@@ -2,7 +2,7 @@
 
 *Copy protection, licensing library and license generator for Windows and Linux.*
 
-[![Standard](https://img.shields.io/badge/c%2B%2B-11-blue.svg)](https://en.wikipedia.org/wiki/C%2B%2B#Standardization)
+[![Standard](https://img.shields.io/badge/c%2B%2B-17-blue.svg)](https://en.wikipedia.org/wiki/C%2B%2B#Standardization)
 [![unstable](http://badges.github.io/stability-badges/dist/unstable.svg)](http://github.com/badges/stability-badges)
 [![License](https://img.shields.io/badge/License-BSD%203--Clause-blue.svg)](https://opensource.org/licenses/BSD-3-Clause)
 [![travis](https://travis-ci.org/open-license-manager/licensecc.svg?branch=develop)](https://travis-ci.org/open-license-manager/licensecc)
@@ -39,7 +39,7 @@ or [Windows](http://open-license-manager.github.io/licensecc/development/Build-t
 ### Prerequisites
 -   Operating system: Linux(Ubuntu, CentOS), Windows
 -   compilers       : GCC (Linux) MINGW (Linux cross compile for Windows), MINGW or MSVC (Windows) 
--   tools           : cmake(>3.6), git, make/ninja(linux)
+-   tools           : cmake(>=3.16), git, make/ninja(linux)
 -   libs            : If target is Linux Openssl is required. Windows depends only on system libraries. Boost is necessary to build license generator and to run the tests but it's NOT a dependency of the final `licensecc` library. 
 
 For a complete list of dependencies and supported environments see [the project website](http://open-license-manager.github.io/licensecc/development/Dependencies.html)
@@ -59,10 +59,10 @@ make
 make install
 ```
 
-### build on Windows (with MSVC 2017)
+### build on Windows (with MSVC 2022)
 
 ```console
-cmake .. -G "Visual Studio 15 2017 Win64" -DBOOST_ROOT="{Folder where boost is}" -DCMAKE_INSTALL_PREFIX=../install
+cmake .. -G "Visual Studio 17 2022" -A x64 -DBOOST_ROOT="{Folder where boost is}" -DCMAKE_INSTALL_PREFIX=../install
 cmake --build . --target install --config Release
 ```
 
