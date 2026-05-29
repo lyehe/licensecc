@@ -9,6 +9,7 @@
 #define SRC_LIBRARY_PC_IDENTIFIER_PC_IDENTIFIER_HPP_
 
 #include <array>
+#include <cstdint>
 #include <iostream>
 #include <string>
 

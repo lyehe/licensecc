@@ -14,10 +14,14 @@
 //#include <windows.h>
 //#endif
 
+#include <cstdint>
+#include <vector>
+
 #include <public_key.h>
 
 #include "../signature_verifier.hpp"
 #include "../../base/logger.h"
+#include "../../base/base64.h"
 
 namespace license {
 namespace os {
@@ -65,16 +69,9 @@ FUNCTION_RETURN verify_signature(const std::string& stringToVerify, const std::s
 
 	// RSA* rsa = EVP_PKEY_get1_RSA( key );
 	// RSA * pubKey = d2i_RSA_PUBKEY(NULL, <der encoded byte stream pointer>, <num bytes>);
-	unsigned char buffer[512];
-	BIO* b64 = BIO_new(BIO_f_base64());
-	BIO* encoded_signature = BIO_new_mem_buf((const void*)signatureB64.c_str(), signatureB64.size());
-	BIO* biosig = BIO_push(b64, encoded_signature);
-	BIO_set_flags(biosig, BIO_FLAGS_BASE64_NO_NL);  // Do not use newlines to flush buffer
-	unsigned int len = BIO_read(biosig, (void*)buffer, signatureB64.size());
-	// Can test here if len == decodeLen - if not, then return an error
-	buffer[len] = 0;
-
-	BIO_free_all(biosig);
+	// Decode the signature with the project's own base64 decoder so the buffer is
+	// sized to the actual key length (a fixed buffer overflowed for >=4096 bit keys).
+	const std::vector<uint8_t> signature = unbase64(signatureB64);
 
 	/* Create the Message Digest Context */
 	if (!(mdctx = EVP_MD_CTX_create())) {
@@ -95,7 +92,7 @@ FUNCTION_RETURN verify_signature(const std::string& stringToVerify, const std::s
 		return FUNC_RET_ERROR;
 	}
 	FUNCTION_RETURN result;
-	func_ret = EVP_DigestVerifyFinal(mdctx, buffer, len);
+	func_ret = EVP_DigestVerifyFinal(mdctx, signature.data(), signature.size());
 	if (1 != func_ret) {
 		LOG_ERROR("Error verifying digest %d", func_ret);
 	}

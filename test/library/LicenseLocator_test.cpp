@@ -19,6 +19,7 @@
 #include "../../src/library/base/EventRegistry.h"
 #include "../../src/library/locate/ApplicationFolder.hpp"
 #include "../../src/library/locate/EnvironmentVarLocation.hpp"
+#include "../../src/library/locate/EnvironmentVarData.hpp"
 #include "../../src/library/locate/ExternalDefinition.hpp"
 
 #define MOCK_LICENSE PROJECT_TEST_SRC_DIR "/library/test_reader.ini"
@@ -168,6 +169,30 @@ BOOST_AUTO_TEST_CASE(environment_var_location_not_found) {
 	BOOST_CHECK_EQUAL(0, licenseInfos.size());
 	BOOST_CHECK_MESSAGE(registry.getLastFailure()->event_type == LICENSE_FILE_NOT_FOUND, "Error detected");
 	UNSETENV(LCC_LICENSE_LOCATION_ENV_VAR);
+}
+
+/*****************************************************************************
+ * EnvironmentVarData tests
+ *****************************************************************************/
+/**
+ * The license content is provided directly in LCC_LICENSE_DATA_ENV_VAR.
+ * Regression: retrieve_license_content() used to read the wrong (location)
+ * environment variable, which was typically unset -> std::string(nullptr) crash.
+ */
+BOOST_AUTO_TEST_CASE(environment_var_data) {
+	std::ifstream src(MOCK_LICENSE, std::ios::binary);
+	const std::string referenceContent((std::istreambuf_iterator<char>(src)), std::istreambuf_iterator<char>());
+	SETENV(LCC_LICENSE_DATA_ENV_VAR, referenceContent.c_str());
+
+	license::EventRegistry registry;
+	EnvironmentVarData envVarDataStrategy;
+	vector<string> licenseInfos = envVarDataStrategy.license_locations(registry);
+	BOOST_CHECK(registry.isGood());
+	BOOST_REQUIRE_EQUAL(1, licenseInfos.size());
+	const string licenseRealContent = envVarDataStrategy.retrieve_license_content(licenseInfos[0]);
+	BOOST_CHECK_MESSAGE(referenceContent.compare(licenseRealContent) == 0,
+						"env-var data content matches what was provided");
+	UNSETENV(LCC_LICENSE_DATA_ENV_VAR);
 }
 
 /**

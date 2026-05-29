@@ -63,7 +63,7 @@ std::vector<HwIdentifier> DefaultStrategy::alternative_ids() const {
 		LCC_API_HW_IDENTIFICATION_STRATEGY strat_to_try = it;
 		unique_ptr<IdentificationStrategy> strategy_ptr = IdentificationStrategy::get_strategy(strat_to_try);
 		vector<HwIdentifier> alt_ids = strategy_ptr->alternative_ids();
-		identifiers.insert(alt_ids.begin(), alt_ids.end(), identifiers.end());
+		identifiers.insert(identifiers.end(), alt_ids.begin(), alt_ids.end());
 	}
 	return identifiers;
 }
