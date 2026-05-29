@@ -71,5 +71,31 @@ BOOST_AUTO_TEST_CASE(parse_blkid_file) {
 	BOOST_CHECK_MESSAGE(disk_infos[0].preferred, "Preferred found");
 }
 
+/**
+ * Regression test for the parseUUID heap overflow: a dash-free, all-hex UUID
+ * makes the number of hex digits equal the source length (even count, no pad),
+ * and an odd count forces a pad. Both used to write past the allocated buffer.
+ * Reached indirectly through parse_blkid, which calls the file-local parseUUID.
+ */
+BOOST_AUTO_TEST_CASE(parse_uuid_no_overflow) {
+	const string blkid_content =
+		"<device UUID=\"abcdef0123456789\" TYPE=\"ext4\" PARTLABEL=\"even\">/dev/sdz1</device>"
+		"<device UUID=\"abc\" TYPE=\"ext4\" PARTLABEL=\"odd\">/dev/sdz2</device>";
+	vector<DiskInfo> disk_infos;
+	std::unordered_map<std::string, int> disk_by_uuid;
+	FUNCTION_RETURN result = parse_blkid(blkid_content, disk_infos, disk_by_uuid);
+	BOOST_CHECK_EQUAL(result, FUNC_RET_OK);
+	BOOST_REQUIRE_MESSAGE(disk_infos.size() == 2, "Two disks parsed");
+
+	// "abcdef0123456789" -> bytes ab cd ef 01 23 45 67 89 (XOR-folded into 8 bytes = identity)
+	const unsigned char expected_even[8] = {0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89};
+	for (int i = 0; i < 8; i++) {
+		BOOST_CHECK_EQUAL(disk_infos[0].disk_sn[i], expected_even[i]);
+	}
+	// "abc" -> padded to "abc0" -> bytes ab c0
+	BOOST_CHECK_EQUAL(disk_infos[1].disk_sn[0], 0xab);
+	BOOST_CHECK_EQUAL(disk_infos[1].disk_sn[1], 0xc0);
+}
+
 }  // namespace test
 }  // namespace license

@@ -41,34 +41,23 @@ using namespace license;
  *@param buffer_out: unsigned char buffer[8] output buffer for result
  */
 static void parseUUID(const char *uuid, unsigned char *buffer_out, unsigned int out_size) {
-	unsigned int i, j;
-	char *hexuuid;
 	unsigned char cur_character;
-	// remove characters not in hex set
-	size_t len = strlen(uuid);
-	hexuuid = (char *)malloc(sizeof(char) * len);
-	memset(buffer_out, 0, out_size);
-	memset(hexuuid, 0, sizeof(char) * len);
-
-	for (i = 0, j = 0; i < len; i++) {
-		if (isxdigit(uuid[i])) {
-			hexuuid[j] = uuid[i];
-			j++;
-		} else {
-			// skip
-			continue;
+	// keep only the characters in the hex set
+	std::string hexuuid;
+	hexuuid.reserve(strlen(uuid));
+	for (const char *c = uuid; *c != '\0'; c++) {
+		if (isxdigit(*c)) {
+			hexuuid.push_back(*c);
 		}
 	}
-	if (j % 2 == 1) {
-		hexuuid[j++] = '0';
+	if (hexuuid.size() % 2 == 1) {
+		hexuuid.push_back('0');
 	}
-	hexuuid[j] = '\0';
-	for (i = 0; i < j / 2; i++) {
+	memset(buffer_out, 0, out_size);
+	for (size_t i = 0; i < hexuuid.size() / 2; i++) {
 		sscanf(&hexuuid[i * 2], "%2hhx", &cur_character);
 		buffer_out[i % out_size] = buffer_out[i % out_size] ^ cur_character;
 	}
-
-	free(hexuuid);
 }
 
 static void parse_disk_id(const char *uuid, unsigned char *buffer_out, size_t out_size) {
