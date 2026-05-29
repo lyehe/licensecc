@@ -12,6 +12,7 @@
 #include <boost/test/unit_test.hpp>
 #include <stdlib.h>
 #include <cstdio>
+#include <cstring>
 
 #include "../../src/library/base/EventRegistry.h"
 
@@ -34,6 +35,29 @@ BOOST_AUTO_TEST_CASE(test_most_advanced_license_error) {
 	BOOST_CHECK_MESSAGE(event != nullptr, "An error is detected");
 	BOOST_CHECK_MESSAGE(string("lic1") == event->license_reference, "Error is for lic1");
 	BOOST_CHECK_MESSAGE(LICENSE_CORRUPTED == event->event_type, "Error is for LICENSE_CORRUPTED");
+}
+
+/**
+ * to_string must render the registry contents, not stream the `this` pointer.
+ */
+BOOST_AUTO_TEST_CASE(to_string_renders_contents) {
+	EventRegistry er;
+	er.addEvent(LICENSE_FOUND, "lic1");
+	const string s = er.to_string();
+	BOOST_CHECK_MESSAGE(s.find("EventReg[step:") != string::npos, "to_string renders the registry, got: " + s);
+}
+
+/**
+ * An over-length license reference must be truncated and NUL-terminated within
+ * the AuditEvent buffer (previously copied with a non-terminating strncpy).
+ */
+BOOST_AUTO_TEST_CASE(addEvent_truncates_and_terminates_long_reference) {
+	EventRegistry er;
+	const string longRef(MAX_PATH + 50, 'x');
+	er.addEvent(PRODUCT_NOT_LICENSED, longRef);
+	AuditEvent ev;
+	er.exportLastEvents(&ev, 1);
+	BOOST_CHECK_EQUAL(strlen(ev.license_reference), (size_t)MAX_PATH - 1);
 }
 
 }  // namespace test
