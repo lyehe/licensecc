@@ -64,7 +64,6 @@ static DWORD hashData(BCRYPT_HASH_HANDLE& hHash, const string& data, PBYTE pbHas
 static size_t read_length(uint8_t*& ptr) {
 	uint8_t len = *ptr++;
 	size_t result = 0;
-	cout << (len & 0x80) << endl;
 	if ((len & 0x80) > 0) {
 		size_t blen = len & 0x7F;
 		for (size_t i = 0; i < blen; i++) {
