@@ -14,8 +14,17 @@ extern "C" {
 #include "datatypes.h"
 
 /**
- * Method used to convert the LicenseInfo into a human readable
- * representation.
+ * Returns a static, human-readable description for an ::LCC_EVENT_TYPE code
+ * (e.g. the value returned by ::acquire_license). The returned string is owned
+ * by the library and must not be freed.
+ */
+const char* lcc_strerror(LCC_EVENT_TYPE event_type);
+
+/**
+ * Writes a human-readable summary of the (warning/error) audit events contained
+ * in `licenseInfo` into `out_buffer` (always NUL-terminated, truncated to
+ * LCC_API_ERROR_BUFFER_SIZE). Useful to show the end user why a license check
+ * failed. `licenseInfo` is typically the struct filled by ::acquire_license.
  */
 void print_error(char out_buffer[LCC_API_ERROR_BUFFER_SIZE], LicenseInfo* licenseInfo);
 

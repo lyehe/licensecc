@@ -152,6 +152,9 @@ bool EventRegistry::turnErrorsIntoWarnings() {
 }
 
 void EventRegistry::exportLastEvents(AuditEvent *auditEvents, int nlogs) {
+	// zero the whole destination first so unused slots are well-defined for
+	// consumers iterating the array (e.g. print_error).
+	memset(auditEvents, 0, sizeof(AuditEvent) * nlogs);
 	const int sizeToCopy = min(nlogs, (int)logs.size());
 	std::copy(logs.end() - sizeToCopy, logs.end(), auditEvents);
 }

@@ -39,18 +39,6 @@ const unordered_map<int, string> descByCloudProvider = {{PROV_UNKNOWN, "Provider
 														{AWS, "Amazon AWS"},
 														{ALI_CLOUD, "Alibaba Cloud (Chinese cloud provider)"}};
 
-const unordered_map<int, string> stringByEventType = {
-	{LICENSE_OK, "OK "},
-	{LICENSE_FILE_NOT_FOUND, "license file not found "},
-	{LICENSE_SERVER_NOT_FOUND, "license server can't be contacted "},
-	{ENVIRONMENT_VARIABLE_NOT_DEFINED, "environment variable not defined "},
-	{FILE_FORMAT_NOT_RECOGNIZED, "license file has invalid format (not .ini file) "},
-	{LICENSE_MALFORMED, "some mandatory field are missing, or data can't be fully read. "},
-	{PRODUCT_NOT_LICENSED, "this product was not licensed "},
-	{PRODUCT_EXPIRED, "license expired "},
-	{LICENSE_CORRUPTED, "license signature didn't match with current license "},
-	{IDENTIFIERS_MISMATCH, "Calculated identifier and the one provided in license didn't match"}};
-
 static LCC_EVENT_TYPE verifyLicense(const string& fname) {
 	LicenseInfo licenseInfo;
 	LicenseLocation licLocation = {LICENSE_PATH};
@@ -59,7 +47,7 @@ static LCC_EVENT_TYPE verifyLicense(const string& fname) {
 	if (result == LICENSE_OK) {
 		cout << "default project [" << LCC_PROJECT_NAME << "]: license OK" << endl;
 	} else {
-		cerr << "default project [" << LCC_PROJECT_NAME << "]:" << stringByEventType.find(result)->second << endl;
+		cerr << "default project [" << LCC_PROJECT_NAME << "]: " << lcc_strerror(result) << endl;
 	}
 	CSimpleIniA ini;
 	ini.LoadFile(fname.c_str());
@@ -74,7 +62,7 @@ static LCC_EVENT_TYPE verifyLicense(const string& fname) {
 			if (result == LICENSE_OK) {
 				cout << "project [" << section.pItem << "]: license OK" << endl;
 			} else {
-				cerr << "project [" << section.pItem << "]" << stringByEventType.find(result)->second << endl;
+				cerr << "project [" << section.pItem << "]: " << lcc_strerror(result) << endl;
 			}
 		}
 	}

@@ -19,7 +19,7 @@ Adding the following lines to your ``CMakeLists.txt``
 
 .. code-block:: console
   
-  find_package(licensecc 2.0.0 REQUIRED)
+  find_package(licensecc 2.1.0 REQUIRED)
   
 will make the external target ``licensecc::licensecc_static`` to be available for linking.
 

@@ -3,9 +3,9 @@
 ## Interacting with the team 
 
 If you're experiencing issues with the project, due to lack of documentation 
-or you want to ask a question you can contact us on 
-[project forum](https://groups.google.com/forum/#!forum/licensecc). 
-The forum is the preferred way of contact because your question are useful
+or you want to ask a question you can reach us on 
+[GitHub Discussions](https://github.com/open-license-manager/licensecc/discussions). 
+Discussions are the preferred way of contact because your questions are useful
 to other people.
 
 If you're compiling `licensecc` following the guide and you meet a software issue
@@ -73,7 +73,7 @@ Supposing you already know how to contribute to an open source project on GitHub
 -   Ensure your feature branch is up to date with the `develop`, eventually merge the latest changes from the `develop` branch. This will help us save time.
 -   Reformat the changed code using "clang-format" to keep consistent formatting style. The style we use is in `.clang-format` at the base of the project.
 -   Prepare your pull request, in the pull request comment reference the issue the pull request will fix.
--   Check your pull request compiles and pass the checks on Travis CI
+-   Check your pull request compiles and passes the GitHub CI checks (the Linux and Windows workflows)
 -   In the pull request comment reference the issue you want to fix.
 
 ##### Don't

@@ -40,7 +40,7 @@ or [Windows](http://open-license-manager.github.io/licensecc/development/Build-t
 -   Operating system: Linux(Ubuntu, CentOS), Windows
 -   compilers       : GCC (Linux) MINGW (Linux cross compile for Windows), MINGW or MSVC (Windows) 
 -   tools           : cmake(>=3.16), git, make/ninja(linux)
--   libs            : If target is Linux Openssl is required. Windows depends only on system libraries. Boost is necessary to build license generator and to run the tests but it's NOT a dependency of the final `licensecc` library. 
+-   libs            : Linux requires OpenSSL; Windows depends only on system libraries. Boost is required to **build** the project (it is used by the bundled license generator, which is built during configuration, and by the tests). It is **not linked** into the final `licensecc` library, so your application does not need Boost at runtime.
 
 For a complete list of dependencies and supported environments see [the project website](http://open-license-manager.github.io/licensecc/development/Dependencies.html)
 
@@ -90,7 +90,8 @@ ctest -C Release
 
 ## How to use
 
-The [examples](https://github.com/open-license-manager/examples) repository that shows various ways to integrate `licensecc` into your project.
+A minimal, self-contained integration example lives in [`examples/minimal`](examples/minimal) (about 20 lines: acquire a license and report failures with `lcc_strerror`/`print_error`). 
+The [examples](https://github.com/open-license-manager/examples) repository shows more ways to integrate `licensecc` into your project.
 
 ## How to contribute
 

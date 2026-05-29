@@ -25,6 +25,8 @@ extern "C" {
 #define DllExport __declspec(dllexport)
 #endif
 
+// Generated per-project at configure time by lccgen into
+// projects/<LCC_PROJECT_NAME>/include/...; it is not checked into the repository.
 #include <licensecc_properties.h>
 
 typedef enum {

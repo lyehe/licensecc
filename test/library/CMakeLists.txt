@@ -72,10 +72,24 @@ target_link_libraries(
  Boost::system
 )
 
+### Public API tests (lcc_strerror / print_error)
+add_executable(
+ test_public_api
+ public_api_test.cpp
+)
+
+target_link_libraries(
+ test_public_api
+ licensecc_static
+ Boost::unit_test_framework
+ Boost::system
+)
+
 ADD_TEST(NAME test_license_reader COMMAND test_license_reader)
 ADD_TEST(NAME test_license_locator COMMAND test_license_locator)
 ADD_TEST(NAME test_event_registry COMMAND test_event_registry)
 ADD_TEST(NAME test_license_verifier COMMAND test_license_verifier)
+ADD_TEST(NAME test_public_api COMMAND test_public_api)
 
 ADD_SUBDIRECTORY(os)
 ADD_SUBDIRECTORY(hw_identifier)

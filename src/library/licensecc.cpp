@@ -27,7 +27,72 @@
 
 using namespace std;
 
-void print_error(char out_buffer[LCC_API_ERROR_BUFFER_SIZE], LicenseInfo* licenseInfo) {}
+const char* lcc_strerror(LCC_EVENT_TYPE event_type) {
+	switch (event_type) {
+		case LICENSE_OK:
+			return "license OK";
+		case LICENSE_FILE_NOT_FOUND:
+			return "license file not found";
+		case LICENSE_SERVER_NOT_FOUND:
+			return "license server can't be contacted";
+		case ENVIRONMENT_VARIABLE_NOT_DEFINED:
+			return "license environment variable not defined";
+		case FILE_FORMAT_NOT_RECOGNIZED:
+			return "license file has an invalid format (not an .ini file)";
+		case LICENSE_MALFORMED:
+			return "mandatory fields are missing or the license can't be fully read";
+		case PRODUCT_NOT_LICENSED:
+			return "this product was not licensed";
+		case PRODUCT_EXPIRED:
+			return "license expired";
+		case LICENSE_CORRUPTED:
+			return "license signature didn't match";
+		case IDENTIFIERS_MISMATCH:
+			return "the calculated hardware identifier and the one in the license didn't match";
+		case LICENSE_SPECIFIED:
+			return "license location specified";
+		case LICENSE_FOUND:
+			return "license found";
+		case PRODUCT_FOUND:
+			return "product found in license";
+		case SIGNATURE_VERIFIED:
+			return "license signature verified";
+		default:
+			return "unknown license event";
+	}
+}
+
+void print_error(char out_buffer[LCC_API_ERROR_BUFFER_SIZE], LicenseInfo* licenseInfo) {
+	if (out_buffer == nullptr) {
+		return;
+	}
+	string msg;
+	if (licenseInfo == nullptr) {
+		msg = "no license information available";
+	} else {
+		for (int i = 0; i < LCC_API_AUDIT_EVENT_NUM; i++) {
+			const AuditEvent& ev = licenseInfo->status[i];
+			// info events are successes (or zeroed/unused slots); only surface problems
+			if (ev.severity == SVRT_INFO) {
+				continue;
+			}
+			if (!msg.empty()) {
+				msg += "; ";
+			}
+			msg += (ev.severity == SVRT_ERROR) ? "ERROR: " : "WARN: ";
+			msg += lcc_strerror(ev.event_type);
+			if (ev.license_reference[0] != '\0') {
+				msg += " [";
+				msg += ev.license_reference;
+				msg += "]";
+			}
+		}
+		if (msg.empty()) {
+			msg = lcc_strerror(LICENSE_OK);
+		}
+	}
+	license::mstrlcpy(out_buffer, msg.c_str(), LCC_API_ERROR_BUFFER_SIZE);
+}
 
 bool identify_pc(LCC_API_HW_IDENTIFICATION_STRATEGY pc_id_method, char* chbuffer, size_t* bufSize,
 				 ExecutionEnvironmentInfo* execution_environment_info) {
