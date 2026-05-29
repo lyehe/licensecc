@@ -61,41 +61,52 @@ static DWORD hashData(BCRYPT_HASH_HANDLE& hHash, const string& data, PBYTE pbHas
 	return status;
 }
 
-static size_t read_length(uint8_t*& ptr) {
+static FUNCTION_RETURN read_length(uint8_t*& ptr, const uint8_t* end, size_t& out_length) {
+	if (ptr >= end) {
+		return FUNC_RET_ERROR;
+	}
 	uint8_t len = *ptr++;
 	size_t result = 0;
 	if ((len & 0x80) > 0) {
-		size_t blen = len & 0x7F;
+		const size_t blen = len & 0x7F;
+		if (blen > sizeof(size_t)) {
+			return FUNC_RET_ERROR;
+		}
 		for (size_t i = 0; i < blen; i++) {
-			result += (*(ptr++) << (i * 8));
+			if (ptr >= end) {
+				return FUNC_RET_ERROR;
+			}
+			result += (static_cast<size_t>(*(ptr++)) << (i * 8));
 		}
 	} else {
 		result = len;
 	}
-	return result;
-}
-
-static FUNCTION_RETURN read_sequence(uint8_t*& ptr) {
-	uint8_t tag = *ptr++;
-	if (tag != 0x30) {
-		return FUNC_RET_ERROR;
-	}
-	read_length(ptr);
+	out_length = result;
 	return FUNC_RET_OK;
 }
 
-static FUNCTION_RETURN read_integer(uint8_t*& ptr, BYTE* location, const size_t expected_length) {
-	uint8_t tag = *ptr++;
-	if (tag != 0x02) {
+static FUNCTION_RETURN read_sequence(uint8_t*& ptr, const uint8_t* end) {
+	if (ptr >= end || *ptr++ != 0x30) {
 		return FUNC_RET_ERROR;
 	}
-	size_t length = read_length(ptr);
+	size_t seq_length;
+	return read_length(ptr, end, seq_length);
+}
+
+static FUNCTION_RETURN read_integer(uint8_t*& ptr, const uint8_t* end, BYTE* location, const size_t expected_length) {
+	if (ptr >= end || *ptr++ != 0x02) {
+		return FUNC_RET_ERROR;
+	}
+	size_t length;
+	if (read_length(ptr, end, length) != FUNC_RET_OK) {
+		return FUNC_RET_ERROR;
+	}
 	// skip the padding byte
-	if (*ptr == 0) {
+	if (ptr < end && *ptr == 0) {
 		length--;
 		ptr++;
 	}
-	if (expected_length < length) {
+	if (expected_length < length || ptr + length > end) {
 		return FUNC_RET_ERROR;
 	}
 	for (size_t i = 0; i < length; i++) {
@@ -116,9 +127,13 @@ static FUNCTION_RETURN readPublicKey(const BCRYPT_ALG_HANDLE sig_alg, BCRYPT_KEY
 	pubk.rsakey.cbPrime2 = 0;
 	uint8_t pubKey[] = PUBLIC_KEY;
 	uint8_t* pub_key_idx = &pubKey[0];
-	read_sequence(pub_key_idx);
-	read_integer(pub_key_idx, (BYTE*)&pubk.modulus, sizeof(pubk.modulus));
-	read_integer(pub_key_idx, (BYTE*)&pubk.pkExp, sizeof(pubk.pkExp));
+	const uint8_t* pub_key_end = pubKey + sizeof(pubKey);
+	if (read_sequence(pub_key_idx, pub_key_end) != FUNC_RET_OK ||
+		read_integer(pub_key_idx, pub_key_end, (BYTE*)&pubk.modulus, sizeof(pubk.modulus)) != FUNC_RET_OK ||
+		read_integer(pub_key_idx, pub_key_end, (BYTE*)&pubk.pkExp, sizeof(pubk.pkExp)) != FUNC_RET_OK) {
+		LOG_DEBUG("Error parsing public key");
+		return FUNC_RET_ERROR;
+	}
 	if (NT_SUCCESS(status = BCryptImportKeyPair(sig_alg, nullptr, BCRYPT_RSAPUBLIC_BLOB, hKey, (PUCHAR)&pubk,
 												sizeof(pubk), 0))) {
 		result = FUNC_RET_OK;

@@ -40,10 +40,15 @@ bool readSMBIOS(std::vector<uint8_t> &buffer) {
 
 DmiInfo::DmiInfo() {
 	std::vector<uint8_t> raw_smbios_data;
-	if (readSMBIOS(raw_smbios_data)) {
+	if (readSMBIOS(raw_smbios_data) && raw_smbios_data.size() > sizeof(RawSMBIOSData)) {
 		smbios::parser smbios_parser;
 		RawSMBIOSData *rawData = reinterpret_cast<RawSMBIOSData *>(raw_smbios_data.data());
 		size_t length = static_cast<size_t>(rawData->Length);
+		// the table data follows the fixed header; never read past what was actually returned
+		const size_t available = raw_smbios_data.size() - sizeof(RawSMBIOSData);
+		if (length > available) {
+			length = available;
+		}
 		uint8_t* buff= raw_smbios_data.data() + sizeof(RawSMBIOSData);
 		smbios_parser.feed(buff, length);
 
