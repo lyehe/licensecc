@@ -51,7 +51,7 @@ add_executable(
 
 target_link_libraries(
  test_event_registry
- Boost::unit_test_framework 
+ Boost::unit_test_framework
  Boost::system
 )
 
@@ -59,9 +59,23 @@ if(CODE_COVERAGE AND UNIX)
   target_link_libraries(test_event_registry gcov)
 endif(CODE_COVERAGE AND UNIX)
 
+### LicenseVerifier tests
+add_executable(
+ test_license_verifier
+ license_verifier_test.cpp
+)
+
+target_link_libraries(
+ test_license_verifier
+ licensecc_static
+ Boost::unit_test_framework
+ Boost::system
+)
+
 ADD_TEST(NAME test_license_reader COMMAND test_license_reader)
 ADD_TEST(NAME test_license_locator COMMAND test_license_locator)
 ADD_TEST(NAME test_event_registry COMMAND test_event_registry)
+ADD_TEST(NAME test_license_verifier COMMAND test_license_verifier)
 
 ADD_SUBDIRECTORY(os)
 ADD_SUBDIRECTORY(hw_identifier)

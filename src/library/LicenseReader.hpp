@@ -47,7 +47,7 @@ public:
  *  client_signature = XXXXXXXX (optional std::string 16)
  *  license_signature = XXXXXXXXXX (mandatory, 1024)
  *  application_data = xxxxxxxxx (optional std::string 16)
- *	license_version = 100 (mandatory int)
+ *	lic_ver = LCC_LICENSE_FORMAT_VERSION (mandatory int, see base.h)
  *  </pre>
  */
 class LicenseReader {

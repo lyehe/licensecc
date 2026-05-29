@@ -38,6 +38,9 @@ typedef int bool;
 // license file extra entries
 #define LICENSE_SIGNATURE "sig"
 #define LICENSE_VERSION "lic_ver"
+// the only license-file format version the reader accepts; the license
+// generator must emit a matching `lic_ver` value.
+#define LCC_LICENSE_FORMAT_VERSION 200
 
 typedef enum { FUNC_RET_OK, FUNC_RET_NOT_AVAIL, FUNC_RET_ERROR, FUNC_RET_BUFFER_TOO_SMALL } FUNCTION_RETURN;
 

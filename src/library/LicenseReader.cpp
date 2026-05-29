@@ -86,7 +86,7 @@ EventRegistry LicenseReader::readLicenses(const string &product, vector<FullLice
 			 */
 			const char *license_signature = ini.GetValue(productNamePtr, LICENSE_SIGNATURE, nullptr);
 			long license_version = ini.GetLongValue(productNamePtr, LICENSE_VERSION, -1);
-			if (license_signature != nullptr && license_version == 200) {
+			if (license_signature != nullptr && license_version == LCC_LICENSE_FORMAT_VERSION) {
 				CSimpleIniA::TNamesDepend keys;
 				ini.GetAllKeys(productNamePtr, keys);
 				FullLicenseInfo licInfo(*it, product, license_signature);
@@ -117,9 +117,7 @@ string FullLicenseInfo::printForSign() const {
 		}
 	}
 
-#ifndef NDEBUG
-	cout << "license to sign [" << oss.str() << "]" << endl;
-#endif
+	LOG_DEBUG("license to sign [%s]", oss.str().c_str());
 	return oss.str();
 }
 

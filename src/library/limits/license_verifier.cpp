@@ -5,6 +5,7 @@
  *      Author: GC
  */
 #include <cmath>
+#include <cstdlib>
 #include <algorithm>
 #include <licensecc_properties.h>
 
@@ -15,6 +16,9 @@
 
 namespace license {
 using namespace std;
+
+// days_left reported to the caller for a license that never expires.
+static const unsigned int LCC_NO_EXPIRY_DAYS_LEFT = 9999;
 
 LicenseVerifier::LicenseVerifier(EventRegistry& er) : m_event_registry(er) {}
 
@@ -65,8 +69,13 @@ FUNCTION_RETURN LicenseVerifier::verify_limits(const FullLicenseInfo& lic_info) 
 }
 
 LicenseInfo LicenseVerifier::toLicenseInfo(const FullLicenseInfo& fullLicInfo) const {
-	LicenseInfo info;
+	LicenseInfo info{};
 	info.license_type = LCC_LOCAL;
+
+	const auto license_version = fullLicInfo.m_limits.find(LICENSE_VERSION);
+	if (license_version != fullLicInfo.m_limits.end()) {
+		info.license_version = atoi(license_version->second.c_str());
+	}
 
 	const auto expiry = fullLicInfo.m_limits.find(PARAM_EXPIRY_DATE);
 	if (expiry != fullLicInfo.m_limits.end()) {
@@ -76,12 +85,8 @@ LicenseInfo LicenseVerifier::toLicenseInfo(const FullLicenseInfo& fullLicInfo) c
 		info.days_left = max((int)round(secs / (60 * 60 * 24)), 0);
 	} else {
 		info.has_expiry = false;
-		info.days_left = 9999;
+		info.days_left = LCC_NO_EXPIRY_DAYS_LEFT;
 		info.expiry_date[0] = '\0';
-	}
-
-	const auto start_date = fullLicInfo.m_limits.find(PARAM_BEGIN_DATE);
-	if (start_date != fullLicInfo.m_limits.end()) {
 	}
 
 	const auto client_sig = fullLicInfo.m_limits.find(PARAM_CLIENT_SIGNATURE);

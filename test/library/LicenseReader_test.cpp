@@ -37,6 +37,26 @@ BOOST_AUTO_TEST_CASE(read_single_file) {
 }
 
 /**
+ * A license whose lic_ver does not match LCC_LICENSE_FORMAT_VERSION must be
+ * rejected as malformed (regression: the accepted version used to be a bare
+ * literal that contradicted the documented value).
+ */
+BOOST_AUTO_TEST_CASE(wrong_license_format_version_rejected) {
+	string location = PROJECT_TEST_SRC_DIR "/library/test_reader_wrong_version.ini";
+	locate::LocatorFactory::find_license_near_module(false);
+	locate::LocatorFactory::find_license_with_env_var(false);
+	LicenseLocation licLocation = {LICENSE_PATH};
+	std::copy(location.begin(), location.end(), licLocation.licenseData);
+	LicenseReader licenseReader(&licLocation);
+	vector<FullLicenseInfo> licenseInfos;
+	const EventRegistry registry = licenseReader.readLicenses("PRODUCT", licenseInfos);
+	BOOST_CHECK(!registry.isGood());
+	BOOST_CHECK_EQUAL(0, licenseInfos.size());
+	BOOST_ASSERT(registry.getLastFailure() != NULL);
+	BOOST_CHECK_EQUAL(LICENSE_MALFORMED, registry.getLastFailure()->event_type);
+}
+
+/**
  * Test the error return if the product code is not found in the license
  */
 BOOST_AUTO_TEST_CASE(product_not_licensed) {

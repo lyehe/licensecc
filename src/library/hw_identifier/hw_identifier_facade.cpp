@@ -23,8 +23,8 @@ using namespace std;
 LCC_EVENT_TYPE HwIdentifierFacade::validate_pc_signature(const std::string& str_code) {
 	LCC_EVENT_TYPE result = IDENTIFIERS_MISMATCH;
 	try {
-        HwIdentifier pc_id(str_code);
-        LCC_API_HW_IDENTIFICATION_STRATEGY id_strategy = pc_id.get_identification_strategy();
+		HwIdentifier pc_id(str_code);
+		LCC_API_HW_IDENTIFICATION_STRATEGY id_strategy = pc_id.get_identification_strategy();
 		unique_ptr<IdentificationStrategy> strategy = IdentificationStrategy::get_strategy(id_strategy);
 		result = strategy->validate_identifier(pc_id);
 	} catch (logic_error& e) {
@@ -41,7 +41,9 @@ std::string HwIdentifierFacade::generate_user_pc_signature(LCC_API_HW_IDENTIFICA
 		char* env_var_value = getenv(LCC_IDENTIFICATION_STRATEGY_ENV_VAR);
 		if (env_var_value != nullptr && env_var_value[0] != '\0') {
 			int strategy_int = atoi(env_var_value);
-			if (strategy_int < 0 || strategy_int > 3) {
+			// only the strategies handled by IdentificationStrategy::get_strategy
+			// are accepted; anything else falls back to STRATEGY_DEFAULT.
+			if (strategy_int < STRATEGY_ETHERNET || strategy_int > STRATEGY_DISK) {
 				LOG_WARN("unknown " LCC_IDENTIFICATION_STRATEGY_ENV_VAR " %s", env_var_value);
 			} else {
 				strategy = (LCC_API_HW_IDENTIFICATION_STRATEGY)strategy_int;
