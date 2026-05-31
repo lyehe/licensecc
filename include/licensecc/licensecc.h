@@ -24,7 +24,11 @@ const char* lcc_strerror(LCC_EVENT_TYPE event_type);
  * Writes a human-readable summary of the (warning/error) audit events contained
  * in `licenseInfo` into `out_buffer` (always NUL-terminated, truncated to
  * LCC_API_ERROR_BUFFER_SIZE). Useful to show the end user why a license check
- * failed. `licenseInfo` is typically the struct filled by ::acquire_license.
+ * failed.
+ *
+ * Precondition: `licenseInfo` must be a struct populated by ::acquire_license
+ * (or, if built by other means, zero-initialized) — `status` is read in full,
+ * so an uninitialized struct yields undefined output.
  */
 void print_error(char out_buffer[LCC_API_ERROR_BUFFER_SIZE], LicenseInfo* licenseInfo);
 

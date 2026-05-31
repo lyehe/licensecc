@@ -106,7 +106,9 @@ static FUNCTION_RETURN read_integer(uint8_t*& ptr, const uint8_t* end, BYTE* loc
 		length--;
 		ptr++;
 	}
-	if (expected_length < length || ptr + length > end) {
+	// compare against the remaining byte count instead of forming `ptr + length`,
+	// which could be an out-of-bounds pointer (UB). ptr <= end is guaranteed here.
+	if (expected_length < length || length > static_cast<size_t>(end - ptr)) {
 		return FUNC_RET_ERROR;
 	}
 	for (size_t i = 0; i < length; i++) {
