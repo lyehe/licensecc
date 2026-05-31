@@ -25,6 +25,8 @@ set(PROJECT_DESCRIPTION "Copy protection and licensing library")
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+option(BUILD_BENCHMARKS "Build performance benchmarks (no extra dependencies)" OFF)
 SET(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake/")
 
 #find lccgen executable or build it.
@@ -131,6 +133,10 @@ message( STATUS "Project name        : " ${LCC_PROJECT_NAME} )
 message( STATUS "Project base dir    : " ${LCC_PROJECTS_BASE_DIR}/${LCC_PROJECT_NAME} )
 
 add_subdirectory(src)
+
+IF(BUILD_BENCHMARKS)
+	add_subdirectory(benchmark)
+ENDIF(BUILD_BENCHMARKS)
 
 #boost is required only for tests
 #bug in cmake win32 - can't find boost compiled with mingw 
