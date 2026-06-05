@@ -6,6 +6,7 @@
 #include <fstream>
 #include <string.h>
 #include <iomanip>
+#include <sstream>
 #include "../library/base/string_utils.h"
 #include "../library/ini/SimpleIni.h"
 #include "../library/os/dmi_info.hpp"
@@ -39,6 +40,62 @@ const unordered_map<int, string> descByCloudProvider = {{PROV_UNKNOWN, "Provider
 														{AWS, "Amazon AWS"},
 														{ALI_CLOUD, "Alibaba Cloud (Chinese cloud provider)"}};
 
+static const char* kRedactedHardwareValue = "<redacted>";
+
+static string hardware_value_for_output(const string& value, const bool raw_hardware_output) {
+	return raw_hardware_output ? value : kRedactedHardwareValue;
+}
+
+static string hardware_value_for_output(const int value, const bool raw_hardware_output) {
+	return hardware_value_for_output(to_string(value), raw_hardware_output);
+}
+
+static string format_ipv4_address(const unsigned char ipv4_address[4]) {
+	ostringstream out;
+	out << static_cast<unsigned int>(ipv4_address[3]) << "-"
+		<< static_cast<unsigned int>(ipv4_address[2]) << "-"
+		<< static_cast<unsigned int>(ipv4_address[1]) << "-"
+		<< static_cast<unsigned int>(ipv4_address[0]);
+	return out.str();
+}
+
+static string format_mac_address(const unsigned char mac_address[6]) {
+	ostringstream out;
+	out << std::hex;
+	for (int i = 0; i < 6; i++) {
+		if (i != 0) {
+			out << ":";
+		}
+		out << static_cast<unsigned int>(mac_address[i]);
+	}
+	return out.str();
+}
+
+static int run_redaction_self_test() {
+	const string raw_value("AA-BB-CC-DD");
+	if (hardware_value_for_output(raw_value, false) != kRedactedHardwareValue) {
+		return 2;
+	}
+	if (hardware_value_for_output(raw_value, true) != raw_value) {
+		return 3;
+	}
+	const unsigned char ip[4] = {1, 2, 3, 4};
+	if (format_ipv4_address(ip) != "4-3-2-1") {
+		return 4;
+	}
+	const unsigned char mac[6] = {0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff};
+	if (format_mac_address(mac) != "aa:bb:cc:dd:ee:ff") {
+		return 5;
+	}
+	return 0;
+}
+
+static void print_usage(const char* program_name) {
+	cout << "Usage: " << program_name << " [--raw-hardware-identifiers] [license-file]" << endl;
+	cout << "Hardware identifiers, IP addresses, and MAC addresses are redacted by default." << endl;
+	cout << "Use --raw-hardware-identifiers only for trusted diagnostic handoff." << endl;
+}
+
 static LCC_EVENT_TYPE verifyLicense(const string& fname) {
 	LicenseInfo licenseInfo;
 	LicenseLocation licLocation = {LICENSE_PATH};
@@ -53,7 +110,7 @@ static LCC_EVENT_TYPE verifyLicense(const string& fname) {
 	ini.LoadFile(fname.c_str());
 	CSimpleIniA::TNamesDepend sections;
 	ini.GetAllSections(sections);
-	CallerInformations callerInformation;
+	CallerInformations callerInformation = {};
 	for (CSimpleIniA::Entry section : sections) {
 		const string section_name(section.pItem, 15);
 		if (section_name != LCC_PROJECT_NAME) {
@@ -70,13 +127,39 @@ static LCC_EVENT_TYPE verifyLicense(const string& fname) {
 }
 
 int main(int argc, char* argv[]) {
+	bool raw_hardware_output = false;
+	string license_path;
+	for (int i = 1; i < argc; ++i) {
+		const string arg(argv[i]);
+		if (arg == "--help" || arg == "-h") {
+			print_usage(argv[0]);
+			return 0;
+		}
+		if (arg == "--raw-hardware-identifiers") {
+			raw_hardware_output = true;
+			continue;
+		}
+		if (arg == "--self-test-redaction") {
+			return run_redaction_self_test();
+		}
+		if (license_path.empty()) {
+			license_path = arg;
+			continue;
+		}
+		cerr << "Unexpected argument: " << arg << endl;
+		print_usage(argv[0]);
+		return 1;
+	}
+
 	char hw_identifier[LCC_API_PC_IDENTIFIER_SIZE + 1];
-	size_t bufSize = LCC_API_PC_IDENTIFIER_SIZE + 1;
 	ExecutionEnvironmentInfo exec_env_info;
 	for (const auto& x : stringByStrategyId) {
+		size_t bufSize = sizeof(hw_identifier);
+		memset(hw_identifier, 0, sizeof(hw_identifier));
 		if (identify_pc(static_cast<LCC_API_HW_IDENTIFICATION_STRATEGY>(x.first), hw_identifier, &bufSize,
 						&exec_env_info)) {
-			std::cout << x.second << ':' << hw_identifier << std::endl;
+			std::cout << x.second << ':' << hardware_value_for_output(hw_identifier, raw_hardware_output)
+					  << std::endl;
 		} else {
 			std::cout << x.second << ": NA" << endl;
 		}
@@ -89,43 +172,39 @@ int main(int argc, char* argv[]) {
 	FUNCTION_RETURN ret = license::os::getAdapterInfos(adapterInfos);
 	if (ret == FUNCTION_RETURN::FUNC_RET_OK) {
 		for (auto osAdapter : adapterInfos) {
-			cout << "Network adapter [" << osAdapter.id << "]: " << osAdapter.description << endl;
-			cout << "   ip address [" << static_cast<unsigned int>(osAdapter.ipv4_address[3]) << "-"
-				 << static_cast<unsigned int>(osAdapter.ipv4_address[2]) << "-"
-				 << static_cast<unsigned int>(osAdapter.ipv4_address[1]) << "-"
-				 << static_cast<unsigned int>(osAdapter.ipv4_address[0]) << "]" << endl;
-			cout << "   mac address [" << std::hex;
-			for (int i = 0; i < sizeof(osAdapter.mac_address); i++) {
-				if (i != 0) {
-					cout << ":";
-				}
-				cout << static_cast<unsigned int>(osAdapter.mac_address[i]);
-			}
-			cout << "]" << std::dec << endl;
+			cout << "Network adapter [" << hardware_value_for_output(osAdapter.id, raw_hardware_output)
+				 << "]: " << hardware_value_for_output(osAdapter.description, raw_hardware_output) << endl;
+			cout << "   ip address ["
+				 << hardware_value_for_output(format_ipv4_address(osAdapter.ipv4_address), raw_hardware_output)
+				 << "]" << endl;
+			cout << "   mac address ["
+				 << hardware_value_for_output(format_mac_address(osAdapter.mac_address), raw_hardware_output)
+				 << "]" << endl;
 		}
 	} else {
 		cout << "problem in getting adapter informations:" << ret << endl;
 	}
 
 	license::os::CpuInfo cpu;
-	cout << "Cpu Vendor       :" << cpu.vendor() << endl;
-	cout << "Cpu Brand        :" << cpu.brand() << endl;
-	cout << "Cpu hypervisor   :" << cpu.is_hypervisor_set() << endl;
-	cout << "Cpu model        :0x" << std::hex << ((long)cpu.model()) << std::dec << endl;
+	cout << "Cpu Vendor       :" << hardware_value_for_output(cpu.vendor(), raw_hardware_output) << endl;
+	cout << "Cpu Brand        :" << hardware_value_for_output(cpu.brand(), raw_hardware_output) << endl;
+	cout << "Cpu hypervisor   :" << hardware_value_for_output(cpu.is_hypervisor_set(), raw_hardware_output) << endl;
+	ostringstream cpu_model;
+	cpu_model << "0x" << std::hex << ((long)cpu.model());
+	cout << "Cpu model        :" << hardware_value_for_output(cpu_model.str(), raw_hardware_output) << endl;
 	license::os::DmiInfo dmi_info;
-	cout << "Bios vendor      :" << dmi_info.bios_vendor() << endl;
-	cout << "Bios description :" << dmi_info.bios_description() << endl;
-	cout << "System vendor    :" << dmi_info.sys_vendor() << endl;
-	cout << "Cpu Vendor (dmi) :" << dmi_info.cpu_manufacturer() << endl;
-	cout << "Cpu Cores  (dmi) :" << dmi_info.cpu_cores() << endl;
+	cout << "Bios vendor      :" << hardware_value_for_output(dmi_info.bios_vendor(), raw_hardware_output) << endl;
+	cout << "Bios description :" << hardware_value_for_output(dmi_info.bios_description(), raw_hardware_output) << endl;
+	cout << "System vendor    :" << hardware_value_for_output(dmi_info.sys_vendor(), raw_hardware_output) << endl;
+	cout << "Cpu Vendor (dmi) :" << hardware_value_for_output(dmi_info.cpu_manufacturer(), raw_hardware_output) << endl;
+	cout << "Cpu Cores  (dmi) :" << hardware_value_for_output(dmi_info.cpu_cores(), raw_hardware_output) << endl;
 	cout << "==================" << endl;
-	if (argc == 2) {
-		const string fname(argv[1]);
-		ifstream license_file(fname);
+	if (!license_path.empty()) {
+		ifstream license_file(license_path);
 		if (license_file.good()) {
-			verifyLicense(fname);
+			verifyLicense(license_path);
 		} else {
-			cerr << "license file :" << fname << " not found." << endl;
+			cerr << "license file :" << license_path << " not found." << endl;
 		}
 	}
 	bool find_license_with_env_var = FIND_LICENSE_WITH_ENV_VAR;

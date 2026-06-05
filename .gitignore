@@ -39,3 +39,16 @@ projects/*
 /.venv/
 /Pipfile
 /.pydevproject
+/doc/_build/
+/doc/_doxygen/
+
+# JavaScript/Worker generated files
+**/node_modules/
+**/dist/
+**/dist-worker/
+**/.wrangler/
+**/.dev.vars
+**/.online-key/
+services/cloudflare-online-verifier/wrangler.toml
+services/cloudflare-license-admin/wrangler.toml
+services/cloudflare-license-admin/wrangler.jsonc

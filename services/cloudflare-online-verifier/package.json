@@ -1,0 +1,22 @@
+{
+  "name": "@licensecc/cloudflare-online-verifier",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test test/*.mjs",
+    "lint": "node scripts/lint.mjs",
+    "schema:parity": "python3 scripts/check-schema-parity.py",
+    "dry-run": "npx wrangler deploy src/index.ts --dry-run --config wrangler.example.toml",
+    "migrate:local": "npx wrangler d1 migrations apply DB --local --config wrangler.example.toml",
+    "migrate:remote": "npx wrangler d1 migrations apply DB --remote --config wrangler.toml",
+    "entitlement": "node scripts/entitlement.mjs",
+    "generate-online-key": "node scripts/generate-online-key.mjs",
+    "generate-online-assertion-fixture": "node scripts/generate-online-assertion-fixture.mjs"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3",
+    "wrangler": "^4.18.0"
+  }
+}

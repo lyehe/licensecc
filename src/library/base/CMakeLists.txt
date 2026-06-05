@@ -3,6 +3,7 @@ ADD_LIBRARY(base OBJECT
     file_utils.cpp
     string_utils.cpp
     base64.cpp
+    v201_canonical_payload.cpp
     logger.cpp
 )
 

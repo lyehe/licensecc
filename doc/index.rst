@@ -10,7 +10,7 @@ Licensecc
 .. |unstable| image:: http://badges.github.io/stability-badges/dist/unstable.svg
 .. _unstable: http://github.com/badges/stability-badges
 .. |License| image:: https://img.shields.io/badge/License-BSD%203--Clause-blue.svg
-.. _License: ttps://opensource.org/licenses/BSD-3-Clause
+.. _License: https://opensource.org/licenses/BSD-3-Clause
 .. |TravisBuild| image:: https://travis-ci.org/open-license-manager/licensecc.svg?branch=develop
 .. _TravisBuild: https://travis-ci.org/open-license-manager/licensecc
 .. |GithubCI| image:: https://github.com/open-license-manager/licensecc/workflows/Github_CI/badge.svg
@@ -49,7 +49,7 @@ Project Structure
 The software is made by 4 main sub-components:
 
 * ``licensecc``    : the C++ library with a C api (the part you have to integrate in your software) with minimal external dependencies. (github project `licensecc <https://github.com/open-license-manager/licensecc>`_ )
-* ``lccinspector`` : a license debugger to be sent to the final customer to diagnose licensing problems or for calculating the hardware id before issuing the license.
+* ``lccinspector`` : a support diagnostic tool for licensing problems. It redacts hardware identifiers by default; raw identifier output requires an explicit diagnostic flag.
 * ``lccgen``       : a license generator (github project `lcc-license-generator`_ ) to initialize the library and generate the licenses.
 * ``examples``     : usage samples (github project `examples <https://github.com/open-license-manager/examples>`_ ).
 
@@ -64,7 +64,7 @@ Prerequisites
 ===================
 
 * Operating system : Linux(Ubuntu, CentOS), Windows
-* compilers        : GCC (Linux) MINGW (Linux cross compile for Windows), MINGW or MSVC (Windows) 
+* compilers        : GCC (Linux), MSVC (Windows). MinGW and Linux-to-Windows cross-compilation are legacy/development flows and are not release-validated until a dedicated CI gate is added.
 * tools            : Cmake(>3.6), git, make/ninja(linux)
 * libraries        : If target is Linux Openssl is required. Windows depends only on system libraries. Boost is necessary to build license generator and to run the tests but it's NOT a dependency of the final `licensecc` library. 
 
@@ -99,6 +99,10 @@ Build on Windows (with MSVC 2017)
 
 Cross compile with MINGW on Linux
 =====================================
+
+This is legacy development guidance, not a release-validated packaging path in
+the current CI matrix. Use the native Linux and MSVC Windows gates for release
+validation until a MinGW gate is added.
 
 .. code-block:: console
 

@@ -7,4 +7,9 @@
 {%for i in public_key%}{% if loop.index1 > 1 %},{% endif %}{{ i }}{%endfor%}\
 }
 #define PUBLIC_KEY_LEN {{ public_key_len }}
+#define LCC_PUBLIC_KEY_ALGORITHM "{{ public_key_algorithm }}"
+#define LCC_PUBLIC_KEY_BITS {{ public_key_bits }}
+#define LCC_PUBLIC_KEY_SHA256 "{{ public_key_sha256 }}"
+#define LCC_PUBLIC_KEY_ID "sha256:{{ public_key_sha256 }}"
+#define LCC_SIGNATURE_ALGORITHM "{{ signature_algorithm }}"
 #endif

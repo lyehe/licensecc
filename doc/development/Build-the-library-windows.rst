@@ -2,7 +2,9 @@
 Build - Windows
 #######################################
 
-This page describes how to build the library under windows. Both MSVC compiler and MinGW are supported.
+This page describes how to build the library under windows. MSVC is the
+release-validated Windows compiler path. MinGW notes are retained as legacy
+development guidance only until a dedicated MinGW CI gate is added.
 
 MSVC (2017~2019)
 *****************
@@ -99,6 +101,10 @@ Restart, delete and rebuild the cache a couple of time, until Visual Studio unde
 
 MINGW
 *****************
+
+This section is legacy development guidance. The current release validation
+matrix does not include a MinGW gate, so do not treat artifacts from this flow
+as release-supported until that CI coverage is added.
 
 .. TODO::
    

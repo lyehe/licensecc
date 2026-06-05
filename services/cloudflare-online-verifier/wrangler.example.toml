@@ -1,0 +1,44 @@
+name = "licensecc-online-verifier"
+main = "src/index.ts"
+compatibility_date = "2026-06-03"
+workers_dev = true
+preview_urls = false
+
+[vars]
+D1_RATE_LIMIT_ENABLED = "0"
+D1_RATE_LIMIT_LIMIT = "20"
+D1_RATE_LIMIT_PERIOD_SECONDS = "60"
+SIGN_DENIED_ASSERTIONS = "0"
+# Optional D1 limiter tier overrides. Defaults fall back to D1_RATE_LIMIT_*.
+# D1_CLIENT_RATE_LIMIT_LIMIT = "20"
+# D1_CLIENT_RATE_LIMIT_PERIOD_SECONDS = "60"
+# D1_ENTITLEMENT_RATE_LIMIT_LIMIT = "20"
+# D1_ENTITLEMENT_RATE_LIMIT_PERIOD_SECONDS = "60"
+# D1_GLOBAL_RATE_LIMIT_ENABLED = "0"
+# D1_GLOBAL_RATE_LIMIT_LIMIT = "200"
+# D1_GLOBAL_RATE_LIMIT_PERIOD_SECONDS = "60"
+
+[observability]
+enabled = true
+head_sampling_rate = 1
+
+[observability.logs]
+enabled = true
+head_sampling_rate = 1
+invocation_logs = true
+persist = true
+
+[[d1_databases]]
+binding = "DB"
+database_name = "licensecc-online-verifier"
+database_id = "replace-with-d1-database-id"
+migrations_dir = "migrations"
+
+[[ratelimits]]
+name = "VERIFY_RATE_LIMITER"
+namespace_id = "1001"
+simple = { limit = 20, period = 60 }
+
+# Set these as Worker secrets, not plaintext vars:
+# wrangler secret put ONLINE_SIGNING_PRIVATE_KEY_PKCS8_PEM
+# wrangler secret put ONLINE_SIGNING_KEY_ID

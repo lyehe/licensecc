@@ -1,0 +1,716 @@
+import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { spawnSync } from "node:child_process";
+import { test } from "node:test";
+import worker, {
+  canonicalPayloadForTests,
+  resetSigningKeyCacheForTests,
+  signingKeyImportCountForTests,
+  validateVerifyRequest,
+} from "../dist/index.js";
+import { sqlFor } from "../scripts/entitlement.mjs";
+
+function bytesToPem(bytes, label) {
+  const b64 = Buffer.from(bytes).toString("base64");
+  const lines = b64.match(/.{1,64}/g).join("\n");
+  return `-----BEGIN ${label}-----\n${lines}\n-----END ${label}-----`;
+}
+
+async function testKeyEnv(row, overrides = {}) {
+  const keyPair = await crypto.subtle.generateKey(
+    { name: "RSASSA-PKCS1-v1_5", modulusLength: 3072, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" },
+    true,
+    ["sign", "verify"],
+  );
+  const pkcs8 = await crypto.subtle.exportKey("pkcs8", keyPair.privateKey);
+  const env = {
+    ONLINE_SIGNING_PRIVATE_KEY_PKCS8_PEM: bytesToPem(new Uint8Array(pkcs8), "PRIVATE KEY"),
+    ONLINE_SIGNING_KEY_ID: "sha256:test-online-key",
+    MAX_ASSERTION_TTL_SECONDS: "300",
+    MAX_CACHE_TTL_SECONDS: "3600",
+    DB: {
+      prepare() {
+        return {
+          bind(project, feature, licenseFingerprint) {
+            return {
+              async first() {
+                if (
+                  row &&
+                  row.project === project &&
+                  row.feature === feature &&
+                  row.license_fingerprint === licenseFingerprint
+                ) {
+                  return row;
+                }
+                return null;
+              },
+            };
+          },
+        };
+      },
+    },
+    ...overrides,
+  };
+  return env;
+}
+
+function validBody(overrides = {}) {
+  return {
+    project: "DEFAULT",
+    feature: "DEFAULT",
+    license_fingerprint: "a".repeat(64),
+    device_hash: "",
+    nonce: "b".repeat(64),
+    ...overrides,
+  };
+}
+
+function derPayloadOffset(bytes, offset) {
+  assert.equal(bytes[offset], 0x30);
+  ++offset;
+  const lengthByte = bytes[offset++];
+  if ((lengthByte & 0x80) === 0) {
+    return offset;
+  }
+  const lengthBytes = lengthByte & 0x7f;
+  assert.ok(lengthBytes > 0 && lengthBytes <= 4);
+  return offset + lengthBytes;
+}
+
+test("key generator emits PKCS#1 public key records for the C++ verifier", () => {
+  const outDir = mkdtempSync(join(tmpdir(), "licensecc-online-key-"));
+  try {
+    const result = spawnSync(process.execPath, ["scripts/generate-online-key.mjs", "--out-dir", outDir], {
+      cwd: process.cwd(),
+      encoding: "utf8",
+    });
+    assert.equal(result.status, 0, result.stderr);
+
+    const publicRecord = JSON.parse(readFileSync(join(outDir, "online_public_key.json"), "utf8"));
+    const publicDer = Buffer.from(publicRecord.public_key_der_base64, "base64");
+    const payloadOffset = derPayloadOffset(publicDer, 0);
+    assert.equal(publicDer[payloadOffset], 0x02, "PKCS#1 RSA public key starts with a modulus INTEGER");
+
+    const expectedKeyId = `sha256:${createHash("sha256").update(publicDer).digest("hex")}`;
+    assert.equal(publicRecord.key_id, expectedKeyId);
+    assert.match(readFileSync(join(outDir, "online_private_key.pkcs8.pem"), "utf8"), new RegExp("BEGIN " + "PRIVATE KEY"));
+    const cmakeRecord = readFileSync(join(outDir, "online_public_key_record.cmake.txt"), "utf8");
+    assert.match(cmakeRecord, /CACHE STRING/);
+    assert.match(
+      cmakeRecord,
+      new RegExp(`SignaturePublicKey\\(\\\\"${expectedKeyId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\\\"`),
+    );
+  } finally {
+    rmSync(outDir, { recursive: true, force: true });
+  }
+});
+
+test("break-glass CLI upsert does not update revoked entitlements", () => {
+  const sql = sqlFor("upsert", { fingerprint: "a".repeat(64), actor: "operator", status: "active" });
+  assert.match(sql, /ON CONFLICT\(project, feature, license_fingerprint\) DO UPDATE SET/);
+  assert.match(sql, /WHERE entitlements\.status != 'revoked'/);
+  assert.match(sql, /INSERT INTO entitlement_events/);
+});
+
+test("break-glass CLI transitions keep revoked terminal except revoke", () => {
+  const disabled = sqlFor("disable", { fingerprint: "a".repeat(64), actor: "operator", reason: "support" });
+  const reenabled = sqlFor("reenable", { fingerprint: "a".repeat(64), actor: "operator" });
+  const revoked = sqlFor("revoke", { fingerprint: "a".repeat(64), actor: "operator", reason: "chargeback" });
+  assert.match(disabled, /AND status != 'revoked'/);
+  assert.match(reenabled, /AND status != 'revoked'/);
+  assert.doesNotMatch(revoked, /AND status != 'revoked'/);
+});
+
+test("validates request schema", () => {
+  assert.equal(validateVerifyRequest(validBody()).project, "DEFAULT");
+  assert.equal(validateVerifyRequest(validBody({ nonce: "x" })), null);
+  assert.equal(validateVerifyRequest(validBody({ license_fingerprint: "z".repeat(64) })), null);
+});
+
+test("canonical online assertion payload is byte exact", () => {
+  const payload = canonicalPayloadForTests({
+    purpose: "licensecc-online-assertion",
+    version: "1",
+    alg: "rsa-pkcs1-sha256",
+    keyId: "sha256:test-key",
+    project: "DEFAULT",
+    feature: "EXPORT",
+    licenseFingerprint: "a".repeat(64),
+    deviceHash: "b".repeat(64),
+    nonce: "c".repeat(64),
+    status: "ok",
+    issuedAt: 1000,
+    expiresAt: 1300,
+    cacheUntil: 1600,
+    revocationSeq: 42,
+  });
+  assert.equal(
+    payload,
+    [
+      "purpose=licensecc-online-assertion",
+      "version=1",
+      "alg=rsa-pkcs1-sha256",
+      "key-id=sha256:test-key",
+      "project=DEFAULT",
+      "feature=EXPORT",
+      `license-fingerprint=${"a".repeat(64)}`,
+      `device-hash=${"b".repeat(64)}`,
+      `nonce=${"c".repeat(64)}`,
+      "status=ok",
+      "issued-at=1000",
+      "expires-at=1300",
+      "cache-until=1600",
+      "revocation-seq=42",
+      "",
+    ].join("\n"),
+  );
+});
+
+test("canonical online assertion payload matches shared golden fixture", () => {
+  const fixtureDir = join(process.cwd(), "../../test/vectors/online_assertion");
+  const keyId = readFileSync(join(fixtureDir, "golden.key_id"), "utf8").trim();
+  const fixturePayload = readFileSync(join(fixtureDir, "golden.payload"), "utf8");
+  const fixtureAssertion = readFileSync(join(fixtureDir, "golden.assertion"), "utf8").trim();
+  const payload = canonicalPayloadForTests({
+    purpose: "licensecc-online-assertion",
+    version: "1",
+    alg: "rsa-pkcs1-sha256",
+    keyId,
+    project: "DEFAULT",
+    feature: "EXPORT",
+    licenseFingerprint: "a".repeat(64),
+    deviceHash: "b".repeat(64),
+    nonce: "c".repeat(64),
+    status: "ok",
+    issuedAt: 1000,
+    expiresAt: 1300,
+    cacheUntil: 1600,
+    revocationSeq: 42,
+  });
+  assert.equal(payload, fixturePayload);
+  assert.equal(Buffer.from(fixtureAssertion.split(".")[1], "base64").toString("utf8"), fixturePayload);
+});
+
+test("health route returns status", async () => {
+  const response = await worker.fetch(new Request("https://example.test/health"), await testKeyEnv(null));
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).ok, true);
+});
+
+test("signing key import is cached for a stable key", async () => {
+  resetSigningKeyCacheForTests();
+  const row = {
+    ...validBody(),
+    status: "active",
+    assertion_ttl_seconds: 120,
+    cache_ttl_seconds: 600,
+    revocation_seq: 3,
+  };
+  const env = await testKeyEnv(row);
+  for (let i = 0; i < 2; ++i) {
+    const response = await worker.fetch(
+      new Request("https://example.test/v1/verify", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(validBody({ nonce: `${i}${"b".repeat(63)}` })),
+      }),
+      env,
+    );
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).ok, true);
+  }
+  assert.equal(signingKeyImportCountForTests(), 1);
+});
+
+test("valid entitlement returns signed assertion with nonce", async () => {
+  const row = {
+    ...validBody(),
+    status: "active",
+    assertion_ttl_seconds: 120,
+    cache_ttl_seconds: 600,
+    revocation_seq: 3,
+  };
+  const response = await worker.fetch(
+    new Request("https://example.test/v1/verify", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(validBody()),
+    }),
+    await testKeyEnv(row),
+  );
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.ok, true);
+  assert.match(body.assertion, /^lccoa1\./);
+  const payload = Buffer.from(body.assertion.split(".")[1], "base64").toString("utf8");
+  assert.match(payload, /status=ok\n/);
+  assert.match(payload, new RegExp(`nonce=${"b".repeat(64)}\\n`));
+});
+
+test("rate limited request returns 429 before D1 lookup", async () => {
+  let dbPrepareCount = 0;
+  const env = await testKeyEnv(null, {
+    VERIFY_RATE_LIMITER: {
+      async limit(input) {
+        assert.equal(input.key, "client:203.0.113.10");
+        return { success: false };
+      },
+    },
+    DB: {
+      prepare() {
+        ++dbPrepareCount;
+        throw new Error("D1 should not be used for rate-limited requests");
+      },
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request("https://example.test/v1/verify", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "cf-connecting-ip": "203.0.113.10",
+      },
+      body: JSON.stringify(validBody()),
+    }),
+    env,
+  );
+  assert.equal(response.status, 429);
+  assert.deepEqual(await response.json(), { ok: false, code: "rate_limited" });
+  assert.equal(dbPrepareCount, 0);
+});
+
+test("D1 client rate limiter returns 429 before entitlement lookup", async () => {
+  let entitlementLookupCount = 0;
+  const env = await testKeyEnv(null, {
+    D1_RATE_LIMIT_ENABLED: "1",
+    D1_RATE_LIMIT_LIMIT: "20",
+    D1_RATE_LIMIT_PERIOD_SECONDS: "60",
+    DB: {
+      prepare(sql) {
+        if (sql.startsWith("INSERT INTO rate_limit_counters")) {
+          return {
+            bind(namespace, key, windowStart, expiresAt, updatedAt) {
+              assert.equal(namespace, "verify-v1-client");
+              assert.equal(key, "client:203.0.113.10");
+              assert.equal(Number.isInteger(windowStart), true);
+              assert.equal(Number.isInteger(expiresAt), true);
+              assert.equal(Number.isInteger(updatedAt), true);
+              return {
+                async first() {
+                  return { request_count: 21 };
+                },
+              };
+            },
+          };
+        }
+        ++entitlementLookupCount;
+        throw new Error("entitlement lookup should not be used for D1-rate-limited requests");
+      },
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request("https://example.test/v1/verify", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "cf-connecting-ip": "203.0.113.10",
+      },
+      body: JSON.stringify(validBody()),
+    }),
+    env,
+  );
+  assert.equal(response.status, 429);
+  assert.deepEqual(await response.json(), { ok: false, code: "rate_limited" });
+  assert.equal(entitlementLookupCount, 0);
+});
+
+test("D1 entitlement rate limiter returns 429 after client tier passes", async () => {
+  let entitlementLookupCount = 0;
+  const env = await testKeyEnv(null, {
+    D1_RATE_LIMIT_ENABLED: "1",
+    D1_RATE_LIMIT_LIMIT: "20",
+    D1_RATE_LIMIT_PERIOD_SECONDS: "60",
+    DB: {
+      prepare(sql) {
+        if (sql.startsWith("INSERT INTO rate_limit_counters")) {
+          return {
+            bind(namespace, key) {
+              if (namespace === "verify-v1-client") {
+                assert.equal(key, "client:203.0.113.10");
+                return {
+                  async first() {
+                    return { request_count: 1 };
+                  },
+                };
+              }
+              assert.equal(namespace, "verify-v1-entitlement");
+              assert.equal(key, `DEFAULT:DEFAULT:${"a".repeat(64)}`);
+              return {
+                async first() {
+                  return { request_count: 21 };
+                },
+              };
+            },
+          };
+        }
+        if (sql.startsWith("DELETE FROM rate_limit_counters")) {
+          return {
+            bind() {
+              return {
+                async run() {
+                  return {};
+                },
+              };
+            },
+          };
+        }
+        ++entitlementLookupCount;
+        throw new Error("entitlement lookup should not be used for D1-rate-limited requests");
+      },
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request("https://example.test/v1/verify", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "cf-connecting-ip": "203.0.113.10",
+      },
+      body: JSON.stringify(validBody()),
+    }),
+    env,
+  );
+  assert.equal(response.status, 429);
+  assert.deepEqual(await response.json(), { ok: false, code: "rate_limited" });
+  assert.equal(entitlementLookupCount, 0);
+});
+
+test("D1 rate limiter cleans expired counters on first request in window", async () => {
+  let cleanupCount = 0;
+  let entitlementLookupCount = 0;
+  const env = await testKeyEnv(null, {
+    D1_RATE_LIMIT_ENABLED: "1",
+    DB: {
+      prepare(sql) {
+        if (sql.startsWith("INSERT INTO rate_limit_counters")) {
+          return {
+            bind() {
+              return {
+                async first() {
+                  return { request_count: 1 };
+                },
+              };
+            },
+          };
+        }
+        if (sql.startsWith("DELETE FROM rate_limit_counters")) {
+          return {
+            bind(nowSeconds) {
+              assert.equal(Number.isInteger(nowSeconds), true);
+              return {
+                async run() {
+                  ++cleanupCount;
+                  return {};
+                },
+              };
+            },
+          };
+        }
+        if (sql.startsWith("SELECT project, feature, license_fingerprint")) {
+          ++entitlementLookupCount;
+          return {
+            bind() {
+              return {
+                async first() {
+                  return null;
+                },
+              };
+            },
+          };
+        }
+        throw new Error(`unexpected SQL: ${sql}`);
+      },
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request("https://example.test/v1/verify", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(validBody()),
+    }),
+    env,
+  );
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).code, "entitlement_denied");
+  assert.equal(cleanupCount, 2);
+  assert.equal(entitlementLookupCount, 1);
+});
+
+test("rate limiter failure returns controlled error", async () => {
+  const env = await testKeyEnv(null, {
+    VERIFY_RATE_LIMITER: {
+      async limit() {
+        throw new Error("simulated rate limiter outage");
+      },
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request("https://example.test/v1/verify", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "cf-connecting-ip": "203.0.113.10",
+      },
+      body: JSON.stringify(validBody()),
+    }),
+    env,
+  );
+  assert.equal(response.status, 500);
+  assert.deepEqual(await response.json(), { ok: false, code: "verification_error" });
+});
+
+test("D1 rate limiter failure returns controlled error", async () => {
+  const env = await testKeyEnv(null, {
+    D1_RATE_LIMIT_ENABLED: "1",
+    DB: {
+      prepare(sql) {
+        if (sql.startsWith("INSERT INTO rate_limit_counters")) {
+          return {
+            bind() {
+              return {
+                async first() {
+                  throw new Error("simulated D1 limiter outage");
+                },
+              };
+            },
+          };
+        }
+        throw new Error("entitlement lookup should not run after D1 limiter failure");
+      },
+    },
+  });
+
+  const response = await worker.fetch(
+    new Request("https://example.test/v1/verify", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(validBody()),
+    }),
+    env,
+  );
+  assert.equal(response.status, 500);
+  assert.deepEqual(await response.json(), { ok: false, code: "verification_error" });
+});
+
+test("unknown entitlement returns unsigned denial by default", async () => {
+  const response = await worker.fetch(
+    new Request("https://example.test/v1/verify", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(validBody()),
+    }),
+    await testKeyEnv(null),
+  );
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.ok, false);
+  assert.equal(body.code, "entitlement_denied");
+  assert.equal(body.assertion, undefined);
+});
+
+test("inactive entitlement states return unsigned denial by default", async () => {
+  for (const status of ["disabled", "revoked"]) {
+    const row = {
+      ...validBody(),
+      status,
+      assertion_ttl_seconds: 120,
+      cache_ttl_seconds: 600,
+      revocation_seq: 4,
+    };
+    const response = await worker.fetch(
+      new Request("https://example.test/v1/verify", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(validBody()),
+      }),
+      await testKeyEnv(row),
+    );
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.ok, false);
+    assert.equal(body.code, "entitlement_denied");
+    assert.equal(body.assertion, undefined);
+    assert.equal(typeof body.server_time, "number");
+  }
+});
+
+test("device mismatch returns unsigned denial by default", async () => {
+  const row = {
+    ...validBody(),
+    device_hash: "c".repeat(64),
+    status: "active",
+    assertion_ttl_seconds: 120,
+    cache_ttl_seconds: 600,
+    revocation_seq: 5,
+  };
+  const response = await worker.fetch(
+    new Request("https://example.test/v1/verify", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(validBody({ device_hash: "d".repeat(64) })),
+    }),
+    await testKeyEnv(row),
+  );
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.ok, false);
+  assert.equal(body.code, "entitlement_denied");
+  assert.equal(body.assertion, undefined);
+});
+
+test("signed denial remains available only when explicitly enabled", async () => {
+  const response = await worker.fetch(
+    new Request("https://example.test/v1/verify", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(validBody()),
+    }),
+    await testKeyEnv(null, { SIGN_DENIED_ASSERTIONS: "1" }),
+  );
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.ok, false);
+  assert.match(body.assertion, /^lccoa1\./);
+  const payload = Buffer.from(body.assertion.split(".")[1], "base64").toString("utf8");
+  assert.match(payload, /status=denied\n/);
+});
+
+test("validity windows are enforced and clamp assertion cache", async () => {
+  const originalNow = Date.now;
+  Date.now = () => 1_000_000;
+  try {
+    const activeRow = {
+      ...validBody(),
+      status: "active",
+      assertion_ttl_seconds: 120,
+      cache_ttl_seconds: 600,
+      revocation_seq: 9,
+      valid_from: 900,
+      valid_until: 1050,
+    };
+    const active = await worker.fetch(
+      new Request("https://example.test/v1/verify", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(validBody()),
+      }),
+      await testKeyEnv(activeRow),
+    );
+    assert.equal(active.status, 200);
+    const activeBody = await active.json();
+    assert.equal(activeBody.ok, true);
+    const activePayload = Buffer.from(activeBody.assertion.split(".")[1], "base64").toString("utf8");
+    assert.match(activePayload, /expires-at=1050\n/);
+    assert.match(activePayload, /cache-until=1050\n/);
+
+    const expired = await worker.fetch(
+      new Request("https://example.test/v1/verify", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(validBody()),
+      }),
+      await testKeyEnv({ ...activeRow, valid_until: 1000 }),
+    );
+    assert.equal(expired.status, 200);
+    assert.deepEqual(await expired.json(), { ok: false, code: "entitlement_denied", server_time: 1000 });
+
+    const notYetValid = await worker.fetch(
+      new Request("https://example.test/v1/verify", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(validBody()),
+      }),
+      await testKeyEnv({ ...activeRow, valid_from: 1001, valid_until: 1100 }),
+    );
+    assert.equal(notYetValid.status, 200);
+    assert.deepEqual(await notYetValid.json(), { ok: false, code: "entitlement_denied", server_time: 1000 });
+  } finally {
+    Date.now = originalNow;
+  }
+});
+
+test("malformed and oversized requests are rejected", async () => {
+  const env = await testKeyEnv(null);
+  const malformed = await worker.fetch(
+    new Request("https://example.test/v1/verify", { method: "POST", body: "{" }),
+    env,
+  );
+  assert.equal(malformed.status, 400);
+
+  const oversized = await worker.fetch(
+    new Request("https://example.test/v1/verify", {
+      method: "POST",
+      headers: { "content-length": "4097" },
+      body: JSON.stringify(validBody()),
+    }),
+    env,
+  );
+  assert.equal(oversized.status, 413);
+});
+
+test("D1 and signing failures return controlled errors", async () => {
+  const d1FailureEnv = await testKeyEnv(null, {
+    DB: {
+      prepare() {
+        return {
+          bind() {
+            return {
+              async first() {
+                throw new Error("simulated D1 outage");
+              },
+            };
+          },
+        };
+      },
+    },
+  });
+  const d1Failure = await worker.fetch(
+    new Request("https://example.test/v1/verify", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(validBody()),
+    }),
+    d1FailureEnv,
+  );
+  assert.equal(d1Failure.status, 500);
+  assert.deepEqual(await d1Failure.json(), { ok: false, code: "verification_error" });
+
+  const signingFailureRow = {
+    ...validBody(),
+    status: "active",
+    assertion_ttl_seconds: 120,
+    cache_ttl_seconds: 600,
+    revocation_seq: 3,
+  };
+  const signingFailureEnv = await testKeyEnv(signingFailureRow, {
+    ONLINE_SIGNING_PRIVATE_KEY_PKCS8_PEM: "not a private key",
+  });
+  const signingFailure = await worker.fetch(
+    new Request("https://example.test/v1/verify", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(validBody()),
+    }),
+    signingFailureEnv,
+  );
+  assert.equal(signingFailure.status, 500);
+  assert.deepEqual(await signingFailure.json(), { ok: false, code: "verification_error" });
+});

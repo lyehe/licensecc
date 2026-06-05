@@ -1,6 +1,7 @@
 #include <paths.h>
 #include <sys/stat.h>
 #include <stdio.h>
+#include <algorithm>
 #include <cerrno>
 #include <cstring>
 #include <iostream>
@@ -10,6 +11,9 @@
 #include <stdio.h>
 #include <string.h>
 #include <sstream>
+#ifdef __linux__
+#include <sys/random.h>
+#endif
 #include "../os.h"
 #include "../../base/logger.h"
 #include "../../base/string_utils.h"
@@ -89,10 +93,10 @@ static std::string getAttribute(const std::string &source, const std::string &at
 
 FUNCTION_RETURN parse_blkid(const std::string &blkid_file_content, std::vector<DiskInfo> &diskInfos_out,
 							std::unordered_map<std::string, int> &disk_by_uuid) {
-	DiskInfo diskInfo = {};
 	int diskNum = 0;
 	for (std::size_t oldpos = 0, pos = 0; (pos = blkid_file_content.find("</device>", oldpos)) != std::string::npos;
 		 oldpos = pos + 1) {
+		DiskInfo diskInfo = {};
 		std::string cur_dev = blkid_file_content.substr(oldpos, pos);
 		diskInfo.id = diskNum++;
 		std::string device = cur_dev.substr(cur_dev.find_last_of(">") + 1);
@@ -100,8 +104,13 @@ FUNCTION_RETURN parse_blkid(const std::string &blkid_file_content, std::vector<D
 		std::string label = getAttribute(cur_dev, "PARTLABEL");
 		mstrlcpy(diskInfo.label, label.c_str(), 255);
 		std::string disk_sn = getAttribute(cur_dev, "UUID");
+		mstrlcpy(diskInfo.volume_id, disk_sn.c_str(), sizeof(diskInfo.volume_id));
+		diskInfo.volume_id_initialized = true;
 		parseUUID(disk_sn.c_str(), diskInfo.disk_sn, sizeof(diskInfo.disk_sn));
+		diskInfo.identifier_source = DISK_IDENTIFIER_SOURCE_SERIAL_OR_UUID;
 		std::string disk_type = getAttribute(cur_dev, "TYPE");
+		mstrlcpy(diskInfo.filesystem, disk_type.c_str(), sizeof(diskInfo.filesystem));
+		diskInfo.filesystem_initialized = true;
 		disk_by_uuid.insert(std::pair<std::string, int>(disk_sn, diskInfo.id));
 		diskInfo.label_initialized = true;
 		diskInfo.sn_initialized = true;
@@ -112,6 +121,79 @@ FUNCTION_RETURN parse_blkid(const std::string &blkid_file_content, std::vector<D
 		diskInfos_out.push_back(diskInfo);
 	}
 	return FUNCTION_RETURN::FUNC_RET_OK;
+}
+
+static bool disk_sn_has_nonzero_bytes(const DiskInfo &disk_info) {
+	for (const auto byte : disk_info.disk_sn) {
+		if (byte != 0) {
+			return true;
+		}
+	}
+	return false;
+}
+
+static bool disk_has_strong_identity(const DiskInfo &disk_info) {
+	return disk_info.sn_initialized && disk_sn_has_nonzero_bytes(disk_info);
+}
+
+static int compare_disk_bytes(const unsigned char *lhs, const unsigned char *rhs, const size_t size) {
+	const int byte_compare = std::memcmp(lhs, rhs, size);
+	if (byte_compare < 0) {
+		return -1;
+	}
+	if (byte_compare > 0) {
+		return 1;
+	}
+	return 0;
+}
+
+static bool linux_disk_info_less(const DiskInfo &lhs, const DiskInfo &rhs) {
+	if (lhs.preferred != rhs.preferred) {
+		return lhs.preferred && !rhs.preferred;
+	}
+
+	const bool lhs_strong = disk_has_strong_identity(lhs);
+	const bool rhs_strong = disk_has_strong_identity(rhs);
+	if (lhs_strong != rhs_strong) {
+		return lhs_strong;
+	}
+
+	if (lhs.volume_id_initialized != rhs.volume_id_initialized) {
+		return lhs.volume_id_initialized && !rhs.volume_id_initialized;
+	}
+
+	if (lhs.label_initialized != rhs.label_initialized) {
+		return lhs.label_initialized && !rhs.label_initialized;
+	}
+
+	const int device_compare = std::strcmp(lhs.device, rhs.device);
+	if (device_compare != 0) {
+		return device_compare < 0;
+	}
+
+	const int volume_compare = std::strcmp(lhs.volume_id, rhs.volume_id);
+	if (volume_compare != 0) {
+		return volume_compare < 0;
+	}
+
+	const int label_compare = std::strcmp(lhs.label, rhs.label);
+	if (label_compare != 0) {
+		return label_compare < 0;
+	}
+
+	const int sn_compare = compare_disk_bytes(lhs.disk_sn, rhs.disk_sn, sizeof(lhs.disk_sn));
+	if (sn_compare != 0) {
+		return sn_compare < 0;
+	}
+
+	return lhs.id < rhs.id;
+}
+
+void sortLinuxDiskInfos(std::vector<DiskInfo> &diskInfos) {
+	std::sort(diskInfos.begin(), diskInfos.end(), linux_disk_info_less);
+	for (size_t i = 0; i < diskInfos.size(); ++i) {
+		diskInfos[i].id = static_cast<int>(i);
+	}
 }
 
 #define BLKID_LOCATIONS {"/run/blkid/blkid.tab", "/etc/blkid.tab"};
@@ -196,7 +278,7 @@ FUNCTION_RETURN getDiskInfos_dev(std::vector<DiskInfo> &disk_infos,
 
 			std::string cur_dir = base_dir + dir->d_name;
 			if (stat(cur_dir.c_str(), &sym_stat) == 0) {
-				DiskInfo tmpDiskInfo;
+				DiskInfo tmpDiskInfo = {};
 				tmpDiskInfo.id = sym_stat.st_ino;
 				ssize_t len = ::readlink(cur_dir.c_str(), device_name, MAX_PATH - 1);
 				if (len != -1) {
@@ -207,8 +289,11 @@ FUNCTION_RETURN getDiskInfos_dev(std::vector<DiskInfo> &disk_infos,
 						device_name_s = device_name_s.substr(pos + 1);
 					}
 					mstrlcpy(tmpDiskInfo.device, device_name_s.c_str(), sizeof(tmpDiskInfo.device));
+					mstrlcpy(tmpDiskInfo.volume_id, dir->d_name, sizeof(tmpDiskInfo.volume_id));
 					PARSE_ID_FUNC(dir->d_name, tmpDiskInfo.disk_sn, sizeof(tmpDiskInfo.disk_sn));
 					tmpDiskInfo.sn_initialized = true;
+					tmpDiskInfo.identifier_source = DISK_IDENTIFIER_SOURCE_SERIAL_OR_UUID;
+					tmpDiskInfo.volume_id_initialized = true;
 					tmpDiskInfo.label_initialized = false;
 					tmpDiskInfo.preferred = false;
 					bool found = false;
@@ -245,6 +330,54 @@ FUNCTION_RETURN getDiskInfos_dev(std::vector<DiskInfo> &disk_infos,
  *
  * @param diskInfos
  */
+bool markLinuxPreferredDiskForFstabSource(std::vector<DiskInfo> &diskInfos,
+										  std::unordered_map<std::string, int> &disk_by_uuid,
+										  const std::string &fstab_source) {
+	if (fstab_source.compare(0, 5, "UUID=") == 0) {
+		const std::string uuid = fstab_source.substr(5);
+		auto it = disk_by_uuid.find(uuid);
+		if (it == disk_by_uuid.end()) {
+			LOG_DEBUG("fstab device %s found, but no corresponding diskInfo", fstab_source.c_str());
+			return false;
+		}
+		for (auto &disk_info : diskInfos) {
+			if (it->second == disk_info.id) {
+				disk_info.preferred = true;
+				LOG_DEBUG("Disk %d device %s set as preferred", disk_info.id, disk_info.device);
+				return true;
+			}
+		}
+		return false;
+	}
+
+	if (fstab_source.compare(0, 6, "LABEL=") == 0) {
+		const std::string label = fstab_source.substr(6);
+		for (auto &disk_info : diskInfos) {
+			if (label == disk_info.label) {
+				disk_info.preferred = true;
+				LOG_DEBUG("Disk %d device %s set as preferred", disk_info.id, disk_info.device);
+				return true;
+			}
+		}
+		return false;
+	}
+
+	std::string device_name_s(fstab_source);
+	auto pos = device_name_s.find_last_of("/");
+	if (pos != std::string::npos) {
+		device_name_s = device_name_s.substr(pos + 1);
+	}
+
+	for (auto &disk_info : diskInfos) {
+		if (device_name_s == disk_info.device) {
+			disk_info.preferred = true;
+			LOG_DEBUG("Disk %d device %s set as preferred", disk_info.id, disk_info.device);
+			return true;
+		}
+	}
+	return false;
+}
+
 static void set_preferred_disks(std::vector<DiskInfo> &diskInfos, std::unordered_map<std::string, int> &disk_by_uuid) {
 	FILE *fstabFile = setmntent("/etc/fstab", "r");
 	if (fstabFile == nullptr) {
@@ -253,49 +386,8 @@ static void set_preferred_disks(std::vector<DiskInfo> &diskInfos, std::unordered
 	}
 	struct mntent *ent;
 	while (nullptr != (ent = getmntent(fstabFile))) {
-		bool found = false;
-		std::string device_name_s(ent->mnt_fsname);
 		LOG_DEBUG("found fstab entry %s ", ent->mnt_fsname);
-		if (strncmp("UUID=", ent->mnt_fsname, 5) == 0) {
-			// fstab entry is uuid
-			device_name_s = device_name_s.substr(5);
-			auto it = disk_by_uuid.find(device_name_s);
-			if (it != disk_by_uuid.end()) {
-				for (auto &disk_info : diskInfos) {
-					if (it->second == disk_info.id) {
-						disk_info.preferred = true;
-						LOG_DEBUG("Disk %d device %s set as preferred", disk_info.id, disk_info.device);
-						break;
-					}
-				}
-			} else {
-				LOG_DEBUG("fstab device %s found, but no corresponding diskInfo", ent->mnt_fsname);
-			}
-		} else if (strncmp("LABEL=", ent->mnt_fsname, 6) == 0) {
-			// fstab entry is uuid
-			device_name_s = device_name_s.substr(6);
-			for (auto &disk_info : diskInfos) {
-				if (device_name_s == disk_info.label) {
-					disk_info.preferred = true;
-					LOG_DEBUG("Disk %d device %s set as preferred", disk_info.id, disk_info.device);
-					break;
-				}
-			}
-		} else {
-			// fstab entry is a device
-			auto pos = device_name_s.find_last_of("/");
-			if (pos != std::string::npos) {
-				device_name_s = device_name_s.substr(pos + 1);
-			}
-
-			for (auto disk_info : diskInfos) {
-				if (device_name_s == disk_info.device) {
-					disk_info.preferred = true;
-					LOG_DEBUG("Disk %d device %s set as preferred", disk_info.id, disk_info.device);
-					break;
-				}
-			}
-		}
+		markLinuxPreferredDiskForFstabSource(diskInfos, disk_by_uuid, ent->mnt_fsname);
 	}
 	endmntent(fstabFile);
 	return;
@@ -318,6 +410,7 @@ FUNCTION_RETURN getDiskInfos(std::vector<DiskInfo> &disk_infos) {
 	}
 	if (result == FUNCTION_RETURN::FUNC_RET_OK) {
 		set_preferred_disks(disk_infos, disk_by_uuid);
+		sortLinuxDiskInfos(disk_infos);
 	}
 	return result;
 }
@@ -330,6 +423,40 @@ FUNCTION_RETURN getMachineName(unsigned char identifier[6]) {
 	}
 	memcpy(identifier, u.nodename, 6);
 	return FUNC_RET_OK;
+}
+
+FUNCTION_RETURN getSecureRandomBytes(unsigned char* buffer, size_t size) {
+	if (size == 0) {
+		return FUNC_RET_OK;
+	}
+	if (buffer == nullptr) {
+		return FUNC_RET_ERROR;
+	}
+#ifdef __linux__
+	size_t offset = 0;
+	while (offset < size) {
+		const ssize_t read_count = getrandom(buffer + offset, size - offset, 0);
+		if (read_count < 0) {
+			if (errno == EINTR) {
+				continue;
+			}
+			break;
+		}
+		if (read_count == 0) {
+			break;
+		}
+		offset += static_cast<size_t>(read_count);
+	}
+	if (offset == size) {
+		return FUNC_RET_OK;
+	}
+#endif
+	std::ifstream urandom("/dev/urandom", std::ios::binary);
+	if (!urandom.is_open()) {
+		return FUNC_RET_ERROR;
+	}
+	urandom.read(reinterpret_cast<char*>(buffer), static_cast<std::streamsize>(size));
+	return urandom.gcount() == static_cast<std::streamsize>(size) ? FUNC_RET_OK : FUNC_RET_ERROR;
 }
 
 FUNCTION_RETURN getOsSpecificIdentifier(unsigned char identifier[6]) {

@@ -1,0 +1,50 @@
+PROJECT_NAME           = "Licensecc"
+PROJECT_BRIEF          = "C++ copy protection, licensing, and license verification library"
+OUTPUT_DIRECTORY       = doc/_doxygen
+GENERATE_HTML          = NO
+GENERATE_LATEX         = NO
+GENERATE_XML           = YES
+XML_OUTPUT             = xml
+INPUT                  = include/licensecc src/library src/templates/licensecc_properties.h.in doc/structure.dox
+FILE_PATTERNS          = *.h *.hpp *.c *.cpp *.dox *.h.in
+EXTENSION_MAPPING      = h.in=C++
+RECURSIVE              = YES
+EXCLUDE_PATTERNS       = */ini/* */doc/_build/* */doc/_doxygen/* */build/* */projects/* */extern/*
+LAYOUT_FILE            = doc/DoxygenLayout.xml
+
+QUIET                  = NO
+WARNINGS               = YES
+WARN_IF_UNDOCUMENTED   = NO
+WARN_IF_DOC_ERROR      = YES
+
+ENABLE_PREPROCESSING   = YES
+MACRO_EXPANSION        = YES
+EXPAND_ONLY_PREDEF     = YES
+SEARCH_INCLUDES        = NO
+PREDEFINED             = LCC_API_MAX_LICENSE_DATA_LENGTH=4096 \
+                         LCC_API_PC_IDENTIFIER_SIZE=19 \
+                         LCC_API_PROPRIETARY_DATA_SIZE=16 \
+                         LCC_API_AUDIT_EVENT_NUM=5 \
+                         LCC_API_AUDIT_EVENT_PARAM2=255 \
+                         LCC_API_VERSION_LENGTH=15 \
+                         LCC_API_FEATURE_NAME_SIZE=15 \
+                         LCC_API_EXPIRY_DATE_SIZE=10 \
+                         LCC_API_ERROR_BUFFER_SIZE=256 \
+                         LCC_PROJECT_NAME=\"DOXYGEN\" \
+                         FIND_LICENSE_NEAR_MODULE=true \
+                         FIND_LICENSE_WITH_ENV_VAR=false \
+                         LCC_LICENSE_FILE_EXTENSION=\".lic\" \
+                         LCC_LICENSE_LOCATION_ENV_VAR=\"LICENSE_LOCATION\" \
+                         LCC_LICENSE_DATA_ENV_VAR=\"LICENSE_DATA\" \
+                         LCC_VERIFY_MAGIC=true \
+                         LCC_IDENTIFICATION_STRATEGY_ENV_VAR=\"IDENTIFICATION_STRATEGY\" \
+                         LCC_ALLOW_RUNTIME_IP_BINDING=false \
+                         LCC_ALLOW_RUNTIME_ENV_SELECTED_BINDING=false \
+                         LCC_ALLOW_WEAK_DISK_LABEL_BINDING=false
+
+EXTRACT_ALL            = NO
+HIDE_UNDOC_MEMBERS     = NO
+HIDE_UNDOC_CLASSES     = NO
+FULL_PATH_NAMES        = NO
+STRIP_FROM_PATH        = .
+JAVADOC_AUTOBRIEF      = YES

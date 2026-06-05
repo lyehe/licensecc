@@ -53,11 +53,11 @@ BOOST_AUTO_TEST_CASE(to_string_renders_contents) {
  */
 BOOST_AUTO_TEST_CASE(addEvent_truncates_and_terminates_long_reference) {
 	EventRegistry er;
-	const string longRef(MAX_PATH + 50, 'x');
+	const string longRef(LCC_API_PATH_SIZE + 50, 'x');
 	er.addEvent(PRODUCT_NOT_LICENSED, longRef);
 	AuditEvent ev;
 	er.exportLastEvents(&ev, 1);
-	BOOST_CHECK_EQUAL(strlen(ev.license_reference), (size_t)MAX_PATH - 1);
+	BOOST_CHECK_EQUAL(strlen(ev.license_reference), (size_t)LCC_API_PATH_SIZE - 1);
 }
 
 }  // namespace test

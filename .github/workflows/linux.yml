@@ -1,11 +1,37 @@
 name: Linux_CI
-on: [push, pull_request]
+on:
+   push:
+   pull_request:
+   schedule:
+      -  cron: '17 3 * * *'
+permissions:
+   contents: read
 jobs:
+   docs:
+      runs-on: ubuntu-22.04
+      timeout-minutes: 20
+      steps:
+      -  uses: actions/checkout@v4
+         with:
+            submodules: recursive
+      -  name: Install documentation dependencies
+         run: |
+            sudo apt-get update
+            sudo apt-get install -y doxygen graphviz python3-pip
+            python3 -m pip install -r requirements.txt
+      -  name: Validate documentation
+         run: |
+            doxygen doc/Doxyfile
+            python3 scripts/check_docs_links.py doc
+            python3 -m sphinx -b html -W --keep-going -n doc build/docs/sphinx
+
    build-linux:
-      runs-on: ubuntu-latest
+      runs-on: ${{ matrix.os }}
+      timeout-minutes: 45
       strategy:
         fail-fast: false
         matrix:
+          os: ["ubuntu-22.04", "ubuntu-24.04"]
           build_type: ["Debug", "Release"]
 
       steps:
@@ -21,14 +47,152 @@ jobs:
               libboost-system-dev libboost-thread-dev libboost-date-time-dev
       -  name: Compile
          run: |
-            cmake -S . -B build -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} -DLCC_PROJECT_NAME=test -DCMAKE_INSTALL_PREFIX=$PWD/install
+            if [ "${{ matrix.build_type }}" = "Release" ]; then
+              cmake -S . -B build-keygen \
+                -DCMAKE_BUILD_TYPE=Debug \
+                -DLCC_PROJECT_NAME=licensecc_ci \
+                -DLCC_PROJECTS_BASE_DIR=$RUNNER_TEMP/licensecc-projects \
+                -DBUILD_TESTING=OFF \
+                -DLCC_BUILD_INSPECTOR=OFF
+              cmake --build build-keygen --target project_initialize -j$(nproc)
+            fi
+            cmake -S . -B build -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} -DLCC_PROJECT_NAME=licensecc_ci -DLCC_PROJECTS_BASE_DIR=$RUNNER_TEMP/licensecc-projects -DCMAKE_INSTALL_PREFIX=$PWD/install
             cmake --build build --target install -j$(nproc)
+      -  name: Scan runtime install
+         run: cmake -DLCC_ARTIFACT_SCAN_ROOT=$PWD/install -DLCC_ARTIFACT_ALLOW_TOOLS=OFF -P cmake/ScanReleaseArtifact.cmake
+      -  name: Print release manifest summary
+         run: cmake -DLCC_RELEASE_MANIFEST_PREFIX=$PWD/install -DLCC_RELEASE_MANIFEST_PROJECT_NAME=licensecc_ci -P cmake/PrintReleaseManifestSummary.cmake
       -  name: Test
          working-directory: build
-         run: ctest --output-on-failure
+         run: ctest --output-on-failure --no-tests=error
          env:
             CTEST_OUTPUT_ON_FAILURE: 1
             VIRTUAL_ENV: VM
+      -  name: Security facet gates
+         working-directory: build
+         run: |
+            for label in security parser signature base64 public_api generator package install platform hardware validation verifier v201; do
+              echo "::group::ctest -L ${label}"
+              ctest -L "${label}" --output-on-failure --no-tests=error
+              echo "::endgroup::"
+            done
+         env:
+            CTEST_OUTPUT_ON_FAILURE: 1
+            VIRTUAL_ENV: VM
+      -  name: Signature parity report
+         working-directory: build
+         run: ctest -R test_signature_verifier --verbose --output-on-failure --no-tests=error
+         env:
+            CTEST_OUTPUT_ON_FAILURE: 1
+            VIRTUAL_ENV: VM
+      -  name: Nonzero project magic install/package smoke
+         if: ${{ matrix.build_type == 'Debug' }}
+         run: |
+            cmake -S . -B build-magic \
+              -DCMAKE_BUILD_TYPE=Debug \
+              -DLCC_PROJECT_NAME=magic_smoke \
+              -DLCC_PROJECTS_BASE_DIR=$RUNNER_TEMP/licensecc-magic-projects \
+              -DLCC_PROJECT_MAGIC_NUM=123456 \
+              -DCMAKE_INSTALL_PREFIX=$PWD/install-magic
+            cmake --build build-magic --target licensecc_static -j$(nproc)
+            cmake --build build-magic --target install -j$(nproc)
+            cmake -DLCC_RELEASE_MANIFEST_PREFIX=$PWD/install-magic -DLCC_RELEASE_MANIFEST_PROJECT_NAME=magic_smoke -P cmake/PrintReleaseManifestSummary.cmake
+            ctest --test-dir build-magic -R "test_install_consumer_smoke|test_package_consumer_smoke" --output-on-failure --no-tests=error
+         env:
+            CTEST_OUTPUT_ON_FAILURE: 1
+            VIRTUAL_ENV: VM
+      -  name: On failure print logs
+         if: ${{ failure() }}
+         run: cat /tmp/open-license.log || true
+
+   sanitizers:
+      runs-on: ubuntu-22.04
+      timeout-minutes: 60
+      steps:
+      -  uses: actions/checkout@v4
+         with:
+            submodules: recursive
+      -  name: Install dependencies
+         run: |
+            sudo apt-get update
+            sudo apt-get install -y cmake libssl-dev zlib1g-dev \
+              libboost-dev libboost-test-dev libboost-filesystem-dev \
+              libboost-iostreams-dev libboost-program-options-dev \
+              libboost-system-dev libboost-thread-dev libboost-date-time-dev
+      -  name: Compile sanitizer security tests
+         run: |
+            cmake -S . -B build-asan \
+              -DCMAKE_BUILD_TYPE=Debug \
+              -DLCC_PROJECT_NAME=licensecc_ci \
+              -DLCC_PROJECTS_BASE_DIR=$RUNNER_TEMP/licensecc-projects \
+              -DLCC_BUILD_INSPECTOR=OFF \
+              -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer" \
+              -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
+            cmake --build build-asan -j$(nproc)
+      -  name: Run sanitizer direct security tests
+         run: |
+            SANITIZER_EXCLUDE="test_install_consumer_smoke|test_package_consumer_smoke|test_release_safety_smoke|test_artifact_scan_smoke|test_tools_profile_smoke|test_source_package_smoke|test_manifest_summary_smoke"
+            ctest --test-dir build-asan -E "$SANITIZER_EXCLUDE" --output-on-failure --no-tests=error
+         env:
+            CTEST_OUTPUT_ON_FAILURE: 1
+            VIRTUAL_ENV: VM
+            ASAN_OPTIONS: detect_leaks=0:halt_on_error=1
+            UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+      -  name: Run sanitizer boundary facets
+         run: |
+            for label in public_api parser base64 signature verifier v201 generator hardware platform validation; do
+              echo "::group::ctest -L ${label}"
+              ctest --test-dir build-asan -L "${label}" -E "test_install_consumer_smoke|test_package_consumer_smoke|test_release_safety_smoke|test_artifact_scan_smoke|test_tools_profile_smoke|test_source_package_smoke|test_manifest_summary_smoke" --output-on-failure --no-tests=error
+              echo "::endgroup::"
+            done
+         env:
+            CTEST_OUTPUT_ON_FAILURE: 1
+            VIRTUAL_ENV: VM
+            ASAN_OPTIONS: detect_leaks=0:halt_on_error=1
+            UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+      -  name: On failure print logs
+         if: ${{ failure() }}
+         run: cat /tmp/open-license.log || true
+
+   fuzz-smoke:
+      runs-on: ubuntu-22.04
+      timeout-minutes: 45
+      steps:
+      -  uses: actions/checkout@v4
+         with:
+            submodules: recursive
+      -  name: Install dependencies
+         run: |
+            sudo apt-get update
+            sudo apt-get install -y clang cmake ninja-build libssl-dev zlib1g-dev \
+              libboost-dev libboost-test-dev libboost-filesystem-dev \
+              libboost-iostreams-dev libboost-program-options-dev \
+              libboost-system-dev libboost-thread-dev libboost-date-time-dev
+      -  name: Compile fuzz targets
+         run: |
+            cmake -S . -B build-fuzz -G Ninja \
+              -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+              -DCMAKE_CXX_COMPILER=clang++ \
+              -DLCC_PROJECT_NAME=licensecc_ci \
+              -DLCC_PROJECTS_BASE_DIR=$RUNNER_TEMP/licensecc-fuzz-projects \
+              -DLCC_BUILD_INSPECTOR=OFF \
+              -DBUILD_FUZZERS=ON \
+              -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer" \
+              -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
+            cmake --build build-fuzz --target fuzz_license_reader fuzz_base64 fuzz_hw_identifier fuzz_v201_canonical_payload -j$(nproc)
+      -  name: Run fuzz smoke
+         run: |
+            FUZZ_SECONDS=60
+            if [ "${{ github.event_name }}" = "schedule" ]; then
+              FUZZ_SECONDS=600
+            fi
+            build-fuzz/test/fuzz/fuzz_license_reader -max_total_time=$FUZZ_SECONDS test/fuzz/corpus/license_reader build-fuzz/test/fuzz/corpus/license_reader_generated
+            build-fuzz/test/fuzz/fuzz_base64 -max_total_time=$FUZZ_SECONDS test/fuzz/corpus/base64
+            build-fuzz/test/fuzz/fuzz_hw_identifier -max_total_time=$FUZZ_SECONDS test/fuzz/corpus/hw_identifier
+            build-fuzz/test/fuzz/fuzz_v201_canonical_payload -max_total_time=$FUZZ_SECONDS test/fuzz/corpus/v201_canonical_payload
+         env:
+            ASAN_OPTIONS: detect_leaks=0:halt_on_error=1
+            UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
       -  name: On failure print logs
          if: ${{ failure() }}
          run: cat /tmp/open-license.log || true

@@ -17,12 +17,16 @@
 namespace license {
 namespace hw_identifier {
 
+LCC_API_HW_IDENTIFICATION_STRATEGY parse_identification_strategy_env_value(const char* env_var_value);
+
 class HwIdentifierFacade {
 private:
 	HwIdentifierFacade(){};
 	virtual ~HwIdentifierFacade(){};
 public:
 	static LCC_EVENT_TYPE validate_pc_signature(const std::string& str_code);
+	static LCC_EVENT_TYPE validate_pc_signature(const std::string& str_code, bool allow_ip_binding,
+												bool allow_env_selected_binding);
 	/**
 	 *
 	 * @throws logic_error if pc_identifier can't be generated.

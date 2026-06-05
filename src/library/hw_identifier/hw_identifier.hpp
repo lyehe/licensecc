@@ -47,6 +47,11 @@ public:
 	void set_identification_strategy(LCC_API_HW_IDENTIFICATION_STRATEGY strategy);
 	LCC_API_HW_IDENTIFICATION_STRATEGY get_identification_strategy() const;
 	void set_use_environment_var(bool use_env_var);
+	bool uses_environment_var() const;
+	void set_use_weak_source(bool use_weak_source);
+	void set_use_weak_mutable_disk_source(bool use_weak_mutable_disk_source);
+	bool uses_weak_source() const;
+	std::string source_strength_metadata() const;
 	void set_data(const std::array<uint8_t, HW_IDENTIFIER_PROPRIETARY_DATA> &data);
 	bool data_match(const std::array<uint8_t, HW_IDENTIFIER_PROPRIETARY_DATA> &data) const;
 	std::string print() const;

@@ -1,8 +1,11 @@
 name: Github_CI
 on: [push, pull_request]
+permissions:
+   contents: read
 jobs:
    build-windows:
       runs-on: ${{ matrix.os }}
+      timeout-minutes: 60
       strategy:
         fail-fast: false
         matrix:
@@ -22,18 +25,68 @@ jobs:
       -  name: Compile
          shell: bash
          run: |
-            cmake -S . -B build -A x64 -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} -DSTATIC_RUNTIME:BOOL=${{ matrix.static }} -DLCC_PROJECT_NAME:STRING=test -DCMAKE_INSTALL_PREFIX=C:/licensecc
+            if [ "${{ matrix.build_type }}" = "Release" ]; then
+              cmake -S . -B build-keygen -A x64 \
+                -DCMAKE_BUILD_TYPE=Debug \
+                -DSTATIC_RUNTIME:BOOL=${{ matrix.static }} \
+                -DLCC_PROJECT_NAME:STRING=licensecc_ci \
+                -DLCC_PROJECTS_BASE_DIR="$RUNNER_TEMP/licensecc-projects" \
+                -DBUILD_TESTING=OFF \
+                -DLCC_BUILD_INSPECTOR=OFF
+              cmake --build build-keygen --target project_initialize --config Debug
+            fi
+            cmake -S . -B build -A x64 -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} -DSTATIC_RUNTIME:BOOL=${{ matrix.static }} -DLCC_PROJECT_NAME:STRING=licensecc_ci -DLCC_PROJECTS_BASE_DIR="$RUNNER_TEMP/licensecc-projects" -DCMAKE_INSTALL_PREFIX=C:/licensecc
             cmake --build build --target install --config ${{ matrix.build_type }}
+      -  name: Scan runtime install
+         shell: bash
+         run: cmake -DLCC_ARTIFACT_SCAN_ROOT=C:/licensecc -DLCC_ARTIFACT_ALLOW_TOOLS=OFF -P cmake/ScanReleaseArtifact.cmake
+      -  name: Print release manifest summary
+         shell: bash
+         run: cmake -DLCC_RELEASE_MANIFEST_PREFIX=C:/licensecc -DLCC_RELEASE_MANIFEST_PROJECT_NAME=licensecc_ci -P cmake/PrintReleaseManifestSummary.cmake
       -  name: Test
          shell: bash
          working-directory: build
-         run: ctest -C ${{ matrix.build_type }}
+         run: ctest -C ${{ matrix.build_type }} --output-on-failure --no-tests=error
          env:
             CTEST_OUTPUT_ON_FAILURE: 1
             VIRTUAL_ENV: VM
-      -  name: Inspector
+      -  name: Security facet gates
          shell: bash
-         run: C:/licensecc/bin/test/lccinspector.exe
+         working-directory: build
+         run: |
+            for label in security parser signature base64 public_api generator package install platform hardware validation verifier v201; do
+              echo "::group::ctest -L ${label}"
+              ctest -C ${{ matrix.build_type }} -L "${label}" --output-on-failure --no-tests=error
+              echo "::endgroup::"
+            done
+         env:
+            CTEST_OUTPUT_ON_FAILURE: 1
+            VIRTUAL_ENV: VM
+      -  name: Signature parity report
+         shell: bash
+         working-directory: build
+         run: ctest -C ${{ matrix.build_type }} -R test_signature_verifier --verbose --output-on-failure --no-tests=error
+         env:
+            CTEST_OUTPUT_ON_FAILURE: 1
+            VIRTUAL_ENV: VM
+      -  name: Nonzero project magic install/package smoke
+         if: ${{ matrix.build_type == 'Debug' && matrix.static == 'true' }}
+         shell: bash
+         run: |
+            cmake -S . -B build-magic -A x64 \
+              -DCMAKE_BUILD_TYPE=Debug \
+              -DSTATIC_RUNTIME:BOOL=true \
+              -DLCC_PROJECT_NAME:STRING=magic_smoke \
+              -DLCC_PROJECTS_BASE_DIR="$RUNNER_TEMP/licensecc-magic-projects" \
+              -DLCC_PROJECT_MAGIC_NUM:STRING=123456 \
+              -DCMAKE_INSTALL_PREFIX=C:/licensecc-magic
+            cmake --build build-magic --target licensecc_static --config Debug
+            cmake --build build-magic --target install --config Debug
+            cmake -DLCC_RELEASE_MANIFEST_PREFIX=C:/licensecc-magic -DLCC_RELEASE_MANIFEST_PROJECT_NAME=magic_smoke -P cmake/PrintReleaseManifestSummary.cmake
+            ctest --test-dir build-magic -C Debug -R "test_install_consumer_smoke|test_package_consumer_smoke" --output-on-failure --no-tests=error
+         env:
+            CTEST_OUTPUT_ON_FAILURE: 1
+            VIRTUAL_ENV: VM
       -  name: On failure print logs
          if: ${{ failure() }}
          shell: pwsh

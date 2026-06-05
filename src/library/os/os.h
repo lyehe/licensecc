@@ -23,20 +23,41 @@
 #include <licensecc/datatypes.h>
 #include "../base/base.h"
 
+typedef enum {
+	DISK_IDENTIFIER_SOURCE_NONE = 0,
+	DISK_IDENTIFIER_SOURCE_SERIAL_OR_UUID = 1,
+	DISK_IDENTIFIER_SOURCE_LABEL = 2,
+	DISK_IDENTIFIER_SOURCE_MUTABLE_VOLUME = 3
+} DISK_IDENTIFIER_SOURCE;
+
 typedef struct {
 	int id;
+	char drive_root[MAX_PATH];
+	bool drive_root_initialized;
 	char device[MAX_PATH];
 	unsigned char disk_sn[8];
 	bool sn_initialized;
 	char label[255];
 	bool label_initialized;
+	char filesystem[MAX_PATH];
+	bool filesystem_initialized;
+	char volume_id[MAX_PATH];
+	bool volume_id_initialized;
+	DISK_IDENTIFIER_SOURCE identifier_source;
 	bool preferred;
 } DiskInfo;
 
 FUNCTION_RETURN getDiskInfos(std::vector<DiskInfo>& diskInfos);
+#ifdef _WIN32
+void appendWindowsDiskInfo(std::vector<DiskInfo>& diskInfos, const char* driveRoot, const char* volumeName,
+						   const char* fileSystemName, unsigned long volumeSerial,
+						   const char* volumeGuidPath = nullptr, const char* devicePath = nullptr);
+void sortWindowsDiskInfos(std::vector<DiskInfo>& diskInfos);
+#endif
 FUNCTION_RETURN getUserHomePath(char[MAX_PATH]);
 FUNCTION_RETURN getModuleName(char buffer[MAX_PATH]);
 FUNCTION_RETURN getMachineName(unsigned char identifier[6]);
+FUNCTION_RETURN getSecureRandomBytes(unsigned char* buffer, size_t size);
 /**
  * Get an identifier of the machine in an os specific way.
  * In Linux it uses:

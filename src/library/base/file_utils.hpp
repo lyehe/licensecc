@@ -13,7 +13,8 @@
 
 namespace license {
 
-std::vector<std::string> filter_existing_files(const std::vector<std::string>& fileList,EventRegistry& registry, const char* extraData);
+std::vector<std::string> filter_existing_files(const std::vector<std::string>& fileList, EventRegistry& registry,
+											   const char* extraData, size_t max_size = 0);
 std::string get_file_contents(const char *filename,size_t max_size);
 std::string remove_extension(const std::string& path);
 

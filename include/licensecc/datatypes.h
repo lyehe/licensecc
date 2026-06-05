@@ -15,19 +15,21 @@ extern "C" {
 #include <stdbool.h>
 #endif
 
-#ifdef __unix__
-#define DllExport
-#ifndef MAX_PATH
-#define MAX_PATH 1024
-#endif
-#else
-#include <windows.h>
+#if defined(_WIN32)
 #define DllExport __declspec(dllexport)
+#define LCC_API_PATH_SIZE 260
+#else
+#define DllExport
+#define LCC_API_PATH_SIZE 1024
 #endif
 
 // Generated per-project at configure time by lccgen into
 // projects/<LCC_PROJECT_NAME>/include/...; it is not checked into the repository.
-#include <licensecc_properties.h>
+// Consumers should get this definition from the licensecc CMake target.
+#ifndef LCC_PROJECT_CONFIG_HEADER
+#error "LCC_PROJECT_CONFIG_HEADER is not defined. Link against licensecc::licensecc_static or define the project-scoped generated properties header."
+#endif
+#include LCC_PROJECT_CONFIG_HEADER
 
 typedef enum {
 	LICENSE_OK = 0,  // OK
@@ -40,6 +42,11 @@ typedef enum {
 	PRODUCT_EXPIRED = 7,    //!< PRODUCT_EXPIRED
 	LICENSE_CORRUPTED = 8,  // License signature didn't match with current license
 	IDENTIFIERS_MISMATCH = 9,  // Calculated identifier and the one provided in license didn't match
+	LICENSE_TAMPER_DETECTED = 10,  // Runtime tamper signal detected
+	LICENSE_ONLINE_REQUIRED = 11,  // Online verification is required but not available
+	LICENSE_ONLINE_VERIFICATION_FAILED = 12,  // Online entitlement verification failed
+	LICENSE_ONLINE_ASSERTION_INVALID = 13,  // Online assertion was malformed, expired, or not authentic
+	LICENSE_ONLINE_CACHE_EXPIRED = 14,  // Online verification cache is expired
 
 	LICENSE_SPECIFIED = 100,  // license location was specified
 	LICENSE_FOUND = 101,  // License file has been found or license data has been located
@@ -54,13 +61,81 @@ typedef enum {
 
 typedef enum { SVRT_INFO, SVRT_WARN, SVRT_ERROR } LCC_SEVERITY;
 
+typedef enum {
+	LCC_TAMPER_DISABLED = 0,
+	LCC_TAMPER_AUDIT = 1,
+	LCC_TAMPER_ENFORCE = 2
+} LCC_TAMPER_POLICY;
+
+#define LCC_TAMPER_FLAG_NONE 0u
+#define LCC_TAMPER_FLAG_STRICT_SOURCE_SHADOWING 0x00000001u
+#define LCC_ONLINE_FLAG_NONE 0u
+#define LCC_API_ONLINE_PROJECT_SIZE 127u
+#define LCC_API_ONLINE_NONCE_SIZE 64u
+#define LCC_API_ONLINE_LICENSE_FINGERPRINT_SIZE 64u
+#define LCC_API_ONLINE_DEVICE_HASH_SIZE 64u
+#define LCC_API_ONLINE_ASSERTION_SIZE 4096u
+#define LCC_ONLINE_REQUEST_VERSION 1u
+#define LCC_ONLINE_DEFAULT_TIMEOUT_MS 3000u
+#define LCC_ONLINE_MAX_TIMEOUT_MS 30000u
+#define LCC_LICENSE_CHECK_OPTIONS_VERSION 2u
+
+typedef bool (*LCC_HOST_INTEGRITY_CHECK)(void* user_data, char* detail_out, size_t detail_out_size);
+
+typedef enum {
+	LCC_ONLINE_DISABLED = 0,
+	LCC_ONLINE_AUDIT = 1,
+	LCC_ONLINE_REQUIRE = 2,
+	LCC_ONLINE_REQUIRE_WITH_CACHE = 3
+} LCC_ONLINE_POLICY;
+
+typedef enum {
+	LCC_ONLINE_CB_OK = 0,
+	LCC_ONLINE_CB_TRANSPORT_UNAVAILABLE = 1,
+	LCC_ONLINE_CB_TIMEOUT = 2,
+	LCC_ONLINE_CB_BUFFER_TOO_SMALL = 3,
+	LCC_ONLINE_CB_HOST_DECLINED = 4,
+	LCC_ONLINE_CB_MALFORMED_RESPONSE = 5
+} LCC_ONLINE_CALLBACK_STATUS;
+
+typedef struct LccOnlineRequest {
+	uint32_t size;
+	uint32_t version;
+	char project[LCC_API_ONLINE_PROJECT_SIZE + 1];
+	char feature[LCC_API_FEATURE_NAME_SIZE + 1];
+	char license_fingerprint[LCC_API_ONLINE_LICENSE_FINGERPRINT_SIZE + 1];
+	char device_hash[LCC_API_ONLINE_DEVICE_HASH_SIZE + 1];
+	char nonce[LCC_API_ONLINE_NONCE_SIZE + 1];
+	LCC_ONLINE_POLICY policy;
+	uint32_t flags;
+	uint32_t timeout_ms;
+} LccOnlineRequest;
+
+typedef LCC_ONLINE_CALLBACK_STATUS (*LCC_ONLINE_CHECK)(void* user_data, const LccOnlineRequest* request,
+													   char* assertion_out, size_t* assertion_out_size);
+
+typedef struct LicenseCheckOptions {
+	uint32_t size;
+	uint32_t version;
+	LCC_TAMPER_POLICY tamper_policy;
+	uint32_t tamper_flags;
+	LCC_HOST_INTEGRITY_CHECK host_integrity_check;
+	void* host_integrity_user_data;
+	LCC_ONLINE_POLICY online_policy;
+	uint32_t online_flags;
+	uint32_t online_timeout_ms;
+	LCC_ONLINE_CHECK online_check;
+	void* online_user_data;
+	char online_device_hash[LCC_API_ONLINE_DEVICE_HASH_SIZE + 1];
+} LicenseCheckOptions;
+
 typedef struct {
 	LCC_SEVERITY severity;
 	LCC_EVENT_TYPE event_type;
 	/**
 	 * License file name or location where the license is stored.
 	 */
-	char license_reference[MAX_PATH];
+	char license_reference[LCC_API_PATH_SIZE];
 	char param2[LCC_API_AUDIT_EVENT_PARAM2 + 1];
 } AuditEvent;
 
@@ -97,8 +172,10 @@ typedef struct {
  */
 typedef struct {
 	/**
-	 *  software version in format xxxx[.xxxx.xxxx]
-	 *  NOT IMPLEMENTED pass '\0'
+	 * Software version in format xxxx[.xxxx.xxxx].
+	 * Required when a license uses start-version or end-version limits.
+	 * If such a license is checked without a caller version, or with a malformed
+	 * caller version, verification fails closed with PRODUCT_NOT_LICENSED.
 	 */
 	char version[LCC_API_VERSION_LENGTH + 1];
 	/**
@@ -115,7 +192,8 @@ typedef struct {
 	char feature_name[LCC_API_FEATURE_NAME_SIZE + 1];
 	/**
 	 * this number passed in by the application must correspond to the magic number used when compiling the library.
-	 * See cmake parameter -DLCC_PROJECT_MAGIC_NUM and licensecc_properties.h macro VERIFY_MAGIC
+	 * See cmake parameter -DLCC_PROJECT_MAGIC_NUM and generated licensecc_properties.h macros
+	 * LCC_PROJECT_MAGIC_NUM and LCC_VERIFY_MAGIC.
 	 */
 	unsigned int magic;
 } CallerInformations;

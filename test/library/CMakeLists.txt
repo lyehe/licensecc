@@ -26,6 +26,7 @@ ELSE(WIN32)
 	)
 
 	ADD_TEST(NAME test_os_linux COMMAND test_os_linux)
+	set_tests_properties(test_os_linux PROPERTIES LABELS "security;platform;hardware")
 ENDIF(WIN32)
 
 ### LicenseLocator tests
@@ -39,6 +40,32 @@ target_link_libraries(
  licensecc_static
  Boost::unit_test_framework 
  Boost::filesystem
+ Boost::system
+)
+
+### Base64 decoder tests
+add_executable(
+ test_base64
+ base64_test.cpp
+)
+
+target_link_libraries(
+ test_base64
+ licensecc_static
+ Boost::unit_test_framework
+ Boost::system
+)
+
+### v201 canonical payload tests
+add_executable(
+ test_v201_canonical_payload
+ v201_canonical_payload_test.cpp
+)
+
+target_link_libraries(
+ test_v201_canonical_payload
+ licensecc_static
+ Boost::unit_test_framework
  Boost::system
 )
 
@@ -85,11 +112,87 @@ target_link_libraries(
  Boost::system
 )
 
+### Anti-tamper API and integration tests
+add_executable(
+ test_anti_tamper
+ anti_tamper_test.cpp
+)
+
+target_link_libraries(
+ test_anti_tamper
+ licensecc_static
+ Boost::unit_test_framework
+ Boost::system
+)
+
+### Online verification API, assertion, and integration tests
+add_executable(
+ test_online_verification
+ online_verification_test.cpp
+)
+
+target_link_libraries(
+ test_online_verification
+ licensecc_static
+ license_generator_lib
+ Boost::unit_test_framework
+ Boost::system
+)
+
 ADD_TEST(NAME test_license_reader COMMAND test_license_reader)
 ADD_TEST(NAME test_license_locator COMMAND test_license_locator)
+ADD_TEST(NAME test_base64 COMMAND test_base64)
+ADD_TEST(NAME test_v201_canonical_payload COMMAND test_v201_canonical_payload)
 ADD_TEST(NAME test_event_registry COMMAND test_event_registry)
 ADD_TEST(NAME test_license_verifier COMMAND test_license_verifier)
 ADD_TEST(NAME test_public_api COMMAND test_public_api)
+ADD_TEST(NAME test_anti_tamper COMMAND test_anti_tamper)
+ADD_TEST(NAME test_online_verification COMMAND test_online_verification)
+
+set_tests_properties(
+ test_license_reader
+ PROPERTIES LABELS "security;parser"
+)
+
+set_tests_properties(
+ test_license_locator
+ PROPERTIES LABELS "security;parser;base64;public_api"
+)
+
+set_tests_properties(
+ test_base64
+ PROPERTIES LABELS "security;base64"
+)
+
+set_tests_properties(
+ test_v201_canonical_payload
+ PROPERTIES LABELS "security;validation;v201"
+)
+
+set_tests_properties(
+ test_event_registry
+ PROPERTIES LABELS "security;validation"
+)
+
+set_tests_properties(
+ test_license_verifier
+ PROPERTIES LABELS "security;verifier"
+)
+
+set_tests_properties(
+ test_public_api
+ PROPERTIES LABELS "security;public_api"
+)
+
+set_tests_properties(
+ test_anti_tamper
+ PROPERTIES LABELS "security;public_api;anti_tamper"
+)
+
+set_tests_properties(
+ test_online_verification
+ PROPERTIES LABELS "security;public_api;online"
+)
 
 ADD_SUBDIRECTORY(os)
 ADD_SUBDIRECTORY(hw_identifier)

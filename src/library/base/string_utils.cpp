@@ -24,11 +24,11 @@ using namespace std;
 
 string trim_copy(const string &string_to_trim) {
 	std::string::const_iterator it = string_to_trim.begin();
-	while (it != string_to_trim.end() && isspace(*it)) {
+	while (it != string_to_trim.end() && isspace(static_cast<unsigned char>(*it))) {
 		++it;
 	}
 	std::string::const_reverse_iterator rit = string_to_trim.rbegin();
-	while (rit.base() != it && (isspace(*rit) || *rit == 0)) {
+	while (rit.base() != it && (isspace(static_cast<unsigned char>(*rit)) || *rit == 0)) {
 		++rit;
 	}
 	return std::string(it, rit.base());
@@ -36,39 +36,57 @@ string trim_copy(const string &string_to_trim) {
 
 string toupper_copy(const string &lowercase) {
 	string cp(lowercase);
-	std::transform(cp.begin(), cp.end(), cp.begin(), (int (*)(int))toupper);
+	std::transform(cp.begin(), cp.end(), cp.begin(),
+				   [](unsigned char ch) { return static_cast<char>(toupper(ch)); });
 	return cp;
 }
 
-time_t seconds_from_epoch(const string &timeString) {
-	int year, month, day;
-	tm tm;
-	if (timeString.size() == 8) {
-		const int nfield = sscanf(timeString.c_str(), "%4d%2d%2d", &year, &month, &day);
-		if (nfield != 3) {
-			throw invalid_argument("Date not recognized");
-		}
-	} else if (timeString.size() == 10) {
-		const int nfield = sscanf(timeString.c_str(), "%4d-%2d-%2d", &year, &month, &day);
-		if (nfield != 3) {
-			const int nfield = sscanf(timeString.c_str(), "%4d/%2d/%2d", &year, &month, &day);
-			if (nfield != 3) {
-				throw invalid_argument("Date [" + timeString + "] not recognized");
-			}
-		}
-	} else {
-		throw invalid_argument("Date [" + timeString + "] not recognized");
+static bool parse_canonical_v200_date(const string &timeString, unsigned int &year, unsigned int &month,
+									  unsigned int &day) {
+	if (timeString.size() != 10 || timeString[4] != '-' || timeString[7] != '-') {
+		return false;
 	}
-	tm.tm_isdst = -1;
-	tm.tm_year = year - 1900;
-	tm.tm_mon = month - 1;
-	tm.tm_mday = day;
-	tm.tm_hour = 0;
-	tm.tm_min = 0;
-	tm.tm_sec = 0;
-	tm.tm_yday = -1;
-	tm.tm_wday = -1;
-	return mktime(&tm);
+	auto parse_digits = [&timeString](const size_t offset, const size_t count, unsigned int &out) {
+		out = 0;
+		for (size_t i = offset; i < offset + count; ++i) {
+			const unsigned char ch = static_cast<unsigned char>(timeString[i]);
+			if (!isdigit(ch)) {
+				return false;
+			}
+			out = out * 10 + static_cast<unsigned int>(ch - '0');
+		}
+		return true;
+	};
+
+	if (!parse_digits(0, 4, year) || !parse_digits(5, 2, month) || !parse_digits(8, 2, day)) {
+		return false;
+	}
+	const bool leap_year = (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0);
+	const unsigned int days_in_month[] = {0,  31, leap_year ? 29U : 28U, 31, 30, 31, 30,
+										  31, 31, 30,				 31, 30, 31};
+	return year != 0 && month >= 1 && month <= 12 && day >= 1 && day <= days_in_month[month];
+}
+
+bool is_canonical_v200_date(const string &timeString) {
+	unsigned int year = 0;
+	unsigned int month = 0;
+	unsigned int day = 0;
+	return parse_canonical_v200_date(timeString, year, month, day);
+}
+
+time_t seconds_from_epoch(const string &timeString) {
+	unsigned int year = 0;
+	unsigned int month = 0;
+	unsigned int day = 0;
+	if (!parse_canonical_v200_date(timeString, year, month, day)) {
+		throw invalid_argument("Date [" + timeString + "] is not a canonical YYYY-MM-DD calendar date");
+	}
+	tm tm_value = {};
+	tm_value.tm_isdst = -1;
+	tm_value.tm_year = static_cast<int>(year) - 1900;
+	tm_value.tm_mon = static_cast<int>(month) - 1;
+	tm_value.tm_mday = static_cast<int>(day);
+	return mktime(&tm_value);
 }
 
 const vector<string> split_string(const string &licensePositions, char splitchar) {
@@ -87,7 +105,10 @@ const static regex b64("^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/
 
 FILE_FORMAT identify_format(const string &license) {
 	FILE_FORMAT result = UNKNOWN;
-	if (regex_match(license, b64)) {
+	string base64_candidate(license);
+	base64_candidate.erase(std::remove(base64_candidate.begin(), base64_candidate.end(), '\n'), base64_candidate.end());
+	base64_candidate.erase(std::remove(base64_candidate.begin(), base64_candidate.end(), '\r'), base64_candidate.end());
+	if (regex_match(base64_candidate, b64)) {
 		result = BASE64;
 	} else if (regex_search(license, iniSection)) {
 		result = INI;
@@ -101,8 +122,8 @@ size_t mstrnlen_s(const char *szptr, size_t maxsize) {
 		return 0;
 	}
 	size_t count = 0;
-	while (*szptr++ && maxsize--) {
-		count++;
+	while (count < maxsize && szptr[count] != '\0') {
+		++count;
 	}
 	return count;
 }

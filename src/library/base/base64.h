@@ -12,6 +12,7 @@
 namespace license {
 
 std::vector<uint8_t> unbase64(const std::string& base64_data);
+bool is_canonical_base64(const std::string& base64_data, bool allow_line_breaks = true);
 std::string base64(const void* binaryData, size_t len, int lineLenght = -1);
 
 }  // namespace license

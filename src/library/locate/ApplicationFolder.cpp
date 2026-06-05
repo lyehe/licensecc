@@ -7,6 +7,7 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <cstdint>
 #include <iostream>
 
 #include <licensecc/datatypes.h>
@@ -34,10 +35,15 @@ const vector<string> ApplicationFolder::license_locations(EventRegistry &eventRe
 	if (fret == FUNC_RET_OK) {
 		const string module_name = remove_extension(fname);
 		const string temptativeLicense = string(module_name) + LCC_LICENSE_FILE_EXTENSION;
-		ifstream f(temptativeLicense.c_str());
+		ifstream f(temptativeLicense.c_str(), ios::binary | ios::ate);
 		if (f.good()) {
-			diskFiles.push_back(temptativeLicense);
-			eventRegistry.addEvent(LICENSE_FOUND, temptativeLicense.c_str());
+			const streampos file_size = f.tellg();
+			if (file_size >= 0 && static_cast<uintmax_t>(file_size) > LCC_API_MAX_LICENSE_DATA_LENGTH) {
+				eventRegistry.addEvent(LICENSE_MALFORMED, temptativeLicense.c_str(), "license file exceeds maximum size");
+			} else {
+				diskFiles.push_back(temptativeLicense);
+				eventRegistry.addEvent(LICENSE_FOUND, temptativeLicense.c_str());
+			}
 		} else {
 			eventRegistry.addEvent(LICENSE_FILE_NOT_FOUND, temptativeLicense.c_str());
 		}

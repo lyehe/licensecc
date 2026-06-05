@@ -29,7 +29,8 @@ const vector<string> EnvironmentVarLocation::license_locations(EventRegistry &ev
 		if (env_var_value != nullptr && env_var_value[0] != '\0') {
 			const vector<string> declared_positions = license::split_string(string(env_var_value), ';');
 			licenseFileFoundWithEnvVariable =
-				license::filter_existing_files(declared_positions, eventRegistry, LCC_LICENSE_LOCATION_ENV_VAR);
+				license::filter_existing_files(declared_positions, eventRegistry, LCC_LICENSE_LOCATION_ENV_VAR,
+											   LCC_API_MAX_LICENSE_DATA_LENGTH);
 		} else {
 			eventRegistry.addEvent(ENVIRONMENT_VARIABLE_NOT_DEFINED);
 		}

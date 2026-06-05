@@ -1,0 +1,7 @@
+valid-from=2026-01-01
+valid-to=2026-12-31
+start-version=1.0.0
+end-version=2.0.0
+client-signature=AEBC-Q0RF-Rkc=
+client-signature-source-strength=strong-disk-serial-or-uuid
+extra-data=fuzz-data

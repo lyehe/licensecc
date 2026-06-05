@@ -33,14 +33,21 @@ typedef int bool;
 #define PARAM_BEGIN_DATE "valid-from"
 #define PARAM_VERSION_FROM "start-version"
 #define PARAM_CLIENT_SIGNATURE "client-signature"
+#define PARAM_CLIENT_SIGNATURE_SOURCE_STRENGTH "client-signature-source-strength"
 #define PARAM_VERSION_TO "end-version"
 #define PARAM_EXTRA_DATA "extra-data"
 // license file extra entries
 #define LICENSE_SIGNATURE "sig"
 #define LICENSE_VERSION "lic_ver"
-// the only license-file format version the reader accepts; the license
-// generator must emit a matching `lic_ver` value.
-#define LCC_LICENSE_FORMAT_VERSION 200
+#define LICENSE_CANONICAL_VERSION "canonical-v"
+#define LICENSE_SIGNATURE_VERSION "sig-v"
+#define LICENSE_SIGNATURE_ALGORITHM "sig-alg"
+#define LICENSE_KEY_ID "key-id"
+// v200 remains the default issuance format during migration. v201 is the
+// canonical format and is dispatched explicitly by reader/verifier code.
+#define LCC_LICENSE_FORMAT_VERSION_V200 200
+#define LCC_LICENSE_FORMAT_VERSION_V201 201
+#define LCC_LICENSE_FORMAT_VERSION LCC_LICENSE_FORMAT_VERSION_V200
 
 typedef enum { FUNC_RET_OK, FUNC_RET_NOT_AVAIL, FUNC_RET_ERROR, FUNC_RET_BUFFER_TOO_SMALL } FUNCTION_RETURN;
 

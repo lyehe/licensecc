@@ -81,15 +81,31 @@ const AuditEvent *EventRegistry::getLastFailure() const {
 	return result;
 }
 
+const AuditEvent *EventRegistry::getLastEventOfType(LCC_EVENT_TYPE event_type) const {
+	for (auto it = logs.rbegin(); it != logs.rend(); ++it) {
+		if (it->event_type == event_type) {
+			return &(*it);
+		}
+	}
+	return nullptr;
+}
+
 void EventRegistry::addEvent(LCC_EVENT_TYPE event, const std::string &licenseLocationId) {
 	addEvent(event, licenseLocationId.c_str(), nullptr);
 }
 
 void EventRegistry::addEvent(LCC_EVENT_TYPE event, const char *licenseLocationId, const char *info) {
+	auto eventIterator = PROGRESS_BY_EVENT_TYPE.find(event);
+	bool successEvent = (eventIterator != PROGRESS_BY_EVENT_TYPE.end());
+	addEventWithSeverity(successEvent ? SVRT_INFO : SVRT_WARN, event, licenseLocationId, info);
+}
+
+void EventRegistry::addEventWithSeverity(LCC_SEVERITY severity, LCC_EVENT_TYPE event, const char *licenseLocationId,
+										 const char *info) {
 	AuditEvent audit;
 	auto eventIterator = PROGRESS_BY_EVENT_TYPE.find(event);
 	bool successEvent = (eventIterator != PROGRESS_BY_EVENT_TYPE.end());
-	audit.severity = successEvent ? SVRT_INFO : SVRT_WARN;
+	audit.severity = severity;
 	audit.event_type = event;
 	if (licenseLocationId == nullptr) {
 		mstrlcpy(audit.license_reference, LIC_ID_NOT_DEFINED, sizeof audit.license_reference);

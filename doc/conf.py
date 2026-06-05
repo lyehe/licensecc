@@ -17,7 +17,8 @@
 # add these directories to sys.path here. If the directory is relative to the
 # documentation root, use os.path.abspath to make it absolute, like shown here.
 #
-# import os
+import os
+from pathlib import Path
 # import sys
 # sys.path.insert(0, os.path.abspath('.'))
 
@@ -26,19 +27,34 @@
 
 # If your documentation needs a minimal Sphinx version, state it here.
 #
-# needs_sphinx = '1.0'
+needs_sphinx = '5.3'
 
 # Add any Sphinx extension module names here, as strings. They can be
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
 # ones.
-extensions = ['sphinx.ext.todo',
-    'sphinx.ext.githubpages', 'breathe', 'recommonmark', 'sphinx_markdown_tables', 'sphinx_rtd_theme',
-    'sphinxemoji.sphinxemoji', 'sphinx_sitemap','sphinx.ext.autosectionlabel' ]
+extensions = [
+    'sphinx.ext.todo',
+    'sphinx.ext.githubpages',
+    'breathe',
+    'recommonmark',
+    'sphinx_markdown_tables',
+    'sphinx_rtd_theme',
+    'sphinxemoji.sphinxemoji',
+    'sphinx_sitemap',
+    'sphinx.ext.autosectionlabel',
+]
 
 autosectionlabel_prefix_document = True
 
 # Breathe Configuration
+docs_dir = Path(__file__).resolve().parent
 breathe_default_project = "licensecc"
+breathe_projects = {
+    "licensecc": os.environ.get(
+        "LICENSECC_DOXYGEN_XML",
+        str(docs_dir / "_doxygen" / "xml"),
+    )
+}
 breathe_domain_by_extension = {"h" : "cpp"}
 
 # Add any paths that contain templates here, relative to this directory.
@@ -72,12 +88,12 @@ release = '2.1.0'
 #
 # This is also used if you do content translation via gettext catalogs.
 # Usually you set "language" from the command line for these cases.
-language = None
+language = 'en'
 
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
 # This patterns also effect to html_static_path and html_extra_path
-exclude_patterns = []
+exclude_patterns = ['_build', '_doxygen', '.doctrees']
 
 # The name of the Pygments (syntax highlighting) style to use.
 pygments_style = 'sphinx'
@@ -98,7 +114,6 @@ html_theme = 'sphinx_rtd_theme'
 # documentation.
 #
 html_theme_options = {
-  'canonical_url': 'http://open-license-manager.github.io/licensecc/',
   'analytics_id': 'UA-160839650-1',  #  Provided by Google in your dashboard
   'titles_only': False
 }

@@ -18,8 +18,6 @@
 #include <iphlpapi.h>
 #include <unordered_map>
 #include <stdio.h>
-#include <algorithm>
-#include <cctype>
 #pragma comment(lib, "IPHLPAPI.lib")
 
 #include "../../base/string_utils.h"
@@ -33,47 +31,6 @@ namespace license {
 namespace os {
 using namespace std;
 
-static int translate(const char ipStringIn[16], unsigned char ipv4[4]) {
-	size_t index = 0;
-
-	const char *str2 = ipStringIn; /* save the pointer */
-	while (*str2) {
-		if (isdigit((unsigned char)*str2)) {
-			ipv4[index] *= 10;
-			ipv4[index] += *str2 - '0';
-		} else {
-			index++;
-		}
-		str2++;
-	}
-	return 0;
-}
-
-int score(const OsAdapterInfo &a) {
-	int score = 0;
-	bool allzero = true;
-	const char *bads[] = {"virtual", "ppp", "tunnel", "vpn"};
-	const char *goods[] = {"realtek", "intel", "wireless"};
-
-	for (int i = 0; i < sizeof(a.description) && allzero; i++) {
-		allzero = allzero && (a.description[i] == 0);
-	}
-	if (!allzero) {
-		score++;
-	}
-
-	string descr=string(a.description);
-	std::transform(descr.begin(), descr.end(), descr.begin(), [](unsigned char c) { return std::tolower(c); });
-	for (auto bad: bads) {
-		score += descr.find(bad) == std::string::npos ? 1 : -1;
-	}
-	for (auto good : goods) {
-		score += descr.find(good) == std::string::npos ? -1 : 1;
-	}
-	return score;
-}
-
-bool cmp(const OsAdapterInfo &a, const OsAdapterInfo &b) { return score(a) > score(b); }
 	/**
  *
  * @param adapterInfos
@@ -141,7 +98,7 @@ FUNCTION_RETURN getAdapterInfos(vector<OsAdapterInfo> &adapterInfos) {
 					strncpy(ai.description, pAdapter->Description,
 						min(sizeof(ai.description) - 1, (size_t)MAX_ADAPTER_DESCRIPTION_LENGTH));
 					memcpy(ai.mac_address, pAdapter->Address, size_to_be_copied);
-					translate(pAdapter->IpAddressList.IpAddress.String, ai.ipv4_address);
+					parse_ipv4_address(pAdapter->IpAddressList.IpAddress.String, ai.ipv4_address);
 					ai.type = IFACE_TYPE_ETHERNET;
 					tmpAdapters.push_back(ai);
 				}
@@ -156,8 +113,12 @@ FUNCTION_RETURN getAdapterInfos(vector<OsAdapterInfo> &adapterInfos) {
 	if (tmpAdapters.size() == 0) {
 		f_return = FUNC_RET_NOT_AVAIL;
 	} else {
-		std::sort(tmpAdapters.begin(), tmpAdapters.end(), cmp);
-		adapterInfos = std::move(tmpAdapters);
+		sortAdapterInfos(tmpAdapters);
+		if (tmpAdapters.size() == 0) {
+			f_return = FUNC_RET_NOT_AVAIL;
+		} else {
+			adapterInfos = std::move(tmpAdapters);
+		}
 	}
 	return f_return;
 }

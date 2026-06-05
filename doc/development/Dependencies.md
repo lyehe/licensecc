@@ -2,6 +2,10 @@
 
 This page describes the dependencies of `licensecc` and the supported build environments.
 
+Current release validation covers native Linux and MSVC Windows builds. MinGW
+and Linux-to-Windows cross-compilation entries are retained as legacy
+development references only until dedicated CI coverage is added.
+
 Dependencies varies with the environment, if you're building the library for the first time we suggest you download or set up one of the supported environments to be sure not to incur in dependency/compiler errors (you can use virtual machines , docker or lxc/lxd technologies).
 
 The library is composed by two modules: a license generator `lcc` executable, that also works as a project configuration tool, and the C++ library itself `licensecc` (the part you have to integrate in your application).

@@ -1,0 +1,7 @@
+[LICENSECC_CI]
+lic_ver = 201
+canonical-v = 1
+sig-v = 1
+sig-alg = rsa-pkcs1-sha256
+key-id = sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+sig = AA=A

@@ -28,23 +28,29 @@ using namespace hw_identifier;
  * is OK
  */
 
-static void generate_and_verify_license(LCC_API_HW_IDENTIFICATION_STRATEGY strategy, const string& lic_fname) {
+static void generate_and_verify_license(LCC_API_HW_IDENTIFICATION_STRATEGY strategy, const string& lic_fname,
+										LCC_EVENT_TYPE expected_result = LICENSE_OK) {
 	BOOST_TEST_CHECKPOINT("Before generate");
 	const string identifier_out = HwIdentifierFacade::generate_user_pc_signature(strategy);
 	BOOST_TEST_CHECKPOINT("After generate signature");
-	cout << "Identifier:" << identifier_out << endl;
+	cout << "Identifier:<redacted>" << endl;
 	vector<string> extraArgs;
 	extraArgs.push_back("-s");
 	extraArgs.push_back(identifier_out);
+	if (strategy == LCC_API_HW_IDENTIFICATION_STRATEGY::STRATEGY_IP_ADDRESS) {
+		extraArgs.push_back("--allow-ip-binding");
+	}
 	BOOST_TEST_CHECKPOINT("Before generate license");
 	const string licLocation = generate_license(lic_fname, extraArgs);
 	LicenseInfo license;
 	LicenseLocation location = {LICENSE_PATH};
 	std::copy(licLocation.begin(), licLocation.end(), location.licenseData);
 	const LCC_EVENT_TYPE result = acquire_license(nullptr, &location, &license);
-	BOOST_CHECK_EQUAL(result, LICENSE_OK);
-	BOOST_CHECK_EQUAL(license.has_expiry, false);
-	BOOST_CHECK_EQUAL(license.linked_to_pc, true);
+	BOOST_CHECK_EQUAL(result, expected_result);
+	if (expected_result == LICENSE_OK) {
+		BOOST_CHECK_EQUAL(license.has_expiry, false);
+		BOOST_CHECK_EQUAL(license.linked_to_pc, true);
+	}
 }
 
 BOOST_AUTO_TEST_CASE(volid_lic_file) {
@@ -74,7 +80,8 @@ BOOST_AUTO_TEST_CASE(strategy_ip_address) {
 	FUNCTION_RETURN result_adapterInfos = os::getAdapterInfos(adapters);
 	if ((result_adapterInfos == FUNC_RET_BUFFER_TOO_SMALL || result_adapterInfos == FUNC_RET_OK) &&
 		adapters.size() > 0) {
-		generate_and_verify_license(LCC_API_HW_IDENTIFICATION_STRATEGY::STRATEGY_IP_ADDRESS, "strategy_ip_address");
+		generate_and_verify_license(LCC_API_HW_IDENTIFICATION_STRATEGY::STRATEGY_IP_ADDRESS, "strategy_ip_address",
+									LICENSE_MALFORMED);
 	} else {
 		BOOST_TEST_MESSAGE("No ethernet adapter found skipping testing ip hardware identifier");
 	}

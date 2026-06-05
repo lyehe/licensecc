@@ -1,0 +1,69 @@
+name: Cloudflare_Online_Verifier
+
+on:
+  push:
+    paths:
+      - ".github/workflows/cloudflare-online-verifier.yml"
+      - "services/cloudflare-online-verifier/**"
+      - "doc/analysis/license-admin-vite-react*.rst"
+      - "doc/analysis/online-verification-implementation-checklist.rst"
+  pull_request:
+    paths:
+      - ".github/workflows/cloudflare-online-verifier.yml"
+      - "services/cloudflare-online-verifier/**"
+      - "doc/analysis/license-admin-vite-react*.rst"
+      - "doc/analysis/online-verification-implementation-checklist.rst"
+
+permissions:
+  contents: read
+
+jobs:
+  verifier:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: services/cloudflare-online-verifier
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: services/cloudflare-online-verifier/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Secret marker scan
+        shell: bash
+        working-directory: .
+        run: |
+          pem_begin='BEGIN'
+          pem_scope='PRIVATE'
+          pem_kind='KEY'
+          pem_marker="${pem_begin} (RSA |EC |DSA |OPENSSH |ENCRYPTED )?${pem_scope} ${pem_kind}|${pem_begin} ${pem_scope} ${pem_kind}"
+          if grep -R -n -E "$pem_marker" services/cloudflare-online-verifier .github/workflows/cloudflare-online-verifier.yml; then
+            echo "PEM key marker found"
+            exit 1
+          fi
+          if grep -R -n -E 'CLOUDFLARE_API_TOKEN=|ADMIN_BEARER=|[A-Za-z0-9_-]{40,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}' services/cloudflare-online-verifier .github/workflows/cloudflare-online-verifier.yml; then
+            echo "secret-like token found"
+            exit 1
+          fi
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm test
+
+      - name: Check schema parity
+        run: npm run schema:parity
+
+      - name: Dry-run deploy
+        run: npm run dry-run
+
+      - name: Apply local migrations
+        run: npm run migrate:local

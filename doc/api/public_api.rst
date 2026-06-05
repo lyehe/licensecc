@@ -21,6 +21,13 @@ Verify a license
 
 .. doxygenfunction:: acquire_license
 
+.. doxygenfunction:: acquire_license_ex
+
+.. doxygenfunction:: lcc_init_license_check_options
+
+.. doxygenstruct:: LicenseCheckOptions
+	:members:
+
 .. doxygenstruct:: CallerInformations
 	:members:
 

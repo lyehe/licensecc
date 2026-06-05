@@ -39,6 +39,7 @@ add_executable( test_signature_verifier
 target_link_libraries(
  test_signature_verifier
  licensecc_static
+ license_generator_lib
  license_generator_snippet
  Boost::unit_test_framework 
  Boost::filesystem
@@ -72,4 +73,8 @@ ADD_TEST(NAME test_it_hw_identifier COMMAND test_it_hw_identifier WORKING_DIRECT
 ADD_TEST(NAME test_standard_license COMMAND test_standard_license WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 ADD_TEST(NAME test_signature_verifier COMMAND test_signature_verifier WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 
-
+set_tests_properties(test_crack PROPERTIES LABELS "security;parser;signature;public_api")
+set_tests_properties(test_date PROPERTIES LABELS "security;parser;verifier")
+set_tests_properties(test_it_hw_identifier PROPERTIES LABELS "security;hardware;generator")
+set_tests_properties(test_standard_license PROPERTIES LABELS "security;signature;generator")
+set_tests_properties(test_signature_verifier PROPERTIES LABELS "security;signature")

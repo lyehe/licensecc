@@ -1,7 +1,15 @@
 add_subdirectory("base")
+add_subdirectory("anti_tamper")
+add_subdirectory("online_verification")
 add_subdirectory("os")
 add_subdirectory("locate")
 add_subdirectory("hw_identifier")
+
+foreach(_lcc_generated_metadata_target IN ITEMS base anti_tamper online_verification os locate hw_identifier)
+    if(TARGET ${_lcc_generated_metadata_target})
+        add_dependencies(${_lcc_generated_metadata_target} project_initialize)
+    endif()
+endforeach()
 
 ADD_LIBRARY(licensecc_static STATIC
     licensecc.cpp
@@ -12,6 +20,8 @@ ADD_LIBRARY(licensecc_static STATIC
     $<TARGET_OBJECTS:locate>
     $<TARGET_OBJECTS:os>
     $<TARGET_OBJECTS:base>
+    $<TARGET_OBJECTS:anti_tamper>
+    $<TARGET_OBJECTS:online_verification>
 )
 
 if(CODE_COVERAGE AND UNIX)
@@ -31,19 +41,58 @@ ELSE(UNIX OR OPENSSL_FOUND)
 	target_link_libraries(licensecc_static PUBLIC ${EXTERNAL_LIBS})
 ENDIF(UNIX OR OPENSSL_FOUND)
 
+if(WIN32)
+	target_link_libraries(licensecc_static PUBLIC bcrypt)
+endif()
+
 #set_property(TARGET licensecc_static PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
 target_include_directories(licensecc_static
     PUBLIC 
         $<INSTALL_INTERFACE:include>
-        $<INSTALL_INTERFACE:include/${PROJECT_NAME}/${LCC_PROJECT_NAME}>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../include>
+        $<BUILD_INTERFACE:${LCC_PROJECT_INCLUDE_ROOT}>
+    PRIVATE
         $<BUILD_INTERFACE:${LCC_INCLUDE_DIR}>
 )
 
+target_compile_definitions(licensecc_static
+    PUBLIC
+        "LCC_PROJECT_CONFIG_HEADER=\"${LCC_PROJECT_CONFIG_HEADER}\""
+        "LCC_PROJECT_PUBLIC_KEY_HEADER=\"${LCC_PROJECT_PUBLIC_KEY_HEADER}\""
+)
+
+if(NOT "${LCC_ONLINE_ASSERTION_PUBLIC_KEY_RECORDS}" STREQUAL "")
+    if(TARGET online_verification)
+        target_compile_definitions(online_verification
+            PRIVATE
+                "LCC_ONLINE_ASSERTION_PUBLIC_KEY_RECORDS=${LCC_ONLINE_ASSERTION_PUBLIC_KEY_RECORDS}"
+        )
+    endif()
+    target_compile_definitions(licensecc_static
+        PUBLIC
+            "LCC_ONLINE_ASSERTION_PUBLIC_KEY_RECORDS=${LCC_ONLINE_ASSERTION_PUBLIC_KEY_RECORDS}"
+    )
+endif()
+
+if(NOT "${LCC_ONLINE_ASSERTION_RETIRED_KEY_IDS}" STREQUAL "")
+    if(TARGET online_verification)
+        target_compile_definitions(online_verification
+            PRIVATE
+                "LCC_ONLINE_ASSERTION_RETIRED_KEY_IDS=${LCC_ONLINE_ASSERTION_RETIRED_KEY_IDS}"
+        )
+    endif()
+    target_compile_definitions(licensecc_static
+        PUBLIC
+            "LCC_ONLINE_ASSERTION_RETIRED_KEY_IDS=${LCC_ONLINE_ASSERTION_RETIRED_KEY_IDS}"
+    )
+endif()
+
 add_library(licensecc::licensecc_static ALIAS licensecc_static)
 install(TARGETS licensecc_static EXPORT licensecc
-	ARCHIVE DESTINATION ${main_lib_dest}/${LCC_PROJECT_NAME})
+	ARCHIVE DESTINATION ${main_lib_dest}/${LCC_PROJECT_NAME}
+	COMPONENT licensecc_runtime)
 	
-install(EXPORT licensecc NAMESPACE licensecc:: DESTINATION  ${main_lib_dest}/${LCC_PROJECT_NAME}/cmake)
+install(EXPORT licensecc NAMESPACE licensecc:: DESTINATION  ${main_lib_dest}/${LCC_PROJECT_NAME}/cmake
+	COMPONENT licensecc_runtime)
 export(EXPORT licensecc NAMESPACE licensecc:: FILE ${CMAKE_BINARY_DIR}/${PROJECT_NAME}.cmake)

@@ -11,9 +11,11 @@
 [![codecov](https://codecov.io/gh/open-license-manager/licensecc/branch/develop/graph/badge.svg?token=vdrBBzX6Rl)](https://codecov.io/gh/open-license-manager/licensecc)
 [![Github Issues](https://img.shields.io/github/issues/open-license-manager/licensecc)](http://github.com/open-license-manager/licensecc/issues)
 
-Protect the software you develop from unauthorized copies, limit the usage in time, to a specific set of 
-machines, or prevent the usage in  virtualized environments. It is an open source license manager that helps to keep your 
-software closed :smirk: . Among other features if it runs on a "real hardware" it can generate a signature of that hardware and report if the signature doesn't match.
+Licensecc verifies signed local license files, supports time and hardware
+limits, and reports deterministic diagnostics when license data, project
+metadata, or hardware bindings do not match. It is an offline licensing library,
+not a tamper-proof enforcement system; a customer-controlled machine can still
+patch binaries, replace libraries, or hook local API results.
 
 A comprehensive [list of features](http://open-license-manager.github.io/licensecc/analysis/features.html), and their status is available in the project site. 
 
@@ -27,7 +29,7 @@ It has a [BSD 3 clauses](https://opensource.org/licenses/BSD-3-Clause) licensing
 
 ## Project Structure
 The software is made by 4 main sub-components:
--   a C++ library with a nice C api, `licensecc` with minimal (or no) external dependencies (the part you have to integrate in your software) that is the project you're currently in.
+-   a C++ library, `licensecc`, with C-linkage public functions for C++ consumers or project-owned wrappers and minimal (or no) external runtime dependencies. This is the part you integrate in your software.
 -   a license debugger `lcc-inspector` to be sent to the final customer when there are licensing problems or for calculating the pc hash before issuing the license.
 -   a license generator (github project [lcc-license-generator](https://github.com/open-license-manager/lcc-license-generator)) `lccgen` for customizing the library and generate the licenses.
 -   Usage [examples](https://github.com/open-license-manager/examples) to simplify the integration in your project.
@@ -38,7 +40,7 @@ or [Windows](http://open-license-manager.github.io/licensecc/development/Build-t
 
 ### Prerequisites
 -   Operating system: Linux(Ubuntu, CentOS), Windows
--   compilers       : GCC (Linux) MINGW (Linux cross compile for Windows), MINGW or MSVC (Windows) 
+-   compilers       : GCC (Linux), MSVC (Windows). MinGW and Linux-to-Windows cross-compilation are legacy/development flows and are not release-validated until a dedicated CI gate is added.
 -   tools           : cmake(>=3.16), git, make/ninja(linux)
 -   libs            : Linux requires OpenSSL; Windows depends only on system libraries. Boost is required to **build** the project (it is used by the bundled license generator, which is built during configuration, and by the tests). It is **not linked** into the final `licensecc` library, so your application does not need Boost at runtime.
 
@@ -48,30 +50,36 @@ Clone the project. It has submodules, don't forget the `--recursive` option.
 
 ```console
 git clone --recursive https://github.com/open-license-manager/licensecc.git
-cd licensecc/build
+cd licensecc
 ```
+
+Release builds should use a project name for your product and an
+issuer-controlled project directory. The automatically created `DEFAULT`
+project is for local tests only.
 
 ### build on Linux
 
 ```console
-cmake .. -DCMAKE_INSTALL_PREFIX=../install
-make
-make install
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DLCC_PROJECT_NAME=MY_PRODUCT -DLCC_PROJECTS_BASE_DIR=/secure/licensecc-projects -DCMAKE_INSTALL_PREFIX=$PWD/install
+cmake --build build --target install -j$(nproc)
 ```
 
 ### build on Windows (with MSVC 2022)
 
 ```console
-cmake .. -G "Visual Studio 17 2022" -A x64 -DBOOST_ROOT="{Folder where boost is}" -DCMAKE_INSTALL_PREFIX=../install
-cmake --build . --target install --config Release
+cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DBOOST_ROOT="{Folder where boost is}" -DLCC_PROJECT_NAME=MY_PRODUCT -DLCC_PROJECTS_BASE_DIR=C:/secure/licensecc-projects -DCMAKE_INSTALL_PREFIX=C:/licensecc/MY_PRODUCT
+cmake --build build --target install --config Release
 ```
 
 ### cross compile with MINGW on Linux
 
+This is legacy development guidance, not a release-validated packaging path in
+the current CI matrix. Use the native Linux and MSVC Windows gates for release
+validation until a MinGW gate is added.
+
 ```console
-x86_64-w64-mingw32.static-cmake .. -DCMAKE_INSTALL_PREFIX=../install
-make
-make install
+x86_64-w64-mingw32.static-cmake -S . -B build-mingw -DLCC_PROJECT_NAME=MY_PRODUCT -DLCC_PROJECTS_BASE_DIR=/secure/licensecc-projects -DCMAKE_INSTALL_PREFIX=$PWD/install-mingw
+cmake --build build-mingw --target install
 ```
 
 ## How to test
@@ -90,8 +98,45 @@ ctest -C Release
 
 ## How to use
 
-A minimal, self-contained integration example lives in [`examples/minimal`](examples/minimal) (about 20 lines: acquire a license and report failures with `lcc_strerror`/`print_error`). 
+A minimal, self-contained integration example lives in [`examples/minimal`](examples/minimal): acquire a license and report failures with `lcc_strerror`/`print_error`.
 The [examples](https://github.com/open-license-manager/examples) repository shows more ways to integrate `licensecc` into your project.
+
+For production C++ applications, the supported integration mode is to build and
+install Licensecc for one named project, then consume that install with CMake
+`find_package(licensecc REQUIRED COMPONENTS <project>)` and link
+`licensecc::licensecc_static`. Do not rely on source-tree include directories,
+hand-copied static-library paths, or generated headers from another project;
+those modes are unsupported unless they have their own smoke tests.
+
+The public functions use C linkage, but the distributed runtime target is a C++
+static library and the installed package is validated with C++ consumers. Pure
+C hosts should use a build rule that links through the C++ linker or a
+project-owned wrapper with its own installed-prefix smoke test.
+
+Host applications should fail closed: grant access only when `acquire_license()`
+or `acquire_license_ex()` returns `LICENSE_OK`. Treat every other return value
+as not licensed, then use `print_error()` or `lcc_strerror()` only to report
+diagnostics. For products with multiple licensed capabilities, pass the feature
+name in `CallerInformations.feature_name`; for licenses with `start-version` or
+`end-version`, pass the running application version in
+`CallerInformations.version`. If your build uses a nonzero
+`LCC_PROJECT_MAGIC_NUM`, initialize `CallerInformations.magic` from the
+generated constant before checking a license.
+
+Use `acquire_license_ex()` when you want per-call runtime tamper diagnostics.
+`lcc_init_license_check_options()` defaults to `LCC_TAMPER_AUDIT`, which records
+tamper signals as warnings without denying an otherwise valid license. Switch to
+`LCC_TAMPER_ENFORCE` only after testing host-specific false positives.
+
+`acquire_license_ex()` also supports opt-in online verification through a host
+callback. Licensecc core stays HTTP-free: your application sends the generated
+`LccOnlineRequest` to your service and returns the signed assertion to the
+library. A reference low-volume Cloudflare Worker lives in
+[`services/cloudflare-online-verifier`](services/cloudflare-online-verifier).
+Start with `LCC_ONLINE_AUDIT`; use `LCC_ONLINE_REQUIRE` only after transport and
+entitlement failure testing. Production online builds should configure
+`LCC_ONLINE_ASSERTION_PUBLIC_KEY_RECORDS` with a dedicated online assertion
+public key; otherwise online assertion verification fails closed.
 
 ## How to contribute
 

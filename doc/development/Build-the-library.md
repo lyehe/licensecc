@@ -78,7 +78,7 @@ Minimum prerequisites
 *   Boost => 1.57 (If you want to compile your own boost version remember to use the flag `runtime-link=static`)
 
 Optional prerequisites:
-*   Doxygen, Sphynx for documentation
+*   Doxygen, Sphinx for documentation
 
 ## Download and compile
 
@@ -120,6 +120,12 @@ ctest -T memcheck
 |OPENSSL_ROOT            | Folder where OpenSSL was installed (optional: if you installed openssl as system package this should not be necessary) |
 
 ## Cross compile on Linux for Windows
+
+This section is legacy development guidance. The current release validation
+matrix does not include a MinGW or Linux-to-Windows cross-compile gate, so do
+not treat artifacts from this flow as release-supported until that CI coverage
+is added.
+
 Tested on host: Ubuntu 18.04
 
 ### Prerequisites

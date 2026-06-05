@@ -25,6 +25,7 @@
 #include <netpacket/packet.h>
 #include <stdio.h>
 #include <unordered_map>
+#include <utility>
 #include <string.h>
 #include <memory.h>
 
@@ -105,10 +106,17 @@ FUNCTION_RETURN getAdapterInfos(vector<OsAdapterInfo> &adapterInfos) {
 	if (adapterByName.size() == 0) {
 		f_return = FUNC_RET_NOT_AVAIL;
 	} else {
-		f_return = FUNC_RET_OK;
-		adapterInfos.reserve(adapterByName.size());
+		std::vector<OsAdapterInfo> tmpAdapters;
+		tmpAdapters.reserve(adapterByName.size());
 		for (auto &it : adapterByName) {
-			adapterInfos.push_back(it.second);
+			tmpAdapters.push_back(it.second);
+		}
+		sortAdapterInfos(tmpAdapters);
+		if (tmpAdapters.size() == 0) {
+			f_return = FUNC_RET_NOT_AVAIL;
+		} else {
+			f_return = FUNC_RET_OK;
+			adapterInfos = std::move(tmpAdapters);
 		}
 	}
 	return f_return;

@@ -1,0 +1,32 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "licensecc-admin",
+  "main": "src/worker/index.ts",
+  "compatibility_date": "2026-06-04",
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  },
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "licensecc-online-verifier",
+      "database_id": "replace-with-d1-database-id",
+      "migrations_dir": "../cloudflare-online-verifier/migrations"
+    }
+  ],
+  "vars": {
+    "ENVIRONMENT": "development",
+    "ADMIN_DEV_BEARER_ENABLED": "0",
+    "ADMIN_ACCESS_ISSUER": "",
+    "ADMIN_ACCESS_AUDIENCE": "",
+    "ADMIN_ACCESS_ADMIN_EMAILS": "",
+    "ADMIN_ACCESS_READER_EMAILS": "",
+    "PUBLIC_VERIFIER_URL": "https://example.workers.dev"
+  }
+}

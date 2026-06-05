@@ -1,0 +1,20 @@
+cmake_minimum_required(VERSION 3.16)
+project(licensecc_online_callback_example CXX)
+
+set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+if(NOT TARGET licensecc::licensecc_static)
+  find_package(licensecc REQUIRED COMPONENTS ${LCC_PROJECT_NAME})
+endif()
+find_package(CURL QUIET)
+
+if(CURL_FOUND)
+  add_executable(online_callback main.cpp)
+  target_link_libraries(online_callback PRIVATE licensecc::licensecc_static CURL::libcurl)
+elseif(WIN32)
+  add_executable(online_callback main_winhttp.cpp)
+  target_link_libraries(online_callback PRIVATE licensecc::licensecc_static winhttp)
+else()
+  message(STATUS "libcurl not found and no native HTTP backend is available; skipping online_callback example")
+endif()
