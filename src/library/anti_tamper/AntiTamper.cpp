@@ -24,8 +24,8 @@ void init_default_options(LicenseCheckOptions& options) {
 	options = LicenseCheckOptions{};
 	options.size = sizeof(LicenseCheckOptions);
 	options.version = LCC_LICENSE_CHECK_OPTIONS_VERSION;
-	options.tamper_policy = LCC_TAMPER_AUDIT;
-	options.tamper_flags = LCC_TAMPER_FLAG_NONE;
+	options.tamper_policy = LCC_TAMPER_ENFORCE;
+	options.tamper_flags = LCC_TAMPER_FLAG_STRICT_SOURCE_SHADOWING;
 	options.host_integrity_check = nullptr;
 	options.host_integrity_user_data = nullptr;
 	options.online_policy = LCC_ONLINE_DISABLED;
@@ -100,15 +100,13 @@ bool AntiTamperResult::detected() const {
 }
 
 LCC_SEVERITY AntiTamperResult::severity() const {
-	return policy == AntiTamperPolicy::Enforce ? SVRT_ERROR : SVRT_WARN;
+	return SVRT_ERROR;
 }
 
 AntiTamperPolicy to_internal_policy(LCC_TAMPER_POLICY policy) {
 	switch (policy) {
 		case LCC_TAMPER_DISABLED:
 			return AntiTamperPolicy::Disabled;
-		case LCC_TAMPER_AUDIT:
-			return AntiTamperPolicy::Audit;
 		case LCC_TAMPER_ENFORCE:
 			return AntiTamperPolicy::Enforce;
 		default:
@@ -166,8 +164,7 @@ bool normalize_options(const LicenseCheckOptions* options, LicenseCheckOptions& 
 	normalized.size = sizeof(LicenseCheckOptions);
 	normalized.version = LCC_LICENSE_CHECK_OPTIONS_VERSION;
 
-	if (normalized.tamper_policy != LCC_TAMPER_DISABLED && normalized.tamper_policy != LCC_TAMPER_AUDIT &&
-		normalized.tamper_policy != LCC_TAMPER_ENFORCE) {
+	if (normalized.tamper_policy != LCC_TAMPER_DISABLED && normalized.tamper_policy != LCC_TAMPER_ENFORCE) {
 		error = "invalid tamper policy";
 		return false;
 	}
@@ -175,11 +172,12 @@ bool normalize_options(const LicenseCheckOptions* options, LicenseCheckOptions& 
 		error = "unsupported tamper flags";
 		return false;
 	}
-	if (normalized.online_policy != LCC_ONLINE_DISABLED && normalized.online_policy != LCC_ONLINE_AUDIT &&
-		normalized.online_policy != LCC_ONLINE_REQUIRE &&
-		normalized.online_policy != LCC_ONLINE_REQUIRE_WITH_CACHE) {
+	if (normalized.online_policy != LCC_ONLINE_DISABLED && normalized.online_policy != LCC_ONLINE_REQUIRE) {
 		error = "invalid online policy";
 		return false;
+	}
+	if (normalized.online_policy == LCC_ONLINE_DISABLED && normalized.online_check != nullptr) {
+		normalized.online_policy = LCC_ONLINE_REQUIRE;
 	}
 	if ((normalized.online_flags & ~kSupportedOnlineFlags) != 0) {
 		error = "unsupported online flags";

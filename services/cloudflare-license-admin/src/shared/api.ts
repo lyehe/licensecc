@@ -8,7 +8,6 @@ export interface EntitlementRecord {
   device_hash: string;
   status: EntitlementStatus;
   assertion_ttl_seconds: number;
-  cache_ttl_seconds: number;
   revocation_seq: number;
   valid_from: number | null;
   valid_until: number | null;
@@ -49,7 +48,6 @@ export interface EntitlementInput {
   device_hash?: string;
   status?: EntitlementStatus;
   assertion_ttl_seconds?: number;
-  cache_ttl_seconds?: number;
   valid_from?: number | null;
   valid_until?: number | null;
   notes?: string;
@@ -60,7 +58,6 @@ export interface EntitlementInput {
 export interface EntitlementPatch {
   device_hash?: string;
   assertion_ttl_seconds?: number;
-  cache_ttl_seconds?: number;
   valid_from?: number | null;
   valid_until?: number | null;
   notes?: string;

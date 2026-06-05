@@ -14,9 +14,7 @@ namespace online_verification {
 
 enum class OnlinePolicy {
 	Disabled,
-	Audit,
-	Require,
-	RequireWithCache
+	Require
 };
 
 struct OnlineAssertionClaims {

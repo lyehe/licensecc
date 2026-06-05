@@ -234,14 +234,11 @@ BOOST_AUTO_TEST_CASE(public_abi_enum_values_are_stable) {
 	BOOST_CHECK_EQUAL(static_cast<int>(LICENSE_PLAIN_DATA), 1);
 	BOOST_CHECK_EQUAL(static_cast<int>(LICENSE_ENCODED), 2);
 	BOOST_CHECK_EQUAL(static_cast<int>(LCC_TAMPER_DISABLED), 0);
-	BOOST_CHECK_EQUAL(static_cast<int>(LCC_TAMPER_AUDIT), 1);
 	BOOST_CHECK_EQUAL(static_cast<int>(LCC_TAMPER_ENFORCE), 2);
 	BOOST_CHECK_EQUAL(static_cast<uint32_t>(LCC_TAMPER_FLAG_NONE), 0U);
 	BOOST_CHECK_EQUAL(static_cast<uint32_t>(LCC_TAMPER_FLAG_STRICT_SOURCE_SHADOWING), 1U);
 	BOOST_CHECK_EQUAL(static_cast<int>(LCC_ONLINE_DISABLED), 0);
-	BOOST_CHECK_EQUAL(static_cast<int>(LCC_ONLINE_AUDIT), 1);
 	BOOST_CHECK_EQUAL(static_cast<int>(LCC_ONLINE_REQUIRE), 2);
-	BOOST_CHECK_EQUAL(static_cast<int>(LCC_ONLINE_REQUIRE_WITH_CACHE), 3);
 	BOOST_CHECK_EQUAL(static_cast<int>(LCC_ONLINE_CB_OK), 0);
 	BOOST_CHECK_EQUAL(static_cast<int>(LCC_ONLINE_CB_TRANSPORT_UNAVAILABLE), 1);
 	BOOST_CHECK_EQUAL(static_cast<int>(LCC_ONLINE_CB_TIMEOUT), 2);
@@ -331,8 +328,8 @@ BOOST_AUTO_TEST_CASE(public_helpers_initialize_structs_safely) {
 	lcc_init_license_check_options(&options);
 	BOOST_CHECK_EQUAL(options.size, static_cast<uint32_t>(sizeof(LicenseCheckOptions)));
 	BOOST_CHECK_EQUAL(options.version, static_cast<uint32_t>(LCC_LICENSE_CHECK_OPTIONS_VERSION));
-	BOOST_CHECK_EQUAL(options.tamper_policy, LCC_TAMPER_AUDIT);
-	BOOST_CHECK_EQUAL(options.tamper_flags, static_cast<uint32_t>(LCC_TAMPER_FLAG_NONE));
+	BOOST_CHECK_EQUAL(options.tamper_policy, LCC_TAMPER_ENFORCE);
+	BOOST_CHECK_EQUAL(options.tamper_flags, static_cast<uint32_t>(LCC_TAMPER_FLAG_STRICT_SOURCE_SHADOWING));
 	BOOST_CHECK(options.host_integrity_check == nullptr);
 	BOOST_CHECK(options.host_integrity_user_data == nullptr);
 	BOOST_CHECK_EQUAL(options.online_policy, LCC_ONLINE_DISABLED);

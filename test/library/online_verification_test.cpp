@@ -572,10 +572,10 @@ BOOST_AUTO_TEST_CASE(evaluate_advances_revocation_floor_and_rejects_rollback) {
 	online_verification::reset_revocation_floors_for_tests();
 }
 
-BOOST_AUTO_TEST_CASE(evaluate_rejects_cached_assertion_below_seen_revocation_floor) {
+BOOST_AUTO_TEST_CASE(evaluate_rejects_replayed_assertion_below_seen_revocation_floor) {
 	online_verification::reset_revocation_floors_for_tests();
 	online_verification::OnlineVerificationRequest request;
-	request.policy = online_verification::OnlinePolicy::RequireWithCache;
+	request.policy = online_verification::OnlinePolicy::Require;
 	request.online_check = signing_callback;
 	request.project = LCC_PROJECT_NAME;
 	request.feature = LCC_PROJECT_NAME;
@@ -610,7 +610,7 @@ BOOST_AUTO_TEST_CASE(evaluate_rejects_cached_assertion_below_seen_revocation_flo
 	online_verification::reset_revocation_floors_for_tests();
 }
 
-BOOST_AUTO_TEST_CASE(disabled_policy_does_not_invoke_callback) {
+BOOST_AUTO_TEST_CASE(no_online_callback_leaves_online_verification_disabled) {
 	RuntimePolicyGuard guard;
 	const string valid_path = issue_valid_license_file("online-disabled-valid");
 	LicenseLocation location = license_path_location(valid_path);
@@ -619,38 +619,33 @@ BOOST_AUTO_TEST_CASE(disabled_policy_does_not_invoke_callback) {
 
 	LicenseCheckOptions options;
 	lcc_init_license_check_options(&options);
-	CallbackState state;
-	options.online_check = signing_callback;
-	options.online_user_data = &state;
 
 	const LCC_EVENT_TYPE result = acquire_license_ex(&caller, &location, &info, &options);
 	BOOST_CHECK_EQUAL(result, LICENSE_OK);
-	BOOST_CHECK_EQUAL(state.calls, 0);
 	BOOST_CHECK(!has_status_event(info, LICENSE_ONLINE_VERIFICATION_FAILED));
 
 	std::remove(valid_path.c_str());
 }
 
-BOOST_AUTO_TEST_CASE(audit_policy_records_warning_and_allows_license_on_transport_failure) {
+BOOST_AUTO_TEST_CASE(online_callback_requires_valid_assertion_by_default) {
 	RuntimePolicyGuard guard;
-	const string valid_path = issue_valid_license_file("online-audit-transport-valid");
+	const string valid_path = issue_valid_license_file("online-default-transport-valid");
 	LicenseLocation location = license_path_location(valid_path);
 	CallerInformations caller = default_caller();
 	LicenseInfo info{};
 
 	LicenseCheckOptions options;
 	lcc_init_license_check_options(&options);
-	options.online_policy = LCC_ONLINE_AUDIT;
 	CallbackState state;
 	state.status = LCC_ONLINE_CB_TRANSPORT_UNAVAILABLE;
 	options.online_check = signing_callback;
 	options.online_user_data = &state;
 
 	const LCC_EVENT_TYPE result = acquire_license_ex(&caller, &location, &info, &options);
-	BOOST_CHECK_EQUAL(result, LICENSE_OK);
+	BOOST_CHECK_EQUAL(result, LICENSE_ONLINE_VERIFICATION_FAILED);
 	BOOST_CHECK_EQUAL(state.calls, 1);
-	BOOST_CHECK(find_status_event(info, LICENSE_ONLINE_VERIFICATION_FAILED, SVRT_WARN) != nullptr);
-	BOOST_CHECK_EQUAL(info.license_version, 200);
+	BOOST_CHECK(find_status_event(info, LICENSE_ONLINE_VERIFICATION_FAILED, SVRT_ERROR) != nullptr);
+	BOOST_CHECK_EQUAL(info.license_version, 0);
 
 	std::remove(valid_path.c_str());
 }

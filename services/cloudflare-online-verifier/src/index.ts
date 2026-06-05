@@ -26,8 +26,6 @@ export interface Env {
   ONLINE_SIGNING_PRIVATE_KEY_PKCS8_PEM: string;
   ONLINE_SIGNING_KEY_ID: string;
   MAX_ASSERTION_TTL_SECONDS?: string;
-  MAX_CACHE_TTL_SECONDS?: string;
-  SIGN_DENIED_ASSERTIONS?: string;
   LOG_RATE_LIMIT_DECISIONS?: string;
   D1_RATE_LIMIT_ENABLED?: string;
   D1_RATE_LIMIT_LIMIT?: string;
@@ -57,7 +55,6 @@ interface EntitlementRow {
   device_hash: string;
   status: "active" | "revoked" | "disabled";
   assertion_ttl_seconds: number;
-  cache_ttl_seconds: number;
   revocation_seq: number;
   valid_from?: number | null;
   valid_until?: number | null;
@@ -188,10 +185,6 @@ function entitlementRateLimitKey(verifyRequest: VerifyRequest): string {
 
 function clientRateLimitKey(request: Request): string {
   return `client:${clientIp(request)}`;
-}
-
-function signDeniedAssertions(env: Env): boolean {
-  return envFlag(env.SIGN_DENIED_ASSERTIONS);
 }
 
 function logRateLimitDecisions(env: Env): boolean {
@@ -462,7 +455,7 @@ export async function signAssertion(claims: AssertionClaims, env: Env): Promise<
 
 async function lookupEntitlement(env: Env, request: VerifyRequest): Promise<EntitlementRow | null> {
   return env.DB.prepare(
-    "SELECT project, feature, license_fingerprint, device_hash, status, assertion_ttl_seconds, cache_ttl_seconds, revocation_seq, valid_from, valid_until FROM entitlements WHERE project = ? AND feature = ? AND license_fingerprint = ? LIMIT 1",
+    "SELECT project, feature, license_fingerprint, device_hash, status, assertion_ttl_seconds, revocation_seq, valid_from, valid_until FROM entitlements WHERE project = ? AND feature = ? AND license_fingerprint = ? LIMIT 1",
   )
     .bind(request.project, request.feature, request.license_fingerprint)
     .first<EntitlementRow>();
@@ -550,7 +543,6 @@ async function handleVerify(request: Request, env: Env): Promise<Response> {
   }
   const d1DurationMs = Date.now() - d1Started;
   const maxAssertionTtl = parsePositiveInt(env.MAX_ASSERTION_TTL_SECONDS, 300, 3600);
-  const maxCacheTtl = parsePositiveInt(env.MAX_CACHE_TTL_SECONDS, 3600, 86400);
   const activeRow =
     row !== null &&
     row.status === "active" &&
@@ -559,12 +551,10 @@ async function handleVerify(request: Request, env: Env): Promise<Response> {
       ? row
       : null;
   const assertionTtl = activeRow !== null ? Math.min(activeRow.assertion_ttl_seconds, maxAssertionTtl) : 0;
-  const cacheTtl =
-    activeRow !== null ? Math.min(Math.max(activeRow.cache_ttl_seconds, assertionTtl), maxCacheTtl) : 0;
   const expiresAt = activeRow !== null ? clampToValidUntil(activeRow, now + assertionTtl) : now;
-  const cacheUntil = activeRow !== null ? clampToValidUntil(activeRow, now + cacheTtl) : now;
+  const cacheUntil = expiresAt;
 
-  if (activeRow === null && !signDeniedAssertions(env)) {
+  if (activeRow === null) {
     logEvent("warn", "verify.denied", {
       request_id: id,
       project: verifyRequest.project,
@@ -591,7 +581,7 @@ async function handleVerify(request: Request, env: Env): Promise<Response> {
     licenseFingerprint: verifyRequest.license_fingerprint,
     deviceHash: verifyRequest.device_hash ?? "",
     nonce: verifyRequest.nonce,
-    status: activeRow !== null ? "ok" : "denied",
+    status: "ok",
     issuedAt: now,
     expiresAt,
     cacheUntil,
@@ -612,21 +602,20 @@ async function handleVerify(request: Request, env: Env): Promise<Response> {
     return json({ ok: false, code: "verification_error" }, 500);
   }
 
-  logEvent(activeRow !== null ? "info" : "warn", activeRow !== null ? "verify.ok" : "verify.denied", {
+  logEvent("info", "verify.ok", {
     request_id: id,
     project: verifyRequest.project,
     feature: verifyRequest.feature,
     license_fingerprint: shortHex(verifyRequest.license_fingerprint),
     device_hash: shortHex(verifyRequest.device_hash),
     assertion_ttl_seconds: assertionTtl,
-    cache_ttl_seconds: cacheTtl,
     revocation_seq: claims.revocationSeq,
     d1_duration_ms: d1DurationMs,
   });
 
   return json({
-    ok: activeRow !== null,
-    code: activeRow !== null ? "entitlement_ok" : "entitlement_denied",
+    ok: true,
+    code: "entitlement_ok",
     assertion,
     server_time: now,
   });

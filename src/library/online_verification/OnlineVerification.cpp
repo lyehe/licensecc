@@ -392,9 +392,9 @@ OnlineVerificationResult failure_result(const OnlineVerificationRequest& request
 										const std::string& detail) {
 	OnlineVerificationResult result;
 	result.policy = request.policy;
-	result.accepted = request.policy == OnlinePolicy::Audit;
+	result.accepted = false;
 	result.event_type = event_type;
-	result.severity = request.policy == OnlinePolicy::Audit ? SVRT_WARN : SVRT_ERROR;
+	result.severity = SVRT_ERROR;
 	result.license_reference = kReference;
 	result.detail = detail;
 	return result;
@@ -410,12 +410,8 @@ OnlinePolicy to_internal_policy(const LCC_ONLINE_POLICY policy) {
 	switch (policy) {
 		case LCC_ONLINE_DISABLED:
 			return OnlinePolicy::Disabled;
-		case LCC_ONLINE_AUDIT:
-			return OnlinePolicy::Audit;
 		case LCC_ONLINE_REQUIRE:
 			return OnlinePolicy::Require;
-		case LCC_ONLINE_REQUIRE_WITH_CACHE:
-			return OnlinePolicy::RequireWithCache;
 		default:
 			return OnlinePolicy::Require;
 	}
@@ -503,11 +499,7 @@ OnlineVerificationResult evaluate(const OnlineVerificationRequest& request) {
 	LccOnlineRequest public_request{};
 	public_request.size = sizeof(public_request);
 	public_request.version = LCC_ONLINE_REQUEST_VERSION;
-	public_request.policy =
-		request.policy == OnlinePolicy::Audit
-			? LCC_ONLINE_AUDIT
-			: (request.policy == OnlinePolicy::RequireWithCache ? LCC_ONLINE_REQUIRE_WITH_CACHE
-																: LCC_ONLINE_REQUIRE);
+	public_request.policy = LCC_ONLINE_REQUIRE;
 	public_request.flags = request.flags;
 	public_request.timeout_ms = request.timeout_ms;
 	if (!copy_public_request_field(public_request.project, sizeof(public_request.project), request.project) ||
@@ -552,7 +544,7 @@ OnlineVerificationResult evaluate(const OnlineVerificationRequest& request) {
 	expected.device_hash = request.device_hash;
 	expected.nonce = nonce;
 	expected.now_epoch_seconds = request.now_epoch_seconds;
-	expected.allow_cache = request.policy == OnlinePolicy::RequireWithCache;
+	expected.allow_cache = false;
 	expected.min_revocation_seq =
 		current_revocation_floor(request.project, request.feature, request.license_fingerprint);
 

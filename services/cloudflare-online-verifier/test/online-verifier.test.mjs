@@ -30,7 +30,6 @@ async function testKeyEnv(row, overrides = {}) {
     ONLINE_SIGNING_PRIVATE_KEY_PKCS8_PEM: bytesToPem(new Uint8Array(pkcs8), "PRIVATE KEY"),
     ONLINE_SIGNING_KEY_ID: "sha256:test-online-key",
     MAX_ASSERTION_TTL_SECONDS: "300",
-    MAX_CACHE_TTL_SECONDS: "3600",
     DB: {
       prepare() {
         return {
@@ -576,24 +575,7 @@ test("device mismatch returns unsigned denial by default", async () => {
   assert.equal(body.assertion, undefined);
 });
 
-test("signed denial remains available only when explicitly enabled", async () => {
-  const response = await worker.fetch(
-    new Request("https://example.test/v1/verify", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(validBody()),
-    }),
-    await testKeyEnv(null, { SIGN_DENIED_ASSERTIONS: "1" }),
-  );
-  assert.equal(response.status, 200);
-  const body = await response.json();
-  assert.equal(body.ok, false);
-  assert.match(body.assertion, /^lccoa1\./);
-  const payload = Buffer.from(body.assertion.split(".")[1], "base64").toString("utf8");
-  assert.match(payload, /status=denied\n/);
-});
-
-test("validity windows are enforced and clamp assertion cache", async () => {
+test("validity windows are enforced and clamp assertion lifetime", async () => {
   const originalNow = Date.now;
   Date.now = () => 1_000_000;
   try {

@@ -9,7 +9,7 @@ const STATUS = new Set(["active", "revoked", "disabled"]);
 
 function usage() {
   console.error(`usage:
-  node scripts/entitlement.mjs upsert --fingerprint <64-hex> --actor <operator> [--project DEFAULT] [--feature DEFAULT] [--device-hash <64-hex>] [--status active] [--assertion-ttl 300] [--cache-ttl 3600] [--valid-from <epoch>] [--valid-until <epoch>] [--reason <text>] [--database ${DEFAULT_DATABASE}] [--config wrangler.toml] [--remote]
+  node scripts/entitlement.mjs upsert --fingerprint <64-hex> --actor <operator> [--project DEFAULT] [--feature DEFAULT] [--device-hash <64-hex>] [--status active] [--assertion-ttl 300] [--valid-from <epoch>] [--valid-until <epoch>] [--reason <text>] [--database ${DEFAULT_DATABASE}] [--config wrangler.toml] [--remote]
   node scripts/entitlement.mjs revoke --fingerprint <64-hex> --actor <operator> --reason <text> [--project DEFAULT] [--feature DEFAULT] [--database ${DEFAULT_DATABASE}] [--config wrangler.toml] [--remote]
   node scripts/entitlement.mjs disable --fingerprint <64-hex> --actor <operator> --reason <text> [--project DEFAULT] [--feature DEFAULT] [--database ${DEFAULT_DATABASE}] [--config wrangler.toml] [--remote]
   node scripts/entitlement.mjs reenable --fingerprint <64-hex> --actor <operator> [--reason <text>] [--project DEFAULT] [--feature DEFAULT] [--database ${DEFAULT_DATABASE}] [--config wrangler.toml] [--remote]
@@ -140,7 +140,7 @@ function sqlFor(command, options) {
       throw new Error("status must be active, revoked, or disabled");
     }
     const assertionTtl = validatedInt(options["assertion-ttl"], "assertion-ttl", 300, 1, 3600);
-    const cacheTtl = validatedInt(options["cache-ttl"], "cache-ttl", 3600, assertionTtl, 86400);
+    const cacheTtl = assertionTtl;
     const validFrom = validatedOptionalInt(options["valid-from"], "valid-from", 0, Number.MAX_SAFE_INTEGER);
     const validUntil = validatedOptionalInt(options["valid-until"], "valid-until", 0, Number.MAX_SAFE_INTEGER);
     const ctx = mutationContext(options);

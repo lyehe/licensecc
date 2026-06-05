@@ -287,7 +287,8 @@ Validity windows
 * Treat ``NULL`` as unbounded.
 * Deny when ``now < valid_from``.
 * Deny when ``now >= valid_until``.
-* Clamp ``expires_at`` and ``cache_until`` to ``valid_until``.
+* Clamp ``expires_at`` to ``valid_until`` and set ``cache_until`` equal to
+  ``expires_at`` for wire compatibility.
 
 Worker tests
 ------------
@@ -303,7 +304,8 @@ Add tests for:
 * active entitlement still signs ``status=ok``;
 * expired validity window denies;
 * not-yet-valid window denies;
-* ``valid_until`` clamps ``expires_at`` and ``cache_until``.
+* ``valid_until`` clamps ``expires_at``; ``cache_until`` mirrors
+  ``expires_at``.
 
 Live smoke
 ----------
@@ -489,11 +491,11 @@ Testing
 -------
 
 * Fresh online ``ok`` allows.
-* Cached online ``ok`` allows only until ``cache_until``.
+* Expired online assertions are rejected.
 * Lower ``revocation_seq`` is rejected.
 * Higher ``revocation_seq`` advances floor.
 * Local license failure masks online result.
-* Tamper audit warns and allows.
+* Tamper enforcement denies deterministic tamper signals.
 * Tamper enforce denies.
 * Network unavailable allows only under configured grace/cache policy.
 * Existing public ABI tests are unchanged.
@@ -703,7 +705,7 @@ UX requirements
 * Redact hashes by default.
 * Provide explicit copy buttons for full hashes.
 * Require typed confirmation for revoke and disable.
-* Show effective revocation latency based on ``cache_ttl_seconds``.
+* Show effective revocation latency based on ``assertion_ttl_seconds``.
 * Show request id on every error.
 * Avoid raw internal status codes in primary UI labels.
 * Do not put explanatory marketing text on the first screen.
@@ -945,9 +947,9 @@ Staging E2E checklist
 * Disable entitlement and confirm fresh verifier denial.
 * Reenable entitlement and confirm fresh verifier ``ok``.
 * Revoke entitlement and confirm fresh verifier denial.
-* Confirm cached behavior matches ``cache_until`` policy.
+* Confirm expired assertions are rejected.
 * Confirm audit timeline includes all actors and request ids.
-* Confirm UI displays effective revocation latency.
+* Confirm UI displays assertion TTL as effective revocation latency.
 * Cleanup test rows and rate-limit counters.
 
 Final review process

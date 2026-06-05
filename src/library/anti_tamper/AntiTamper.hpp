@@ -14,7 +14,6 @@ namespace anti_tamper {
 
 enum class AntiTamperPolicy {
 	Disabled,
-	Audit,
 	Enforce
 };
 

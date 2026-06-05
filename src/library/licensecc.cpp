@@ -79,7 +79,7 @@ const char* lcc_strerror(LCC_EVENT_TYPE event_type) {
 		case LICENSE_ONLINE_ASSERTION_INVALID:
 			return "online license assertion invalid";
 		case LICENSE_ONLINE_CACHE_EXPIRED:
-			return "online license verification cache expired";
+			return "online license verification cache expired (reserved)";
 		case LICENSE_SPECIFIED:
 			return "license location specified";
 		case LICENSE_FOUND:
@@ -139,8 +139,8 @@ void lcc_init_license_check_options(LicenseCheckOptions* options) {
 	*options = LicenseCheckOptions{};
 	options->size = sizeof(LicenseCheckOptions);
 	options->version = LCC_LICENSE_CHECK_OPTIONS_VERSION;
-	options->tamper_policy = LCC_TAMPER_AUDIT;
-	options->tamper_flags = LCC_TAMPER_FLAG_NONE;
+	options->tamper_policy = LCC_TAMPER_ENFORCE;
+	options->tamper_flags = LCC_TAMPER_FLAG_STRICT_SOURCE_SHADOWING;
 	options->online_policy = LCC_ONLINE_DISABLED;
 	options->online_flags = LCC_ONLINE_FLAG_NONE;
 	options->online_timeout_ms = LCC_ONLINE_DEFAULT_TIMEOUT_MS;

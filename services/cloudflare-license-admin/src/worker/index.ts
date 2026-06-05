@@ -150,9 +150,11 @@ function decodeEntitlementId(id: string): { project: string; feature: string; li
   }
 }
 
-function withId(row: Omit<EntitlementRecord, "id">): EntitlementRecord {
+function withId(row: Omit<EntitlementRecord, "id"> & { cache_ttl_seconds?: number }): EntitlementRecord {
+  const publicRow = { ...row };
+  delete publicRow.cache_ttl_seconds;
   return {
-    ...row,
+    ...publicRow,
     id: entitlementId(row.project, row.feature, row.license_fingerprint),
   };
 }
@@ -273,7 +275,6 @@ function validateEntitlementInput(value: unknown): EntitlementInput | null {
       : null;
   const status = input.status === undefined ? "active" : input.status;
   const assertionTtl = boundedInt(input.assertion_ttl_seconds ?? 300, 1, 3600);
-  const cacheTtl = boundedInt(input.cache_ttl_seconds ?? 3600, 1, 86400);
   const validFrom = input.valid_from === undefined ? null : nullableEpoch(input.valid_from);
   const validUntil = input.valid_until === undefined ? null : nullableEpoch(input.valid_until);
   const notes = input.notes === undefined ? "" : safeString(input.notes, MAX_NOTES_SIZE);
@@ -282,7 +283,7 @@ function validateEntitlementInput(value: unknown): EntitlementInput | null {
   if (
     project === null || feature === null || licenseFingerprint === null || deviceHash === null ||
     !["active", "disabled", "revoked"].includes(String(status)) || assertionTtl === undefined ||
-    cacheTtl === undefined || cacheTtl < assertionTtl || validFrom === undefined || validUntil === undefined ||
+    validFrom === undefined || validUntil === undefined ||
     (validFrom !== null && validUntil !== null && validFrom >= validUntil) || notes === null ||
     customerId === undefined || licenseId === undefined
   ) {
@@ -295,7 +296,6 @@ function validateEntitlementInput(value: unknown): EntitlementInput | null {
     device_hash: deviceHash,
     status: status as EntitlementStatus,
     assertion_ttl_seconds: assertionTtl,
-    cache_ttl_seconds: cacheTtl,
     valid_from: validFrom,
     valid_until: validUntil,
     notes,
@@ -320,18 +320,11 @@ function validateEntitlementPatch(value: unknown): EntitlementPatch | null {
     }
   }
   const assertionTtl = boundedInt(input.assertion_ttl_seconds, 1, 3600);
-  const cacheTtl = boundedInt(input.cache_ttl_seconds, 1, 86400);
   if (input.assertion_ttl_seconds !== undefined && assertionTtl === undefined) {
-    return null;
-  }
-  if (input.cache_ttl_seconds !== undefined && cacheTtl === undefined) {
     return null;
   }
   if (assertionTtl !== undefined) {
     patch.assertion_ttl_seconds = assertionTtl;
-  }
-  if (cacheTtl !== undefined) {
-    patch.cache_ttl_seconds = cacheTtl;
   }
   if (input.valid_from !== undefined) {
     const validFrom = nullableEpoch(input.valid_from);
@@ -562,7 +555,7 @@ async function createEntitlement(env: Env, input: EntitlementInput, ctx: Mutatio
     input.device_hash ?? "",
     input.status ?? "active",
     input.assertion_ttl_seconds ?? 300,
-    input.cache_ttl_seconds ?? 3600,
+    input.assertion_ttl_seconds ?? 300,
     input.project,
     input.feature,
     input.license_fingerprint,
@@ -586,10 +579,9 @@ async function patchEntitlement(env: Env, key: { project: string; feature: strin
     throw new Error("revoked_terminal");
   }
   const assertionTtl = patch.assertion_ttl_seconds ?? prev.assertion_ttl_seconds;
-  const cacheTtl = patch.cache_ttl_seconds ?? prev.cache_ttl_seconds;
   const validFrom = patch.valid_from !== undefined ? patch.valid_from : prev.valid_from;
   const validUntil = patch.valid_until !== undefined ? patch.valid_until : prev.valid_until;
-  if (cacheTtl < assertionTtl || (validFrom !== null && validUntil !== null && validFrom >= validUntil)) {
+  if (validFrom !== null && validUntil !== null && validFrom >= validUntil) {
     throw new Error("invalid_patch");
   }
 	const now = Math.floor(Date.now() / 1000);
@@ -598,7 +590,7 @@ async function patchEntitlement(env: Env, key: { project: string; feature: strin
   ).bind(
     patch.device_hash ?? prev.device_hash,
     assertionTtl,
-    cacheTtl,
+    assertionTtl,
     validFrom,
     validUntil,
     patch.notes ?? prev.notes,

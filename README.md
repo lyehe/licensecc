@@ -124,17 +124,17 @@ name in `CallerInformations.feature_name`; for licenses with `start-version` or
 generated constant before checking a license.
 
 Use `acquire_license_ex()` when you want per-call runtime tamper diagnostics.
-`lcc_init_license_check_options()` defaults to `LCC_TAMPER_AUDIT`, which records
-tamper signals as warnings without denying an otherwise valid license. Switch to
-`LCC_TAMPER_ENFORCE` only after testing host-specific false positives.
+`lcc_init_license_check_options()` defaults to enforcement and strict
+source-shadowing: tamper signals deny an otherwise valid license instead of
+quietly allowing access. Set `LCC_TAMPER_DISABLED` only for compatibility tests.
 
 `acquire_license_ex()` also supports opt-in online verification through a host
 callback. Licensecc core stays HTTP-free: your application sends the generated
 `LccOnlineRequest` to your service and returns the signed assertion to the
 library. A reference low-volume Cloudflare Worker lives in
 [`services/cloudflare-online-verifier`](services/cloudflare-online-verifier).
-Start with `LCC_ONLINE_AUDIT`; use `LCC_ONLINE_REQUIRE` only after transport and
-entitlement failure testing. Production online builds should configure
+When `online_check` is supplied, online verification is required and failures
+deny the check. Production online builds should configure
 `LCC_ONLINE_ASSERTION_PUBLIC_KEY_RECORDS` with a dedicated online assertion
 public key; otherwise online assertion verification fails closed.
 

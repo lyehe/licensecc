@@ -16,20 +16,10 @@ cmake --build build/online_callback
 Run:
 
 ```console
-online_callback <license-path> https://licensecc-online-verifier.example.workers.dev [audit|require|cache|cache-smoke] [cache-file]
+online_callback <license-path> https://licensecc-online-verifier.example.workers.dev
 ```
 
-Modes:
-
-- `audit`: online failures are audit warnings and a locally valid license remains accepted.
-- `require`: online failures deny the license check.
-- `cache`: online failures may use a previously returned assertion, subject to the
-  `cache-until` time in the signed assertion.
-- `cache-smoke`: runs one online check, then switches to an unreachable endpoint
-  and runs a second check from the in-memory cache.
-
-When `cache-file` is provided, the example loads and saves one signed assertion
-outside licensecc core. Production hosts should store successful assertions in a
-host-specific secure location and let `acquire_license_ex()` validate expiry,
-nonce/cache binding, signature, request binding, and the in-process revocation
-floor before allowing offline grace.
+The example uses the secure online policy: a locally valid license still needs a
+fresh signed assertion from the verifier. Transport failures, entitlement
+denials, malformed assertions, expired assertions, or rollback below the
+in-process revocation floor fail closed.

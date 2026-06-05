@@ -497,6 +497,8 @@ test("admin create is audited and idempotent", async () => {
   assert.equal(first.status, 200);
   const firstBody = await json(first);
   assert.equal(firstBody.data.revocation_seq, 1);
+  assert.equal(firstBody.data.cache_ttl_seconds, undefined);
+  assert.equal(db.entitlements.get(keyOf("DEFAULT", "DEFAULT", fingerprint)).cache_ttl_seconds, 300);
   assert.equal(db.events.length, 1);
   assert.equal(db.events[0].event_type, "create");
   assert.equal(JSON.parse(db.events[0].next_json).id, firstBody.data.id);

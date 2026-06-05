@@ -36,7 +36,6 @@ const emptyForm = {
   license_fingerprint: "",
   device_hash: "",
   assertion_ttl_seconds: 300,
-  cache_ttl_seconds: 3600,
   valid_from: "",
   valid_until: "",
   notes: "",
@@ -101,7 +100,6 @@ function App(): React.ReactElement {
       ...form,
       device_hash: form.device_hash,
       assertion_ttl_seconds: Number(form.assertion_ttl_seconds),
-      cache_ttl_seconds: Number(form.cache_ttl_seconds),
       valid_from: form.valid_from === "" ? null : Number(form.valid_from),
       valid_until: form.valid_until === "" ? null : Number(form.valid_until),
     };
@@ -163,7 +161,6 @@ function App(): React.ReactElement {
               <label>Fingerprint<input value={form.license_fingerprint} onChange={(event) => setForm({ ...form, license_fingerprint: event.target.value })} /></label>
               <label>Device hash<input value={form.device_hash} onChange={(event) => setForm({ ...form, device_hash: event.target.value })} /></label>
               <label>Assertion TTL<input type="number" value={form.assertion_ttl_seconds} onChange={(event) => setForm({ ...form, assertion_ttl_seconds: Number(event.target.value) })} /></label>
-              <label>Cache TTL<input type="number" value={form.cache_ttl_seconds} onChange={(event) => setForm({ ...form, cache_ttl_seconds: Number(event.target.value) })} /></label>
               <label>Valid from<input value={form.valid_from} onChange={(event) => setForm({ ...form, valid_from: event.target.value })} /></label>
               <label>Valid until<input value={form.valid_until} onChange={(event) => setForm({ ...form, valid_until: event.target.value })} /></label>
               <label>Notes<textarea value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} /></label>

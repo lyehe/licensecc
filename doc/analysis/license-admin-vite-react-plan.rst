@@ -105,8 +105,8 @@ Adding ``valid_from`` and ``valid_until`` as admin metadata is misleading unless
 * ``NULL`` means unbounded.
 * deny if ``now < valid_from``;
 * deny if ``now >= valid_until``;
-* clamp issued ``expires_at`` and ``cache_until`` so no signed assertion outlives
-  ``valid_until``.
+* clamp issued ``expires_at`` so no signed assertion outlives ``valid_until``;
+  ``cache_until`` mirrors ``expires_at`` for wire compatibility.
 
 3. Revocation sequence needs ownership and enforcement
 ------------------------------------------------------
@@ -117,8 +117,9 @@ layer should persist the last seen sequence for a
 ``(project, feature, license_fingerprint)`` tuple and reject assertions that move
 backward.
 
-This does not make revocation instant. Cached clients can continue until
-``cache_until``. The admin UI must surface that effective revocation window.
+This does not make revocation instant. Clients continue until their current
+fresh assertion expires. The admin UI should surface the assertion TTL because
+that is the effective revocation latency for this design.
 
 4. Denials should not be signed by default
 ------------------------------------------
@@ -353,7 +354,8 @@ Exit gates
 * Existing verifier tests pass against the migrated schema.
 * Entitlements without validity windows behave exactly as before.
 * Validity windows are enforced when present.
-* ``cache_until`` and ``expires_at`` never exceed ``valid_until``.
+* ``expires_at`` never exceeds ``valid_until`` and ``cache_until`` equals
+  ``expires_at``.
 * Every mutation increases ``revocation_seq``.
 * Every mutation writes exactly one audit event with a server-derived actor or
   documented CLI actor.
@@ -477,7 +479,7 @@ Overview
 
 Entitlements
   Searchable, paginated table with status, project, feature, customer, short
-  fingerprint, validity window, updated time, and effective revocation latency.
+  fingerprint, validity window, updated time, and assertion TTL.
 
 Entitlement detail
   Full entitlement state, customer/license metadata, safe copy controls, event
@@ -500,7 +502,7 @@ UX requirements
 
 * Redact hashes by default.
 * Require typed confirmation for revoke and disable.
-* Show effective revocation time based on ``cache_ttl_seconds``.
+* Show effective revocation time based on ``assertion_ttl_seconds``.
 * Show request ids on all errors.
 * Keep tokens and secrets out of the SPA bundle.
 * Use the Access session cookie; do not embed API tokens in JavaScript.
@@ -554,7 +556,7 @@ Example decision:
        std::string diagnostics;
        std::chrono::system_clock::time_point checked_at;
        std::optional<std::chrono::system_clock::time_point> grace_until;
-       std::optional<std::chrono::system_clock::time_point> cache_until;
+       std::optional<std::chrono::system_clock::time_point> assertion_expires_at;
    };
 
 States:
@@ -637,7 +639,7 @@ Script a staging flow:
 4. verify that assertion with the C++ client built with the staging public key;
 5. revoke entitlement through admin API;
 6. verify that a fresh online check is denied;
-7. verify that cached clients remain governed by ``cache_until``;
+7. verify that an old assertion is rejected after ``expires_at``;
 8. inspect audit event with verified actor and request id;
 9. clean up test rows.
 

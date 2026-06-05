@@ -8,7 +8,6 @@ preview_urls = false
 D1_RATE_LIMIT_ENABLED = "0"
 D1_RATE_LIMIT_LIMIT = "20"
 D1_RATE_LIMIT_PERIOD_SECONDS = "60"
-SIGN_DENIED_ASSERTIONS = "0"
 # Optional D1 limiter tier overrides. Defaults fall back to D1_RATE_LIMIT_*.
 # D1_CLIENT_RATE_LIMIT_LIMIT = "20"
 # D1_CLIENT_RATE_LIMIT_PERIOD_SECONDS = "60"

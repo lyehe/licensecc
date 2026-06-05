@@ -55,10 +55,9 @@ offline with the configured public key before applying the online policy.
 Online verification improves server-side entitlement checks, revocation
 diagnostics, and rollout visibility. It still does not make a patched binary,
 hooked API, replaced library, or fully controlled local machine trustworthy.
-Use ``LCC_ONLINE_AUDIT`` during rollout. Use ``LCC_ONLINE_REQUIRE`` only after
-testing host transport failures and entitlement false positives. Bounded cache
-assertions can improve outage tolerance, but they are not real-time revocation
-while the client is offline.
+When a host supplies ``online_check``, Licensecc requires a fresh valid signed
+assertion. Transport failure, entitlement denial, malformed assertions, expired
+assertions, or rollback below the in-process revocation floor fail closed.
 
 The C++ verifier remembers the highest accepted online ``revocation-seq`` for a
 given project, feature, and license fingerprint for the lifetime of the current
@@ -142,11 +141,10 @@ license failures keep their original result codes.
 
 Initialize ``LicenseCheckOptions`` with
 ``lcc_init_license_check_options``. The default policy is
-``LCC_TAMPER_AUDIT``: tamper signals are exported as ``SVRT_WARN`` audit
-events and the return value remains ``LICENSE_OK``. Set
-``tamper_policy = LCC_TAMPER_ENFORCE`` only after product-specific
-false-positive testing; enforcement exports ``SVRT_ERROR`` and returns
-``LICENSE_TAMPER_DETECTED``.
+``LCC_TAMPER_ENFORCE`` with strict source shadowing enabled. Tamper signals are
+exported as ``SVRT_ERROR`` and return ``LICENSE_TAMPER_DETECTED``. Set
+``tamper_policy = LCC_TAMPER_DISABLED`` only for compatibility tests or trusted
+diagnostics.
 
 Version 1 supports two offline-first signals:
 

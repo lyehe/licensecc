@@ -132,9 +132,9 @@ BOOST_AUTO_TEST_CASE(disabled_policy_ignores_host_callback) {
 	std::remove(valid_path.c_str());
 }
 
-BOOST_AUTO_TEST_CASE(audit_policy_records_tamper_warning_and_allows_license) {
+BOOST_AUTO_TEST_CASE(default_policy_records_tamper_error_and_denies_license) {
 	RuntimePolicyGuard guard;
-	const string valid_path = issue_valid_license_file("anti-tamper-audit-valid");
+	const string valid_path = issue_valid_license_file("anti-tamper-default-valid");
 	LicenseLocation location = license_path_location(valid_path);
 	CallerInformations caller = default_caller();
 	LicenseInfo info{};
@@ -146,10 +146,10 @@ BOOST_AUTO_TEST_CASE(audit_policy_records_tamper_warning_and_allows_license) {
 	options.host_integrity_user_data = &calls;
 
 	const LCC_EVENT_TYPE result = acquire_license_ex(&caller, &location, &info, &options);
-	BOOST_CHECK_EQUAL(result, LICENSE_OK);
+	BOOST_CHECK_EQUAL(result, LICENSE_TAMPER_DETECTED);
 	BOOST_CHECK_EQUAL(calls, 1);
-	BOOST_CHECK(find_status_event(info, LICENSE_TAMPER_DETECTED, SVRT_WARN) != nullptr);
-	BOOST_CHECK_EQUAL(info.license_version, 200);
+	BOOST_CHECK(find_status_event(info, LICENSE_TAMPER_DETECTED, SVRT_ERROR) != nullptr);
+	BOOST_CHECK_EQUAL(info.license_version, 0);
 
 	std::remove(valid_path.c_str());
 }
@@ -189,8 +189,8 @@ BOOST_AUTO_TEST_CASE(callback_detail_is_bounded_and_terminated) {
 	options.host_integrity_check = long_unterminated_detail_callback;
 
 	const LCC_EVENT_TYPE result = acquire_license_ex(&caller, &location, &info, &options);
-	BOOST_CHECK_EQUAL(result, LICENSE_OK);
-	const AuditEvent* event = find_status_event(info, LICENSE_TAMPER_DETECTED, SVRT_WARN);
+	BOOST_CHECK_EQUAL(result, LICENSE_TAMPER_DETECTED);
+	const AuditEvent* event = find_status_event(info, LICENSE_TAMPER_DETECTED, SVRT_ERROR);
 	BOOST_REQUIRE(event != nullptr);
 	BOOST_CHECK_EQUAL(strlen(event->param2), static_cast<size_t>(LCC_API_AUDIT_EVENT_PARAM2));
 
@@ -225,7 +225,7 @@ BOOST_AUTO_TEST_CASE(v1_options_size_remains_accepted_and_ignores_online_tail) {
 	lcc_init_license_check_options(&options);
 	options.size = static_cast<uint32_t>(offsetof(LicenseCheckOptions, online_policy));
 	options.version = 1;
-	options.tamper_policy = LCC_TAMPER_AUDIT;
+	options.tamper_policy = LCC_TAMPER_DISABLED;
 	int calls = 0;
 	options.host_integrity_check = failing_integrity_callback;
 	options.host_integrity_user_data = &calls;
@@ -235,8 +235,8 @@ BOOST_AUTO_TEST_CASE(v1_options_size_remains_accepted_and_ignores_online_tail) {
 	LicenseInfo info{};
 	const LCC_EVENT_TYPE result = acquire_license_ex(&caller, &location, &info, &options);
 	BOOST_CHECK_EQUAL(result, LICENSE_OK);
-	BOOST_CHECK_EQUAL(calls, 1);
-	BOOST_CHECK(find_status_event(info, LICENSE_TAMPER_DETECTED, SVRT_WARN) != nullptr);
+	BOOST_CHECK_EQUAL(calls, 0);
+	BOOST_CHECK(!has_status_event(info, LICENSE_TAMPER_DETECTED));
 	BOOST_CHECK(!has_status_event(info, LICENSE_ONLINE_REQUIRED));
 
 	std::remove(valid_path.c_str());
@@ -274,13 +274,6 @@ BOOST_AUTO_TEST_CASE(strict_source_shadowing_flag_reports_malformed_fallback_sha
 
 	LicenseCheckOptions options;
 	lcc_init_license_check_options(&options);
-	options.tamper_flags = LCC_TAMPER_FLAG_STRICT_SOURCE_SHADOWING;
-
-	LicenseInfo audit_info{};
-	BOOST_CHECK_EQUAL(acquire_license_ex(&caller, &location, &audit_info, &options), LICENSE_OK);
-	BOOST_CHECK(find_status_event(audit_info, LICENSE_TAMPER_DETECTED, SVRT_WARN) != nullptr);
-
-	options.tamper_policy = LCC_TAMPER_ENFORCE;
 	LicenseInfo enforce_info{};
 	BOOST_CHECK_EQUAL(acquire_license_ex(&caller, &location, &enforce_info, &options), LICENSE_TAMPER_DETECTED);
 	BOOST_CHECK(find_status_event(enforce_info, LICENSE_TAMPER_DETECTED, SVRT_ERROR) != nullptr);

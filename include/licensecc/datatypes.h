@@ -46,7 +46,7 @@ typedef enum {
 	LICENSE_ONLINE_REQUIRED = 11,  // Online verification is required but not available
 	LICENSE_ONLINE_VERIFICATION_FAILED = 12,  // Online entitlement verification failed
 	LICENSE_ONLINE_ASSERTION_INVALID = 13,  // Online assertion was malformed, expired, or not authentic
-	LICENSE_ONLINE_CACHE_EXPIRED = 14,  // Online verification cache is expired
+	LICENSE_ONLINE_CACHE_EXPIRED = 14,  // Reserved for future persistent-cache APIs
 
 	LICENSE_SPECIFIED = 100,  // license location was specified
 	LICENSE_FOUND = 101,  // License file has been found or license data has been located
@@ -63,7 +63,6 @@ typedef enum { SVRT_INFO, SVRT_WARN, SVRT_ERROR } LCC_SEVERITY;
 
 typedef enum {
 	LCC_TAMPER_DISABLED = 0,
-	LCC_TAMPER_AUDIT = 1,
 	LCC_TAMPER_ENFORCE = 2
 } LCC_TAMPER_POLICY;
 
@@ -84,9 +83,7 @@ typedef bool (*LCC_HOST_INTEGRITY_CHECK)(void* user_data, char* detail_out, size
 
 typedef enum {
 	LCC_ONLINE_DISABLED = 0,
-	LCC_ONLINE_AUDIT = 1,
-	LCC_ONLINE_REQUIRE = 2,
-	LCC_ONLINE_REQUIRE_WITH_CACHE = 3
+	LCC_ONLINE_REQUIRE = 2
 } LCC_ONLINE_POLICY;
 
 typedef enum {

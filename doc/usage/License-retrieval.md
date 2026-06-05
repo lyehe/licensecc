@@ -88,7 +88,8 @@ sources masked by a fallback license.
 
 New integrations that need per-call policy can use `acquire_license_ex()` with
 `LCC_TAMPER_FLAG_STRICT_SOURCE_SHADOWING` instead of the process-global
-source-fatal toggle. In audit mode, a valid fallback still returns
-`LICENSE_OK` while the shadowed malformed source is reported as a
-`LICENSE_TAMPER_DETECTED` warning. In enforce mode, the same signal returns
-`LICENSE_TAMPER_DETECTED`.
+source-fatal toggle. `lcc_init_license_check_options()` enables strict
+source-shadowing by default, so a shadowed malformed source returns
+`LICENSE_TAMPER_DETECTED` even when another fallback source is valid. Use
+`acquire_license()` for the historical fallback behavior, or set
+`tamper_policy = LCC_TAMPER_DISABLED` only for compatibility tests.

@@ -35,11 +35,10 @@ void lcc_init_license_location(LicenseLocation* licenseLocation, LCC_LICENSE_DAT
 void lcc_init_license_info(LicenseInfo* licenseInfo);
 /**
  * Initializes ::LicenseCheckOptions for ::acquire_license_ex. Defaults to
- * audit mode so tamper signals are reported as warnings while a valid license
- * remains accepted, and online verification disabled for compatibility. Set
- * tamper_policy to ::LCC_TAMPER_ENFORCE only after host-specific false-positive
- * testing. Set online_policy to ::LCC_ONLINE_AUDIT or ::LCC_ONLINE_REQUIRE and
- * provide online_check when the host application owns the network transport.
+ * the secure runtime policy: tamper signals are enforced, strict source
+ * shadowing is enabled, and online verification is disabled unless the host
+ * supplies online_check. When online_check is set, online verification is
+ * required and must return a fresh signed assertion.
  */
 void lcc_init_license_check_options(LicenseCheckOptions* options);
 
@@ -128,8 +127,7 @@ LCC_EVENT_TYPE acquire_license(const CallerInformations* callerInformation, cons
  * Licensecc core does not perform HTTP. The host callback receives a
  * ::LccOnlineRequest containing project, feature, license fingerprint, device
  * hash, and a core-generated nonce. It writes a signed assertion envelope into
- * the provided output buffer. Audit online policy reports failures as warnings;
- * require policy returns an online failure event.
+ * the provided output buffer. Online failures return an online failure event.
  *
  * A null options pointer uses the same defaults as
  * ::lcc_init_license_check_options. Invalid size/version fields fail closed

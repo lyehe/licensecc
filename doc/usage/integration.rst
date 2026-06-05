@@ -242,16 +242,13 @@ addition to license verification. Initialize options for every call:
   lcc_init_license_info(&info);
   LCC_EVENT_TYPE result = acquire_license_ex(&caller, &location, &info, &options);
 
-``lcc_init_license_check_options()`` defaults to ``LCC_TAMPER_AUDIT``. Audit
-mode is the recommended rollout mode: a valid license still returns
-``LICENSE_OK`` while tamper signals are visible as warning audit events through
-``print_error()`` or ``LicenseInfo.status``.
-
-After host-specific false-positive testing, set
-``options.tamper_policy = LCC_TAMPER_ENFORCE`` to fail closed on the same
-signals. Enforcement returns ``LICENSE_TAMPER_DETECTED`` only after the license
-would otherwise have returned ``LICENSE_OK``; ordinary license failures keep
-their original result.
+``lcc_init_license_check_options()`` defaults to the secure policy:
+``LCC_TAMPER_ENFORCE`` with
+``LCC_TAMPER_FLAG_STRICT_SOURCE_SHADOWING``. Tamper signals return
+``LICENSE_TAMPER_DETECTED`` only after the license would otherwise have
+returned ``LICENSE_OK``; ordinary license failures keep their original result.
+Set ``options.tamper_policy = LCC_TAMPER_DISABLED`` only for compatibility
+tests or trusted diagnostics.
 
 The host callback owns product-specific policy such as binary signing checks,
 self-hash checks, debugger policy, monotonic-clock strategy, or platform

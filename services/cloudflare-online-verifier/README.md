@@ -66,7 +66,7 @@ also supports an optional Cloudflare rate-limit binding named
      --database licensecc-online-verifier ^
      --project DEFAULT --feature DEFAULT ^
      --fingerprint <64 hex fingerprint> ^
-     --status active --assertion-ttl 300 --cache-ttl 3600 ^
+     --status active --assertion-ttl 300 ^
      --actor ops@example.com --reason "initial entitlement"
    ```
 
@@ -82,20 +82,16 @@ also supports an optional Cloudflare rate-limit binding named
 
 ## Notes
 
-- Use `LCC_ONLINE_AUDIT` first. Switch to `LCC_ONLINE_REQUIRE` only after
-  testing network failures, entitlement misses, and host callback behavior.
-- Cache assertions are bounded by `cache-until`; they improve outage tolerance
-  and do not provide real-time revocation while offline.
+- Licensecc online verification is intentionally fail-closed: once a host
+  supplies `online_check`, the C++ runtime requires a fresh signed assertion.
 - Licensecc core keeps a last-seen `revocation-seq` floor only for the current
-  process. If your host persists assertions across restarts, also persist the
-  last accepted sequence in your own session policy when restart-resilient
-  rollback detection matters.
-- Active entitlement assertions are clamped to `valid_until` when that optional
-  D1 column is set. A `NULL` validity window means unbounded.
-- Denied entitlements are unsigned by default to avoid spending signing CPU on
-  arbitrary unknown fingerprints. Set `SIGN_DENIED_ASSERTIONS=1` only if your
-  host integration explicitly requires signed denials, then keep the negative
-  cache window short and validate abuse limits.
+  process. Hosts that need restart-resilient rollback detection should persist
+  the last accepted sequence in their own session policy.
+- Active entitlement assertions use `assertion_ttl_seconds` and are clamped to
+  `valid_until` when that optional D1 column is set. A `NULL` validity window
+  means unbounded.
+- Denied entitlements are unsigned to avoid spending signing CPU on arbitrary
+  unknown fingerprints.
 - `VERIFY_RATE_LIMITER` protects the public verification endpoint before D1 is
   queried. The key is client-network scoped (`client:<ip>`) so rotating license
   fingerprints from one source cannot bypass the Cloudflare binding.

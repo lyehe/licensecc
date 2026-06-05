@@ -66,17 +66,15 @@ those diagnostics are informational only. Do not grant access because a message
 looks recoverable; check only for `LICENSE_OK`.
 
 The example initializes `LicenseCheckOptions` with
-`lcc_init_license_check_options()`, which uses `LCC_TAMPER_AUDIT`. In audit
-mode, a valid license still returns `LICENSE_OK` while tamper signals appear as
-warning audit events. To fail closed on a host-specific integrity signal, set a
-callback and switch to enforcement after testing:
+`lcc_init_license_check_options()`, which uses `LCC_TAMPER_ENFORCE` and strict
+source-shadowing by default. To add a host-specific integrity signal, set a
+callback:
 
 ```c
 LicenseCheckOptions options;
 lcc_init_license_check_options(&options);
 options.host_integrity_check = my_integrity_check;
 options.host_integrity_user_data = my_state;
-options.tamper_policy = LCC_TAMPER_ENFORCE;
 ```
 
 Do not print raw hardware identifiers from normal application logs. If support
