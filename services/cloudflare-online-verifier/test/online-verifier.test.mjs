@@ -123,6 +123,13 @@ test("break-glass CLI transitions keep revoked terminal except revoke", () => {
   assert.doesNotMatch(revoked, /AND status != 'revoked'/);
 });
 
+test("schema permits sync audit actor type", () => {
+  const schema = readFileSync("schema.sql", "utf8");
+  const migration = readFileSync("migrations/0006_allow_sync_actor_type.sql", "utf8");
+  assert.match(schema, /actor_type IN \('access', 'dev', 'cli', 'sync', 'system', 'unknown'\)/);
+  assert.match(migration, /actor_type IN \('access', 'dev', 'cli', 'sync', 'system', 'unknown'\)/);
+});
+
 test("validates request schema", () => {
   assert.equal(validateVerifyRequest(validBody()).project, "DEFAULT");
   assert.equal(validateVerifyRequest(validBody({ nonce: "x" })), null);

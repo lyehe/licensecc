@@ -120,6 +120,10 @@ aside,
   margin: 24px;
 }
 
+.tablePane {
+  overflow-x: auto;
+}
+
 form,
 .filters {
   display: grid;
@@ -158,6 +162,7 @@ textarea {
 table {
   border-collapse: collapse;
   font-size: 13px;
+  min-width: 980px;
   width: 100%;
 }
 
@@ -176,6 +181,10 @@ th {
 
 code {
   font-size: 12px;
+}
+
+.muted {
+  color: #667065;
 }
 
 .status {
@@ -207,6 +216,33 @@ code {
   gap: 6px;
 }
 
+.details {
+  color: #485047;
+  display: grid;
+  gap: 3px;
+  line-height: 1.3;
+  max-width: 320px;
+}
+
+.details span {
+  overflow-wrap: anywhere;
+}
+
+.editRow td {
+  background: #f8faf6;
+  padding: 14px 8px;
+}
+
+.editForm {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(4, minmax(150px, 1fr));
+}
+
+.wide {
+  grid-column: 1 / -1;
+}
+
 .reason {
   margin-top: 14px;
   max-width: 480px;
@@ -225,6 +261,10 @@ code {
   }
 
   .filters {
+    grid-template-columns: 1fr;
+  }
+
+  .editForm {
     grid-template-columns: 1fr;
   }
 }

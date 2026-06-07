@@ -62,12 +62,14 @@ also supports an optional Cloudflare rate-limit binding named
 6. Insert or update an entitlement:
 
    ```console
-   node scripts/entitlement.mjs upsert --remote --config wrangler.toml ^
-     --database licensecc-online-verifier ^
+   cd ../cloudflare-license-admin
+   LICENSECC_SYNC_TOKEN=<secret> npm run sync:entitlement -- ^
+     --url https://licensecc-admin.example.workers.dev ^
      --project DEFAULT --feature DEFAULT ^
      --fingerprint <64 hex fingerprint> ^
      --status active --assertion-ttl 300 ^
-     --actor ops@example.com --reason "initial entitlement"
+     --customer-id cus_123 --license-id lic_123 ^
+     --reason "initial entitlement"
    ```
 
 7. Deploy:
@@ -80,13 +82,43 @@ also supports an optional Cloudflare rate-limit binding named
    npx wrangler deploy
    ```
 
+8. Validate a remote Worker-signed assertion with the C++ verifier test against
+   a staging/test D1 database:
+
+   ```console
+   npm run validate:remote-cpp -- wrangler.toml ../../build Debug
+   ```
+
+   The script deploys a temporary verifier Worker with generated online signing
+   key material, creates a scratch entitlement, obtains a real `lccoa1`
+   assertion, runs `test_online_verification` with the matching public key,
+   revokes the scratch entitlement, deletes the temporary Worker, and removes
+   temporary key material.
+
+9. Validate the public verifier abuse controls against a staging Worker:
+
+   ```console
+   npm run validate:public-verifier --url=https://licensecc-online-verifier.example.workers.dev --expect-rate-limit --json
+   ```
+
+   The drill sends a malformed request, an unknown-entitlement request, and a
+   bounded burst from one source. It expects unsigned denial for unknown
+   entitlements, observes a `429 rate_limited` response, waits for recovery,
+   and redacts the target URL in output.
+   Use `--flag=value` form when invoking through `npm run`; the script also
+   supports direct `node scripts/public-verifier-drill.mjs --url <url> ...`.
+
 ## Notes
 
 - Licensecc online verification is intentionally fail-closed: once a host
   supplies `online_check`, the C++ runtime requires a fresh signed assertion.
-- Licensecc core keeps a last-seen `revocation-seq` floor only for the current
-  process. Hosts that need restart-resilient rollback detection should persist
-  the last accepted sequence in their own session policy.
+- Production C++ hosts should prefer `lcc_acquire_license_decision()`. It
+  requires online verification plus host callbacks that load and store the
+  strongest accepted `revocation_seq` for each project/feature/fingerprint
+  tuple, so normal process restarts cannot silently accept older assertions.
+- Direct `acquire_license_ex()` integrations keep a last-seen `revocation-seq`
+  floor only for the current process. Use the decision wrapper or restore a
+  host-persisted floor with the public floor helpers before checking licenses.
 - Active entitlement assertions use `assertion_ttl_seconds` and are clamped to
   `valid_until` when that optional D1 column is set. A `NULL` validity window
   means unbounded.
@@ -108,9 +140,13 @@ also supports an optional Cloudflare rate-limit binding named
 - `schema.sql` is a snapshot of the final schema. The forward migrations remain
   authoritative; run `npm run schema:parity` after schema edits to confirm the
   snapshot and migrations still match.
+- D1 Time Travel is the short-window emergency recovery path. For longer
+  retention, deploy the companion backup Workflow in `../cloudflare-d1-backup`
+  to export SQL dumps into R2 on a schedule.
 - The `scripts/entitlement.mjs` D1 helper is a break-glass operator path. Normal
-  hosted writes should use the authenticated admin Worker. The helper requires
-  an actor for mutations, stamps events as `source='cli'`, and increments
+  hosted writes should use the authenticated admin Worker or its
+  bearer-authenticated `/api/sync/entitlements` projection endpoint. The helper
+  requires an actor for mutations, stamps events as `source='cli'`, and increments
   `revocation_seq` in SQL instead of accepting caller-provided sequence values.
   Use `reenable` to reactivate a disabled entitlement; revoked entitlements are
   terminal for v1 and `upsert` will not update an existing revoked row. `upsert`

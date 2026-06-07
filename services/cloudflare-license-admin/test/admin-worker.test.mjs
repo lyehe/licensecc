@@ -16,6 +16,13 @@ function baseEnv(db = new MockD1()) {
   };
 }
 
+function syncEnv(db = new MockD1()) {
+  return {
+    ...baseEnv(db),
+    SYNC_API_TOKEN: "sync-secret",
+  };
+}
+
 function authed(path, options = {}) {
   return new Request(`https://admin.example${path}`, {
     ...options,
@@ -49,6 +56,19 @@ function accessAuthed(path, token, options = {}) {
       "content-type": "application/json",
       ...(options.headers ?? {}),
     },
+  });
+}
+
+function syncAuthed(body, options = {}) {
+  return new Request("https://admin.example/api/sync/entitlements", {
+    method: "POST",
+    ...options,
+    headers: {
+      authorization: "Bearer sync-secret",
+      "content-type": "application/json",
+      ...(options.headers ?? {}),
+    },
+    body: JSON.stringify(body),
   });
 }
 
@@ -130,6 +150,7 @@ class MockD1 {
     this.events = [];
     this.idempotency = new Map();
     this.failEvents = false;
+    this.lastBatchSize = 0;
   }
 
   prepare(sql) {
@@ -137,6 +158,7 @@ class MockD1 {
   }
 
   async batch(statements) {
+    this.lastBatchSize = statements.length;
     const entitlementSnapshot = new Map([...this.entitlements.entries()].map(([key, value]) => [key, clone(value)]));
     const eventSnapshot = this.events.map(clone);
     const idempotencySnapshot = new Map([...this.idempotency.entries()].map(([key, value]) => [key, clone(value)]));
@@ -213,6 +235,7 @@ class MockD1 {
         if (row === undefined) {
           return { meta: { changes: 0 } };
         }
+        const source = sql.includes("'sync'") ? "sync" : "admin";
         this.events.push({
           id: this.events.length + 1,
           project: row.project,
@@ -225,7 +248,7 @@ class MockD1 {
           detail: values[1],
           actor: values[2],
           actor_type: values[3],
-          source: "admin",
+          source,
           request_id: values[4],
           ip: values[5],
           prev_json: values[6],
@@ -261,8 +284,23 @@ class MockD1 {
     }
     if (sql.startsWith("INSERT OR IGNORE INTO mutation_idempotency")) {
       const key = `${values[0]}\u0000${values[1]}`;
+      let responseJson = values[2];
+      if (sql.includes(" SELECT ")) {
+        const row = this.entitlements.get(keyOf(values[6], values[7], values[8]));
+        if (row === undefined) {
+          return { meta: { changes: 0 } };
+        }
+        const data = { ...clone(row), id: values[4] };
+        delete data.cache_ttl_seconds;
+        responseJson = JSON.stringify({
+          ok: true,
+          code: values[2],
+          request_id: values[3],
+          data,
+        });
+      }
       if (!this.idempotency.has(key)) {
-        this.idempotency.set(key, { response_json: values[2] });
+        this.idempotency.set(key, { response_json: responseJson });
       }
       return { meta: { changes: 1 } };
     }
@@ -477,6 +515,122 @@ test("cloudflare access identity header without jwt is rejected", async (t) => {
   assert.equal((await json(response)).code, "missing_access_jwt");
 });
 
+test("sync endpoint requires its dedicated bearer secret", async () => {
+  const payload = { project: "DEFAULT", feature: "DEFAULT", license_fingerprint: fingerprint };
+  const missing = await worker.fetch(syncAuthed(payload), baseEnv(new MockD1()));
+  assert.equal(missing.status, 401);
+  assert.equal((await json(missing)).code, "sync_auth_not_configured");
+
+  const invalid = await worker.fetch(new Request("https://admin.example/api/sync/entitlements", {
+    method: "POST",
+    headers: { authorization: "Bearer wrong", "content-type": "application/json" },
+    body: JSON.stringify(payload),
+  }), syncEnv(new MockD1()));
+  assert.equal(invalid.status, 403);
+  assert.equal((await json(invalid)).code, "invalid_sync_token");
+});
+
+test("sync endpoint upserts user database projection and no-ops identical state", async () => {
+  const db = new MockD1();
+  const env = syncEnv(db);
+  const payload = {
+    project: "DEFAULT",
+    feature: "DEFAULT",
+    license_fingerprint: fingerprint,
+    status: "active",
+    assertion_ttl_seconds: 300,
+    customer_id: "cus_123",
+    license_id: "lic_123",
+    notes: "paid account",
+  };
+
+  const first = await worker.fetch(syncAuthed(payload, { headers: { "idempotency-key": "sync-1" } }), env);
+  assert.equal(first.status, 200);
+  const firstBody = await json(first);
+  assert.equal(firstBody.code, "entitlement_synced");
+  assert.equal(firstBody.data.customer_id, "cus_123");
+  assert.equal(firstBody.data.license_id, "lic_123");
+  assert.equal(firstBody.data.revocation_seq, 1);
+  assert.equal(db.events.length, 1);
+  assert.equal(db.events[0].source, "sync");
+  assert.equal(db.events[0].actor_type, "sync");
+
+  const identical = await worker.fetch(syncAuthed(payload), env);
+  assert.equal(identical.status, 200);
+  assert.equal((await json(identical)).data.revocation_seq, 1);
+  assert.equal(db.events.length, 1);
+});
+
+test("sync endpoint revokes with reason and keeps revoked terminal", async () => {
+  const db = new MockD1();
+  const env = syncEnv(db);
+  const active = {
+    project: "DEFAULT",
+    feature: "DEFAULT",
+    license_fingerprint: fingerprint,
+    status: "active",
+    customer_id: "cus_456",
+    license_id: "lic_456",
+  };
+  assert.equal((await worker.fetch(syncAuthed(active), env)).status, 200);
+
+  const missingReason = await worker.fetch(syncAuthed({ ...active, status: "revoked" }), env);
+  assert.equal(missingReason.status, 400);
+  assert.equal((await json(missingReason)).code, "reason_required");
+
+  const revoked = await worker.fetch(syncAuthed({ ...active, status: "revoked", reason: "chargeback" }), env);
+  assert.equal(revoked.status, 200);
+  const revokedBody = await json(revoked);
+  assert.equal(revokedBody.data.status, "revoked");
+  assert.equal(revokedBody.data.customer_id, "cus_456");
+  assert.equal(revokedBody.data.license_id, "lic_456");
+  assert.equal(revokedBody.data.revocation_seq, 2);
+  assert.equal(db.events.at(-1).event_type, "revoke");
+  assert.equal(db.events.at(-1).source, "sync");
+  assert.equal(db.events.at(-1).reason, "chargeback");
+
+  const reactivate = await worker.fetch(syncAuthed(active), env);
+  assert.equal(reactivate.status, 409);
+  assert.equal((await json(reactivate)).code, "revoked_entitlement_is_terminal");
+});
+
+test("sync endpoint records status transition event types while updating projection", async () => {
+  const db = new MockD1();
+  const env = syncEnv(db);
+  const base = {
+    project: "DEFAULT",
+    feature: "DEFAULT",
+    license_fingerprint: fingerprint,
+    customer_id: "cus_789",
+    license_id: "lic_789",
+  };
+
+  const disabled = await worker.fetch(syncAuthed({
+    ...base,
+    status: "disabled",
+    notes: "paused",
+    reason: "subscription paused",
+  }), env);
+  assert.equal(disabled.status, 200);
+  const disabledBody = await json(disabled);
+  assert.equal(disabledBody.data.status, "disabled");
+  assert.equal(disabledBody.data.notes, "paused");
+  assert.equal(db.events.at(-1).event_type, "disable");
+  assert.equal(db.events.at(-1).reason, "subscription paused");
+
+  const reenabled = await worker.fetch(syncAuthed({
+    ...base,
+    status: "active",
+    notes: "paid again",
+  }), env);
+  assert.equal(reenabled.status, 200);
+  const reenabledBody = await json(reenabled);
+  assert.equal(reenabledBody.data.status, "active");
+  assert.equal(reenabledBody.data.notes, "paid again");
+  assert.equal(reenabledBody.data.revocation_seq, 2);
+  assert.equal(db.events.at(-1).event_type, "reenable");
+});
+
 test("admin create is audited and idempotent", async () => {
   const db = new MockD1();
   const env = baseEnv(db);
@@ -502,6 +656,8 @@ test("admin create is audited and idempotent", async () => {
   assert.equal(db.events.length, 1);
   assert.equal(db.events[0].event_type, "create");
   assert.equal(JSON.parse(db.events[0].next_json).id, firstBody.data.id);
+  assert.equal(db.lastBatchSize, 3);
+  assert.equal(db.idempotency.size, 1);
 
   const replay = await worker.fetch(authed("/api/admin/entitlements", {
     method: "POST",
@@ -520,12 +676,15 @@ test("admin mutation rolls back entitlement write when audit insert fails", asyn
   const env = baseEnv(db);
   const response = await worker.fetch(authed("/api/admin/entitlements", {
     method: "POST",
+    headers: { "idempotency-key": "rollback-1" },
     body: JSON.stringify({ project: "DEFAULT", feature: "DEFAULT", license_fingerprint: fingerprint }),
   }), env);
   assert.equal(response.status, 500);
   assert.equal((await json(response)).code, "mutation_failed");
+  assert.equal(db.lastBatchSize, 3);
   assert.equal(db.entitlements.size, 0);
   assert.equal(db.events.length, 0);
+  assert.equal(db.idempotency.size, 0);
 });
 
 test("admin mutation fails closed when D1 batch is unavailable", async () => {
@@ -636,6 +795,41 @@ test("admin patch and transitions increment from stored row state", async () => 
     body: JSON.stringify({ reason: "stored sequence regression" }),
   }), env);
   assert.equal((await json(disabled)).data.revocation_seq, 22);
+});
+
+test("admin create and patch accept explicit empty notes from UI payloads", async () => {
+  const db = new MockD1();
+  const env = baseEnv(db);
+  const create = await worker.fetch(authed("/api/admin/entitlements", {
+    method: "POST",
+    body: JSON.stringify({
+      project: "DEFAULT",
+      feature: "DEFAULT",
+      license_fingerprint: fingerprint,
+      notes: "",
+      customer_id: null,
+      license_id: null,
+    }),
+  }), env);
+  assert.equal(create.status, 200);
+  const created = await json(create);
+  assert.equal(created.data.notes, "");
+  assert.equal(created.data.customer_id, null);
+  assert.equal(created.data.license_id, null);
+
+  const patched = await worker.fetch(authed(`/api/admin/entitlements/${created.data.id}`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      notes: "",
+      customer_id: "",
+      license_id: "",
+    }),
+  }), env);
+  assert.equal(patched.status, 200);
+  const patchedBody = await json(patched);
+  assert.equal(patchedBody.data.notes, "");
+  assert.equal(patchedBody.data.customer_id, null);
+  assert.equal(patchedBody.data.license_id, null);
 });
 
 test("admin transitions require reason and revoked is terminal", async () => {

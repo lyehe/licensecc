@@ -1,6 +1,19 @@
-import React, { FormEvent, useEffect, useMemo, useState } from "react";
+import React, { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { EntitlementRecord } from "../shared/api";
+import {
+  canEditEntitlement,
+  canRunAction,
+  editFormFromEntitlement,
+  emptyEntitlementEditForm,
+  emptyEntitlementForm,
+  entitlementsPath,
+  normalizeEntitlementForm,
+  normalizeEntitlementPatch,
+  patchPath,
+  shortHash,
+  transitionPath,
+} from "./operatorWorkflow";
 import "./styles.css";
 
 interface Summary {
@@ -25,27 +38,11 @@ interface EventItem {
   project: string;
   feature: string;
   license_fingerprint: string;
+  source: string;
   actor: string;
+  actor_type: string;
   revocation_seq: number;
   created_at: number;
-}
-
-const emptyForm = {
-  project: "DEFAULT",
-  feature: "DEFAULT",
-  license_fingerprint: "",
-  device_hash: "",
-  assertion_ttl_seconds: 300,
-  valid_from: "",
-  valid_until: "",
-  notes: "",
-};
-
-function shortHash(value: string): string {
-  if (value.length <= 16) {
-    return value;
-  }
-  return `${value.slice(0, 8)}...${value.slice(-8)}`;
 }
 
 async function api<T>(path: string, init?: RequestInit): Promise<ApiEnvelope<T>> {
@@ -64,17 +61,17 @@ function App(): React.ReactElement {
   const [entitlements, setEntitlements] = useState<EntitlementRecord[]>([]);
   const [events, setEvents] = useState<EventItem[]>([]);
   const [activeTab, setActiveTab] = useState<"overview" | "entitlements" | "events">("overview");
-  const [form, setForm] = useState(emptyForm);
+  const [form, setForm] = useState(emptyEntitlementForm);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState(emptyEntitlementEditForm);
   const [reason, setReason] = useState("");
   const [message, setMessage] = useState("");
   const [filter, setFilter] = useState({ project: "", feature: "", status: "" });
+  const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false);
 
   const entitlementsUrl = useMemo(() => {
-    const params = new URLSearchParams();
-    if (filter.project !== "") params.set("project", filter.project);
-    if (filter.feature !== "") params.set("feature", filter.feature);
-    if (filter.status !== "") params.set("status", filter.status);
-    return `/api/admin/entitlements${params.size === 0 ? "" : `?${params.toString()}`}`;
+    return entitlementsPath(filter);
   }, [filter]);
 
   async function refresh(): Promise<void> {
@@ -94,38 +91,89 @@ function App(): React.ReactElement {
     void refresh();
   }, [entitlementsUrl]);
 
-  async function submitCreate(event: FormEvent): Promise<void> {
-    event.preventDefault();
-    const body = {
-      ...form,
-      device_hash: form.device_hash,
-      assertion_ttl_seconds: Number(form.assertion_ttl_seconds),
-      valid_from: form.valid_from === "" ? null : Number(form.valid_from),
-      valid_until: form.valid_until === "" ? null : Number(form.valid_until),
-    };
-    const result = await api<EntitlementRecord>("/api/admin/entitlements", {
-      method: "POST",
-      headers: { "idempotency-key": crypto.randomUUID() },
-      body: JSON.stringify(body),
-    });
-    setMessage(`${result.code} (${result.request_id})`);
-    if (result.ok) {
-      setForm(emptyForm);
-      await refresh();
+  async function runMutation(work: () => Promise<void>): Promise<void> {
+    if (busyRef.current) {
+      return;
+    }
+    busyRef.current = true;
+    setBusy(true);
+    try {
+      await work();
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
     }
   }
 
-  async function transition(item: EntitlementRecord, action: "disable" | "reenable" | "revoke"): Promise<void> {
-    const result = await api<EntitlementRecord>(`/api/admin/entitlements/${item.id}/${action}`, {
-      method: "POST",
-      headers: { "idempotency-key": crypto.randomUUID() },
-      body: JSON.stringify({ reason }),
+  async function submitCreate(event: FormEvent): Promise<void> {
+    event.preventDefault();
+    await runMutation(async () => {
+      let body: ReturnType<typeof normalizeEntitlementForm>;
+      try {
+        body = normalizeEntitlementForm(form);
+      } catch (error) {
+        setMessage(error instanceof Error ? error.message : "invalid_form");
+        return;
+      }
+      const result = await api<EntitlementRecord>("/api/admin/entitlements", {
+        method: "POST",
+        headers: { "idempotency-key": crypto.randomUUID() },
+        body: JSON.stringify(body),
+      });
+      setMessage(`${result.code} (${result.request_id})`);
+      if (result.ok) {
+        setForm(emptyEntitlementForm);
+        await refresh();
+      }
     });
-    setMessage(`${result.code} (${result.request_id})`);
-    if (result.ok) {
-      setReason("");
-      await refresh();
-    }
+  }
+
+  function beginEdit(item: EntitlementRecord): void {
+    setEditingId(item.id);
+    setEditForm(editFormFromEntitlement(item));
+  }
+
+  function cancelEdit(): void {
+    setEditingId(null);
+    setEditForm(emptyEntitlementEditForm);
+  }
+
+  async function submitPatch(event: FormEvent, item: EntitlementRecord): Promise<void> {
+    event.preventDefault();
+    await runMutation(async () => {
+      let body: ReturnType<typeof normalizeEntitlementPatch>;
+      try {
+        body = normalizeEntitlementPatch(editForm);
+      } catch (error) {
+        setMessage(error instanceof Error ? error.message : "invalid_patch");
+        return;
+      }
+      const result = await api<EntitlementRecord>(patchPath(item), {
+        method: "PATCH",
+        headers: { "idempotency-key": crypto.randomUUID() },
+        body: JSON.stringify(body),
+      });
+      setMessage(`${result.code} (${result.request_id})`);
+      if (result.ok) {
+        cancelEdit();
+        await refresh();
+      }
+    });
+  }
+
+  async function transition(item: EntitlementRecord, action: "disable" | "reenable" | "revoke"): Promise<void> {
+    await runMutation(async () => {
+      const result = await api<EntitlementRecord>(transitionPath(item, action), {
+        method: "POST",
+        headers: { "idempotency-key": crypto.randomUUID() },
+        body: JSON.stringify({ reason }),
+      });
+      setMessage(`${result.code} (${result.request_id})`);
+      if (result.ok) {
+        setReason("");
+        await refresh();
+      }
+    });
   }
 
   return (
@@ -163,8 +211,10 @@ function App(): React.ReactElement {
               <label>Assertion TTL<input type="number" value={form.assertion_ttl_seconds} onChange={(event) => setForm({ ...form, assertion_ttl_seconds: Number(event.target.value) })} /></label>
               <label>Valid from<input value={form.valid_from} onChange={(event) => setForm({ ...form, valid_from: event.target.value })} /></label>
               <label>Valid until<input value={form.valid_until} onChange={(event) => setForm({ ...form, valid_until: event.target.value })} /></label>
+              <label>Customer ID<input value={form.customer_id} onChange={(event) => setForm({ ...form, customer_id: event.target.value })} /></label>
+              <label>License ID<input value={form.license_id} onChange={(event) => setForm({ ...form, license_id: event.target.value })} /></label>
               <label>Notes<textarea value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} /></label>
-              <button type="submit">Save</button>
+              <button disabled={busy} type="submit">Save</button>
             </form>
           </aside>
           <section className="tablePane">
@@ -179,21 +229,52 @@ function App(): React.ReactElement {
               </select>
             </div>
             <table>
-              <thead><tr><th>Project</th><th>Feature</th><th>Fingerprint</th><th>Status</th><th>Seq</th><th>Actions</th></tr></thead>
+              <thead><tr><th>Project</th><th>Feature</th><th>Fingerprint</th><th>Details</th><th>Status</th><th>Seq</th><th>Actions</th></tr></thead>
               <tbody>
                 {entitlements.map((item) => (
-                  <tr key={item.id}>
-                    <td>{item.project}</td>
-                    <td>{item.feature}</td>
-                    <td><code>{shortHash(item.license_fingerprint)}</code></td>
-                    <td><span className={`status ${item.status}`}>{item.status}</span></td>
-                    <td>{item.revocation_seq}</td>
-                    <td className="actions">
-                      <button disabled={item.status !== "active"} onClick={() => void transition(item, "disable")}>Disable</button>
-                      <button disabled={item.status !== "disabled"} onClick={() => void transition(item, "reenable")}>Reenable</button>
-                      <button disabled={item.status === "revoked"} onClick={() => void transition(item, "revoke")}>Revoke</button>
-                    </td>
-                  </tr>
+                  <React.Fragment key={item.id}>
+                    <tr>
+                      <td>{item.project}</td>
+                      <td>{item.feature}</td>
+                      <td><code>{shortHash(item.license_fingerprint)}</code></td>
+                      <td>
+                        <div className="details">
+                          <span>TTL {item.assertion_ttl_seconds}s</span>
+                          <span>Valid {item.valid_from ?? "any"} to {item.valid_until ?? "any"}</span>
+                          <span>Customer {item.customer_id ?? "-"}</span>
+                          <span>License {item.license_id ?? "-"}</span>
+                          {item.notes !== "" && <span>Notes {item.notes}</span>}
+                        </div>
+                      </td>
+                      <td><span className={`status ${item.status}`}>{item.status}</span></td>
+                      <td>{item.revocation_seq}</td>
+                      <td className="actions">
+                        <button disabled={busy || !canEditEntitlement(item.status)} onClick={() => beginEdit(item)}>Edit</button>
+                        <button disabled={busy || !canRunAction(item.status, "disable")} onClick={() => void transition(item, "disable")}>Disable</button>
+                        <button disabled={busy || !canRunAction(item.status, "reenable")} onClick={() => void transition(item, "reenable")}>Reenable</button>
+                        <button disabled={busy || !canRunAction(item.status, "revoke")} onClick={() => void transition(item, "revoke")}>Revoke</button>
+                      </td>
+                    </tr>
+                    {editingId === item.id && (
+                      <tr className="editRow">
+                        <td colSpan={7}>
+                          <form className="editForm" onSubmit={(event) => void submitPatch(event, item)}>
+                            <label>Device hash<input value={editForm.device_hash} onChange={(event) => setEditForm({ ...editForm, device_hash: event.target.value })} /></label>
+                            <label>Assertion TTL<input type="number" value={editForm.assertion_ttl_seconds} onChange={(event) => setEditForm({ ...editForm, assertion_ttl_seconds: Number(event.target.value) })} /></label>
+                            <label>Valid from<input value={editForm.valid_from} onChange={(event) => setEditForm({ ...editForm, valid_from: event.target.value })} /></label>
+                            <label>Valid until<input value={editForm.valid_until} onChange={(event) => setEditForm({ ...editForm, valid_until: event.target.value })} /></label>
+                            <label>Customer ID<input value={editForm.customer_id} onChange={(event) => setEditForm({ ...editForm, customer_id: event.target.value })} /></label>
+                            <label>License ID<input value={editForm.license_id} onChange={(event) => setEditForm({ ...editForm, license_id: event.target.value })} /></label>
+                            <label className="wide">Notes<textarea value={editForm.notes} onChange={(event) => setEditForm({ ...editForm, notes: event.target.value })} /></label>
+                            <div className="actions wide">
+                              <button disabled={busy} type="submit">Update</button>
+                              <button disabled={busy} type="button" onClick={cancelEdit}>Cancel</button>
+                            </div>
+                          </form>
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
                 ))}
               </tbody>
             </table>
@@ -205,7 +286,7 @@ function App(): React.ReactElement {
       {activeTab === "events" && (
         <section className="tablePane full">
           <table>
-            <thead><tr><th>Time</th><th>Event</th><th>Project</th><th>Feature</th><th>Fingerprint</th><th>Actor</th><th>Seq</th></tr></thead>
+            <thead><tr><th>Time</th><th>Event</th><th>Project</th><th>Feature</th><th>Fingerprint</th><th>Source</th><th>Actor</th><th>Seq</th></tr></thead>
             <tbody>
               {events.map((item) => (
                 <tr key={item.id}>
@@ -214,7 +295,8 @@ function App(): React.ReactElement {
                   <td>{item.project}</td>
                   <td>{item.feature}</td>
                   <td><code>{shortHash(item.license_fingerprint)}</code></td>
-                  <td>{item.actor}</td>
+                  <td>{item.source}</td>
+                  <td>{item.actor} <span className="muted">({item.actor_type})</span></td>
                   <td>{item.revocation_seq}</td>
                 </tr>
               ))}

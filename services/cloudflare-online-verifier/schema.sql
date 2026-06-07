@@ -71,7 +71,7 @@ CREATE TABLE IF NOT EXISTS entitlement_events (
   revocation_seq INTEGER NOT NULL,
   detail TEXT NOT NULL DEFAULT '',
   actor TEXT NOT NULL DEFAULT '',
-  actor_type TEXT NOT NULL DEFAULT 'unknown' CHECK (actor_type IN ('access', 'dev', 'cli', 'system', 'unknown')),
+  actor_type TEXT NOT NULL DEFAULT 'unknown' CHECK (actor_type IN ('access', 'dev', 'cli', 'sync', 'system', 'unknown')),
   source TEXT NOT NULL DEFAULT 'admin',
   request_id TEXT NOT NULL DEFAULT '',
   ip TEXT NOT NULL DEFAULT '',

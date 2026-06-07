@@ -29,4 +29,6 @@
     "ADMIN_ACCESS_READER_EMAILS": "",
     "PUBLIC_VERIFIER_URL": "https://example.workers.dev"
   }
+  // Set SYNC_API_TOKEN as a Worker secret for /api/sync/entitlements:
+  // wrangler secret put SYNC_API_TOKEN
 }

@@ -13,6 +13,8 @@ reads and mutates D1 rows.
 npm ci
 npm run lint
 npm test
+npm run test:ui
+npm run test:e2e
 npm run build
 npm run dry-run
 npm run migrate:local
@@ -21,6 +23,42 @@ npm run migrate:local
 `npm run migrate:local` applies the shared verifier migrations from
 `../cloudflare-online-verifier/migrations` because the admin service and public
 verifier share the same D1 schema.
+
+`npm run test:e2e` installs the Playwright Chromium runtime when needed, starts
+a local Vite preview, and runs a browser workflow with mocked admin API
+responses. It covers create, metadata/validity/TTL patch, disable, reenable,
+revoke, audit timeline display, duplicate-submit guarding, and UI secret
+exposure checks. It does not replace the real Cloudflare Access staging drill
+below.
+
+Remote D1 atomicity validation against a staging/test Cloudflare database:
+
+```sh
+npm run validate:remote-d1-atomicity -- ../cloudflare-online-verifier/wrangler.toml
+```
+
+The script deploys a temporary authenticated Worker bound to the configured D1
+database, forces a failed entitlement/audit `DB.batch()`, verifies that no
+partial entitlement or event row persisted, and deletes the temporary Worker.
+
+Cloudflare Access staging validation with a real Access JWT:
+
+```sh
+cloudflared access login --quiet --auto-close --app https://licensecc-admin.example.workers.dev
+LICENSECC_ACCESS_USE_CLOUDFLARED=1 node scripts/access-admin-drill.mjs \
+  --url https://licensecc-admin.example.workers.dev
+```
+
+The wrapper reads `LICENSECC_ACCESS_JWT` when present, or uses the cached
+`cloudflared` application token when `LICENSECC_ACCESS_USE_CLOUDFLARED=1`.
+It passes the token as both the Access edge cookie and the origin assertion
+header, without putting the token on the command line. The drill verifies
+unauthenticated and malformed-JWT rejection, reads the admin summary with the
+valid Access JWT, creates a scratch entitlement with an idempotency key, replays
+the same mutation without advancing `revocation_seq`, revokes the scratch row
+for cleanup, and confirms revoked-terminal reactivation denial. Optionally set
+`LICENSECC_NON_ADMIN_ACCESS_JWT=<redacted>` to prove a valid non-admin Access
+identity cannot mutate.
 
 ## Authentication
 
@@ -64,18 +102,68 @@ Mutation endpoints:
 - `POST /api/admin/entitlements/:id/reenable`
 - `POST /api/admin/entitlements/:id/revoke`
 
+User database sync endpoint:
+
+- `POST /api/sync/entitlements`
+
 Mutations require admin role, validate request bodies, atomically increment
 `revocation_seq` in D1, and write the entitlement row plus audit event in one
 D1 `batch()` transaction. The `Idempotency-Key` header is supported for replay
 of completed mutation responses. Mutation requests fail closed if the D1 binding
 does not expose `batch()`.
 
-The idempotency record is written after the entitlement/audit batch commits. A
-process failure between those two writes can make a retried create/update run
-again and advance `revocation_seq`; this preserves monotonicity and auditability
-but does not make browser retries a strict exactly-once transaction.
+For requests that change an entitlement, the entitlement row, audit event, and
+idempotency replay record are written in the same D1 `batch()` transaction. A
+no-op request may record replay metadata after the read because no entitlement
+mutation occurred.
 
 Revoked entitlements are terminal for this first admin version.
+
+Production deployments should also deploy `../cloudflare-d1-backup` so D1 Time
+Travel and scheduled R2 SQL exports are available before admin mutations or
+migrations are run against live data.
+
+## User database sync
+
+Use the sync endpoint when your user database, billing system, or CRM is the
+source of truth. Configure `SYNC_API_TOKEN` as a Worker secret:
+
+```sh
+wrangler secret put SYNC_API_TOKEN
+```
+
+Then send a bearer-authenticated projection update:
+
+```json
+{
+  "project": "DEFAULT",
+  "feature": "DEFAULT",
+  "license_fingerprint": "<64 hex fingerprint>",
+  "status": "active",
+  "assertion_ttl_seconds": 300,
+  "customer_id": "cus_123",
+  "license_id": "lic_123",
+  "valid_until": 1767225600,
+  "reason": "subscription active"
+}
+```
+
+The endpoint uses the same validation, D1 batch write, audit event, idempotency,
+and revoked-terminal rules as the admin console. Repeated identical projections
+return the current row without advancing `revocation_seq`. Disabled and revoked
+sync payloads require `reason`.
+
+CLI smoke example:
+
+```sh
+LICENSECC_SYNC_TOKEN=<secret> npm run sync:entitlement -- \
+  --url https://licensecc-admin.example.workers.dev \
+  --fingerprint <64 hex fingerprint> \
+  --customer-id cus_123 \
+  --license-id lic_123 \
+  --status active \
+  --reason "subscription active"
+```
 
 ## Deployment notes
 

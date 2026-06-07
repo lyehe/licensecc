@@ -6,14 +6,17 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "npm run build && node --test test/*.mjs",
+    "test:e2e": "npm --prefix ../cloudflare-license-admin run build:worker && npm run build && node --test test/e2e/*.mjs",
     "lint": "node scripts/lint.mjs",
-    "schema:parity": "python3 scripts/check-schema-parity.py",
+    "schema:parity": "uv run --no-project python scripts/check-schema-parity.py",
     "dry-run": "npx wrangler deploy src/index.ts --dry-run --config wrangler.example.toml",
     "migrate:local": "npx wrangler d1 migrations apply DB --local --config wrangler.example.toml",
     "migrate:remote": "npx wrangler d1 migrations apply DB --remote --config wrangler.toml",
     "entitlement": "node scripts/entitlement.mjs",
     "generate-online-key": "node scripts/generate-online-key.mjs",
-    "generate-online-assertion-fixture": "node scripts/generate-online-assertion-fixture.mjs"
+    "generate-online-assertion-fixture": "node scripts/generate-online-assertion-fixture.mjs",
+    "validate:remote-cpp": "node scripts/remote-cpp-verify.mjs",
+    "validate:public-verifier": "node scripts/public-verifier-drill.mjs"
   },
   "devDependencies": {
     "typescript": "^5.8.3",

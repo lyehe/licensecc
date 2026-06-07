@@ -64,3 +64,7 @@ export interface EntitlementPatch {
   customer_id?: string | null;
   license_id?: string | null;
 }
+
+export interface EntitlementSyncInput extends EntitlementInput {
+  reason?: string;
+}

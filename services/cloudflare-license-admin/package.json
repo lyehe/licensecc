@@ -7,10 +7,15 @@
     "build:worker": "tsc -p tsconfig.worker.json",
     "build:ui": "vite build",
     "build": "npm run build:worker && npm run build:ui",
-    "test": "npm run build:worker && node --test test/*.mjs",
+    "test:ui": "npm run build:ui && node --test test/admin-ui-workflow.test.mjs",
+    "test": "npm run build:worker && node --test test/access-validator.test.mjs test/admin-worker.test.mjs",
+    "test:e2e": "playwright install chromium && playwright test --config playwright.config.mjs",
     "lint": "node scripts/lint.mjs",
     "dry-run": "npm run build && npx wrangler deploy --dry-run --config wrangler.example.jsonc",
-    "migrate:local": "npx wrangler d1 migrations apply DB --local --config ../cloudflare-online-verifier/wrangler.example.toml"
+    "migrate:local": "npx wrangler d1 migrations apply DB --local --config ../cloudflare-online-verifier/wrangler.example.toml",
+    "sync:entitlement": "node scripts/sync-entitlement.mjs",
+    "validate:remote-d1-atomicity": "node scripts/remote-d1-atomicity.mjs",
+    "validate:access-admin": "node scripts/validate-access-admin.mjs"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^4.5.0",
@@ -20,6 +25,7 @@
     "vite": "^6.3.5"
   },
   "devDependencies": {
+    "@playwright/test": "^1.60.0",
     "typescript": "^5.8.3",
     "wrangler": "^4.18.0"
   }

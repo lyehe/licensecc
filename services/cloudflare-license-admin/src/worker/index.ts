@@ -26,13 +26,14 @@ export interface Env {
   ADMIN_ACCESS_ADMIN_EMAILS?: string;
   ADMIN_ACCESS_READER_EMAILS?: string;
   PUBLIC_VERIFIER_URL?: string;
+  SYNC_API_TOKEN?: string;
 }
 
 interface Actor {
   subject: string;
   email: string;
   role: "reader" | "admin";
-  actorType: "access" | "dev";
+  actorType: "access" | "dev" | "sync";
 }
 
 interface MutationContext {
@@ -40,6 +41,17 @@ interface MutationContext {
   actor: Actor;
   ip: string;
   idempotencyKey: string | null;
+  source: "admin" | "sync";
+}
+
+interface IdempotencyCommit {
+  scope: string;
+  responseCode: string;
+}
+
+interface MutationResult<T> {
+  data: T;
+  idempotencyRecorded: boolean;
 }
 
 const HEX_64 = /^[0-9a-fA-F]{64}$/;
@@ -81,6 +93,16 @@ function splitCsv(value: string | undefined): Set<string> {
 
 function safeString(value: unknown, maxLength: number): string | null {
   if (typeof value !== "string" || value.length === 0 || value.length > maxLength) {
+    return null;
+  }
+  if (value.includes("\n") || value.includes("\r") || value.includes("\0")) {
+    return null;
+  }
+  return value;
+}
+
+function safeNotes(value: unknown): string | null {
+  if (typeof value !== "string" || value.length > MAX_NOTES_SIZE) {
     return null;
   }
   if (value.includes("\n") || value.includes("\r") || value.includes("\0")) {
@@ -242,6 +264,17 @@ async function authenticate(request: Request, env: Env, requestIdValue: string):
   return { subject, email, role, actorType: "access" };
 }
 
+async function authenticateSync(request: Request, env: Env, requestIdValue: string): Promise<Actor | Response> {
+  if (env.SYNC_API_TOKEN === undefined || env.SYNC_API_TOKEN === "") {
+    return envelope(requestIdValue, "sync_auth_not_configured", undefined, 401);
+  }
+  const token = bearerToken(request);
+  if (token === null || !await timingSafeEqual(token, env.SYNC_API_TOKEN)) {
+    return envelope(requestIdValue, "invalid_sync_token", undefined, 403);
+  }
+  return { subject: "sync", email: "sync", role: "admin", actorType: "sync" };
+}
+
 function requireAdmin(actor: Actor, requestIdValue: string): Response | null {
   return actor.role === "admin" ? null : envelope(requestIdValue, "admin_role_required", undefined, 403);
 }
@@ -277,7 +310,7 @@ function validateEntitlementInput(value: unknown): EntitlementInput | null {
   const assertionTtl = boundedInt(input.assertion_ttl_seconds ?? 300, 1, 3600);
   const validFrom = input.valid_from === undefined ? null : nullableEpoch(input.valid_from);
   const validUntil = input.valid_until === undefined ? null : nullableEpoch(input.valid_until);
-  const notes = input.notes === undefined ? "" : safeString(input.notes, MAX_NOTES_SIZE);
+  const notes = input.notes === undefined ? "" : safeNotes(input.notes);
   const customerId = input.customer_id === undefined ? null : nullableSafeString(input.customer_id, 128);
   const licenseId = input.license_id === undefined ? null : nullableSafeString(input.license_id, 128);
   if (
@@ -340,7 +373,7 @@ function validateEntitlementPatch(value: unknown): EntitlementPatch | null {
     }
     patch.valid_until = validUntil;
   }
-  const notes = input.notes === undefined ? undefined : safeString(input.notes, MAX_NOTES_SIZE);
+  const notes = input.notes === undefined ? undefined : safeNotes(input.notes);
   if (notes === null) {
     return null;
   }
@@ -454,6 +487,57 @@ async function rememberIdempotency(env: Env, scope: string, key: string | null, 
   ).bind(scope, key, JSON.stringify(body), now).run();
 }
 
+function idempotencyFromCurrentStatement(
+  env: Env,
+  ctx: MutationContext,
+  key: { project: string; feature: string; license_fingerprint: string },
+  idempotency: IdempotencyCommit | null,
+  now: number,
+): D1PreparedStatementLike | null {
+  if (ctx.idempotencyKey === null || idempotency === null) {
+    return null;
+  }
+  return env.DB.prepare(
+    `INSERT OR IGNORE INTO mutation_idempotency (scope, idempotency_key, response_json, created_at)
+     SELECT ?, ?,
+       json_object(
+         'ok', json('true'),
+         'code', ?,
+         'request_id', ?,
+         'data', json_object(
+           'project', project,
+           'feature', feature,
+           'license_fingerprint', license_fingerprint,
+           'device_hash', device_hash,
+           'status', status,
+           'assertion_ttl_seconds', assertion_ttl_seconds,
+           'revocation_seq', revocation_seq,
+           'valid_from', valid_from,
+           'valid_until', valid_until,
+           'notes', notes,
+           'customer_id', customer_id,
+           'license_id', license_id,
+           'created_at', created_at,
+           'updated_at', updated_at,
+           'id', ?
+         )
+       ),
+       ?
+     FROM entitlements
+     WHERE project = ? AND feature = ? AND license_fingerprint = ?`,
+  ).bind(
+    idempotency.scope,
+    ctx.idempotencyKey,
+    idempotency.responseCode,
+    ctx.requestId,
+    entitlementId(key.project, key.feature, key.license_fingerprint),
+    now,
+    key.project,
+    key.feature,
+    key.license_fingerprint,
+  );
+}
+
 function eventFromCurrentStatement(
   env: Env,
   ctx: MutationContext,
@@ -463,9 +547,10 @@ function eventFromCurrentStatement(
   reason: string,
   now: number,
 ): D1PreparedStatementLike {
+  const source = ctx.source === "sync" ? "sync" : "admin";
   return env.DB.prepare(
     `INSERT INTO entitlement_events (project, feature, license_fingerprint, device_hash, event_type, status, revocation_seq, detail, actor, actor_type, source, request_id, ip, prev_json, next_json, reason, idempotency_key, created_at)
-     SELECT project, feature, license_fingerprint, device_hash, ?, status, revocation_seq, ?, ?, ?, 'admin', ?, ?, ?,
+     SELECT project, feature, license_fingerprint, device_hash, ?, status, revocation_seq, ?, ?, ?, '${source}', ?, ?, ?,
        json_object(
          'project', project,
          'feature', feature,
@@ -525,27 +610,40 @@ async function writeEntitlementWithAudit(
   prev: EntitlementRecord | null,
   reason: string,
   now: number,
-): Promise<EntitlementRecord> {
+  idempotency: IdempotencyCommit | null,
+): Promise<MutationResult<EntitlementRecord>> {
   if (env.DB.batch === undefined) {
     throw new Error("write_failed");
   }
-  const results = await env.DB.batch([
+  const statements = [
     writeStatement,
     eventFromCurrentStatement(env, ctx, eventType, key, prev, reason, now),
-  ]);
+  ];
+  const idempotencyStatement = idempotencyFromCurrentStatement(env, ctx, key, idempotency, now);
+  if (idempotencyStatement !== null) {
+    statements.push(idempotencyStatement);
+  }
+  const results = await env.DB.batch(statements);
   const saved = batchReturnedRow<Omit<EntitlementRecord, "id">>(results[0]);
   if (saved === null) {
     throw new Error("write_failed");
   }
-  return withId(saved);
+  return { data: withId(saved), idempotencyRecorded: idempotencyStatement !== null };
 }
 
-async function createEntitlement(env: Env, input: EntitlementInput, ctx: MutationContext): Promise<EntitlementRecord> {
-	const now = Math.floor(Date.now() / 1000);
-	const prev = await findEntitlement(env, input);
-	if (prev?.status === "revoked") {
-		throw new Error("revoked_terminal");
-	}
+async function createEntitlement(
+  env: Env,
+  input: EntitlementInput,
+  ctx: MutationContext,
+  reason = "",
+  eventTypeOverride?: "create" | "update" | "disable" | "reenable" | "revoke",
+  idempotency: IdempotencyCommit | null = null,
+): Promise<MutationResult<EntitlementRecord>> {
+  const now = Math.floor(Date.now() / 1000);
+  const prev = await findEntitlement(env, input);
+  if (prev?.status === "revoked") {
+    throw new Error("revoked_terminal");
+  }
 	const statement = env.DB.prepare(
     "INSERT INTO entitlements (project, feature, license_fingerprint, device_hash, status, assertion_ttl_seconds, cache_ttl_seconds, revocation_seq, valid_from, valid_until, notes, customer_id, license_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT MAX(revocation_seq) + 1 FROM entitlement_events WHERE project = ? AND feature = ? AND license_fingerprint = ?), 1), ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(project, feature, license_fingerprint) DO UPDATE SET device_hash = excluded.device_hash, status = excluded.status, assertion_ttl_seconds = excluded.assertion_ttl_seconds, cache_ttl_seconds = excluded.cache_ttl_seconds, revocation_seq = max(entitlements.revocation_seq, COALESCE((SELECT MAX(revocation_seq) FROM entitlement_events WHERE project = entitlements.project AND feature = entitlements.feature AND license_fingerprint = entitlements.license_fingerprint), entitlements.revocation_seq)) + 1, valid_from = excluded.valid_from, valid_until = excluded.valid_until, notes = excluded.notes, customer_id = excluded.customer_id, license_id = excluded.license_id, updated_at = excluded.updated_at RETURNING project, feature, license_fingerprint, device_hash, status, assertion_ttl_seconds, cache_ttl_seconds, revocation_seq, valid_from, valid_until, notes, customer_id, license_id, created_at, updated_at",
   ).bind(
@@ -567,10 +665,20 @@ async function createEntitlement(env: Env, input: EntitlementInput, ctx: Mutatio
     prev?.created_at ?? now,
     now,
   );
-  return writeEntitlementWithAudit(env, input, statement, ctx, prev === null ? "create" : "update", prev, "", now);
+  return writeEntitlementWithAudit(
+    env,
+    input,
+    statement,
+    ctx,
+    eventTypeOverride ?? (prev === null ? "create" : "update"),
+    prev,
+    reason,
+    now,
+    idempotency,
+  );
 }
 
-async function patchEntitlement(env: Env, key: { project: string; feature: string; license_fingerprint: string }, patch: EntitlementPatch, ctx: MutationContext): Promise<EntitlementRecord | null> {
+async function patchEntitlement(env: Env, key: { project: string; feature: string; license_fingerprint: string }, patch: EntitlementPatch, ctx: MutationContext, idempotency: IdempotencyCommit | null): Promise<MutationResult<EntitlementRecord> | null> {
   const prev = await findEntitlement(env, key);
   if (prev === null) {
     return null;
@@ -601,10 +709,10 @@ async function patchEntitlement(env: Env, key: { project: string; feature: strin
     key.feature,
     key.license_fingerprint,
   );
-  return writeEntitlementWithAudit(env, key, statement, ctx, "update", prev, "", now);
+  return writeEntitlementWithAudit(env, key, statement, ctx, "update", prev, "", now, idempotency);
 }
 
-async function transitionEntitlement(env: Env, key: { project: string; feature: string; license_fingerprint: string }, status: EntitlementStatus, eventType: "disable" | "reenable" | "revoke", reason: string, ctx: MutationContext): Promise<EntitlementRecord | null> {
+async function transitionEntitlement(env: Env, key: { project: string; feature: string; license_fingerprint: string }, status: EntitlementStatus, eventType: "disable" | "reenable" | "revoke", reason: string, ctx: MutationContext, idempotency: IdempotencyCommit | null): Promise<MutationResult<EntitlementRecord> | null> {
   const prev = await findEntitlement(env, key);
   if (prev === null) {
     return null;
@@ -613,28 +721,72 @@ async function transitionEntitlement(env: Env, key: { project: string; feature: 
     throw new Error("revoked_terminal");
   }
   if (prev.status === status) {
-    return prev;
+    return { data: prev, idempotencyRecorded: false };
   }
 	const now = Math.floor(Date.now() / 1000);
   const statement = env.DB.prepare(
     "UPDATE entitlements SET status = ?, revocation_seq = max(revocation_seq, COALESCE((SELECT MAX(revocation_seq) FROM entitlement_events WHERE project = entitlements.project AND feature = entitlements.feature AND license_fingerprint = entitlements.license_fingerprint), revocation_seq)) + 1, updated_at = ? WHERE project = ? AND feature = ? AND license_fingerprint = ? RETURNING project, feature, license_fingerprint, device_hash, status, assertion_ttl_seconds, cache_ttl_seconds, revocation_seq, valid_from, valid_until, notes, customer_id, license_id, created_at, updated_at",
   ).bind(status, now, key.project, key.feature, key.license_fingerprint);
-  return writeEntitlementWithAudit(env, key, statement, ctx, eventType, prev, reason, now);
+  return writeEntitlementWithAudit(env, key, statement, ctx, eventType, prev, reason, now, idempotency);
 }
 
-async function mutationResponse<T>(request: Request, env: Env, ctx: MutationContext, code: string, fn: () => Promise<T | null>): Promise<Response> {
+function entitlementMatchesInput(row: EntitlementRecord, input: EntitlementInput): boolean {
+  return row.device_hash === (input.device_hash ?? "") &&
+    row.status === (input.status ?? "active") &&
+    row.assertion_ttl_seconds === (input.assertion_ttl_seconds ?? 300) &&
+    row.valid_from === (input.valid_from ?? null) &&
+    row.valid_until === (input.valid_until ?? null) &&
+    row.notes === (input.notes ?? "") &&
+    row.customer_id === (input.customer_id ?? null) &&
+    row.license_id === (input.license_id ?? null);
+}
+
+function syncEventType(prev: EntitlementRecord | null, targetStatus: EntitlementStatus): "create" | "update" | "disable" | "reenable" | "revoke" {
+  if (targetStatus === "revoked") {
+    return "revoke";
+  }
+  if (prev === null) {
+    return targetStatus === "disabled" ? "disable" : "create";
+  }
+  if (prev.status !== targetStatus) {
+    return targetStatus === "disabled" ? "disable" : "reenable";
+  }
+  return "update";
+}
+
+async function syncEntitlement(env: Env, input: EntitlementInput, reason: string, ctx: MutationContext, idempotency: IdempotencyCommit | null): Promise<MutationResult<EntitlementRecord> | null> {
+  const key = {
+    project: input.project,
+    feature: input.feature,
+    license_fingerprint: input.license_fingerprint,
+  };
+  const prev = await findEntitlement(env, key);
+  if (prev !== null && entitlementMatchesInput(prev, input)) {
+    return { data: prev, idempotencyRecorded: false };
+  }
+  const targetStatus = input.status ?? "active";
+  if (prev?.status === "revoked" && targetStatus === "revoked") {
+    return { data: prev, idempotencyRecorded: false };
+  }
+  return createEntitlement(env, input, ctx, reason, syncEventType(prev, targetStatus), idempotency);
+}
+
+async function mutationResponse<T>(request: Request, env: Env, ctx: MutationContext, code: string, fn: (idempotency: IdempotencyCommit | null) => Promise<MutationResult<T> | null>): Promise<Response> {
   const scope = `${request.method}:${new URL(request.url).pathname}:${ctx.actor.subject}`;
   const replay = await idempotentReplay(env, scope, ctx.idempotencyKey);
   if (replay !== null) {
     return replay;
   }
   try {
-    const result = await fn();
+    const idempotency = ctx.idempotencyKey === null ? null : { scope, responseCode: code };
+    const result = await fn(idempotency);
     if (result === null) {
       return envelope(ctx.requestId, "not_found", undefined, 404);
     }
-    const body = { ok: true, code, request_id: ctx.requestId, data: result };
-    await rememberIdempotency(env, scope, ctx.idempotencyKey, body, Math.floor(Date.now() / 1000));
+    const body = { ok: true, code, request_id: ctx.requestId, data: result.data };
+    if (!result.idempotencyRecorded) {
+      await rememberIdempotency(env, scope, ctx.idempotencyKey, body, Math.floor(Date.now() / 1000));
+    }
     return json(body);
   } catch (error) {
     if (error instanceof Error && error.message === "revoked_terminal") {
@@ -662,6 +814,7 @@ async function handleMutation(request: Request, env: Env, actor: Actor, requestI
     requestId: requestIdValue,
     ip: clientIp(request),
     idempotencyKey: idempotencyKey ?? null,
+    source: "admin",
   };
   const body = await parseJsonBody(request, requestIdValue);
   if (body instanceof Response) {
@@ -673,7 +826,8 @@ async function handleMutation(request: Request, env: Env, actor: Actor, requestI
     if (input === null) {
       return envelope(requestIdValue, "invalid_request", undefined, 400);
     }
-    return mutationResponse(request, env, ctx, "entitlement_saved", () => createEntitlement(env, input, ctx));
+    return mutationResponse(request, env, ctx, "entitlement_saved", (idempotency) =>
+      createEntitlement(env, input, ctx, "", undefined, idempotency));
   }
 
   const match = /^\/api\/admin\/entitlements\/([^/]+)(?:\/(disable|reenable|revoke))?$/.exec(url.pathname);
@@ -690,7 +844,8 @@ async function handleMutation(request: Request, env: Env, actor: Actor, requestI
     if (patch === null) {
       return envelope(requestIdValue, "invalid_request", undefined, 400);
     }
-    return mutationResponse(request, env, ctx, "entitlement_patched", () => patchEntitlement(env, key, patch, ctx));
+    return mutationResponse(request, env, ctx, "entitlement_patched", (idempotency) =>
+      patchEntitlement(env, key, patch, ctx, idempotency));
   }
   if (request.method === "POST" && action !== undefined) {
     const reason = typeof (body as Record<string, unknown>).reason === "string"
@@ -701,10 +856,54 @@ async function handleMutation(request: Request, env: Env, actor: Actor, requestI
     }
     const transition = action as "disable" | "reenable" | "revoke";
     const targetStatus = transition === "reenable" ? "active" : transition === "disable" ? "disabled" : "revoked";
-    return mutationResponse(request, env, ctx, `entitlement_${action}d`, () =>
-      transitionEntitlement(env, key, targetStatus, transition, reason, ctx));
+    return mutationResponse(request, env, ctx, `entitlement_${action}d`, (idempotency) =>
+      transitionEntitlement(env, key, targetStatus, transition, reason, ctx, idempotency));
   }
   return envelope(requestIdValue, "not_found", undefined, 404);
+}
+
+function syncReason(value: unknown): string | null {
+  if (value === undefined || value === "") {
+    return "";
+  }
+  return safeString(value, MAX_NOTES_SIZE);
+}
+
+async function handleSync(request: Request, env: Env): Promise<Response> {
+  const id = requestId(request);
+  if (request.method !== "POST" || new URL(request.url).pathname !== "/api/sync/entitlements") {
+    return envelope(id, "not_found", undefined, 404);
+  }
+  const auth = await authenticateSync(request, env, id);
+  if (auth instanceof Response) {
+    return auth;
+  }
+  const idempotencyKey = safeString(request.headers.get("idempotency-key"), 128);
+  if (request.headers.has("idempotency-key") && idempotencyKey === null) {
+    return envelope(id, "invalid_idempotency_key", undefined, 400);
+  }
+  const body = await parseJsonBody(request, id);
+  if (body instanceof Response) {
+    return body;
+  }
+  const bodyRecord = typeof body === "object" && body !== null ? body as Record<string, unknown> : {};
+  const input = validateEntitlementInput(body);
+  const reason = syncReason(bodyRecord.reason);
+  if (input === null || reason === null) {
+    return envelope(id, "invalid_request", undefined, 400);
+  }
+  if ((input.status === "disabled" || input.status === "revoked") && reason === "") {
+    return envelope(id, "reason_required", undefined, 400);
+  }
+  const ctx: MutationContext = {
+    actor: auth,
+    requestId: id,
+    ip: clientIp(request),
+    idempotencyKey: idempotencyKey ?? null,
+    source: "sync",
+  };
+  return mutationResponse(request, env, ctx, "entitlement_synced", (idempotency) =>
+    syncEntitlement(env, input, reason, ctx, idempotency));
 }
 
 async function handleApi(request: Request, env: Env): Promise<Response> {
@@ -746,6 +945,9 @@ export default {
     const url = new URL(request.url);
     if (url.pathname.startsWith("/api/admin/")) {
       return handleApi(request, env);
+    }
+    if (url.pathname.startsWith("/api/sync/")) {
+      return handleSync(request, env);
     }
     if (env.ASSETS !== undefined) {
       return env.ASSETS.fetch(request);
