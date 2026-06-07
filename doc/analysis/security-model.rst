@@ -63,9 +63,16 @@ The C++ verifier remembers the highest accepted online ``revocation-seq`` for a
 given project, feature, and license fingerprint for the lifetime of the current
 process. This rejects lower-sequence fresh or cached assertions after a newer
 assertion has been seen. The floor is not persisted by Licensecc core across
-process restarts; hosts that need restart-resilient rollback detection should
-persist their own last-seen floor alongside the cached assertion and use it in
-their product session policy.
+process restarts when hosts call ``acquire_license_ex`` directly.
+
+Hosts that need restart-resilient rollback detection should use
+``lcc_acquire_license_decision``. That wrapper requires host callbacks that load
+and store the strongest accepted ``revocation_seq`` for the exact
+project/feature/license-fingerprint tuple. The wrapper compares fresh online
+assertions against the loaded floor and fails closed if the host cannot store a
+newly accepted floor. This improves rollback detection across normal restarts,
+but it still cannot protect a machine where the application binary, callback
+implementation, or stored floor has been fully patched by the attacker.
 
 Production online verification should use a dedicated online assertion signing
 key. Configure the C++ verifier with

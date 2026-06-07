@@ -796,7 +796,7 @@ Run:
 
 .. code-block:: console
 
-   python scripts/check_docs_links.py
+   uv run --no-project python scripts/check_docs_links.py doc
    sphinx-build -b html doc build/doc-html
 
 **Exit criteria**

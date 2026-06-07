@@ -23,3 +23,12 @@ Implement your own hardware signature generator
 *************************************************
 
 .. doxygenclass:: license::hw_identifier::IdentificationStrategy
+
+Built-in implementations
+*************************
+
+.. doxygenclass:: license::hw_identifier::DefaultStrategy
+
+.. doxygenclass:: license::hw_identifier::DiskStrategy
+
+.. doxygenclass:: license::hw_identifier::Ethernet

@@ -256,6 +256,97 @@ hardening probes. Licensecc core intentionally avoids generic debugger, VM,
 process-list, module-injection, and self-hash checks because those are
 deployment-specific and can have high false-positive rates.
 
+Secure online decision wrapper
+==============================
+
+Production hosts that use online verification should prefer
+``lcc_acquire_license_decision()`` over calling ``acquire_license_ex()``
+directly. The wrapper keeps the security policy fixed:
+
+* runtime tamper signals are enforced;
+* strict source-shadowing is enabled;
+* online verification is required; and
+* the host must load and store a persisted revocation floor.
+
+The floor is the highest accepted ``revocation_seq`` for the exact
+``project``, ``feature``, and ``license_fingerprint`` tuple. Persist it in
+host-controlled durable storage such as a small local database, encrypted
+settings store, or your product's existing license state store. The store path
+should be monotonic: never replace a higher saved sequence with a lower one.
+
+.. code-block:: c
+
+  static bool load_floor(void* user_data,
+                         const LccRevocationFloorRecord* key,
+                         uint64_t* revocation_seq_out) {
+      return my_floor_store_load(user_data,
+                                 key->project,
+                                 key->feature,
+                                 key->license_fingerprint,
+                                 revocation_seq_out);
+  }
+
+  static bool store_floor(void* user_data,
+                          const LccRevocationFloorRecord* record) {
+      return my_floor_store_save_max(user_data,
+                                     record->project,
+                                     record->feature,
+                                     record->license_fingerprint,
+                                     record->revocation_seq);
+  }
+
+  LccLicenseDecisionOptions decision_options;
+  lcc_init_license_decision_options(&decision_options);
+  decision_options.online_check = my_online_check;
+  decision_options.online_user_data = my_online_transport;
+  decision_options.revocation_floor_load = load_floor;
+  decision_options.revocation_floor_store = store_floor;
+  decision_options.revocation_floor_user_data = my_floor_store;
+
+  LicenseInfo info;
+  LccLicenseDecision decision;
+  LCC_EVENT_TYPE result = lcc_acquire_license_decision(
+      &caller, &location, &info, &decision, &decision_options);
+
+  if (result != LICENSE_OK || decision.decision != LCC_LICENSE_DECISION_ALLOW) {
+      deny_access();
+      return;
+  }
+
+  grant_access();
+
+The wrapper fails closed when online verification is unavailable, the signed
+assertion is invalid, the assertion's ``revocation_seq`` is below the persisted
+floor, or the host cannot store the newly accepted floor. Ordinary local
+license failures still take precedence; the online callback and floor callbacks
+are not invoked when the local license is malformed, expired, corrupted, or for
+the wrong machine.
+
+User database integration
+=========================
+
+When an existing user database, subscription system, or CRM owns customer
+state, keep it as the source of truth and sync only the entitlement projection
+needed by the verifier:
+
+* ``project`` and ``feature``;
+* ``license_fingerprint``;
+* ``status``;
+* optional device binding;
+* optional validity window;
+* ``customer_id`` and ``license_id`` for back-reference.
+
+Use the Cloudflare admin Worker's ``POST /api/sync/entitlements`` endpoint for
+that projection. It requires a bearer token stored as the ``SYNC_API_TOKEN``
+Worker secret, validates the same entitlement schema as the admin console,
+writes the entitlement and audit event in the same D1 ``batch()``, and keeps
+revoked entitlements terminal. Replaying the same projected state is a no-op
+and does not advance ``revocation_seq``.
+
+The public verifier Worker should continue to read D1 directly on
+``POST /v1/verify``. Do not put your primary user database on the public verify
+hot path unless that coupling and outage behavior is intentional.
+
 Project magic
 =============
 

@@ -77,7 +77,7 @@ Verification commands
 .. code-block:: console
 
    ctest --test-dir build -C Debug --output-on-failure --timeout 900
-   python scripts/check_docs_links.py
+   uv run --no-project python scripts/check_docs_links.py doc
 
 For the Worker:
 
@@ -365,8 +365,8 @@ Create a shared TypeScript entitlement module:
   validity windows;
 * uses prepared D1 statements in Worker code;
 * computes ``revocation_seq`` server-side;
-* writes the entitlement mutation and audit event in the same D1 ``batch()``
-  transaction;
+* writes the entitlement mutation, audit event, and idempotency replay record in
+  the same D1 ``batch()`` transaction when a mutation changes entitlement state;
 * returns a consistent API envelope;
 * supports idempotency keys for repeated browser submissions.
 
@@ -418,8 +418,9 @@ Exit criteria
 
 * Existing verifier behavior is preserved for rows without validity windows.
 * Every mutation increments ``revocation_seq`` exactly once.
-* Every mutation writes one audit event with actor/source/request id in the same
-  D1 batch as the entitlement write.
+* Every state-changing mutation writes one audit event with actor/source/request
+  id and, when supplied, one idempotency replay record in the same D1 batch as
+  the entitlement write.
 * Admin mutations fail closed if the configured D1 binding does not support
   ``batch()``.
 * No Worker write path interpolates user values into SQL strings.
@@ -923,8 +924,8 @@ Docs:
 
 .. code-block:: console
 
-   python scripts/check_docs_links.py
-   python -m sphinx -b html -W --keep-going -n doc build/docs/sphinx
+   uv run --no-project python scripts/check_docs_links.py doc
+   uv run --no-project python scripts/build_docs.py
 
 Secret/artifact checks:
 

@@ -45,6 +45,7 @@ extensions = [
 ]
 
 autosectionlabel_prefix_document = True
+autosectionlabel_maxdepth = 2
 
 # Breathe Configuration
 docs_dir = Path(__file__).resolve().parent
@@ -56,6 +57,14 @@ breathe_projects = {
     )
 }
 breathe_domain_by_extension = {"h" : "cpp"}
+
+nitpick_ignore = [
+    ("cpp:identifier", "LCC_API_HW_IDENTIFICATION_STRATEGY"),
+    ("cpp:identifier", "LCC_API_PATH_SIZE"),
+    ("cpp:identifier", "license"),
+    ("cpp:identifier", "license::hw_identifier"),
+    ("cpp:identifier", "size_t"),
+]
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ['_templates']

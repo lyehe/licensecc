@@ -25,6 +25,13 @@ signals through the audit log, and can fail closed when the host opts into
 ``LCC_TAMPER_ENFORCE``. Treat those signals as best-effort local diagnostics,
 not proof that the process is untampered.
 
+For online deployments, prefer ``lcc_acquire_license_decision`` in the host
+application. It keeps tamper enforcement and strict source-shadowing enabled,
+requires online verification, and requires host callbacks that persist the
+highest accepted ``revocation_seq`` per entitlement tuple. This closes the
+normal restart rollback gap left by a process-local floor, while still assuming
+that a fully patched local machine can bypass local decisions.
+
 Signing keys and algorithms
 ===========================
 

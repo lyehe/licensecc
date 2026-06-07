@@ -96,6 +96,20 @@ make test
 ctest -C Release
 ```
 
+### documentation
+
+Local documentation builds use `uv`/`uvx` for Python tooling and require
+Doxygen for C++ API XML. `scripts/build_docs.py` finds Doxygen on `PATH`,
+from the `DOXYGEN` environment variable, or under `build/tools/doxygen*/`:
+
+```console
+uv run --no-project python scripts/check_docs_links.py doc
+uv run --no-project python scripts/build_docs.py
+```
+
+The helper runs Doxygen first, then runs Sphinx through `uvx` using the pinned
+packages in `requirements.txt`.
+
 ## How to use
 
 A minimal, self-contained integration example lives in [`examples/minimal`](examples/minimal): acquire a license and report failures with `lcc_strerror`/`print_error`.
@@ -113,11 +127,12 @@ static library and the installed package is validated with C++ consumers. Pure
 C hosts should use a build rule that links through the C++ linker or a
 project-owned wrapper with its own installed-prefix smoke test.
 
-Host applications should fail closed: grant access only when `acquire_license()`
-or `acquire_license_ex()` returns `LICENSE_OK`. Treat every other return value
-as not licensed, then use `print_error()` or `lcc_strerror()` only to report
-diagnostics. For products with multiple licensed capabilities, pass the feature
-name in `CallerInformations.feature_name`; for licenses with `start-version` or
+Host applications should fail closed: grant access only when `acquire_license()`,
+`acquire_license_ex()`, or `lcc_acquire_license_decision()` returns
+`LICENSE_OK`. Treat every other return value as not licensed, then use
+`print_error()` or `lcc_strerror()` only to report diagnostics. For products
+with multiple licensed capabilities, pass the feature name in
+`CallerInformations.feature_name`; for licenses with `start-version` or
 `end-version`, pass the running application version in
 `CallerInformations.version`. If your build uses a nonzero
 `LCC_PROJECT_MAGIC_NUM`, initialize `CallerInformations.magic` from the
@@ -137,6 +152,66 @@ When `online_check` is supplied, online verification is required and failures
 deny the check. Production online builds should configure
 `LCC_ONLINE_ASSERTION_PUBLIC_KEY_RECORDS` with a dedicated online assertion
 public key; otherwise online assertion verification fails closed.
+
+For production online integrations, prefer `lcc_acquire_license_decision()`.
+It keeps the policy surface small: tamper enforcement and strict source
+shadowing are always enabled, online verification is required, and the host must
+provide callbacks that load and store the strongest accepted `revocation_seq`
+for each project/feature/license fingerprint. Those callbacks let a restarted
+process reject rollback to an older signed online assertion.
+
+For deployments with an existing user database or billing system, keep that
+system as the source of truth and sync a small entitlement projection into D1
+through the admin Worker's `/api/sync/entitlements` endpoint. The public verifier
+then reads that projection on the hot path.
+
+The Cloudflare deployment also includes optional D1 backup infrastructure under
+`services/cloudflare-d1-backup`: a scheduled Workflow exports the verifier D1
+database to R2, while D1 Time Travel remains the short-window point-in-time
+restore path.
+
+For local release evidence, run `node scripts/validate_release_gates.mjs
+--full --external --json-out build/release-gates/full-latest.json`. The command runs
+deterministic local gates and reports explicit skip reasons for staging-only
+Access, R2 restore, backup deployment, and public verifier abuse drills when
+their operator credentials or staging identifiers are not present.
+The first local gate is a workspace hygiene scan: it runs tracked diff checks
+and scans untracked, non-ignored text files for trailing whitespace before
+service tests run.
+For production sign-off, use `--require-external` with the staging credentials
+present so the runner first performs a secret-redacted external input preflight,
+then fails if Access, R2 restore, or backup deployment drills are missing or
+skipped instead of producing only a partial evidence packet. It also requires
+the public verifier abuse drill to run successfully against the staging
+verifier URL. Full and strict runs also require
+`build/CTestTestfile.cmake`, so C++ security/API tests cannot be skipped by
+running from an unconfigured build tree. The production JSON must show
+`production_ready=true` and an empty `blocking_reasons` list. It must also have
+nonempty trimmed unique result labels and integer exit statuses, or the
+runner/assertion will treat the evidence as malformed. In strict mode, the
+runner also blocks `production_ready=true` when required deterministic local or
+external result labels are missing. Each result records the command/action and
+duration evidence used for sign-off. Required local result commands must match
+the shared release-gate contract, so a fabricated label/status row is rejected.
+External drill command strings must match redacted templates for staging URLs,
+Worker names, R2 object keys, bucket names, and D1 database names; extra
+literal staging arguments are rejected. Skipped external drill rows use only
+`not run: <drill label>`, without staging details. You can assert that contract
+directly; the assertion also checks required deterministic local gate results,
+including C++ tests, the admin UI build, UI workflow tests, and browser e2e,
+are present with status `0`:
+
+```console
+node scripts/external_gate_preflight.mjs
+node scripts/validate_release_gates.mjs --full --require-external --json-out build/release-gates/production-latest.json
+node scripts/assert_release_ready.mjs build/release-gates/production-latest.json
+```
+
+Use the detailed production worksheet in
+[`doc/analysis/remaining-gap-closure-checklist.rst`](doc/analysis/remaining-gap-closure-checklist.rst)
+to record verification logs, staging validation evidence, hard blockers, and
+final sign-off. A runner summary with `ok=true` and `complete=false` is useful
+local evidence, but it is not a production release sign-off.
 
 ## How to contribute
 

@@ -93,3 +93,9 @@ source-shadowing by default, so a shadowed malformed source returns
 `LICENSE_TAMPER_DETECTED` even when another fallback source is valid. Use
 `acquire_license()` for the historical fallback behavior, or set
 `tamper_policy = LCC_TAMPER_DISABLED` only for compatibility tests.
+
+Production online integrations should prefer `lcc_acquire_license_decision()`.
+It fixes the secure policy choices for the host: tamper enforcement, strict
+source-shadowing, required online verification, and persisted revocation-floor
+load/store callbacks. Use `acquire_license_ex()` directly when you intentionally
+need lower-level control or compatibility with an existing integration.

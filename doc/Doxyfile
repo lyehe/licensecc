@@ -9,10 +9,10 @@ INPUT                  = include/licensecc src/library src/templates/licensecc_p
 FILE_PATTERNS          = *.h *.hpp *.c *.cpp *.dox *.h.in
 EXTENSION_MAPPING      = h.in=C++
 RECURSIVE              = YES
-EXCLUDE_PATTERNS       = */ini/* */doc/_build/* */doc/_doxygen/* */build/* */projects/* */extern/*
+EXCLUDE                = src/library/ini doc/_build doc/_doxygen build projects extern
 LAYOUT_FILE            = doc/DoxygenLayout.xml
 
-QUIET                  = NO
+QUIET                  = YES
 WARNINGS               = YES
 WARN_IF_UNDOCUMENTED   = NO
 WARN_IF_DOC_ERROR      = YES
