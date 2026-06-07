@@ -26,7 +26,7 @@
 #endif
 
 //#ifdef USE_DISK_MODEL
-///#define PARSE_ID_FUNC parse_disk_id
+//#define PARSE_ID_FUNC parse_disk_id
 //#define ID_FOLDER "/dev/disk/by-id"
 //#else
 #define PARSE_ID_FUNC parseUUID
@@ -39,10 +39,11 @@
 using namespace license;
 
 /**
- *Usually uuid are hex number separated by "-". this method read up to 8 hex
- *numbers skipping - characters.
- *@param uuid uuid as read in /dev/disk/by-uuid
- *@param buffer_out: unsigned char buffer[8] output buffer for result
+ * Usually uuid are hex number separated by "-". this method read up to 8 hex
+ * numbers skipping - characters.
+ * @param uuid uuid as read in /dev/disk/by-uuid
+ * @param buffer_out unsigned char buffer[8] output buffer for result
+ * @param out_size size of buffer_out
  */
 static void parseUUID(const char *uuid, unsigned char *buffer_out, unsigned int out_size) {
 	unsigned char cur_character;
@@ -74,14 +75,10 @@ static void parse_disk_id(const char *uuid, unsigned char *buffer_out, size_t ou
 }
 
 /**
- * 	int id;
-	char device[MAX_PATH];
-	unsigned char disk_sn[8];
-	char label[255];
-	int preferred;
- * @param blkidfile
- * @param diskInfos_out
- * @return
+ * Extract an XML-style attribute from a blkid entry.
+ * @param source blkid entry text.
+ * @param attrName attribute name without quotes.
+ * @return attribute value, or an empty/undefined substring when missing.
  */
 
 static std::string getAttribute(const std::string &source, const std::string &attrName) {
@@ -328,7 +325,9 @@ FUNCTION_RETURN getDiskInfos_dev(std::vector<DiskInfo> &disk_infos,
  * Try to determine removable devices: as a first guess removable devices doesn't have
  * an entry in /etc/fstab
  *
- * @param diskInfos
+ * @param diskInfos disk records to update.
+ * @param disk_by_uuid map from UUID to disk record id.
+ * @param fstab_source source field from an /etc/fstab entry.
  */
 bool markLinuxPreferredDiskForFstabSource(std::vector<DiskInfo> &diskInfos,
 										  std::unordered_map<std::string, int> &disk_by_uuid,
@@ -397,20 +396,20 @@ static void set_preferred_disks(std::vector<DiskInfo> &diskInfos, std::unordered
  * First try to read disk_infos from /dev/disk/by-uuid folder, if fails try to use
  * blkid cache to see what's in there, then try to exclude removable disks
  * looking at /etc/fstab
- * @param diskInfos_out vector used to output the disk informations
- * @return
+ * @param diskInfos vector used to output the disk informations
+ * @return FUNC_RET_OK when disk information is available, otherwise an error code.
  */
-FUNCTION_RETURN getDiskInfos(std::vector<DiskInfo> &disk_infos) {
+FUNCTION_RETURN getDiskInfos(std::vector<DiskInfo> &diskInfos) {
 	std::unordered_map<std::string, int> disk_by_uuid;
 
-	FUNCTION_RETURN result = getDiskInfos_dev(disk_infos, disk_by_uuid);
+	FUNCTION_RETURN result = getDiskInfos_dev(diskInfos, disk_by_uuid);
 
 	if (result != FUNCTION_RETURN::FUNC_RET_OK) {
-		result = getDiskInfos_blkid(disk_infos, disk_by_uuid);
+		result = getDiskInfos_blkid(diskInfos, disk_by_uuid);
 	}
 	if (result == FUNCTION_RETURN::FUNC_RET_OK) {
-		set_preferred_disks(disk_infos, disk_by_uuid);
-		sortLinuxDiskInfos(disk_infos);
+		set_preferred_disks(diskInfos, disk_by_uuid);
+		sortLinuxDiskInfos(diskInfos);
 	}
 	return result;
 }

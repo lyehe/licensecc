@@ -2,6 +2,7 @@
 
 #include <licensecc/licensecc.h>
 
+#include <algorithm>
 #include <ctime>
 #include <cctype>
 #include <cstdlib>
@@ -114,6 +115,11 @@ static vector<uint8_t> hex_to_bytes(const string& hex) {
 	return out;
 }
 
+static string env_string(const char* name) {
+	const char* value = getenv(name);
+	return value == nullptr ? string() : string(value);
+}
+
 static online_verification::OnlineVerificationExpected expected_claims(const uint64_t now = 1000) {
 	online_verification::OnlineVerificationExpected expected;
 	expected.project = LCC_PROJECT_NAME;
@@ -207,6 +213,16 @@ struct CallbackState {
 	string last_assertion;
 };
 
+struct FloorStoreState {
+	int load_calls = 0;
+	int store_calls = 0;
+	bool load_ok = true;
+	bool store_ok = true;
+	uint64_t floor = 0;
+	LccRevocationFloorRecord last_loaded_key{};
+	LccRevocationFloorRecord last_stored_record{};
+};
+
 static LCC_ONLINE_CALLBACK_STATUS copy_assertion_to_output(const string& assertion, char* assertion_out,
 														   size_t* assertion_out_size) {
 	if (assertion_out == nullptr || assertion_out_size == nullptr) {
@@ -262,6 +278,47 @@ static LCC_ONLINE_CALLBACK_STATUS signing_callback(void* user_data, const LccOnl
 		state->last_assertion = assertion;
 	}
 	return copy_assertion_to_output(assertion, assertion_out, assertion_out_size);
+}
+
+static bool floor_load_callback(void* user_data, const LccRevocationFloorRecord* key,
+								uint64_t* revocation_seq_out) {
+	FloorStoreState* state = static_cast<FloorStoreState*>(user_data);
+	if (state == nullptr || key == nullptr || revocation_seq_out == nullptr) {
+		return false;
+	}
+	++state->load_calls;
+	state->last_loaded_key = *key;
+	if (!state->load_ok) {
+		return false;
+	}
+	*revocation_seq_out = state->floor;
+	return true;
+}
+
+static bool floor_store_callback(void* user_data, const LccRevocationFloorRecord* record) {
+	FloorStoreState* state = static_cast<FloorStoreState*>(user_data);
+	if (state == nullptr || record == nullptr) {
+		return false;
+	}
+	++state->store_calls;
+	state->last_stored_record = *record;
+	if (!state->store_ok) {
+		return false;
+	}
+	state->floor = (std::max)(state->floor, record->revocation_seq);
+	return true;
+}
+
+static LccLicenseDecisionOptions secure_decision_options(CallbackState& online_state,
+														 FloorStoreState& floor_state) {
+	LccLicenseDecisionOptions options;
+	lcc_init_license_decision_options(&options);
+	options.online_check = signing_callback;
+	options.online_user_data = &online_state;
+	options.revocation_floor_load = floor_load_callback;
+	options.revocation_floor_store = floor_store_callback;
+	options.revocation_floor_user_data = &floor_state;
+	return options;
 }
 
 BOOST_AUTO_TEST_CASE(verifier_accepts_valid_assertion) {
@@ -371,6 +428,55 @@ BOOST_AUTO_TEST_CASE(shared_golden_assertion_verifies_in_cpp) {
 	BOOST_CHECK(!used_cache);
 	BOOST_CHECK_EQUAL(verified_claims.revocation_seq, 42);
 	BOOST_CHECK_EQUAL(verified_claims.key_id, key_id);
+}
+
+BOOST_AUTO_TEST_CASE(remote_worker_assertion_fixture_verifies_in_cpp_when_provided) {
+	const string assertion = env_string("LCC_REMOTE_ONLINE_ASSERTION");
+	if (assertion.empty()) {
+		return;
+	}
+	const string key_id = env_string("LCC_REMOTE_ONLINE_KEY_ID");
+	const string public_key_der_hex = env_string("LCC_REMOTE_ONLINE_PUBLIC_KEY_DER_HEX");
+	const string fingerprint = env_string("LCC_REMOTE_ONLINE_LICENSE_FINGERPRINT");
+	const string nonce = env_string("LCC_REMOTE_ONLINE_NONCE");
+	const string project = env_string("LCC_REMOTE_ONLINE_PROJECT").empty() ? "DEFAULT" : env_string("LCC_REMOTE_ONLINE_PROJECT");
+	const string feature = env_string("LCC_REMOTE_ONLINE_FEATURE").empty() ? "DEFAULT" : env_string("LCC_REMOTE_ONLINE_FEATURE");
+	const string device_hash = env_string("LCC_REMOTE_ONLINE_DEVICE_HASH");
+	BOOST_REQUIRE_MESSAGE(!key_id.empty(), "LCC_REMOTE_ONLINE_KEY_ID is required with LCC_REMOTE_ONLINE_ASSERTION");
+	BOOST_REQUIRE_MESSAGE(!public_key_der_hex.empty(),
+						  "LCC_REMOTE_ONLINE_PUBLIC_KEY_DER_HEX is required with LCC_REMOTE_ONLINE_ASSERTION");
+	BOOST_REQUIRE_MESSAGE(!fingerprint.empty(),
+						  "LCC_REMOTE_ONLINE_LICENSE_FINGERPRINT is required with LCC_REMOTE_ONLINE_ASSERTION");
+	BOOST_REQUIRE_MESSAGE(!nonce.empty(), "LCC_REMOTE_ONLINE_NONCE is required with LCC_REMOTE_ONLINE_ASSERTION");
+
+	online_verification::OnlineVerificationPublicKey public_key;
+	public_key.key_id = key_id;
+	public_key.public_key_der = hex_to_bytes(public_key_der_hex);
+	public_key.bits = 3072;
+
+	online_verification::OnlineVerificationExpected expected;
+	expected.project = project;
+	expected.feature = feature;
+	expected.license_fingerprint = fingerprint;
+	expected.device_hash = device_hash;
+	expected.nonce = nonce;
+	expected.now_epoch_seconds = static_cast<uint64_t>(time(nullptr));
+	expected.trusted_public_keys.push_back(public_key);
+
+	online_verification::OnlineAssertionClaims verified_claims;
+	string error;
+	LCC_EVENT_TYPE failure = LICENSE_OK;
+	bool used_cache = false;
+	BOOST_REQUIRE_MESSAGE(
+		online_verification::verify_assertion_envelope(assertion, expected, &verified_claims, error, failure, used_cache),
+		error);
+	BOOST_CHECK(!used_cache);
+	BOOST_CHECK_EQUAL(verified_claims.key_id, key_id);
+	BOOST_CHECK_EQUAL(verified_claims.project, project);
+	BOOST_CHECK_EQUAL(verified_claims.feature, feature);
+	BOOST_CHECK_EQUAL(verified_claims.license_fingerprint, fingerprint);
+	BOOST_CHECK_EQUAL(verified_claims.nonce, nonce);
+	BOOST_CHECK_EQUAL(verified_claims.status, "ok");
 }
 
 BOOST_AUTO_TEST_CASE(dedicated_online_key_set_rejects_project_license_key_assertion) {
@@ -572,6 +678,37 @@ BOOST_AUTO_TEST_CASE(evaluate_advances_revocation_floor_and_rejects_rollback) {
 	online_verification::reset_revocation_floors_for_tests();
 }
 
+BOOST_AUTO_TEST_CASE(evaluate_enforces_external_minimum_revocation_floor) {
+	online_verification::reset_revocation_floors_for_tests();
+	online_verification::OnlineVerificationRequest request;
+	request.policy = online_verification::OnlinePolicy::Require;
+	request.online_check = signing_callback;
+	request.project = LCC_PROJECT_NAME;
+	request.feature = LCC_PROJECT_NAME;
+	request.license_fingerprint = string(LCC_API_ONLINE_LICENSE_FINGERPRINT_SIZE, 'a');
+	request.device_hash = "";
+	request.minimum_revocation_seq = 9;
+
+	CallbackState state;
+	state.revocation_seq = 8;
+	request.online_user_data = &state;
+	online_verification::OnlineVerificationResult result = online_verification::evaluate(request);
+	BOOST_CHECK(result.failed());
+	BOOST_CHECK_EQUAL(result.event_type, LICENSE_ONLINE_ASSERTION_INVALID);
+	BOOST_CHECK_EQUAL(online_verification::revocation_floor_for_tests(request.project, request.feature,
+																	  request.license_fingerprint),
+					  0U);
+
+	state.revocation_seq = 9;
+	result = online_verification::evaluate(request);
+	BOOST_REQUIRE(!result.failed());
+	BOOST_CHECK_EQUAL(result.accepted_revocation_seq, 9U);
+	BOOST_CHECK_EQUAL(online_verification::revocation_floor_for_tests(request.project, request.feature,
+																	  request.license_fingerprint),
+					  9U);
+	online_verification::reset_revocation_floors_for_tests();
+}
+
 BOOST_AUTO_TEST_CASE(evaluate_rejects_replayed_assertion_below_seen_revocation_floor) {
 	online_verification::reset_revocation_floors_for_tests();
 	online_verification::OnlineVerificationRequest request;
@@ -701,6 +838,99 @@ BOOST_AUTO_TEST_CASE(require_policy_accepts_valid_assertion_and_rejects_bad_bind
 	std::remove(valid_path.c_str());
 }
 
+BOOST_AUTO_TEST_CASE(decision_wrapper_requires_online_and_persistent_floor_callbacks) {
+	RuntimePolicyGuard guard;
+	const string valid_path = issue_valid_license_file("decision-requires-callbacks");
+	LicenseLocation location = license_path_location(valid_path);
+	CallerInformations caller = default_caller();
+	LicenseInfo info{};
+	LccLicenseDecision decision;
+	lcc_init_license_decision(&decision);
+
+	const LCC_EVENT_TYPE result = lcc_acquire_license_decision(&caller, &location, &info, &decision, nullptr);
+	BOOST_CHECK_EQUAL(result, LICENSE_ONLINE_REQUIRED);
+	BOOST_CHECK_EQUAL(decision.decision, LCC_LICENSE_DECISION_DENY);
+	BOOST_CHECK_EQUAL(decision.event_type, LICENSE_ONLINE_REQUIRED);
+	BOOST_CHECK(decision.tamper_enforced);
+	BOOST_CHECK(find_status_event(info, LICENSE_ONLINE_REQUIRED, SVRT_ERROR) != nullptr);
+	BOOST_CHECK_EQUAL(info.license_version, 0);
+
+	std::remove(valid_path.c_str());
+}
+
+BOOST_AUTO_TEST_CASE(decision_wrapper_persists_floor_and_rejects_restart_rollback) {
+	RuntimePolicyGuard guard;
+	const string valid_path = issue_valid_license_file("decision-persistent-floor-valid");
+	LicenseLocation location = license_path_location(valid_path);
+	CallerInformations caller = default_caller();
+
+	CallbackState online_state;
+	online_state.revocation_seq = 12;
+	FloorStoreState floor_state;
+	floor_state.floor = 9;
+	LccLicenseDecisionOptions options = secure_decision_options(online_state, floor_state);
+
+	LicenseInfo ok_info{};
+	LccLicenseDecision ok_decision;
+	const LCC_EVENT_TYPE ok = lcc_acquire_license_decision(&caller, &location, &ok_info, &ok_decision, &options);
+	BOOST_REQUIRE_EQUAL(ok, LICENSE_OK);
+	BOOST_CHECK_EQUAL(ok_decision.decision, LCC_LICENSE_DECISION_ALLOW);
+	BOOST_CHECK(ok_decision.online_verified);
+	BOOST_CHECK(ok_decision.revocation_floor_loaded);
+	BOOST_CHECK(ok_decision.revocation_floor_stored);
+	BOOST_CHECK(ok_decision.tamper_enforced);
+	BOOST_CHECK_EQUAL(ok_decision.revocation_floor.revocation_seq, 12U);
+	BOOST_CHECK_EQUAL(floor_state.floor, 12U);
+	BOOST_CHECK_EQUAL(floor_state.load_calls, 1);
+	BOOST_CHECK_EQUAL(floor_state.store_calls, 1);
+	BOOST_CHECK_EQUAL(ok_info.license_version, 200);
+
+	online_verification::reset_revocation_floors_for_tests();
+	online_state.revocation_seq = 11;
+	LicenseInfo rollback_info{};
+	LccLicenseDecision rollback_decision;
+	const LCC_EVENT_TYPE rollback =
+		lcc_acquire_license_decision(&caller, &location, &rollback_info, &rollback_decision, &options);
+	BOOST_CHECK_EQUAL(rollback, LICENSE_ONLINE_ASSERTION_INVALID);
+	BOOST_CHECK_EQUAL(rollback_decision.decision, LCC_LICENSE_DECISION_DENY);
+	BOOST_CHECK(rollback_decision.revocation_floor_loaded);
+	BOOST_CHECK(!rollback_decision.revocation_floor_stored);
+	BOOST_CHECK_EQUAL(floor_state.load_calls, 2);
+	BOOST_CHECK_EQUAL(floor_state.store_calls, 1);
+	BOOST_CHECK_EQUAL(rollback_info.license_version, 0);
+	BOOST_CHECK(find_status_event(rollback_info, LICENSE_ONLINE_ASSERTION_INVALID, SVRT_ERROR) != nullptr);
+
+	std::remove(valid_path.c_str());
+}
+
+BOOST_AUTO_TEST_CASE(decision_wrapper_denies_when_floor_store_fails) {
+	RuntimePolicyGuard guard;
+	const string valid_path = issue_valid_license_file("decision-floor-store-fails");
+	LicenseLocation location = license_path_location(valid_path);
+	CallerInformations caller = default_caller();
+
+	CallbackState online_state;
+	online_state.revocation_seq = 3;
+	FloorStoreState floor_state;
+	floor_state.store_ok = false;
+	LccLicenseDecisionOptions options = secure_decision_options(online_state, floor_state);
+
+	LicenseInfo info{};
+	LccLicenseDecision decision;
+	const LCC_EVENT_TYPE result = lcc_acquire_license_decision(&caller, &location, &info, &decision, &options);
+	BOOST_CHECK_EQUAL(result, LICENSE_ONLINE_VERIFICATION_FAILED);
+	BOOST_CHECK_EQUAL(decision.decision, LCC_LICENSE_DECISION_DENY);
+	BOOST_CHECK(decision.online_verified);
+	BOOST_CHECK(decision.revocation_floor_loaded);
+	BOOST_CHECK(!decision.revocation_floor_stored);
+	BOOST_CHECK_EQUAL(floor_state.load_calls, 1);
+	BOOST_CHECK_EQUAL(floor_state.store_calls, 1);
+	BOOST_CHECK_EQUAL(info.license_version, 0);
+	BOOST_CHECK(find_status_event(info, LICENSE_ONLINE_VERIFICATION_FAILED, SVRT_ERROR) != nullptr);
+
+	std::remove(valid_path.c_str());
+}
+
 BOOST_AUTO_TEST_CASE(local_license_failure_takes_precedence_over_online_callback) {
 	RuntimePolicyGuard guard;
 	CallerInformations caller = default_caller();
@@ -719,6 +949,29 @@ BOOST_AUTO_TEST_CASE(local_license_failure_takes_precedence_over_online_callback
 	const LCC_EVENT_TYPE result = acquire_license_ex(&caller, &location, &info, &options);
 	BOOST_CHECK_EQUAL(result, LICENSE_MALFORMED);
 	BOOST_CHECK_EQUAL(state.calls, 0);
+	BOOST_CHECK(!has_status_event(info, LICENSE_ONLINE_VERIFICATION_FAILED));
+	BOOST_CHECK(!has_status_event(info, LICENSE_ONLINE_ASSERTION_INVALID));
+}
+
+BOOST_AUTO_TEST_CASE(decision_wrapper_preserves_local_license_failure_precedence) {
+	RuntimePolicyGuard guard;
+	CallerInformations caller = default_caller();
+	LicenseLocation location;
+	lcc_init_license_location(&location, LICENSE_PLAIN_DATA);
+	BOOST_REQUIRE(lcc_set_license_location_data(&location, LICENSE_PLAIN_DATA, "not ini"));
+
+	CallbackState online_state;
+	FloorStoreState floor_state;
+	LccLicenseDecisionOptions options = secure_decision_options(online_state, floor_state);
+
+	LicenseInfo info{};
+	LccLicenseDecision decision;
+	const LCC_EVENT_TYPE result = lcc_acquire_license_decision(&caller, &location, &info, &decision, &options);
+	BOOST_CHECK_EQUAL(result, LICENSE_MALFORMED);
+	BOOST_CHECK_EQUAL(decision.decision, LCC_LICENSE_DECISION_DENY);
+	BOOST_CHECK_EQUAL(online_state.calls, 0);
+	BOOST_CHECK_EQUAL(floor_state.load_calls, 0);
+	BOOST_CHECK_EQUAL(floor_state.store_calls, 0);
 	BOOST_CHECK(!has_status_event(info, LICENSE_ONLINE_VERIFICATION_FAILED));
 	BOOST_CHECK(!has_status_event(info, LICENSE_ONLINE_ASSERTION_INVALID));
 }

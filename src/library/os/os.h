@@ -68,7 +68,7 @@ FUNCTION_RETURN getSecureRandomBytes(unsigned char* buffer, size_t size);
  * </ul>
  * Can be used as a fallback in case no other methods are available.
  * Windows:
- * HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\ CurrentVersion\ProductId
+ * HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\ProductId
  * http://sowkot.blogspot.it/2008/08/generating-unique-keyfinger-print-for.html
  * http://stackoverflow.com/questions/2842116/reliable-way-of-generating-unique-hardware-id
  *

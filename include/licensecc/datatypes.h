@@ -78,6 +78,8 @@ typedef enum {
 #define LCC_ONLINE_DEFAULT_TIMEOUT_MS 3000u
 #define LCC_ONLINE_MAX_TIMEOUT_MS 30000u
 #define LCC_LICENSE_CHECK_OPTIONS_VERSION 2u
+#define LCC_LICENSE_DECISION_OPTIONS_VERSION 1u
+#define LCC_LICENSE_DECISION_VERSION 1u
 
 typedef bool (*LCC_HOST_INTEGRITY_CHECK)(void* user_data, char* detail_out, size_t detail_out_size);
 
@@ -125,6 +127,52 @@ typedef struct LicenseCheckOptions {
 	void* online_user_data;
 	char online_device_hash[LCC_API_ONLINE_DEVICE_HASH_SIZE + 1];
 } LicenseCheckOptions;
+
+typedef enum {
+	LCC_LICENSE_DECISION_DENY = 0,
+	LCC_LICENSE_DECISION_ALLOW = 1
+} LCC_LICENSE_DECISION;
+
+typedef struct LccRevocationFloorRecord {
+	uint32_t size;
+	uint32_t version;
+	char project[LCC_API_ONLINE_PROJECT_SIZE + 1];
+	char feature[LCC_API_FEATURE_NAME_SIZE + 1];
+	char license_fingerprint[LCC_API_ONLINE_LICENSE_FINGERPRINT_SIZE + 1];
+	uint64_t revocation_seq;
+} LccRevocationFloorRecord;
+
+typedef bool (*LCC_REVOCATION_FLOOR_LOAD)(void* user_data, const LccRevocationFloorRecord* key,
+										  uint64_t* revocation_seq_out);
+typedef bool (*LCC_REVOCATION_FLOOR_STORE)(void* user_data, const LccRevocationFloorRecord* record);
+
+typedef struct LccLicenseDecisionOptions {
+	uint32_t size;
+	uint32_t version;
+	LCC_ONLINE_CHECK online_check;
+	void* online_user_data;
+	LCC_HOST_INTEGRITY_CHECK host_integrity_check;
+	void* host_integrity_user_data;
+	LCC_REVOCATION_FLOOR_LOAD revocation_floor_load;
+	LCC_REVOCATION_FLOOR_STORE revocation_floor_store;
+	void* revocation_floor_user_data;
+	uint32_t online_timeout_ms;
+	uint32_t reserved;
+	char online_device_hash[LCC_API_ONLINE_DEVICE_HASH_SIZE + 1];
+} LccLicenseDecisionOptions;
+
+typedef struct LccLicenseDecision {
+	uint32_t size;
+	uint32_t version;
+	LCC_LICENSE_DECISION decision;
+	LCC_EVENT_TYPE event_type;
+	bool online_verified;
+	bool revocation_floor_loaded;
+	bool revocation_floor_stored;
+	bool tamper_enforced;
+	uint32_t reserved;
+	LccRevocationFloorRecord revocation_floor;
+} LccLicenseDecision;
 
 typedef struct {
 	LCC_SEVERITY severity;

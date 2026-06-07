@@ -1,14 +1,14 @@
 /**
- * @file network_id.c
+ * @file network.cpp
  * @date 16 Sep 2014
  * @brief File containing network interface detection functions for Linux.
  *
- * The only public function of this module is #getAdapterInfos(OsAdapterInfo *,
- *		size_t *), other functions are either static or inline.
+ * The only public function of this module is getAdapterInfos(), other
+ * functions are either static or inline.
  *
  * Responsibility of this module is to fill OsAdapterInfo structures, in a
  * predictable way (skip "lo" interfaces,
- * @TODO: place physical interfaces in front in a repeatable order: "eth", "wlan","ib"
+ * TODO: place physical interfaces in front in a repeatable order: "eth", "wlan","ib"
  * and other interfaces later, first the one with a a specified mac address, then
  * the ones with only an ip.)
  */
@@ -40,9 +40,8 @@ using namespace std;
 
 /**
  *
- * @param adapterInfos
- * @param adapter_info_size
- * @return
+ * @param adapterInfos output vector populated with network adapter details.
+ * @return FUNC_RET_OK when adapters can be enumerated, otherwise an error code.
  */
 FUNCTION_RETURN getAdapterInfos(vector<OsAdapterInfo> &adapterInfos) {
 	unordered_map<string, OsAdapterInfo> adapterByName;

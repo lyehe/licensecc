@@ -545,8 +545,9 @@ OnlineVerificationResult evaluate(const OnlineVerificationRequest& request) {
 	expected.nonce = nonce;
 	expected.now_epoch_seconds = request.now_epoch_seconds;
 	expected.allow_cache = false;
-	expected.min_revocation_seq =
-		current_revocation_floor(request.project, request.feature, request.license_fingerprint);
+	expected.min_revocation_seq = (std::max)(
+		current_revocation_floor(request.project, request.feature, request.license_fingerprint),
+		request.minimum_revocation_seq);
 
 	std::string error;
 	LCC_EVENT_TYPE failure_event = LICENSE_ONLINE_ASSERTION_INVALID;
@@ -559,6 +560,7 @@ OnlineVerificationResult evaluate(const OnlineVerificationRequest& request) {
 	advance_revocation_floor(request.project, request.feature, request.license_fingerprint, claims.revocation_seq);
 	result.accepted = true;
 	result.used_cache = used_cache;
+	result.accepted_revocation_seq = claims.revocation_seq;
 	return result;
 }
 
@@ -575,6 +577,16 @@ void set_trusted_public_keys_for_tests(const std::vector<OnlineVerificationPubli
 	trusted_public_keys_override_for_tests() = public_keys;
 }
 
+void set_revocation_floor(const std::string& project, const std::string& feature,
+						  const std::string& license_fingerprint, const uint64_t revocation_seq) {
+	advance_revocation_floor(project, feature, license_fingerprint, revocation_seq);
+}
+
+uint64_t revocation_floor(const std::string& project, const std::string& feature,
+						  const std::string& license_fingerprint) {
+	return current_revocation_floor(project, feature, license_fingerprint);
+}
+
 void reset_revocation_floors_for_tests() {
 	std::lock_guard<std::mutex> lock(revocation_floors_mutex());
 	revocation_floors().clear();
@@ -582,7 +594,7 @@ void reset_revocation_floors_for_tests() {
 
 uint64_t revocation_floor_for_tests(const std::string& project, const std::string& feature,
 									const std::string& license_fingerprint) {
-	return current_revocation_floor(project, feature, license_fingerprint);
+	return revocation_floor(project, feature, license_fingerprint);
 }
 
 }  // namespace online_verification

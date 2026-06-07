@@ -41,7 +41,7 @@ static bool is_supported_default_strategy(LCC_API_HW_IDENTIFICATION_STRATEGY str
 
 DefaultStrategy::DefaultStrategy() : m_has_strategy_override(false) {}
 
-DefaultStrategy::DefaultStrategy(const vector<LCC_API_HW_IDENTIFICATION_STRATEGY> &strategy_to_try)
+DefaultStrategy::DefaultStrategy(const std::vector<LCC_API_HW_IDENTIFICATION_STRATEGY> &strategy_to_try)
 	: m_has_strategy_override(true), m_strategy_override(strategy_to_try) {}
 
 DefaultStrategy::~DefaultStrategy() {}

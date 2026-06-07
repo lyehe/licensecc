@@ -41,6 +41,24 @@ void lcc_init_license_info(LicenseInfo* licenseInfo);
  * required and must return a fresh signed assertion.
  */
 void lcc_init_license_check_options(LicenseCheckOptions* options);
+/**
+ * Initializes the revocation-floor record used by the online decision APIs.
+ * Hosts that persist rollback floors fill project, feature, license_fingerprint,
+ * and revocation_seq before calling ::lcc_set_online_revocation_floor.
+ */
+void lcc_init_revocation_floor_record(LccRevocationFloorRecord* record);
+/**
+ * Initializes ::LccLicenseDecisionOptions for ::lcc_acquire_license_decision.
+ * This higher-level entry point owns the secure policy choices: tamper
+ * enforcement and strict source shadowing are always enabled, online
+ * verification is required, and persisted revocation-floor load/store
+ * callbacks are required.
+ */
+void lcc_init_license_decision_options(LccLicenseDecisionOptions* options);
+/**
+ * Initializes ::LccLicenseDecision output. The default decision is deny.
+ */
+void lcc_init_license_decision(LccLicenseDecision* decision);
 
 /**
  * Bounded setters for fixed-size public ABI buffers. They return false and
@@ -77,7 +95,7 @@ void print_error(char out_buffer[LCC_API_ERROR_BUFFER_SIZE], const LicenseInfo* 
  * support bundles, public issue trackers, or telemetry. Redact them by default
  * and request raw values only through an explicit trusted support workflow.
  *
- * pc_id_method = ::STRATEGY_DEFAULT is usually the best choice.
+ * pc_id_method = STRATEGY_DEFAULT is usually the best choice.
  *
  * First call this method with `identifier_out` = nullptr and `*buf_size` = 0; it will return the requested buffer size
  * in the `buf_size` parameter. If `buf_size` is nullptr the function returns false.
@@ -85,11 +103,11 @@ void print_error(char out_buffer[LCC_API_ERROR_BUFFER_SIZE], const LicenseInfo* 
  * Then allocate the necessary memory, and call the method again.
  *
  * @return true if successful, false if failure (because it is not possible to identify or buffer too small).
- * @param hw_id_method[in] specifies a preferred identification method. Usually #STRATEGY_DEFAULT works well. See the
+ * @param[in] hw_id_method specifies a preferred identification method. Usually STRATEGY_DEFAULT works well. See the
  * wiki for more informations.
- * @param identifier_out[out] buffer where the identification string will be placed.
- * @param buf_size[in-out] size of the buffer where the identification string will be placed.
- * @param execution_environment_info[out] if not null will contain the informations about the execution environment.
+ * @param[out] identifier_out buffer where the identification string will be placed.
+ * @param[in,out] buf_size size of the buffer where the identification string will be placed.
+ * @param[out] execution_environment_info if not null will contain the informations about the execution environment.
  */
 bool identify_pc(LCC_API_HW_IDENTIFICATION_STRATEGY hw_id_method, char* identifier_out, size_t* buf_size,
 				 ExecutionEnvironmentInfo* execution_environment_info);
@@ -101,15 +119,15 @@ bool identify_pc(LCC_API_HW_IDENTIFICATION_STRATEGY hw_id_method, char* identifi
  * @return LCC_EVENT_TYPE::LICENSE_OK(0) if successful. Other values mean the
  * 			requested product or feature must be treated as not licensed.
  *
- * @param callerInformation[in] optional, can be NULL.
+ * @param[in] callerInformation optional, can be NULL.
  * 			contains informations on the software that is requesting the license verification. Let the software
  * 			specify its version or request verification for features that need to be enabled separately.
  * 			When a license has start-version or end-version limits, a missing or malformed caller version
  * 			fails closed with PRODUCT_NOT_LICENSED.
- * @param licenseLocation[in] optional, can be NULL.
+ * @param[in] licenseLocation optional, can be NULL.
  * 					licenseLocation, either the name of the file
  * 								or the name of the environment variable should be !='\0'
- * @param license_out[out] optional, can be NULL. If set, it is reset before validation and populated with license
+ * @param[out] license_out optional, can be NULL. If set, it is reset before validation and populated with license
  * 							information and audit status for the result.
  */
 
@@ -135,6 +153,32 @@ LCC_EVENT_TYPE acquire_license(const CallerInformations* callerInformation, cons
  */
 LCC_EVENT_TYPE acquire_license_ex(const CallerInformations* callerInformation, const LicenseLocation* licenseLocation,
 								  LicenseInfo* license_out, const LicenseCheckOptions* options);
+
+/**
+ * Secure decision wrapper for production integrations that have an online
+ * verifier and durable host storage. The wrapper evaluates the local license,
+ * enforced anti-tamper checks, required online verification, and a persisted
+ * revocation-sequence rollback floor. It returns ::LICENSE_OK only when the
+ * decision is ::LCC_LICENSE_DECISION_ALLOW.
+ *
+ * The host callbacks in ::LccLicenseDecisionOptions must load and store the
+ * strongest revocation_seq seen for the exact project/feature/license
+ * fingerprint. Load/store failures fail closed so a restarted process cannot
+ * silently accept an older online assertion.
+ */
+LCC_EVENT_TYPE lcc_acquire_license_decision(const CallerInformations* callerInformation,
+											const LicenseLocation* licenseLocation, LicenseInfo* license_out,
+											LccLicenseDecision* decision_out,
+											const LccLicenseDecisionOptions* options);
+
+/**
+ * Process-local online revocation-floor helpers. They are useful for tests and
+ * hosts that restore a persisted floor at startup before using
+ * ::acquire_license_ex directly. The secure decision wrapper above is preferred
+ * because it loads/stores the floor on every successful online decision.
+ */
+bool lcc_set_online_revocation_floor(const LccRevocationFloorRecord* record);
+bool lcc_get_online_revocation_floor(LccRevocationFloorRecord* record);
 
 /**
  * Enables or disables license lookup through process environment variables

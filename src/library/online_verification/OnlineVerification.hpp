@@ -64,6 +64,7 @@ struct OnlineVerificationRequest {
 	std::string license_fingerprint;
 	std::string device_hash;
 	uint64_t now_epoch_seconds = 0;
+	uint64_t minimum_revocation_seq = 0;
 };
 
 struct OnlineVerificationResult {
@@ -71,6 +72,7 @@ struct OnlineVerificationResult {
 	bool accepted = true;
 	bool callback_invoked = false;
 	bool used_cache = false;
+	uint64_t accepted_revocation_seq = 0;
 	LCC_EVENT_TYPE event_type = LICENSE_OK;
 	LCC_SEVERITY severity = SVRT_INFO;
 	std::string license_reference;
@@ -89,6 +91,10 @@ bool verify_assertion_envelope(const std::string& assertion, const OnlineVerific
 OnlineVerificationResult evaluate(const OnlineVerificationRequest& request);
 void append_audit_event(const OnlineVerificationResult& result, EventRegistry& event_registry);
 void set_trusted_public_keys_for_tests(const std::vector<OnlineVerificationPublicKey>& public_keys);
+void set_revocation_floor(const std::string& project, const std::string& feature,
+						  const std::string& license_fingerprint, uint64_t revocation_seq);
+uint64_t revocation_floor(const std::string& project, const std::string& feature,
+						  const std::string& license_fingerprint);
 void reset_revocation_floors_for_tests();
 uint64_t revocation_floor_for_tests(const std::string& project, const std::string& feature,
 									const std::string& license_fingerprint);

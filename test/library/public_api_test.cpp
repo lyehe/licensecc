@@ -202,6 +202,40 @@ BOOST_AUTO_TEST_CASE(public_abi_layout_profile_is_stable) {
 	BOOST_CHECK_EQUAL(offsetof(LicenseCheckOptions, online_check), static_cast<size_t>(48));
 	BOOST_CHECK_EQUAL(offsetof(LicenseCheckOptions, online_user_data), static_cast<size_t>(56));
 	BOOST_CHECK_EQUAL(offsetof(LicenseCheckOptions, online_device_hash), static_cast<size_t>(64));
+
+	BOOST_CHECK_EQUAL(sizeof(LccRevocationFloorRecord), static_cast<size_t>(232));
+	BOOST_CHECK_EQUAL(offsetof(LccRevocationFloorRecord, size), static_cast<size_t>(0));
+	BOOST_CHECK_EQUAL(offsetof(LccRevocationFloorRecord, version), static_cast<size_t>(4));
+	BOOST_CHECK_EQUAL(offsetof(LccRevocationFloorRecord, project), static_cast<size_t>(8));
+	BOOST_CHECK_EQUAL(offsetof(LccRevocationFloorRecord, feature), static_cast<size_t>(136));
+	BOOST_CHECK_EQUAL(offsetof(LccRevocationFloorRecord, license_fingerprint), static_cast<size_t>(152));
+	BOOST_CHECK_EQUAL(offsetof(LccRevocationFloorRecord, revocation_seq), static_cast<size_t>(224));
+
+	BOOST_CHECK_EQUAL(sizeof(LccLicenseDecisionOptions), static_cast<size_t>(144));
+	BOOST_CHECK_EQUAL(offsetof(LccLicenseDecisionOptions, size), static_cast<size_t>(0));
+	BOOST_CHECK_EQUAL(offsetof(LccLicenseDecisionOptions, version), static_cast<size_t>(4));
+	BOOST_CHECK_EQUAL(offsetof(LccLicenseDecisionOptions, online_check), static_cast<size_t>(8));
+	BOOST_CHECK_EQUAL(offsetof(LccLicenseDecisionOptions, online_user_data), static_cast<size_t>(16));
+	BOOST_CHECK_EQUAL(offsetof(LccLicenseDecisionOptions, host_integrity_check), static_cast<size_t>(24));
+	BOOST_CHECK_EQUAL(offsetof(LccLicenseDecisionOptions, host_integrity_user_data), static_cast<size_t>(32));
+	BOOST_CHECK_EQUAL(offsetof(LccLicenseDecisionOptions, revocation_floor_load), static_cast<size_t>(40));
+	BOOST_CHECK_EQUAL(offsetof(LccLicenseDecisionOptions, revocation_floor_store), static_cast<size_t>(48));
+	BOOST_CHECK_EQUAL(offsetof(LccLicenseDecisionOptions, revocation_floor_user_data), static_cast<size_t>(56));
+	BOOST_CHECK_EQUAL(offsetof(LccLicenseDecisionOptions, online_timeout_ms), static_cast<size_t>(64));
+	BOOST_CHECK_EQUAL(offsetof(LccLicenseDecisionOptions, reserved), static_cast<size_t>(68));
+	BOOST_CHECK_EQUAL(offsetof(LccLicenseDecisionOptions, online_device_hash), static_cast<size_t>(72));
+
+	BOOST_CHECK_EQUAL(sizeof(LccLicenseDecision), static_cast<size_t>(256));
+	BOOST_CHECK_EQUAL(offsetof(LccLicenseDecision, size), static_cast<size_t>(0));
+	BOOST_CHECK_EQUAL(offsetof(LccLicenseDecision, version), static_cast<size_t>(4));
+	BOOST_CHECK_EQUAL(offsetof(LccLicenseDecision, decision), static_cast<size_t>(8));
+	BOOST_CHECK_EQUAL(offsetof(LccLicenseDecision, event_type), static_cast<size_t>(12));
+	BOOST_CHECK_EQUAL(offsetof(LccLicenseDecision, online_verified), static_cast<size_t>(16));
+	BOOST_CHECK_EQUAL(offsetof(LccLicenseDecision, revocation_floor_loaded), static_cast<size_t>(17));
+	BOOST_CHECK_EQUAL(offsetof(LccLicenseDecision, revocation_floor_stored), static_cast<size_t>(18));
+	BOOST_CHECK_EQUAL(offsetof(LccLicenseDecision, tamper_enforced), static_cast<size_t>(19));
+	BOOST_CHECK_EQUAL(offsetof(LccLicenseDecision, reserved), static_cast<size_t>(20));
+	BOOST_CHECK_EQUAL(offsetof(LccLicenseDecision, revocation_floor), static_cast<size_t>(24));
 }
 
 BOOST_AUTO_TEST_CASE(public_abi_enum_values_are_stable) {
@@ -250,6 +284,10 @@ BOOST_AUTO_TEST_CASE(public_abi_enum_values_are_stable) {
 	BOOST_CHECK_EQUAL(static_cast<uint32_t>(LCC_ONLINE_DEFAULT_TIMEOUT_MS), 3000U);
 	BOOST_CHECK_EQUAL(static_cast<uint32_t>(LCC_ONLINE_MAX_TIMEOUT_MS), 30000U);
 	BOOST_CHECK_EQUAL(static_cast<uint32_t>(LCC_LICENSE_CHECK_OPTIONS_VERSION), 2U);
+	BOOST_CHECK_EQUAL(static_cast<uint32_t>(LCC_LICENSE_DECISION_OPTIONS_VERSION), 1U);
+	BOOST_CHECK_EQUAL(static_cast<uint32_t>(LCC_LICENSE_DECISION_VERSION), 1U);
+	BOOST_CHECK_EQUAL(static_cast<int>(LCC_LICENSE_DECISION_DENY), 0);
+	BOOST_CHECK_EQUAL(static_cast<int>(LCC_LICENSE_DECISION_ALLOW), 1);
 
 	BOOST_CHECK_EQUAL(static_cast<int>(STRATEGY_DEFAULT), -1);
 	BOOST_CHECK_EQUAL(static_cast<int>(STRATEGY_NONE), -2);
@@ -284,6 +322,9 @@ BOOST_AUTO_TEST_CASE(public_api_symbols_are_linkable) {
 	BOOST_CHECK(lcc_init_license_location != nullptr);
 	BOOST_CHECK(lcc_init_license_info != nullptr);
 	BOOST_CHECK(lcc_init_license_check_options != nullptr);
+	BOOST_CHECK(lcc_init_revocation_floor_record != nullptr);
+	BOOST_CHECK(lcc_init_license_decision_options != nullptr);
+	BOOST_CHECK(lcc_init_license_decision != nullptr);
 	BOOST_CHECK(lcc_set_caller_feature_name != nullptr);
 	BOOST_CHECK(lcc_set_caller_version != nullptr);
 	BOOST_CHECK(lcc_set_license_location_data != nullptr);
@@ -292,6 +333,9 @@ BOOST_AUTO_TEST_CASE(public_api_symbols_are_linkable) {
 	BOOST_CHECK(identify_pc != nullptr);
 	BOOST_CHECK(acquire_license != nullptr);
 	BOOST_CHECK(acquire_license_ex != nullptr);
+	BOOST_CHECK(lcc_acquire_license_decision != nullptr);
+	BOOST_CHECK(lcc_set_online_revocation_floor != nullptr);
+	BOOST_CHECK(lcc_get_online_revocation_floor != nullptr);
 	BOOST_CHECK(lcc_set_environment_license_sources_enabled != nullptr);
 	BOOST_CHECK(lcc_set_strict_source_fatal_enabled != nullptr);
 	BOOST_CHECK(confirm_license != nullptr);
@@ -339,10 +383,76 @@ BOOST_AUTO_TEST_CASE(public_helpers_initialize_structs_safely) {
 	BOOST_CHECK(options.online_user_data == nullptr);
 	BOOST_CHECK_EQUAL(options.online_device_hash[0], '\0');
 
+	LccRevocationFloorRecord floor_record;
+	std::memset(&floor_record, 0x7f, sizeof(floor_record));
+	lcc_init_revocation_floor_record(&floor_record);
+	BOOST_CHECK_EQUAL(floor_record.size, static_cast<uint32_t>(sizeof(LccRevocationFloorRecord)));
+	BOOST_CHECK_EQUAL(floor_record.version, static_cast<uint32_t>(LCC_LICENSE_DECISION_VERSION));
+	BOOST_CHECK_EQUAL(floor_record.project[0], '\0');
+	BOOST_CHECK_EQUAL(floor_record.feature[0], '\0');
+	BOOST_CHECK_EQUAL(floor_record.license_fingerprint[0], '\0');
+	BOOST_CHECK_EQUAL(floor_record.revocation_seq, 0U);
+
+	LccLicenseDecisionOptions decision_options;
+	std::memset(&decision_options, 0x7f, sizeof(decision_options));
+	lcc_init_license_decision_options(&decision_options);
+	BOOST_CHECK_EQUAL(decision_options.size, static_cast<uint32_t>(sizeof(LccLicenseDecisionOptions)));
+	BOOST_CHECK_EQUAL(decision_options.version, static_cast<uint32_t>(LCC_LICENSE_DECISION_OPTIONS_VERSION));
+	BOOST_CHECK(decision_options.online_check == nullptr);
+	BOOST_CHECK(decision_options.online_user_data == nullptr);
+	BOOST_CHECK(decision_options.host_integrity_check == nullptr);
+	BOOST_CHECK(decision_options.host_integrity_user_data == nullptr);
+	BOOST_CHECK(decision_options.revocation_floor_load == nullptr);
+	BOOST_CHECK(decision_options.revocation_floor_store == nullptr);
+	BOOST_CHECK(decision_options.revocation_floor_user_data == nullptr);
+	BOOST_CHECK_EQUAL(decision_options.online_timeout_ms, static_cast<uint32_t>(LCC_ONLINE_DEFAULT_TIMEOUT_MS));
+	BOOST_CHECK_EQUAL(decision_options.online_device_hash[0], '\0');
+
+	LccLicenseDecision decision;
+	std::memset(&decision, 0x7f, sizeof(decision));
+	lcc_init_license_decision(&decision);
+	BOOST_CHECK_EQUAL(decision.size, static_cast<uint32_t>(sizeof(LccLicenseDecision)));
+	BOOST_CHECK_EQUAL(decision.version, static_cast<uint32_t>(LCC_LICENSE_DECISION_VERSION));
+	BOOST_CHECK_EQUAL(decision.decision, LCC_LICENSE_DECISION_DENY);
+	BOOST_CHECK_EQUAL(decision.event_type, PRODUCT_NOT_LICENSED);
+	BOOST_CHECK(!decision.online_verified);
+	BOOST_CHECK(!decision.revocation_floor_loaded);
+	BOOST_CHECK(!decision.revocation_floor_stored);
+	BOOST_CHECK(!decision.tamper_enforced);
+	BOOST_CHECK_EQUAL(decision.revocation_floor.size, static_cast<uint32_t>(sizeof(LccRevocationFloorRecord)));
+
 	lcc_init_caller_informations(nullptr);
 	lcc_init_license_location(nullptr, LICENSE_PATH);
 	lcc_init_license_info(nullptr);
 	lcc_init_license_check_options(nullptr);
+	lcc_init_revocation_floor_record(nullptr);
+	lcc_init_license_decision_options(nullptr);
+	lcc_init_license_decision(nullptr);
+}
+
+BOOST_AUTO_TEST_CASE(public_revocation_floor_helpers_validate_and_roundtrip) {
+	LccRevocationFloorRecord record;
+	lcc_init_revocation_floor_record(&record);
+	std::strcpy(record.project, "PUBLICAPI");
+	std::strcpy(record.feature, "FEATURE");
+	const string fingerprint(LCC_API_ONLINE_LICENSE_FINGERPRINT_SIZE, 'a');
+	std::strcpy(record.license_fingerprint, fingerprint.c_str());
+	record.revocation_seq = 11;
+
+	BOOST_CHECK(lcc_set_online_revocation_floor(&record));
+	record.revocation_seq = 0;
+	BOOST_CHECK(lcc_get_online_revocation_floor(&record));
+	BOOST_CHECK_EQUAL(record.revocation_seq, 11U);
+
+	record.revocation_seq = 7;
+	BOOST_CHECK(lcc_set_online_revocation_floor(&record));
+	record.revocation_seq = 0;
+	BOOST_CHECK(lcc_get_online_revocation_floor(&record));
+	BOOST_CHECK_EQUAL(record.revocation_seq, 11U);
+
+	record.license_fingerprint[0] = 'z';
+	BOOST_CHECK(!lcc_get_online_revocation_floor(&record));
+	BOOST_CHECK(!lcc_set_online_revocation_floor(nullptr));
 }
 
 BOOST_AUTO_TEST_CASE(public_helpers_bound_fixed_buffer_setters) {

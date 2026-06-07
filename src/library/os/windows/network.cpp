@@ -1,10 +1,10 @@
 /**
- * @file network_id.c
+ * @file network.cpp
  * @date 16 Sep 2014
  * @brief File containing network interface detection functions for Windows.
  *
- * The only public function of this module is #getAdapterInfos(OsAdapterInfo *,
- *		size_t *), other functions are either static or inline.
+ * The only public function of this module is getAdapterInfos(), other
+ * functions are either static or inline.
  *
  * Responsibility of this module is to fill OsAdapterInfo structures, in a predictable way (skip loopback/vpn interfaces)
  */
@@ -33,9 +33,8 @@ using namespace std;
 
 	/**
  *
- * @param adapterInfos
- * @param adapter_info_size
- * @return
+ * @param adapterInfos output vector populated with network adapter details.
+ * @return FUNC_RET_OK when adapters can be enumerated, otherwise an error code.
  */
 FUNCTION_RETURN getAdapterInfos(vector<OsAdapterInfo> &adapterInfos) {
 	vector<OsAdapterInfo> tmpAdapters;
