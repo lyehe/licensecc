@@ -1,0 +1,17 @@
+# Normalize line endings: store text files as LF in the repository.
+# Stops the Windows checkout from flagging LF -> CRLF conversions.
+* text=auto eol=lf
+
+# Windows-only scripts must keep CRLF.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binary files (never normalize / diff as text).
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.pdf  binary
+*.rsa  binary
+*.der  binary

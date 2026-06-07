@@ -47,8 +47,11 @@ projects/*
 **/dist/
 **/dist-worker/
 **/.wrangler/
+**/playwright-report/
+**/test-results/
 **/.dev.vars
 **/.online-key/
 services/cloudflare-online-verifier/wrangler.toml
 services/cloudflare-license-admin/wrangler.toml
 services/cloudflare-license-admin/wrangler.jsonc
+services/cloudflare-d1-backup/wrangler.jsonc
