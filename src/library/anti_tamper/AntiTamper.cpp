@@ -1,5 +1,7 @@
 #include "AntiTamper.hpp"
 
+#include <licensecc/licensecc.h>
+
 #include <cctype>
 #include <cstddef>
 #include <exception>
@@ -21,19 +23,10 @@ const char kSourceShadowingPrefix[] = "source-shadowing";
 	((options).size >= offsetof(LicenseCheckOptions, field) + sizeof((options).field))
 
 void init_default_options(LicenseCheckOptions& options) {
-	options = LicenseCheckOptions{};
-	options.size = sizeof(LicenseCheckOptions);
-	options.version = LCC_LICENSE_CHECK_OPTIONS_VERSION;
-	options.tamper_policy = LCC_TAMPER_ENFORCE;
-	options.tamper_flags = LCC_TAMPER_FLAG_STRICT_SOURCE_SHADOWING;
-	options.host_integrity_check = nullptr;
-	options.host_integrity_user_data = nullptr;
-	options.online_policy = LCC_ONLINE_DISABLED;
-	options.online_flags = LCC_ONLINE_FLAG_NONE;
-	options.online_timeout_ms = LCC_ONLINE_DEFAULT_TIMEOUT_MS;
-	options.online_check = nullptr;
-	options.online_user_data = nullptr;
-	options.online_device_hash[0] = '\0';
+	// Single source of truth for the secure defaults: delegate to the public
+	// initializer so this internal default cannot drift from
+	// lcc_init_license_check_options().
+	lcc_init_license_check_options(&options);
 }
 
 std::string bounded_detail_or_default(const char* detail, const char* fallback) {

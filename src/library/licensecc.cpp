@@ -677,9 +677,6 @@ static LCC_EVENT_TYPE acquire_license_with_runtime_checks(const CallerInformatio
 		if (tamper_result.detected()) {
 			license::anti_tamper::append_audit_events(tamper_result, er);
 			if (tamper_result.policy == license::anti_tamper::AntiTamperPolicy::Enforce) {
-				if (license_out != nullptr) {
-					*license_out = LicenseInfo{};
-				}
 				result = LICENSE_TAMPER_DETECTED;
 			}
 		}
@@ -713,11 +710,11 @@ static LCC_EVENT_TYPE acquire_license_with_runtime_checks(const CallerInformatio
 					}
 				}
 			}
-			if (result != LICENSE_OK && license_out != nullptr) {
-				*license_out = LicenseInfo{};
-			}
 		}
 		if (result != LICENSE_OK) {
+			if (license_out != nullptr) {
+				*license_out = LicenseInfo{};
+			}
 			export_license_status(er, license_out);
 			return result;
 		}
@@ -740,9 +737,6 @@ static LCC_EVENT_TYPE acquire_license_with_runtime_checks(const CallerInformatio
 		if (online_result.failed()) {
 			license::online_verification::append_audit_event(online_result, er);
 			if (!online_result.accepted) {
-				if (license_out != nullptr) {
-					*license_out = LicenseInfo{};
-				}
 				result = online_result.event_type;
 			}
 		} else if (request.policy != license::online_verification::OnlinePolicy::Disabled) {
@@ -765,13 +759,13 @@ static LCC_EVENT_TYPE acquire_license_with_runtime_checks(const CallerInformatio
 						hardening_out->revocation_floor = accepted_floor;
 					}
 				}
-				if (result != LICENSE_OK && license_out != nullptr) {
-					*license_out = LicenseInfo{};
-				}
 			}
 		}
 	}
 
+	if (result != LICENSE_OK && license_out != nullptr) {
+		*license_out = LicenseInfo{};
+	}
 	export_license_status(er, license_out);
 	return result;
 }
