@@ -47,7 +47,7 @@ async function requireManualTrigger(request: Request, env: BackupHttpEnv): Promi
   return null;
 }
 
-function workflowInstanceId(kind: "manual" | "scheduled", nowMs: number): string {
+export function workflowInstanceId(kind: "manual" | "scheduled", nowMs: number): string {
   const timestamp = new Date(nowMs).toISOString().replace(/[^0-9A-Za-z]/g, "").slice(0, 17);
   return `${kind}-${timestamp}-${crypto.randomUUID().slice(0, 8)}`;
 }

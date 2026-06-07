@@ -256,6 +256,42 @@ test("valid entitlement returns signed assertion with nonce", async () => {
   assert.match(payload, new RegExp(`nonce=${"b".repeat(64)}\\n`));
 });
 
+test("cache-until grace window exceeds expires-at when cache ttl is larger", async () => {
+  const originalNow = Date.now;
+  Date.now = () => 2_000_000_000;
+  try {
+    const row = {
+      ...validBody(),
+      status: "active",
+      assertion_ttl_seconds: 120,
+      cache_ttl_seconds: 600,
+      revocation_seq: 7,
+    };
+    const response = await worker.fetch(
+      new Request("https://example.test/v1/verify", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(validBody()),
+      }),
+      await testKeyEnv(row),
+    );
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.ok, true);
+    const payload = Buffer.from(body.assertion.split(".")[1], "base64").toString("utf8");
+    const issuedAt = Number(payload.match(/issued-at=(\d+)\n/)[1]);
+    const expiresAt = Number(payload.match(/expires-at=(\d+)\n/)[1]);
+    const cacheUntil = Number(payload.match(/cache-until=(\d+)\n/)[1]);
+    assert.equal(expiresAt, issuedAt + 120);
+    assert.equal(cacheUntil, issuedAt + 600);
+    assert.ok(cacheUntil > expiresAt, "cache-until must exceed expires-at when cache ttl is larger");
+    // C++ client rejects cache_until - issued_at > 86400; stay within the bound.
+    assert.ok(cacheUntil - issuedAt <= 86400);
+  } finally {
+    Date.now = originalNow;
+  }
+});
+
 test("rate limited request returns 429 before D1 lookup", async () => {
   let dbPrepareCount = 0;
   const env = await testKeyEnv(null, {

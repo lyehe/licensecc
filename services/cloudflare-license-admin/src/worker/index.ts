@@ -182,14 +182,13 @@ function withId(row: Omit<EntitlementRecord, "id"> & { cache_ttl_seconds?: numbe
 }
 
 async function timingSafeEqual(a: string, b: string): Promise<boolean> {
-  const left = new TextEncoder().encode(a);
-  const right = new TextEncoder().encode(b);
-  const max = Math.max(left.length, right.length);
-  let diff = left.length ^ right.length;
-  for (let i = 0; i < max; ++i) {
-    diff |= (left[i] ?? 0) ^ (right[i] ?? 0);
+  const encoder = new TextEncoder();
+  const leftDigest = new Uint8Array(await crypto.subtle.digest("SHA-256", encoder.encode(a)));
+  const rightDigest = new Uint8Array(await crypto.subtle.digest("SHA-256", encoder.encode(b)));
+  let diff = a.length === b.length ? 0 : 1;
+  for (let i = 0; i < leftDigest.length; ++i) {
+    diff |= (leftDigest[i] ?? 0) ^ (rightDigest[i] ?? 0);
   }
-  await crypto.subtle.digest("SHA-256", left);
   return diff === 0;
 }
 
@@ -848,9 +847,7 @@ async function handleMutation(request: Request, env: Env, actor: Actor, requestI
       patchEntitlement(env, key, patch, ctx, idempotency));
   }
   if (request.method === "POST" && action !== undefined) {
-    const reason = typeof (body as Record<string, unknown>).reason === "string"
-      ? String((body as Record<string, unknown>).reason).slice(0, 1000)
-      : "";
+    const reason = safeNotes((body as Record<string, unknown>).reason) ?? "";
     if ((action === "disable" || action === "revoke") && reason === "") {
       return envelope(requestIdValue, "reason_required", undefined, 400);
     }

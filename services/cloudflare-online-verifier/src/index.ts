@@ -26,6 +26,7 @@ export interface Env {
   ONLINE_SIGNING_PRIVATE_KEY_PKCS8_PEM: string;
   ONLINE_SIGNING_KEY_ID: string;
   MAX_ASSERTION_TTL_SECONDS?: string;
+  MAX_CACHE_TTL_SECONDS?: string;
   LOG_RATE_LIMIT_DECISIONS?: string;
   D1_RATE_LIMIT_ENABLED?: string;
   D1_RATE_LIMIT_LIMIT?: string;
@@ -55,6 +56,7 @@ interface EntitlementRow {
   device_hash: string;
   status: "active" | "revoked" | "disabled";
   assertion_ttl_seconds: number;
+  cache_ttl_seconds: number;
   revocation_seq: number;
   valid_from?: number | null;
   valid_until?: number | null;
@@ -86,6 +88,7 @@ const PURPOSE = "licensecc-online-assertion";
 const VERSION = "1";
 const ALGORITHM = "rsa-pkcs1-sha256";
 const MAX_BODY_BYTES = 4096;
+// Mirrors the C++ ABI buffer limits LCC_API_ONLINE_PROJECT_SIZE (127) and LCC_API_FEATURE_NAME_SIZE (15) in include/licensecc/datatypes.h; keep in sync.
 const MAX_PROJECT_SIZE = 127;
 const MAX_FEATURE_SIZE = 15;
 const HEX_64 = /^[0-9a-fA-F]{64}$/;
@@ -227,6 +230,27 @@ async function checkD1RateLimitTier(
   return { limited: requestCount > limit, source: requestCount > limit ? source : undefined };
 }
 
+function logRateLimitTier(
+  env: Env,
+  requestIdValue: string,
+  request: Request,
+  verifyRequest: VerifyRequest,
+  source: NonNullable<RateLimitDecision["source"]>,
+  success: boolean,
+): void {
+  if (logRateLimitDecisions(env)) {
+    logEvent("info", "verify.rate_limit_decision", {
+      request_id: requestIdValue,
+      source,
+      project: verifyRequest.project,
+      feature: verifyRequest.feature,
+      license_fingerprint: shortHex(verifyRequest.license_fingerprint),
+      client_ip: clientIp(request),
+      success,
+    });
+  }
+}
+
 async function checkRateLimit(
   request: Request,
   env: Env,
@@ -237,17 +261,7 @@ async function checkRateLimit(
   const clientKey = clientRateLimitKey(request);
   if (env.VERIFY_RATE_LIMITER !== undefined) {
     const result = await env.VERIFY_RATE_LIMITER.limit({ key: clientKey });
-    if (logRateLimitDecisions(env)) {
-      logEvent("info", "verify.rate_limit_decision", {
-        request_id: requestIdValue,
-        source: "cloudflare-client",
-        project: verifyRequest.project,
-        feature: verifyRequest.feature,
-        license_fingerprint: shortHex(verifyRequest.license_fingerprint),
-        client_ip: clientIp(request),
-        success: result.success,
-      });
-    }
+    logRateLimitTier(env, requestIdValue, request, verifyRequest, "cloudflare-client", result.success);
     if (!result.success) {
       return { limited: true, source: "cloudflare-client" };
     }
@@ -262,16 +276,8 @@ async function checkRateLimit(
     env.D1_CLIENT_RATE_LIMIT_PERIOD_SECONDS,
     "d1-client",
   );
-  if (useD1RateLimit && logRateLimitDecisions(env)) {
-    logEvent("info", "verify.rate_limit_decision", {
-      request_id: requestIdValue,
-      source: "d1-client",
-      project: verifyRequest.project,
-      feature: verifyRequest.feature,
-      license_fingerprint: shortHex(verifyRequest.license_fingerprint),
-      client_ip: clientIp(request),
-      success: !clientDecision.limited,
-    });
+  if (useD1RateLimit) {
+    logRateLimitTier(env, requestIdValue, request, verifyRequest, "d1-client", !clientDecision.limited);
   }
   if (clientDecision.limited) {
     return clientDecision;
@@ -286,16 +292,8 @@ async function checkRateLimit(
     env.D1_ENTITLEMENT_RATE_LIMIT_PERIOD_SECONDS,
     "d1-entitlement",
   );
-  if (useD1RateLimit && logRateLimitDecisions(env)) {
-    logEvent("info", "verify.rate_limit_decision", {
-      request_id: requestIdValue,
-      source: "d1-entitlement",
-      project: verifyRequest.project,
-      feature: verifyRequest.feature,
-      license_fingerprint: shortHex(verifyRequest.license_fingerprint),
-      client_ip: clientIp(request),
-      success: !entitlementDecision.limited,
-    });
+  if (useD1RateLimit) {
+    logRateLimitTier(env, requestIdValue, request, verifyRequest, "d1-entitlement", !entitlementDecision.limited);
   }
   if (entitlementDecision.limited) {
     return entitlementDecision;
@@ -311,16 +309,8 @@ async function checkRateLimit(
       env.D1_GLOBAL_RATE_LIMIT_PERIOD_SECONDS,
       "d1-global",
     );
-    if (useD1RateLimit && logRateLimitDecisions(env)) {
-      logEvent("info", "verify.rate_limit_decision", {
-        request_id: requestIdValue,
-        source: "d1-global",
-        project: verifyRequest.project,
-        feature: verifyRequest.feature,
-        license_fingerprint: shortHex(verifyRequest.license_fingerprint),
-        client_ip: clientIp(request),
-        success: !globalDecision.limited,
-      });
+    if (useD1RateLimit) {
+      logRateLimitTier(env, requestIdValue, request, verifyRequest, "d1-global", !globalDecision.limited);
     }
     return globalDecision;
   }
@@ -455,7 +445,7 @@ export async function signAssertion(claims: AssertionClaims, env: Env): Promise<
 
 async function lookupEntitlement(env: Env, request: VerifyRequest): Promise<EntitlementRow | null> {
   return env.DB.prepare(
-    "SELECT project, feature, license_fingerprint, device_hash, status, assertion_ttl_seconds, revocation_seq, valid_from, valid_until FROM entitlements WHERE project = ? AND feature = ? AND license_fingerprint = ? LIMIT 1",
+    "SELECT project, feature, license_fingerprint, device_hash, status, assertion_ttl_seconds, cache_ttl_seconds, revocation_seq, valid_from, valid_until FROM entitlements WHERE project = ? AND feature = ? AND license_fingerprint = ? LIMIT 1",
   )
     .bind(request.project, request.feature, request.license_fingerprint)
     .first<EntitlementRow>();
@@ -543,6 +533,7 @@ async function handleVerify(request: Request, env: Env): Promise<Response> {
   }
   const d1DurationMs = Date.now() - d1Started;
   const maxAssertionTtl = parsePositiveInt(env.MAX_ASSERTION_TTL_SECONDS, 300, 3600);
+  const maxCacheTtl = parsePositiveInt(env.MAX_CACHE_TTL_SECONDS, 86400, 604800);
   const activeRow =
     row !== null &&
     row.status === "active" &&
@@ -552,7 +543,9 @@ async function handleVerify(request: Request, env: Env): Promise<Response> {
       : null;
   const assertionTtl = activeRow !== null ? Math.min(activeRow.assertion_ttl_seconds, maxAssertionTtl) : 0;
   const expiresAt = activeRow !== null ? clampToValidUntil(activeRow, now + assertionTtl) : now;
-  const cacheUntil = expiresAt;
+  const cacheTtl =
+    activeRow !== null ? Math.min(Math.max(activeRow.cache_ttl_seconds, assertionTtl), maxCacheTtl) : 0;
+  const cacheUntil = activeRow !== null ? clampToValidUntil(activeRow, now + cacheTtl) : now;
 
   if (activeRow === null) {
     logEvent("warn", "verify.denied", {
