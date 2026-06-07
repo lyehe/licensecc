@@ -1,0 +1,150 @@
+name: Release_Gates
+
+on:
+  push:
+    paths:
+      - ".github/workflows/release-gates.yml"
+      - ".gitignore"
+      - "scripts/assert_release_ready.mjs"
+      - "scripts/assert_release_ready.test.mjs"
+      - "scripts/build_docs.py"
+      - "scripts/check_docs_links.py"
+      - "scripts/external_gate_preflight.mjs"
+      - "scripts/external_gate_preflight.test.mjs"
+      - "scripts/release_gate_contract.mjs"
+      - "scripts/release_gate_contract.test.mjs"
+      - "scripts/release_gates_workflow.test.mjs"
+      - "scripts/secret_hygiene_scan.mjs"
+      - "scripts/secret_hygiene_scan.test.mjs"
+      - "scripts/validate_release_gates.mjs"
+      - "scripts/validate_release_gates.test.mjs"
+      - "scripts/workspace_hygiene_check.mjs"
+      - "scripts/workspace_hygiene_check.test.mjs"
+      - "services/cloudflare-d1-backup/package.json"
+      - "services/cloudflare-d1-backup/scripts/validate-deploy.mjs"
+      - "services/cloudflare-d1-backup/test/backup-validate-deploy.test.mjs"
+      - "services/cloudflare-license-admin/scripts/access-admin-drill.mjs"
+      - "services/cloudflare-license-admin/package.json"
+      - "services/cloudflare-license-admin/package-lock.json"
+      - "services/cloudflare-license-admin/playwright.config.mjs"
+      - "services/cloudflare-license-admin/src/ui/main.tsx"
+      - "services/cloudflare-license-admin/src/ui/operatorWorkflow.ts"
+      - "services/cloudflare-license-admin/src/ui/styles.css"
+      - "services/cloudflare-license-admin/test/access-validator.test.mjs"
+      - "services/cloudflare-license-admin/test/admin-ui.e2e.mjs"
+      - "services/cloudflare-license-admin/test/admin-ui-workflow.test.mjs"
+      - "services/cloudflare-online-verifier/package.json"
+      - "services/cloudflare-online-verifier/scripts/public-verifier-drill.mjs"
+      - "services/cloudflare-online-verifier/test/public-verifier-drill.test.mjs"
+      - "doc/analysis/remaining-gap-closure-checklist.rst"
+      - "doc/usage/cloudflare-backups.rst"
+      - "README.md"
+  pull_request:
+    paths:
+      - ".github/workflows/release-gates.yml"
+      - ".gitignore"
+      - "scripts/assert_release_ready.mjs"
+      - "scripts/assert_release_ready.test.mjs"
+      - "scripts/build_docs.py"
+      - "scripts/check_docs_links.py"
+      - "scripts/external_gate_preflight.mjs"
+      - "scripts/external_gate_preflight.test.mjs"
+      - "scripts/release_gate_contract.mjs"
+      - "scripts/release_gate_contract.test.mjs"
+      - "scripts/release_gates_workflow.test.mjs"
+      - "scripts/secret_hygiene_scan.mjs"
+      - "scripts/secret_hygiene_scan.test.mjs"
+      - "scripts/validate_release_gates.mjs"
+      - "scripts/validate_release_gates.test.mjs"
+      - "scripts/workspace_hygiene_check.mjs"
+      - "scripts/workspace_hygiene_check.test.mjs"
+      - "services/cloudflare-d1-backup/package.json"
+      - "services/cloudflare-d1-backup/scripts/validate-deploy.mjs"
+      - "services/cloudflare-d1-backup/test/backup-validate-deploy.test.mjs"
+      - "services/cloudflare-license-admin/scripts/access-admin-drill.mjs"
+      - "services/cloudflare-license-admin/package.json"
+      - "services/cloudflare-license-admin/package-lock.json"
+      - "services/cloudflare-license-admin/playwright.config.mjs"
+      - "services/cloudflare-license-admin/src/ui/main.tsx"
+      - "services/cloudflare-license-admin/src/ui/operatorWorkflow.ts"
+      - "services/cloudflare-license-admin/src/ui/styles.css"
+      - "services/cloudflare-license-admin/test/access-validator.test.mjs"
+      - "services/cloudflare-license-admin/test/admin-ui.e2e.mjs"
+      - "services/cloudflare-license-admin/test/admin-ui-workflow.test.mjs"
+      - "services/cloudflare-online-verifier/package.json"
+      - "services/cloudflare-online-verifier/scripts/public-verifier-drill.mjs"
+      - "services/cloudflare-online-verifier/test/public-verifier-drill.test.mjs"
+      - "doc/analysis/remaining-gap-closure-checklist.rst"
+      - "doc/usage/cloudflare-backups.rst"
+      - "README.md"
+
+permissions:
+  contents: read
+
+jobs:
+  tooling:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Script tests
+        run: |
+          node --test \
+            scripts/assert_release_ready.test.mjs \
+            scripts/external_gate_preflight.test.mjs \
+            scripts/release_gate_contract.test.mjs \
+            scripts/release_gates_workflow.test.mjs \
+            scripts/secret_hygiene_scan.test.mjs \
+            scripts/validate_release_gates.test.mjs \
+            scripts/workspace_hygiene_check.test.mjs \
+            services/cloudflare-d1-backup/test/backup-validate-deploy.test.mjs \
+            services/cloudflare-license-admin/test/admin-ui-workflow.test.mjs \
+            services/cloudflare-license-admin/test/access-validator.test.mjs \
+            services/cloudflare-online-verifier/test/public-verifier-drill.test.mjs
+
+      - name: Secret hygiene scan
+        run: node scripts/secret_hygiene_scan.mjs
+
+      - name: Workspace hygiene scan
+        run: node scripts/workspace_hygiene_check.mjs
+
+      - name: Strict external gate fails fast without staging inputs
+        run: |
+          summary="$RUNNER_TEMP/strict-missing-external.json"
+          if node scripts/validate_release_gates.mjs --quick --require-external --json-out "$summary"; then
+            echo "strict external gate accepted missing staging inputs"
+            exit 1
+          fi
+          node - "$summary" <<'NODE'
+          const fs = require("node:fs");
+          const summary = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+          const blockers = Array.isArray(summary.blocking_reasons) ? summary.blocking_reasons : [];
+          if (!blockers.some((blocker) => blocker.type === "external_input_missing")) {
+            console.error("strict gate did not report external_input_missing");
+            process.exit(1);
+          }
+          if (JSON.stringify(summary).includes("CTest metadata check")) {
+            console.error("strict external preflight reached local CTest prerequisite");
+            process.exit(1);
+          }
+          NODE
+
+      - name: Incomplete evidence fails readiness assertion
+        run: |
+          summary="$RUNNER_TEMP/incomplete-release-evidence.json"
+          node -e "const fs=require('node:fs'); const p=process.env.RUNNER_TEMP + '/incomplete-release-evidence.json'; const s={ok:true,complete:false,production_ready:false,quick:false,full:true,external:true,require_external:true,skipped:1,generated_at:new Date(0).toISOString(),platform:process.platform,node_version:process.version,cwd:process.cwd(),blocking_reasons:[{type:'external_gate_skipped',label:'Cloudflare Access admin staging drill',reason:'credentials missing'}],external_inputs_present:{access_admin:false,access_non_admin_jwt:false,r2_restore:false,backup_deploy:false,public_verifier_abuse:false},results:[{label:'repository whitespace check',status:0,command:'git diff --check',duration_ms:0},{label:'Cloudflare Access admin staging drill',status:'skipped',command:'not run: Cloudflare Access admin staging drill',duration_ms:0,reason:'credentials missing'}]}; fs.writeFileSync(p, JSON.stringify(s, null, 2) + '\n');"
+          output="$RUNNER_TEMP/incomplete-release-evidence.out"
+          if node scripts/assert_release_ready.mjs "$summary" >"$output" 2>&1; then
+            echo "partial release evidence was accepted"
+            exit 1
+          fi
+          if ! grep -q "repository whitespace check command must match the release-gate contract" "$output"; then
+            cat "$output"
+            echo "partial release evidence did not exercise local command-contract validation"
+            exit 1
+          fi

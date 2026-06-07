@@ -1,0 +1,61 @@
+name: Cloudflare_D1_Backup
+
+on:
+  push:
+    paths:
+      - ".github/workflows/cloudflare-d1-backup.yml"
+      - "services/cloudflare-d1-backup/**"
+      - "doc/usage/cloudflare-backups.rst"
+  pull_request:
+    paths:
+      - ".github/workflows/cloudflare-d1-backup.yml"
+      - "services/cloudflare-d1-backup/**"
+      - "doc/usage/cloudflare-backups.rst"
+
+permissions:
+  contents: read
+
+jobs:
+  backup:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: services/cloudflare-d1-backup
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: services/cloudflare-d1-backup/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Secret marker scan
+        shell: bash
+        working-directory: .
+        run: |
+          pem_begin='BEGIN'
+          pem_scope='PRIVATE'
+          pem_kind='KEY'
+          pem_marker="${pem_begin} (RSA |EC |DSA |OPENSSH |ENCRYPTED )?${pem_scope} ${pem_kind}|${pem_begin} ${pem_scope} ${pem_kind}"
+          if grep -R -n -E "$pem_marker" services/cloudflare-d1-backup .github/workflows/cloudflare-d1-backup.yml; then
+            echo "PEM key marker found"
+            exit 1
+          fi
+          if grep -R -n -E 'CLOUDFLARE_API_TOKEN=|D1_REST_API_TOKEN=|BACKUP_TRIGGER_TOKEN=|[A-Za-z0-9_-]{40,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}' services/cloudflare-d1-backup .github/workflows/cloudflare-d1-backup.yml; then
+            echo "secret-like token found"
+            exit 1
+          fi
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm test
+
+      - name: Dry-run deploy
+        run: npm run dry-run
