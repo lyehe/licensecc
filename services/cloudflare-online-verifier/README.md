@@ -133,6 +133,19 @@ also supports an optional Cloudflare rate-limit binding named
   `D1_CLIENT_RATE_LIMIT_*`, `D1_ENTITLEMENT_RATE_LIMIT_*`, and
   `D1_GLOBAL_RATE_LIMIT_*`. D1 fallback limiting adds D1 writes before each
   entitlement lookup, so keep it conservative for low-volume deployments.
+- Rate-limit tier defaults are a deliberate low-scale decision, not an omission:
+  the client-network tier and the entitlement tier are on (with
+  `D1_RATE_LIMIT_ENABLED`, plus the optional Cloudflare `VERIFY_RATE_LIMITER`),
+  and the global tier is **off** by default because it adds a contended D1 write
+  on every request. Enable `D1_GLOBAL_RATE_LIMIT_ENABLED=1` only if you observe
+  rotating-fingerprint abuse spread across many client IPs (where the per-IP and
+  per-entitlement tiers cannot bound the aggregate). Validate that a
+  rotating-fingerprint flood from one source is still limited with
+  `npm run validate:public-verifier -- --url <staging> --rotate-fingerprint
+  --expect-rate-limit`: distinct fingerprints cannot trip the entitlement tier,
+  so a 429 proves the client-network tier holds. The HTTP response is a single
+  `rate_limited` code for every tier; the limiting tier appears only in the
+  `LOG_RATE_LIMIT_DECISIONS` server log.
 - Set `LOG_RATE_LIMIT_DECISIONS=1` temporarily when validating a live rate-limit
   binding; leave it unset during normal operation.
 - Logs are structured JSON and redact fingerprints/device hashes. Do not log
@@ -146,10 +159,22 @@ also supports an optional Cloudflare rate-limit binding named
 - The `scripts/entitlement.mjs` D1 helper is a break-glass operator path. Normal
   hosted writes should use the authenticated admin Worker or its
   bearer-authenticated `/api/sync/entitlements` projection endpoint. The helper
-  requires an actor for mutations, stamps events as `source='cli'`, and increments
-  `revocation_seq` in SQL instead of accepting caller-provided sequence values.
-  Use `reenable` to reactivate a disabled entitlement; revoked entitlements are
-  terminal for v1 and `upsert` will not update an existing revoked row. `upsert`
-  is a full create/update operation for non-revoked rows and unspecified
-  mutable fields use command defaults.
+  requires an actor for mutations, stamps events as `actor_type='cli'`,
+  `source='cli'`, and increments `revocation_seq` in SQL instead of accepting
+  caller-provided sequence values. It runs mutations through `wrangler d1 execute
+  --file`, which is transactional on both local (`db.batch()`) and remote (the D1
+  import path), so the entitlement write and its audit event commit atomically or
+  not at all — there is no path that writes the row without the event.
+- Revoked entitlements are terminal for v1. `upsert`, `disable`, and `reenable`
+  are guarded by `status != 'revoked'` and will not change a revoked row. A
+  guarded mutation is a NO-OP: it changes zero rows and writes no audit event. On
+  `--remote` the helper detects this (zero `rows_written`) and exits non-zero with
+  a notice; on `--local` wrangler reports no row counts, so the helper prints a
+  note and you should confirm with `get`. Use `reenable` to reactivate a
+  *disabled* entitlement. To intentionally reactivate a *revoked* entitlement
+  (e.g. a mistaken revoke), run `upsert --allow-revoked-override --reason <text>`:
+  it requires a reason and records a distinct `revoked-override` audit event so
+  the override is unmistakable in the log. `upsert` also accepts optional
+  `--customer-id`/`--license-id`; unspecified mutable fields use command defaults
+  and reset to their defaults on conflict.
 - This reference service does not prevent local binary patching or API hooking.

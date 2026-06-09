@@ -66,7 +66,7 @@ CREATE TABLE IF NOT EXISTS entitlement_events (
   feature TEXT NOT NULL,
   license_fingerprint TEXT NOT NULL,
   device_hash TEXT NOT NULL DEFAULT '',
-  event_type TEXT NOT NULL CHECK (event_type IN ('create', 'update', 'disable', 'reenable', 'revoke', 'upsert')),
+  event_type TEXT NOT NULL CHECK (event_type IN ('create', 'update', 'disable', 'reenable', 'revoke', 'upsert', 'revoked-override')),
   status TEXT NOT NULL CHECK (status IN ('active', 'revoked', 'disabled')),
   revocation_seq INTEGER NOT NULL,
   detail TEXT NOT NULL DEFAULT '',

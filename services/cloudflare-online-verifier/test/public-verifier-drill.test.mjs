@@ -173,3 +173,58 @@ test("public verifier drill fails closed when expected limiter is not observed",
   assert.equal(summary.ok, false);
   assert.deepEqual(summary.failures, ["rate_limit_not_observed"]);
 });
+
+test("public verifier drill parses --rotate-fingerprint", () => {
+  const on = parseArgs(["--url", "https://verifier.example", "--fingerprint", "a".repeat(64), "--rotate-fingerprint"]);
+  assert.equal(on.rotateFingerprint, true);
+  const off = parseArgs(["--url", "https://verifier.example", "--fingerprint", "a".repeat(64)]);
+  assert.equal(off.rotateFingerprint, false);
+});
+
+test("rotating-fingerprint flood uses distinct fingerprints and still reaches the limiter", async () => {
+  const fingerprints = [];
+  const options = parseArgs([
+    "--url", "https://verifier.example", "--fingerprint", "c".repeat(64),
+    "--burst-count", "3", "--expect-rate-limit", "--rotate-fingerprint", "--recovery-wait-ms", "1",
+  ]);
+  const responses = [
+    jsonResponse(400, { ok: false, code: "invalid_request" }),
+    jsonResponse(200, { ok: false, code: "entitlement_denied", server_time: 1000 }),
+    jsonResponse(429, { ok: false, code: "rate_limited" }),
+    jsonResponse(429, { ok: false, code: "rate_limited" }),
+    jsonResponse(429, { ok: false, code: "rate_limited" }),
+    jsonResponse(200, { ok: false, code: "entitlement_denied", server_time: 1065 }),
+  ];
+  const summary = await runDrill(options, {
+    async fetchImpl(_url, init) {
+      fingerprints.push(JSON.parse(init.body).license_fingerprint);
+      return responses.shift();
+    },
+    async sleepImpl() {},
+  });
+  assert.equal(summary.ok, true);
+  assert.equal(summary.rotate_fingerprint, true);
+  // indices 0 (malformed) and 1 (unknown denial) are fixed; the 3 burst requests must be distinct fingerprints
+  const burstFingerprints = fingerprints.slice(2, 5);
+  assert.equal(new Set(burstFingerprints).size, 3);
+});
+
+test("rotating-fingerprint flood that is not limited reports the distinct failure code", async () => {
+  const options = parseArgs([
+    "--url", "https://verifier.example", "--fingerprint", "d".repeat(64),
+    "--burst-count", "2", "--expect-rate-limit", "--rotate-fingerprint", "--recovery-wait-ms", "0",
+  ]);
+  const responses = [
+    jsonResponse(400, { ok: false, code: "invalid_request" }),
+    jsonResponse(200, { ok: false, code: "entitlement_denied", server_time: 1000 }),
+    jsonResponse(200, { ok: false, code: "entitlement_denied", server_time: 1000 }),
+    jsonResponse(200, { ok: false, code: "entitlement_denied", server_time: 1000 }),
+  ];
+  const summary = await runDrill(options, {
+    async fetchImpl() {
+      return responses.shift();
+    },
+  });
+  assert.equal(summary.ok, false);
+  assert.deepEqual(summary.failures, ["rotating_fingerprint_flood_not_rate_limited"]);
+});

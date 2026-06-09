@@ -12,12 +12,16 @@ const MAX_RECOVERY_WAIT_MS = 180_000;
 
 function usage(exitCode = 2) {
   console.error(`usage:
-  node scripts/public-verifier-drill.mjs --url <verifier-worker-url> [--project DEFAULT] [--feature DEFAULT] [--fingerprint <64-hex>] [--burst-count 25] [--expect-rate-limit] [--recovery-wait-ms 65000] [--json]
+  node scripts/public-verifier-drill.mjs --url <verifier-worker-url> [--project DEFAULT] [--feature DEFAULT] [--fingerprint <64-hex>] [--burst-count 25] [--expect-rate-limit] [--rotate-fingerprint] [--recovery-wait-ms 65000] [--json]
 
 Runs a bounded public verifier staging drill. It validates malformed request
 rejection, unsigned unknown-entitlement denial, and optionally verifies a
 controlled burst reaches the public rate limiter and recovers after the
-configured wait. Output is redacted and does not print assertions.`);
+configured wait. With --rotate-fingerprint each burst request uses a fresh
+license fingerprint, so the flood is forced onto the client-network tier
+(shared client:<ip> key) rather than the entitlement tier — proving a
+rotating-fingerprint abuser from one source cannot bypass the limiter. Output
+is redacted and does not print assertions.`);
   process.exit(exitCode);
 }
 
@@ -146,6 +150,7 @@ function parseArgs(argv = process.argv.slice(2), env = process.env) {
     fingerprint,
     burstCount,
     expectRateLimit,
+    rotateFingerprint: configFlag(argv, env, "--rotate-fingerprint"),
     recoveryWaitMs,
     timeoutMs,
     json: configFlag(argv, env, "--json"),
@@ -226,7 +231,10 @@ async function runDrill(options, dependencies = {}) {
   const unknownDenial = await postVerify(options, verifyBody(options), fetchImpl);
   const burst = [];
   for (let index = 0; index < options.burstCount; ++index) {
-    burst.push(await postVerify(options, verifyBody(options), fetchImpl));
+    // --rotate-fingerprint sends a distinct fingerprint per request so the burst cannot trip the
+    // entitlement tier (keyed by project:feature:fingerprint); only the shared client:<ip> tier can stop it.
+    const overrides = options.rotateFingerprint ? { license_fingerprint: randomBytes(32).toString("hex") } : {};
+    burst.push(await postVerify(options, verifyBody(options, overrides), fetchImpl));
     if (evaluateRateLimit(burst.at(-1)) && !options.expectRateLimit) {
       break;
     }
@@ -247,7 +255,9 @@ async function runDrill(options, dependencies = {}) {
     failures.push("unknown_entitlement_not_unsigned_denial");
   }
   if (options.expectRateLimit && firstRateLimitedAt === -1) {
-    failures.push("rate_limit_not_observed");
+    // Distinct code by mode: a rotating-fingerprint flood that is NOT limited proves the client/global tier
+    // failed to bite (distinct entitlement keys cannot have tripped the entitlement tier).
+    failures.push(options.rotateFingerprint ? "rotating_fingerprint_flood_not_rate_limited" : "rate_limit_not_observed");
   }
   if (recovery !== undefined && evaluateRateLimit(recovery)) {
     failures.push("recovery_request_still_rate_limited");
@@ -258,6 +268,7 @@ async function runDrill(options, dependencies = {}) {
     project: options.project,
     feature: options.feature,
     fingerprint: `${options.fingerprint.slice(0, 8)}...${options.fingerprint.slice(-8)}`,
+    rotate_fingerprint: Boolean(options.rotateFingerprint),
     malformed,
     unknown_denial: unknownDenial,
     burst: {

@@ -611,6 +611,10 @@ async function writeEntitlementWithAudit(
   now: number,
   idempotency: IdempotencyCommit | null,
 ): Promise<MutationResult<EntitlementRecord>> {
+  // INVARIANT: the entitlement write, its audit event, and any idempotency record MUST commit atomically.
+  // Real Cloudflare D1 always exposes batch(); a missing batch() means a degraded or mocked binding, so we
+  // fail closed rather than perform two un-transactioned writes (which could persist a row with no audit
+  // event). Do NOT add a non-batch fallback here.
   if (env.DB.batch === undefined) {
     throw new Error("write_failed");
   }

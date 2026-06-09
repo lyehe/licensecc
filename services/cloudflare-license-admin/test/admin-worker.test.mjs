@@ -1,10 +1,33 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import http from "node:http";
 import { test } from "node:test";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import worker from "../dist-worker/worker/index.js";
 
 const fingerprint = "a".repeat(64);
+
+// The exact field set the production json_object emits into entitlement_events.next_json
+// (src/worker/index.ts eventFromCurrentStatement). cache_ttl_seconds is present here even though
+// withId() strips it from the API response body; the drift-guard test pins this contract.
+const NEXT_JSON_KEYS = [
+  "project",
+  "feature",
+  "license_fingerprint",
+  "device_hash",
+  "status",
+  "assertion_ttl_seconds",
+  "cache_ttl_seconds",
+  "revocation_seq",
+  "valid_from",
+  "valid_until",
+  "notes",
+  "customer_id",
+  "license_id",
+  "created_at",
+  "updated_at",
+  "id",
+];
 
 function baseEnv(db = new MockD1()) {
   return {
@@ -116,6 +139,33 @@ async function accessToken(fixture, email, overrides = {}) {
     ? token.setExpirationTime(Math.floor(Date.now() / 1000) - 60)
     : token.setExpirationTime("5m");
   return token.sign(fixture.privateKey);
+}
+
+// Like accessFixture, but exposes a request counter so tests can assert JWKS cache reuse and the
+// fail-closed unknown-kid path. Each fixture binds an ephemeral port (unique jwksUrl), so the worker's
+// module-level jwksCache never bleeds between tests.
+async function rotatableAccessFixture(t) {
+  const { publicKey, privateKey } = await generateKeyPair("RS256");
+  const jwk = await exportJWK(publicKey);
+  jwk.kid = "test-key";
+  jwk.alg = "RS256";
+  jwk.use = "sig";
+  const state = { keys: [jwk], requests: 0 };
+  const server = http.createServer((_request, response) => {
+    state.requests += 1;
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({ keys: state.keys }));
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const { port } = server.address();
+  return {
+    issuer: "https://licensecc-test.cloudflareaccess.com",
+    audience: "test-audience",
+    jwksUrl: `http://127.0.0.1:${port}/cdn-cgi/access/certs`,
+    privateKey,
+    state,
+  };
 }
 
 class MockStatement {
@@ -878,4 +928,169 @@ test("admin transitions require reason and revoked is terminal", async () => {
   }), env);
   assert.equal(terminal.status, 409);
   assert.equal((await json(terminal)).code, "revoked_entitlement_is_terminal");
+});
+
+// ATOM-2: pin the audit next_json contract (the only existing assertion checks a single field, .id).
+test("audit next_json carries the full production json_object field set", async () => {
+  const db = new MockD1();
+  const env = baseEnv(db);
+  const res = await worker.fetch(authed("/api/admin/entitlements", {
+    method: "POST",
+    body: JSON.stringify({
+      project: "DEFAULT",
+      feature: "DEFAULT",
+      license_fingerprint: fingerprint,
+      device_hash: "d".repeat(64),
+      assertion_ttl_seconds: 321,
+      valid_from: 1000,
+      valid_until: 2000,
+      notes: "shape probe",
+      customer_id: "cus-1",
+      license_id: "lic-1",
+      status: "active",
+    }),
+  }), env);
+  assert.equal(res.status, 200);
+  const saved = (await json(res)).data;
+  const next = JSON.parse(db.events[0].next_json);
+  assert.deepEqual(Object.keys(next).sort(), [...NEXT_JSON_KEYS].sort());
+  // Intentional shape divergence: next_json includes cache_ttl_seconds; the API response (withId) does not.
+  assert.ok("cache_ttl_seconds" in next);
+  assert.equal(saved.cache_ttl_seconds, undefined);
+  assert.equal(next.id, saved.id);
+  assert.equal(next.customer_id, "cus-1");
+  assert.equal(next.license_id, "lic-1");
+  assert.equal(db.events[0].prev_json, ""); // prev was null on create
+});
+
+test("production json_object next_json key set matches the audit contract (drift guard)", () => {
+  const src = readFileSync(new URL("../src/worker/index.ts", import.meta.url), "utf8");
+  const match = /function eventFromCurrentStatement\([\s\S]*?json_object\(([\s\S]*?)\),\s*\n/.exec(src);
+  assert.ok(match, "eventFromCurrentStatement json_object block not found");
+  const keys = [...match[1].matchAll(/'([a-z_]+)'\s*,/g)].map((m) => m[1]);
+  assert.deepEqual(keys.sort(), [...NEXT_JSON_KEYS].sort());
+});
+
+test("audit prev_json is the prior API record on update", async () => {
+  const db = new MockD1();
+  const env = baseEnv(db);
+  const base = { project: "DEFAULT", feature: "DEFAULT", license_fingerprint: fingerprint, notes: "v1" };
+  const first = await worker.fetch(authed("/api/admin/entitlements", { method: "POST", body: JSON.stringify(base) }), env);
+  const firstData = (await json(first)).data;
+  const second = await worker.fetch(
+    authed("/api/admin/entitlements", { method: "POST", body: JSON.stringify({ ...base, notes: "v2" }) }),
+    env,
+  );
+  assert.equal(second.status, 200);
+  const updateEvent = db.events.at(-1);
+  assert.equal(updateEvent.event_type, "update");
+  const prev = JSON.parse(updateEvent.prev_json);
+  assert.equal(prev.id, firstData.id);
+  assert.equal(prev.notes, "v1");
+  assert.equal(prev.status, firstData.status);
+});
+
+// TEST-1: PATCH and the transitions were only exercised via the dev bearer; prove the Access-JWT path too.
+test("cloudflare access admin can patch and transition entitlements end to end", async (t) => {
+  const fixture = await accessFixture(t);
+  const db = new MockD1();
+  const env = accessEnv(db, fixture);
+  const token = await accessToken(fixture, "admin@example.com");
+  const create = await worker.fetch(accessAuthed("/api/admin/entitlements", token, {
+    method: "POST",
+    body: JSON.stringify({ project: "DEFAULT", feature: "DEFAULT", license_fingerprint: fingerprint }),
+  }), env);
+  const id = (await json(create)).data.id;
+
+  const patched = await worker.fetch(accessAuthed(`/api/admin/entitlements/${id}`, token, {
+    method: "PATCH",
+    body: JSON.stringify({ notes: "access-patched" }),
+  }), env);
+  assert.equal(patched.status, 200);
+  assert.equal((await json(patched)).code, "entitlement_patched");
+
+  const disabled = await worker.fetch(accessAuthed(`/api/admin/entitlements/${id}/disable`, token, {
+    method: "POST",
+    body: JSON.stringify({ reason: "support request" }),
+  }), env);
+  assert.equal((await json(disabled)).data.status, "disabled");
+
+  const reenabled = await worker.fetch(accessAuthed(`/api/admin/entitlements/${id}/reenable`, token, {
+    method: "POST",
+    body: JSON.stringify({}),
+  }), env);
+  assert.equal((await json(reenabled)).data.status, "active");
+
+  const revoked = await worker.fetch(accessAuthed(`/api/admin/entitlements/${id}/revoke`, token, {
+    method: "POST",
+    body: JSON.stringify({ reason: "chargeback" }),
+  }), env);
+  assert.equal((await json(revoked)).data.status, "revoked");
+
+  const terminal = await worker.fetch(accessAuthed(`/api/admin/entitlements/${id}/reenable`, token, {
+    method: "POST",
+    body: JSON.stringify({}),
+  }), env);
+  assert.equal(terminal.status, 409);
+  assert.equal((await json(terminal)).code, "revoked_entitlement_is_terminal");
+
+  // Every audit event must carry the Access identity (actor propagation through eventFromCurrentStatement).
+  assert.ok(db.events.length >= 4);
+  for (const event of db.events) {
+    assert.equal(event.actor_type, "access");
+    assert.equal(event.actor, "admin@example.com");
+  }
+});
+
+test("cloudflare access reader cannot patch or transition", async (t) => {
+  const fixture = await accessFixture(t);
+  const db = new MockD1();
+  const env = accessEnv(db, fixture);
+  const create = await worker.fetch(accessAuthed("/api/admin/entitlements", await accessToken(fixture, "admin@example.com"), {
+    method: "POST",
+    body: JSON.stringify({ project: "DEFAULT", feature: "DEFAULT", license_fingerprint: fingerprint }),
+  }), env);
+  const id = (await json(create)).data.id;
+  const eventsAfterCreate = db.events.length;
+  const reader = await accessToken(fixture, "reader@example.com");
+  for (const request of [
+    accessAuthed(`/api/admin/entitlements/${id}`, reader, { method: "PATCH", body: JSON.stringify({ notes: "x" }) }),
+    accessAuthed(`/api/admin/entitlements/${id}/disable`, reader, { method: "POST", body: JSON.stringify({ reason: "x" }) }),
+    accessAuthed(`/api/admin/entitlements/${id}/reenable`, reader, { method: "POST", body: JSON.stringify({}) }),
+    accessAuthed(`/api/admin/entitlements/${id}/revoke`, reader, { method: "POST", body: JSON.stringify({ reason: "x" }) }),
+  ]) {
+    const response = await worker.fetch(request, env);
+    assert.equal(response.status, 403);
+    assert.equal((await json(response)).code, "admin_role_required");
+  }
+  assert.equal(db.events.length, eventsAfterCreate); // denied reader mutations write nothing
+});
+
+// TEST-2: JWKS cache reuse + fail-closed unknown-kid (the only review-listed auth path with zero coverage).
+test("access auth fails closed for a token signed with an unknown kid", async (t) => {
+  const fixture = await rotatableAccessFixture(t);
+  const token = await new SignJWT({ email: "admin@example.com" })
+    .setProtectedHeader({ alg: "RS256", kid: "never-published" })
+    .setIssuer(fixture.issuer)
+    .setAudience(fixture.audience)
+    .setSubject("admin@example.com")
+    .setIssuedAt()
+    .setExpirationTime("5m")
+    .sign(fixture.privateKey);
+  const response = await worker.fetch(accessAuthed("/api/admin/summary", token), accessEnv(new MockD1(), fixture));
+  assert.equal(response.status, 403);
+  assert.equal((await json(response)).code, "invalid_access_jwt");
+  // jose fetches the JWKS once, cannot match the kid, then the cooldown blocks a refetch -> fail closed.
+  assert.equal(fixture.state.requests, 1);
+});
+
+test("access auth reuses the cached JWKS across repeated valid tokens", async (t) => {
+  const fixture = await rotatableAccessFixture(t);
+  const token = await accessToken(fixture, "admin@example.com");
+  const first = await worker.fetch(accessAuthed("/api/admin/summary", token), accessEnv(new MockD1(), fixture));
+  assert.equal(first.status, 200);
+  const afterFirst = fixture.state.requests;
+  const second = await worker.fetch(accessAuthed("/api/admin/summary", token), accessEnv(new MockD1(), fixture));
+  assert.equal(second.status, 200);
+  assert.equal(fixture.state.requests, afterFirst); // served from the memoized key set, no second fetch
 });

@@ -990,6 +990,59 @@ The release is blocked if any item is false:
 * Staging E2E passes.
 * Docs accurately describe cache and revocation limitations.
 
+Release-blocker evidence map
+----------------------------
+
+Each release-blocking item maps to runnable evidence and a current source
+reference. The release is gated only if every row's evidence passes.
+
+* No admin routes in verifier ->
+  ``rg "/api/admin" services/cloudflare-online-verifier/src`` returns nothing
+  (the Worker serves only ``/health`` and ``/v1/verify``).
+* Admin Worker has no signing key -> the admin Worker ``Env`` binds no signing
+  secret; the per-service CI "Secret marker scan" greps for PEM/token markers.
+* Access JWT validated cryptographically -> ``npm test`` in
+  ``services/cloudflare-license-admin`` (``access-validator.test.mjs`` plus the
+  Access JWT admin-summary, admin patch/transition, reader-denied, unknown-role,
+  malformed-token, unknown-kid, and JWKS-cache tests in
+  ``admin-worker.test.mjs``); staging ``npm run validate:access-admin``.
+* Dev bearer cannot run in production -> ``admin-worker.test.mjs`` "dev bearer
+  cannot be enabled in production".
+* Denied entitlements not signed by default -> ``online-verifier.test.mjs``
+  "unknown entitlement returns unsigned denial by default".
+* Rotating-fingerprint flood rate-limited -> ``public-verifier-drill.test.mjs``
+  rotating-fingerprint cases and staging
+  ``npm run validate:public-verifier -- --rotate-fingerprint --expect-rate-limit``.
+* Worker-signed fixture verifies in C++ -> ``online-verifier.test.mjs`` golden
+  fixture tests, ``npm run validate:remote-cpp``, and the C++
+  ``online_verification`` tests.
+* ``revocation_seq`` rollback rejected -> the C++ process-local floor in
+  ``src/library/online_verification/OnlineVerification.cpp`` and its tests.
+* Validity windows enforced -> ``online-verifier.test.mjs`` "validity windows
+  are enforced and clamp assertion lifetime".
+* Every mutation writes an audit event in the same D1 batch -> the single
+  ``env.DB.batch([...])`` write path with the fail-closed guard in
+  ``services/cloudflare-license-admin/src/worker/index.ts`` (``writeEntitlementWithAudit``);
+  the ``admin-worker.test.mjs`` audit-rollback and batch-unavailable tests; the
+  real-SQLite ``json_object`` shape + transactional-rollback test
+  (``npm run test:sql`` -> ``test/sql/audit-json-object.test.mjs``); and staging
+  ``npm run validate:remote-d1-atomicity``. The break-glass CLI uses
+  ``wrangler d1 execute --file`` (atomic on local ``db.batch`` and the remote
+  import path) and its SQL semantics are exercised by the verifier
+  ``npm run test:sql`` suite.
+* Service CI required -> ``.github/workflows/cloudflare-online-verifier.yml`` and
+  ``.github/workflows/cloudflare-license-admin.yml`` (build, lint, tests,
+  ``test:sql``, dry-run, local migrations, schema parity, secret scan).
+* Staging E2E passes -> the Phase 11 staging E2E checklist plus
+  ``validate:access-admin``, ``validate:remote-d1-atomicity``,
+  ``validate:public-verifier``. Distributed concurrent-mutation monotonicity is a
+  staging probe:
+  ``SELECT revocation_seq, COUNT(*) c FROM entitlement_events WHERE project=? AND license_fingerprint=? GROUP BY revocation_seq HAVING c > 1``
+  must return zero rows (local serialized monotonicity is covered by the unit and
+  ``test:sql`` suites).
+* Docs accurate -> ``python scripts/check_docs_links.py doc`` and the Sphinx
+  warnings-as-errors docs build.
+
 Final evidence packet
 ---------------------
 

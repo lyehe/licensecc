@@ -119,6 +119,20 @@ mutation occurred.
 
 Revoked entitlements are terminal for this first admin version.
 
+### Break-glass CLI
+
+The shared D1 helper `../cloudflare-online-verifier/scripts/entitlement.mjs` is an
+operator break-glass path that **bypasses Cloudflare Access**. It stamps
+`actor_type='cli'`, `source='cli'`, requires `--actor`, and computes
+`revocation_seq` server-side. Like the admin Worker it treats revoked as terminal:
+`upsert`/`disable`/`reenable` will not change a revoked row, and a guarded no-op
+writes no audit event (the helper exits non-zero on `--remote`). To deliberately
+reactivate a revoked entitlement, run `upsert --allow-revoked-override --reason
+<text>`, which records a distinct `revoked-override` audit event. Mutations run via
+`wrangler d1 execute --file`, so the entitlement write and its audit event commit
+atomically. Prefer the authenticated admin Worker or `/api/sync/entitlements` for
+normal, audited writes.
+
 Production deployments should also deploy `../cloudflare-d1-backup` so D1 Time
 Travel and scheduled R2 SQL exports are available before admin mutations or
 migrations are run against live data.

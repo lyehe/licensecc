@@ -62,6 +62,9 @@ jobs:
       - name: Test
         run: npm test
 
+      - name: SQL tests
+        run: npm run test:sql
+
       - name: Check schema parity
         run: npm run schema:parity
 

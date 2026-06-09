@@ -23,7 +23,7 @@ export interface EntitlementEvent {
   project: string;
   feature: string;
   license_fingerprint: string;
-  event_type: "create" | "update" | "disable" | "reenable" | "revoke";
+  event_type: "create" | "update" | "disable" | "reenable" | "revoke" | "upsert" | "revoked-override";
   status: EntitlementStatus;
   revocation_seq: number;
   actor: string;
