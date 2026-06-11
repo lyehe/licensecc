@@ -21,9 +21,6 @@
 #include <mntent.h>
 #include <dirent.h>
 #include <sys/utsname.h>
-#ifndef NDEBUG
-#include <valgrind/memcheck.h>
-#endif
 
 //#ifdef USE_DISK_MODEL
 //#define PARSE_ID_FUNC parse_disk_id

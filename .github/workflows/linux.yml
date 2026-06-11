@@ -133,6 +133,9 @@ jobs:
               -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer" \
               -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
             cmake --build build-asan -j$(nproc)
+         env:
+            ASAN_OPTIONS: detect_leaks=0:halt_on_error=1
+            UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
       -  name: Run sanitizer direct security tests
          run: |
             SANITIZER_EXCLUDE="test_install_consumer_smoke|test_package_consumer_smoke|test_release_safety_smoke|test_artifact_scan_smoke|test_tools_profile_smoke|test_source_package_smoke|test_manifest_summary_smoke"
@@ -187,6 +190,9 @@ jobs:
               -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer" \
               -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
             cmake --build build-fuzz --target fuzz_license_reader fuzz_base64 fuzz_hw_identifier fuzz_v201_canonical_payload -j$(nproc)
+         env:
+            ASAN_OPTIONS: detect_leaks=0:halt_on_error=1
+            UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
       -  name: Run fuzz smoke
          run: |
             FUZZ_SECONDS=60
