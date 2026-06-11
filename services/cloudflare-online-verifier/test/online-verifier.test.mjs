@@ -195,6 +195,56 @@ test("validates request schema", () => {
   assert.equal(validateVerifyRequest(validBody({ license_fingerprint: "z".repeat(64) })), null);
 });
 
+test("client_hardening is accepted but does not change the allow/deny decision", async () => {
+  const row = {
+    ...validBody(),
+    status: "active",
+    assertion_ttl_seconds: 120,
+    cache_ttl_seconds: 600,
+    revocation_seq: 3,
+  };
+  async function verify(body) {
+    return worker.fetch(
+      new Request("https://example.test/v1/verify", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      }),
+      await testKeyEnv(row),
+    );
+  }
+
+  const withoutField = await verify(validBody());
+  const withField = await verify(validBody({ client_hardening: 15 }));
+  assert.equal(withoutField.status, withField.status);
+  const withoutBody = await withoutField.json();
+  const withBody = await withField.json();
+  assert.equal(withoutBody.ok, withBody.ok);
+  assert.equal(withoutBody.code, withBody.code);
+  assert.equal(withBody.ok, true);
+  assert.equal(withBody.code, "entitlement_ok");
+
+  // The telemetry must never leak into the signed canonical payload.
+  const payload = Buffer.from(withBody.assertion.split(".")[1], "base64").toString("utf8");
+  assert.doesNotMatch(payload, /client.?hardening/i);
+});
+
+test("invalid client_hardening values are rejected like other malformed fields", async () => {
+  for (const value of [-1, 1.5, "x", 70000]) {
+    assert.equal(validateVerifyRequest(validBody({ client_hardening: value })), null, `value=${value}`);
+    const response = await worker.fetch(
+      new Request("https://example.test/v1/verify", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(validBody({ client_hardening: value })),
+      }),
+      await testKeyEnv(null),
+    );
+    assert.equal(response.status, 400, `value=${value}`);
+    assert.deepEqual(await response.json(), { ok: false, code: "invalid_request" }, `value=${value}`);
+  }
+});
+
 test("canonical online assertion payload is byte exact", () => {
   const payload = canonicalPayloadForTests({
     purpose: "licensecc-online-assertion",

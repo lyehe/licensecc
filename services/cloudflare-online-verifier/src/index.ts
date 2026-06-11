@@ -47,6 +47,7 @@ export interface VerifyRequest {
   device_hash?: string;
   nonce: string;
   client_version?: string;
+  client_hardening?: number;
 }
 
 interface EntitlementRow {
@@ -91,6 +92,10 @@ const MAX_BODY_BYTES = 4096;
 // Mirrors the C++ ABI buffer limits LCC_API_ONLINE_PROJECT_SIZE (127) and LCC_API_FEATURE_NAME_SIZE (15) in include/licensecc/datatypes.h; keep in sync.
 const MAX_PROJECT_SIZE = 127;
 const MAX_FEATURE_SIZE = 15;
+// client_hardening is request telemetry only (a bitset of the client's self-reported
+// hardening posture). It is bounded but NEVER influences the allow/deny decision and is
+// never folded into the signed assertion, since a client can spoof its own posture.
+const MAX_CLIENT_HARDENING = 0xffff;
 const HEX_64 = /^[0-9a-fA-F]{64}$/;
 const textEncoder = new TextEncoder();
 
@@ -335,7 +340,23 @@ export function validateVerifyRequest(value: unknown): VerifyRequest | null {
         ? input.device_hash
         : null;
   const nonce = typeof input.nonce === "string" && HEX_64.test(input.nonce) ? input.nonce : null;
-  if (project === null || feature === null || licenseFingerprint === null || deviceHash === null || nonce === null) {
+  const clientHardening =
+    input.client_hardening === undefined
+      ? 0
+      : typeof input.client_hardening === "number" &&
+          Number.isInteger(input.client_hardening) &&
+          input.client_hardening >= 0 &&
+          input.client_hardening <= MAX_CLIENT_HARDENING
+        ? input.client_hardening
+        : null;
+  if (
+    project === null ||
+    feature === null ||
+    licenseFingerprint === null ||
+    deviceHash === null ||
+    nonce === null ||
+    clientHardening === null
+  ) {
     return null;
   }
   return {
@@ -345,6 +366,7 @@ export function validateVerifyRequest(value: unknown): VerifyRequest | null {
     device_hash: deviceHash,
     nonce,
     client_version: typeof input.client_version === "string" ? input.client_version.slice(0, 64) : undefined,
+    client_hardening: clientHardening,
   };
 }
 
@@ -554,6 +576,7 @@ async function handleVerify(request: Request, env: Env): Promise<Response> {
       feature: verifyRequest.feature,
       license_fingerprint: shortHex(verifyRequest.license_fingerprint),
       device_hash: shortHex(verifyRequest.device_hash),
+      client_hardening: verifyRequest.client_hardening ?? 0,
       revocation_seq: row?.revocation_seq ?? 0,
       d1_duration_ms: d1DurationMs,
     });
@@ -601,6 +624,7 @@ async function handleVerify(request: Request, env: Env): Promise<Response> {
     feature: verifyRequest.feature,
     license_fingerprint: shortHex(verifyRequest.license_fingerprint),
     device_hash: shortHex(verifyRequest.device_hash),
+    client_hardening: verifyRequest.client_hardening ?? 0,
     assertion_ttl_seconds: assertionTtl,
     revocation_seq: claims.revocationSeq,
     d1_duration_ms: d1DurationMs,
