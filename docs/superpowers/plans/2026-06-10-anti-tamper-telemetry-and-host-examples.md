@@ -163,7 +163,16 @@ git commit -m "docs(examples): document the best-effort host-integrity example"
 
 ---
 
-## Part B — Move 1: server-anchored tamper telemetry
+## Part B — Move 1: server-anchored client hardening-posture telemetry
+
+> **CORRECTION (2026-06-10):** the field is `client_hardening` (a `uint32_t` posture bitset),
+> NOT `tamper_signal`. Tamper policy is binary (`DISABLED`/`ENFORCE`), so a *detection* verdict is
+> always 0 by the time the online request is built (ENFORCE blocks first; DISABLED produces nothing).
+> The meaningful, non-fatal signal is the client's hardening CONFIGURATION, populated from
+> `normalized_options`: bit0 tamper enforce, bit1 host-integrity callback present, bit2 strict
+> source-shadowing, bit3 online required. Constants `LCC_CLIENT_HARDENING_*`. Everywhere below that says
+> `tamper_signal`, read `client_hardening`; B2 populates from options, not from the tamper result. See the
+> spec's corrected Move 1 section. The authoritative per-task spec is in the implementer dispatch prompts.
 
 > **Re-ground before starting B1–B2:** the core is under active development. Before editing, re-read the CURRENT `include/licensecc/datatypes.h` (`LccOnlineRequest`, `LCC_ONLINE_REQUEST_VERSION`), `src/library/online_verification/OnlineVerification.hpp/.cpp` (`OnlineVerificationRequest`, `evaluate()` where it builds the public `LccOnlineRequest`), and `src/library/licensecc.cpp` (`acquire_license_with_runtime_checks`, the tamper block ~`AntiTamperResult` and the `OnlineVerificationRequest` build). Confirm field names/positions before applying edits.
 
