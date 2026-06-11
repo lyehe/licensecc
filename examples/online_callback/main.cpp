@@ -41,10 +41,15 @@ std::string json_field(const char* name, const char* value) {
 }
 
 std::string request_body(const LccOnlineRequest& request) {
-	return std::string("{") + json_field("project", request.project) + "," +
-		   json_field("feature", request.feature) + "," +
-		   json_field("license_fingerprint", request.license_fingerprint) + "," +
-		   json_field("device_hash", request.device_hash) + "," + json_field("nonce", request.nonce) + "}";
+	std::string body = std::string("{") + json_field("project", request.project) + "," +
+					   json_field("feature", request.feature) + "," +
+					   json_field("license_fingerprint", request.license_fingerprint) + "," +
+					   json_field("device_hash", request.device_hash) + "," + json_field("nonce", request.nonce);
+	if (request.version >= 2u) {
+		body += ",\"client_hardening\":" + std::to_string(request.client_hardening);
+	}
+	body += "}";
+	return body;
 }
 
 bool extract_json_string(const std::string& json, const char* name, std::string* out) {

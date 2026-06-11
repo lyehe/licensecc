@@ -52,6 +52,15 @@ The callback may contact a service such as the reference Cloudflare Worker, then
 returns a signed server assertion to Licensecc. Licensecc verifies the assertion
 offline with the configured public key before applying the online policy.
 
+The ``LccOnlineRequest`` may carry an optional ``client_hardening`` bitset
+(``LCC_CLIENT_HARDENING_*``) describing the client's hardening *configuration*:
+tamper enforcement enabled, a host-integrity callback present, strict source
+shadowing, and online verification required. The verifier *records* this bitset
+for audit and operator visibility, but it does **not** use it for allow/deny
+decisions because a client controls — and can therefore spoof — its own posture.
+The bitset is never part of the signed assertion and carries no PII; only the
+enumerated bits are reported.
+
 Online verification improves server-side entitlement checks, revocation
 diagnostics, and rollout visibility. It still does not make a patched binary,
 hooked API, replaced library, or fully controlled local machine trustworthy.
