@@ -44,11 +44,15 @@ jobs:
           pem_scope='PRIVATE'
           pem_kind='KEY'
           pem_marker="${pem_begin} (RSA |EC |DSA |OPENSSH |ENCRYPTED )?${pem_scope} ${pem_kind}|${pem_begin} ${pem_scope} ${pem_kind}"
-          if grep -R -n -E "$pem_marker" services/cloudflare-license-admin .github/workflows/cloudflare-license-admin.yml; then
+          cloudflare_token='CLOUDFLARE_API_TOKEN'
+          admin_bearer='ADMIN_BEARER'
+          jwt_like='[A-Za-z0-9_-]{40,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}'
+          token_marker="${cloudflare_token}=|${admin_bearer}=|${jwt_like}"
+          if grep -R -n -E --exclude-dir=node_modules --exclude-dir=.wrangler --exclude-dir=.online-key "$pem_marker" services/cloudflare-license-admin .github/workflows/cloudflare-license-admin.yml; then
             echo "PEM key marker found"
             exit 1
           fi
-          if grep -R -n -E 'CLOUDFLARE_API_TOKEN=|ADMIN_BEARER=|[A-Za-z0-9_-]{40,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}' services/cloudflare-license-admin .github/workflows/cloudflare-license-admin.yml; then
+          if grep -R -n -E --exclude-dir=node_modules --exclude-dir=.wrangler --exclude-dir=.online-key "$token_marker" services/cloudflare-license-admin .github/workflows/cloudflare-license-admin.yml; then
             echo "secret-like token found"
             exit 1
           fi

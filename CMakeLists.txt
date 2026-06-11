@@ -193,6 +193,7 @@ endif()
 add_custom_target(project_initialize
   COMMAND license_generator::lccgen project initialize -t "${PROJECT_SOURCE_DIR}/src/templates" -n "${LCC_PROJECT_NAME}" -p "${LCC_PROJECTS_BASE_DIR}"
   COMMENT "preparing project ${LCC_PROJECT_NAME}; embedding public key ${LCC_PROJECT_PUBLIC_KEY}"
+  VERBATIM
   USES_TERMINAL
 )
 add_custom_target(release_project_guard
@@ -208,6 +209,7 @@ add_custom_target(release_project_guard
     "-DLCC_PROJECT_PRIVATE_KEY=${LCC_PROJECT_PRIVATE_KEY}"
     "-DLCCGEN_EXECUTABLE=$<TARGET_FILE:license_generator::lccgen>"
     -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CheckReleaseProject.cmake"
+  VERBATIM
 )
 if(TARGET lccgen)
   add_dependencies(release_project_guard lccgen)
@@ -444,5 +446,4 @@ set(CPACK_SOURCE_IGNORE_FILES
 	"signing"
 )
 include(CPack)
-
 

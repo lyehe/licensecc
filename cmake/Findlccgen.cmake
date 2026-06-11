@@ -78,6 +78,17 @@ ELSE(LCC_LOCATION)
 		    set(failure_messge  "All the options to find lcc executable failed. And i can't compile one from source GIT_SUBMODULE was turned off or failed. Please update submodules and try again.")
 		endif()
 		add_subdirectory("${PROJECT_SOURCE_DIR}/extern/license-generator")
+		if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+			# The pinned generator submodule uses uint8_t from base64.h without
+			# including <cstdint>. Keep the compatibility shim in the superproject
+			# so CI does not depend on an unpublished submodule working-tree edit.
+			if(TARGET lcc_base)
+				target_compile_options(lcc_base PRIVATE "SHELL:-include cstdint")
+			endif()
+			if(TARGET license_generator_lib)
+				target_compile_options(license_generator_lib PUBLIC "SHELL:-include cstdint")
+			endif()
+		endif()
 		set(lccgen_FOUND TRUE)
 	ENDIF(NOT lccgen_FOUND)
 ENDIF(LCC_LOCATION)

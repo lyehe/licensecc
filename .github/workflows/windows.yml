@@ -20,8 +20,13 @@ jobs:
       -  name: Install Boost (msvc 14.3 / VS2022)
          shell: bash
          run: |
-            choco install -y boost-msvc-14.3 --version 1.83.0
-            echo "BOOST_ROOT=C:/local/boost_1_83_0" >> $GITHUB_ENV
+            choco install -y boost-msvc-14.3 --version 1.84.0.1
+            boost_root="$(find /c/local -maxdepth 1 -type d -name 'boost_*' -print | sort -V | tail -n 1)"
+            if [ -z "$boost_root" ]; then
+              echo "Boost install did not create a /c/local/boost_* directory" >&2
+              exit 1
+            fi
+            echo "BOOST_ROOT=$(cygpath -m "$boost_root")" >> $GITHUB_ENV
       -  name: Compile
          shell: bash
          run: |

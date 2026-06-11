@@ -175,6 +175,7 @@ jobs:
               -DCMAKE_CXX_COMPILER=clang++ \
               -DLCC_PROJECT_NAME=licensecc_ci \
               -DLCC_PROJECTS_BASE_DIR=$RUNNER_TEMP/licensecc-fuzz-projects \
+              -DLCC_ALLOW_RELEASE_PROJECT_KEYGEN=ON \
               -DLCC_BUILD_INSPECTOR=OFF \
               -DBUILD_FUZZERS=ON \
               -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer" \
