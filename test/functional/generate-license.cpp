@@ -17,6 +17,7 @@
 
 #include "../../src/library/base/base64.h"
 #include "../../src/library/base/base.h"
+#include "../../src/library/base/string_utils.h"
 #include "../../src/library/ini/SimpleIni.h"
 #include "generate-license.h"
 
@@ -92,7 +93,8 @@ string generate_license(const string& license_name, const vector<string>& other_
 		rc = ini.LoadFile(license_fname.c_str());
 	}
 	BOOST_REQUIRE_GE(rc, 0);
-	const int sectionSize = ini.GetSectionSize(LCC_PROJECT_NAME);
+	const string default_feature = toupper_copy(trim_copy(LCC_PROJECT_NAME));
+	const int sectionSize = ini.GetSectionSize(default_feature.c_str());
 	BOOST_CHECK_GT(sectionSize, 0);
 	return license_fname.string();
 }

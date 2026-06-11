@@ -114,7 +114,7 @@ static bool lcc_copy_public_string(char* out, const size_t out_size, const char*
 	if (out == nullptr || out_size == 0) {
 		return false;
 	}
-	out[0] = '\0';
+	memset(out, 0, out_size);
 	if (value == nullptr) {
 		return false;
 	}

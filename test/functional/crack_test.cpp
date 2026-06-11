@@ -19,6 +19,7 @@
 #include "../../src/library/base/file_utils.hpp"
 #include "../../src/library/locate/LocatorFactory.hpp"
 #include "../../src/library/os/os.h"
+#include "../../src/library/base/string_utils.h"
 
 namespace license {
 namespace test {
@@ -34,6 +35,10 @@ static void replace_in_file(const string& file_path, const string& from, const s
 	ofstream out(file_path.c_str(), ios::binary | ios::trunc);
 	BOOST_REQUIRE_MESSAGE(out.is_open(), "Can open license for tampering: " + file_path);
 	out << content;
+}
+
+static string default_feature_name() {
+	return toupper_copy(trim_copy(LCC_PROJECT_NAME));
 }
 
 static void write_file(const string& file_path, const string& content) {
@@ -55,7 +60,7 @@ static string suffix_to_exceed_license_limit(const string& current_content, cons
 static string write_signed_extra_data_license(const string& license_name, const string& extra_data) {
 	const string license_version = to_string(LCC_LICENSE_FORMAT_VERSION);
 	const string signature_payload =
-		string(LCC_PROJECT_NAME) + PARAM_EXTRA_DATA + extra_data + LICENSE_VERSION + license_version;
+		default_feature_name() + PARAM_EXTRA_DATA + extra_data + LICENSE_VERSION + license_version;
 	const string signature = sign_data(signature_payload, license_name + "_signature");
 	const fs::path licenses_base(LCC_LICENSES_BASE);
 	if (!fs::exists(licenses_base)) {
@@ -64,7 +69,7 @@ static string write_signed_extra_data_license(const string& license_name, const 
 	const fs::path license_path(licenses_base / (license_name + ".lic"));
 	ofstream out(license_path.string().c_str(), ios::binary | ios::trunc);
 	BOOST_REQUIRE_MESSAGE(out.is_open(), "Can write signed extra-data license");
-	out << "[" << LCC_PROJECT_NAME << "]\n";
+	out << "[" << default_feature_name() << "]\n";
 	out << LICENSE_VERSION << " = " << license_version << "\n";
 	out << PARAM_EXTRA_DATA << " = " << extra_data << "\n";
 	out << LICENSE_SIGNATURE << " = " << signature << "\n";
@@ -384,7 +389,7 @@ BOOST_AUTO_TEST_CASE(test_reject_signed_malformed_or_oversized_extra_data) {
 BOOST_AUTO_TEST_CASE(test_reject_feature_section_mutation) {
 	const vector<string> extraArgs;
 	const string licLocation = generate_license("feature_section_tamper", extraArgs);
-	replace_in_file(licLocation, string("[") + LCC_PROJECT_NAME + "]", "[FEATURE1]");
+	replace_in_file(licLocation, string("[") + default_feature_name() + "]", "[FEATURE1]");
 
 	LicenseInfo license;
 	LicenseLocation location = {LICENSE_PATH};
@@ -631,7 +636,7 @@ BOOST_AUTO_TEST_CASE(test_reject_malformed_version_bound) {
 BOOST_AUTO_TEST_CASE(test_reject_signed_malformed_client_signature) {
 	const string client_signature = "XXX-XXX-XXX";
 	const string license_version = to_string(LCC_LICENSE_FORMAT_VERSION);
-	const string signature_payload = string(LCC_PROJECT_NAME) + PARAM_CLIENT_SIGNATURE + client_signature +
+	const string signature_payload = default_feature_name() + PARAM_CLIENT_SIGNATURE + client_signature +
 									 LICENSE_VERSION + license_version;
 	const string signature = sign_data(signature_payload, "signed_malformed_client_signature");
 	const fs::path licenses_base(LCC_LICENSES_BASE);
@@ -641,7 +646,7 @@ BOOST_AUTO_TEST_CASE(test_reject_signed_malformed_client_signature) {
 	const fs::path license_path(licenses_base / "signed_malformed_client_signature.lic");
 	ofstream out(license_path.string().c_str(), ios::binary | ios::trunc);
 	BOOST_REQUIRE_MESSAGE(out.is_open(), "Can write malformed client signature license");
-	out << "[" << LCC_PROJECT_NAME << "]\n";
+	out << "[" << default_feature_name() << "]\n";
 	out << LICENSE_VERSION << " = " << license_version << "\n";
 	out << PARAM_CLIENT_SIGNATURE << " = " << client_signature << "\n";
 	out << LICENSE_SIGNATURE << " = " << signature << "\n";

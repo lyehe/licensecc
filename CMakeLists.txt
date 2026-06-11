@@ -5,6 +5,8 @@ SET(LICENSECC_SHORT_LICENSE "BSD Software License")
 SET(CMAKE_DISABLE_SOURCE_CHANGES OFF)
 SET(CMAKE_DISABLE_IN_SOURCE_BUILD ON)
 
+option(STATIC_RUNTIME "Link statically to the compiler runtime where supported." OFF)
+
 IF(NOT DEFINED LCC_PROJECT_NAME OR "${LCC_PROJECT_NAME}" STREQUAL "")
 	message(STATUS "You should define a variable LCC_PROJECT_NAME containing the name of the software you want to add a license to."
 		"A mock project named DEFAULT has been added for you.")
@@ -15,6 +17,8 @@ ENDIF()
 IF(NOT DEFINED LCC_PROJECTS_BASE_DIR OR "${LCC_PROJECTS_BASE_DIR}" STREQUAL "")
 	set(LCC_PROJECTS_BASE_DIR "${CMAKE_BINARY_DIR}/projects" CACHE PATH "Base folder where licensecc projects are stored")
 ENDIF()
+file(TO_CMAKE_PATH "${LCC_PROJECTS_BASE_DIR}" LCC_PROJECTS_BASE_DIR)
+set(LCC_PROJECTS_BASE_DIR "${LCC_PROJECTS_BASE_DIR}" CACHE PATH "Base folder where licensecc projects are stored" FORCE)
 
 option(LCC_ALLOW_DEFAULT_PROJECT_FOR_RELEASE
 	"Allow release install/package artifacts to use reserved local test or example project names." OFF)
@@ -60,7 +64,12 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/CheckReleaseProject.cmake")
 unset(LCC_CONFIG_NAME)
 
 cmake_policy(SET CMP0048 NEW)
-#cmake_policy(SET CMP0091 NEW)
+if(POLICY CMP0091)
+	cmake_policy(SET CMP0091 NEW)
+endif()
+if(STATIC_RUNTIME)
+	set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+endif()
 project (licensecc 
 			VERSION 2.1.0
 			LANGUAGES CXX)
@@ -395,9 +404,18 @@ configure_file(
 	"${CMAKE_CURRENT_SOURCE_DIR}/cmake/LicenseccCPackOptions.cmake.in"
 	"${CMAKE_BINARY_DIR}/LicenseccCPackOptions.cmake"
 	@ONLY)
-file(GENERATE
-	OUTPUT "${CMAKE_BINARY_DIR}/LicenseccLccgenPath-$<CONFIG>.cmake"
-	CONTENT "set(LCCGEN_EXECUTABLE \"$<TARGET_FILE:license_generator::lccgen>\")\n")
+if(CMAKE_CONFIGURATION_TYPES)
+	file(GENERATE
+		OUTPUT "${CMAKE_BINARY_DIR}/LicenseccLccgenPath-$<CONFIG>.cmake"
+		CONTENT "set(LCCGEN_EXECUTABLE \"$<TARGET_FILE:license_generator::lccgen>\")\n")
+else()
+	file(GENERATE
+		OUTPUT "${CMAKE_BINARY_DIR}/LicenseccLccgenPath-${LCC_PACKAGE_BUILD_CONFIG}.cmake"
+		CONTENT "set(LCCGEN_EXECUTABLE \"$<TARGET_FILE:license_generator::lccgen>\")\n")
+	file(GENERATE
+		OUTPUT "${CMAKE_BINARY_DIR}/LicenseccLccgenPath.cmake"
+		CONTENT "set(LCCGEN_EXECUTABLE \"$<TARGET_FILE:license_generator::lccgen>\")\n")
+endif()
 set(CPACK_PROJECT_CONFIG_FILE "${CMAKE_BINARY_DIR}/LicenseccCPackOptions.cmake")
 if(WIN32)
 	set(CPACK_GENERATOR "ZIP")
@@ -446,4 +464,3 @@ set(CPACK_SOURCE_IGNORE_FILES
 	"signing"
 )
 include(CPack)
-

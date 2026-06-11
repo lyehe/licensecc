@@ -23,6 +23,7 @@
 #include <licensecc_properties.h>
 
 #include "../../src/library/base/base64.h"
+#include "../../src/library/base/string_utils.h"
 #include "../../src/library/base/v201_canonical_payload.hpp"
 #include "../../src/library/os/signature_verifier.hpp"
 #include "../../extern/license-generator/src/base_lib/crypto_helper.hpp"
@@ -33,6 +34,14 @@ namespace test {
 using namespace std;
 
 static const char* kGoldenV201KeyId = "sha256:9d1797cf21f0341f364b7af016a745580fd36b78b17cd1630d1049879fe9ecf2";
+
+static string project_name() {
+	return string(LCC_PROJECT_NAME);
+}
+
+static string default_feature_name() {
+	return toupper_copy(trim_copy(project_name()));
+}
 
 static license::os::SignatureVerificationRequest legacy_request(const vector<uint8_t>& payload,
 																 const vector<uint8_t>& signature) {
@@ -256,8 +265,8 @@ static vector<license::v201::CanonicalField> v201_minimal_fields() {
 		{LICENSE_SIGNATURE_VERSION, "1"},
 		{LICENSE_SIGNATURE_ALGORITHM, license::os::LCC_SIGNATURE_ALGORITHM_RSA_PKCS1_SHA256},
 		{LICENSE_KEY_ID, license::os::embedded_public_key_id()},
-		{"project", LCC_PROJECT_NAME},
-		{"feature", LCC_PROJECT_NAME},
+		{"project", project_name()},
+		{"feature", default_feature_name()},
 	};
 }
 
@@ -267,14 +276,14 @@ static string v201_license_from_storage_fields(const vector<pair<string, string>
 	for (const pair<string, string>& field : storage_fields) {
 		canonical_fields.push_back({field.first, field.second});
 	}
-	canonical_fields.push_back({"project", LCC_PROJECT_NAME});
-	canonical_fields.push_back({"feature", LCC_PROJECT_NAME});
+	canonical_fields.push_back({"project", project_name()});
+	canonical_fields.push_back({"feature", default_feature_name()});
 	const license::v201::CanonicalPayloadResult canonical =
 		license::v201::build_canonical_payload(canonical_fields);
 	BOOST_REQUIRE_MESSAGE(canonical.ok, canonical.error);
 	const string signature = signature_override.empty() ? sign_payload_bytes(canonical.bytes) : signature_override;
 
-	string license_text = string("[") + LCC_PROJECT_NAME + "]\n";
+	string license_text = string("[") + default_feature_name() + "]\n";
 	for (const pair<string, string>& field : storage_fields) {
 		license_text += field.first + " = " + field.second + "\n";
 	}
@@ -777,7 +786,7 @@ BOOST_AUTO_TEST_CASE(signature_negative_vector_parity_report) {
 	full.signature[0] ^= 0x01;
 	report_parity_vector("v201-golden-full-signature-mutated", FUNC_RET_ERROR, license::os::verify_signature(full));
 
-	const string v200_payload = string(LCC_PROJECT_NAME) + LICENSE_VERSION + "200";
+	const string v200_payload = default_feature_name() + LICENSE_VERSION + "200";
 	const string v200_signature = sign_data(v200_payload, "parity_v201_with_v200_signature");
 	LicenseInfo license{};
 	report_parity_vector("v201-with-v200-signature", LICENSE_CORRUPTED,
@@ -803,7 +812,7 @@ BOOST_AUTO_TEST_CASE(signature_negative_vector_parity_report) {
 	report_parity_vector("v201-unknown-key-corrupted", LICENSE_CORRUPTED,
 						 acquire_from_plain_data(unknown_key, license));
 
-	const string v200_with_v201_field = string("[") + LCC_PROJECT_NAME + "]\n"
+	const string v200_with_v201_field = string("[") + default_feature_name() + "]\n"
 										+ LICENSE_VERSION + " = 200\n"
 										+ LICENSE_CANONICAL_VERSION + " = 1\n"
 										+ LICENSE_SIGNATURE + " = QUJDRA==\n";
@@ -814,7 +823,7 @@ BOOST_AUTO_TEST_CASE(signature_negative_vector_parity_report) {
 }
 
 BOOST_AUTO_TEST_CASE(verify_v201_rejects_v200_style_signature) {
-	const string v200_payload = string(LCC_PROJECT_NAME) + LICENSE_VERSION + "200";
+	const string v200_payload = default_feature_name() + LICENSE_VERSION + "200";
 	const string v200_signature = sign_data(v200_payload, "v201_with_v200_signature");
 	LicenseInfo license{};
 	const LCC_EVENT_TYPE result = acquire_from_plain_data(v201_minimal_license(v200_signature), license);
@@ -970,7 +979,7 @@ BOOST_AUTO_TEST_CASE(verify_v201_optional_field_semantics_fail_closed_at_documen
 }
 
 BOOST_AUTO_TEST_CASE(verify_v200_rejects_v201_only_fields) {
-	const string license_text = string("[") + LCC_PROJECT_NAME + "]\n"
+	const string license_text = string("[") + default_feature_name() + "]\n"
 								+ LICENSE_VERSION + " = 200\n"
 								+ LICENSE_CANONICAL_VERSION + " = 1\n"
 								+ LICENSE_SIGNATURE + " = QUJDRA==\n";
