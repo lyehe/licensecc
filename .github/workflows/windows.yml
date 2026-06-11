@@ -60,13 +60,14 @@ jobs:
               cmake -S . -B build-keygen -A x64 \
                 -DCMAKE_BUILD_TYPE=Debug \
                 -DSTATIC_RUNTIME:BOOL=${{ matrix.static }} \
+                -DCMAKE_DISABLE_FIND_PACKAGE_OpenSSL=TRUE \
                 -DLCC_PROJECT_NAME:STRING=licensecc_ci \
                 -DLCC_PROJECTS_BASE_DIR="$RUNNER_TEMP/licensecc-projects" \
                 -DBUILD_TESTING=OFF \
                 -DLCC_BUILD_INSPECTOR=OFF
               cmake --build build-keygen --target project_initialize --config Debug
             fi
-            cmake -S . -B build -A x64 -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} -DSTATIC_RUNTIME:BOOL=${{ matrix.static }} -DLCC_PROJECT_NAME:STRING=licensecc_ci -DLCC_PROJECTS_BASE_DIR="$RUNNER_TEMP/licensecc-projects" -DCMAKE_INSTALL_PREFIX=C:/licensecc
+            cmake -S . -B build -A x64 -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} -DSTATIC_RUNTIME:BOOL=${{ matrix.static }} -DCMAKE_DISABLE_FIND_PACKAGE_OpenSSL=TRUE -DLCC_PROJECT_NAME:STRING=licensecc_ci -DLCC_PROJECTS_BASE_DIR="$RUNNER_TEMP/licensecc-projects" -DCMAKE_INSTALL_PREFIX=C:/licensecc
             cmake --build build --target install --config ${{ matrix.build_type }}
       -  name: Scan runtime install
          shell: bash
@@ -107,6 +108,7 @@ jobs:
             cmake -S . -B build-magic -A x64 \
               -DCMAKE_BUILD_TYPE=Debug \
               -DSTATIC_RUNTIME:BOOL=true \
+              -DCMAKE_DISABLE_FIND_PACKAGE_OpenSSL=TRUE \
               -DLCC_PROJECT_NAME:STRING=magic_smoke \
               -DLCC_PROJECTS_BASE_DIR="$RUNNER_TEMP/licensecc-magic-projects" \
               -DLCC_PROJECT_MAGIC_NUM:STRING=123456 \
