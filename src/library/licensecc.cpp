@@ -665,6 +665,10 @@ static LCC_EVENT_TYPE acquire_license_with_runtime_checks(const CallerInformatio
 	AcquiredLicenseContext license_context;
 	LCC_EVENT_TYPE result =
 		acquire_license_internal(callerInformation, licenseLocation, license_out, false, er, &license_context);
+	// INVARIANT: runtime checks run ONLY after the base license returns LICENSE_OK, so an ordinary
+	// license failure (expired/mismatch/malformed) is never masked or overwritten. Tamper under ENFORCE
+	// and a failed required online check both fail closed (clear license_out, return the failure code).
+	// Do not reorder these so a runtime check can run before the base verdict, or hide a base failure.
 	if (result == LICENSE_OK) {
 		license::anti_tamper::AntiTamperRequest request;
 		request.policy = license::anti_tamper::to_internal_policy(normalized_options.tamper_policy);

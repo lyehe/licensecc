@@ -236,6 +236,7 @@ ENDIF(BUILD_BENCHMARKS)
 
 if(LCC_BUILD_EXAMPLES)
 	add_subdirectory(examples/online_callback)
+	add_subdirectory(examples/anti_tamper_host)
 endif()
 
 #boost is required only for tests
