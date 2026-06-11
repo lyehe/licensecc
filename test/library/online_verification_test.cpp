@@ -237,6 +237,26 @@ static LCC_ONLINE_CALLBACK_STATUS copy_assertion_to_output(const string& asserti
 	return LCC_ONLINE_CB_OK;
 }
 
+static uint32_t g_captured_client_hardening = 0xFFFFFFFFu;
+
+static LCC_ONLINE_CALLBACK_STATUS capture_hardening_callback(void* user_data, const LccOnlineRequest* request,
+															 char* assertion_out, size_t* assertion_out_size) {
+	(void)user_data;
+	(void)assertion_out;
+	(void)assertion_out_size;
+	if (request != nullptr) {
+		g_captured_client_hardening = request->client_hardening;
+	}
+	return LCC_ONLINE_CB_TRANSPORT_UNAVAILABLE;
+}
+
+static bool always_ok_host_integrity(void* user_data, char* detail_out, size_t detail_out_size) {
+	(void)user_data;
+	(void)detail_out;
+	(void)detail_out_size;
+	return true;
+}
+
 static LCC_ONLINE_CALLBACK_STATUS signing_callback(void* user_data, const LccOnlineRequest* request,
 												   char* assertion_out, size_t* assertion_out_size) {
 	CallbackState* state = static_cast<CallbackState*>(user_data);
@@ -974,6 +994,32 @@ BOOST_AUTO_TEST_CASE(decision_wrapper_preserves_local_license_failure_precedence
 	BOOST_CHECK_EQUAL(floor_state.store_calls, 0);
 	BOOST_CHECK(!has_status_event(info, LICENSE_ONLINE_VERIFICATION_FAILED));
 	BOOST_CHECK(!has_status_event(info, LICENSE_ONLINE_ASSERTION_INVALID));
+}
+
+BOOST_AUTO_TEST_CASE(online_request_carries_client_hardening_posture) {
+	RuntimePolicyGuard guard;
+	const string valid_path = issue_valid_license_file("online-client-hardening-valid");
+	LicenseLocation location = license_path_location(valid_path);
+	CallerInformations caller = default_caller();
+	LicenseInfo info{};
+
+	g_captured_client_hardening = 0xFFFFFFFFu;
+
+	LicenseCheckOptions options;
+	lcc_init_license_check_options(&options);
+	options.tamper_policy = LCC_TAMPER_ENFORCE;
+	options.tamper_flags = LCC_TAMPER_FLAG_STRICT_SOURCE_SHADOWING;
+	options.host_integrity_check = always_ok_host_integrity;
+	options.online_policy = LCC_ONLINE_REQUIRE;
+	options.online_check = capture_hardening_callback;
+
+	acquire_license_ex(&caller, &location, &info, &options);
+
+	const uint32_t expected_hardening = LCC_CLIENT_HARDENING_TAMPER_ENFORCE | LCC_CLIENT_HARDENING_HOST_INTEGRITY |
+										LCC_CLIENT_HARDENING_SOURCE_SHADOWING | LCC_CLIENT_HARDENING_ONLINE_REQUIRED;
+	BOOST_CHECK_EQUAL(g_captured_client_hardening, expected_hardening);
+
+	std::remove(valid_path.c_str());
 }
 
 BOOST_AUTO_TEST_CASE(invalid_online_options_fail_closed) {

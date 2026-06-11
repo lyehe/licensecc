@@ -502,6 +502,7 @@ OnlineVerificationResult evaluate(const OnlineVerificationRequest& request) {
 	public_request.policy = LCC_ONLINE_REQUIRE;
 	public_request.flags = request.flags;
 	public_request.timeout_ms = request.timeout_ms;
+	public_request.client_hardening = request.client_hardening;
 	if (!copy_public_request_field(public_request.project, sizeof(public_request.project), request.project) ||
 		!copy_public_request_field(public_request.feature, sizeof(public_request.feature), request.feature) ||
 		!copy_public_request_field(public_request.license_fingerprint,

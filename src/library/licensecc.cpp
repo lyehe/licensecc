@@ -735,6 +735,20 @@ static LCC_EVENT_TYPE acquire_license_with_runtime_checks(const CallerInformatio
 		if (loaded_floor_available) {
 			request.minimum_revocation_seq = minimum_revocation_seq;
 		}
+		uint32_t client_hardening = LCC_CLIENT_HARDENING_NONE;
+		if (normalized_options.tamper_policy == LCC_TAMPER_ENFORCE) {
+			client_hardening |= LCC_CLIENT_HARDENING_TAMPER_ENFORCE;
+		}
+		if (normalized_options.host_integrity_check != nullptr) {
+			client_hardening |= LCC_CLIENT_HARDENING_HOST_INTEGRITY;
+		}
+		if ((normalized_options.tamper_flags & LCC_TAMPER_FLAG_STRICT_SOURCE_SHADOWING) != 0) {
+			client_hardening |= LCC_CLIENT_HARDENING_SOURCE_SHADOWING;
+		}
+		if (online_policy == license::online_verification::OnlinePolicy::Require) {
+			client_hardening |= LCC_CLIENT_HARDENING_ONLINE_REQUIRED;
+		}
+		request.client_hardening = client_hardening;
 
 		const license::online_verification::OnlineVerificationResult online_result =
 			license::online_verification::evaluate(request);

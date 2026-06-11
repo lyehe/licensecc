@@ -177,7 +177,7 @@ BOOST_AUTO_TEST_CASE(public_abi_layout_profile_is_stable) {
 	BOOST_CHECK_EQUAL(offsetof(ExecutionEnvironmentInfo, virtualization), static_cast<size_t>(4));
 	BOOST_CHECK_EQUAL(offsetof(ExecutionEnvironmentInfo, virtualization_detail), static_cast<size_t>(8));
 
-	BOOST_CHECK_EQUAL(sizeof(LccOnlineRequest), static_cast<size_t>(360));
+	BOOST_CHECK_EQUAL(sizeof(LccOnlineRequest), static_cast<size_t>(364));
 	BOOST_CHECK_EQUAL(offsetof(LccOnlineRequest, size), static_cast<size_t>(0));
 	BOOST_CHECK_EQUAL(offsetof(LccOnlineRequest, version), static_cast<size_t>(4));
 	BOOST_CHECK_EQUAL(offsetof(LccOnlineRequest, project), static_cast<size_t>(8));
@@ -188,6 +188,7 @@ BOOST_AUTO_TEST_CASE(public_abi_layout_profile_is_stable) {
 	BOOST_CHECK_EQUAL(offsetof(LccOnlineRequest, policy), static_cast<size_t>(348));
 	BOOST_CHECK_EQUAL(offsetof(LccOnlineRequest, flags), static_cast<size_t>(352));
 	BOOST_CHECK_EQUAL(offsetof(LccOnlineRequest, timeout_ms), static_cast<size_t>(356));
+	BOOST_CHECK_EQUAL(offsetof(LccOnlineRequest, client_hardening), static_cast<size_t>(360));
 
 	BOOST_CHECK_EQUAL(sizeof(LicenseCheckOptions), static_cast<size_t>(136));
 	BOOST_CHECK_EQUAL(offsetof(LicenseCheckOptions, size), static_cast<size_t>(0));
@@ -280,7 +281,12 @@ BOOST_AUTO_TEST_CASE(public_abi_enum_values_are_stable) {
 	BOOST_CHECK_EQUAL(static_cast<int>(LCC_ONLINE_CB_HOST_DECLINED), 4);
 	BOOST_CHECK_EQUAL(static_cast<int>(LCC_ONLINE_CB_MALFORMED_RESPONSE), 5);
 	BOOST_CHECK_EQUAL(static_cast<uint32_t>(LCC_ONLINE_FLAG_NONE), 0U);
-	BOOST_CHECK_EQUAL(static_cast<uint32_t>(LCC_ONLINE_REQUEST_VERSION), 1U);
+	BOOST_CHECK_EQUAL(static_cast<uint32_t>(LCC_ONLINE_REQUEST_VERSION), 2U);
+	BOOST_CHECK_EQUAL(static_cast<uint32_t>(LCC_CLIENT_HARDENING_NONE), 0U);
+	BOOST_CHECK_EQUAL(static_cast<uint32_t>(LCC_CLIENT_HARDENING_TAMPER_ENFORCE), 1U);
+	BOOST_CHECK_EQUAL(static_cast<uint32_t>(LCC_CLIENT_HARDENING_HOST_INTEGRITY), 2U);
+	BOOST_CHECK_EQUAL(static_cast<uint32_t>(LCC_CLIENT_HARDENING_SOURCE_SHADOWING), 4U);
+	BOOST_CHECK_EQUAL(static_cast<uint32_t>(LCC_CLIENT_HARDENING_ONLINE_REQUIRED), 8U);
 	BOOST_CHECK_EQUAL(static_cast<uint32_t>(LCC_ONLINE_DEFAULT_TIMEOUT_MS), 3000U);
 	BOOST_CHECK_EQUAL(static_cast<uint32_t>(LCC_ONLINE_MAX_TIMEOUT_MS), 30000U);
 	BOOST_CHECK_EQUAL(static_cast<uint32_t>(LCC_LICENSE_CHECK_OPTIONS_VERSION), 2U);

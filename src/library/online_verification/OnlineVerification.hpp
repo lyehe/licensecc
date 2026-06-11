@@ -56,6 +56,7 @@ struct OnlineVerificationExpected {
 struct OnlineVerificationRequest {
 	OnlinePolicy policy = OnlinePolicy::Disabled;
 	uint32_t flags = 0;
+	uint32_t client_hardening = 0;
 	uint32_t timeout_ms = LCC_ONLINE_DEFAULT_TIMEOUT_MS;
 	LCC_ONLINE_CHECK online_check = nullptr;
 	void* online_user_data = nullptr;
