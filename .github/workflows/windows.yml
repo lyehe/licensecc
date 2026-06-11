@@ -17,16 +17,27 @@ jobs:
       -  uses: actions/checkout@v4
          with:
             submodules: recursive
-      -  name: Install Boost (msvc 14.3 / VS2022)
+      -  name: Patch vendored license generator
          shell: bash
+         run: gzip -dc patches/license-generator-ci.patch.gz | git -C extern/license-generator apply --ignore-whitespace -
+      -  name: Install Boost (msvc 14.3 / VS2022)
+         shell: pwsh
          run: |
-            choco install -y boost-msvc-14.3 --version 1.84.0.1
-            boost_root="$(find /c/local -maxdepth 1 -type d -name 'boost_*' -print | sort -V | tail -n 1)"
-            if [ -z "$boost_root" ]; then
-              echo "Boost install did not create a /c/local/boost_* directory" >&2
-              exit 1
-            fi
-            echo "BOOST_ROOT=$(cygpath -m "$boost_root")" >> $GITHUB_ENV
+            $boostVersion = "1.84.0"
+            $boostRoot = "C:\local\boost_1_84_0"
+            $installer = Join-Path $env:RUNNER_TEMP "boost_1_84_0-msvc-14.3-64.exe"
+            $url = "https://sourceforge.net/projects/boost/files/boost-binaries/$boostVersion/boost_1_84_0-msvc-14.3-64.exe/download"
+            $expectedSha256 = "b14090362af9730ed9cc125b456a76d981b010060ee30e6d2eb109f8144fa444"
+            curl.exe -L --fail --retry 5 --retry-delay 10 -o $installer $url
+            $actualSha256 = (Get-FileHash -Algorithm SHA256 $installer).Hash.ToLowerInvariant()
+            if ($actualSha256 -ne $expectedSha256) {
+              throw "Boost installer SHA256 mismatch: $actualSha256"
+            }
+            Start-Process -FilePath $installer -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/DIR=$boostRoot" -Wait -NoNewWindow
+            if (-not (Test-Path (Join-Path $boostRoot "boost"))) {
+              throw "Boost install did not create $boostRoot\boost"
+            }
+            "BOOST_ROOT=C:/local/boost_1_84_0" >> $env:GITHUB_ENV
       -  name: Compile
          shell: bash
          run: |
