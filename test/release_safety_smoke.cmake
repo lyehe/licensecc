@@ -113,13 +113,17 @@ function(_run_cpack name build_dir out_result out_stdout out_stderr)
 	set(_package_dir "${_smoke_root}/${name}/packages")
 	_remove_safe("${_package_dir}" "${_smoke_root}" "${name} package dir")
 	file(MAKE_DIRECTORY "${_package_dir}")
+	set(_cpack_config "${LICENSECC_CONFIG}")
+	if(_is_multi_config AND "${name}" MATCHES "^debug-package-")
+		set(_cpack_config "Debug")
+	endif()
 	set(_cpack_command
 		"${LICENSECC_CPACK_COMMAND}"
 		--config "${build_dir}/CPackConfig.cmake"
 		-B "${_package_dir}"
 	)
-	if(NOT "${LICENSECC_CONFIG}" STREQUAL "")
-		list(APPEND _cpack_command -C "${LICENSECC_CONFIG}")
+	if(NOT "${_cpack_config}" STREQUAL "")
+		list(APPEND _cpack_command -C "${_cpack_config}")
 	endif()
 	list(APPEND _cpack_command ${ARGN})
 	execute_process(
@@ -264,6 +268,17 @@ if(NOT DEFINED LICENSECC_CONFIG OR "${LICENSECC_CONFIG}" STREQUAL "")
 else()
 	set(_config_name "${LICENSECC_CONFIG}")
 endif()
+set(_is_multi_config FALSE)
+if(DEFINED LICENSECC_GENERATOR AND
+   ("${LICENSECC_GENERATOR}" MATCHES "Visual Studio" OR
+	"${LICENSECC_GENERATOR}" MATCHES "Multi-Config" OR
+	"${LICENSECC_GENERATOR}" MATCHES "Xcode"))
+	set(_is_multi_config TRUE)
+endif()
+set(_project_initialize_config "${LICENSECC_CONFIG}")
+if(_is_multi_config)
+	set(_project_initialize_config "Debug")
+endif()
 
 _to_abs(LICENSECC_SOURCE_DIR "${LICENSECC_SOURCE_DIR}")
 _to_abs(LICENSECC_BUILD_DIR "${LICENSECC_BUILD_DIR}")
@@ -350,7 +365,7 @@ _expect_build_success(
 	"release key preparation"
 	"${_release_keygen_build_dir}"
 	"project_initialize"
-	"${LICENSECC_CONFIG}"
+	"${_project_initialize_config}"
 )
 if(NOT EXISTS "${_prepared_projects_base}/PRODUCT_SMOKE/private_key.rsa" OR
    NOT EXISTS "${_prepared_projects_base}/PRODUCT_SMOKE/include/licensecc/PRODUCT_SMOKE/public_key.h")
@@ -374,7 +389,7 @@ _expect_build_success(
 	"release alternate key preparation"
 	"${_release_keygen_other_build_dir}"
 	"project_initialize"
-	"${LICENSECC_CONFIG}"
+	"${_project_initialize_config}"
 )
 set(_mismatched_projects_base "${_smoke_root}/mismatched-release-projects")
 file(MAKE_DIRECTORY "${_mismatched_projects_base}")
@@ -406,7 +421,7 @@ _expect_build_success(
 	"debug default runtime build"
 	"${_default_build_dir}"
 	"licensecc_static"
-	"${LICENSECC_CONFIG}"
+	"${_project_initialize_config}"
 )
 _expect_cpack_failure(
 	"debug-package-default-project"
@@ -440,7 +455,7 @@ _expect_build_success(
 	"debug mismatched package runtime build"
 	"${debug-mismatched-package-project_BUILD_DIR}"
 	"licensecc_static"
-	"${LICENSECC_CONFIG}"
+	"${_project_initialize_config}"
 )
 _expect_cpack_failure(
 	"debug-package-mismatched-project-keypair"
@@ -458,13 +473,6 @@ _assert_paths_equal(
 	"Clean default LCC_PROJECTS_BASE_DIR"
 )
 
-set(_is_multi_config FALSE)
-if(DEFINED LICENSECC_GENERATOR AND
-   ("${LICENSECC_GENERATOR}" MATCHES "Visual Studio" OR
-    "${LICENSECC_GENERATOR}" MATCHES "Multi-Config" OR
-    "${LICENSECC_GENERATOR}" MATCHES "Xcode"))
-	set(_is_multi_config TRUE)
-endif()
 if(_is_multi_config)
 	_expect_build_failure(
 		"multi-config-release-default-project"
