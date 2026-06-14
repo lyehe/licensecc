@@ -119,5 +119,28 @@ BOOST_AUTO_TEST_CASE(canonical_config_payload_is_byte_exact) {
 	BOOST_CHECK_EQUAL(config_attestation::build_canonical_config_payload(c), expected);
 }
 
+BOOST_AUTO_TEST_CASE(verifier_accepts_valid_token_and_rejects_envelope_and_signature_tampering) {
+	auto e = base_expected();
+	const string token = token_for(make_claims(e));
+	string error;
+	ConfigVerifyFailure failure = ConfigVerifyFailure::None;
+	config_attestation::ConfigAttestationClaims out;
+
+	BOOST_CHECK(config_attestation::verify_config_envelope(token, e, &out, error, failure));
+	BOOST_CHECK(error.empty());
+	BOOST_CHECK_EQUAL(out.config_id, "app-config");
+
+	BOOST_CHECK(!config_attestation::verify_config_envelope("bad." + token, e, nullptr, error, failure));
+	BOOST_CHECK(failure == ConfigVerifyFailure::Envelope);
+
+	string tampered = token;
+	const size_t first = tampered.find('.');
+	const size_t second = tampered.find('.', first + 1);
+	BOOST_REQUIRE(second != string::npos);
+	tampered[second + 1] = tampered[second + 1] == 'A' ? 'B' : 'A';
+	BOOST_CHECK(!config_attestation::verify_config_envelope(tampered, e, nullptr, error, failure));
+	BOOST_CHECK(failure == ConfigVerifyFailure::Signature);
+}
+
 }  // namespace test
 }  // namespace license
