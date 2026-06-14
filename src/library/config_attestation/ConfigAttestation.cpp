@@ -1,6 +1,7 @@
 #include "ConfigAttestation.hpp"
 
 #include <cstdint>
+#include <ctime>
 #include <mutex>
 #include <sstream>
 #include <string>
@@ -46,6 +47,11 @@ const char kEnvelopePrefix[] = "lcccfg1";
 const char kPurpose[] = "licensecc-config-attestation";
 const char kVersion[] = "1";
 const unsigned int kConfigSignatureVersion = 9002U;
+const uint64_t kIssuedAtFutureSkewSeconds = 300;
+
+uint64_t now_epoch_seconds() {
+	return static_cast<uint64_t>(time(nullptr));
+}
 
 std::vector<ConfigAttestationPublicKey> current_trusted_public_keys() {
 	std::lock_guard<std::mutex> lock(trusted_public_keys_override_mutex());
@@ -226,6 +232,17 @@ bool validate_claims(const ConfigAttestationClaims& claims, const ConfigAttestat
 	if (claims.config_hash != expected_config_hash) {
 		failure = ConfigVerifyFailure::HashMismatch;
 		error = "config token hash does not match config bytes";
+		return false;
+	}
+	const uint64_t now = expected.now_epoch_seconds == 0 ? now_epoch_seconds() : expected.now_epoch_seconds;
+	if (claims.issued_at > now + kIssuedAtFutureSkewSeconds) {
+		failure = ConfigVerifyFailure::Expired;
+		error = "config token issued in the future";
+		return false;
+	}
+	if (claims.expires_at != 0 && (claims.expires_at < claims.issued_at || claims.expires_at < now)) {
+		failure = ConfigVerifyFailure::Expired;
+		error = "config token expired";
 		return false;
 	}
 	return true;

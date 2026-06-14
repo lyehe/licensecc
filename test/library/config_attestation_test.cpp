@@ -172,5 +172,26 @@ BOOST_AUTO_TEST_CASE(verifier_rejects_config_byte_tamper) {
 	BOOST_CHECK(config_attestation::verify_config_envelope(token, e, nullptr, error, failure));
 }
 
+BOOST_AUTO_TEST_CASE(verifier_enforces_expiry_window) {
+	auto e = base_expected(1000);
+	string error;
+	ConfigVerifyFailure failure = ConfigVerifyFailure::None;
+
+	{
+		const string t = token_for(make_claims(e, "app-config", 5, 900, 950));
+		BOOST_CHECK(!config_attestation::verify_config_envelope(t, e, nullptr, error, failure));
+		BOOST_CHECK(failure == ConfigVerifyFailure::Expired);
+	}
+	{
+		const string t = token_for(make_claims(e, "app-config", 5, 900, 0));
+		BOOST_CHECK(config_attestation::verify_config_envelope(t, e, nullptr, error, failure));
+	}
+	{
+		const string t = token_for(make_claims(e, "app-config", 5, 1000 + 301, 0));
+		BOOST_CHECK(!config_attestation::verify_config_envelope(t, e, nullptr, error, failure));
+		BOOST_CHECK(failure == ConfigVerifyFailure::Expired);
+	}
+}
+
 }  // namespace test
 }  // namespace license
