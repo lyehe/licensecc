@@ -24,6 +24,7 @@
 #include <licensecc_properties.h>
 
 #include "anti_tamper/AntiTamper.hpp"
+#include "config_attestation/ConfigAttestation.hpp"
 #include "online_verification/OnlineVerification.hpp"
 #include "base/base64.h"
 #include "base/logger.h"
@@ -268,6 +269,45 @@ void lcc_init_license_decision(LccLicenseDecision* decision) {
 	lcc_init_revocation_floor_record(&decision->revocation_floor);
 }
 
+void lcc_init_config_input(LccConfigInput* input) {
+	if (input == nullptr) {
+		return;
+	}
+	*input = LccConfigInput{};
+	input->size = sizeof(LccConfigInput);
+	input->version = LCC_CONFIG_INPUT_VERSION;
+}
+
+void lcc_init_config_verify_options(LccConfigVerifyOptions* options) {
+	if (options == nullptr) {
+		return;
+	}
+	*options = LccConfigVerifyOptions{};
+	options->size = sizeof(LccConfigVerifyOptions);
+	options->version = LCC_CONFIG_VERIFY_OPTIONS_VERSION;
+}
+
+void lcc_init_config_decision(LccConfigDecision* decision) {
+	if (decision == nullptr) {
+		return;
+	}
+	*decision = LccConfigDecision{};
+	decision->size = sizeof(LccConfigDecision);
+	decision->version = LCC_CONFIG_DECISION_VERSION;
+	decision->decision = LCC_LICENSE_DECISION_DENY;
+}
+
+bool lcc_set_config_device_hash(LccConfigInput* input, const char* device_hash) {
+	if (input == nullptr) {
+		return false;
+	}
+	if (device_hash == nullptr) {
+		input->device_hash[0] = '\0';
+		return false;
+	}
+	return lcc_copy_public_string(input->device_hash, sizeof(input->device_hash), device_hash);
+}
+
 bool lcc_set_caller_feature_name(CallerInformations* callerInformation, const char* feature_name) {
 	if (callerInformation == nullptr) {
 		return false;
@@ -452,6 +492,49 @@ static bool normalize_decision_options(const LccLicenseDecisionOptions* options,
 		error = "invalid online device hash";
 		return false;
 	}
+	return true;
+}
+
+static bool validate_config_input(const LccConfigInput* input, std::string& error) {
+	if (input == nullptr || input->size != sizeof(LccConfigInput) || input->version != LCC_CONFIG_INPUT_VERSION) {
+		error = "invalid LccConfigInput size or version";
+		return false;
+	}
+	if (input->token == nullptr || input->config_bytes == nullptr) {
+		error = "config token and config bytes are required";
+		return false;
+	}
+	const size_t device_hash_size = license::mstrnlen_s(input->device_hash, sizeof(input->device_hash));
+	if (device_hash_size == sizeof(input->device_hash)) {
+		error = "config device hash is not NUL-terminated";
+		return false;
+	}
+	if (device_hash_size != 0 &&
+		(device_hash_size != LCC_API_ONLINE_DEVICE_HASH_SIZE ||
+		 !is_public_hex_string(input->device_hash, device_hash_size))) {
+		error = "config device hash must be 64 hex characters or empty";
+		return false;
+	}
+	return true;
+}
+
+static bool normalize_config_verify_options(const LccConfigVerifyOptions* options, LccConfigVerifyOptions& normalized,
+											 std::string& error) {
+	lcc_init_config_verify_options(&normalized);
+	if (options == nullptr) {
+		return true;
+	}
+	if (options->size != sizeof(LccConfigVerifyOptions) || options->version != LCC_CONFIG_VERIFY_OPTIONS_VERSION) {
+		error = "invalid LccConfigVerifyOptions size or version";
+		return false;
+	}
+	if (options->reserved != 0) {
+		error = "reserved fields must be zero";
+		return false;
+	}
+	normalized = *options;
+	normalized.size = sizeof(LccConfigVerifyOptions);
+	normalized.version = LCC_CONFIG_VERIFY_OPTIONS_VERSION;
 	return true;
 }
 
@@ -915,6 +998,36 @@ void lcc_set_environment_license_sources_enabled(bool enabled) {
 
 void lcc_set_strict_source_fatal_enabled(bool enabled) {
 	strict_source_fatal_enabled.store(enabled, std::memory_order_relaxed);
+}
+
+LCC_EVENT_TYPE lcc_verify_config(const CallerInformations* callerInformation, const LicenseLocation* licenseLocation,
+								 LicenseInfo* license_out, const LccConfigInput* input, LccConfigDecision* decision_out,
+								 const LccConfigVerifyOptions* options) {
+	(void)callerInformation;
+	(void)licenseLocation;
+	if (license_out != nullptr) {
+		*license_out = LicenseInfo{};
+	}
+	if (decision_out != nullptr) {
+		lcc_init_config_decision(decision_out);
+	}
+	license::EventRegistry er;
+	std::string error;
+	LccConfigVerifyOptions normalized;
+	if (!validate_config_input(input, error) || !normalize_config_verify_options(options, normalized, error)) {
+		add_malformed_api_input_event(er, "lcc_verify_config", error.c_str());
+		export_license_status(er, license_out);
+		if (decision_out != nullptr) {
+			decision_out->event_type = LICENSE_MALFORMED;
+		}
+		return LICENSE_MALFORMED;
+	}
+	// Task 3 implements the license + config verification here.
+	if (decision_out != nullptr) {
+		decision_out->event_type = LICENSE_CONFIG_TOKEN_INVALID;
+	}
+	export_license_status(er, license_out);
+	return LICENSE_CONFIG_TOKEN_INVALID;
 }
 
 LCC_EVENT_TYPE confirm_license(char* featureName, LicenseLocation* licenseLocation) {

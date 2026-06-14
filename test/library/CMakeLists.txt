@@ -214,5 +214,25 @@ set_tests_properties(
  PROPERTIES LABELS "security;config_attestation"
 )
 
+### Config public API tests
+add_executable(
+ test_config_public_api
+ config_public_api_test.cpp
+)
+
+target_link_libraries(
+ test_config_public_api
+ licensecc_static
+ Boost::unit_test_framework
+ Boost::system
+)
+
+ADD_TEST(NAME test_config_public_api COMMAND test_config_public_api)
+
+set_tests_properties(
+ test_config_public_api
+ PROPERTIES LABELS "security;public_api;config_attestation"
+)
+
 ADD_SUBDIRECTORY(os)
 ADD_SUBDIRECTORY(hw_identifier)
