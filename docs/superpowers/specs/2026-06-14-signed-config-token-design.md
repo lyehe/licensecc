@@ -310,9 +310,9 @@ The offline signer (phases 1–6) is the shippable MVP; the worker endpoint
 
 | Decision | Default chosen |
 | --- | --- |
-| Integrity-only vs authorization policy | **Authorization** (validate against license); integrity-only is a permissive hook |
+| Integrity-only vs authorization policy | **Entitlement-checked authorization** (eng review 2026-06-14): the D1 entitlements table gains config-limit columns; the hook validates config fields against the license's limits and signs only within-limit. See §16. |
 | Config-signing key | **Separate** key ring (separation of duties) |
-| Issuance | Offline file signer is the MVP; worker endpoint is a later, optional phase |
+| Issuance | **Incremental (eng review 2026-06-14): Plan 2 (offline-usable) ships before Plan 3 (online endpoint).** See §16. |
 | Signature primitive | **RSA-PKCS1-SHA256** (reuse); Ed25519 noted as future |
 | Envelope | New `lcccfg1` prefix + `purpose=licensecc-config-attestation` (distinct from `lccoa1`) |
 | Rollback floor scope | Keyed per `config-id`; independent configs do not interfere |
@@ -328,3 +328,59 @@ The offline signer (phases 1–6) is the shippable MVP; the worker endpoint
 - Monotonic `config-seq` floor for rollback protection.
 - Separate signing key; `key-id` + key rotation / retirement supported.
 - Fail closed on every error path.
+
+## 16. Engineering review outcomes (2026-06-14)
+
+Locked by `/plan-eng-review`. These supersede the §14 defaults where they differ.
+
+### Sequencing (D1): incremental
+Plan 2 (offline-usable) ships and is proven before Plan 3 (the coupled online
+endpoint). Plan 2 is itself sliced:
+- **Plan 2a - callable + interop-proven:** public `lcc_verify_config` C API
+  (structs, event codes, wired into `licensecc.cpp`), the Node `config-sign`
+  signer, and the byte-identical Node-to-C++ golden fixture. Uses a dev/test
+  key (the Plan 1 injection seam). After 2a an integrator can sign a config in
+  Node and verify it through the public API.
+- **Plan 2b - productionize:** project config-signing key generation (lccgen +
+  template + `LCC_API_CONFIG_ATTESTATION` + key ring + the
+  `config_attestation_signature_policy()` factory + restore `>=3072`),
+  platform-crypto SHA-256, the right-sized DRY extraction, example host, docs.
+- **Plan 3:** entitlement-checked endpoint + persistent per-config-id floor.
+
+### Policy hook (D2): entitlement-checked
+The hook is NOT permissive. The D1 entitlements table gains config-limit
+columns; the hook validates specific config fields against the requesting
+license's limits and signs only configs within them. Defining that entitlement
+contract (which config fields map to which limits) is the gating task (T1) for
+Plan 3, done before the endpoint exists.
+
+### Accepted hardening (fold into Plan 2)
+- **#3** `lcc_verify_config` is the combined license+config entry point (it
+  performs the one license read and binds the config to that fingerprint); no
+  hidden second acquire. Document "use it instead of `acquire_license` when you
+  have a config to check."
+- **#4** embed a config public-key RING + a dedicated Worker signing secret
+  (`CONFIG_SIGNING_PRIVATE_KEY_PKCS8_PEM`) + `key-id` from day one, so rotation
+  never needs a flag day.
+- **#5** the endpoint lives in the existing Worker but with an isolated signing
+  key and a separate D1 table, so a config-path bug cannot corrupt entitlement
+  rows.
+- **#7** extract only the pure, identical token helpers (`parse_uint64`,
+  canonical base64 split, `append_claim_line`) into a shared `base` unit with
+  their own tests; keep the two validators (`online_verification`,
+  `config_attestation`) separate.
+- **#8** map each `ConfigVerifyFailure` to a distinct `LCC_EVENT_TYPE` and into
+  the EventRegistry/`LicenseInfo.status`, like the online path.
+- **#12** hash the config with platform crypto (OpenSSL EVP / Windows BCrypt),
+  not the software SHA-256, because the config path hashes large payloads.
+
+### Non-negotiable spines
+1. The entitlement contract (T1), defined before the Plan 3 endpoint exists.
+2. The byte-identical Node-to-C++ golden fixture (T2), or the two sides drift
+   silently and it surfaces only in production.
+
+### New public event codes (append after `LICENSE_ONLINE_CACHE_EXPIRED = 14`,
+before the `100` block, to preserve ABI ordering)
+`LICENSE_CONFIG_TOKEN_INVALID = 15` (envelope / signature / metadata),
+`LICENSE_CONFIG_BINDING_MISMATCH = 16`, `LICENSE_CONFIG_HASH_MISMATCH = 17`,
+`LICENSE_CONFIG_EXPIRED = 18`, `LICENSE_CONFIG_ROLLBACK = 19`.
