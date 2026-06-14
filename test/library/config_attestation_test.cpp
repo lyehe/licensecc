@@ -158,5 +158,19 @@ BOOST_AUTO_TEST_CASE(verifier_rejects_binding_mismatch) {
 	{ auto bad = e; bad.device_hash = string(64, 'c'); expect_binding_denied(bad); }
 }
 
+BOOST_AUTO_TEST_CASE(verifier_rejects_config_byte_tamper) {
+	auto e = base_expected();
+	const string token = token_for(make_claims(e));
+	string error;
+	ConfigVerifyFailure failure = ConfigVerifyFailure::None;
+
+	auto tampered = e;
+	tampered.config_bytes[0] = static_cast<uint8_t>(tampered.config_bytes[0] ^ 0x01);
+	BOOST_CHECK(!config_attestation::verify_config_envelope(token, tampered, nullptr, error, failure));
+	BOOST_CHECK(failure == ConfigVerifyFailure::HashMismatch);
+
+	BOOST_CHECK(config_attestation::verify_config_envelope(token, e, nullptr, error, failure));
+}
+
 }  // namespace test
 }  // namespace license

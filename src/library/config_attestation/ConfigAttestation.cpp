@@ -221,6 +221,13 @@ bool validate_claims(const ConfigAttestationClaims& claims, const ConfigAttestat
 		error = "config token request binding mismatch";
 		return false;
 	}
+	const std::string expected_config_hash =
+		std::string("sha256:") + license::os::signature_sha256_hex(expected.config_bytes);
+	if (claims.config_hash != expected_config_hash) {
+		failure = ConfigVerifyFailure::HashMismatch;
+		error = "config token hash does not match config bytes";
+		return false;
+	}
 	return true;
 }
 
