@@ -209,5 +209,16 @@ BOOST_AUTO_TEST_CASE(verifier_enforces_config_seq_floor) {
 	BOOST_CHECK(config_attestation::verify_config_envelope(token, at, nullptr, error, failure));
 }
 
+BOOST_AUTO_TEST_CASE(verifier_accepts_large_config) {
+	auto e = base_expected();
+	e.config_bytes.assign(static_cast<size_t>(1024) * 1024, 0x5A);
+	const string token = token_for(make_claims(e));
+	string error;
+	ConfigVerifyFailure failure = ConfigVerifyFailure::None;
+
+	BOOST_CHECK(config_attestation::verify_config_envelope(token, e, nullptr, error, failure));
+	BOOST_CHECK(error.empty());
+}
+
 }  // namespace test
 }  // namespace license
