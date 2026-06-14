@@ -60,6 +60,15 @@ void lcc_init_license_decision_options(LccLicenseDecisionOptions* options);
  */
 void lcc_init_license_decision(LccLicenseDecision* decision);
 
+/** Initializes ::LccConfigInput (null-safe). */
+void lcc_init_config_input(LccConfigInput* input);
+/** Initializes ::LccConfigVerifyOptions (null-safe). */
+void lcc_init_config_verify_options(LccConfigVerifyOptions* options);
+/** Initializes ::LccConfigDecision; the default decision is deny. */
+void lcc_init_config_decision(LccConfigDecision* decision);
+/** Bounded setter for the optional device hash (64 hex chars or empty). */
+bool lcc_set_config_device_hash(LccConfigInput* input, const char* device_hash);
+
 /**
  * Bounded setters for fixed-size public ABI buffers. They return false and
  * clear the destination field if the input is null or too large for the
@@ -170,6 +179,25 @@ LCC_EVENT_TYPE lcc_acquire_license_decision(const CallerInformations* callerInfo
 											const LicenseLocation* licenseLocation, LicenseInfo* license_out,
 											LccLicenseDecision* decision_out,
 											const LccLicenseDecisionOptions* options);
+
+/**
+ * Verifies a server-signed configuration token against the bytes the
+ * application will use, binding it to a valid local license. This is the
+ * combined entry point: it performs the one license read (use it instead of
+ * ::acquire_license when you have a config to check) and binds the config to
+ * that license's fingerprint, project, and feature.
+ *
+ * Returns ::LICENSE_OK only when the local license is valid AND the config
+ * token verifies (signature, binding, config-hash, window, rollback floor).
+ * Otherwise returns the license failure or a LICENSE_CONFIG_* code, and sets
+ * `decision_out->decision` to deny. `license_out` receives the license audit
+ * status; `decision_out` receives the config decision. Invalid size/version
+ * inputs fail closed with ::LICENSE_MALFORMED.
+ */
+LCC_EVENT_TYPE lcc_verify_config(const CallerInformations* callerInformation,
+								 const LicenseLocation* licenseLocation, LicenseInfo* license_out,
+								 const LccConfigInput* input, LccConfigDecision* decision_out,
+								 const LccConfigVerifyOptions* options);
 
 /**
  * Process-local online revocation-floor helpers. They are useful for tests and

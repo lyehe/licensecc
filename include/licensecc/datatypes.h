@@ -48,6 +48,12 @@ typedef enum {
 	LICENSE_ONLINE_ASSERTION_INVALID = 13,  // Online assertion was malformed, expired, or not authentic
 	LICENSE_ONLINE_CACHE_EXPIRED = 14,  // Reserved for future persistent-cache APIs
 
+	LICENSE_CONFIG_TOKEN_INVALID = 15,     // config token envelope, signature, or metadata invalid
+	LICENSE_CONFIG_BINDING_MISMATCH = 16,  // config token not bound to this project/feature/license/device
+	LICENSE_CONFIG_HASH_MISMATCH = 17,     // config bytes do not match the signed config-hash
+	LICENSE_CONFIG_EXPIRED = 18,           // config token outside its issued/expires window
+	LICENSE_CONFIG_ROLLBACK = 19,          // config-seq below the accepted minimum
+
 	LICENSE_SPECIFIED = 100,  // license location was specified
 	LICENSE_FOUND = 101,  // License file has been found or license data has been located
 	PRODUCT_FOUND = 102,  // License has been loaded and the declared product has been found
@@ -85,6 +91,10 @@ typedef enum {
 #define LCC_LICENSE_CHECK_OPTIONS_VERSION 2u
 #define LCC_LICENSE_DECISION_OPTIONS_VERSION 1u
 #define LCC_LICENSE_DECISION_VERSION 1u
+#define LCC_API_CONFIG_ID_SIZE 64u
+#define LCC_CONFIG_INPUT_VERSION 1u
+#define LCC_CONFIG_VERIFY_OPTIONS_VERSION 1u
+#define LCC_CONFIG_DECISION_VERSION 1u
 
 typedef bool (*LCC_HOST_INTEGRITY_CHECK)(void* user_data, char* detail_out, size_t detail_out_size);
 
@@ -179,6 +189,52 @@ typedef struct LccLicenseDecision {
 	uint32_t reserved;
 	LccRevocationFloorRecord revocation_floor;
 } LccLicenseDecision;
+
+/**
+ * Input to ::lcc_verify_config. `token` is the NUL-terminated "lcccfg1...."
+ * envelope. `config_bytes`/`config_len` are the EXACT bytes the application will
+ * consume; the verifier hashes them and compares to the signed config-hash, so
+ * the application must load the exact bytes that were signed (no re-serialize,
+ * no added BOM or trailing whitespace). `device_hash` is optional (empty = not
+ * device-bound).
+ */
+typedef struct LccConfigInput {
+	uint32_t size;
+	uint32_t version;
+	const char* token;
+	const uint8_t* config_bytes;
+	size_t config_len;
+	char device_hash[LCC_API_ONLINE_DEVICE_HASH_SIZE + 1];
+} LccConfigInput;
+
+/**
+ * Options for ::lcc_verify_config. `now_override` of 0 uses the system clock.
+ * `min_config_seq` is a caller-supplied rollback floor (0 = none); persistent
+ * per-config-id floor storage is a later phase.
+ */
+typedef struct LccConfigVerifyOptions {
+	uint32_t size;
+	uint32_t version;
+	uint64_t now_override;
+	uint64_t min_config_seq;
+	uint32_t reserved;
+} LccConfigVerifyOptions;
+
+/**
+ * Output of ::lcc_verify_config. Honor the config only when `decision` is
+ * ::LCC_LICENSE_DECISION_ALLOW and `event_type` is ::LICENSE_OK.
+ */
+typedef struct LccConfigDecision {
+	uint32_t size;
+	uint32_t version;
+	LCC_LICENSE_DECISION decision;
+	LCC_EVENT_TYPE event_type;
+	char config_id[LCC_API_CONFIG_ID_SIZE + 1];
+	uint64_t config_seq;
+	bool bound_to_license;
+	bool bound_to_device;
+	uint32_t reserved;
+} LccConfigDecision;
 
 typedef struct {
 	LCC_SEVERITY severity;
