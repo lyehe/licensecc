@@ -139,6 +139,20 @@ target_link_libraries(
  Boost::system
 )
 
+### Config attestation verification tests
+add_executable(
+ test_config_attestation
+ config_attestation_test.cpp
+)
+
+target_link_libraries(
+ test_config_attestation
+ licensecc_static
+ license_generator_lib
+ Boost::unit_test_framework
+ Boost::system
+)
+
 ADD_TEST(NAME test_license_reader COMMAND test_license_reader)
 ADD_TEST(NAME test_license_locator COMMAND test_license_locator)
 ADD_TEST(NAME test_base64 COMMAND test_base64)
@@ -148,6 +162,7 @@ ADD_TEST(NAME test_license_verifier COMMAND test_license_verifier)
 ADD_TEST(NAME test_public_api COMMAND test_public_api)
 ADD_TEST(NAME test_anti_tamper COMMAND test_anti_tamper)
 ADD_TEST(NAME test_online_verification COMMAND test_online_verification)
+ADD_TEST(NAME test_config_attestation COMMAND test_config_attestation)
 
 set_tests_properties(
  test_license_reader
@@ -192,6 +207,11 @@ set_tests_properties(
 set_tests_properties(
  test_online_verification
  PROPERTIES LABELS "security;public_api;online"
+)
+
+set_tests_properties(
+ test_config_attestation
+ PROPERTIES LABELS "security;config_attestation"
 )
 
 ADD_SUBDIRECTORY(os)
