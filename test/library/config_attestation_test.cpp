@@ -142,5 +142,21 @@ BOOST_AUTO_TEST_CASE(verifier_accepts_valid_token_and_rejects_envelope_and_signa
 	BOOST_CHECK(failure == ConfigVerifyFailure::Signature);
 }
 
+BOOST_AUTO_TEST_CASE(verifier_rejects_binding_mismatch) {
+	auto e = base_expected();
+	const string token = token_for(make_claims(e));
+	string error;
+	ConfigVerifyFailure failure = ConfigVerifyFailure::None;
+
+	auto expect_binding_denied = [&](config_attestation::ConfigAttestationExpected bad) {
+		BOOST_CHECK(!config_attestation::verify_config_envelope(token, bad, nullptr, error, failure));
+		BOOST_CHECK(failure == ConfigVerifyFailure::Binding);
+	};
+	{ auto bad = e; bad.project = "OTHER"; expect_binding_denied(bad); }
+	{ auto bad = e; bad.feature = "OTHER"; expect_binding_denied(bad); }
+	{ auto bad = e; bad.license_fingerprint = string(64, 'b'); expect_binding_denied(bad); }
+	{ auto bad = e; bad.device_hash = string(64, 'c'); expect_binding_denied(bad); }
+}
+
 }  // namespace test
 }  // namespace license

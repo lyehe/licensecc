@@ -209,11 +209,16 @@ bool verify_payload_signature(const std::vector<uint8_t>& payload, const std::ve
 
 bool validate_claims(const ConfigAttestationClaims& claims, const ConfigAttestationExpected& expected,
 					 std::string& error, ConfigVerifyFailure& failure) {
-	(void)expected;
 	if (claims.purpose != kPurpose || claims.version != kVersion ||
 		claims.algorithm != license::os::LCC_SIGNATURE_ALGORITHM_RSA_PKCS1_SHA256) {
 		failure = ConfigVerifyFailure::Metadata;
 		error = "config token metadata mismatch";
+		return false;
+	}
+	if (claims.project != expected.project || claims.feature != expected.feature ||
+		claims.license_fingerprint != expected.license_fingerprint || claims.device_hash != expected.device_hash) {
+		failure = ConfigVerifyFailure::Binding;
+		error = "config token request binding mismatch";
 		return false;
 	}
 	return true;
