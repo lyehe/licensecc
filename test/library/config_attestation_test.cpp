@@ -193,5 +193,21 @@ BOOST_AUTO_TEST_CASE(verifier_enforces_expiry_window) {
 	}
 }
 
+BOOST_AUTO_TEST_CASE(verifier_enforces_config_seq_floor) {
+	auto e = base_expected();
+	const string token = token_for(make_claims(e, "app-config", 5, 900, 1100));
+	string error;
+	ConfigVerifyFailure failure = ConfigVerifyFailure::None;
+
+	auto below = e;
+	below.min_config_seq = 6;
+	BOOST_CHECK(!config_attestation::verify_config_envelope(token, below, nullptr, error, failure));
+	BOOST_CHECK(failure == ConfigVerifyFailure::Rollback);
+
+	auto at = e;
+	at.min_config_seq = 5;
+	BOOST_CHECK(config_attestation::verify_config_envelope(token, at, nullptr, error, failure));
+}
+
 }  // namespace test
 }  // namespace license

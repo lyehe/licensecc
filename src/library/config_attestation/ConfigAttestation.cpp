@@ -245,6 +245,11 @@ bool validate_claims(const ConfigAttestationClaims& claims, const ConfigAttestat
 		error = "config token expired";
 		return false;
 	}
+	if (claims.config_seq < expected.min_config_seq) {
+		failure = ConfigVerifyFailure::Rollback;
+		error = "config token sequence is below the minimum";
+		return false;
+	}
 	return true;
 }
 
