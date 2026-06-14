@@ -3,7 +3,9 @@
 #include <boost/test/unit_test.hpp>
 
 #include <cstdint>
+#include <fstream>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -218,6 +220,50 @@ BOOST_AUTO_TEST_CASE(verifier_accepts_large_config) {
 
 	BOOST_CHECK(config_attestation::verify_config_envelope(token, e, nullptr, error, failure));
 	BOOST_CHECK(error.empty());
+}
+
+BOOST_AUTO_TEST_CASE(golden_config_token_signed_by_node_verifies_in_cpp) {
+	const string base = string(PROJECT_TEST_SRC_DIR) + "/vectors/config_attestation/";
+	auto read_file = [&](const string& name) {
+		ifstream in((base + name).c_str(), ios::binary);
+		BOOST_REQUIRE_MESSAGE(in.is_open(), "open " + base + name);
+		return string((istreambuf_iterator<char>(in)), istreambuf_iterator<char>());
+	};
+	auto trim = [](string s) { while (!s.empty() && (s.back()=='\n'||s.back()=='\r'||s.back()==' ')) s.pop_back(); return s; };
+	auto hex_to_bytes = [](const string& hex) {
+		vector<uint8_t> out;
+		for (size_t i = 0; i + 1 < hex.size(); i += 2)
+			out.push_back(static_cast<uint8_t>(stoul(hex.substr(i, 2), nullptr, 16)));
+		return out;
+	};
+
+	const string token = trim(read_file("golden.token"));
+	const string key_id = trim(read_file("golden.key_id"));
+	const string config = read_file("golden.config");  // exact bytes, no trim
+	const vector<uint8_t> public_key_der = hex_to_bytes(trim(read_file("golden.public_key.pkcs1.der.hex")));
+
+	config_attestation::ConfigAttestationExpected expected;
+	expected.project = "DEFAULT";
+	expected.feature = "EXPORT";
+	expected.license_fingerprint = string(64, 'a');
+	expected.device_hash = "";
+	expected.config_bytes.assign(config.begin(), config.end());
+	expected.now_epoch_seconds = 1500;  // inside [1000,2000]
+	expected.min_config_seq = 9;
+	config_attestation::ConfigAttestationPublicKey key;
+	key.key_id = key_id;
+	key.public_key_der = public_key_der;
+	key.bits = 3072;
+	expected.trusted_public_keys.push_back(key);
+
+	config_attestation::ConfigAttestationClaims claims;
+	string error;
+	config_attestation::ConfigVerifyFailure failure = config_attestation::ConfigVerifyFailure::None;
+	BOOST_REQUIRE_MESSAGE(
+		config_attestation::verify_config_envelope(token, expected, &claims, error, failure), error);
+	BOOST_CHECK_EQUAL(claims.config_id, "app-config");
+	BOOST_CHECK_EQUAL(claims.config_seq, 9u);
+	BOOST_CHECK_EQUAL(claims.key_id, key_id);
 }
 
 }  // namespace test
