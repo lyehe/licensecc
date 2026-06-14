@@ -223,6 +223,7 @@ add_executable(
 target_link_libraries(
  test_config_public_api
  licensecc_static
+ license_generator_lib
  Boost::unit_test_framework
  Boost::system
 )

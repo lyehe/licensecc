@@ -604,6 +604,21 @@ static bool call_revocation_floor_store(const RevocationFloorCallbacks& callback
 	return true;
 }
 
+static LCC_EVENT_TYPE config_event_for_failure(license::config_attestation::ConfigVerifyFailure failure) {
+	switch (failure) {
+		case license::config_attestation::ConfigVerifyFailure::Binding:
+			return LICENSE_CONFIG_BINDING_MISMATCH;
+		case license::config_attestation::ConfigVerifyFailure::HashMismatch:
+			return LICENSE_CONFIG_HASH_MISMATCH;
+		case license::config_attestation::ConfigVerifyFailure::Expired:
+			return LICENSE_CONFIG_EXPIRED;
+		case license::config_attestation::ConfigVerifyFailure::Rollback:
+			return LICENSE_CONFIG_ROLLBACK;
+		default:
+			return LICENSE_CONFIG_TOKEN_INVALID;
+	}
+}
+
 static void export_license_status(license::EventRegistry& er, LicenseInfo* license_out) {
 #ifndef NDEBUG
 	const string evlog = er.to_string();
@@ -1003,8 +1018,6 @@ void lcc_set_strict_source_fatal_enabled(bool enabled) {
 LCC_EVENT_TYPE lcc_verify_config(const CallerInformations* callerInformation, const LicenseLocation* licenseLocation,
 								 LicenseInfo* license_out, const LccConfigInput* input, LccConfigDecision* decision_out,
 								 const LccConfigVerifyOptions* options) {
-	(void)callerInformation;
-	(void)licenseLocation;
 	if (license_out != nullptr) {
 		*license_out = LicenseInfo{};
 	}
@@ -1022,12 +1035,60 @@ LCC_EVENT_TYPE lcc_verify_config(const CallerInformations* callerInformation, co
 		}
 		return LICENSE_MALFORMED;
 	}
-	// Task 3 implements the license + config verification here.
+
+	AcquiredLicenseContext license_context;
+	const bool strict_source_fatal = strict_source_fatal_enabled.load(std::memory_order_relaxed);
+	LCC_EVENT_TYPE result =
+		acquire_license_internal(callerInformation, licenseLocation, license_out, strict_source_fatal, er,
+								 &license_context);
+	if (result != LICENSE_OK) {
+		export_license_status(er, license_out);
+		if (decision_out != nullptr) {
+			decision_out->event_type = result;
+		}
+		return result;
+	}
+
+	license::config_attestation::ConfigAttestationExpected expected;
+	expected.project = license_context.project;
+	expected.feature = license_context.feature;
+	expected.license_fingerprint = license_context.license_fingerprint;
+	expected.device_hash = std::string(input->device_hash);
+	expected.config_bytes.assign(input->config_bytes, input->config_bytes + input->config_len);
+	expected.now_epoch_seconds = normalized.now_override;
+	expected.min_config_seq = normalized.min_config_seq;
+	// expected.trusted_public_keys left empty: the module uses the embedded config
+	// key ring (Plan 2b) or the test-injected override.
+
+	license::config_attestation::ConfigAttestationClaims claims;
+	license::config_attestation::ConfigVerifyFailure failure =
+		license::config_attestation::ConfigVerifyFailure::None;
+	std::string verify_error;
+	const bool ok = license::config_attestation::verify_config_envelope(std::string(input->token), expected, &claims,
+																		verify_error, failure);
+	if (!ok) {
+		result = config_event_for_failure(failure);
+		add_runtime_security_failure_event(er, result, "ConfigAttestation", verify_error.c_str());
+		if (license_out != nullptr) {
+			*license_out = LicenseInfo{};
+		}
+		export_license_status(er, license_out);
+		if (decision_out != nullptr) {
+			decision_out->event_type = result;
+		}
+		return result;
+	}
+
 	if (decision_out != nullptr) {
-		decision_out->event_type = LICENSE_CONFIG_TOKEN_INVALID;
+		decision_out->decision = LCC_LICENSE_DECISION_ALLOW;
+		decision_out->event_type = LICENSE_OK;
+		lcc_copy_public_string(decision_out->config_id, sizeof(decision_out->config_id), claims.config_id.c_str());
+		decision_out->config_seq = claims.config_seq;
+		decision_out->bound_to_license = true;
+		decision_out->bound_to_device = !expected.device_hash.empty();
 	}
 	export_license_status(er, license_out);
-	return LICENSE_CONFIG_TOKEN_INVALID;
+	return LICENSE_OK;
 }
 
 LCC_EVENT_TYPE confirm_license(char* featureName, LicenseLocation* licenseLocation) {
