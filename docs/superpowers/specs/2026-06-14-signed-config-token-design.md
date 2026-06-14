@@ -59,10 +59,15 @@ Provided:
   flipped byte fails verification.
 - **Binding:** the token is bound to `project`, `feature`,
   `license-fingerprint`, and optionally `device-hash`; it cannot be moved to a
-  different product/license/device.
-- **Freshness:** `issued-at` / `expires-at` bound the validity window.
-- **Rollback protection:** a monotonic `config-seq` floor (persisted by the
-  host) prevents reinstating an older signed config.
+  different product/license/device. With `device-hash` empty the token is
+  portable across machines that hold the same license; set it to pin to one
+  machine.
+- **Freshness:** `issued-at` / `expires-at` bound the validity window
+  (`expires-at=0` means never expires).
+- **Rollback protection:** a `config-seq` floor scoped per `config-id` and
+  persisted by the host prevents reinstating an older version of the same
+  config. Independent configs use distinct `config-id`s and never block one
+  another.
 - **Fail-closed:** any parse/signature/binding/expiry/rollback failure → DENY.
 
 Not provided (documented as such): confidentiality; protection against a fully
@@ -110,8 +115,11 @@ Distinct envelope and `purpose` so a config token can never be confused with an
 online assertion (cross-protocol separation):
 
 ```
-lcccfg1.<base64url(canonical_payload)>.<base64(signature)>
+lcccfg1.<base64(canonical_payload)>.<base64(signature)>
 ```
+
+Both segments use standard base64 (matching the existing `lccoa1` envelope), so
+the two formats share one decoder.
 
 Canonical payload — `key=value\n`, fixed key order, signed with
 RSA-PKCS1-SHA256:
@@ -125,16 +133,24 @@ project=<project>
 feature=<feature>
 license-fingerprint=<64-hex>
 device-hash=<64-hex or empty>
-config-id=<opaque version/name string>
-config-seq=<uint64>
+config-id=<stable logical config identity; constant across versions>
+config-seq=<uint64; monotonic version within this config-id>
 config-hash=sha256:<64-hex of the raw config bytes>
 issued-at=<unix seconds>
-expires-at=<unix seconds>
+expires-at=<unix seconds; 0 = never expires>
 ```
 
 **Hashing rule:** the client hashes the **exact raw bytes** it will consume —
 no parsing, no normalization. Canonicalization (e.g. stable JSON serialization)
 is the issuer's responsibility. This eliminates signed-vs-parsed mismatch bugs.
+The application must ship and load the exact bytes that were signed (no
+re-serialization, no added BOM or trailing whitespace) or the hash will not
+match.
+
+`config-id` is the stable logical identity of a config and does not change
+between versions; `config-seq` is its monotonically increasing version. The
+rollback floor is keyed by `(project, feature, license-fingerprint, config-id)`,
+so independent configs each keep their own lineage.
 
 Signature policy: algorithm fixed to `rsa-pkcs1-sha256`; min 3072-bit key;
 key-id must be in the embedded config key ring; retired key-ids rejected;
@@ -176,8 +192,8 @@ typedef struct LccConfigDecisionOptions {
   uint32_t size;
   uint32_t version;
   uint64_t now_override;                       /* 0 = use system clock */
-  LCC_CONFIG_SEQ_FLOOR_LOAD  config_seq_load;  /* mirror revocation floor */
-  LCC_CONFIG_SEQ_FLOOR_STORE config_seq_store;
+  LCC_CONFIG_SEQ_FLOOR_LOAD  config_seq_load;  /* keyed by project+feature+fingerprint+config_id */
+  LCC_CONFIG_SEQ_FLOOR_STORE config_seq_store; /* persist max seq per config_id */
   void* config_seq_user_data;
 } LccConfigDecisionOptions;
 
@@ -264,6 +280,7 @@ Ed25519 is a documented future upgrade for the signature primitive.
   - expired token → DENY;
   - each binding mismatch (project / feature / fingerprint / device) → DENY;
   - `config-seq` below floor (rollback) → DENY;
+  - two independent `config-id`s do not block each other (per-lineage floor);
   - large config (~1 MB) verifies.
 - Worker tests for `POST /v1/config/attest` (allow + each denial reason).
 - Signer CLI test for `config-sign.mjs` (deterministic output; rejects malformed
@@ -298,6 +315,10 @@ The offline signer (phases 1–6) is the shippable MVP; the worker endpoint
 | Issuance | Offline file signer is the MVP; worker endpoint is a later, optional phase |
 | Signature primitive | **RSA-PKCS1-SHA256** (reuse); Ed25519 noted as future |
 | Envelope | New `lcccfg1` prefix + `purpose=licensecc-config-attestation` (distinct from `lccoa1`) |
+| Rollback floor scope | Keyed per `config-id`; independent configs do not interfere |
+| Device binding | Optional; empty `device-hash` makes the token portable across machines on the same license |
+| Token expiry | `expires-at=0` means never expires |
+| Encoding | Standard base64 for both envelope segments (shared decoder with `lccoa1`) |
 
 ## 15. Security must-haves (format-independent checklist)
 
