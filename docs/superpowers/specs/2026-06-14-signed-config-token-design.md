@@ -230,14 +230,14 @@ ABI ordering.
 ## 9. Server design
 
 ### 9.1 Offline signer (MVP)
-`services/cloudflare-online-verifier/scripts/config-sign.mjs` (mirrors
+`services/cloudflare-licensing-backend/scripts/config-sign.mjs` (mirrors
 `device-key.mjs`): inputs a config file + claims + a PKCS#8 private key,
 outputs the `lcccfg1...` token. Deterministic and unit-testable; also generates
 the golden fixtures used by the C++ tests. Covers the "issued once / signed
 out-of-band, shipped as a file" case.
 
 ### 9.2 Worker endpoint (later phase)
-`POST /v1/config/attest` in `services/cloudflare-online-verifier/src/index.ts`:
+`POST /v1/config/attest` in `services/cloudflare-licensing-backend/src/index.ts`:
 accepts `{project, feature, license_fingerprint, device_hash?, config | config_hash}`,
 runs the policy hook, signs on allow, returns `{token}` or a denial.
 

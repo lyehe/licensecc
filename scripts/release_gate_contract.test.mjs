@@ -166,7 +166,7 @@ test("release gate contract command templates stay redacted", () => {
     assert.equal(token.includes("licensecc-d1-backup-test"), false);
   }
 
-  assert.equal(PUBLIC_VERIFIER_ABUSE_COMMAND_TEMPLATE, "node services/cloudflare-online-verifier/scripts/public-verifier-drill.mjs --url <redacted-verifier-url> --expect-rate-limit --json");
+  assert.equal(PUBLIC_VERIFIER_ABUSE_COMMAND_TEMPLATE, "node services/cloudflare-licensing-backend/scripts/public-verifier-drill.mjs --url <redacted-verifier-url> --expect-rate-limit --json");
   assert.equal(PUBLIC_VERIFIER_ABUSE_COMMAND_TEMPLATE.includes("https://"), false);
   assert.equal(PUBLIC_VERIFIER_ABUSE_COMMAND_TEMPLATE.includes("<redacted-verifier-url>"), true);
 });

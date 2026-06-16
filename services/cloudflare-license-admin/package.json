@@ -13,7 +13,7 @@
     "test:e2e": "playwright install chromium && playwright test --config playwright.config.mjs",
     "lint": "node scripts/lint.mjs",
     "dry-run": "npm run build && npx wrangler deploy --dry-run --config wrangler.example.jsonc",
-    "migrate:local": "npx wrangler d1 migrations apply DB --local --config ../cloudflare-online-verifier/wrangler.example.toml",
+    "migrate:local": "npx wrangler d1 migrations apply DB --local --config ../cloudflare-licensing-backend/wrangler.example.toml",
     "sync:entitlement": "node scripts/sync-entitlement.mjs",
     "validate:remote-d1-atomicity": "node scripts/remote-d1-atomicity.mjs",
     "validate:access-admin": "node scripts/validate-access-admin.mjs"

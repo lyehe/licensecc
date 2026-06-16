@@ -8,7 +8,7 @@ import {
 } from "./secret_hygiene_scan.mjs";
 
 test("secret hygiene scan defines required ignored deployment files", () => {
-  assert.equal(REQUIRED_IGNORED_PATHS.includes("services/cloudflare-online-verifier/wrangler.toml"), true);
+  assert.equal(REQUIRED_IGNORED_PATHS.includes("services/cloudflare-licensing-backend/wrangler.toml"), true);
   assert.equal(REQUIRED_IGNORED_PATHS.includes("services/cloudflare-d1-backup/wrangler.jsonc"), true);
 });
 

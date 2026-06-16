@@ -1,5 +1,9 @@
 # Licensecc Workflow Example
 
+> This is the canonical single-file `find_package(licensecc)` consumer demo,
+> intentionally kept separate from the richer multi-pattern `examples/` set (note
+> the plural) — see `CLAUDE.md` for the `example/` vs `examples/` distinction.
+
 This standalone example demonstrates the supported application workflow:
 
 - consume an installed Licensecc project package with `find_package`;

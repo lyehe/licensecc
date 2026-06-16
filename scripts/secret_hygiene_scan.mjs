@@ -16,13 +16,13 @@ const SECRET_ENV_NAMES = [
 ];
 
 const REQUIRED_IGNORED_PATHS = [
-  "services/cloudflare-online-verifier/wrangler.toml",
+  "services/cloudflare-licensing-backend/wrangler.toml",
   "services/cloudflare-license-admin/wrangler.toml",
   "services/cloudflare-license-admin/wrangler.jsonc",
   "services/cloudflare-d1-backup/wrangler.jsonc",
-  "services/cloudflare-online-verifier/.dev.vars",
+  "services/cloudflare-licensing-backend/.dev.vars",
   "services/cloudflare-license-admin/.dev.vars",
-  "services/cloudflare-online-verifier/.online-key/online_private_key.pkcs8.pem",
+  "services/cloudflare-licensing-backend/.online-key/online_private_key.pkcs8.pem",
 ];
 
 const SECRET_ASSIGNMENT = new RegExp(`(?:^|[\\s;])(${SECRET_ENV_NAMES.join("|")})\\s*=(?!=)\\s*([^\\s"'\\\`]+)`, "g");

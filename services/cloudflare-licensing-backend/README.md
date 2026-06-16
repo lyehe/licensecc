@@ -15,6 +15,16 @@ lookup by primary key, one signed assertion, and one JSON response. The Worker
 also supports an optional Cloudflare rate-limit binding named
 `VERIFY_RATE_LIMITER`.
 
+> **Directory renamed (operator note).** This service directory was renamed
+> from `cloudflare-online-verifier` to `cloudflare-licensing-backend` to reflect
+> its multiple roles (online verifier, offline config signer, device/relay
+> tooling). The deployed Worker `name` and the D1 `database_name` are
+> intentionally **unchanged** (still `licensecc-online-verifier`) so live infra
+> and hardcoded client URLs are not orphaned. After moving to this path you must
+> re-create / reinstall the gitignored working files at the new location:
+> `wrangler.toml`, `.dev.vars`, `.online-key/`, `node_modules/`, and
+> `.wrangler/`. Run `npm ci` from this directory to reinstall dependencies.
+
 ## Setup
 
 1. Create a D1 database:

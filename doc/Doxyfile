@@ -5,7 +5,7 @@ GENERATE_HTML          = NO
 GENERATE_LATEX         = NO
 GENERATE_XML           = YES
 XML_OUTPUT             = xml
-INPUT                  = include/licensecc src/library src/templates/licensecc_properties.h.in doc/structure.dox
+INPUT                  = include/licensecc src/library src/templates/licensecc_properties.h.in
 FILE_PATTERNS          = *.h *.hpp *.c *.cpp *.dox *.h.in
 EXTENSION_MAPPING      = h.in=C++
 RECURSIVE              = YES

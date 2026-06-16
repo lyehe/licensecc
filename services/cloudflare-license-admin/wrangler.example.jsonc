@@ -17,7 +17,7 @@
       "binding": "DB",
       "database_name": "licensecc-online-verifier",
       "database_id": "replace-with-d1-database-id",
-      "migrations_dir": "../cloudflare-online-verifier/migrations"
+      "migrations_dir": "../cloudflare-licensing-backend/migrations"
     }
   ],
   "vars": {

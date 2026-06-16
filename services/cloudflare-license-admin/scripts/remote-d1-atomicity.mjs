@@ -8,7 +8,7 @@ import { spawnSync } from "node:child_process";
 
 function usage(exitCode = 2) {
   console.error(`usage:
-  node scripts/remote-d1-atomicity.mjs [--config ../cloudflare-online-verifier/wrangler.toml] [--worker-name licensecc-d1-atomicity-<suffix>] [--keep-worker]
+  node scripts/remote-d1-atomicity.mjs [--config ../cloudflare-licensing-backend/wrangler.toml] [--worker-name licensecc-d1-atomicity-<suffix>] [--keep-worker]
 
 Deploys a temporary Worker bound to the configured remote D1 database, forces a
 failed entitlement+audit D1 batch(), verifies no entitlement or event row
@@ -199,7 +199,7 @@ async function main() {
   if (hasFlag("--help") || hasFlag("-h")) {
     usage(0);
   }
-  const configPath = resolve(argValue("--config") ?? positionalArgs()[0] ?? "../cloudflare-online-verifier/wrangler.toml");
+  const configPath = resolve(argValue("--config") ?? positionalArgs()[0] ?? "../cloudflare-licensing-backend/wrangler.toml");
   const keepWorker = hasFlag("--keep-worker");
   const workerName = argValue("--worker-name") ?? `licensecc-d1-atomicity-${randomUUID().slice(0, 8)}`;
   const token = `validate-${randomBytes(32).toString("hex")}`;

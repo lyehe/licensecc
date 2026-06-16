@@ -385,7 +385,7 @@ function backupDeployCommandForEvidence() {
 
 function publicVerifierAbuseArgsFromEnv() {
   return [
-    "services/cloudflare-online-verifier/scripts/public-verifier-drill.mjs",
+    "services/cloudflare-licensing-backend/scripts/public-verifier-drill.mjs",
     "--url",
     process.env[PUBLIC_VERIFIER_URL_ENV],
     "--expect-rate-limit",
@@ -431,9 +431,9 @@ function localGates(options, environment = {}) {
     ["npm", ["--prefix", "services/cloudflare-license-admin", "run", "lint"], "admin Worker lint"],
     ["npm", ["--prefix", "services/cloudflare-license-admin", "run", "build:ui"], "admin UI build"],
     ["npm", ["--prefix", "services/cloudflare-license-admin", "run", "test:ui"], "admin UI workflow tests"],
-    ["npm", ["--prefix", "services/cloudflare-online-verifier", "test"], "online verifier tests"],
-    ["npm", ["--prefix", "services/cloudflare-online-verifier", "run", "schema:parity"], "online verifier schema parity"],
-    ["npm", ["--prefix", "services/cloudflare-online-verifier", "run", "lint"], "online verifier lint"],
+    ["npm", ["--prefix", "services/cloudflare-licensing-backend", "test"], "online verifier tests"],
+    ["npm", ["--prefix", "services/cloudflare-licensing-backend", "run", "schema:parity"], "online verifier schema parity"],
+    ["npm", ["--prefix", "services/cloudflare-licensing-backend", "run", "lint"], "online verifier lint"],
     ["npm", ["--prefix", "services/cloudflare-d1-backup", "test"], "D1 backup tests"],
     ["npm", ["--prefix", "services/cloudflare-d1-backup", "run", "lint"], "D1 backup lint"],
     ["node", ["services/cloudflare-license-admin/scripts/validate-access-admin.mjs", "--help"], "Access admin validator help"],
@@ -443,10 +443,10 @@ function localGates(options, environment = {}) {
     ["uv", ["run", "--no-project", "python", "scripts/build_docs.py"], "documentation build"],
   ];
   if (!options.quick) {
-    gates.splice(6, 0, ["npm", ["--prefix", "services/cloudflare-online-verifier", "run", "test:e2e"], "online verifier/admin local e2e"]);
+    gates.splice(6, 0, ["npm", ["--prefix", "services/cloudflare-licensing-backend", "run", "test:e2e"], "online verifier/admin local e2e"]);
     gates.splice(15, 0, ["npm", ["--prefix", "services/cloudflare-license-admin", "run", "test:e2e"], "admin UI browser e2e"]);
     gates.push(["npm", ["--prefix", "services/cloudflare-license-admin", "run", "dry-run"], "admin Worker dry-run"]);
-    gates.push(["npm", ["--prefix", "services/cloudflare-online-verifier", "run", "dry-run"], "online verifier dry-run"]);
+    gates.push(["npm", ["--prefix", "services/cloudflare-licensing-backend", "run", "dry-run"], "online verifier dry-run"]);
     gates.push(["npm", ["--prefix", "services/cloudflare-d1-backup", "run", "dry-run"], "D1 backup dry-run"]);
   }
   if (ctestAvailable(environment)) {

@@ -5,7 +5,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const signer = resolve(here, "../../../services/cloudflare-online-verifier/scripts/config-sign.mjs");
+const signer = resolve(here, "../../../services/cloudflare-licensing-backend/scripts/config-sign.mjs");
 
 const { publicKey: pkcs1Der, privateKey: pkcs8Pem } = generateKeyPairSync("rsa", {
   modulusLength: 3072,
