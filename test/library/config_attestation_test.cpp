@@ -144,6 +144,41 @@ BOOST_AUTO_TEST_CASE(verifier_accepts_valid_token_and_rejects_envelope_and_signa
 	BOOST_CHECK(failure == ConfigVerifyFailure::Signature);
 }
 
+BOOST_AUTO_TEST_CASE(golden_round_trip_and_signature_error_noun_is_stable) {
+	// Characterization test pinned BEFORE the shared signed-token core extraction.
+	// A known payload round-trips through build_config_envelope -> verify_config_envelope
+	// with the expected claims, and a signature-tampered envelope yields the exact
+	// existing error string. This locks the error-noun behavior the shared core's
+	// error_noun parameter must preserve.
+	auto e = base_expected();
+	const auto claims = make_claims(e);
+	const string token = token_for(claims);
+
+	string error;
+	ConfigVerifyFailure failure = ConfigVerifyFailure::None;
+	config_attestation::ConfigAttestationClaims out;
+	BOOST_CHECK(config_attestation::verify_config_envelope(token, e, &out, error, failure));
+	BOOST_CHECK(error.empty());
+	BOOST_CHECK(failure == ConfigVerifyFailure::None);
+	BOOST_CHECK_EQUAL(out.purpose, "licensecc-config-attestation");
+	BOOST_CHECK_EQUAL(out.config_id, "app-config");
+	BOOST_CHECK_EQUAL(out.config_seq, 5u);
+	BOOST_CHECK_EQUAL(out.config_hash, claims.config_hash);
+
+	// Flip one base64 signature character so the signature no longer verifies.
+	string tampered = token;
+	const size_t first = tampered.find('.');
+	const size_t second = tampered.find('.', first + 1);
+	BOOST_REQUIRE(second != string::npos);
+	tampered[second + 1] = tampered[second + 1] == 'A' ? 'B' : 'A';
+
+	error.clear();
+	failure = ConfigVerifyFailure::None;
+	BOOST_CHECK(!config_attestation::verify_config_envelope(tampered, e, nullptr, error, failure));
+	BOOST_CHECK(failure == ConfigVerifyFailure::Signature);
+	BOOST_CHECK_EQUAL(error, "config token signature verification failed");
+}
+
 BOOST_AUTO_TEST_CASE(verifier_rejects_binding_mismatch) {
 	auto e = base_expected();
 	const string token = token_for(make_claims(e));

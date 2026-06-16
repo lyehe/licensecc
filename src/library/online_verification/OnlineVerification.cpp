@@ -15,6 +15,7 @@
 #include "../base/string_utils.h"
 #include "../os/os.h"
 #include "../os/signature_verifier.hpp"
+#include "../signed_token/SignedToken.hpp"
 
 namespace license {
 namespace online_verification {
@@ -28,9 +29,7 @@ const uint64_t kIssuedAtFutureSkewSeconds = 300;
 
 using RevocationFloorKey = std::tuple<std::string, std::string, std::string>;
 
-uint64_t now_epoch_seconds() {
-	return static_cast<uint64_t>(time(nullptr));
-}
+using OVKeyOverride = license::signed_token::TrustedKeyOverride<OnlineVerificationPublicKey>;
 
 std::map<RevocationFloorKey, uint64_t>& revocation_floors() {
 	static std::map<RevocationFloorKey, uint64_t> floors;
@@ -40,21 +39,6 @@ std::map<RevocationFloorKey, uint64_t>& revocation_floors() {
 std::mutex& revocation_floors_mutex() {
 	static std::mutex mutex;
 	return mutex;
-}
-
-std::vector<OnlineVerificationPublicKey>& trusted_public_keys_override_for_tests() {
-	static std::vector<OnlineVerificationPublicKey> public_keys;
-	return public_keys;
-}
-
-std::mutex& trusted_public_keys_override_mutex() {
-	static std::mutex mutex;
-	return mutex;
-}
-
-std::vector<OnlineVerificationPublicKey> current_trusted_public_keys_override_for_tests() {
-	std::lock_guard<std::mutex> lock(trusted_public_keys_override_mutex());
-	return trusted_public_keys_override_for_tests();
 }
 
 RevocationFloorKey floor_key(const std::string& project, const std::string& feature,
@@ -80,11 +64,6 @@ void advance_revocation_floor(const std::string& project, const std::string& fea
 	}
 }
 
-bool value_has_line_breaks_or_equals(const std::string& value) {
-	return value.find('\n') != std::string::npos || value.find('\r') != std::string::npos ||
-		   value.find('=') != std::string::npos;
-}
-
 bool is_ascii_hex(const std::string& value, const size_t expected_size) {
 	if (value.size() != expected_size) {
 		return false;
@@ -97,61 +76,10 @@ bool is_ascii_hex(const std::string& value, const size_t expected_size) {
 	return true;
 }
 
-bool parse_uint64(const std::string& value, uint64_t& out) {
-	if (value.empty()) {
-		return false;
-	}
-	uint64_t result = 0;
-	for (const unsigned char ch : value) {
-		if (!std::isdigit(ch)) {
-			return false;
-		}
-		const uint64_t digit = static_cast<uint64_t>(ch - '0');
-		if (result > (UINT64_MAX - digit) / 10U) {
-			return false;
-		}
-		result = result * 10U + digit;
-	}
-	out = result;
-	return true;
-}
-
-bool append_claim_line(std::ostringstream& out, const char* key, const std::string& value) {
-	if (value_has_line_breaks_or_equals(value)) {
-		return false;
-	}
-	out << key << '=' << value << '\n';
-	return true;
-}
-
-bool append_uint_claim_line(std::ostringstream& out, const char* key, const uint64_t value) {
-	out << key << '=' << value << '\n';
-	return true;
-}
-
-bool extract_preverify_field(const std::string& payload, const char* key, std::string& out) {
-	const std::string prefix = std::string(key) + "=";
-	size_t pos = 0;
-	while (pos < payload.size()) {
-		const size_t next = payload.find('\n', pos);
-		if (next == std::string::npos) {
-			return false;
-		}
-		const std::string line = payload.substr(pos, next - pos);
-		if (line.find(prefix) == 0) {
-			out = line.substr(prefix.size());
-			return !out.empty();
-		}
-		pos = next + 1;
-	}
-	return false;
-}
-
 license::os::SignatureVerificationPolicy signature_policy_for_expected(const OnlineVerificationExpected& expected) {
 	license::os::SignatureVerificationPolicy policy = license::os::online_assertion_signature_policy();
 	const std::vector<OnlineVerificationPublicKey> trusted_public_keys =
-		expected.trusted_public_keys.empty() ? current_trusted_public_keys_override_for_tests()
-											: expected.trusted_public_keys;
+		expected.trusted_public_keys.empty() ? OVKeyOverride::get() : expected.trusted_public_keys;
 	if (trusted_public_keys.empty()) {
 		return policy;
 	}
@@ -165,117 +93,42 @@ license::os::SignatureVerificationPolicy signature_policy_for_expected(const Onl
 	return policy;
 }
 
-bool split_envelope(const std::string& assertion, std::string& payload_b64, std::string& signature_b64,
-					std::string& error) {
-	const size_t first_dot = assertion.find('.');
-	if (first_dot == std::string::npos) {
-		error = "online assertion missing payload";
-		return false;
-	}
-	const size_t second_dot = assertion.find('.', first_dot + 1);
-	if (second_dot == std::string::npos || assertion.find('.', second_dot + 1) != std::string::npos) {
-		error = "online assertion envelope malformed";
-		return false;
-	}
-	if (assertion.substr(0, first_dot) != kEnvelopePrefix) {
-		error = "online assertion prefix mismatch";
-		return false;
-	}
-	payload_b64 = assertion.substr(first_dot + 1, second_dot - first_dot - 1);
-	signature_b64 = assertion.substr(second_dot + 1);
-	if (!license::is_canonical_base64(payload_b64, false) ||
-		!license::is_canonical_base64(signature_b64, false)) {
-		error = "online assertion base64 is not canonical";
-		return false;
-	}
-	return true;
-}
-
 bool parse_canonical_payload(const std::string& payload, OnlineAssertionClaims& claims, std::string& error) {
 	if (payload.empty() || payload[payload.size() - 1] != '\n' || payload.find('\r') != std::string::npos) {
 		error = "online assertion payload is not canonical";
 		return false;
 	}
 
-	struct Field {
-		const char* key;
-		std::string* string_value;
-		uint64_t* uint_value;
-	};
-
 	std::string issued_at;
 	std::string expires_at;
 	std::string cache_until;
 	std::string revocation_seq;
-	Field fields[] = {
-		{"purpose", &claims.purpose, nullptr},
-		{"version", &claims.version, nullptr},
-		{"alg", &claims.algorithm, nullptr},
-		{"key-id", &claims.key_id, nullptr},
-		{"project", &claims.project, nullptr},
-		{"feature", &claims.feature, nullptr},
-		{"license-fingerprint", &claims.license_fingerprint, nullptr},
-		{"device-hash", &claims.device_hash, nullptr},
-		{"nonce", &claims.nonce, nullptr},
-		{"status", &claims.status, nullptr},
-		{"issued-at", &issued_at, nullptr},
-		{"expires-at", &expires_at, nullptr},
-		{"cache-until", &cache_until, nullptr},
-		{"revocation-seq", &revocation_seq, nullptr},
+	const license::signed_token::FieldSpec fields[] = {
+		{"purpose", &claims.purpose},
+		{"version", &claims.version},
+		{"alg", &claims.algorithm},
+		{"key-id", &claims.key_id},
+		{"project", &claims.project},
+		{"feature", &claims.feature},
+		{"license-fingerprint", &claims.license_fingerprint},
+		{"device-hash", &claims.device_hash},
+		{"nonce", &claims.nonce},
+		{"status", &claims.status},
+		{"issued-at", &issued_at},
+		{"expires-at", &expires_at},
+		{"cache-until", &cache_until},
+		{"revocation-seq", &revocation_seq},
 	};
 
-	size_t pos = 0;
-	for (const Field& field : fields) {
-		const size_t next = payload.find('\n', pos);
-		if (next == std::string::npos) {
-			error = std::string("online assertion missing field ") + field.key;
-			return false;
-		}
-		const std::string line = payload.substr(pos, next - pos);
-		const std::string prefix = std::string(field.key) + "=";
-		if (line.find(prefix) != 0) {
-			error = std::string("online assertion expected field ") + field.key;
-			return false;
-		}
-		*field.string_value = line.substr(prefix.size());
-		if (value_has_line_breaks_or_equals(*field.string_value)) {
-			error = std::string("online assertion invalid value for ") + field.key;
-			return false;
-		}
-		pos = next + 1;
-	}
-	if (pos != payload.size()) {
-		error = "online assertion has unknown trailing fields";
+	if (!license::signed_token::parse_fields_in_order(payload, fields, sizeof(fields) / sizeof(fields[0]),
+													  "online assertion", true, error)) {
 		return false;
 	}
-	if (!parse_uint64(issued_at, claims.issued_at) || !parse_uint64(expires_at, claims.expires_at) ||
-		!parse_uint64(cache_until, claims.cache_until) || !parse_uint64(revocation_seq, claims.revocation_seq)) {
+	if (!license::signed_token::parse_uint64(issued_at, claims.issued_at) ||
+		!license::signed_token::parse_uint64(expires_at, claims.expires_at) ||
+		!license::signed_token::parse_uint64(cache_until, claims.cache_until) ||
+		!license::signed_token::parse_uint64(revocation_seq, claims.revocation_seq)) {
 		error = "online assertion integer field malformed";
-		return false;
-	}
-	return true;
-}
-
-bool verify_payload_signature(const std::vector<uint8_t>& payload, const std::vector<uint8_t>& signature,
-							  const std::string& payload_text, const OnlineVerificationExpected& expected,
-							  std::string& error) {
-	std::string algorithm;
-	std::string key_id;
-	if (!extract_preverify_field(payload_text, "alg", algorithm) ||
-		!extract_preverify_field(payload_text, "key-id", key_id)) {
-		error = "online assertion missing signature metadata";
-		return false;
-	}
-
-	license::os::SignatureVerificationRequest request;
-	request.payload = payload;
-	request.signature = signature;
-	request.declared_algorithm = algorithm;
-	request.key_id = key_id;
-	request.license_version = license::os::LCC_ONLINE_ASSERTION_SIGNATURE_VERSION;
-	request.policy = signature_policy_for_expected(expected);
-	if (license::os::verify_signature(request) != FUNC_RET_OK) {
-		error = "online assertion signature verification failed";
 		return false;
 	}
 	return true;
@@ -285,7 +138,8 @@ bool validate_claims(const OnlineAssertionClaims& claims, const OnlineVerificati
 					 std::string& error, LCC_EVENT_TYPE& failure_event, bool& used_cache) {
 	used_cache = false;
 	failure_event = LICENSE_ONLINE_ASSERTION_INVALID;
-	const uint64_t now = expected.now_epoch_seconds == 0 ? now_epoch_seconds() : expected.now_epoch_seconds;
+	const uint64_t now =
+		expected.now_epoch_seconds == 0 ? license::signed_token::now_epoch_seconds() : expected.now_epoch_seconds;
 
 	if (claims.purpose != kPurpose || claims.version != kVersion ||
 		claims.algorithm != license::os::LCC_SIGNATURE_ALGORITHM_RSA_PKCS1_SHA256) {
@@ -426,6 +280,8 @@ std::string generate_nonce() {
 }
 
 std::string build_canonical_assertion_payload(const OnlineAssertionClaims& claims) {
+	using license::signed_token::append_claim_line;
+	using license::signed_token::append_uint_claim_line;
 	std::ostringstream out;
 	if (!append_claim_line(out, "purpose", claims.purpose) || !append_claim_line(out, "version", claims.version) ||
 		!append_claim_line(out, "alg", claims.algorithm) || !append_claim_line(out, "key-id", claims.key_id) ||
@@ -443,8 +299,7 @@ std::string build_canonical_assertion_payload(const OnlineAssertionClaims& claim
 }
 
 std::string build_assertion_envelope(const std::string& payload, const std::string& signature_base64) {
-	const std::string payload_b64 = license::base64(payload.data(), payload.size(), 0);
-	return std::string(kEnvelopePrefix) + "." + payload_b64 + "." + signature_base64;
+	return license::signed_token::build_envelope(kEnvelopePrefix, payload, signature_base64);
 }
 
 bool verify_assertion_envelope(const std::string& assertion, const OnlineVerificationExpected& expected,
@@ -455,7 +310,8 @@ bool verify_assertion_envelope(const std::string& assertion, const OnlineVerific
 
 	std::string payload_b64;
 	std::string signature_b64;
-	if (!split_envelope(assertion, payload_b64, signature_b64, error)) {
+	if (!license::signed_token::split_envelope(assertion, kEnvelopePrefix, "online assertion", payload_b64,
+											   signature_b64, error)) {
 		return false;
 	}
 	const std::vector<uint8_t> payload = license::unbase64(payload_b64);
@@ -465,7 +321,9 @@ bool verify_assertion_envelope(const std::string& assertion, const OnlineVerific
 		return false;
 	}
 	const std::string payload_text(payload.begin(), payload.end());
-	if (!verify_payload_signature(payload, signature, payload_text, expected, error)) {
+	if (!license::signed_token::verify_payload_signature(
+			payload, signature, payload_text, license::os::LCC_ONLINE_ASSERTION_SIGNATURE_VERSION,
+			signature_policy_for_expected(expected), "online assertion", error)) {
 		return false;
 	}
 
@@ -574,8 +432,7 @@ void append_audit_event(const OnlineVerificationResult& result, EventRegistry& e
 }
 
 void set_trusted_public_keys_for_tests(const std::vector<OnlineVerificationPublicKey>& public_keys) {
-	std::lock_guard<std::mutex> lock(trusted_public_keys_override_mutex());
-	trusted_public_keys_override_for_tests() = public_keys;
+	OVKeyOverride::set(public_keys);
 }
 
 void set_revocation_floor(const std::string& project, const std::string& feature,
