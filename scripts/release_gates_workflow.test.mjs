@@ -35,9 +35,9 @@ const REQUIRED_TRIGGER_PATHS = [
   "services/cloudflare-license-admin/test/access-validator.test.mjs",
   "services/cloudflare-license-admin/test/admin-ui.e2e.mjs",
   "services/cloudflare-license-admin/test/admin-ui-workflow.test.mjs",
-  "services/cloudflare-online-verifier/package.json",
-  "services/cloudflare-online-verifier/scripts/public-verifier-drill.mjs",
-  "services/cloudflare-online-verifier/test/public-verifier-drill.test.mjs",
+  "services/cloudflare-licensing-backend/package.json",
+  "services/cloudflare-licensing-backend/scripts/public-verifier-drill.mjs",
+  "services/cloudflare-licensing-backend/test/public-verifier-drill.test.mjs",
   "doc/analysis/remaining-gap-closure-checklist.rst",
   "doc/usage/cloudflare-backups.rst",
   "README.md",
@@ -69,7 +69,7 @@ test("release gates workflow runs script tests and secret scan without productio
   assert.match(text, /services\/cloudflare-d1-backup\/test\/backup-validate-deploy\.test\.mjs/);
   assert.match(text, /services\/cloudflare-license-admin\/test\/admin-ui-workflow\.test\.mjs/);
   assert.match(text, /services\/cloudflare-license-admin\/test\/access-validator\.test\.mjs/);
-  assert.match(text, /services\/cloudflare-online-verifier\/test\/public-verifier-drill\.test\.mjs/);
+  assert.match(text, /services\/cloudflare-licensing-backend\/test\/public-verifier-drill\.test\.mjs/);
   assert.match(text, /node scripts\/secret_hygiene_scan\.mjs/);
   assert.match(text, /node scripts\/workspace_hygiene_check\.mjs/);
 });

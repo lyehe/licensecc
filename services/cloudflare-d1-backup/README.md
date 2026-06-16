@@ -121,7 +121,7 @@ For recent accidental writes or migrations, prefer D1 Time Travel first:
 npm run time-travel -- info \
   --database licensecc-online-verifier \
   --timestamp "2026-06-05T14:30:00Z" \
-  --config ../cloudflare-online-verifier/wrangler.toml
+  --config ../cloudflare-licensing-backend/wrangler.toml
 ```
 
 The restore command is destructive and requires `--confirm`:
@@ -130,7 +130,7 @@ The restore command is destructive and requires `--confirm`:
 npm run time-travel -- restore \
   --database licensecc-online-verifier \
   --bookmark <bookmark> \
-  --config ../cloudflare-online-verifier/wrangler.toml \
+  --config ../cloudflare-licensing-backend/wrangler.toml \
   --confirm
 ```
 

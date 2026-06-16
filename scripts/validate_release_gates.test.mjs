@@ -364,7 +364,7 @@ test("public verifier abuse args keep verifier URL out of evidence", () => {
     const args = publicVerifierAbuseArgsFromEnv();
     const command = publicVerifierAbuseCommandForEvidence();
     assert.deepEqual(args, [
-      "services/cloudflare-online-verifier/scripts/public-verifier-drill.mjs",
+      "services/cloudflare-licensing-backend/scripts/public-verifier-drill.mjs",
       "--url",
       "https://verifier.example.workers.dev",
       "--expect-rate-limit",
@@ -930,7 +930,7 @@ test("external drill evidence commands redact staging resource identifiers", () 
   process.env.LICENSECC_RESTORE_SCRATCH_D1 = "licensecc-restore-scratch";
   process.env.LICENSECC_RESTORE_SOURCE_D1 = "licensecc-source";
   process.env.LICENSECC_RESTORE_SCRATCH_CONFIG = "services/cloudflare-d1-backup/wrangler.scratch.jsonc";
-  process.env.LICENSECC_RESTORE_SOURCE_CONFIG = "services/cloudflare-online-verifier/wrangler.source.toml";
+  process.env.LICENSECC_RESTORE_SOURCE_CONFIG = "services/cloudflare-licensing-backend/wrangler.source.toml";
   process.env.LICENSECC_RESTORE_R2_CONFIG = "services/cloudflare-d1-backup/wrangler.r2.jsonc";
   process.env.LICENSECC_RESTORE_REQUIRE_STATUSES = "active,revoked";
   process.env.LICENSECC_VERIFIER_URL = "https://verifier.example.workers.dev";

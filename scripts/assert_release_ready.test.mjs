@@ -54,7 +54,7 @@ function passedResult(label) {
     ].join(" ");
   }
   if (label === "Cloudflare public verifier abuse staging drill") {
-    command = "node services/cloudflare-online-verifier/scripts/public-verifier-drill.mjs --url <redacted-verifier-url> --expect-rate-limit --json";
+    command = "node services/cloudflare-licensing-backend/scripts/public-verifier-drill.mjs --url <redacted-verifier-url> --expect-rate-limit --json";
   }
   return {
     label,
@@ -484,7 +484,7 @@ test("release readiness rejects unredacted external drill command evidence", () 
     },
     {
       ...passedResult("Cloudflare public verifier abuse staging drill"),
-      command: "node services/cloudflare-online-verifier/scripts/public-verifier-drill.mjs --url https://verifier.example.workers.dev --expect-rate-limit --json",
+      command: "node services/cloudflare-licensing-backend/scripts/public-verifier-drill.mjs --url https://verifier.example.workers.dev --expect-rate-limit --json",
     },
   ];
   const analysis = analyzeSummary(productionSummary({ results }));

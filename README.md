@@ -147,7 +147,7 @@ quietly allowing access. Set `LCC_TAMPER_DISABLED` only for compatibility tests.
 callback. Licensecc core stays HTTP-free: your application sends the generated
 `LccOnlineRequest` to your service and returns the signed assertion to the
 library. A reference low-volume Cloudflare Worker lives in
-[`services/cloudflare-online-verifier`](services/cloudflare-online-verifier).
+[`services/cloudflare-licensing-backend`](services/cloudflare-licensing-backend).
 When `online_check` is supplied, online verification is required and failures
 deny the check. Production online builds should configure
 `LCC_ONLINE_ASSERTION_PUBLIC_KEY_RECORDS` with a dedicated online assertion

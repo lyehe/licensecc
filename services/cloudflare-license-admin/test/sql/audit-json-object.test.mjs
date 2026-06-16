@@ -15,7 +15,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const migrationsDir = join(here, "..", "..", "..", "cloudflare-online-verifier", "migrations");
+const migrationsDir = join(here, "..", "..", "..", "cloudflare-licensing-backend", "migrations");
 const workerSource = join(here, "..", "..", "src", "worker", "index.ts");
 
 // The audit payload contract: the exact keys the production json_object emits (+ no others).

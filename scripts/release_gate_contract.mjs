@@ -126,15 +126,15 @@ const REQUIRED_LOCAL_COMMANDS = new Map([
   ["release gate contract tests", "node --test scripts/release_gate_contract.test.mjs"],
   ["release gates workflow coverage tests", "node --test scripts/release_gates_workflow.test.mjs"],
   ["release gate runner tests", "node --test scripts/validate_release_gates.test.mjs"],
-  ["online verifier/admin local e2e", "npm --prefix services/cloudflare-online-verifier run test:e2e"],
+  ["online verifier/admin local e2e", "npm --prefix services/cloudflare-licensing-backend run test:e2e"],
   ["admin Worker tests", "npm --prefix services/cloudflare-license-admin test"],
   ["admin Worker lint", "npm --prefix services/cloudflare-license-admin run lint"],
   ["admin UI build", "npm --prefix services/cloudflare-license-admin run build:ui"],
   ["admin UI workflow tests", "npm --prefix services/cloudflare-license-admin run test:ui"],
   ["admin UI browser e2e", "npm --prefix services/cloudflare-license-admin run test:e2e"],
-  ["online verifier tests", "npm --prefix services/cloudflare-online-verifier test"],
-  ["online verifier schema parity", "npm --prefix services/cloudflare-online-verifier run schema:parity"],
-  ["online verifier lint", "npm --prefix services/cloudflare-online-verifier run lint"],
+  ["online verifier tests", "npm --prefix services/cloudflare-licensing-backend test"],
+  ["online verifier schema parity", "npm --prefix services/cloudflare-licensing-backend run schema:parity"],
+  ["online verifier lint", "npm --prefix services/cloudflare-licensing-backend run lint"],
   ["D1 backup tests", "npm --prefix services/cloudflare-d1-backup test"],
   ["D1 backup lint", "npm --prefix services/cloudflare-d1-backup run lint"],
   ["Access admin validator help", "node services/cloudflare-license-admin/scripts/validate-access-admin.mjs --help"],
@@ -143,7 +143,7 @@ const REQUIRED_LOCAL_COMMANDS = new Map([
   ["documentation link check", "uv run --no-project python scripts/check_docs_links.py doc"],
   ["documentation build", "uv run --no-project python scripts/build_docs.py"],
   ["admin Worker dry-run", "npm --prefix services/cloudflare-license-admin run dry-run"],
-  ["online verifier dry-run", "npm --prefix services/cloudflare-online-verifier run dry-run"],
+  ["online verifier dry-run", "npm --prefix services/cloudflare-licensing-backend run dry-run"],
   ["D1 backup dry-run", "npm --prefix services/cloudflare-d1-backup run dry-run"],
   [
     "focused C++ security/API tests",
@@ -213,7 +213,7 @@ const BACKUP_DEPLOY_COMMAND_REQUIRED_TOKENS = [
 ];
 
 const PUBLIC_VERIFIER_ABUSE_COMMAND_TEMPLATE =
-  "node services/cloudflare-online-verifier/scripts/public-verifier-drill.mjs --url <redacted-verifier-url> --expect-rate-limit --json";
+  "node services/cloudflare-licensing-backend/scripts/public-verifier-drill.mjs --url <redacted-verifier-url> --expect-rate-limit --json";
 
 export {
   ACCESS_DRILL_COMMAND_TEMPLATE,

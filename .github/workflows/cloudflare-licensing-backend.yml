@@ -1,16 +1,16 @@
-name: Cloudflare_Online_Verifier
+name: Cloudflare_Licensing_Backend
 
 on:
   push:
     paths:
-      - ".github/workflows/cloudflare-online-verifier.yml"
-      - "services/cloudflare-online-verifier/**"
+      - ".github/workflows/cloudflare-licensing-backend.yml"
+      - "services/cloudflare-licensing-backend/**"
       - "doc/analysis/license-admin-vite-react*.rst"
       - "doc/analysis/online-verification-implementation-checklist.rst"
   pull_request:
     paths:
-      - ".github/workflows/cloudflare-online-verifier.yml"
-      - "services/cloudflare-online-verifier/**"
+      - ".github/workflows/cloudflare-licensing-backend.yml"
+      - "services/cloudflare-licensing-backend/**"
       - "doc/analysis/license-admin-vite-react*.rst"
       - "doc/analysis/online-verification-implementation-checklist.rst"
 
@@ -23,7 +23,7 @@ jobs:
     timeout-minutes: 20
     defaults:
       run:
-        working-directory: services/cloudflare-online-verifier
+        working-directory: services/cloudflare-licensing-backend
     steps:
       - uses: actions/checkout@v4
 
@@ -31,7 +31,7 @@ jobs:
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: services/cloudflare-online-verifier/package-lock.json
+          cache-dependency-path: services/cloudflare-licensing-backend/package-lock.json
 
       - name: Install uv
         uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
@@ -51,11 +51,11 @@ jobs:
           admin_bearer='ADMIN_BEARER'
           jwt_like='[A-Za-z0-9_-]{40,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}'
           token_marker="${cloudflare_token}=|${admin_bearer}=|${jwt_like}"
-          if grep -R -n -E --exclude-dir=node_modules --exclude-dir=.wrangler --exclude-dir=.online-key "$pem_marker" services/cloudflare-online-verifier .github/workflows/cloudflare-online-verifier.yml; then
+          if grep -R -n -E --exclude-dir=node_modules --exclude-dir=.wrangler --exclude-dir=.online-key "$pem_marker" services/cloudflare-licensing-backend .github/workflows/cloudflare-licensing-backend.yml; then
             echo "PEM key marker found"
             exit 1
           fi
-          if grep -R -n -E --exclude-dir=node_modules --exclude-dir=.wrangler --exclude-dir=.online-key "$token_marker" services/cloudflare-online-verifier .github/workflows/cloudflare-online-verifier.yml; then
+          if grep -R -n -E --exclude-dir=node_modules --exclude-dir=.wrangler --exclude-dir=.online-key "$token_marker" services/cloudflare-licensing-backend .github/workflows/cloudflare-licensing-backend.yml; then
             echo "secret-like token found"
             exit 1
           fi

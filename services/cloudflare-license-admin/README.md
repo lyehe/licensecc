@@ -21,7 +21,7 @@ npm run migrate:local
 ```
 
 `npm run migrate:local` applies the shared verifier migrations from
-`../cloudflare-online-verifier/migrations` because the admin service and public
+`../cloudflare-licensing-backend/migrations` because the admin service and public
 verifier share the same D1 schema.
 
 `npm run test:e2e` installs the Playwright Chromium runtime when needed, starts
@@ -34,7 +34,7 @@ below.
 Remote D1 atomicity validation against a staging/test Cloudflare database:
 
 ```sh
-npm run validate:remote-d1-atomicity -- ../cloudflare-online-verifier/wrangler.toml
+npm run validate:remote-d1-atomicity -- ../cloudflare-licensing-backend/wrangler.toml
 ```
 
 The script deploys a temporary authenticated Worker bound to the configured D1
@@ -121,7 +121,7 @@ Revoked entitlements are terminal for this first admin version.
 
 ### Break-glass CLI
 
-The shared D1 helper `../cloudflare-online-verifier/scripts/entitlement.mjs` is an
+The shared D1 helper `../cloudflare-licensing-backend/scripts/entitlement.mjs` is an
 operator break-glass path that **bypasses Cloudflare Access**. It stamps
 `actor_type='cli'`, `source='cli'`, requires `--actor`, and computes
 `revocation_seq` server-side. Like the admin Worker it treats revoked as terminal:

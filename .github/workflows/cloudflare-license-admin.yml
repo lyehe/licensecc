@@ -5,13 +5,13 @@ on:
     paths:
       - ".github/workflows/cloudflare-license-admin.yml"
       - "services/cloudflare-license-admin/**"
-      - "services/cloudflare-online-verifier/migrations/**"
+      - "services/cloudflare-licensing-backend/migrations/**"
       - "doc/analysis/license-admin-vite-react*.rst"
   pull_request:
     paths:
       - ".github/workflows/cloudflare-license-admin.yml"
       - "services/cloudflare-license-admin/**"
-      - "services/cloudflare-online-verifier/migrations/**"
+      - "services/cloudflare-licensing-backend/migrations/**"
       - "doc/analysis/license-admin-vite-react*.rst"
 
 permissions:
