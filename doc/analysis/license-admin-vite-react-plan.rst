@@ -57,7 +57,7 @@ Current baseline
 
 Already implemented and should be preserved:
 
-* ``services/cloudflare-online-verifier`` with ``GET /health`` and
+* ``services/cloudflare-licensing-backend`` with ``GET /health`` and
   ``POST /v1/verify``.
 * D1 ``entitlements`` and ``rate_limit_counters`` tables.
 * D1 and Cloudflare rate-limit layers.

@@ -107,7 +107,7 @@ Use Time Travel for short-window recovery:
    npm run time-travel -- info \
      --database licensecc-online-verifier \
      --timestamp "2026-06-05T14:30:00Z" \
-     --config ../cloudflare-online-verifier/wrangler.toml
+     --config ../cloudflare-licensing-backend/wrangler.toml
 
 The restore wrapper requires ``--confirm`` because D1 Time Travel restore is
 destructive:
@@ -117,7 +117,7 @@ destructive:
    npm run time-travel -- restore \
      --database licensecc-online-verifier \
      --bookmark <bookmark> \
-     --config ../cloudflare-online-verifier/wrangler.toml \
+     --config ../cloudflare-licensing-backend/wrangler.toml \
      --confirm
 
 For R2 SQL dumps, restore to staging first, validate schema and verifier

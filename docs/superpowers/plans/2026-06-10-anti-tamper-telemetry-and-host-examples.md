@@ -6,7 +6,7 @@
 
 **Architecture:** Two independent, sequenced increments. Part A (Move 3) is an example only — no library change. Part B (Move 1) extends the online-verification *request* (client→server) with a fixed enumerated `tamper_signal` bitset that the verifier records for audit/operator action; it is telemetry, never allow/deny input, and the signed assertion is untouched.
 
-**Tech Stack:** C++17 core (`src/library`), CMake + Boost.Test, Cloudflare Worker (TypeScript, `services/cloudflare-online-verifier`), Node test runner.
+**Tech Stack:** C++17 core (`src/library`), CMake + Boost.Test, Cloudflare Worker (TypeScript, `services/cloudflare-licensing-backend`), Node test runner.
 
 **Spec:** `docs/superpowers/specs/2026-06-09-anti-tamper-improvements-design.md`
 
@@ -23,8 +23,8 @@ Re-grounding shows the fail-closed flow is implemented and locked by tests; do *
 - `src/library/online_verification/OnlineVerification.hpp/.cpp` — carry `tamper_signal` on `OnlineVerificationRequest` and set it on the public `LccOnlineRequest` (B2).
 - `examples/anti_tamper_host/` (new: `CMakeLists.txt`, `main.cpp`, `README.md`) — best-effort host-integrity example (A1–A3).
 - `examples/online_callback/main.cpp` — forward `tamper_signal` in the request body (B4).
-- `services/cloudflare-online-verifier/src/index.ts` — accept/bound/log optional `tamper_signal` in `validateVerifyRequest`, never use it for allow/deny (B3).
-- `services/cloudflare-online-verifier/test/online-verifier.test.mjs` — tests for B3.
+- `services/cloudflare-licensing-backend/src/index.ts` — accept/bound/log optional `tamper_signal` in `validateVerifyRequest`, never use it for allow/deny (B3).
+- `services/cloudflare-licensing-backend/test/online-verifier.test.mjs` — tests for B3.
 - `doc/analysis/security-model.rst` (or online-verification doc) — document the telemetry field + its honest semantics (B5).
 
 ---
@@ -247,8 +247,8 @@ git commit -m "feat(core): carry local tamper signal into the online verificatio
 ### Task B3: Verifier accepts, bounds, logs `tamper_signal` (telemetry only)
 
 **Files:**
-- Modify: `services/cloudflare-online-verifier/src/index.ts` (`VerifyRequest` type + `validateVerifyRequest` + the `verify.*` log call)
-- Test: `services/cloudflare-online-verifier/test/online-verifier.test.mjs`
+- Modify: `services/cloudflare-licensing-backend/src/index.ts` (`VerifyRequest` type + `validateVerifyRequest` + the `verify.*` log call)
+- Test: `services/cloudflare-licensing-backend/test/online-verifier.test.mjs`
 
 > Re-read `validateVerifyRequest` and the log call first; match the existing validation style (`safeString`/bounded-int helpers) and the structured-log shape.
 
@@ -256,20 +256,20 @@ git commit -m "feat(core): carry local tamper signal into the online verificatio
 
 - [ ] **Step 2: Run it; confirm it fails.**
 
-Run: `cd services/cloudflare-online-verifier && npm test`
+Run: `cd services/cloudflare-licensing-backend && npm test`
 Expected: FAIL (field not validated yet).
 
 - [ ] **Step 3: Add an optional `tamper_signal?: number` to `VerifyRequest`**, validate it in `validateVerifyRequest` as a non-negative integer `<= 0xffff` (default `0`/absent), and include `tamper_signal` in the structured `verify.ok` / `verify.denied` log fields. Do NOT branch allow/deny on it.
 
 - [ ] **Step 4: Run tests.**
 
-Run: `cd services/cloudflare-online-verifier && npm test`
+Run: `cd services/cloudflare-licensing-backend && npm test`
 Expected: PASS.
 
 - [ ] **Step 5: Commit.**
 
 ```bash
-git add services/cloudflare-online-verifier/src/index.ts services/cloudflare-online-verifier/test/online-verifier.test.mjs
+git add services/cloudflare-licensing-backend/src/index.ts services/cloudflare-licensing-backend/test/online-verifier.test.mjs
 git commit -m "feat(verifier): record optional tamper_signal as audit telemetry (not allow/deny)"
 ```
 
@@ -295,7 +295,7 @@ git commit -m "examples: forward tamper_signal in the online verification reques
 ### Task B5: Document the telemetry field honestly
 
 **Files:**
-- Modify: `doc/analysis/security-model.rst` (online verification section) and/or `services/cloudflare-online-verifier/README.md`
+- Modify: `doc/analysis/security-model.rst` (online verification section) and/or `services/cloudflare-licensing-backend/README.md`
 
 - [ ] **Step 1: Add a short paragraph**: the client→server request may include a `tamper_signal` bitset reflecting local best-effort tamper detection; the verifier records it for audit and operator action (e.g. investigate/revoke) but does NOT use it for allow/deny because a controlled client can spoof it. No PII; fixed enumerated bits only.
 
@@ -307,7 +307,7 @@ Expected: exit 0.
 - [ ] **Step 3: Commit.**
 
 ```bash
-git add doc services/cloudflare-online-verifier/README.md
+git add doc services/cloudflare-licensing-backend/README.md
 git commit -m "docs: document the tamper_signal telemetry field and its semantics"
 ```
 

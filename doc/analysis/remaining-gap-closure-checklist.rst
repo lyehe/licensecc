@@ -695,19 +695,19 @@ Verification checklist:
 
   .. code-block:: console
 
-     npm --prefix services/cloudflare-online-verifier test
+     npm --prefix services/cloudflare-licensing-backend test
 
 * [ ] Run local verifier/admin e2e:
 
   .. code-block:: console
 
-     npm --prefix services/cloudflare-online-verifier run test:e2e
+     npm --prefix services/cloudflare-licensing-backend run test:e2e
 
 * [ ] Run the public verifier abuse drill against staging:
 
   .. code-block:: console
 
-     node services/cloudflare-online-verifier/scripts/public-verifier-drill.mjs --url <staging-verifier-url> --expect-rate-limit --json
+     node services/cloudflare-licensing-backend/scripts/public-verifier-drill.mjs --url <staging-verifier-url> --expect-rate-limit --json
 
 Validation checklist:
 
@@ -1101,11 +1101,11 @@ Implementation checklist
 
 * Keep generated local Cloudflare files ignored:
 
-  * ``services/cloudflare-online-verifier/wrangler.toml``
+  * ``services/cloudflare-licensing-backend/wrangler.toml``
   * ``services/cloudflare-license-admin/wrangler.toml``
-  * ``services/cloudflare-online-verifier/.dev.vars``
+  * ``services/cloudflare-licensing-backend/.dev.vars``
   * ``services/cloudflare-license-admin/.dev.vars``
-  * ``services/cloudflare-online-verifier/.online-key/``
+  * ``services/cloudflare-licensing-backend/.online-key/``
 
 * Keep D1 backup destination names, account ids, and Worker routes in examples
   unless the deployment file is intentionally private.
@@ -1123,9 +1123,9 @@ Run:
 
    git status --short
    git diff --check
-   git check-ignore services/cloudflare-online-verifier/wrangler.toml services/cloudflare-license-admin/wrangler.toml
-   git check-ignore services/cloudflare-online-verifier/.dev.vars services/cloudflare-license-admin/.dev.vars
-   git check-ignore services/cloudflare-online-verifier/.online-key
+   git check-ignore services/cloudflare-licensing-backend/wrangler.toml services/cloudflare-license-admin/wrangler.toml
+   git check-ignore services/cloudflare-licensing-backend/.dev.vars services/cloudflare-license-admin/.dev.vars
+   git check-ignore services/cloudflare-licensing-backend/.online-key
 
 Run a local secret-marker scan:
 
@@ -1232,13 +1232,13 @@ Online verifier:
 
 .. code-block:: console
 
-   npm --prefix services/cloudflare-online-verifier ci
-   npm --prefix services/cloudflare-online-verifier test
-   npm --prefix services/cloudflare-online-verifier run test:e2e
-   npm --prefix services/cloudflare-online-verifier run lint
-   npm --prefix services/cloudflare-online-verifier run schema:parity
-   npm --prefix services/cloudflare-online-verifier run dry-run
-   npm --prefix services/cloudflare-online-verifier run migrate:local
+   npm --prefix services/cloudflare-licensing-backend ci
+   npm --prefix services/cloudflare-licensing-backend test
+   npm --prefix services/cloudflare-licensing-backend run test:e2e
+   npm --prefix services/cloudflare-licensing-backend run lint
+   npm --prefix services/cloudflare-licensing-backend run schema:parity
+   npm --prefix services/cloudflare-licensing-backend run dry-run
+   npm --prefix services/cloudflare-licensing-backend run migrate:local
 
 Admin Worker/UI:
 
@@ -1351,7 +1351,7 @@ drill:
 
 .. code-block:: console
 
-   npm --prefix services/cloudflare-license-admin run validate:remote-d1-atomicity -- ../cloudflare-online-verifier/wrangler.toml
+   npm --prefix services/cloudflare-license-admin run validate:remote-d1-atomicity -- ../cloudflare-licensing-backend/wrangler.toml
 
 Expected evidence:
 
@@ -1398,15 +1398,15 @@ Use Wrangler against staging:
 
 .. code-block:: console
 
-   npx wrangler d1 migrations apply <staging-db-name> --remote --config services/cloudflare-online-verifier/wrangler.toml
-   npx wrangler deploy --config services/cloudflare-online-verifier/wrangler.toml
+   npx wrangler d1 migrations apply <staging-db-name> --remote --config services/cloudflare-licensing-backend/wrangler.toml
+   npx wrangler deploy --config services/cloudflare-licensing-backend/wrangler.toml
    npx wrangler deploy --config services/cloudflare-license-admin/wrangler.toml
 
 Confirm secrets are set without printing values:
 
 .. code-block:: console
 
-   npx wrangler secret list --config services/cloudflare-online-verifier/wrangler.toml
+   npx wrangler secret list --config services/cloudflare-licensing-backend/wrangler.toml
    npx wrangler secret list --config services/cloudflare-license-admin/wrangler.toml
 
 Validation
@@ -1474,7 +1474,7 @@ For a staging/test Worker-signed assertion, run:
 
 .. code-block:: console
 
-   npm --prefix services/cloudflare-online-verifier run validate:remote-cpp -- wrangler.toml ../../build Debug
+   npm --prefix services/cloudflare-licensing-backend run validate:remote-cpp -- wrangler.toml ../../build Debug
 
 Run the staging host sample or e2e harness and capture:
 
@@ -1722,8 +1722,8 @@ Run verifier tests:
 
 .. code-block:: console
 
-   npm --prefix services/cloudflare-online-verifier test
-   npm --prefix services/cloudflare-online-verifier run test:e2e
+   npm --prefix services/cloudflare-licensing-backend test
+   npm --prefix services/cloudflare-licensing-backend run test:e2e
 
 Required tests:
 
@@ -2078,22 +2078,22 @@ development workspace:
   external input presence flags, and all external drill result rows were
   missing;
 * public verifier abuse drill tests were added and rerun:
-  ``npm --prefix services/cloudflare-online-verifier test`` passed 28/28,
+  ``npm --prefix services/cloudflare-licensing-backend test`` passed 28/28,
   including malformed-request rejection, unsigned unknown-entitlement denial,
   npm config/equals-form argument parsing, rate-limit/recovery drill behavior,
   and failure when an expected limiter is not observed;
 * public verifier npm wrapper smoke
-  ``npm --prefix services/cloudflare-online-verifier run validate:public-verifier --url=https://licensecc-online-verifier-test.splattingworks.workers.dev --burst-count=1 --json``
+  ``npm --prefix services/cloudflare-licensing-backend run validate:public-verifier --url=https://licensecc-online-verifier-test.splattingworks.workers.dev --burst-count=1 --json``
   exited ``0`` with redacted target evidence, proving the documented npm
   invocation path works on the current Windows shell;
 * live public verifier smoke drill
-  ``node services/cloudflare-online-verifier/scripts/public-verifier-drill.mjs --url https://licensecc-online-verifier-test.splattingworks.workers.dev --burst-count 1 --json``
+  ``node services/cloudflare-licensing-backend/scripts/public-verifier-drill.mjs --url https://licensecc-online-verifier-test.splattingworks.workers.dev --burst-count 1 --json``
   exited ``0`` with redacted target evidence. It reported
   ``malformed.status=400`` with ``code=invalid_request``, unsigned
   ``unknown_denial.status=200`` with ``code=entitlement_denied``, and no
   failures;
 * live public verifier abuse drill
-  ``node services/cloudflare-online-verifier/scripts/public-verifier-drill.mjs --url https://licensecc-online-verifier-test.splattingworks.workers.dev --expect-rate-limit --json``
+  ``node services/cloudflare-licensing-backend/scripts/public-verifier-drill.mjs --url https://licensecc-online-verifier-test.splattingworks.workers.dev --expect-rate-limit --json``
   exited ``0`` with redacted target evidence. The bounded burst made 25
   attempts, observed six ``429`` responses, first hit the limiter at attempt
   20, and recovered after the wait with unsigned ``entitlement_denied``;
@@ -2266,7 +2266,7 @@ the Splattingworks account:
   errored immediately with ``D1_REST_API_TOKEN_required``, proving the deployed
   export path fails closed until the D1 REST export token is configured.
 * Public verifier abuse drill
-  ``node services/cloudflare-online-verifier/scripts/public-verifier-drill.mjs --url https://licensecc-online-verifier-test.splattingworks.workers.dev --expect-rate-limit --json``
+  ``node services/cloudflare-licensing-backend/scripts/public-verifier-drill.mjs --url https://licensecc-online-verifier-test.splattingworks.workers.dev --expect-rate-limit --json``
   exited ``0`` on June 6, 2026. Output redacted the target URL, rejected a
   malformed fingerprint with ``400 invalid_request``, returned unsigned
   ``entitlement_denied`` for an unknown entitlement, observed rate limiting in
@@ -2278,7 +2278,7 @@ admin mutation drill is executable through
 ``node services/cloudflare-license-admin/scripts/access-admin-drill.mjs``.
 Both are covered by local tests. The public verifier abuse drill is executable
 through
-``node services/cloudflare-online-verifier/scripts/public-verifier-drill.mjs``.
+``node services/cloudflare-licensing-backend/scripts/public-verifier-drill.mjs``.
 This snapshot now includes real R2 restore evidence with restored
 active-acceptance and revoked-denial semantics, a deployed backup
 Worker/cron/Workflow fail-closed validation, and a live public verifier

@@ -9,7 +9,7 @@ and review requirements.
 The plan assumes the current baseline:
 
 * The public Cloudflare verifier Worker exists under
-  ``services/cloudflare-online-verifier``.
+  ``services/cloudflare-licensing-backend``.
 * The C++ online verifier, anti-tamper flow, ``acquire_license_ex()``, and
   ``examples/online_callback`` exist.
 * The public verifier currently has several review findings that must be closed
@@ -59,9 +59,9 @@ Implementation tasks
   implementation notes, not in public docs if sensitive.
 * Confirm generated validation artifacts are not present:
 
-  * ``services/cloudflare-online-verifier/node_modules``;
-  * ``services/cloudflare-online-verifier/.wrangler``;
-  * ``services/cloudflare-online-verifier/dist``;
+  * ``services/cloudflare-licensing-backend/node_modules``;
+  * ``services/cloudflare-licensing-backend/.wrangler``;
+  * ``services/cloudflare-licensing-backend/dist``;
   * local online private-key directories.
 
 * Confirm existing public APIs remain unchanged:
@@ -83,7 +83,7 @@ For the Worker:
 
 .. code-block:: console
 
-   cd services/cloudflare-online-verifier
+   cd services/cloudflare-licensing-backend
    npm ci
    npm test
    npm run lint
@@ -94,9 +94,9 @@ Cleanup after local Worker validation:
 
 .. code-block:: powershell
 
-   Remove-Item -LiteralPath services/cloudflare-online-verifier/node_modules -Recurse -Force
-   Remove-Item -LiteralPath services/cloudflare-online-verifier/.wrangler -Recurse -Force
-   Remove-Item -LiteralPath services/cloudflare-online-verifier/dist -Recurse -Force
+   Remove-Item -LiteralPath services/cloudflare-licensing-backend/node_modules -Recurse -Force
+   Remove-Item -LiteralPath services/cloudflare-licensing-backend/.wrangler -Recurse -Force
+   Remove-Item -LiteralPath services/cloudflare-licensing-backend/dist -Recurse -Force
 
 Exit criteria
 -------------
@@ -119,10 +119,10 @@ adding admin code.
 Implementation tasks
 --------------------
 
-* Add a GitHub Actions workflow for ``services/cloudflare-online-verifier``.
+* Add a GitHub Actions workflow for ``services/cloudflare-licensing-backend``.
 * Trigger on:
 
-  * changes under ``services/cloudflare-online-verifier/**``;
+  * changes under ``services/cloudflare-licensing-backend/**``;
   * changes under ``.github/workflows/**``;
   * changes to docs/checklists that describe service behavior.
 
@@ -222,7 +222,7 @@ Validation
 
 .. code-block:: console
 
-   cd services/cloudflare-online-verifier
+   cd services/cloudflare-licensing-backend
    npm test
 
 .. code-block:: console
@@ -901,7 +901,7 @@ Worker verifier:
 
 .. code-block:: console
 
-   cd services/cloudflare-online-verifier
+   cd services/cloudflare-licensing-backend
    npm ci
    npm test
    npm run lint
@@ -931,7 +931,7 @@ Secret/artifact checks:
 
 .. code-block:: console
 
-   npm --prefix services/cloudflare-online-verifier run lint
+   npm --prefix services/cloudflare-licensing-backend run lint
    rg -n "CLOUDFLARE_API_TOKEN|ADMIN_BEARER|ONLINE_SIGNING_PRIVATE_KEY" .
 
 The secret scan must account for intentional references in docs/config examples
@@ -997,7 +997,7 @@ Each release-blocking item maps to runnable evidence and a current source
 reference. The release is gated only if every row's evidence passes.
 
 * No admin routes in verifier ->
-  ``rg "/api/admin" services/cloudflare-online-verifier/src`` returns nothing
+  ``rg "/api/admin" services/cloudflare-licensing-backend/src`` returns nothing
   (the Worker serves only ``/health`` and ``/v1/verify``).
 * Admin Worker has no signing key -> the admin Worker ``Env`` binds no signing
   secret; the per-service CI "Secret marker scan" greps for PEM/token markers.
@@ -1030,7 +1030,7 @@ reference. The release is gated only if every row's evidence passes.
   ``wrangler d1 execute --file`` (atomic on local ``db.batch`` and the remote
   import path) and its SQL semantics are exercised by the verifier
   ``npm run test:sql`` suite.
-* Service CI required -> ``.github/workflows/cloudflare-online-verifier.yml`` and
+* Service CI required -> ``.github/workflows/cloudflare-licensing-backend.yml`` and
   ``.github/workflows/cloudflare-license-admin.yml`` (build, lint, tests,
   ``test:sql``, dry-run, local migrations, schema parity, secret scan).
 * Staging E2E passes -> the Phase 11 staging E2E checklist plus

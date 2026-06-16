@@ -574,7 +574,7 @@ of users on Cloudflare Workers.
 
 
 * Add a Worker module directory, for example
-  ``services/cloudflare-online-verifier/``.
+  ``services/cloudflare-licensing-backend/``.
 * Use TypeScript.
 * Add local package metadata:
 
@@ -661,7 +661,7 @@ Run:
 
 .. code-block:: console
 
-   cd services/cloudflare-online-verifier
+   cd services/cloudflare-licensing-backend
    npm ci
    npm test
    npm run lint
@@ -722,7 +722,7 @@ Run:
 
    cmake --build build --config Debug --target test_online_verification
    ctest --test-dir build -C Debug -R "test_online_verification$" --output-on-failure
-   cd services/cloudflare-online-verifier
+   cd services/cloudflare-licensing-backend
    npm test
 
 **Exit criteria**
@@ -920,7 +920,7 @@ Run full local gates:
 
    cmake --build build --config Debug
    ctest --test-dir build -C Debug --output-on-failure
-   cd services/cloudflare-online-verifier
+   cd services/cloudflare-licensing-backend
    npm test
    npm run lint
    npx wrangler deploy --dry-run
