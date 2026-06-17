@@ -174,3 +174,138 @@ rows, and the adapter never swallows errors, so this contract holds.
 - **Migrations:** this port ships a single consolidated `schema.pg.sql` equivalent to the
   final state of D1 migrations `0001..0008`. If you want incremental Postgres migrations,
   split it along the same boundaries (the per-table comments name the source migration).
+
+## Full admin CLI on Postgres
+
+`scripts/entitlement.mjs` (the D1 admin CLI) is **not** modified by this port. Instead this
+directory ships a **parallel** PostgreSQL CLI with the same command surface, flags, validation,
+output, and exit codes -- but it runs against Postgres/Supabase via `postgres.js` (reusing
+`createPool` / `closePool` from `db-postgres.mjs`) instead of shelling out to
+`wrangler d1 execute`.
+
+| File | Role |
+|---|---|
+| `pg-sql.mjs` | `pgSqlFor(command, args)` -> `{ text, params }` (or an **ordered array** of them for multi-statement mutations). A faithful, command-for-command mirror of `entitlement.mjs`'s `sqlFor()` -- it reuses the **exact** validators, field builders, and per-command branching, so the two CLIs accept/reject identical inputs with identical messages. Only the SQL dialect (`$n` placeholders, `EXTRACT(EPOCH FROM now())::bigint`, `GREATEST`, `encode(gen_random_bytes(8),'hex')`, `EXCLUDED`) and the value-passing (`$n` + params, not embedded literals) differ. |
+| `entitlement-pg.mjs` | The runnable CLI. Parses the same flags, validates the same way, runs reads via one `pool.unsafe()` and mutations as an ordered list inside one `pool.begin()` transaction, and prints the same-shaped output. |
+| `entitlement-pg.test.mjs` | A `node --test` suite mirroring `test/sql/entitlement-cli-sql.test.mjs`, but executing `pgSqlFor()`'s statements against **`pg-mem`** (in-memory Postgres). |
+
+### Commands and flags
+
+Identical to the D1 CLI minus the wrangler-only flags (`--database` / `--config` / `--remote` /
+`--local` are dropped; `--remote`/`--local` are still **accepted but ignored** for muscle-memory
+parity -- the Postgres CLI always targets the single `DATABASE_URL` connection):
+
+```text
+upsert        --fingerprint <64-hex> --actor <op> [--project DEFAULT] [--feature DEFAULT] [--device-hash <64-hex>]
+              [--status active] [--assertion-ttl 300] [--valid-from <epoch>] [--valid-until <epoch>]
+              [--customer-id <text>] [--license-id <text>] [--reason <text>] [--allow-revoked-override]
+revoke        --fingerprint <64-hex> --actor <op> --reason <text> [--project] [--feature]
+disable       --fingerprint <64-hex> --actor <op> --reason <text> [--project] [--feature]
+reenable      --fingerprint <64-hex> --actor <op> [--reason <text>] [--project] [--feature]
+get           --fingerprint <64-hex> [--project] [--feature]
+list          [--project] [--feature]
+device-upsert --fingerprint <64-hex> --device-key-id sha256:<64-hex> --public-key-spki-der-base64 <b64> --actor <op>
+              [--status active] [--reason <text>] [--project] [--feature]
+device-disable --fingerprint <64-hex> --device-key-id sha256:<64-hex> --actor <op> --reason <text> [--project] [--feature]
+device-revoke  --fingerprint <64-hex> --device-key-id sha256:<64-hex> --actor <op> --reason <text> [--project] [--feature]
+device-list    --fingerprint <64-hex> [--project] [--feature]
+```
+
+### Run it
+
+```bash
+npm install postgres                       # the adapter's only runtime dep
+export DATABASE_URL='postgresql://postgres.<ref>:<pw>@aws-0-<region>.pooler.supabase.com:6543/postgres'
+psql "$DATABASE_URL" -f schema.pg.sql       # one-time: apply the schema
+
+# create / update an entitlement (writes the row + one audit event, atomically)
+node entitlement-pg.mjs upsert --fingerprint <64-hex> --actor alice --customer-id cus_1
+
+# break-glass: reactivate a revoked (terminal) entitlement -- requires --reason, logs a
+# distinct 'revoked-override' audit event
+node entitlement-pg.mjs upsert --fingerprint <64-hex> --actor alice --allow-revoked-override --reason TICKET-42
+
+node entitlement-pg.mjs revoke  --fingerprint <64-hex> --actor alice --reason leaked
+node entitlement-pg.mjs get     --fingerprint <64-hex>          # prints the row(s) as JSON
+node entitlement-pg.mjs list    --project DEFAULT              # JSON array, newest first, capped 100
+
+node entitlement-pg.mjs device-upsert  --fingerprint <64-hex> --device-key-id sha256:<64-hex> \
+  --public-key-spki-der-base64 <b64> --actor alice --reason enroll
+node entitlement-pg.mjs device-revoke  --fingerprint <64-hex> --device-key-id sha256:<64-hex> --actor alice --reason lost
+node entitlement-pg.mjs device-list    --fingerprint <64-hex>
+```
+
+**Exit codes** (same contract as the D1 CLI):
+
+| Code | Meaning |
+|---|---|
+| `0` | success |
+| `2` | usage / validation error (bad or missing command, bad flag, missing flag value, any failed validator -- identical messages to `entitlement.mjs`). Thrown **before** any connection is opened or the `postgres` driver is loaded. |
+| `3` | a **guarded mutation changed 0 rows** (a terminal `revoked` row for `upsert`/`disable`/`reenable`, or an unknown device for `device-*`): no audit event was written. Prints the same `NO-OP: ...` line with recovery guidance. **Unlike** the D1 CLI, there is no "no-op detection unavailable" caveat -- Postgres always reports the affected-row count (`postgres.js` `result.count`), so the 0-row no-op is detected deterministically. |
+| `1` | any other runtime failure (missing `DATABASE_URL`, DB/connection error) -- fail-closed. |
+
+**Atomicity.** The D1 CLI routes mutations through `wrangler ... --file` so the joined
+statements (entitlement/device write + parent `revocation_seq` bump + audit event) commit
+atomically. The adapter exposes no `.batch()`, so `entitlement-pg.mjs` wraps each mutation's
+ordered statement list in one `pool.begin()` transaction (`BEGIN`/`COMMIT`, `ROLLBACK` on error)
+on a single connection -- the same all-or-nothing guarantee.
+
+### The pg-mem test
+
+```bash
+npm install --no-save pg-mem          # in-memory Postgres, no server needed
+node --test supabase-postgres/entitlement-pg.test.mjs
+```
+
+It loads `schema.pg.sql` into `pg-mem`, then for each command runs `pgSqlFor()`'s **unmodified**
+statement text and asserts the row effects (revoked-terminal guard = zero changes + zero events,
+`--allow-revoked-override` reactivates with a `revoked-override` event, monotonic
+`revocation_seq`, guarded `disable`/`reenable`, device bump + `update` event only when the device
+exists, and the `get`/`list`/`device-list` projections include `notes` / `last_seen_at`).
+
+**`pg-mem` emulation gaps (the test documents each at the top of the file and handles them
+faithfully -- the `pg-sql.mjs` output is never changed, only what is handed to `pg-mem`):**
+
+1. **pgcrypto** (`gen_random_bytes` / `encode`) is not built in -> the test registers a pgcrypto
+   extension shim so the real ported `request_id` expression `'cli-' ||
+   encode(gen_random_bytes(8),'hex')` runs unmodified (it verifies the result matches
+   `^cli-[0-9a-f]{16}$`).
+2. **`BIGINT GENERATED ALWAYS AS IDENTITY`** (the `entitlement_events.id` column) is not parsed by
+   some `pg-mem` builds -> the loader retries once, rewriting **only that one column** to
+   `BIGSERIAL` (behavior-equivalent auto-increment). No other column/constraint is touched.
+3. **Correlated subquery inside `ON CONFLICT DO UPDATE` / `UPDATE`** -- the `revocation_seq` floor
+   `GREATEST(<tbl>.revocation_seq, COALESCE((SELECT MAX(...) FROM entitlement_events WHERE project
+   = entitlements.project ...), <tbl>.revocation_seq)) + 1` -- references the row being written.
+   `pg-mem` **cannot resolve a subquery correlated to the target row** of an `ON CONFLICT` or a
+   plain `UPDATE` (it raises `column "entitlements.project" does not exist`). This is a `pg-mem`
+   engine gap, **not** a defect in the ported SQL, which is valid Postgres and is exactly what a
+   real Supabase/Postgres runs. The test applies one surgical, behavior-preserving transform
+   (`pgMemRewrite`) that collapses the floor to `<tbl>.revocation_seq + 1` -- exactly equivalent
+   for this hermetic suite, because every audit event is written **from the current entitlement
+   row**, so the event-history floor never exceeds the row's own `revocation_seq`. The monotonic
+   `+1` increment the tests assert is preserved.
+4. **`rowCount` of a guard-suppressed `ON CONFLICT DO UPDATE`** -- when the `DO UPDATE ... WHERE`
+   guard suppresses the update (a terminal revoked row), real Postgres reports `rowCount 0` (the
+   CLI's exit-3 signal); `pg-mem` leaves the row **correctly unchanged** but reports `rowCount 1`.
+   So for the guard-suppressed *upsert* path the test asserts the **observable** no-op (row
+   unchanged + zero audit events), exactly like the SQLite ground-truth test, rather than
+   `pg-mem`'s `rowCount`. Plain guarded `UPDATE`s (`reenable`'s terminal guard, `device-*` against
+   an unknown device) **do** report `rowCount 0` correctly under `pg-mem`, so those keep the
+   `rowCount === 0` assertion.
+
+### Real-Postgres / Supabase caveats (not exercised by the hermetic `pg-mem` suite)
+
+- The correlated `revocation_seq` floor subquery (gap #3) runs **as written** against real
+  Postgres -- run the unmodified `pg-sql.mjs` SQL there. The floor only ever *raises* the seq when
+  the `entitlement_events` history outruns the row's own `revocation_seq` (which the live
+  verify-path's revocation handling can produce); the `pg-mem` shim does not need that branch.
+  Before production, do a one-time smoke of the unrewritten B1/B5/B6/B8 statements against a real
+  Postgres (`docker run postgres` or a Supabase instance) to confirm the correlated
+  `entitlements.<col>` reference resolves as expected -- it is standard Postgres and will.
+- The CLI uses **`postgres.js`** (a wire-protocol client), which `pg-mem` cannot serve. The
+  `pg-mem` suite therefore exercises the SQL and the row effects, not a live `entitlement-pg.mjs`
+  socket connection. To smoke-test the live CLI, point `DATABASE_URL` at a real Postgres/Supabase
+  (the transaction pooler on `:6543` with `prepare: false`, per the adapter notes above).
+- Validation and usage errors do **not** require `postgres` to be installed: `entitlement-pg.mjs`
+  imports the adapter **lazily** (only once a validated command needs a connection), so a bad
+  command exits `2` even before `npm install postgres`.

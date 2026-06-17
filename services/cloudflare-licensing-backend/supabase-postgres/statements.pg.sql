@@ -208,3 +208,233 @@ ON CONFLICT (project, feature, license_fingerprint, device_key_id) DO UPDATE SET
   public_key_spki_der_base64 = EXCLUDED.public_key_spki_der_base64,
   status                     = EXCLUDED.status,
   updated_at                 = EXTRACT(EPOCH FROM now())::bigint;   -- unixepoch()
+
+
+-- B5. entitlement upsert -- OVERRIDE path (--allow-revoked-override)  (entitlement.mjs line 219, command 'upsert')
+--   Identical to B1 EXCEPT the conditional ON CONFLICT guard `WHERE entitlements.status != 'revoked'` is
+--   DROPPED (conflictGuard = ""), so a revoked (terminal) row IS reactivated. The matching audit event uses
+--   event_type 'revoked-override' (see B2/B6e below). This is the break-glass variant.
+INSERT INTO entitlements (
+  project, feature, license_fingerprint, device_hash, status,
+  assertion_ttl_seconds, cache_ttl_seconds, revocation_seq,
+  valid_from, valid_until, customer_id, license_id, created_at, updated_at
+)
+VALUES (
+  $1, $2, $3, $4, $5,
+  $6, $7,
+  -- nextInsertedRevocationSeqSql: COALESCE((SELECT MAX(revocation_seq)+1 FROM entitlement_events WHERE ...), 1)
+  COALESCE((SELECT MAX(revocation_seq) + 1 FROM entitlement_events
+            WHERE project = $1 AND feature = $2 AND license_fingerprint = $3), 1),
+  $8, $9, $10, $11,
+  EXTRACT(EPOCH FROM now())::bigint,    -- unixepoch() -> created_at
+  EXTRACT(EPOCH FROM now())::bigint     -- unixepoch() -> updated_at
+)
+ON CONFLICT (project, feature, license_fingerprint) DO UPDATE SET
+  device_hash           = EXCLUDED.device_hash,
+  status                = EXCLUDED.status,
+  assertion_ttl_seconds = EXCLUDED.assertion_ttl_seconds,
+  cache_ttl_seconds     = EXCLUDED.cache_ttl_seconds,
+  revocation_seq        = GREATEST(
+                            entitlements.revocation_seq,
+                            COALESCE((SELECT MAX(revocation_seq) FROM entitlement_events
+                                      WHERE project = entitlements.project
+                                        AND feature = entitlements.feature
+                                        AND license_fingerprint = entitlements.license_fingerprint),
+                                     entitlements.revocation_seq)
+                          ) + 1,
+  valid_from            = EXCLUDED.valid_from,
+  valid_until           = EXCLUDED.valid_until,
+  customer_id           = EXCLUDED.customer_id,
+  license_id            = EXCLUDED.license_id,
+  updated_at            = EXTRACT(EPOCH FROM now())::bigint;   -- NO conflictGuard WHERE (override drops it)
+
+
+-- B6. status mutation UPDATEs -- revoke / disable / reenable  (entitlement.mjs line 230)
+--   ORIGINAL (D1):
+--     UPDATE entitlements SET status = '<status>',
+--       revocation_seq = max(revocation_seq, COALESCE((SELECT MAX(revocation_seq) FROM entitlement_events WHERE ...), revocation_seq)) + 1,
+--       updated_at = unixepoch()
+--     WHERE project = ? AND feature = ? AND license_fingerprint = ?<terminalGuard>
+--   <terminalGuard> = " AND status != 'revoked'" for disable AND reenable; "" for revoke (revoke has no guard).
+--   $4 = status literal ('revoked' | 'disabled' | 'active'). Each finished form below is the SAME UPDATE body
+--   with the per-command terminal guard materialized (B3 only gave the unguarded template).
+
+-- B6a. revoke  (status = 'revoked', NO terminal guard -- revoke can re-revoke any non-terminal-or-terminal row)
+UPDATE entitlements SET
+  status         = 'revoked',
+  revocation_seq = GREATEST(
+                     entitlements.revocation_seq,
+                     COALESCE((SELECT MAX(revocation_seq) FROM entitlement_events
+                               WHERE project = entitlements.project
+                                 AND feature = entitlements.feature
+                                 AND license_fingerprint = entitlements.license_fingerprint),
+                              entitlements.revocation_seq)
+                   ) + 1,
+  updated_at     = EXTRACT(EPOCH FROM now())::bigint
+WHERE project = $1 AND feature = $2 AND license_fingerprint = $3;
+
+-- B6b. disable  (status = 'disabled', WITH terminal guard: a revoked row is terminal -> 0 rows changed)
+UPDATE entitlements SET
+  status         = 'disabled',
+  revocation_seq = GREATEST(
+                     entitlements.revocation_seq,
+                     COALESCE((SELECT MAX(revocation_seq) FROM entitlement_events
+                               WHERE project = entitlements.project
+                                 AND feature = entitlements.feature
+                                 AND license_fingerprint = entitlements.license_fingerprint),
+                              entitlements.revocation_seq)
+                   ) + 1,
+  updated_at     = EXTRACT(EPOCH FROM now())::bigint
+WHERE project = $1 AND feature = $2 AND license_fingerprint = $3 AND status != 'revoked';
+
+-- B6c. reenable  (status = 'active', WITH terminal guard: a revoked row stays revoked -> 0 rows changed)
+UPDATE entitlements SET
+  status         = 'active',
+  revocation_seq = GREATEST(
+                     entitlements.revocation_seq,
+                     COALESCE((SELECT MAX(revocation_seq) FROM entitlement_events
+                               WHERE project = entitlements.project
+                                 AND feature = entitlements.feature
+                                 AND license_fingerprint = entitlements.license_fingerprint),
+                              entitlements.revocation_seq)
+                   ) + 1,
+  updated_at     = EXTRACT(EPOCH FROM now())::bigint
+WHERE project = $1 AND feature = $2 AND license_fingerprint = $3 AND status != 'revoked';
+
+
+-- B7. update-event insert from current row with device-existence guard  (entitlement.mjs line 174, updateEventSqlFromCurrent)
+--   ORIGINAL (D1):
+--     INSERT INTO entitlement_events (...) SELECT project, feature, ..., 'update', status, revocation_seq,
+--       '<detail>', '<actor>', 'cli', 'cli', 'cli-' || lower(hex(randomblob(8))), '<reason>', unixepoch()
+--     FROM entitlements WHERE project = ? AND feature = ? AND license_fingerprint = ?
+--       AND EXISTS (SELECT 1 FROM entitlement_devices WHERE ... AND device_key_id = ?)
+--   Distinct from B2 (eventSqlFromCurrent): event_type is the LITERAL 'update' (not a param), the filter is the
+--   device EXISTS(...) guard (NOT `status = ?`), and detail/reason are separate params ($5=detail, $6=reason).
+--   Used by device-upsert / device-disable / device-revoke. Writes 0 events when the device row does not exist.
+INSERT INTO entitlement_events (
+  project, feature, license_fingerprint, device_hash, event_type, status, revocation_seq,
+  detail, actor, actor_type, source, request_id, reason, created_at
+)
+SELECT
+  project, feature, license_fingerprint, device_hash,
+  'update',                            -- event_type LITERAL (updateEventSqlFromCurrent)
+  status, revocation_seq,
+  $5,                                  -- detail
+  $6,                                  -- actor
+  'cli', 'cli',
+  'cli-' || encode(gen_random_bytes(8), 'hex'),   -- lower(hex(randomblob(8)))
+  $7,                                  -- reason
+  EXTRACT(EPOCH FROM now())::bigint     -- unixepoch()
+FROM entitlements
+WHERE project = $1 AND feature = $2 AND license_fingerprint = $3
+  AND EXISTS (
+    SELECT 1 FROM entitlement_devices
+    WHERE project = $1 AND feature = $2 AND license_fingerprint = $3 AND device_key_id = $4
+  );
+
+
+-- B8. parent entitlement revocation_seq bump, GUARDED by device existence  (entitlement.mjs line 248 / 259)
+--   ORIGINAL (D1):
+--     UPDATE entitlements SET
+--       revocation_seq = max(revocation_seq, COALESCE((SELECT MAX(revocation_seq) FROM entitlement_events WHERE ...), revocation_seq)) + 1,
+--       updated_at = unixepoch()
+--     WHERE project = ? AND feature = ? AND license_fingerprint = ?
+--       AND EXISTS (SELECT 1 FROM entitlement_devices WHERE ... AND device_key_id = ?)
+--   Shared by device-upsert (statement 2) and device-disable / device-revoke (statement 2). The EXISTS guard
+--   means a device mutation against an UNKNOWN device bumps nothing (and B7 writes no event) -- the no-op path.
+--   B3's standalone template lacked this EXISTS guard; this is the finished, guarded form.
+UPDATE entitlements SET
+  revocation_seq = GREATEST(
+                     entitlements.revocation_seq,
+                     COALESCE((SELECT MAX(revocation_seq) FROM entitlement_events
+                               WHERE project = entitlements.project
+                                 AND feature = entitlements.feature
+                                 AND license_fingerprint = entitlements.license_fingerprint),
+                              entitlements.revocation_seq)
+                   ) + 1,
+  updated_at     = EXTRACT(EPOCH FROM now())::bigint
+WHERE project = $1 AND feature = $2 AND license_fingerprint = $3
+  AND EXISTS (
+    SELECT 1 FROM entitlement_devices
+    WHERE project = $1 AND feature = $2 AND license_fingerprint = $3 AND device_key_id = $4
+  );
+
+
+-- B9. device state UPDATE -- device-disable / device-revoke  (entitlement.mjs line 258, statement 1)
+--   ORIGINAL (D1):
+--     UPDATE entitlement_devices SET status = '<status>', updated_at = unixepoch()
+--     WHERE project = ? AND feature = ? AND license_fingerprint = ? AND device_key_id = ?
+--   $5 = status literal ('disabled' for device-disable, 'revoked' for device-revoke). No revocation_seq here
+--   (the device row has none); the parent bump (B8) + event (B7) follow as statements 2 and 3.
+UPDATE entitlement_devices SET
+  status     = $5,
+  updated_at = EXTRACT(EPOCH FROM now())::bigint   -- unixepoch()
+WHERE project = $1 AND feature = $2 AND license_fingerprint = $3 AND device_key_id = $4;
+
+
+-- =====================================================================================
+-- (B-READS) Read-only SELECTs from the CLI. These run via .all()/.first(); they are NOT
+-- the verify-path reads (A3/A4) -- they return the FULL admin column set, including `notes`,
+-- and the device-list/list reads order + cap at 100 rows.
+-- =====================================================================================
+
+-- B10. get -- single entitlement, full admin columns incl. notes  (entitlement.mjs line 236, command 'get')
+--   ORIGINAL (D1): SELECT project, feature, ..., notes, created_at, updated_at FROM entitlements
+--     WHERE project = ? AND feature = ? AND license_fingerprint = ?
+--   NOTE: includes `notes`, created_at, updated_at -- unlike the verify-path A3 (which omits notes/timestamps
+--   and adds LIMIT 1). No LIMIT here (the composite PK makes it at most one row).
+SELECT project, feature, license_fingerprint, device_hash, status,
+       assertion_ttl_seconds, cache_ttl_seconds, revocation_seq,
+       valid_from, valid_until, notes, created_at, updated_at
+FROM entitlements
+WHERE project = $1 AND feature = $2 AND license_fingerprint = $3;
+
+
+-- B11. list -- entitlements with OPTIONAL project/feature filters  (entitlement.mjs line 277, command 'list')
+--   ORIGINAL (D1): SELECT ... FROM entitlements<WHERE> ORDER BY updated_at DESC LIMIT 100
+--   <WHERE> is "" / " WHERE project = ?" / " WHERE feature = ?" / " WHERE project = ? AND feature = ?",
+--   depending on which of project/feature were passed. The four materialized forms:
+
+-- B11a. list (no filters)
+SELECT project, feature, license_fingerprint, device_hash, status,
+       assertion_ttl_seconds, cache_ttl_seconds, revocation_seq,
+       valid_from, valid_until, notes, created_at, updated_at
+FROM entitlements
+ORDER BY updated_at DESC LIMIT 100;
+
+-- B11b. list (project filter only)
+SELECT project, feature, license_fingerprint, device_hash, status,
+       assertion_ttl_seconds, cache_ttl_seconds, revocation_seq,
+       valid_from, valid_until, notes, created_at, updated_at
+FROM entitlements
+WHERE project = $1
+ORDER BY updated_at DESC LIMIT 100;
+
+-- B11c. list (feature filter only)
+SELECT project, feature, license_fingerprint, device_hash, status,
+       assertion_ttl_seconds, cache_ttl_seconds, revocation_seq,
+       valid_from, valid_until, notes, created_at, updated_at
+FROM entitlements
+WHERE feature = $1
+ORDER BY updated_at DESC LIMIT 100;
+
+-- B11d. list (project AND feature filters)
+SELECT project, feature, license_fingerprint, device_hash, status,
+       assertion_ttl_seconds, cache_ttl_seconds, revocation_seq,
+       valid_from, valid_until, notes, created_at, updated_at
+FROM entitlements
+WHERE project = $1 AND feature = $2
+ORDER BY updated_at DESC LIMIT 100;
+
+
+-- B12. device-list -- devices for one entitlement  (entitlement.mjs line 265, command 'device-list')
+--   ORIGINAL (D1): SELECT project, feature, license_fingerprint, device_key_id, status,
+--     created_at, updated_at, last_seen_at, notes FROM entitlement_devices
+--     WHERE project = ? AND feature = ? AND license_fingerprint = ? ORDER BY updated_at DESC LIMIT 100
+--   Reads last_seen_at and notes (distinct from the verify-path A4, which selects only
+--   device_key_id, public_key_spki_der_base64, status with LIMIT 1).
+SELECT project, feature, license_fingerprint, device_key_id, status,
+       created_at, updated_at, last_seen_at, notes
+FROM entitlement_devices
+WHERE project = $1 AND feature = $2 AND license_fingerprint = $3
+ORDER BY updated_at DESC LIMIT 100;
