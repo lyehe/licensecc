@@ -299,9 +299,14 @@ faithfully -- the `pg-sql.mjs` output is never changed, only what is handed to `
   Postgres -- run the unmodified `pg-sql.mjs` SQL there. The floor only ever *raises* the seq when
   the `entitlement_events` history outruns the row's own `revocation_seq` (which the live
   verify-path's revocation handling can produce); the `pg-mem` shim does not need that branch.
-  Before production, do a one-time smoke of the unrewritten B1/B5/B6/B8 statements against a real
-  Postgres (`docker run postgres` or a Supabase instance) to confirm the correlated
-  `entitlements.<col>` reference resolves as expected -- it is standard Postgres and will.
+  **VERIFIED 2026-06-16 on PostgreSQL 16 (Docker):** `smoke-real-pg.mjs` drove the unmodified
+  `pgSqlFor()` output (no rewrite) through node-postgres against a live PG16 — the full lifecycle
+  passed **9/9**, including the un-rewritten `ON CONFLICT` correlated floor (`revocation_seq`
+  1→2→…→6 monotonic), the conditional `WHERE entitlements.status != 'revoked'` guard (reenable on
+  a revoked row = `rowCount 0`, zero audit events), and `pgcrypto`'s `gen_random_bytes`. The
+  correlated `entitlements.<col>` reference resolves natively — no rewrite needed off `pg-mem`.
+  Re-run it against your own instance: `npm i pg && DATABASE_URL=… node smoke-real-pg.mjs`
+  (after `schema.pg.sql` is applied).
 - The CLI uses **`postgres.js`** (a wire-protocol client), which `pg-mem` cannot serve. The
   `pg-mem` suite therefore exercises the SQL and the row effects, not a live `entitlement-pg.mjs`
   socket connection. To smoke-test the live CLI, point `DATABASE_URL` at a real Postgres/Supabase
