@@ -40,14 +40,12 @@ npm run build
 # 3. Create + migrate the database.
 node local-host/migrate.mjs app.db
 
-# 4. Provide a signing key. Reuse the project's generator:
-#      node scripts/generate-online-key.mjs
-#    or generate a throwaway PKCS#8 RSA-3072 key for local testing:
-node -e '(async()=>{const {webcrypto:c}=await import("node:crypto");const k=await c.subtle.generateKey({name:"RSASSA-PKCS1-v1_5",modulusLength:3072,publicExponent:new Uint8Array([1,0,1]),hash:"SHA-256"},true,["sign","verify"]);const p=Buffer.from(new Uint8Array(await c.subtle.exportKey("pkcs8",k.privateKey))).toString("base64");require("fs").writeFileSync("online-private-key.pem","-----BEGIN PRIVATE KEY-----\n"+p.match(/.{1,64}/g).join("\n")+"\n-----END PRIVATE KEY-----\n")})()'
+# 4. Provide a signing key. Use the project's generator (writes a PKCS#8 RSA-3072 PEM):
+node scripts/generate-online-key.mjs --out-dir .local-keys
 
-# 5. Start the host.
+# 5. Start the host (ONLINE_SIGNING_KEY_ID is any stable label for local dev).
 PORT=8787 DB_PATH=app.db \
-  ONLINE_SIGNING_PRIVATE_KEY_PKCS8_PEM="$(cat online-private-key.pem)" \
+  ONLINE_SIGNING_PRIVATE_KEY_PKCS8_PEM="$(cat .local-keys/online_private_key.pkcs8.pem)" \
   ONLINE_SIGNING_KEY_ID="sha256:local-dev-key" \
   node local-host/server.mjs
 ```
@@ -56,7 +54,7 @@ On Windows PowerShell, set the env vars first, then run:
 
 ```powershell
 $env:PORT="8787"; $env:DB_PATH="app.db"
-$env:ONLINE_SIGNING_PRIVATE_KEY_PKCS8_PEM = Get-Content online-private-key.pem -Raw
+$env:ONLINE_SIGNING_PRIVATE_KEY_PKCS8_PEM = Get-Content .local-keys/online_private_key.pkcs8.pem -Raw
 $env:ONLINE_SIGNING_KEY_ID = "sha256:local-dev-key"
 node local-host/server.mjs
 ```
