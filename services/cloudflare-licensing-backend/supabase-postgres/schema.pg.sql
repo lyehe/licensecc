@@ -1,0 +1,207 @@
+-- schema.pg.sql
+--
+-- PostgreSQL / Supabase port of the licensecc licensing backend schema.
+-- Ground truth: services/cloudflare-licensing-backend/schema.sql (SQLite/D1, built from
+--   migrations/0001..0008). This is a faithful 1:1 port: every table, column, default,
+--   CHECK enum, composite primary key, index, and the composite ON DELETE CASCADE FK are
+--   preserved. The ONLY behavioral differences are the documented type/identity changes
+--   required by Postgres (see header notes per change).
+--
+-- Port rules applied (verbatim from the task contract):
+--   * INTEGER PRIMARY KEY AUTOINCREMENT          -> BIGINT GENERATED ALWAYS AS IDENTITY
+--   * epoch / counter INTEGER columns            -> BIGINT  (32-bit unix seconds overflow
+--       in 2038; counters/seq are 64-bit-intent). Widened columns:
+--         created_at, updated_at, valid_from, valid_until, last_seen_at,
+--         window_start, expires_at, revocation_seq, request_count,
+--         assertion_ttl_seconds, cache_ttl_seconds.
+--     NOTE: postgres.js returns BIGINT (int8, OID 20) columns as JavaScript STRINGS by
+--       default. The Worker's verify path survives that coincidentally (every BIGINT read
+--       is numerically coerced downstream -- see db-postgres.mjs), but the adapter now
+--       installs an int8 type parser so these columns arrive as numbers. See db-postgres.mjs.
+--   * CHECK (col IN (...)) enums                 -> kept verbatim (NOT converted to native
+--       ENUM types, so migrations 0006/0007 that widened the enum lists stay trivial to
+--       reproduce as ALTER ... DROP/ADD CONSTRAINT, exactly like the SQLite rebuilds).
+--   * TEXT NOT NULL DEFAULT ''                   -> kept as-is.
+--   * metadata_json TEXT NOT NULL DEFAULT '{}'   -> kept as TEXT (jsonb is an option;
+--       see the commented jsonb variant next to each occurrence). Kept TEXT to stay
+--       byte-for-byte compatible with the existing admin/CLI tooling that writes/reads
+--       these columns as opaque JSON strings.
+--   * composite TEXT primary keys                -> ported verbatim.
+--   * composite FOREIGN KEY ... ON DELETE CASCADE -> ported verbatim.
+--
+-- pgcrypto is required because the admin/CLI statements port `lower(hex(randomblob(8)))`
+-- to `encode(gen_random_bytes(8),'hex')` (see statements.pg.sql). gen_random_bytes lives
+-- in pgcrypto. (On Supabase pgcrypto is preinstalled; this is idempotent.)
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+-- =====================================================================================
+-- entitlements  (migrations 0001 + 0003 validity columns + 0004 customer/license cols)
+-- =====================================================================================
+CREATE TABLE IF NOT EXISTS entitlements (
+  project               TEXT    NOT NULL,
+  feature               TEXT    NOT NULL,
+  license_fingerprint   TEXT    NOT NULL,
+  device_hash           TEXT    NOT NULL DEFAULT '',
+  status                TEXT    NOT NULL CHECK (status IN ('active', 'revoked', 'disabled')),
+  assertion_ttl_seconds BIGINT  NOT NULL DEFAULT 300,
+  cache_ttl_seconds     BIGINT  NOT NULL DEFAULT 3600,
+  revocation_seq        BIGINT  NOT NULL DEFAULT 0,
+  created_at            BIGINT  NOT NULL,
+  updated_at            BIGINT  NOT NULL,
+  valid_from            BIGINT  NULL,
+  valid_until           BIGINT  NULL,
+  notes                 TEXT    NOT NULL DEFAULT '',
+  customer_id           TEXT    NULL,
+  license_id            TEXT    NULL,
+  PRIMARY KEY (project, feature, license_fingerprint)
+);
+
+CREATE INDEX IF NOT EXISTS idx_entitlements_status
+  ON entitlements(status);
+
+CREATE INDEX IF NOT EXISTS idx_entitlements_project_feature_status
+  ON entitlements(project, feature, status);
+
+CREATE INDEX IF NOT EXISTS idx_entitlements_valid_until
+  ON entitlements(valid_until);
+
+CREATE INDEX IF NOT EXISTS idx_entitlements_customer
+  ON entitlements(customer_id);
+
+CREATE INDEX IF NOT EXISTS idx_entitlements_license
+  ON entitlements(license_id);
+
+-- =====================================================================================
+-- entitlement_devices  (migration 0008) -- per-entitlement ECDSA device keys.
+-- Composite FK back to entitlements with ON DELETE CASCADE, ported verbatim.
+-- =====================================================================================
+CREATE TABLE IF NOT EXISTS entitlement_devices (
+  project                    TEXT   NOT NULL,
+  feature                    TEXT   NOT NULL,
+  license_fingerprint        TEXT   NOT NULL,
+  device_key_id              TEXT   NOT NULL,
+  public_key_spki_der_base64 TEXT   NOT NULL,
+  status                     TEXT   NOT NULL CHECK (status IN ('active', 'revoked', 'disabled')),
+  created_at                 BIGINT NOT NULL,
+  updated_at                 BIGINT NOT NULL,
+  last_seen_at               BIGINT NULL,
+  notes                      TEXT   NOT NULL DEFAULT '',
+  PRIMARY KEY (project, feature, license_fingerprint, device_key_id),
+  FOREIGN KEY (project, feature, license_fingerprint)
+    REFERENCES entitlements(project, feature, license_fingerprint)
+    ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_entitlement_devices_status
+  ON entitlement_devices(status);
+
+CREATE INDEX IF NOT EXISTS idx_entitlement_devices_entitlement
+  ON entitlement_devices(project, feature, license_fingerprint);
+
+-- =====================================================================================
+-- customers  (migration 0004)
+-- =====================================================================================
+CREATE TABLE IF NOT EXISTS customers (
+  id            TEXT   PRIMARY KEY,
+  name          TEXT   NOT NULL,
+  email         TEXT   NOT NULL DEFAULT '',
+  metadata_json TEXT   NOT NULL DEFAULT '{}',   -- jsonb option: metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb
+  created_at    BIGINT NOT NULL,
+  updated_at    BIGINT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_customers_email
+  ON customers(email);
+
+-- =====================================================================================
+-- licenses  (migration 0004)
+-- =====================================================================================
+CREATE TABLE IF NOT EXISTS licenses (
+  id            TEXT   PRIMARY KEY,
+  customer_id   TEXT   NULL,
+  project       TEXT   NOT NULL,
+  label         TEXT   NOT NULL DEFAULT '',
+  metadata_json TEXT   NOT NULL DEFAULT '{}',   -- jsonb option: metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb
+  created_at    BIGINT NOT NULL,
+  updated_at    BIGINT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_licenses_customer
+  ON licenses(customer_id);
+
+CREATE INDEX IF NOT EXISTS idx_licenses_project
+  ON licenses(project);
+
+-- =====================================================================================
+-- entitlement_events  (migration 0005 rebuild + 0006 sync actor_type + 0007 revoked-override)
+-- The CHECK enum lists below already include the values added by 0006 ('sync') and
+-- 0007 ('revoked-override'), matching the final ground-truth schema.sql.
+--
+-- SQLite: id INTEGER PRIMARY KEY AUTOINCREMENT  ->  Postgres identity column.
+-- =====================================================================================
+CREATE TABLE IF NOT EXISTS entitlement_events (
+  id                  BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  project             TEXT   NOT NULL,
+  feature             TEXT   NOT NULL,
+  license_fingerprint TEXT   NOT NULL,
+  device_hash         TEXT   NOT NULL DEFAULT '',
+  event_type          TEXT   NOT NULL CHECK (event_type IN ('create', 'update', 'disable', 'reenable', 'revoke', 'upsert', 'revoked-override')),
+  status              TEXT   NOT NULL CHECK (status IN ('active', 'revoked', 'disabled')),
+  revocation_seq      BIGINT NOT NULL,
+  detail              TEXT   NOT NULL DEFAULT '',
+  actor               TEXT   NOT NULL DEFAULT '',
+  actor_type          TEXT   NOT NULL DEFAULT 'unknown' CHECK (actor_type IN ('access', 'dev', 'cli', 'sync', 'system', 'unknown')),
+  source              TEXT   NOT NULL DEFAULT 'admin',
+  request_id          TEXT   NOT NULL DEFAULT '',
+  ip                  TEXT   NOT NULL DEFAULT '',
+  prev_json           TEXT   NOT NULL DEFAULT '',   -- jsonb option possible, but kept TEXT (can be empty string '')
+  next_json           TEXT   NOT NULL DEFAULT '',   -- jsonb option possible, but kept TEXT (can be empty string '')
+  reason              TEXT   NOT NULL DEFAULT '',
+  idempotency_key     TEXT   NULL,
+  created_at          BIGINT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_entitlement_events_lookup
+  ON entitlement_events(project, feature, license_fingerprint, created_at);
+
+CREATE INDEX IF NOT EXISTS idx_entitlement_events_actor
+  ON entitlement_events(actor, created_at);
+
+CREATE INDEX IF NOT EXISTS idx_entitlement_events_request
+  ON entitlement_events(request_id);
+
+-- =====================================================================================
+-- mutation_idempotency  (migration 0004)
+-- =====================================================================================
+CREATE TABLE IF NOT EXISTS mutation_idempotency (
+  scope           TEXT   NOT NULL,
+  idempotency_key TEXT   NOT NULL,
+  response_json   TEXT   NOT NULL,             -- jsonb option: response_json JSONB NOT NULL
+  created_at      BIGINT NOT NULL,
+  PRIMARY KEY (scope, idempotency_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_mutation_idempotency_created_at
+  ON mutation_idempotency(created_at);
+
+-- =====================================================================================
+-- rate_limit_counters  (migration 0002)
+--
+-- CRITICAL: the verify-path upsert targets ON CONFLICT(namespace, rate_key, window_start).
+-- That triple MUST be a UNIQUE or PRIMARY KEY constraint for `ON CONFLICT (...)` to bind
+-- an arbiter index in Postgres -- otherwise the upsert raises
+--   "there is no unique or exclusion constraint matching the ON CONFLICT specification".
+-- The composite PRIMARY KEY below provides exactly that arbiter. Do not drop it.
+-- =====================================================================================
+CREATE TABLE IF NOT EXISTS rate_limit_counters (
+  namespace     TEXT   NOT NULL,
+  rate_key      TEXT   NOT NULL,
+  window_start  BIGINT NOT NULL,
+  request_count BIGINT NOT NULL,
+  expires_at    BIGINT NOT NULL,
+  updated_at    BIGINT NOT NULL,
+  PRIMARY KEY (namespace, rate_key, window_start)   -- <- ON CONFLICT arbiter for the rate-limit upsert
+);
+
+CREATE INDEX IF NOT EXISTS idx_rate_limit_counters_expires_at
+  ON rate_limit_counters(expires_at);
