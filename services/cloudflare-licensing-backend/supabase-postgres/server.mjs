@@ -36,6 +36,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { webcrypto } from "node:crypto";
 
 import { createPostgresDatabase, closePool } from "./db-postgres.mjs";
+import { CLIENT_IP_HEADERS, clientIpFromRequest, assertSafeBind } from "../host-common.mjs";
 
 // --- Node <20 crypto shim (the Worker uses crypto.subtle for RSA sign / ECDSA verify) ---
 if (typeof globalThis.crypto === "undefined") {
@@ -130,12 +131,16 @@ function nodeRequestToWeb(req) {
   const headers = new Headers();
   for (const [key, value] of Object.entries(req.headers)) {
     if (value === undefined) continue;
+    if (CLIENT_IP_HEADERS.includes(key.toLowerCase())) continue; // strip client-supplied IP headers
     if (Array.isArray(value)) {
       for (const v of value) headers.append(key, v);
     } else {
       headers.set(key, value);
     }
   }
+  // Re-derive the caller IP from a trustworthy source (socket / trusted proxy header) so the
+  // Worker's rate limiter (keyed on cf-connecting-ip) cannot be bypassed by a spoofed header.
+  headers.set("cf-connecting-ip", clientIpFromRequest(req));
 
   return new Promise((resolveReq, rejectReq) => {
     const chunks = [];
@@ -189,6 +194,14 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
       process.exit(0);
     });
   });
+}
+
+// Refuse to expose an unthrottled signing oracle (non-loopback bind without rate limiting).
+try {
+  assertSafeBind(HOST);
+} catch (error) {
+  console.error(error.message);
+  process.exit(1);
 }
 
 server.listen(PORT, HOST, () => {

@@ -206,6 +206,25 @@ DATABASE_URL=postgresql://user:pass@host:5432/db \
 500) for a miss — full parity with the SQLite host. `smoke-worker-sql.mjs` re-runs the
 data-layer proof (7/7) against any Postgres: `npm i postgres && node smoke-worker-sql.mjs`.
 
+## Exposing the host safely
+
+`/v1/verify` is a **signing oracle** — it mints signed `lccoa1.` assertions. Off Cloudflare you
+lose the edge WAF, the per-client rate limiter, and a trustworthy client IP, so `server.mjs` closes
+the two gaps the security review flagged:
+
+- **Spoofable client IP.** The Worker keys its per-client rate-limit tier on `cf-connecting-ip`,
+  which off Cloudflare is attacker-supplied. The host **strips** any inbound `cf-connecting-ip` /
+  `x-forwarded-for` / `x-real-ip` and re-derives the caller IP from the **real socket peer**.
+  Behind a reverse proxy, set `TRUST_PROXY_HEADER` (e.g. `x-real-ip`, or `x-forwarded-for` to take
+  the rightmost hop) — and ensure that proxy overwrites the header from untrusted clients.
+- **Non-loopback bind guard.** The host binds `127.0.0.1` by default and **refuses to bind a
+  non-loopback address unless rate limiting is enabled** (`D1_RATE_LIMIT_ENABLED=1` + the
+  `D1_*_RATE_LIMIT_*` tiers).
+
+**Recommendation:** keep `HOST=127.0.0.1` and front the host with a reverse proxy that does TLS,
+authentication, and rate limiting. Never expose `/v1/verify` directly. The guard + IP logic live
+in `../host-common.mjs` (unit-tested in `../host-common.test.mjs`).
+
 ## Full admin CLI on Postgres
 
 `scripts/entitlement.mjs` (the D1 admin CLI) is **not** modified by this port. Instead this

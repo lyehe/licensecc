@@ -72,6 +72,7 @@
 //   // env.DB is a D1DatabaseLike; handleVerify(request, env) works unchanged.
 
 import postgres from "postgres";
+import { translateWorkerSqlToPg } from "./sql-translate.mjs";
 
 // PostgreSQL type OID for BIGINT / int8. Used by the type parser below so BIGINT columns
 // are returned as JS numbers (matching D1/SQLite) instead of postgres.js's default string.
@@ -91,29 +92,8 @@ function parseInt8(value) {
   return Number.isSafeInteger(n) ? n : value;
 }
 
-/**
- * Translate the UNMODIFIED Worker's D1/SQLite SQL to PostgreSQL. Enabled ONLY via
- * createPostgresDatabase(..., { workerSql: true }); the CLI (pg-sql.mjs) emits native PG SQL
- * and never triggers this. Two transforms, scoped to the Worker's verify-path statements:
- *   1. `?` positional placeholders -> `$1..$n` (the statements contain no `?` inside string
- *      literals, so a positional pass is safe; this is intentionally NOT a general parser).
- *   2. A bare self-referential ON CONFLICT update (`col = col + 1`) -> the table-qualified
- *      `col = <insert-target>.col + 1`. PostgreSQL rejects the bare form as ambiguous (the
- *      existing row AND `excluded` both expose the column); the qualified form is the
- *      existing row's value -- the atomic increment the rate limiter relies on. (D1/SQLite
- *      accepts the bare form, which is why the Worker uses it.)
- * @param {string} sql
- * @returns {string}
- */
-function translateWorkerSqlToPg(sql) {
-  let i = 0;
-  let out = sql.replace(/\?/g, () => `$${++i}`);
-  const insertTarget = out.match(/INSERT\s+INTO\s+("?\w+"?)/i);
-  if (insertTarget && /\bON\s+CONFLICT\b/i.test(out)) {
-    out = out.replace(/\b(\w+)\s*=\s*\1\b/g, `$1 = ${insertTarget[1]}.$1`);
-  }
-  return out;
-}
+// translateWorkerSqlToPg (the `{ workerSql: true }` D1 -> PG translation) lives in
+// ./sql-translate.mjs as a pure, dependency-free, unit-tested module (translate.test.mjs).
 
 // ---------------------------------------------------------------------------------------
 // Single long-lived connection pool, created once at startup (module-level singleton).
