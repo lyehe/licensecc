@@ -175,6 +175,37 @@ rows, and the adapter never swallows errors, so this contract holds.
   final state of D1 migrations `0001..0008`. If you want incremental Postgres migrations,
   split it along the same boundaries (the per-table comments name the source migration).
 
+## Run the verify Worker on Postgres (server.mjs)
+
+`server.mjs` runs the **unmodified** compiled Worker (`dist/index.js`) on Postgres — the
+counterpart of `local-host/server.mjs` (SQLite). The Worker emits D1/SQLite SQL, so the host
+wires the adapter with `{ workerSql: true }`, which translates the Worker's verify-path
+statements to PostgreSQL at `prepare()` time:
+
+- `?` placeholders → `$1..$n`;
+- the bare `ON CONFLICT … DO UPDATE SET request_count = request_count + 1` → table-qualified
+  (`rate_limit_counters.request_count + 1`). PostgreSQL rejects the bare self-reference as
+  ambiguous (the existing row **and** `excluded` both expose the column); D1/SQLite accepts
+  it, which is why the Worker uses it.
+
+```bash
+npm install postgres                                          # adapter runtime dep
+npm run build                                                 # tsc -> dist/index.js
+psql "$DATABASE_URL" -f supabase-postgres/schema.pg.sql       # apply the schema
+node scripts/generate-online-key.mjs --out-dir .online-key    # signing key (.online-key is gitignored)
+
+DATABASE_URL=postgresql://user:pass@host:5432/db \
+  ONLINE_SIGNING_PRIVATE_KEY_PKCS8_PEM="$(cat .online-key/online_private_key.pkcs8.pem)" \
+  ONLINE_SIGNING_KEY_ID="sha256:local-dev-key" \
+  node supabase-postgres/server.mjs
+# GET /health ; POST /v1/verify {project,feature,license_fingerprint,device_hash,nonce}
+```
+
+**Verified 2026-06-16 on PostgreSQL 16 (Docker):** the compiled Worker served a genuine signed
+`lccoa1.` assertion for a seeded entitlement (`verify.ok`) and `entitlement_denied` (200, not
+500) for a miss — full parity with the SQLite host. `smoke-worker-sql.mjs` re-runs the
+data-layer proof (7/7) against any Postgres: `npm i postgres && node smoke-worker-sql.mjs`.
+
 ## Full admin CLI on Postgres
 
 `scripts/entitlement.mjs` (the D1 admin CLI) is **not** modified by this port. Instead this

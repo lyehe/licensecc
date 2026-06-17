@@ -47,9 +47,12 @@
 //     not a runtime SQL rewriter).
 //   - A naive `?`->`$n` rewriter is unsafe: it would also rewrite `?` inside string
 //     literals. Requiring $n keeps the adapter a thin, predictable pass-through.
-// If you instead want `?` support, swap to postgres.js's tagged-template / dynamic form;
-// but pick ONE. This file is consistently $n-only and asserts on a stray `?`-style call
-// only insofar as the DB will reject malformed SQL (we do not parse SQL ourselves).
+// The compiled Worker (src/index.ts), however, emits D1/SQLite SQL: `?` placeholders AND a
+// bare self-referential ON CONFLICT counter update (`request_count = request_count + 1`).
+// To run the UNMODIFIED Worker on Postgres, pass `{ workerSql: true }` to
+// createPostgresDatabase(): the adapter translates the Worker's verify-path statements to
+// PG at prepare() time (see translateWorkerSqlToPg below). The CLI keeps the default (no
+// translation) -- pg-sql.mjs already emits native PG SQL ($n, qualified upsert).
 //
 // WHY postgres.js (raw SQL) and NOT @supabase/supabase-js (PostgREST query builder):
 //   The load-bearing statement is the rate-limit counter upsert:
@@ -86,6 +89,30 @@ function parseInt8(value) {
   // null is handled by postgres.js before the parser is invoked; value is always a string.
   const n = Number(value);
   return Number.isSafeInteger(n) ? n : value;
+}
+
+/**
+ * Translate the UNMODIFIED Worker's D1/SQLite SQL to PostgreSQL. Enabled ONLY via
+ * createPostgresDatabase(..., { workerSql: true }); the CLI (pg-sql.mjs) emits native PG SQL
+ * and never triggers this. Two transforms, scoped to the Worker's verify-path statements:
+ *   1. `?` positional placeholders -> `$1..$n` (the statements contain no `?` inside string
+ *      literals, so a positional pass is safe; this is intentionally NOT a general parser).
+ *   2. A bare self-referential ON CONFLICT update (`col = col + 1`) -> the table-qualified
+ *      `col = <insert-target>.col + 1`. PostgreSQL rejects the bare form as ambiguous (the
+ *      existing row AND `excluded` both expose the column); the qualified form is the
+ *      existing row's value -- the atomic increment the rate limiter relies on. (D1/SQLite
+ *      accepts the bare form, which is why the Worker uses it.)
+ * @param {string} sql
+ * @returns {string}
+ */
+function translateWorkerSqlToPg(sql) {
+  let i = 0;
+  let out = sql.replace(/\?/g, () => `$${++i}`);
+  const insertTarget = out.match(/INSERT\s+INTO\s+("?\w+"?)/i);
+  if (insertTarget && /\bON\s+CONFLICT\b/i.test(out)) {
+    out = out.replace(/\b(\w+)\s*=\s*\1\b/g, `$1 = ${insertTarget[1]}.$1`);
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------------------
@@ -161,9 +188,9 @@ class PostgresPreparedStatement {
    * @param {ReturnType<typeof postgres>} pool
    * @param {string} sql  SQL using $1..$n placeholders.
    */
-  constructor(pool, sql) {
+  constructor(pool, sql, rewrite = false) {
     /** @private */ this._pool = pool;
-    /** @private */ this._sql = sql;
+    /** @private */ this._sql = rewrite ? translateWorkerSqlToPg(sql) : sql;
     /** @private */ this._params = [];
   }
 
@@ -215,20 +242,24 @@ class PostgresPreparedStatement {
 // D1DatabaseLike implementation: only .prepare(sql).
 // ---------------------------------------------------------------------------------------
 class PostgresDatabase {
-  /** @param {ReturnType<typeof postgres>} pool */
-  constructor(pool) {
+  /**
+   * @param {ReturnType<typeof postgres>} pool
+   * @param {boolean} [workerSql]  translate the D1/SQLite Worker's SQL to PG (see above)
+   */
+  constructor(pool, workerSql = false) {
     /** @private */ this._pool = pool;
+    /** @private */ this._rewrite = workerSql === true;
   }
 
   /**
-   * @param {string} sql  SQL using $1..$n placeholders.
+   * @param {string} sql  SQL using $1..$n placeholders (or `?` when rewriteQuestionMarks).
    * @returns {PostgresPreparedStatement}
    */
   prepare(sql) {
     if (typeof sql !== "string") {
       throw new TypeError("prepare(sql): sql must be a string");
     }
-    return new PostgresPreparedStatement(this._pool, sql);
+    return new PostgresPreparedStatement(this._pool, sql, this._rewrite);
   }
 }
 
@@ -237,12 +268,15 @@ class PostgresDatabase {
  * Call ONCE at startup and reuse the returned object for every request (env.DB).
  *
  * @param {string} connectionString  Supabase/Postgres connection URL.
- * @param {import("postgres").Options<{}>} [options]  Extra postgres.js options.
- * @returns {{ prepare(sql: string): PostgresPreparedStatement, _pool: ReturnType<typeof postgres> }}
+ * @param {import("postgres").Options<{}> & { workerSql?: boolean }} [options]
+ *        Extra postgres.js options, plus `workerSql` to translate the compiled Worker's
+ *        D1/SQLite SQL to PostgreSQL (pass `true` when wiring the Worker via server.mjs).
+ * @returns {{ prepare(sql: string): PostgresPreparedStatement }}
  */
 export function createPostgresDatabase(connectionString, options = {}) {
-  const pool = createPool(connectionString, options);
-  return new PostgresDatabase(pool);
+  const { workerSql = false, ...poolOptions } = options;
+  const pool = createPool(connectionString, poolOptions);
+  return new PostgresDatabase(pool, workerSql);
 }
 
 export { PostgresDatabase, PostgresPreparedStatement };
