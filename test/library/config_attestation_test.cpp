@@ -220,8 +220,10 @@ BOOST_AUTO_TEST_CASE(verifier_enforces_expiry_window) {
 		BOOST_CHECK(failure == ConfigVerifyFailure::Expired);
 	}
 	{
+		// expires-at 0 (never-expires) is rejected: config tokens must carry a finite expiry.
 		const string t = token_for(make_claims(e, "app-config", 5, 900, 0));
-		BOOST_CHECK(config_attestation::verify_config_envelope(t, e, nullptr, error, failure));
+		BOOST_CHECK(!config_attestation::verify_config_envelope(t, e, nullptr, error, failure));
+		BOOST_CHECK(failure == ConfigVerifyFailure::Expired);
 	}
 	{
 		const string t = token_for(make_claims(e, "app-config", 5, 1000 + 301, 0));
@@ -300,6 +302,51 @@ BOOST_AUTO_TEST_CASE(golden_config_token_signed_by_node_verifies_in_cpp) {
 	BOOST_CHECK_EQUAL(claims.config_seq, 9u);
 	BOOST_CHECK_EQUAL(claims.key_id, key_id);
 }
+
+#ifdef LCC_CONFIG_ATTESTATION_PUBLIC_KEY_RECORDS
+BOOST_AUTO_TEST_CASE(golden_config_token_verifies_via_embedded_ring_without_seam) {
+	// Proves a config-sign.mjs-signed token verifies through the EMBEDDED baked ring:
+	// no expected.trusted_public_keys and an explicitly-empty test-seam override.
+	// Only compiled when the build baked LCC_CONFIG_ATTESTATION_PUBLIC_KEY_RECORDS
+	// (the same key embedded_golden.token was signed with).
+	config_attestation::set_trusted_public_keys_for_tests(
+		vector<config_attestation::ConfigAttestationPublicKey>());  // empty -> force embedded fallback
+
+	const string base = string(PROJECT_TEST_SRC_DIR) + "/vectors/config_attestation/";
+	auto read_file = [&](const string& name) {
+		ifstream in((base + name).c_str(), ios::binary);
+		BOOST_REQUIRE_MESSAGE(in.is_open(), "open " + base + name);
+		return string((istreambuf_iterator<char>(in)), istreambuf_iterator<char>());
+	};
+	auto trim = [](string s) { while (!s.empty() && (s.back()=='\n'||s.back()=='\r'||s.back()==' ')) s.pop_back(); return s; };
+
+	const string token = trim(read_file("embedded_golden.token"));
+	const string key_id = trim(read_file("embedded_golden.key_id"));
+	const string config = read_file("embedded_golden.config");  // exact bytes, no trim
+
+	config_attestation::ConfigAttestationExpected expected;
+	expected.project = "DEFAULT";
+	expected.feature = "EXPORT";
+	expected.license_fingerprint = string(64, 'a');
+	expected.device_hash = "";
+	expected.config_bytes.assign(config.begin(), config.end());
+	expected.now_epoch_seconds = 1500;  // inside [1000,2000]
+	expected.min_config_seq = 9;
+	// NOTE: no expected.trusted_public_keys -> policy must use the embedded ring.
+
+	config_attestation::ConfigAttestationClaims claims;
+	string error;
+	config_attestation::ConfigVerifyFailure failure = config_attestation::ConfigVerifyFailure::None;
+	BOOST_REQUIRE_MESSAGE(
+		config_attestation::verify_config_envelope(token, expected, &claims, error, failure), error);
+	BOOST_CHECK_EQUAL(claims.config_id, "app-config");
+	BOOST_CHECK_EQUAL(claims.config_seq, 9u);
+	BOOST_CHECK_EQUAL(claims.key_id, key_id);
+
+	// Restore the fixture's project key so global teardown state is consistent.
+	config_attestation::set_trusted_public_keys_for_tests(project_public_keys_for_tests());
+}
+#endif  // LCC_CONFIG_ATTESTATION_PUBLIC_KEY_RECORDS
 
 }  // namespace test
 }  // namespace license

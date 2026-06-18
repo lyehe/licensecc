@@ -10,7 +10,7 @@ const ENVELOPE_PREFIX = "lcccfg1";
 
 function usage() {
   console.error(`usage:
-  node scripts/config-sign.mjs --private-key <pkcs8-pem> --key-id sha256:<64-hex> --fingerprint <64-hex> --config <file> --config-id <id> --config-seq <uint> [--project DEFAULT] [--feature DEFAULT] [--device-hash <64-hex>] [--issued-at <epoch>] [--expires-at <epoch>]`);
+  node scripts/config-sign.mjs --private-key <pkcs8-pem> --key-id sha256:<64-hex> --fingerprint <64-hex> --config <file> --config-id <id> --config-seq <uint> --expires-at <epoch> [--project DEFAULT] [--feature DEFAULT] [--device-hash <64-hex>] [--issued-at <epoch>]`);
   process.exit(2);
 }
 
@@ -93,10 +93,13 @@ async function main() {
     configId: validatedName(requireOption(options, "config-id"), "config-id", 64),
     configSeq: validatedUint(requireOption(options, "config-seq"), "config-seq", 0),
     issuedAt: validatedUint(options["issued-at"], "issued-at", 0),
-    expiresAt: validatedUint(options["expires-at"], "expires-at", 0),
+    expiresAt: validatedUint(requireOption(options, "expires-at"), "expires-at", 0),
     configHash: createHash("sha256").update(configBytes).digest("hex"),
   };
   if (!/^sha256:[0-9a-f]{64}$/.test(f.keyId)) throw new Error("key-id must be sha256:<64 lowercase hex>");
+  if (f.expiresAt === 0 || f.expiresAt <= f.issuedAt) {
+    throw new Error("expires-at must be a non-zero epoch second greater than issued-at; never-expiring config tokens are rejected by the verifier");
+  }
   const payload = canonicalConfigPayload(f);
   const privateKeyPem = readFileSync(resolve(requireOption(options, "private-key")), "utf8");
   const privateKey = await subtle.importKey(

@@ -135,8 +135,8 @@ static std::string config_token_for(const std::string& fingerprint, const std::v
     c.config_id = "app-config";
     c.config_seq = 3;
     c.config_hash = std::string("sha256:") + license::os::signature_sha256_hex(config_bytes);
-    c.issued_at = 0;     // 0 issued, never-expires window is exercised separately
-    c.expires_at = 0;
+    c.issued_at = 1000000000;   // 2001-09-09, safely in the past for real-clock verification
+    c.expires_at = 4102444800;  // 2100-01-01, finite expiry (never-expires tokens are rejected)
     const std::string payload = license::config_attestation::build_canonical_config_payload(c);
     BOOST_REQUIRE(!payload.empty());
     return license::config_attestation::build_config_envelope(payload, sign_config_payload(payload));

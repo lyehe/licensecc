@@ -92,6 +92,32 @@ if(NOT "${LCC_ONLINE_ASSERTION_RETIRED_KEY_IDS}" STREQUAL "")
     )
 endif()
 
+if(NOT "${LCC_CONFIG_ATTESTATION_PUBLIC_KEY_RECORDS}" STREQUAL "")
+    if(TARGET config_attestation)
+        target_compile_definitions(config_attestation
+            PRIVATE
+                "LCC_CONFIG_ATTESTATION_PUBLIC_KEY_RECORDS=${LCC_CONFIG_ATTESTATION_PUBLIC_KEY_RECORDS}"
+        )
+    endif()
+    target_compile_definitions(licensecc_static
+        PUBLIC
+            "LCC_CONFIG_ATTESTATION_PUBLIC_KEY_RECORDS=${LCC_CONFIG_ATTESTATION_PUBLIC_KEY_RECORDS}"
+    )
+endif()
+
+if(NOT "${LCC_CONFIG_ATTESTATION_RETIRED_KEY_IDS}" STREQUAL "")
+    if(TARGET config_attestation)
+        target_compile_definitions(config_attestation
+            PRIVATE
+                "LCC_CONFIG_ATTESTATION_RETIRED_KEY_IDS=${LCC_CONFIG_ATTESTATION_RETIRED_KEY_IDS}"
+        )
+    endif()
+    target_compile_definitions(licensecc_static
+        PUBLIC
+            "LCC_CONFIG_ATTESTATION_RETIRED_KEY_IDS=${LCC_CONFIG_ATTESTATION_RETIRED_KEY_IDS}"
+    )
+endif()
+
 add_library(licensecc::licensecc_static ALIAS licensecc_static)
 install(TARGETS licensecc_static EXPORT licensecc
 	ARCHIVE DESTINATION ${main_lib_dest}/${LCC_PROJECT_NAME}

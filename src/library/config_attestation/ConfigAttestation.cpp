@@ -114,7 +114,14 @@ bool validate_claims(const ConfigAttestationClaims& claims, const ConfigAttestat
 		error = "config token issued in the future";
 		return false;
 	}
-	if (claims.expires_at != 0 && (claims.expires_at < claims.issued_at || claims.expires_at < now)) {
+	if (claims.expires_at == 0) {
+		// Never-expiring config tokens are rejected: every config token must carry a finite
+		// expiry, matching the online assertion path (which has no never-expires concept).
+		failure = ConfigVerifyFailure::Expired;
+		error = "config token has no expiry";
+		return false;
+	}
+	if (claims.expires_at < claims.issued_at || claims.expires_at < now) {
 		failure = ConfigVerifyFailure::Expired;
 		error = "config token expired";
 		return false;
