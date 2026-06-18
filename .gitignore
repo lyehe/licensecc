@@ -52,6 +52,9 @@ projects/*
 **/.dev.vars
 **/.online-key/
 services/cloudflare-licensing-backend/wrangler.toml
+# Orphaned pre-rename leftover (gitignored cruft + a secret-bearing wrangler.toml).
+# Re-ignored so a `git add -A` cannot leak it; delete the directory once migrated.
+services/cloudflare-online-verifier/
 services/cloudflare-license-admin/wrangler.toml
 services/cloudflare-license-admin/wrangler.jsonc
 services/cloudflare-d1-backup/wrangler.jsonc
