@@ -432,7 +432,7 @@ BOOST_AUTO_TEST_CASE(verify_signature_policy_rejects_structured_key_sized_blobs)
 
 BOOST_AUTO_TEST_CASE(verify_signature_policy_handles_payload_edge_cases) {
 	unique_ptr<CryptoHelper> crypto(CryptoHelper::getInstance());
-	crypto->generateKeyPair(2048);
+	crypto->generateKeyPair(3072);
 
 	const vector<string> payloads = {
 		string(),
@@ -456,7 +456,7 @@ BOOST_AUTO_TEST_CASE(verify_signature_policy_handles_payload_edge_cases) {
 
 BOOST_AUTO_TEST_CASE(verify_signature_policy_rejects_alternate_payload_spelling) {
 	unique_ptr<CryptoHelper> crypto(CryptoHelper::getInstance());
-	crypto->generateKeyPair(2048);
+	crypto->generateKeyPair(3072);
 
 	const string canonical_payload = string(LCC_PROJECT_NAME) + "lic_ver" + "200";
 	const string alternate_payload = string(LCC_PROJECT_NAME) + "lic_ver " + "200";
@@ -519,7 +519,7 @@ BOOST_AUTO_TEST_CASE(verify_signature_policy_rejects_unknown_key_and_version) {
 BOOST_AUTO_TEST_CASE(verify_signature_policy_rejects_duplicate_and_retired_key_ids) {
 	const string test_data("test_data");
 	unique_ptr<CryptoHelper> crypto(CryptoHelper::getInstance());
-	crypto->generateKeyPair(2048);
+	crypto->generateKeyPair(3072);
 	const string signature = crypto->signString(test_data);
 
 	license::os::SignatureVerificationRequest request = legacy_request(test_data, signature);
@@ -544,12 +544,12 @@ BOOST_AUTO_TEST_CASE(verify_signature_policy_rejects_duplicate_and_retired_key_i
 BOOST_AUTO_TEST_CASE(verify_signature_policy_selects_public_key_by_key_id) {
 	const string test_data("test_data");
 	unique_ptr<CryptoHelper> first_key(CryptoHelper::getInstance());
-	first_key->generateKeyPair(2048);
+	first_key->generateKeyPair(3072);
 	const vector<uint8_t> first_public_key = first_key->exportPublicKey();
 	const string first_key_id = license::os::public_key_id_from_der(first_public_key);
 
 	unique_ptr<CryptoHelper> second_key(CryptoHelper::getInstance());
-	second_key->generateKeyPair(2048);
+	second_key->generateKeyPair(3072);
 	const vector<uint8_t> second_public_key = second_key->exportPublicKey();
 	const string second_key_id = license::os::public_key_id_from_der(second_public_key);
 	const string second_signature = second_key->signString(test_data);
@@ -562,9 +562,9 @@ BOOST_AUTO_TEST_CASE(verify_signature_policy_selects_public_key_by_key_id) {
 	request.policy.allowed_key_ids.push_back(second_key_id);
 	request.policy.public_keys.clear();
 	request.policy.public_keys.push_back(
-		license::os::SignaturePublicKey(first_key_id, first_public_key, 2048));
+		license::os::SignaturePublicKey(first_key_id, first_public_key, 3072));
 	request.policy.public_keys.push_back(
-		license::os::SignaturePublicKey(second_key_id, second_public_key, 2048));
+		license::os::SignaturePublicKey(second_key_id, second_public_key, 3072));
 
 	BOOST_CHECK(license::os::signature_request_allowed(request));
 	BOOST_CHECK_EQUAL(license::os::verify_signature(request), FUNC_RET_OK);
@@ -577,7 +577,7 @@ BOOST_AUTO_TEST_CASE(verify_signature_policy_selects_public_key_by_key_id) {
 BOOST_AUTO_TEST_CASE(verify_signature_policy_rejects_duplicate_public_key_ring_entries) {
 	const string test_data("test_data");
 	unique_ptr<CryptoHelper> crypto(CryptoHelper::getInstance());
-	crypto->generateKeyPair(2048);
+	crypto->generateKeyPair(3072);
 	const vector<uint8_t> public_key = crypto->exportPublicKey();
 	const string key_id = license::os::public_key_id_from_der(public_key);
 	const string signature = crypto->signString(test_data);
@@ -588,8 +588,8 @@ BOOST_AUTO_TEST_CASE(verify_signature_policy_rejects_duplicate_public_key_ring_e
 	request.policy.allowed_key_ids.clear();
 	request.policy.allowed_key_ids.push_back(key_id);
 	request.policy.public_keys.clear();
-	request.policy.public_keys.push_back(license::os::SignaturePublicKey(key_id, public_key, 2048));
-	request.policy.public_keys.push_back(license::os::SignaturePublicKey(key_id, public_key, 2048));
+	request.policy.public_keys.push_back(license::os::SignaturePublicKey(key_id, public_key, 3072));
+	request.policy.public_keys.push_back(license::os::SignaturePublicKey(key_id, public_key, 3072));
 
 	BOOST_CHECK(!license::os::signature_request_allowed(request));
 	BOOST_CHECK_EQUAL(license::os::verify_signature(request), FUNC_RET_ERROR);
@@ -598,7 +598,7 @@ BOOST_AUTO_TEST_CASE(verify_signature_policy_rejects_duplicate_public_key_ring_e
 BOOST_AUTO_TEST_CASE(verify_signature_policy_rejects_key_id_public_key_mismatch) {
 	const string test_data("test_data");
 	unique_ptr<CryptoHelper> crypto(CryptoHelper::getInstance());
-	crypto->generateKeyPair(2048);
+	crypto->generateKeyPair(3072);
 	const string signature = crypto->signString(test_data);
 	const vector<uint8_t> public_key = crypto->exportPublicKey();
 
@@ -615,7 +615,7 @@ BOOST_AUTO_TEST_CASE(verify_signature_policy_rejects_key_id_public_key_mismatch)
 BOOST_AUTO_TEST_CASE(verify_signature_policy_rejects_ungated_external_public_key_der) {
 	const string test_data("test_data");
 	unique_ptr<CryptoHelper> crypto(CryptoHelper::getInstance());
-	crypto->generateKeyPair(2048);
+	crypto->generateKeyPair(3072);
 	const string signature = crypto->signString(test_data);
 	const vector<uint8_t> public_key = crypto->exportPublicKey();
 
@@ -630,17 +630,33 @@ BOOST_AUTO_TEST_CASE(verify_signature_policy_rejects_ungated_external_public_key
 	BOOST_CHECK_EQUAL(license::os::verify_signature(request), FUNC_RET_OK);
 }
 
-BOOST_AUTO_TEST_CASE(verify_signature_policy_accepts_supported_rsa_key_sizes) {
+BOOST_AUTO_TEST_CASE(verify_legacy_v200_signature_policy_enforces_minimum_key_bits) {
 	const string test_data("test_data");
-	const size_t key_sizes[] = {1024, 2048, 3072, 4096};
-	for (const size_t key_size : key_sizes) {
+	const size_t rejected_key_sizes[] = {1024, 2048};
+	const size_t accepted_key_sizes[] = {3072, 4096};
+
+	for (const size_t key_size : rejected_key_sizes) {
 		unique_ptr<CryptoHelper> crypto(CryptoHelper::getInstance());
 		crypto->generateKeyPair(key_size);
 		const string signature = crypto->signString(test_data);
 		license::os::SignatureVerificationRequest request = legacy_request(test_data, signature);
 		bind_request_to_public_key_der(request, crypto->exportPublicKey());
 
-		BOOST_TEST_CONTEXT("RSA key size " << key_size) {
+		BOOST_TEST_CONTEXT("legacy v200 rejects RSA key size " << key_size) {
+			BOOST_CHECK(!license::os::signature_request_allowed(request));
+			BOOST_CHECK_EQUAL(license::os::verify_signature(request), FUNC_RET_ERROR);
+		}
+	}
+
+	for (const size_t key_size : accepted_key_sizes) {
+		unique_ptr<CryptoHelper> crypto(CryptoHelper::getInstance());
+		crypto->generateKeyPair(key_size);
+		const string signature = crypto->signString(test_data);
+		license::os::SignatureVerificationRequest request = legacy_request(test_data, signature);
+		bind_request_to_public_key_der(request, crypto->exportPublicKey());
+
+		BOOST_TEST_CONTEXT("legacy v200 accepts RSA key size " << key_size) {
+			BOOST_CHECK(license::os::signature_request_allowed(request));
 			BOOST_CHECK_EQUAL(license::os::verify_signature(request), FUNC_RET_OK);
 			BOOST_CHECK_EQUAL(request.signature.size(), key_size / 8);
 
@@ -710,7 +726,7 @@ BOOST_AUTO_TEST_CASE(verify_v201_signature_policy_rejects_malformed_key_size_met
 BOOST_AUTO_TEST_CASE(verify_signature_policy_rejects_malformed_public_key_der) {
 	const string test_data("test_data");
 	unique_ptr<CryptoHelper> crypto(CryptoHelper::getInstance());
-	crypto->generateKeyPair(2048);
+	crypto->generateKeyPair(3072);
 	const string signature = crypto->signString(test_data);
 
 	license::os::SignatureVerificationRequest request = legacy_request(test_data, signature);

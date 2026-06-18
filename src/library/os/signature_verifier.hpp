@@ -245,6 +245,10 @@ inline SignatureVerificationPolicy legacy_v200_signature_policy() {
 		policy.allowed_key_ids.push_back(public_key.key_id);
 	}
 	append_embedded_retired_key_ids(policy.retired_key_ids);
+	// The default license format must not be weaker than the modern v201 format: enforce the
+	// same 3072-bit RSA floor. Default projects already use 3072-bit keys; only explicitly
+	// weakened projects (lccgen --legacy-rsa1024 / --key-bits 2048) are rejected.
+	policy.min_public_key_bits = 3072;
 	return policy;
 }
 
