@@ -28,7 +28,7 @@ license::os::SignatureVerificationPolicy config_signature_policy(const ConfigAtt
 	license::os::SignatureVerificationPolicy policy;
 	policy.license_version = kConfigSignatureVersion;
 	policy.allowed_algorithms.push_back(license::os::LCC_SIGNATURE_ALGORITHM_RSA_PKCS1_SHA256);
-	policy.min_public_key_bits = 0;
+	policy.min_public_key_bits = 3072;
 	const std::vector<ConfigAttestationPublicKey> trusted =
 		expected.trusted_public_keys.empty() ? CAKeyOverride::get() : expected.trusted_public_keys;
 	for (const ConfigAttestationPublicKey& public_key : trusted) {
