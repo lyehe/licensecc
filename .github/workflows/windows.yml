@@ -120,6 +120,22 @@ jobs:
          env:
             CTEST_OUTPUT_ON_FAILURE: 1
             VIRTUAL_ENV: VM
+      -  name: Config attestation embedded-ring smoke
+         if: ${{ matrix.build_type == 'Debug' && matrix.static == 'true' }}
+         shell: bash
+         run: |
+            cmake -S . -B build-configring -A x64 \
+              -DCMAKE_BUILD_TYPE=Debug \
+              -DSTATIC_RUNTIME:BOOL=true \
+              -DCMAKE_DISABLE_FIND_PACKAGE_OpenSSL=TRUE \
+              -DLCC_PROJECT_NAME:STRING=licensecc_ci \
+              -DLCC_PROJECTS_BASE_DIR="$RUNNER_TEMP/licensecc-configring-projects" \
+              -C test/vectors/config_attestation/embedded_golden_public_key_record.cmake.txt
+            cmake --build build-configring --target test_config_attestation --config Debug
+            ctest --test-dir build-configring -C Debug -R test_config_attestation --output-on-failure --no-tests=error
+         env:
+            CTEST_OUTPUT_ON_FAILURE: 1
+            VIRTUAL_ENV: VM
       -  name: On failure print logs
          if: ${{ failure() }}
          shell: pwsh

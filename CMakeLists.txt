@@ -39,6 +39,10 @@ set(LCC_ONLINE_ASSERTION_PUBLIC_KEY_RECORDS "" CACHE STRING
 	"C++ expression list of license::os::SignaturePublicKey records trusted for online assertions.")
 set(LCC_ONLINE_ASSERTION_RETIRED_KEY_IDS "" CACHE STRING
 	"C string literal list of retired online assertion key ids, for example \"sha256:old\".")
+set(LCC_CONFIG_ATTESTATION_PUBLIC_KEY_RECORDS "" CACHE STRING
+	"C++ expression list of license::os::SignaturePublicKey records trusted for config attestation tokens.")
+set(LCC_CONFIG_ATTESTATION_RETIRED_KEY_IDS "" CACHE STRING
+	"C string literal list of retired config attestation key ids, for example \"sha256:old\".")
 if(NOT "${LCC_SUPPORTED_LICENSE_FORMAT_MIN}" MATCHES "^[0-9]+$")
 	message(FATAL_ERROR "LCC_SUPPORTED_LICENSE_FORMAT_MIN must be numeric: ${LCC_SUPPORTED_LICENSE_FORMAT_MIN}")
 endif()
