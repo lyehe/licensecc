@@ -29,12 +29,23 @@ license::os::SignatureVerificationPolicy config_signature_policy(const ConfigAtt
 	policy.license_version = kConfigSignatureVersion;
 	policy.allowed_algorithms.push_back(license::os::LCC_SIGNATURE_ALGORITHM_RSA_PKCS1_SHA256);
 	policy.min_public_key_bits = 3072;
-	const std::vector<ConfigAttestationPublicKey> trusted =
-		expected.trusted_public_keys.empty() ? CAKeyOverride::get() : expected.trusted_public_keys;
+	std::vector<ConfigAttestationPublicKey> trusted = expected.trusted_public_keys;
+	if (trusted.empty()) {
+		trusted = CAKeyOverride::get();
+	}
 	for (const ConfigAttestationPublicKey& public_key : trusted) {
 		policy.public_keys.push_back(
 			license::os::SignaturePublicKey(public_key.key_id, public_key.public_key_der, public_key.bits));
 		policy.allowed_key_ids.push_back(public_key.key_id);
+	}
+	if (policy.public_keys.empty()) {
+		const std::vector<license::os::SignaturePublicKey> embedded =
+			license::os::config_attestation_public_key_ring();
+		for (const license::os::SignaturePublicKey& public_key : embedded) {
+			policy.public_keys.push_back(public_key);
+			policy.allowed_key_ids.push_back(public_key.key_id);
+		}
+		license::os::append_config_attestation_retired_key_ids(policy.retired_key_ids);
 	}
 	return policy;
 }

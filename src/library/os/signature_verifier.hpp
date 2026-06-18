@@ -192,6 +192,30 @@ inline void append_online_assertion_retired_key_ids(std::vector<std::string>& re
 #endif
 }
 
+inline std::vector<SignaturePublicKey> config_attestation_public_key_ring() {
+#ifdef LCC_CONFIG_ATTESTATION_PUBLIC_KEY_RECORDS
+	std::vector<SignaturePublicKey> keys;
+	const SignaturePublicKey config_public_keys[] = {LCC_CONFIG_ATTESTATION_PUBLIC_KEY_RECORDS};
+	const size_t config_count = sizeof(config_public_keys) / sizeof(config_public_keys[0]);
+	for (size_t i = 0; i < config_count; ++i) {
+		keys.push_back(config_public_keys[i]);
+	}
+	return keys;
+#else
+	return std::vector<SignaturePublicKey>();
+#endif
+}
+
+inline void append_config_attestation_retired_key_ids(std::vector<std::string>& retired_key_ids) {
+#ifdef LCC_CONFIG_ATTESTATION_RETIRED_KEY_IDS
+	const char* const retired_ids[] = {LCC_CONFIG_ATTESTATION_RETIRED_KEY_IDS};
+	const size_t retired_count = sizeof(retired_ids) / sizeof(retired_ids[0]);
+	for (size_t i = 0; i < retired_count; ++i) {
+		retired_key_ids.push_back(retired_ids[i]);
+	}
+#endif
+}
+
 struct SignatureVerificationPolicy {
 	unsigned int license_version = 0;
 	std::vector<std::string> allowed_algorithms;
