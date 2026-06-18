@@ -6,6 +6,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -122,7 +123,7 @@ static void inject_project_config_key() {
 }
 
 static std::string config_token_for(const std::string& fingerprint, const std::vector<uint8_t>& config_bytes,
-                                    const std::string& device_hash = "") {
+                                    const std::string& device_hash = "", uint64_t config_seq = 3) {
     license::config_attestation::ConfigAttestationClaims c;
     c.purpose = "licensecc-config-attestation";
     c.version = "1";
@@ -133,7 +134,7 @@ static std::string config_token_for(const std::string& fingerprint, const std::v
     c.license_fingerprint = fingerprint;
     c.device_hash = device_hash;
     c.config_id = "app-config";
-    c.config_seq = 3;
+    c.config_seq = config_seq;
     c.config_hash = std::string("sha256:") + license::os::signature_sha256_hex(config_bytes);
     c.issued_at = 1000000000;   // 2001-09-09, safely in the past for real-clock verification
     c.expires_at = 4102444800;  // 2100-01-01, finite expiry (never-expires tokens are rejected)
@@ -213,6 +214,104 @@ BOOST_AUTO_TEST_CASE(verify_config_denies_when_local_license_missing) {
     BOOST_CHECK_NE(result, LICENSE_OK);
     BOOST_CHECK_EQUAL(decision.decision, LCC_LICENSE_DECISION_DENY);
     license::config_attestation::set_trusted_public_keys_for_tests({});
+}
+
+// In-memory durable config-seq floor for the callback test (mirrors a host's persistent store).
+struct ConfigFloorStore {
+    std::map<std::string, uint64_t> floors;
+    bool load_fails = false;
+
+    static std::string key_of(const LccConfigSeqFloorRecord* k) {
+        return std::string(k->project) + "|" + k->feature + "|" + k->license_fingerprint + "|" + k->config_id;
+    }
+    static bool load(void* user_data, const LccConfigSeqFloorRecord* key, uint64_t* config_seq_out) {
+        ConfigFloorStore* self = static_cast<ConfigFloorStore*>(user_data);
+        if (self->load_fails) {
+            return false;  // storage read failure -> fail closed
+        }
+        const std::map<std::string, uint64_t>::const_iterator it = self->floors.find(key_of(key));
+        *config_seq_out = (it == self->floors.end()) ? 0u : it->second;
+        return true;
+    }
+    static bool store(void* user_data, const LccConfigSeqFloorRecord* record) {
+        ConfigFloorStore* self = static_cast<ConfigFloorStore*>(user_data);
+        self->floors[key_of(record)] = record->config_seq;
+        return true;
+    }
+};
+
+BOOST_AUTO_TEST_CASE(verify_config_enforces_durable_config_seq_floor) {
+    inject_project_config_key();
+    const std::string path = issue_config_license("config-api-floor");
+    const std::string fingerprint = fingerprint_of_issued_license(path);
+    const std::string body = "{\"flag\":true}";
+    const std::vector<uint8_t> config_bytes(body.begin(), body.end());
+
+    ConfigFloorStore store;
+    LccConfigVerifyOptions options;
+    lcc_init_config_verify_options(&options);
+    options.config_seq_floor_load = &ConfigFloorStore::load;
+    options.config_seq_floor_store = &ConfigFloorStore::store;
+    options.config_seq_floor_user_data = &store;
+
+    LicenseLocation location;
+    lcc_init_license_location(&location, LICENSE_PATH);
+    BOOST_REQUIRE(lcc_set_license_path(&location, path.c_str()));
+    CallerInformations caller = config_caller();
+
+    auto verify_seq = [&](uint64_t seq, LccConfigDecision& decision, const LccConfigVerifyOptions* opts) {
+        const std::string token = config_token_for(fingerprint, config_bytes, "", seq);
+        LccConfigInput input;
+        lcc_init_config_input(&input);
+        input.token = token.c_str();
+        input.config_bytes = config_bytes.data();
+        input.config_len = config_bytes.size();
+        LicenseInfo info{};
+        lcc_init_config_decision(&decision);
+        return lcc_verify_config(&caller, &location, &info, &input, &decision, opts);
+    };
+
+    // First accept at seq=3 -> floor persisted as 3.
+    LccConfigDecision d3;
+    BOOST_CHECK_EQUAL(verify_seq(3, d3, &options), LICENSE_OK);
+    BOOST_CHECK_EQUAL(d3.decision, LCC_LICENSE_DECISION_ALLOW);
+    BOOST_CHECK(d3.config_seq_floor_loaded);
+    BOOST_CHECK(d3.config_seq_floor_stored);
+    BOOST_CHECK_EQUAL(d3.config_seq_floor.config_seq, 3u);
+
+    // Replay at seq=2 (below the persisted floor) -> rollback denial, floor not advanced.
+    LccConfigDecision d2;
+    BOOST_CHECK_EQUAL(verify_seq(2, d2, &options), LICENSE_CONFIG_ROLLBACK);
+    BOOST_CHECK_EQUAL(d2.decision, LCC_LICENSE_DECISION_DENY);
+    BOOST_CHECK(d2.config_seq_floor_loaded);
+    BOOST_CHECK(!d2.config_seq_floor_stored);
+
+    // Advance at seq=5 -> accepted, floor moves to 5.
+    LccConfigDecision d5;
+    BOOST_CHECK_EQUAL(verify_seq(5, d5, &options), LICENSE_OK);
+    BOOST_CHECK_EQUAL(d5.config_seq_floor.config_seq, 5u);
+
+    // seq=3 is now below the advanced floor -> denied even though it was once accepted.
+    LccConfigDecision d3b;
+    BOOST_CHECK_EQUAL(verify_seq(3, d3b, &options), LICENSE_CONFIG_ROLLBACK);
+
+    // Load failure -> fail closed for an otherwise-valid token.
+    store.load_fails = true;
+    LccConfigDecision dfail;
+    BOOST_CHECK_EQUAL(verify_seq(9, dfail, &options), LICENSE_CONFIG_ROLLBACK);
+    BOOST_CHECK_EQUAL(dfail.decision, LCC_LICENSE_DECISION_DENY);
+    store.load_fails = false;
+
+    // Only one of the two floor callbacks set -> malformed options.
+    LccConfigVerifyOptions half;
+    lcc_init_config_verify_options(&half);
+    half.config_seq_floor_load = &ConfigFloorStore::load;  // store deliberately left null
+    half.config_seq_floor_user_data = &store;
+    LccConfigDecision dhalf;
+    BOOST_CHECK_EQUAL(verify_seq(7, dhalf, &half), LICENSE_MALFORMED);
+
+    license::config_attestation::set_trusted_public_keys_for_tests({});
+    std::remove(path.c_str());
 }
 
 }  // namespace test

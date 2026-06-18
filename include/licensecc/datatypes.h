@@ -98,8 +98,8 @@ typedef enum {
 #define LCC_LICENSE_DECISION_VERSION 1u
 #define LCC_API_CONFIG_ID_SIZE 64u
 #define LCC_CONFIG_INPUT_VERSION 1u
-#define LCC_CONFIG_VERIFY_OPTIONS_VERSION 1u
-#define LCC_CONFIG_DECISION_VERSION 1u
+#define LCC_CONFIG_VERIFY_OPTIONS_VERSION 2u
+#define LCC_CONFIG_DECISION_VERSION 2u
 
 /**
  * Host-supplied runtime integrity probe.
@@ -260,15 +260,64 @@ typedef struct LccConfigInput {
 } LccConfigInput;
 
 /**
+ * Durable per-config-id rollback floor record. The key is
+ * (project, feature, license_fingerprint, config_id); the value is the strongest
+ * accepted `config_seq`. Mirrors ::LccRevocationFloorRecord for config tokens.
+ */
+typedef struct LccConfigSeqFloorRecord {
+	/** Structure size, set by ::lcc_init_config_seq_floor_record. */
+	uint32_t size;
+	/** Structure version. Intentionally shares ::LCC_CONFIG_DECISION_VERSION: the floor record is
+	 * versioned in lockstep with the config decision ABI it is returned alongside. */
+	uint32_t version;
+	/** Project bound to the verified config token. */
+	char project[LCC_API_ONLINE_PROJECT_SIZE + 1];
+	/** Feature bound to the verified config token. */
+	char feature[LCC_API_FEATURE_NAME_SIZE + 1];
+	/** Hex fingerprint of the local license signature. */
+	char license_fingerprint[LCC_API_ONLINE_LICENSE_FINGERPRINT_SIZE + 1];
+	/** Config id bound to the verified config token. */
+	char config_id[LCC_API_CONFIG_ID_SIZE + 1];
+	/** Monotonic config sequence accepted for this config id. */
+	uint64_t config_seq;
+} LccConfigSeqFloorRecord;
+
+/**
+ * Loads the persisted config-seq floor for the exact key in `key`.
+ *
+ * Return true and write the strongest stored config sequence to
+ * `config_seq_out`. A missing record should normally return true with zero;
+ * storage read failures should return false so verification fails closed.
+ */
+typedef bool (*LCC_CONFIG_SEQ_FLOOR_LOAD)(void* user_data, const LccConfigSeqFloorRecord* key,
+										  uint64_t* config_seq_out);
+/**
+ * Stores the accepted config-seq floor.
+ *
+ * Hosts should persist the maximum seen `config_seq` for the exact
+ * project/feature/license-fingerprint/config-id. Return false on storage failure
+ * so verification fails closed.
+ */
+typedef bool (*LCC_CONFIG_SEQ_FLOOR_STORE)(void* user_data, const LccConfigSeqFloorRecord* record);
+
+/**
  * Options for ::lcc_verify_config. `now_override` of 0 uses the system clock.
- * `min_config_seq` is a caller-supplied rollback floor (0 = none); persistent
- * per-config-id floor storage is a later phase.
+ * `min_config_seq` is a caller-supplied rollback floor (0 = none).
+ * `config_seq_floor_load`/`config_seq_floor_store` are an optional durable
+ * per-config-id rollback floor: both must be set together (or both null). When
+ * set, verification loads the persisted floor for the verified
+ * (project, feature, license-fingerprint, config-id), denies a config-seq below
+ * max(min_config_seq, loaded) with ::LICENSE_CONFIG_ROLLBACK, and stores the
+ * accepted maximum. Any load/store failure fails closed.
  */
 typedef struct LccConfigVerifyOptions {
 	uint32_t size;
 	uint32_t version;
 	uint64_t now_override;
 	uint64_t min_config_seq;
+	LCC_CONFIG_SEQ_FLOOR_LOAD config_seq_floor_load;
+	LCC_CONFIG_SEQ_FLOOR_STORE config_seq_floor_store;
+	void* config_seq_floor_user_data;
 	uint32_t reserved;
 } LccConfigVerifyOptions;
 
@@ -292,7 +341,13 @@ typedef struct LccConfigDecision {
 	 * (ECDSA device key) path, not this flag.
 	 */
 	bool bound_to_device;
+	/** True when the persisted config-seq floor loaded successfully. */
+	bool config_seq_floor_loaded;
+	/** True when the accepted config-seq floor was stored successfully. */
+	bool config_seq_floor_stored;
 	uint32_t reserved;
+	/** Last loaded or accepted config-seq floor record. */
+	LccConfigSeqFloorRecord config_seq_floor;
 } LccConfigDecision;
 
 typedef struct {

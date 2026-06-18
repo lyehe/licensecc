@@ -201,6 +201,30 @@ static bool floor_record_from_context(const AcquiredLicenseContext& context, con
 	return true;
 }
 
+static bool config_seq_floor_record_build(const AcquiredLicenseContext& context, const string& config_id,
+										  const uint64_t config_seq, LccConfigSeqFloorRecord& record, string& error) {
+	lcc_init_config_seq_floor_record(&record);
+	record.config_seq = config_seq;
+	if (!lcc_copy_public_string(record.project, sizeof(record.project), context.project.c_str())) {
+		error = "project exceeds config-seq floor record buffer";
+		return false;
+	}
+	if (!lcc_copy_public_string(record.feature, sizeof(record.feature), context.feature.c_str())) {
+		error = "feature exceeds config-seq floor record buffer";
+		return false;
+	}
+	if (!lcc_copy_public_string(record.license_fingerprint, sizeof(record.license_fingerprint),
+								context.license_fingerprint.c_str())) {
+		error = "license fingerprint exceeds config-seq floor record buffer";
+		return false;
+	}
+	if (!lcc_copy_public_string(record.config_id, sizeof(record.config_id), config_id.c_str())) {
+		error = "config id exceeds config-seq floor record buffer";
+		return false;
+	}
+	return true;
+}
+
 void lcc_init_caller_informations(CallerInformations* callerInformation) {
 	if (callerInformation == nullptr) {
 		return;
@@ -295,6 +319,16 @@ void lcc_init_config_decision(LccConfigDecision* decision) {
 	decision->size = sizeof(LccConfigDecision);
 	decision->version = LCC_CONFIG_DECISION_VERSION;
 	decision->decision = LCC_LICENSE_DECISION_DENY;
+	lcc_init_config_seq_floor_record(&decision->config_seq_floor);
+}
+
+void lcc_init_config_seq_floor_record(LccConfigSeqFloorRecord* record) {
+	if (record == nullptr) {
+		return;
+	}
+	*record = LccConfigSeqFloorRecord{};
+	record->size = sizeof(LccConfigSeqFloorRecord);
+	record->version = LCC_CONFIG_DECISION_VERSION;
 }
 
 bool lcc_set_config_device_hash(LccConfigInput* input, const char* device_hash) {
@@ -536,6 +570,10 @@ static bool normalize_config_verify_options(const LccConfigVerifyOptions* option
 		error = "reserved fields must be zero";
 		return false;
 	}
+	if ((options->config_seq_floor_load == nullptr) != (options->config_seq_floor_store == nullptr)) {
+		error = "config-seq floor load and store callbacks must both be set or both be null";
+		return false;
+	}
 	normalized = *options;
 	normalized.size = sizeof(LccConfigVerifyOptions);
 	normalized.version = LCC_CONFIG_VERIFY_OPTIONS_VERSION;
@@ -603,6 +641,54 @@ static bool call_revocation_floor_store(const RevocationFloorCallbacks& callback
 	}
 	if (!ok) {
 		detail = "revocation floor store callback failed";
+		return false;
+	}
+	return true;
+}
+
+static bool call_config_seq_floor_load(const LccConfigVerifyOptions& options, const LccConfigSeqFloorRecord& key,
+									   uint64_t& config_seq, string& detail) {
+	if (options.config_seq_floor_load == nullptr) {
+		detail = "config-seq floor load callback is not configured";
+		return false;
+	}
+	uint64_t loaded = 0;
+	bool ok = false;
+	try {
+		ok = options.config_seq_floor_load(options.config_seq_floor_user_data, &key, &loaded);
+	} catch (const std::exception& ex) {
+		detail = ex.what();
+		return false;
+	} catch (...) {
+		detail = "config-seq floor load callback threw";
+		return false;
+	}
+	if (!ok) {
+		detail = "config-seq floor load callback failed";
+		return false;
+	}
+	config_seq = loaded;
+	return true;
+}
+
+static bool call_config_seq_floor_store(const LccConfigVerifyOptions& options, const LccConfigSeqFloorRecord& record,
+										string& detail) {
+	if (options.config_seq_floor_store == nullptr) {
+		detail = "config-seq floor store callback is not configured";
+		return false;
+	}
+	bool ok = false;
+	try {
+		ok = options.config_seq_floor_store(options.config_seq_floor_user_data, &record);
+	} catch (const std::exception& ex) {
+		detail = ex.what();
+		return false;
+	} catch (...) {
+		detail = "config-seq floor store callback threw";
+		return false;
+	}
+	if (!ok) {
+		detail = "config-seq floor store callback failed";
 		return false;
 	}
 	return true;
@@ -1081,6 +1167,71 @@ LCC_EVENT_TYPE lcc_verify_config(const CallerInformations* callerInformation, co
 			decision_out->event_type = result;
 		}
 		return result;
+	}
+
+	// Durable per-config-id config-seq floor (mirrors the online revocation floor).
+	// Runs AFTER signature verification so config_id and config_seq are trusted; any
+	// storage failure fails closed. normalize_config_verify_options guarantees that
+	// when load is set, store is set too.
+	if (normalized.config_seq_floor_load != nullptr) {
+		LccConfigSeqFloorRecord floor_key{};
+		std::string floor_error;
+		if (!config_seq_floor_record_build(license_context, claims.config_id, 0, floor_key, floor_error)) {
+			add_malformed_api_input_event(er, "ConfigSeqFloor", floor_error.c_str());
+			export_license_status(er, license_out);
+			if (decision_out != nullptr) {
+				decision_out->event_type = LICENSE_MALFORMED;
+			}
+			return LICENSE_MALFORMED;
+		}
+		uint64_t stored_floor = 0;
+		std::string floor_detail;
+		if (!call_config_seq_floor_load(normalized, floor_key, stored_floor, floor_detail)) {
+			result = LICENSE_CONFIG_ROLLBACK;
+			add_runtime_security_failure_event(er, result, "ConfigSeqFloorLoad", floor_detail.c_str());
+			export_license_status(er, license_out);
+			if (decision_out != nullptr) {
+				decision_out->event_type = result;
+			}
+			return result;
+		}
+		if (decision_out != nullptr) {
+			decision_out->config_seq_floor_loaded = true;
+			floor_key.config_seq = stored_floor;
+			decision_out->config_seq_floor = floor_key;
+		}
+		if (claims.config_seq < stored_floor) {
+			result = LICENSE_CONFIG_ROLLBACK;
+			add_runtime_security_failure_event(er, result, "ConfigSeqFloor", "config-seq is below the persisted floor");
+			export_license_status(er, license_out);
+			if (decision_out != nullptr) {
+				decision_out->event_type = result;
+			}
+			return result;
+		}
+		const uint64_t new_floor = claims.config_seq > stored_floor ? claims.config_seq : stored_floor;
+		LccConfigSeqFloorRecord accepted_floor{};
+		if (!config_seq_floor_record_build(license_context, claims.config_id, new_floor, accepted_floor, floor_error)) {
+			add_malformed_api_input_event(er, "ConfigSeqFloor", floor_error.c_str());
+			export_license_status(er, license_out);
+			if (decision_out != nullptr) {
+				decision_out->event_type = LICENSE_MALFORMED;
+			}
+			return LICENSE_MALFORMED;
+		}
+		if (!call_config_seq_floor_store(normalized, accepted_floor, floor_detail)) {
+			result = LICENSE_CONFIG_ROLLBACK;
+			add_runtime_security_failure_event(er, result, "ConfigSeqFloorStore", floor_detail.c_str());
+			export_license_status(er, license_out);
+			if (decision_out != nullptr) {
+				decision_out->event_type = result;
+			}
+			return result;
+		}
+		if (decision_out != nullptr) {
+			decision_out->config_seq_floor_stored = true;
+			decision_out->config_seq_floor = accepted_floor;
+		}
 	}
 
 	if (decision_out != nullptr) {

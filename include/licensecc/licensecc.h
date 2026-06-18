@@ -66,6 +66,8 @@ void lcc_init_config_input(LccConfigInput* input);
 void lcc_init_config_verify_options(LccConfigVerifyOptions* options);
 /** Initializes ::LccConfigDecision; the default decision is deny. */
 void lcc_init_config_decision(LccConfigDecision* decision);
+/** Initializes ::LccConfigSeqFloorRecord (null-safe). */
+void lcc_init_config_seq_floor_record(LccConfigSeqFloorRecord* record);
 /** Bounded setter for the optional device hash (64 hex chars or empty). */
 bool lcc_set_config_device_hash(LccConfigInput* input, const char* device_hash);
 
