@@ -159,21 +159,40 @@ LCC_EVENT_TYPE acquire_license(const CallerInformations* callerInformation, cons
  * A null options pointer uses the same defaults as
  * ::lcc_init_license_check_options. Invalid size/version fields fail closed
  * with ::LICENSE_MALFORMED.
+ *
+ * Raw-path caveat: when you call ::acquire_license_ex directly with online
+ * verification enabled, YOU own the revocation-floor lifecycle. The floor
+ * load/store callbacks come from ::LicenseCheckOptions; if online verification is
+ * enabled and they are absent, the call fails closed with
+ * ::LICENSE_ONLINE_REQUIRED. Restore the persisted floor at startup and persist
+ * the accepted revocation_seq after each success, or a restarted process can
+ * accept a superseded assertion. ::lcc_acquire_license_decision does this
+ * load/store wiring for you and is preferred for production hosts.
  */
 LCC_EVENT_TYPE acquire_license_ex(const CallerInformations* callerInformation, const LicenseLocation* licenseLocation,
 								  LicenseInfo* license_out, const LicenseCheckOptions* options);
 
 /**
- * Secure decision wrapper for production integrations that have an online
- * verifier and durable host storage. The wrapper evaluates the local license,
- * enforced anti-tamper checks, required online verification, and a persisted
- * revocation-sequence rollback floor. It returns ::LICENSE_OK only when the
- * decision is ::LCC_LICENSE_DECISION_ALLOW.
+ * Production decision wrapper. It orchestrates the local license check,
+ * configures anti-tamper enforcement, requires online verification, and enforces
+ * a persisted revocation-sequence rollback floor, collapsing the result to a
+ * single ::LICENSE_OK only when the decision is ::LCC_LICENSE_DECISION_ALLOW.
+ *
+ * What this DOES guarantee: required online verification ran and a signed
+ * assertion was accepted; the persisted revocation floor was loaded and the
+ * accepted revocation_seq stored; load/store failures fail closed so a restarted
+ * process cannot accept an older assertion.
+ *
+ * What this does NOT guarantee: it cannot prove code ran on an attacker-controlled
+ * host. `decision_out->tamper_enforced` means the wrapper *configured* tamper
+ * enforcement for the call -- it does not prove every optional host-integrity
+ * probe executed, and a local license failure can deny before any runtime
+ * callback is evaluated. Treat the server (the online verifier) as authoritative;
+ * this wrapper is defense-in-depth, not a guarantee about the client process.
  *
  * The host callbacks in ::LccLicenseDecisionOptions must load and store the
  * strongest revocation_seq seen for the exact project/feature/license
- * fingerprint. Load/store failures fail closed so a restarted process cannot
- * silently accept an older online assertion.
+ * fingerprint.
  */
 LCC_EVENT_TYPE lcc_acquire_license_decision(const CallerInformations* callerInformation,
 											const LicenseLocation* licenseLocation, LicenseInfo* license_out,
@@ -200,10 +219,11 @@ LCC_EVENT_TYPE lcc_verify_config(const CallerInformations* callerInformation,
 								 const LccConfigVerifyOptions* options);
 
 /**
- * Process-local online revocation-floor helpers. They are useful for tests and
- * hosts that restore a persisted floor at startup before using
- * ::acquire_license_ex directly. The secure decision wrapper above is preferred
- * because it loads/stores the floor on every successful online decision.
+ * Process-local online revocation-floor helpers, useful for tests and for hosts
+ * that restore a persisted floor at startup before calling ::acquire_license_ex
+ * directly (which, used raw, requires the caller to own floor load/store -- see
+ * its caveat). The secure decision wrapper above is preferred because it
+ * loads/stores the floor on every successful online decision.
  */
 bool lcc_set_online_revocation_floor(const LccRevocationFloorRecord* record);
 bool lcc_get_online_revocation_floor(LccRevocationFloorRecord* record);
@@ -221,13 +241,15 @@ void lcc_set_environment_license_sources_enabled(bool enabled);
 
 /**
  * Enables or disables strict source-fatal handling. The default is disabled for
- * compatibility: if one license candidate verifies, malformed candidates are
- * reported as warning audit events. When enabled, malformed or invalid-format
- * candidates remain fatal even when another candidate verifies successfully.
- * Hosts that treat explicit or environment-provided license sources as
- * authoritative should enable this mode before calling ::acquire_license. This
- * process-global policy is atomic but should be configured once during
- * single-threaded startup before worker threads begin license checks.
+ * compatibility: if one license candidate verifies, rejected candidates are
+ * reported as warning audit events. When enabled, suspicious rejected
+ * candidates such as malformed, corrupted, expired, identifier-mismatched, or
+ * unlicensed-product sources remain fatal even when another candidate verifies
+ * successfully. Hosts that treat explicit or environment-provided license
+ * sources as authoritative should enable this mode before calling
+ * ::acquire_license. This process-global policy is atomic but should be
+ * configured once during single-threaded startup before worker threads begin
+ * license checks.
  */
 void lcc_set_strict_source_fatal_enabled(bool enabled);
 

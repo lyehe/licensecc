@@ -139,6 +139,25 @@ target_link_libraries(
  Boost::system
 )
 
+### Online callback transport failover helper tests
+add_executable(
+ test_online_callback_failover
+ online_callback_failover_test.cpp
+)
+
+target_include_directories(
+ test_online_callback_failover
+ PRIVATE
+ ${CMAKE_SOURCE_DIR}/examples/online_callback
+)
+
+target_link_libraries(
+ test_online_callback_failover
+ licensecc_static
+ Boost::unit_test_framework
+ Boost::system
+)
+
 ### Config attestation verification tests
 add_executable(
  test_config_attestation
@@ -162,6 +181,7 @@ ADD_TEST(NAME test_license_verifier COMMAND test_license_verifier)
 ADD_TEST(NAME test_public_api COMMAND test_public_api)
 ADD_TEST(NAME test_anti_tamper COMMAND test_anti_tamper)
 ADD_TEST(NAME test_online_verification COMMAND test_online_verification)
+ADD_TEST(NAME test_online_callback_failover COMMAND test_online_callback_failover)
 ADD_TEST(NAME test_config_attestation COMMAND test_config_attestation)
 
 set_tests_properties(
@@ -206,6 +226,11 @@ set_tests_properties(
 
 set_tests_properties(
  test_online_verification
+ PROPERTIES LABELS "security;public_api;online"
+)
+
+set_tests_properties(
+ test_online_callback_failover
  PROPERTIES LABELS "security;public_api;online"
 )
 

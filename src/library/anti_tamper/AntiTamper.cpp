@@ -151,6 +151,11 @@ bool normalize_options(const LicenseCheckOptions* options, LicenseCheckOptions& 
 		normalized.online_user_data = options->online_user_data;
 	}
 	if (include_online_fields && LCC_OPTIONS_FIELD_PRESENT(*options, online_device_hash)) {
+		if (license::mstrnlen_s(options->online_device_hash, sizeof(options->online_device_hash)) ==
+			sizeof(options->online_device_hash)) {
+			error = "online device hash is not NUL-terminated";
+			return false;
+		}
 		license::mstrlcpy(normalized.online_device_hash, options->online_device_hash,
 						   sizeof(normalized.online_device_hash));
 	}
@@ -201,11 +206,16 @@ bool normalize_options(const LicenseCheckOptions* options, LicenseCheckOptions& 
 }
 
 const AuditEvent* find_source_shadowing_signal(const EventRegistry& event_registry) {
-	const AuditEvent* malformed = event_registry.getLastEventOfType(LICENSE_MALFORMED);
-	if (malformed != nullptr) {
-		return malformed;
+	const LCC_EVENT_TYPE source_shadowing_events[] = {LICENSE_MALFORMED,	FILE_FORMAT_NOT_RECOGNIZED,
+													  LICENSE_CORRUPTED, IDENTIFIERS_MISMATCH,
+													  PRODUCT_EXPIRED,	PRODUCT_NOT_LICENSED};
+	for (const LCC_EVENT_TYPE event_type : source_shadowing_events) {
+		const AuditEvent* event = event_registry.getLastEventOfType(event_type);
+		if (event != nullptr) {
+			return event;
+		}
 	}
-	return event_registry.getLastEventOfType(FILE_FORMAT_NOT_RECOGNIZED);
+	return nullptr;
 }
 
 AntiTamperResult evaluate(const AntiTamperRequest& request) {

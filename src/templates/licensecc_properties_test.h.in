@@ -14,6 +14,7 @@
 #define LCC_TEST_LICENSES_PROJECT "@CMAKE_BINARY_DIR@/Testing/Temporary/@LCC_PROJECT_NAME@"
 #define LCC_LICENSES_BASE LCC_TEST_LICENSES_PROJECT "/licenses"
 #define LCC_PROJECTS_BASE_DIR "@LCC_PROJECTS_BASE_DIR@"
+#define LCC_PROJECT_FOLDER LCC_PROJECTS_BASE_DIR "/" LCC_PROJECT_NAME
 #define LCC_PROJECT_PRIVATE_KEY "@LCC_PROJECT_PRIVATE_KEY@"
 
 /*
@@ -21,6 +22,7 @@
  */
 #define PARAM_BASE64 "base64"
 #define PARAM_LICENSE_OUTPUT "output-file-name"
+#define PARAM_FEATURE_NAMES "feature-names"
 #define PARAM_PRODUCT_NAME "product-name"
 #define PARAM_PROJECT_FOLDER "project-folder"
 #define PARAM_PRIMARY_KEY "primary-key"

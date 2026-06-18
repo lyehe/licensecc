@@ -18,6 +18,8 @@ import { sqlFor } from "../../scripts/entitlement.mjs";
 const here = dirname(fileURLToPath(import.meta.url));
 const migrationsDir = join(here, "..", "..", "migrations");
 const fingerprint = "a".repeat(64);
+const deviceKeyId = `sha256:${"1".repeat(64)}`;
+const publicKeySpkiDerBase64 = Buffer.from("test-p256-spki").toString("base64");
 
 function freshDb() {
   const db = new DatabaseSync(":memory:");
@@ -55,6 +57,15 @@ function lastEvent(db) {
         "WHERE license_fingerprint = ? ORDER BY id DESC LIMIT 1",
     )
     .get(fingerprint);
+}
+
+function device(db) {
+  return db
+    .prepare(
+      "SELECT device_key_id, public_key_spki_der_base64, status FROM entitlement_devices " +
+        "WHERE license_fingerprint = ? AND device_key_id = ?",
+    )
+    .get(fingerprint, deviceKeyId);
 }
 
 test("upsert on a revoked row changes nothing and writes no audit event", () => {
@@ -118,5 +129,60 @@ test("disable then revoke increments revocation_seq monotonically; reenable is b
   assert.equal(entitlement(db).status, "revoked");
   assert.equal(entitlement(db).revocation_seq, 3);
   assert.equal(eventCount(db), 3);
+  db.close();
+});
+
+test("device-upsert registers a request-proof key, bumps revocation_seq, and writes an update event", () => {
+  const db = freshDb();
+  db.exec(sqlFor("upsert", { fingerprint, actor: "op" }));
+  db.exec(
+    sqlFor("device-upsert", {
+      fingerprint,
+      "device-key-id": deviceKeyId,
+      "public-key-spki-der-base64": publicKeySpkiDerBase64,
+      actor: "op",
+      reason: "enroll",
+    }),
+  );
+  const row = entitlement(db);
+  assert.equal(row.status, "active");
+  assert.equal(row.revocation_seq, 2);
+  const deviceRow = device(db);
+  assert.equal(deviceRow.device_key_id, deviceKeyId);
+  assert.equal(deviceRow.public_key_spki_der_base64, publicKeySpkiDerBase64);
+  assert.equal(deviceRow.status, "active");
+  assert.equal(eventCount(db), 2);
+  const event = lastEvent(db);
+  assert.equal(event.event_type, "update");
+  assert.equal(event.revocation_seq, 2);
+  db.close();
+});
+
+test("device-revoke changes the device state and bumps the parent revocation_seq", () => {
+  const db = freshDb();
+  db.exec(sqlFor("upsert", { fingerprint, actor: "op" }));
+  db.exec(
+    sqlFor("device-upsert", {
+      fingerprint,
+      "device-key-id": deviceKeyId,
+      "public-key-spki-der-base64": publicKeySpkiDerBase64,
+      actor: "op",
+    }),
+  );
+  db.exec(sqlFor("device-revoke", { fingerprint, "device-key-id": deviceKeyId, actor: "op", reason: "lost" }));
+  assert.equal(device(db).status, "revoked");
+  assert.equal(entitlement(db).revocation_seq, 3);
+  assert.equal(eventCount(db), 3);
+  assert.equal(lastEvent(db).event_type, "update");
+  db.close();
+});
+
+test("device-disable on an unknown device writes no audit event and does not bump revocation_seq", () => {
+  const db = freshDb();
+  db.exec(sqlFor("upsert", { fingerprint, actor: "op" }));
+  db.exec(sqlFor("device-disable", { fingerprint, "device-key-id": deviceKeyId, actor: "op", reason: "unknown" }));
+  assert.equal(device(db), undefined);
+  assert.equal(entitlement(db).revocation_seq, 1);
+  assert.equal(eventCount(db), 1);
   db.close();
 });

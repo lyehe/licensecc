@@ -115,6 +115,14 @@ packages in `requirements.txt`.
 A minimal, self-contained integration example lives in [`examples/minimal`](examples/minimal): acquire a license and report failures with `lcc_strerror`/`print_error`.
 The [examples](https://github.com/open-license-manager/examples) repository shows more ways to integrate `licensecc` into your project.
 
+For local integration examples in this repository, use this progression:
+`examples/minimal` for the smallest fail-closed check,
+`examples/fail_closed_host` for feature gating,
+`examples/anti_tamper_host` for a host-integrity callback,
+`examples/online_callback` for primary/backup verifier transport, and
+`examples/production_decision_host` for the recommended production-shaped
+`lcc_acquire_license_decision()` flow with a persisted revocation floor.
+
 For production C++ applications, the supported integration mode is to build and
 install Licensecc for one named project, then consume that install with CMake
 `find_package(licensecc REQUIRED COMPONENTS <project>)` and link

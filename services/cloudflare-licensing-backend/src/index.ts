@@ -38,6 +38,8 @@ export interface Env {
   D1_GLOBAL_RATE_LIMIT_ENABLED?: string;
   D1_GLOBAL_RATE_LIMIT_LIMIT?: string;
   D1_GLOBAL_RATE_LIMIT_PERIOD_SECONDS?: string;
+  REQUEST_SIGNATURE_MODE?: string;
+  REQUEST_SIGNATURE_MAX_SKEW_SECONDS?: string;
 }
 
 export interface VerifyRequest {
@@ -48,6 +50,15 @@ export interface VerifyRequest {
   nonce: string;
   client_version?: string;
   client_hardening?: number;
+  request_proof?: RequestProof;
+}
+
+export interface RequestProof {
+  version: 1;
+  device_key_id: string;
+  request_timestamp: number;
+  algorithm: "ecdsa-p256-sha256";
+  signature: string;
 }
 
 interface EntitlementRow {
@@ -61,6 +72,12 @@ interface EntitlementRow {
   revocation_seq: number;
   valid_from?: number | null;
   valid_until?: number | null;
+}
+
+interface EntitlementDeviceRow {
+  device_key_id: string;
+  public_key_spki_der_base64: string;
+  status: "active" | "revoked" | "disabled";
 }
 
 export interface AssertionClaims {
@@ -85,9 +102,31 @@ interface RateLimitDecision {
   source?: "cloudflare-client" | "d1-client" | "d1-entitlement" | "d1-global";
 }
 
+type RequestSignatureMode = "off" | "soft" | "required";
+
+interface RequestProofEvaluation {
+  mode: RequestSignatureMode;
+  result:
+    | "not_configured"
+    | "missing"
+    | "valid"
+    | "stale_timestamp"
+    | "unknown_device"
+    | "disabled_device"
+    | "invalid_signature"
+    | "malformed_public_key"
+    | "replayed_nonce"
+    | "d1_error";
+  detail?: string;
+  device_key_id?: string;
+}
+
 const PURPOSE = "licensecc-online-assertion";
+const REQUEST_PROOF_PURPOSE = "licensecc-online-request";
 const VERSION = "1";
 const ALGORITHM = "rsa-pkcs1-sha256";
+const REQUEST_PROOF_VERSION: RequestProof["version"] = 1;
+const REQUEST_PROOF_ALGORITHM: RequestProof["algorithm"] = "ecdsa-p256-sha256";
 const MAX_BODY_BYTES = 4096;
 // Mirrors the C++ ABI buffer limits LCC_API_ONLINE_PROJECT_SIZE (127) and LCC_API_FEATURE_NAME_SIZE (15) in include/licensecc/datatypes.h; keep in sync.
 const MAX_PROJECT_SIZE = 127;
@@ -97,6 +136,8 @@ const MAX_FEATURE_SIZE = 15;
 // never folded into the signed assertion, since a client can spoof its own posture.
 const MAX_CLIENT_HARDENING = 0xffff;
 const HEX_64 = /^[0-9a-fA-F]{64}$/;
+const DEVICE_KEY_ID = /^sha256:[0-9a-f]{64}$/;
+const BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
 const textEncoder = new TextEncoder();
 
 let cachedSigningKey:
@@ -150,6 +191,36 @@ function safeString(value: unknown, maxLength: number): string | null {
   return value;
 }
 
+function safeBase64(value: unknown, maxLength: number): string | null {
+  if (typeof value !== "string" || value.length === 0 || value.length > maxLength || !BASE64.test(value)) {
+    return null;
+  }
+  return value;
+}
+
+function safeDeviceKeyId(value: unknown): string | null {
+  return typeof value === "string" && DEVICE_KEY_ID.test(value) ? value : null;
+}
+
+function safeUnixSeconds(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0 || value > Number.MAX_SAFE_INTEGER) {
+    return null;
+  }
+  return value;
+}
+
+function shortKeyId(value: string | undefined): string | undefined {
+  if (value === undefined || value === "") {
+    return value;
+  }
+  const prefix = "sha256:";
+  if (value.startsWith(prefix) && value.length > prefix.length + 16) {
+    const digest = value.slice(prefix.length);
+    return `${prefix}${digest.slice(0, 8)}...${digest.slice(-8)}`;
+  }
+  return "[redacted]";
+}
+
 function requestId(request: Request): string {
   return request.headers.get("cf-ray") ?? crypto.randomUUID();
 }
@@ -201,6 +272,17 @@ function logRateLimitDecisions(env: Env): boolean {
 
 function d1RateLimitEnabled(env: Env): boolean {
   return envFlag(env.D1_RATE_LIMIT_ENABLED);
+}
+
+// Production deployments MUST set REQUEST_SIGNATURE_MODE = "required" (see
+// wrangler.example.toml) so missing/invalid/replayed request proofs are denied. The
+// runtime fallback stays "off" only so an unconfigured dev Worker does not silently
+// reject legacy clients. Roll out off -> soft (observe) -> required.
+function requestSignatureMode(env: Env): RequestSignatureMode {
+  if (env.REQUEST_SIGNATURE_MODE === "soft" || env.REQUEST_SIGNATURE_MODE === "required") {
+    return env.REQUEST_SIGNATURE_MODE;
+  }
+  return "off";
 }
 
 function fixedWindowStart(nowSeconds: number, periodSeconds: number): number {
@@ -349,13 +431,40 @@ export function validateVerifyRequest(value: unknown): VerifyRequest | null {
           input.client_hardening <= MAX_CLIENT_HARDENING
         ? input.client_hardening
         : null;
+  const proofFields = [
+    input.request_signature_version,
+    input.device_key_id,
+    input.request_timestamp,
+    input.request_signature_algorithm,
+    input.request_signature,
+  ];
+  const hasProof = proofFields.some((field) => field !== undefined);
+  const deviceKeyId = safeDeviceKeyId(input.device_key_id);
+  const requestTimestamp = safeUnixSeconds(input.request_timestamp);
+  const requestSignature = safeBase64(input.request_signature, 512);
+  const requestProof: RequestProof | undefined =
+    hasProof &&
+    input.request_signature_version === REQUEST_PROOF_VERSION &&
+    deviceKeyId !== null &&
+    requestTimestamp !== null &&
+    input.request_signature_algorithm === REQUEST_PROOF_ALGORITHM &&
+    requestSignature !== null
+      ? {
+          version: REQUEST_PROOF_VERSION,
+          device_key_id: deviceKeyId,
+          request_timestamp: requestTimestamp,
+          algorithm: REQUEST_PROOF_ALGORITHM,
+          signature: requestSignature,
+        }
+      : undefined;
   if (
     project === null ||
     feature === null ||
     licenseFingerprint === null ||
     deviceHash === null ||
     nonce === null ||
-    clientHardening === null
+    clientHardening === null ||
+    (hasProof && requestProof === undefined)
   ) {
     return null;
   }
@@ -367,6 +476,7 @@ export function validateVerifyRequest(value: unknown): VerifyRequest | null {
     nonce,
     client_version: typeof input.client_version === "string" ? input.client_version.slice(0, 64) : undefined,
     client_hardening: clientHardening,
+    request_proof: requestProof,
   };
 }
 
@@ -391,6 +501,29 @@ function canonicalPayload(claims: AssertionClaims): string {
 
 export function canonicalPayloadForTests(claims: AssertionClaims): string {
   return canonicalPayload(claims);
+}
+
+function canonicalRequestProofPayload(request: VerifyRequest): string {
+  if (request.request_proof === undefined) {
+    throw new Error("request proof is missing");
+  }
+  return (
+    `purpose=${REQUEST_PROOF_PURPOSE}\n` +
+    `version=${request.request_proof.version}\n` +
+    `alg=${request.request_proof.algorithm}\n` +
+    `project=${request.project}\n` +
+    `feature=${request.feature}\n` +
+    `license-fingerprint=${request.license_fingerprint}\n` +
+    `device-hash=${request.device_hash ?? ""}\n` +
+    `nonce=${request.nonce}\n` +
+    `request-timestamp=${request.request_proof.request_timestamp}\n` +
+    `client-hardening=${request.client_hardening ?? 0}\n` +
+    `device-key-id=${request.request_proof.device_key_id}\n`
+  );
+}
+
+export function canonicalRequestProofPayloadForTests(request: VerifyRequest): string {
+  return canonicalRequestProofPayload(request);
 }
 
 function base64FromBytes(bytes: Uint8Array): string {
@@ -438,6 +571,12 @@ async function importSigningKey(pem: string): Promise<CryptoKey> {
   );
 }
 
+async function importDevicePublicKey(spkiBase64: string): Promise<CryptoKey> {
+  const bytes = bytesFromBase64(spkiBase64);
+  const keyData = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+  return crypto.subtle.importKey("spki", keyData, { name: "ECDSA", namedCurve: "P-256" }, false, ["verify"]);
+}
+
 function signingCacheKey(env: Env): string {
   return `${env.ONLINE_SIGNING_KEY_ID}\n${env.ONLINE_SIGNING_PRIVATE_KEY_PKCS8_PEM}`;
 }
@@ -473,6 +612,17 @@ async function lookupEntitlement(env: Env, request: VerifyRequest): Promise<Enti
     .first<EntitlementRow>();
 }
 
+async function lookupEntitlementDevice(env: Env, request: VerifyRequest): Promise<EntitlementDeviceRow | null> {
+  if (request.request_proof === undefined) {
+    return null;
+  }
+  return env.DB.prepare(
+    "SELECT device_key_id, public_key_spki_der_base64, status FROM entitlement_devices WHERE project = ? AND feature = ? AND license_fingerprint = ? AND device_key_id = ? LIMIT 1",
+  )
+    .bind(request.project, request.feature, request.license_fingerprint, request.request_proof.device_key_id)
+    .first<EntitlementDeviceRow>();
+}
+
 function boundedTime(value: number | null | undefined): number | null {
   if (value === null || value === undefined) {
     return null;
@@ -496,6 +646,204 @@ function entitlementWithinValidity(row: EntitlementRow, nowSeconds: number): boo
 function clampToValidUntil(row: EntitlementRow, timestamp: number): number {
   const validUntil = boundedTime(row.valid_until);
   return validUntil === null ? timestamp : Math.min(timestamp, validUntil);
+}
+
+function proofFailureCode(evaluation: RequestProofEvaluation): string {
+  switch (evaluation.result) {
+    case "missing":
+      return "request_proof_required";
+    case "stale_timestamp":
+      return "request_proof_stale";
+    case "unknown_device":
+    case "disabled_device":
+    case "invalid_signature":
+    case "malformed_public_key":
+    case "replayed_nonce":
+      return "request_proof_invalid";
+    default:
+      return "verification_error";
+  }
+}
+
+function logRequestProofDecision(
+  severity: LogSeverity,
+  requestIdValue: string,
+  verifyRequest: VerifyRequest,
+  evaluation: RequestProofEvaluation,
+): void {
+  logEvent(severity, "verify.request_proof", {
+    request_id: requestIdValue,
+    mode: evaluation.mode,
+    result: evaluation.result,
+    project: verifyRequest.project,
+    feature: verifyRequest.feature,
+    license_fingerprint: shortHex(verifyRequest.license_fingerprint),
+    device_hash: shortHex(verifyRequest.device_hash),
+    device_key_id: shortKeyId(evaluation.device_key_id ?? verifyRequest.request_proof?.device_key_id),
+    detail: evaluation.detail,
+  });
+}
+
+async function verifyRequestSignature(publicKeySpkiDerBase64: string, payload: string, signatureBase64: string): Promise<boolean> {
+  const key = await importDevicePublicKey(publicKeySpkiDerBase64);
+  const signature = bytesFromBase64(signatureBase64);
+  const signatureData = signature.buffer.slice(
+    signature.byteOffset,
+    signature.byteOffset + signature.byteLength,
+  ) as ArrayBuffer;
+  const payloadBytes = textEncoder.encode(payload);
+  const payloadData = payloadBytes.buffer.slice(
+    payloadBytes.byteOffset,
+    payloadBytes.byteOffset + payloadBytes.byteLength,
+  ) as ArrayBuffer;
+  return crypto.subtle.verify({ name: "ECDSA", hash: "SHA-256" }, key, signatureData, payloadData);
+}
+
+// Returns "fresh" if this is the first time the nonce is consumed for this device,
+// "replayed" if it was already consumed within the skew window, or "error" if the
+// store is unavailable. The caller MUST treat "error" as deny (fail closed). The
+// INSERT ... ON CONFLICT DO NOTHING RETURNING is the race-free primitive: the first
+// request for a (project, feature, fingerprint, device_key_id, nonce) gets a row back;
+// a concurrent or later replay gets null.
+async function consumeRequestProofNonce(
+  env: Env,
+  request: VerifyRequest,
+  proof: RequestProof,
+  nowSeconds: number,
+  skewSeconds: number,
+): Promise<"fresh" | "replayed" | "error"> {
+  // A replay can only land inside the accepted skew window on either side of the
+  // signed request-timestamp, so keep the row until the window certainly closes.
+  const expiresAt = nowSeconds + skewSeconds * 2;
+  try {
+    const row = await env.DB.prepare(
+      "INSERT INTO request_proof_nonces (project, feature, license_fingerprint, device_key_id, nonce, request_timestamp, consumed_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(project, feature, license_fingerprint, device_key_id, nonce) DO NOTHING RETURNING nonce",
+    )
+      .bind(
+        request.project,
+        request.feature,
+        request.license_fingerprint,
+        proof.device_key_id,
+        request.nonce,
+        proof.request_timestamp,
+        nowSeconds,
+        expiresAt,
+      )
+      .first<{ nonce: string }>();
+    if (row === null) {
+      return "replayed";
+    }
+    // Opportunistic sweep (mirrors checkD1RateLimitTier). Best-effort; a sweep
+    // failure must not turn a fresh nonce into a denial, so swallow it.
+    try {
+      await env.DB.prepare("DELETE FROM request_proof_nonces WHERE expires_at < ?").bind(nowSeconds).run();
+    } catch {
+      // ignore: cleanup is not load-bearing for correctness
+    }
+    return "fresh";
+  } catch {
+    // Store unavailable: fail closed. Never allow a request we cannot dedupe.
+    return "error";
+  }
+}
+
+async function evaluateRequestProof(
+  env: Env,
+  verifyRequest: VerifyRequest,
+  nowSeconds: number,
+): Promise<RequestProofEvaluation> {
+  const mode = requestSignatureMode(env);
+  if (mode === "off") {
+    return { mode, result: "not_configured" };
+  }
+  const proof = verifyRequest.request_proof;
+  if (proof === undefined) {
+    return { mode, result: "missing", detail: "request proof is not present" };
+  }
+
+  const maxSkewSeconds = parsePositiveInt(env.REQUEST_SIGNATURE_MAX_SKEW_SECONDS, 300, 3600);
+  if (Math.abs(nowSeconds - proof.request_timestamp) > maxSkewSeconds) {
+    return {
+      mode,
+      result: "stale_timestamp",
+      detail: "request proof timestamp is outside the accepted skew window",
+      device_key_id: proof.device_key_id,
+    };
+  }
+
+  let device: EntitlementDeviceRow | null;
+  try {
+    device = await lookupEntitlementDevice(env, verifyRequest);
+  } catch (error) {
+    return {
+      mode,
+      result: "d1_error",
+      detail: error instanceof Error ? error.message : "device lookup failed",
+      device_key_id: proof.device_key_id,
+    };
+  }
+  if (device === null) {
+    return {
+      mode,
+      result: "unknown_device",
+      detail: "device key is not registered for this entitlement",
+      device_key_id: proof.device_key_id,
+    };
+  }
+  if (device.status !== "active") {
+    return {
+      mode,
+      result: "disabled_device",
+      detail: "device key is not active",
+      device_key_id: proof.device_key_id,
+    };
+  }
+
+  let valid: boolean;
+  try {
+    valid = await verifyRequestSignature(
+      device.public_key_spki_der_base64,
+      canonicalRequestProofPayload(verifyRequest),
+      proof.signature,
+    );
+  } catch (error) {
+    return {
+      mode,
+      result: "malformed_public_key",
+      detail: error instanceof Error ? error.message : "request proof verification failed",
+      device_key_id: proof.device_key_id,
+    };
+  }
+  if (!valid) {
+    return {
+      mode,
+      result: "invalid_signature",
+      detail: "request proof signature did not verify",
+      device_key_id: proof.device_key_id,
+    };
+  }
+
+  // Signature, skew, and device are good. Now spend the nonce. This is the relay
+  // defense: a replay of this exact signed body finds the nonce already consumed.
+  const nonceState = await consumeRequestProofNonce(env, verifyRequest, proof, nowSeconds, maxSkewSeconds);
+  if (nonceState === "error") {
+    // Fail CLOSED: a replay store we cannot reach denies, never allows.
+    return {
+      mode,
+      result: "d1_error",
+      detail: "request proof nonce store is unavailable",
+      device_key_id: proof.device_key_id,
+    };
+  }
+  if (nonceState === "replayed") {
+    return {
+      mode,
+      result: "replayed_nonce",
+      detail: "request proof nonce was already consumed",
+      device_key_id: proof.device_key_id,
+    };
+  }
+  return { mode, result: "valid", device_key_id: proof.device_key_id };
 }
 
 async function handleVerify(request: Request, env: Env): Promise<Response> {
@@ -539,6 +887,19 @@ async function handleVerify(request: Request, env: Env): Promise<Response> {
     return json({ ok: false, code: "rate_limited" }, 429);
   }
 
+  const proofEvaluation = await evaluateRequestProof(env, verifyRequest, now);
+  if (proofEvaluation.result !== "not_configured") {
+    const severity: LogSeverity =
+      proofEvaluation.result === "valid" ? "info" : proofEvaluation.result === "d1_error" ? "error" : "warn";
+    logRequestProofDecision(severity, id, verifyRequest, proofEvaluation);
+  }
+  if (proofEvaluation.mode === "required" && proofEvaluation.result !== "valid") {
+    if (proofEvaluation.result === "d1_error") {
+      return json({ ok: false, code: "verification_error" }, 500);
+    }
+    return json({ ok: false, code: proofFailureCode(proofEvaluation), server_time: now });
+  }
+
   const d1Started = Date.now();
   let row: EntitlementRow | null;
   try {
@@ -556,11 +917,19 @@ async function handleVerify(request: Request, env: Env): Promise<Response> {
   const d1DurationMs = Date.now() - d1Started;
   const maxAssertionTtl = parsePositiveInt(env.MAX_ASSERTION_TTL_SECONDS, 300, 3600);
   const maxCacheTtl = parsePositiveInt(env.MAX_CACHE_TTL_SECONDS, 86400, 604800);
-  const activeRow =
+  // Binding is satisfied by EITHER the (unchanged) plaintext device_hash match, OR --
+  // additionally -- a cryptographically verified device key in required mode. The plaintext
+  // clause is request-controlled and intentionally left as-is for back-compat; the new clause
+  // lets a proven ECDSA device satisfy binding even when the self-asserted device_hash does
+  // not match. This LOOSENS the accept condition (adds an accept path); it removes nothing.
+  const proofVerified = proofEvaluation.result === "valid";
+  const deviceHashSatisfied =
     row !== null &&
-    row.status === "active" &&
-    entitlementWithinValidity(row, now) &&
-    (row.device_hash === "" || row.device_hash === verifyRequest.device_hash)
+    (row.device_hash === "" ||
+      row.device_hash === verifyRequest.device_hash ||
+      (proofVerified && proofEvaluation.mode === "required"));
+  const activeRow =
+    row !== null && row.status === "active" && entitlementWithinValidity(row, now) && deviceHashSatisfied
       ? row
       : null;
   const assertionTtl = activeRow !== null ? Math.min(activeRow.assertion_ttl_seconds, maxAssertionTtl) : 0;
@@ -577,6 +946,8 @@ async function handleVerify(request: Request, env: Env): Promise<Response> {
       license_fingerprint: shortHex(verifyRequest.license_fingerprint),
       device_hash: shortHex(verifyRequest.device_hash),
       client_hardening: verifyRequest.client_hardening ?? 0,
+      request_signature_mode: proofEvaluation.mode,
+      request_proof: proofEvaluation.result,
       revocation_seq: row?.revocation_seq ?? 0,
       d1_duration_ms: d1DurationMs,
     });
@@ -625,6 +996,8 @@ async function handleVerify(request: Request, env: Env): Promise<Response> {
     license_fingerprint: shortHex(verifyRequest.license_fingerprint),
     device_hash: shortHex(verifyRequest.device_hash),
     client_hardening: verifyRequest.client_hardening ?? 0,
+    request_signature_mode: proofEvaluation.mode,
+    request_proof: proofEvaluation.result,
     assertion_ttl_seconds: assertionTtl,
     revocation_seq: claims.revocationSeq,
     d1_duration_ms: d1DurationMs,

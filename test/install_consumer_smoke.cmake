@@ -296,6 +296,84 @@ target_link_libraries(cxx11_consumer PRIVATE licensecc::licensecc_static)
 ")
 endfunction()
 
+function(_write_decision_consumer source_dir project_name)
+	_remove_safe("${source_dir}" "${_smoke_root}" "decision consumer source")
+	file(MAKE_DIRECTORY "${source_dir}")
+	file(WRITE "${source_dir}/main.cpp"
+"#include <cstdio>
+#include <cstring>
+#include <licensecc/licensecc.h>
+
+static int online_calls = 0;
+static int floor_load_calls = 0;
+static int floor_store_calls = 0;
+
+static LCC_ONLINE_CALLBACK_STATUS online_callback(void*, const LccOnlineRequest*, char*, size_t*) {
+	++online_calls;
+	return LCC_ONLINE_CB_TRANSPORT_UNAVAILABLE;
+}
+
+static bool host_integrity_callback(void*, char* detail_out, size_t detail_out_size) {
+	if (detail_out != nullptr && detail_out_size > 0) {
+		std::snprintf(detail_out, detail_out_size, \"installed consumer forced host failure\");
+	}
+	return false;
+}
+
+static bool floor_load_callback(void*, const LccRevocationFloorRecord*, uint64_t* revocation_seq_out) {
+	++floor_load_calls;
+	if (revocation_seq_out != nullptr) {
+		*revocation_seq_out = 0;
+	}
+	return true;
+}
+
+static bool floor_store_callback(void*, const LccRevocationFloorRecord*) {
+	++floor_store_calls;
+	return true;
+}
+
+int main(int argc, char** argv) {
+	if (argc != 2) {
+		return 2;
+	}
+	CallerInformations caller;
+	lcc_init_caller_informations(&caller);
+	LicenseLocation location;
+	lcc_init_license_location(&location, LICENSE_PATH);
+	if (!lcc_set_license_path(&location, argv[1])) {
+		return 2;
+	}
+	LicenseInfo info;
+	LccLicenseDecision decision;
+	LccLicenseDecisionOptions options;
+	lcc_init_license_decision_options(&options);
+	options.online_check = online_callback;
+	options.host_integrity_check = host_integrity_callback;
+	options.revocation_floor_load = floor_load_callback;
+	options.revocation_floor_store = floor_store_callback;
+	const LCC_EVENT_TYPE result = lcc_acquire_license_decision(&caller, &location, &info, &decision, &options);
+	if (result != LICENSE_TAMPER_DETECTED || decision.decision != LCC_LICENSE_DECISION_DENY ||
+		!decision.tamper_enforced || online_calls != 0 || floor_load_calls != 0 || floor_store_calls != 0) {
+		return 1;
+	}
+	return 0;
+}
+")
+	file(WRITE "${source_dir}/CMakeLists.txt"
+"cmake_minimum_required(VERSION 3.16)
+project(licensecc_decision_consumer CXX)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+find_package(licensecc REQUIRED COMPONENTS ${project_name})
+
+add_executable(decision_consumer main.cpp)
+target_link_libraries(decision_consumer PRIVATE licensecc::licensecc_static)
+")
+endfunction()
+
 function(_configure_and_build_consumer description source_dir build_dir prefix)
 	_remove_safe("${build_dir}" "${_smoke_root}" "${description} build dir")
 	set(_configure_command
@@ -588,6 +666,18 @@ foreach(_forbidden "application enabled" "REPORTS enabled" "EXPORT enabled" "sig
 		message(FATAL_ERROR "fail-closed host source-fatal output unexpectedly contained ${_forbidden}:\n${_host_source_fatal_output}")
 	endif()
 endforeach()
+
+set(_decision_source "${_smoke_root}/decision-consumer-src")
+set(_decision_build "${_smoke_root}/decision-consumer-build")
+_write_decision_consumer("${_decision_source}" "${LICENSECC_PROJECT_NAME}")
+_configure_and_build_consumer(
+	"decision wrapper consumer"
+	"${_decision_source}"
+	"${_decision_build}"
+	"${LICENSECC_INSTALL_PREFIX}"
+)
+_find_built_executable(_decision_exe "${_decision_build}" "decision_consumer")
+_run_checked("decision wrapper consumer forced tamper denial" "${_decision_exe}" "${_host_source_fatal_valid}")
 
 _expect_configure_failure(
 	"wrong-project"

@@ -8,6 +8,12 @@ preview_urls = false
 D1_RATE_LIMIT_ENABLED = "0"
 D1_RATE_LIMIT_LIMIT = "20"
 D1_RATE_LIMIT_PERIOD_SECONDS = "60"
+# Request proof-of-possession rollout mode: off, soft, or required.
+# off keeps legacy clients compatible. soft logs missing/invalid/replayed proof but
+# still allows otherwise-valid entitlements. required denies missing/invalid/replayed
+# proof and is the PRODUCTION DEFAULT. Roll out off -> soft (observe) -> required.
+REQUEST_SIGNATURE_MODE = "required"
+REQUEST_SIGNATURE_MAX_SKEW_SECONDS = "300"
 # Optional D1 limiter tier overrides. Defaults fall back to D1_RATE_LIMIT_*.
 # D1_CLIENT_RATE_LIMIT_LIMIT = "20"
 # D1_CLIENT_RATE_LIMIT_PERIOD_SECONDS = "60"

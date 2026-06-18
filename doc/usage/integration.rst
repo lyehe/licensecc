@@ -213,6 +213,14 @@ license sources and enables strict source-fatal handling during startup so a
 malformed higher-priority license source cannot be hidden by a later valid
 explicit license path.
 
+The local examples are intended to be read in this order:
+``examples/minimal`` for the smallest fail-closed check,
+``examples/fail_closed_host`` for feature gating,
+``examples/anti_tamper_host`` for host-integrity callbacks,
+``examples/online_callback`` for primary/backup verifier transport, and
+``examples/production_decision_host`` for the production-shaped
+``lcc_acquire_license_decision()`` flow with a persisted revocation floor.
+
 Runtime policy toggles such as
 ``lcc_set_environment_license_sources_enabled(false)`` and
 ``lcc_set_strict_source_fatal_enabled(true)`` are process-global. Their storage
@@ -321,6 +329,30 @@ floor, or the host cannot store the newly accepted floor. Ordinary local
 license failures still take precedence; the online callback and floor callbacks
 are not invoked when the local license is malformed, expired, corrupted, or for
 the wrong machine.
+
+The ``examples/production_decision_host`` target wires this wrapper to backup
+verifier URLs, a host-integrity callback, and a small file-backed revocation
+floor. Use it as the copyable starting point for production-shaped C++
+integrations.
+
+Backup verifier endpoints
+=========================
+
+Licensecc core intentionally does not choose HTTP endpoints. Backup verifier
+support belongs in the host-provided ``LCC_ONLINE_CHECK`` callback. The
+``examples/online_callback`` transport accepts one primary URL followed by
+optional backup URLs and tries them in order. It retries only transport-level
+failures such as timeout, connection failure, or HTTP 5xx. It does not retry an
+entitlement denial, malformed response, invalid assertion, or local buffer
+failure, because those outcomes should not be overridden by another endpoint.
+
+All accepted verifier endpoints must issue assertions from a key trusted by the
+C++ runtime through ``LCC_ONLINE_ASSERTION_PUBLIC_KEY_RECORDS``. They should
+also share the same entitlement projection and monotonic ``revocation_seq``.
+When using ``lcc_acquire_license_decision()``, the host-persisted revocation
+floor rejects stale backup assertions whose ``revocation_seq`` is lower than a
+newer assertion already accepted for the same project, feature, and license
+fingerprint.
 
 User database integration
 =========================

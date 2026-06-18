@@ -1,125 +1,53 @@
 #include <curl/curl.h>
 #include <licensecc/licensecc.h>
 
+#include "online_callback_common.hpp"
+
 #include <cstdio>
 #include <cstring>
 #include <string>
 
 namespace {
 
-struct OnlineClient {
-	std::string endpoint;
+using licensecc_online_callback_example::add_endpoint;
+using licensecc_online_callback_example::online_check;
+using licensecc_online_callback_example::OnlineClient;
+
+struct ResponseBodySink {
+	std::string* body = nullptr;
+	size_t max_size = 0;
+	bool too_large = false;
 };
 
 size_t write_body(char* ptr, size_t size, size_t nmemb, void* user_data) {
-	std::string* body = static_cast<std::string*>(user_data);
+	ResponseBodySink* sink = static_cast<ResponseBodySink*>(user_data);
 	const size_t bytes = size * nmemb;
-	body->append(ptr, bytes);
+	if (sink == nullptr || sink->body == nullptr) {
+		return 0;
+	}
+	if (bytes > sink->max_size || sink->body->size() > sink->max_size - bytes) {
+		sink->too_large = true;
+		return 0;
+	}
+	sink->body->append(ptr, bytes);
 	return bytes;
 }
 
-std::string json_escape(const char* value) {
-	std::string out;
-	for (const char* p = value; p != nullptr && *p != '\0'; ++p) {
-		switch (*p) {
-			case '\\':
-				out += "\\\\";
-				break;
-			case '"':
-				out += "\\\"";
-				break;
-			default:
-				out.push_back(*p);
-				break;
-		}
-	}
-	return out;
-}
-
-std::string json_field(const char* name, const char* value) {
-	return std::string("\"") + name + "\":\"" + json_escape(value) + "\"";
-}
-
-std::string request_body(const LccOnlineRequest& request) {
-	std::string body = std::string("{") + json_field("project", request.project) + "," +
-					   json_field("feature", request.feature) + "," +
-					   json_field("license_fingerprint", request.license_fingerprint) + "," +
-					   json_field("device_hash", request.device_hash) + "," + json_field("nonce", request.nonce);
-	if (request.version >= 2u) {
-		body += ",\"client_hardening\":" + std::to_string(request.client_hardening);
-	}
-	body += "}";
-	return body;
-}
-
-bool extract_json_string(const std::string& json, const char* name, std::string* out) {
-	const std::string needle = std::string("\"") + name + "\"";
-	size_t pos = json.find(needle);
-	if (pos == std::string::npos) {
-		return false;
-	}
-	pos = json.find(':', pos + needle.size());
-	if (pos == std::string::npos) {
-		return false;
-	}
-	pos = json.find('"', pos + 1);
-	if (pos == std::string::npos) {
-		return false;
-	}
-	++pos;
-	std::string value;
-	for (; pos < json.size(); ++pos) {
-		const char ch = json[pos];
-		if (ch == '"') {
-			*out = value;
-			return true;
-		}
-		if (ch == '\\') {
-			if (++pos >= json.size()) {
-				return false;
-			}
-			const char escaped = json[pos];
-			if (escaped == '"' || escaped == '\\' || escaped == '/') {
-				value.push_back(escaped);
-				continue;
-			}
-			return false;
-		}
-		value.push_back(ch);
-	}
-	return false;
-}
-
-LCC_ONLINE_CALLBACK_STATUS copy_assertion(const std::string& assertion, char* assertion_out,
-										  size_t* assertion_out_size) {
-	if (assertion_out == nullptr || assertion_out_size == nullptr) {
+LCC_ONLINE_CALLBACK_STATUS post_verify(void* /*user_data*/, const std::string& endpoint,
+									   const LccOnlineRequest& request, const std::string& body,
+									   std::string* response_body) {
+	if (response_body == nullptr) {
 		return LCC_ONLINE_CB_MALFORMED_RESPONSE;
 	}
-	const size_t required = assertion.size() + 1;
-	if (required > *assertion_out_size) {
-		*assertion_out_size = required;
-		return LCC_ONLINE_CB_BUFFER_TOO_SMALL;
-	}
-	std::memcpy(assertion_out, assertion.c_str(), required);
-	*assertion_out_size = required;
-	return LCC_ONLINE_CB_OK;
-}
-
-LCC_ONLINE_CALLBACK_STATUS online_check(void* user_data, const LccOnlineRequest* request, char* assertion_out,
-										size_t* assertion_out_size) {
-	OnlineClient* client = static_cast<OnlineClient*>(user_data);
-	if (client == nullptr || request == nullptr || assertion_out == nullptr || assertion_out_size == nullptr) {
-		return LCC_ONLINE_CB_MALFORMED_RESPONSE;
-	}
-
 	CURL* curl = curl_easy_init();
 	if (curl == nullptr) {
 		return LCC_ONLINE_CB_TRANSPORT_UNAVAILABLE;
 	}
 
-	const std::string url = client->endpoint + "/v1/verify";
-	const std::string body = request_body(*request);
-	std::string response_body;
+	const std::string url = endpoint + "/v1/verify";
+	ResponseBodySink response_sink;
+	response_sink.body = response_body;
+	response_sink.max_size = 64U * 1024U;
 	struct curl_slist* headers = nullptr;
 	headers = curl_slist_append(headers, "Content-Type: application/json");
 
@@ -128,8 +56,8 @@ LCC_ONLINE_CALLBACK_STATUS online_check(void* user_data, const LccOnlineRequest*
 	curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body.c_str());
 	curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, static_cast<long>(body.size()));
 	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_body);
-	curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response_body);
-	curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, static_cast<long>(request->timeout_ms));
+	curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response_sink);
+	curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, static_cast<long>(request.timeout_ms));
 	curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
 
 	const CURLcode curl_result = curl_easy_perform(curl);
@@ -141,22 +69,16 @@ LCC_ONLINE_CALLBACK_STATUS online_check(void* user_data, const LccOnlineRequest*
 	if (curl_result == CURLE_OPERATION_TIMEDOUT) {
 		return LCC_ONLINE_CB_TIMEOUT;
 	}
+	if (response_sink.too_large) {
+		return LCC_ONLINE_CB_MALFORMED_RESPONSE;
+	}
 	if (curl_result != CURLE_OK || http_status >= 500) {
 		return LCC_ONLINE_CB_TRANSPORT_UNAVAILABLE;
 	}
 	if (http_status != 200) {
 		return LCC_ONLINE_CB_MALFORMED_RESPONSE;
 	}
-
-	std::string assertion;
-	if (!extract_json_string(response_body, "assertion", &assertion) || assertion.empty()) {
-		std::string code;
-		if (extract_json_string(response_body, "code", &code) && code == "entitlement_denied") {
-			return LCC_ONLINE_CB_HOST_DECLINED;
-		}
-		return LCC_ONLINE_CB_MALFORMED_RESPONSE;
-	}
-	return copy_assertion(assertion, assertion_out, assertion_out_size);
+	return LCC_ONLINE_CB_OK;
 }
 
 void print_result(LCC_EVENT_TYPE result, const LicenseInfo& info) {
@@ -180,8 +102,11 @@ LCC_EVENT_TYPE run_check(const CallerInformations& caller, const LicenseLocation
 }  // namespace
 
 int main(int argc, char** argv) {
-	if (argc != 3) {
-		std::fprintf(stderr, "usage: %s <license-path> <worker-url>\n", argv[0]);
+	if (argc < 3) {
+		std::fprintf(stderr,
+					 "usage: %s <license-path> [--allow-insecure-http-for-test] <primary-worker-url> "
+					 "[backup-worker-url ...]\n",
+					 argv[0]);
 		return 2;
 	}
 
@@ -198,9 +123,22 @@ int main(int argc, char** argv) {
 	lcc_init_caller_informations(&caller);
 
 	OnlineClient client;
-	client.endpoint = argv[2];
-	while (!client.endpoint.empty() && client.endpoint[client.endpoint.size() - 1] == '/') {
-		client.endpoint.resize(client.endpoint.size() - 1);
+	client.post_verify_body = post_verify;
+	for (int i = 2; i < argc; ++i) {
+		if (std::strcmp(argv[i], "--allow-insecure-http-for-test") == 0) {
+			client.allow_insecure_http_for_test = true;
+			continue;
+		}
+		if (!add_endpoint(&client, argv[i])) {
+			std::fprintf(stderr, "invalid worker URL: %s\n", argv[i]);
+			curl_global_cleanup();
+			return 2;
+		}
+	}
+	if (client.endpoints.empty()) {
+		std::fprintf(stderr, "at least one worker URL is required\n");
+		curl_global_cleanup();
+		return 2;
 	}
 	LicenseInfo info;
 	const LCC_EVENT_TYPE result = run_check(caller, location, &client, &info);

@@ -7,6 +7,8 @@ import { fileURLToPath } from "node:url";
 
 const DEFAULT_DATABASE = "licensecc-online-verifier";
 const HEX_64 = /^[0-9a-fA-F]{64}$/;
+const DEVICE_KEY_ID = /^sha256:[0-9a-f]{64}$/;
+const BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
 const NAME = /^[A-Za-z0-9_.:-]+$/;
 const STATUS = new Set(["active", "revoked", "disabled"]);
 
@@ -18,6 +20,10 @@ function usage() {
   node scripts/entitlement.mjs reenable --fingerprint <64-hex> --actor <operator> [--reason <text>] [--project DEFAULT] [--feature DEFAULT] [--database ${DEFAULT_DATABASE}] [--config wrangler.toml] [--remote]
   node scripts/entitlement.mjs get --fingerprint <64-hex> [--project DEFAULT] [--feature DEFAULT] [--database ${DEFAULT_DATABASE}] [--config wrangler.toml] [--remote]
   node scripts/entitlement.mjs list [--project DEFAULT] [--feature DEFAULT] [--database ${DEFAULT_DATABASE}] [--config wrangler.toml] [--remote]
+  node scripts/entitlement.mjs device-upsert --fingerprint <64-hex> --device-key-id sha256:<64-hex> --public-key-spki-der-base64 <base64> --actor <operator> [--status active] [--reason <text>] [--project DEFAULT] [--feature DEFAULT] [--database ${DEFAULT_DATABASE}] [--config wrangler.toml] [--remote]
+  node scripts/entitlement.mjs device-disable --fingerprint <64-hex> --device-key-id sha256:<64-hex> --actor <operator> --reason <text> [--project DEFAULT] [--feature DEFAULT] [--database ${DEFAULT_DATABASE}] [--config wrangler.toml] [--remote]
+  node scripts/entitlement.mjs device-revoke --fingerprint <64-hex> --device-key-id sha256:<64-hex> --actor <operator> --reason <text> [--project DEFAULT] [--feature DEFAULT] [--database ${DEFAULT_DATABASE}] [--config wrangler.toml] [--remote]
+  node scripts/entitlement.mjs device-list --fingerprint <64-hex> [--project DEFAULT] [--feature DEFAULT] [--database ${DEFAULT_DATABASE}] [--config wrangler.toml] [--remote]
 
 notes:
   revoked entitlements are terminal: upsert/disable/reenable refuse a revoked row (a refused mutation
@@ -68,6 +74,20 @@ function validatedHex(value, label, required = true) {
     throw new Error(`${label} must be exactly 64 hex characters`);
   }
   return value.toLowerCase();
+}
+
+function validatedDeviceKeyId(value) {
+  if (typeof value !== "string" || !DEVICE_KEY_ID.test(value)) {
+    throw new Error("device-key-id must be sha256:<64 lowercase hex characters>");
+  }
+  return value;
+}
+
+function validatedBase64(value, label, maxLength) {
+  if (typeof value !== "string" || value.length === 0 || value.length > maxLength || !BASE64.test(value)) {
+    throw new Error(`${label} must be 1-${maxLength} characters of padded base64`);
+  }
+  return value;
 }
 
 function validatedInt(value, label, fallback, min, max) {
@@ -123,6 +143,18 @@ function baseFields(options) {
   };
 }
 
+function deviceFields(options, requirePublicKey = false) {
+  const fields = baseFields(options);
+  return {
+    ...fields,
+    deviceKeyId: validatedDeviceKeyId(options["device-key-id"]),
+    publicKeySpkiDerBase64:
+      options["public-key-spki-der-base64"] === undefined && !requirePublicKey
+        ? ""
+        : validatedBase64(options["public-key-spki-der-base64"], "public-key-spki-der-base64", 2048),
+  };
+}
+
 function mutationContext(options, reasonRequired = false) {
   return {
     actor: validatedText(options.actor, "actor", 128, true),
@@ -132,6 +164,14 @@ function mutationContext(options, reasonRequired = false) {
 
 function eventSqlFromCurrent(fields, eventType, status, actor, reason = "") {
   return `INSERT INTO entitlement_events (project, feature, license_fingerprint, device_hash, event_type, status, revocation_seq, detail, actor, actor_type, source, request_id, reason, created_at) SELECT project, feature, license_fingerprint, device_hash, ${sqlString(eventType)}, status, revocation_seq, ${sqlString(reason)}, ${sqlString(actor)}, 'cli', 'cli', 'cli-' || lower(hex(randomblob(8))), ${sqlString(reason)}, unixepoch() FROM entitlements WHERE project = ${sqlString(fields.project)} AND feature = ${sqlString(fields.feature)} AND license_fingerprint = ${sqlString(fields.fingerprint)} AND status = ${sqlString(status)}`;
+}
+
+function deviceExistsWhere(fields) {
+  return `EXISTS (SELECT 1 FROM entitlement_devices WHERE project = ${sqlString(fields.project)} AND feature = ${sqlString(fields.feature)} AND license_fingerprint = ${sqlString(fields.fingerprint)} AND device_key_id = ${sqlString(fields.deviceKeyId)})`;
+}
+
+function updateEventSqlFromCurrent(fields, actor, detail = "", reason = "") {
+  return `INSERT INTO entitlement_events (project, feature, license_fingerprint, device_hash, event_type, status, revocation_seq, detail, actor, actor_type, source, request_id, reason, created_at) SELECT project, feature, license_fingerprint, device_hash, 'update', status, revocation_seq, ${sqlString(detail)}, ${sqlString(actor)}, 'cli', 'cli', 'cli-' || lower(hex(randomblob(8))), ${sqlString(reason)}, unixepoch() FROM entitlements WHERE project = ${sqlString(fields.project)} AND feature = ${sqlString(fields.feature)} AND license_fingerprint = ${sqlString(fields.fingerprint)} AND ${deviceExistsWhere(fields)}`;
 }
 
 function eventHistoryFloorSql(projectExpr, featureExpr, fingerprintExpr, fallbackExpr) {
@@ -146,9 +186,14 @@ function nextInsertedRevocationSeqSql(fields) {
   return `COALESCE((SELECT MAX(revocation_seq) + 1 FROM entitlement_events WHERE project = ${sqlString(fields.project)} AND feature = ${sqlString(fields.feature)} AND license_fingerprint = ${sqlString(fields.fingerprint)}), 1)`;
 }
 
+function shortDeviceKeyId(deviceKeyId) {
+  const digest = deviceKeyId.slice("sha256:".length);
+  return `sha256:${digest.slice(0, 8)}...${digest.slice(-8)}`;
+}
+
 function sqlFor(command, options) {
-  const fields = baseFields(options);
   if (command === "upsert") {
+    const fields = baseFields(options);
     const status = options.status ?? "active";
     if (!STATUS.has(status)) {
       throw new Error("status must be active, revoked, or disabled");
@@ -176,6 +221,7 @@ function sqlFor(command, options) {
     ].join(";\n");
   }
   if (command === "revoke" || command === "disable" || command === "reenable") {
+    const fields = baseFields(options);
     const status = command === "revoke" ? "revoked" : command === "disable" ? "disabled" : "active";
     const eventType = command === "revoke" ? "revoke" : command === "disable" ? "disable" : "reenable";
     const ctx = mutationContext(options, command !== "reenable");
@@ -186,7 +232,37 @@ function sqlFor(command, options) {
     ].join(";\n");
   }
   if (command === "get") {
+    const fields = baseFields(options);
     return `SELECT project, feature, license_fingerprint, device_hash, status, assertion_ttl_seconds, cache_ttl_seconds, revocation_seq, valid_from, valid_until, notes, created_at, updated_at FROM entitlements WHERE project = ${sqlString(fields.project)} AND feature = ${sqlString(fields.feature)} AND license_fingerprint = ${sqlString(fields.fingerprint)}`;
+  }
+  if (command === "device-upsert") {
+    const device = deviceFields(options, true);
+    const status = options.status ?? "active";
+    if (!STATUS.has(status)) {
+      throw new Error("status must be active, revoked, or disabled");
+    }
+    const ctx = mutationContext(options);
+    const detail = `device-upsert ${shortDeviceKeyId(device.deviceKeyId)}${ctx.reason === "" ? "" : `: ${ctx.reason}`}`;
+    return [
+      `INSERT INTO entitlement_devices (project, feature, license_fingerprint, device_key_id, public_key_spki_der_base64, status, created_at, updated_at) VALUES (${sqlString(device.project)}, ${sqlString(device.feature)}, ${sqlString(device.fingerprint)}, ${sqlString(device.deviceKeyId)}, ${sqlString(device.publicKeySpkiDerBase64)}, ${sqlString(status)}, unixepoch(), unixepoch()) ON CONFLICT(project, feature, license_fingerprint, device_key_id) DO UPDATE SET public_key_spki_der_base64 = excluded.public_key_spki_der_base64, status = excluded.status, updated_at = unixepoch()`,
+      `UPDATE entitlements SET revocation_seq = ${nextExistingRevocationSeqSql()}, updated_at = unixepoch() WHERE project = ${sqlString(device.project)} AND feature = ${sqlString(device.feature)} AND license_fingerprint = ${sqlString(device.fingerprint)} AND ${deviceExistsWhere(device)}`,
+      updateEventSqlFromCurrent(device, ctx.actor, detail, ctx.reason),
+    ].join(";\n");
+  }
+  if (command === "device-disable" || command === "device-revoke") {
+    const device = deviceFields(options);
+    const status = command === "device-disable" ? "disabled" : "revoked";
+    const ctx = mutationContext(options, true);
+    const detail = `${command} ${shortDeviceKeyId(device.deviceKeyId)}: ${ctx.reason}`;
+    return [
+      `UPDATE entitlement_devices SET status = ${sqlString(status)}, updated_at = unixepoch() WHERE project = ${sqlString(device.project)} AND feature = ${sqlString(device.feature)} AND license_fingerprint = ${sqlString(device.fingerprint)} AND device_key_id = ${sqlString(device.deviceKeyId)}`,
+      `UPDATE entitlements SET revocation_seq = ${nextExistingRevocationSeqSql()}, updated_at = unixepoch() WHERE project = ${sqlString(device.project)} AND feature = ${sqlString(device.feature)} AND license_fingerprint = ${sqlString(device.fingerprint)} AND ${deviceExistsWhere(device)}`,
+      updateEventSqlFromCurrent(device, ctx.actor, detail, ctx.reason),
+    ].join(";\n");
+  }
+  if (command === "device-list") {
+    const device = baseFields(options);
+    return `SELECT project, feature, license_fingerprint, device_key_id, status, created_at, updated_at, last_seen_at, notes FROM entitlement_devices WHERE project = ${sqlString(device.project)} AND feature = ${sqlString(device.feature)} AND license_fingerprint = ${sqlString(device.fingerprint)} ORDER BY updated_at DESC LIMIT 100`;
   }
   if (command === "list") {
     const project = options.project === undefined ? undefined : validatedName(options.project, "project", 127);
@@ -203,7 +279,7 @@ function sqlFor(command, options) {
   usage();
 }
 
-const MUTATION_COMMANDS = new Set(["upsert", "revoke", "disable", "reenable"]);
+const MUTATION_COMMANDS = new Set(["upsert", "revoke", "disable", "reenable", "device-upsert", "device-disable", "device-revoke"]);
 
 // wrangler prepends a non-JSON "agent skills" banner to stdout even in --json mode, so JSON.parse(stdout)
 // is unsafe. Extract from the first array/object token instead; return undefined if no JSON is present.
@@ -279,11 +355,16 @@ function runWrangler(sql, options, command) {
     }
     const signal = interpretWranglerResult(parseWranglerJson(result.stdout), command);
     if (signal === "noop") {
+      const target =
+        command.startsWith("device-") && options["device-key-id"] !== undefined
+          ? `fingerprint=${options.fingerprint} device_key_id=${options["device-key-id"]}`
+          : `fingerprint=${options.fingerprint}`;
+      const recovery = command.startsWith("device-")
+        ? `Confirm the entitlement and device key with "device-list --fingerprint ${options.fingerprint}".`
+        : `The entitlement is revoked (terminal) or does not exist. Re-run "upsert --allow-revoked-override --reason <text>" to reactivate a revoked entitlement, or check with "get --fingerprint ${options.fingerprint}".`;
       console.error(
         `NO-OP: ${command} on project=${options.project ?? "DEFAULT"} feature=${options.feature ?? "DEFAULT"} ` +
-          `fingerprint=${options.fingerprint} changed 0 rows and wrote no audit event. The entitlement is ` +
-          `revoked (terminal) or does not exist. Re-run "upsert --allow-revoked-override --reason <text>" to ` +
-          `reactivate a revoked entitlement, or check with "get --fingerprint ${options.fingerprint}".`,
+          `${target} changed 0 rows and wrote no audit event. ${recovery}`,
       );
       process.exit(3);
     }

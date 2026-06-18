@@ -25,6 +25,14 @@ Functions
 Public data types
 =================
 
+.. cpp:type:: uint32_t
+
+.. cpp:type:: uint64_t
+
+.. cpp:var:: const unsigned int LCC_API_ONLINE_PROJECT_SIZE
+
+.. cpp:var:: const unsigned int LCC_API_ONLINE_LICENSE_FINGERPRINT_SIZE
+
 .. doxygenenum:: LCC_EVENT_TYPE
 
 .. doxygenenum:: LCC_LICENSE_DATA_TYPE
@@ -38,6 +46,10 @@ Public data types
 .. doxygenenum:: LCC_LICENSE_DECISION
 
 .. doxygendefine:: LCC_API_PATH_SIZE
+
+.. doxygendefine:: LCC_API_ONLINE_PROJECT_SIZE
+
+.. doxygendefine:: LCC_API_ONLINE_LICENSE_FINGERPRINT_SIZE
 
 .. doxygenstruct:: LccOnlineRequest
    :members:

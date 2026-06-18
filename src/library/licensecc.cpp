@@ -473,6 +473,10 @@ static bool normalize_decision_options(const LccLicenseDecisionOptions* options,
 		error = "invalid LccLicenseDecisionOptions version";
 		return false;
 	}
+	if (options->reserved != 0) {
+		error = "reserved fields must be zero";
+		return false;
+	}
 	normalized = *options;
 	normalized.size = sizeof(LccLicenseDecisionOptions);
 	normalized.version = LCC_LICENSE_DECISION_OPTIONS_VERSION;

@@ -248,6 +248,7 @@ ENDIF(BUILD_BENCHMARKS)
 if(LCC_BUILD_EXAMPLES)
 	add_subdirectory(examples/online_callback)
 	add_subdirectory(examples/anti_tamper_host)
+	add_subdirectory(examples/production_decision_host)
 endif()
 
 #boost is required only for tests
@@ -442,6 +443,7 @@ set(CPACK_SOURCE_IGNORE_FILES
 	"/install/"
 	"/dist/"
 	"/node_modules/"
+	"/docs/"
 	"/\\\\.wrangler/"
 	"/\\\\.online-key/"
 	"/projects/"

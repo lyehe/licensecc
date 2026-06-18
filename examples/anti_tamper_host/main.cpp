@@ -8,17 +8,29 @@
 
 #include <licensecc/licensecc.h>
 
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
 namespace {
 
-// Replace the body with product-specific best-effort checks (e.g. a debugger probe, a self-measurement,
-// a parent-process check). Return false to signal a tamper suspicion; write a short reason into detail_out.
+void write_detail(char* detail_out, size_t detail_out_size, const char* detail) {
+	if (detail_out == nullptr || detail_out_size == 0) {
+		return;
+	}
+	std::snprintf(detail_out, detail_out_size, "%s", detail);
+}
+
+// Compose product-specific best-effort checks here. Examples include a debugger probe,
+// signed self-measurement, and parent-process policy. Keep details short and non-sensitive.
 bool host_integrity_check(void* user_data, char* detail_out, size_t detail_out_size) {
 	(void)user_data;
-	const bool suspicious = false;  // demo: always "clean"; real hosts implement a check here.
-	if (suspicious && detail_out != nullptr && detail_out_size > 0) {
-		std::snprintf(detail_out, detail_out_size, "example: integrity probe failed");
+#ifdef _WIN32
+	if (IsDebuggerPresent()) {
+		write_detail(detail_out, detail_out_size, "debugger present");
 		return false;
 	}
+#endif
 	return true;
 }
 

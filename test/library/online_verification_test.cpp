@@ -28,6 +28,9 @@ namespace license {
 namespace test {
 using namespace std;
 
+static const char* const kOnlineFeatureName = "ONLINE";
+static_assert(sizeof("ONLINE") - 1 <= LCC_API_FEATURE_NAME_SIZE, "online test feature must fit public ABI");
+
 struct RuntimePolicyGuard {
 	RuntimePolicyGuard() {
 		online_verification::reset_revocation_floors_for_tests();
@@ -123,7 +126,7 @@ static string env_string(const char* name) {
 static online_verification::OnlineVerificationExpected expected_claims(const uint64_t now = 1000) {
 	online_verification::OnlineVerificationExpected expected;
 	expected.project = LCC_PROJECT_NAME;
-	expected.feature = LCC_PROJECT_NAME;
+	expected.feature = kOnlineFeatureName;
 	expected.license_fingerprint = string(LCC_API_ONLINE_LICENSE_FINGERPRINT_SIZE, 'a');
 	expected.device_hash = "";
 	expected.nonce = string(LCC_API_ONLINE_NONCE_SIZE, 'b');
@@ -145,7 +148,8 @@ struct OnlineVerifierTestFixture {
 	}
 
 	~OnlineVerifierTestFixture() {
-		online_verification::set_trusted_public_keys_for_tests(vector<online_verification::OnlineVerificationPublicKey>());
+		online_verification::set_trusted_public_keys_for_tests(
+			vector<online_verification::OnlineVerificationPublicKey>());
 		online_verification::reset_revocation_floors_for_tests();
 	}
 };
@@ -176,7 +180,7 @@ static string assertion_for(const online_verification::OnlineVerificationExpecte
 	return online_verification::build_assertion_envelope(payload, sign_payload(payload));
 }
 
-static string issue_valid_license_file(const string& license_name) {
+static string issue_license_file(const string& license_name, const string& extra_args) {
 	std::filesystem::create_directories(LCC_LICENSES_BASE);
 	const string file_path = string(LCC_LICENSES_BASE) + "/" + license_name + ".lic";
 	std::remove(file_path.c_str());
@@ -184,11 +188,19 @@ static string issue_valid_license_file(const string& license_name) {
 	ss << LCC_EXE << " license issue";
 	ss << " --" PARAM_PRIMARY_KEY " " << LCC_PROJECT_PRIVATE_KEY;
 	ss << " --" PARAM_LICENSE_OUTPUT " " << file_path;
-	ss << " --" PARAM_PROJECT_FOLDER " " << LCC_TEST_LICENSES_PROJECT;
+	ss << " --" PARAM_PROJECT_FOLDER " " << LCC_PROJECT_FOLDER;
+	ss << " --" PARAM_FEATURE_NAMES " " << kOnlineFeatureName;
+	if (!extra_args.empty()) {
+		ss << " " << extra_args;
+	}
 	const int ret = std::system(ss.str().c_str());
 	BOOST_REQUIRE_EQUAL(ret, 0);
 	BOOST_REQUIRE_MESSAGE(ifstream(file_path.c_str()).good(), "issued license exists: " + file_path);
 	return file_path;
+}
+
+static string issue_valid_license_file(const string& license_name) {
+	return issue_license_file(license_name, "");
 }
 
 static LicenseLocation license_path_location(const string& file_path) {
@@ -201,6 +213,8 @@ static LicenseLocation license_path_location(const string& file_path) {
 static CallerInformations default_caller() {
 	CallerInformations caller;
 	lcc_init_caller_informations(&caller);
+	BOOST_REQUIRE_MESSAGE(lcc_set_caller_feature_name(&caller, kOnlineFeatureName),
+						  "online test feature fits caller buffer");
 	return caller;
 }
 
@@ -257,6 +271,22 @@ static bool always_ok_host_integrity(void* user_data, char* detail_out, size_t d
 	return true;
 }
 
+static bool always_failing_host_integrity(void* user_data, char* detail_out, size_t detail_out_size) {
+	if (user_data != nullptr) {
+		int* calls = static_cast<int*>(user_data);
+		++(*calls);
+	}
+	const char detail[] = "host integrity failed";
+	if (detail_out != nullptr && detail_out_size > 0) {
+		const size_t max_count = detail_out_size - 1;
+		const size_t detail_size = strlen(detail);
+		const size_t count = detail_size < max_count ? detail_size : max_count;
+		memcpy(detail_out, detail, count);
+		detail_out[count] = '\0';
+	}
+	return false;
+}
+
 static LCC_ONLINE_CALLBACK_STATUS signing_callback(void* user_data, const LccOnlineRequest* request,
 												   char* assertion_out, size_t* assertion_out_size) {
 	CallbackState* state = static_cast<CallbackState*>(user_data);
@@ -300,8 +330,7 @@ static LCC_ONLINE_CALLBACK_STATUS signing_callback(void* user_data, const LccOnl
 	return copy_assertion_to_output(assertion, assertion_out, assertion_out_size);
 }
 
-static bool floor_load_callback(void* user_data, const LccRevocationFloorRecord* key,
-								uint64_t* revocation_seq_out) {
+static bool floor_load_callback(void* user_data, const LccRevocationFloorRecord* key, uint64_t* revocation_seq_out) {
 	FloorStoreState* state = static_cast<FloorStoreState*>(user_data);
 	if (state == nullptr || key == nullptr || revocation_seq_out == nullptr) {
 		return false;
@@ -329,8 +358,7 @@ static bool floor_store_callback(void* user_data, const LccRevocationFloorRecord
 	return true;
 }
 
-static LccLicenseDecisionOptions secure_decision_options(CallbackState& online_state,
-														 FloorStoreState& floor_state) {
+static LccLicenseDecisionOptions secure_decision_options(CallbackState& online_state, FloorStoreState& floor_state) {
 	LccLicenseDecisionOptions options;
 	lcc_init_license_decision_options(&options);
 	options.online_check = signing_callback;
@@ -348,8 +376,8 @@ BOOST_AUTO_TEST_CASE(verifier_accepts_valid_assertion) {
 	LCC_EVENT_TYPE failure = LICENSE_OK;
 	bool used_cache = false;
 
-	BOOST_CHECK(online_verification::verify_assertion_envelope(assertion, expected, nullptr, error, failure,
-															   used_cache));
+	BOOST_CHECK(
+		online_verification::verify_assertion_envelope(assertion, expected, nullptr, error, failure, used_cache));
 	BOOST_CHECK(!used_cache);
 	BOOST_CHECK(error.empty());
 }
@@ -389,9 +417,15 @@ BOOST_AUTO_TEST_CASE(canonical_online_assertion_payload_is_byte_exact) {
 		"key-id=sha256:test-key\n"
 		"project=DEFAULT\n"
 		"feature=EXPORT\n"
-		"license-fingerprint=" + string(LCC_API_ONLINE_LICENSE_FINGERPRINT_SIZE, 'a') + "\n"
-		"device-hash=" + string(LCC_API_ONLINE_DEVICE_HASH_SIZE, 'b') + "\n"
-		"nonce=" + string(LCC_API_ONLINE_NONCE_SIZE, 'c') + "\n"
+		"license-fingerprint=" +
+		string(LCC_API_ONLINE_LICENSE_FINGERPRINT_SIZE, 'a') +
+		"\n"
+		"device-hash=" +
+		string(LCC_API_ONLINE_DEVICE_HASH_SIZE, 'b') +
+		"\n"
+		"nonce=" +
+		string(LCC_API_ONLINE_NONCE_SIZE, 'c') +
+		"\n"
 		"status=ok\n"
 		"issued-at=1000\n"
 		"expires-at=1300\n"
@@ -442,8 +476,8 @@ BOOST_AUTO_TEST_CASE(shared_golden_assertion_verifies_in_cpp) {
 	string error;
 	LCC_EVENT_TYPE failure = LICENSE_OK;
 	bool used_cache = false;
-	BOOST_REQUIRE(online_verification::verify_assertion_envelope(assertion, expected, &verified_claims, error,
-																 failure, used_cache));
+	BOOST_REQUIRE(online_verification::verify_assertion_envelope(assertion, expected, &verified_claims, error, failure,
+																 used_cache));
 	BOOST_CHECK(error.empty());
 	BOOST_CHECK(!used_cache);
 	BOOST_CHECK_EQUAL(verified_claims.revocation_seq, 42);
@@ -459,8 +493,10 @@ BOOST_AUTO_TEST_CASE(remote_worker_assertion_fixture_verifies_in_cpp_when_provid
 	const string public_key_der_hex = env_string("LCC_REMOTE_ONLINE_PUBLIC_KEY_DER_HEX");
 	const string fingerprint = env_string("LCC_REMOTE_ONLINE_LICENSE_FINGERPRINT");
 	const string nonce = env_string("LCC_REMOTE_ONLINE_NONCE");
-	const string project = env_string("LCC_REMOTE_ONLINE_PROJECT").empty() ? "DEFAULT" : env_string("LCC_REMOTE_ONLINE_PROJECT");
-	const string feature = env_string("LCC_REMOTE_ONLINE_FEATURE").empty() ? "DEFAULT" : env_string("LCC_REMOTE_ONLINE_FEATURE");
+	const string project =
+		env_string("LCC_REMOTE_ONLINE_PROJECT").empty() ? "DEFAULT" : env_string("LCC_REMOTE_ONLINE_PROJECT");
+	const string feature =
+		env_string("LCC_REMOTE_ONLINE_FEATURE").empty() ? "DEFAULT" : env_string("LCC_REMOTE_ONLINE_FEATURE");
 	const string device_hash = env_string("LCC_REMOTE_ONLINE_DEVICE_HASH");
 	BOOST_REQUIRE_MESSAGE(!key_id.empty(), "LCC_REMOTE_ONLINE_KEY_ID is required with LCC_REMOTE_ONLINE_ASSERTION");
 	BOOST_REQUIRE_MESSAGE(!public_key_der_hex.empty(),
@@ -487,9 +523,9 @@ BOOST_AUTO_TEST_CASE(remote_worker_assertion_fixture_verifies_in_cpp_when_provid
 	string error;
 	LCC_EVENT_TYPE failure = LICENSE_OK;
 	bool used_cache = false;
-	BOOST_REQUIRE_MESSAGE(
-		online_verification::verify_assertion_envelope(assertion, expected, &verified_claims, error, failure, used_cache),
-		error);
+	BOOST_REQUIRE_MESSAGE(online_verification::verify_assertion_envelope(assertion, expected, &verified_claims, error,
+																		 failure, used_cache),
+						  error);
 	BOOST_CHECK(!used_cache);
 	BOOST_CHECK_EQUAL(verified_claims.key_id, key_id);
 	BOOST_CHECK_EQUAL(verified_claims.project, project);
@@ -534,30 +570,30 @@ BOOST_AUTO_TEST_CASE(verifier_rejects_tampered_and_mismatched_assertions) {
 	string error;
 	LCC_EVENT_TYPE failure = LICENSE_OK;
 	bool used_cache = false;
-	BOOST_CHECK(!online_verification::verify_assertion_envelope("bad." + assertion, expected, nullptr, error,
-																failure, used_cache));
+	BOOST_CHECK(!online_verification::verify_assertion_envelope("bad." + assertion, expected, nullptr, error, failure,
+																used_cache));
 	BOOST_CHECK_EQUAL(failure, LICENSE_ONLINE_ASSERTION_INVALID);
 
 	assertion = assertion_for(expected);
 	const size_t dot = assertion.find('.');
 	BOOST_REQUIRE_NE(dot, string::npos);
 	assertion[dot + 1] = assertion[dot + 1] == 'A' ? 'B' : 'A';
-	BOOST_CHECK(!online_verification::verify_assertion_envelope(assertion, expected, nullptr, error, failure,
-																used_cache));
+	BOOST_CHECK(
+		!online_verification::verify_assertion_envelope(assertion, expected, nullptr, error, failure, used_cache));
 	BOOST_CHECK_EQUAL(failure, LICENSE_ONLINE_ASSERTION_INVALID);
 
 	online_verification::OnlineVerificationExpected wrong_nonce = expected;
 	wrong_nonce.nonce[0] = 'c';
 	assertion = assertion_for(expected);
-	BOOST_CHECK(!online_verification::verify_assertion_envelope(assertion, wrong_nonce, nullptr, error, failure,
-																used_cache));
+	BOOST_CHECK(
+		!online_verification::verify_assertion_envelope(assertion, wrong_nonce, nullptr, error, failure, used_cache));
 	BOOST_CHECK_EQUAL(failure, LICENSE_ONLINE_ASSERTION_INVALID);
 
 	online_verification::OnlineVerificationExpected wrong_feature = expected;
 	wrong_feature.feature = "EXPORT";
 	assertion = assertion_for(expected);
-	BOOST_CHECK(!online_verification::verify_assertion_envelope(assertion, wrong_feature, nullptr, error, failure,
-																used_cache));
+	BOOST_CHECK(
+		!online_verification::verify_assertion_envelope(assertion, wrong_feature, nullptr, error, failure, used_cache));
 	BOOST_CHECK_EQUAL(failure, LICENSE_ONLINE_ASSERTION_INVALID);
 
 	online_verification::OnlineVerificationExpected wrong_fingerprint = expected;
@@ -572,8 +608,8 @@ BOOST_AUTO_TEST_CASE(verifier_rejects_tampered_and_mismatched_assertions) {
 	online_verification::OnlineVerificationExpected wrong_device = device_bound;
 	wrong_device.device_hash[0] = 'd';
 	assertion = assertion_for(device_bound);
-	BOOST_CHECK(!online_verification::verify_assertion_envelope(assertion, wrong_device, nullptr, error, failure,
-																used_cache));
+	BOOST_CHECK(
+		!online_verification::verify_assertion_envelope(assertion, wrong_device, nullptr, error, failure, used_cache));
 	BOOST_CHECK_EQUAL(failure, LICENSE_ONLINE_ASSERTION_INVALID);
 }
 
@@ -583,21 +619,21 @@ BOOST_AUTO_TEST_CASE(verifier_enforces_status_and_cache_window) {
 	LCC_EVENT_TYPE failure = LICENSE_OK;
 	bool used_cache = false;
 
-	BOOST_CHECK(!online_verification::verify_assertion_envelope(assertion_for(expected, "denied"), expected,
-																nullptr, error, failure, used_cache));
+	BOOST_CHECK(!online_verification::verify_assertion_envelope(assertion_for(expected, "denied"), expected, nullptr,
+																error, failure, used_cache));
 	BOOST_CHECK_EQUAL(failure, LICENSE_ONLINE_VERIFICATION_FAILED);
 
-	BOOST_CHECK(!online_verification::verify_assertion_envelope(assertion_for(expected, "ok", 800, 900, 950),
-																expected, nullptr, error, failure, used_cache));
+	BOOST_CHECK(!online_verification::verify_assertion_envelope(assertion_for(expected, "ok", 800, 900, 950), expected,
+																nullptr, error, failure, used_cache));
 	BOOST_CHECK_EQUAL(failure, LICENSE_ONLINE_ASSERTION_INVALID);
 
 	expected.allow_cache = true;
-	BOOST_CHECK(online_verification::verify_assertion_envelope(assertion_for(expected, "ok", 800, 900, 1100),
-															   expected, nullptr, error, failure, used_cache));
+	BOOST_CHECK(online_verification::verify_assertion_envelope(assertion_for(expected, "ok", 800, 900, 1100), expected,
+															   nullptr, error, failure, used_cache));
 	BOOST_CHECK(used_cache);
 
-	BOOST_CHECK(!online_verification::verify_assertion_envelope(assertion_for(expected, "ok", 800, 900, 950),
-																expected, nullptr, error, failure, used_cache));
+	BOOST_CHECK(!online_verification::verify_assertion_envelope(assertion_for(expected, "ok", 800, 900, 950), expected,
+																nullptr, error, failure, used_cache));
 	BOOST_CHECK_EQUAL(failure, LICENSE_ONLINE_CACHE_EXPIRED);
 
 	online_verification::OnlineVerificationExpected strict_cache = expected_claims();
@@ -618,20 +654,20 @@ BOOST_AUTO_TEST_CASE(verifier_accepts_nonce_mismatch_only_as_valid_cache) {
 	bool used_cache = false;
 	const string assertion = assertion_for(expected, "ok", 900, 1100, 1200);
 
-	BOOST_CHECK(!online_verification::verify_assertion_envelope(assertion, cached_request, nullptr, error,
-																failure, used_cache));
+	BOOST_CHECK(!online_verification::verify_assertion_envelope(assertion, cached_request, nullptr, error, failure,
+																used_cache));
 	BOOST_CHECK_EQUAL(failure, LICENSE_ONLINE_ASSERTION_INVALID);
 	BOOST_CHECK(!used_cache);
 
 	cached_request.allow_cache = true;
-	BOOST_CHECK(online_verification::verify_assertion_envelope(assertion, cached_request, nullptr, error, failure,
-															   used_cache));
+	BOOST_CHECK(
+		online_verification::verify_assertion_envelope(assertion, cached_request, nullptr, error, failure, used_cache));
 	BOOST_CHECK(used_cache);
 
 	cached_request.now_epoch_seconds = 1300;
 	used_cache = false;
-	BOOST_CHECK(!online_verification::verify_assertion_envelope(assertion, cached_request, nullptr, error,
-																failure, used_cache));
+	BOOST_CHECK(!online_verification::verify_assertion_envelope(assertion, cached_request, nullptr, error, failure,
+																used_cache));
 	BOOST_CHECK_EQUAL(failure, LICENSE_ONLINE_ASSERTION_INVALID);
 	BOOST_CHECK(!used_cache);
 }
@@ -667,7 +703,7 @@ BOOST_AUTO_TEST_CASE(evaluate_advances_revocation_floor_and_rejects_rollback) {
 	request.policy = online_verification::OnlinePolicy::Require;
 	request.online_check = signing_callback;
 	request.project = LCC_PROJECT_NAME;
-	request.feature = LCC_PROJECT_NAME;
+	request.feature = kOnlineFeatureName;
 	request.license_fingerprint = string(LCC_API_ONLINE_LICENSE_FINGERPRINT_SIZE, 'a');
 	request.device_hash = "";
 
@@ -676,25 +712,25 @@ BOOST_AUTO_TEST_CASE(evaluate_advances_revocation_floor_and_rejects_rollback) {
 
 	state.revocation_seq = 5;
 	online_verification::OnlineVerificationResult result = online_verification::evaluate(request);
-	BOOST_REQUIRE(!result.failed());
-	BOOST_CHECK_EQUAL(online_verification::revocation_floor_for_tests(request.project, request.feature,
-																	  request.license_fingerprint),
-					  5U);
+	BOOST_REQUIRE_MESSAGE(!result.failed(), result.detail);
+	BOOST_CHECK_EQUAL(
+		online_verification::revocation_floor_for_tests(request.project, request.feature, request.license_fingerprint),
+		5U);
 
 	state.revocation_seq = 4;
 	result = online_verification::evaluate(request);
 	BOOST_CHECK(result.failed());
 	BOOST_CHECK_EQUAL(result.event_type, LICENSE_ONLINE_ASSERTION_INVALID);
-	BOOST_CHECK_EQUAL(online_verification::revocation_floor_for_tests(request.project, request.feature,
-																	  request.license_fingerprint),
-					  5U);
+	BOOST_CHECK_EQUAL(
+		online_verification::revocation_floor_for_tests(request.project, request.feature, request.license_fingerprint),
+		5U);
 
 	state.revocation_seq = 6;
 	result = online_verification::evaluate(request);
 	BOOST_CHECK(!result.failed());
-	BOOST_CHECK_EQUAL(online_verification::revocation_floor_for_tests(request.project, request.feature,
-																	  request.license_fingerprint),
-					  6U);
+	BOOST_CHECK_EQUAL(
+		online_verification::revocation_floor_for_tests(request.project, request.feature, request.license_fingerprint),
+		6U);
 	online_verification::reset_revocation_floors_for_tests();
 }
 
@@ -704,7 +740,7 @@ BOOST_AUTO_TEST_CASE(evaluate_enforces_external_minimum_revocation_floor) {
 	request.policy = online_verification::OnlinePolicy::Require;
 	request.online_check = signing_callback;
 	request.project = LCC_PROJECT_NAME;
-	request.feature = LCC_PROJECT_NAME;
+	request.feature = kOnlineFeatureName;
 	request.license_fingerprint = string(LCC_API_ONLINE_LICENSE_FINGERPRINT_SIZE, 'a');
 	request.device_hash = "";
 	request.minimum_revocation_seq = 9;
@@ -715,17 +751,17 @@ BOOST_AUTO_TEST_CASE(evaluate_enforces_external_minimum_revocation_floor) {
 	online_verification::OnlineVerificationResult result = online_verification::evaluate(request);
 	BOOST_CHECK(result.failed());
 	BOOST_CHECK_EQUAL(result.event_type, LICENSE_ONLINE_ASSERTION_INVALID);
-	BOOST_CHECK_EQUAL(online_verification::revocation_floor_for_tests(request.project, request.feature,
-																	  request.license_fingerprint),
-					  0U);
+	BOOST_CHECK_EQUAL(
+		online_verification::revocation_floor_for_tests(request.project, request.feature, request.license_fingerprint),
+		0U);
 
 	state.revocation_seq = 9;
 	result = online_verification::evaluate(request);
-	BOOST_REQUIRE(!result.failed());
+	BOOST_REQUIRE_MESSAGE(!result.failed(), result.detail);
 	BOOST_CHECK_EQUAL(result.accepted_revocation_seq, 9U);
-	BOOST_CHECK_EQUAL(online_verification::revocation_floor_for_tests(request.project, request.feature,
-																	  request.license_fingerprint),
-					  9U);
+	BOOST_CHECK_EQUAL(
+		online_verification::revocation_floor_for_tests(request.project, request.feature, request.license_fingerprint),
+		9U);
 	online_verification::reset_revocation_floors_for_tests();
 }
 
@@ -735,7 +771,7 @@ BOOST_AUTO_TEST_CASE(evaluate_rejects_replayed_assertion_below_seen_revocation_f
 	request.policy = online_verification::OnlinePolicy::Require;
 	request.online_check = signing_callback;
 	request.project = LCC_PROJECT_NAME;
-	request.feature = LCC_PROJECT_NAME;
+	request.feature = kOnlineFeatureName;
 	request.license_fingerprint = string(LCC_API_ONLINE_LICENSE_FINGERPRINT_SIZE, 'a');
 	request.device_hash = "";
 
@@ -743,16 +779,16 @@ BOOST_AUTO_TEST_CASE(evaluate_rejects_replayed_assertion_below_seen_revocation_f
 	state.revocation_seq = 7;
 	request.online_user_data = &state;
 	online_verification::OnlineVerificationResult result = online_verification::evaluate(request);
-	BOOST_REQUIRE(!result.failed());
+	BOOST_REQUIRE_MESSAGE(!result.failed(), result.detail);
 	const string cached_seq7 = state.last_assertion;
 	BOOST_REQUIRE(!cached_seq7.empty());
 
 	state.revocation_seq = 8;
 	result = online_verification::evaluate(request);
-	BOOST_REQUIRE(!result.failed());
-	BOOST_CHECK_EQUAL(online_verification::revocation_floor_for_tests(request.project, request.feature,
-																	  request.license_fingerprint),
-					  8U);
+	BOOST_REQUIRE_MESSAGE(!result.failed(), result.detail);
+	BOOST_CHECK_EQUAL(
+		online_verification::revocation_floor_for_tests(request.project, request.feature, request.license_fingerprint),
+		8U);
 
 	CallbackState replay;
 	replay.replay_assertion = cached_seq7;
@@ -761,9 +797,9 @@ BOOST_AUTO_TEST_CASE(evaluate_rejects_replayed_assertion_below_seen_revocation_f
 	BOOST_CHECK(result.failed());
 	BOOST_CHECK_EQUAL(result.event_type, LICENSE_ONLINE_ASSERTION_INVALID);
 	BOOST_CHECK(!result.used_cache);
-	BOOST_CHECK_EQUAL(online_verification::revocation_floor_for_tests(request.project, request.feature,
-																	  request.license_fingerprint),
-					  8U);
+	BOOST_CHECK_EQUAL(
+		online_verification::revocation_floor_for_tests(request.project, request.feature, request.license_fingerprint),
+		8U);
 	online_verification::reset_revocation_floors_for_tests();
 }
 
@@ -851,8 +887,7 @@ BOOST_AUTO_TEST_CASE(require_policy_accepts_valid_assertion_and_rejects_bad_bind
 
 	state.mutate_nonce = true;
 	LicenseInfo bad_info{};
-	BOOST_CHECK_EQUAL(acquire_license_ex(&caller, &location, &bad_info, &options),
-					  LICENSE_ONLINE_ASSERTION_INVALID);
+	BOOST_CHECK_EQUAL(acquire_license_ex(&caller, &location, &bad_info, &options), LICENSE_ONLINE_ASSERTION_INVALID);
 	BOOST_CHECK(find_status_event(bad_info, LICENSE_ONLINE_ASSERTION_INVALID, SVRT_ERROR) != nullptr);
 
 	std::remove(valid_path.c_str());
@@ -874,6 +909,106 @@ BOOST_AUTO_TEST_CASE(decision_wrapper_requires_online_and_persistent_floor_callb
 	BOOST_CHECK(decision.tamper_enforced);
 	BOOST_CHECK(find_status_event(info, LICENSE_ONLINE_REQUIRED, SVRT_ERROR) != nullptr);
 	BOOST_CHECK_EQUAL(info.license_version, 0);
+
+	std::remove(valid_path.c_str());
+}
+
+BOOST_AUTO_TEST_CASE(decision_wrapper_rejects_nonzero_reserved_options) {
+	RuntimePolicyGuard guard;
+	CallerInformations caller = default_caller();
+	LccLicenseDecisionOptions options;
+	lcc_init_license_decision_options(&options);
+	options.reserved = 1;
+
+	LicenseInfo info{};
+	LccLicenseDecision decision;
+	const LCC_EVENT_TYPE result = lcc_acquire_license_decision(&caller, nullptr, &info, &decision, &options);
+	BOOST_CHECK_EQUAL(result, LICENSE_MALFORMED);
+	BOOST_CHECK_EQUAL(decision.decision, LCC_LICENSE_DECISION_DENY);
+	BOOST_CHECK_EQUAL(decision.event_type, LICENSE_MALFORMED);
+	BOOST_CHECK(has_status_event(info, LICENSE_MALFORMED));
+}
+
+BOOST_AUTO_TEST_CASE(decision_wrapper_denies_host_integrity_before_online_or_floor_callbacks) {
+	RuntimePolicyGuard guard;
+	const string valid_path = issue_valid_license_file("decision-host-integrity-before-online");
+	LicenseLocation location = license_path_location(valid_path);
+	CallerInformations caller = default_caller();
+
+	CallbackState online_state;
+	FloorStoreState floor_state;
+	LccLicenseDecisionOptions options = secure_decision_options(online_state, floor_state);
+	int host_calls = 0;
+	options.host_integrity_check = always_failing_host_integrity;
+	options.host_integrity_user_data = &host_calls;
+
+	LicenseInfo info{};
+	LccLicenseDecision decision;
+	const LCC_EVENT_TYPE result = lcc_acquire_license_decision(&caller, &location, &info, &decision, &options);
+	BOOST_CHECK_EQUAL(result, LICENSE_TAMPER_DETECTED);
+	BOOST_CHECK_EQUAL(decision.decision, LCC_LICENSE_DECISION_DENY);
+	BOOST_CHECK_EQUAL(decision.event_type, LICENSE_TAMPER_DETECTED);
+	BOOST_CHECK(decision.tamper_enforced);
+	BOOST_CHECK_EQUAL(host_calls, 1);
+	BOOST_CHECK_EQUAL(online_state.calls, 0);
+	BOOST_CHECK_EQUAL(floor_state.load_calls, 0);
+	BOOST_CHECK_EQUAL(floor_state.store_calls, 0);
+	BOOST_CHECK(find_status_event(info, LICENSE_TAMPER_DETECTED, SVRT_ERROR) != nullptr);
+
+	std::remove(valid_path.c_str());
+}
+
+BOOST_AUTO_TEST_CASE(decision_wrapper_denies_source_shadowing_before_online_or_floor_callbacks) {
+	RuntimePolicyGuard guard;
+	const string valid_path = issue_valid_license_file("decision-source-shadow-before-online");
+	LicenseLocation location = license_path_location(valid_path);
+	CallerInformations caller = default_caller();
+	lcc_set_environment_license_sources_enabled(true);
+	SETENV(LCC_LICENSE_DATA_ENV_VAR, "!!!!");
+	UNSETENV(LCC_LICENSE_LOCATION_ENV_VAR);
+
+	CallbackState online_state;
+	FloorStoreState floor_state;
+	LccLicenseDecisionOptions options = secure_decision_options(online_state, floor_state);
+
+	LicenseInfo info{};
+	LccLicenseDecision decision;
+	const LCC_EVENT_TYPE result = lcc_acquire_license_decision(&caller, &location, &info, &decision, &options);
+	BOOST_CHECK_EQUAL(result, LICENSE_TAMPER_DETECTED);
+	BOOST_CHECK_EQUAL(decision.decision, LCC_LICENSE_DECISION_DENY);
+	BOOST_CHECK_EQUAL(decision.event_type, LICENSE_TAMPER_DETECTED);
+	BOOST_CHECK_EQUAL(online_state.calls, 0);
+	BOOST_CHECK_EQUAL(floor_state.load_calls, 0);
+	BOOST_CHECK_EQUAL(floor_state.store_calls, 0);
+	BOOST_CHECK(find_status_event(info, LICENSE_TAMPER_DETECTED, SVRT_ERROR) != nullptr);
+
+	std::remove(valid_path.c_str());
+}
+
+BOOST_AUTO_TEST_CASE(decision_wrapper_denies_floor_load_before_online_callback) {
+	RuntimePolicyGuard guard;
+	const string valid_path = issue_valid_license_file("decision-floor-load-before-online");
+	LicenseLocation location = license_path_location(valid_path);
+	CallerInformations caller = default_caller();
+
+	CallbackState online_state;
+	FloorStoreState floor_state;
+	floor_state.load_ok = false;
+	LccLicenseDecisionOptions options = secure_decision_options(online_state, floor_state);
+
+	LicenseInfo info{};
+	LccLicenseDecision decision;
+	const LCC_EVENT_TYPE result = lcc_acquire_license_decision(&caller, &location, &info, &decision, &options);
+	BOOST_CHECK_EQUAL(result, LICENSE_ONLINE_VERIFICATION_FAILED);
+	BOOST_CHECK_EQUAL(decision.decision, LCC_LICENSE_DECISION_DENY);
+	BOOST_CHECK_EQUAL(decision.event_type, LICENSE_ONLINE_VERIFICATION_FAILED);
+	BOOST_CHECK(!decision.online_verified);
+	BOOST_CHECK(!decision.revocation_floor_loaded);
+	BOOST_CHECK(!decision.revocation_floor_stored);
+	BOOST_CHECK_EQUAL(floor_state.load_calls, 1);
+	BOOST_CHECK_EQUAL(floor_state.store_calls, 0);
+	BOOST_CHECK_EQUAL(online_state.calls, 0);
+	BOOST_CHECK(find_status_event(info, LICENSE_ONLINE_VERIFICATION_FAILED, SVRT_ERROR) != nullptr);
 
 	std::remove(valid_path.c_str());
 }
@@ -994,6 +1129,38 @@ BOOST_AUTO_TEST_CASE(decision_wrapper_preserves_local_license_failure_precedence
 	BOOST_CHECK_EQUAL(floor_state.store_calls, 0);
 	BOOST_CHECK(!has_status_event(info, LICENSE_ONLINE_VERIFICATION_FAILED));
 	BOOST_CHECK(!has_status_event(info, LICENSE_ONLINE_ASSERTION_INVALID));
+}
+
+BOOST_AUTO_TEST_CASE(decision_wrapper_preserves_expired_and_identifier_failure_precedence) {
+	RuntimePolicyGuard guard;
+	CallerInformations caller = default_caller();
+	const struct {
+		const char* name;
+		const char* extra_args;
+		LCC_EVENT_TYPE expected;
+	} cases[] = {{"decision-local-expired", "--valid-to 2000-01-01", PRODUCT_EXPIRED},
+				 {"decision-local-identifier-mismatch", "--client-signature AEBC-Q0RF-Rkc=",
+				  IDENTIFIERS_MISMATCH}};
+
+	for (const auto& test_case : cases) {
+		const string path = issue_license_file(test_case.name, test_case.extra_args);
+		LicenseLocation location = license_path_location(path);
+		CallbackState online_state;
+		FloorStoreState floor_state;
+		LccLicenseDecisionOptions options = secure_decision_options(online_state, floor_state);
+
+		LicenseInfo info{};
+		LccLicenseDecision decision;
+		const LCC_EVENT_TYPE result = lcc_acquire_license_decision(&caller, &location, &info, &decision, &options);
+		BOOST_CHECK_EQUAL(result, test_case.expected);
+		BOOST_CHECK_EQUAL(decision.decision, LCC_LICENSE_DECISION_DENY);
+		BOOST_CHECK_EQUAL(online_state.calls, 0);
+		BOOST_CHECK_EQUAL(floor_state.load_calls, 0);
+		BOOST_CHECK_EQUAL(floor_state.store_calls, 0);
+		BOOST_CHECK(!has_status_event(info, LICENSE_ONLINE_VERIFICATION_FAILED));
+		BOOST_CHECK(!has_status_event(info, LICENSE_ONLINE_ASSERTION_INVALID));
+		std::remove(path.c_str());
+	}
 }
 
 BOOST_AUTO_TEST_CASE(online_request_carries_client_hardening_posture) {

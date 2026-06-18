@@ -73,7 +73,7 @@ jobs:
       -  name: Security facet gates
          working-directory: build
          run: |
-            for label in security parser signature base64 public_api generator package install platform hardware validation verifier v201; do
+            for label in security parser signature base64 public_api anti_tamper online generator package install platform hardware validation verifier v201; do
               echo "::group::ctest -L ${label}"
               ctest -L "${label}" --output-on-failure --no-tests=error
               echo "::endgroup::"
@@ -147,7 +147,7 @@ jobs:
             UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
       -  name: Run sanitizer boundary facets
          run: |
-            for label in public_api parser base64 signature verifier v201 generator hardware platform validation; do
+            for label in public_api anti_tamper online parser base64 signature verifier v201 generator hardware platform validation; do
               echo "::group::ctest -L ${label}"
               ctest --test-dir build-asan -L "${label}" -E "test_install_consumer_smoke|test_package_consumer_smoke|test_release_safety_smoke|test_artifact_scan_smoke|test_tools_profile_smoke|test_source_package_smoke|test_manifest_summary_smoke" --output-on-failure --no-tests=error
               echo "::endgroup::"

@@ -1,7 +1,7 @@
 // Minimal licensecc integration example.
 //
 // Shows the whole consumer API surface you usually need:
-//   - acquire_license_ex() to check the license with audit-mode tamper signals
+//   - acquire_license_ex() to check the license with enforced tamper policy defaults
 //   - lcc_strerror()       to turn the result code into a message
 //   - print_error()        to summarise why a check failed
 //

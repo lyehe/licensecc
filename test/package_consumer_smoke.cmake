@@ -125,6 +125,84 @@ target_link_libraries(minimal PRIVATE licensecc::licensecc_static)
 ")
 endfunction()
 
+function(_write_decision_consumer source_dir project_name)
+	_remove_safe("${source_dir}" "${LICENSECC_PACKAGE_ROOT}" "decision consumer source")
+	file(MAKE_DIRECTORY "${source_dir}")
+	file(WRITE "${source_dir}/main.cpp"
+"#include <cstdio>
+#include <cstring>
+#include <licensecc/licensecc.h>
+
+static int online_calls = 0;
+static int floor_load_calls = 0;
+static int floor_store_calls = 0;
+
+static LCC_ONLINE_CALLBACK_STATUS online_callback(void*, const LccOnlineRequest*, char*, size_t*) {
+	++online_calls;
+	return LCC_ONLINE_CB_TRANSPORT_UNAVAILABLE;
+}
+
+static bool host_integrity_callback(void*, char* detail_out, size_t detail_out_size) {
+	if (detail_out != nullptr && detail_out_size > 0) {
+		std::snprintf(detail_out, detail_out_size, \"packaged consumer forced host failure\");
+	}
+	return false;
+}
+
+static bool floor_load_callback(void*, const LccRevocationFloorRecord*, uint64_t* revocation_seq_out) {
+	++floor_load_calls;
+	if (revocation_seq_out != nullptr) {
+		*revocation_seq_out = 0;
+	}
+	return true;
+}
+
+static bool floor_store_callback(void*, const LccRevocationFloorRecord*) {
+	++floor_store_calls;
+	return true;
+}
+
+int main(int argc, char** argv) {
+	if (argc != 2) {
+		return 2;
+	}
+	CallerInformations caller;
+	lcc_init_caller_informations(&caller);
+	LicenseLocation location;
+	lcc_init_license_location(&location, LICENSE_PATH);
+	if (!lcc_set_license_path(&location, argv[1])) {
+		return 2;
+	}
+	LicenseInfo info;
+	LccLicenseDecision decision;
+	LccLicenseDecisionOptions options;
+	lcc_init_license_decision_options(&options);
+	options.online_check = online_callback;
+	options.host_integrity_check = host_integrity_callback;
+	options.revocation_floor_load = floor_load_callback;
+	options.revocation_floor_store = floor_store_callback;
+	const LCC_EVENT_TYPE result = lcc_acquire_license_decision(&caller, &location, &info, &decision, &options);
+	if (result != LICENSE_TAMPER_DETECTED || decision.decision != LCC_LICENSE_DECISION_DENY ||
+		!decision.tamper_enforced || online_calls != 0 || floor_load_calls != 0 || floor_store_calls != 0) {
+		return 1;
+	}
+	return 0;
+}
+")
+	file(WRITE "${source_dir}/CMakeLists.txt"
+"cmake_minimum_required(VERSION 3.16)
+project(licensecc_packaged_decision_consumer CXX)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+find_package(licensecc REQUIRED COMPONENTS ${project_name})
+
+add_executable(decision_consumer main.cpp)
+target_link_libraries(decision_consumer PRIVATE licensecc::licensecc_static)
+")
+endfunction()
+
 _require_defined(LICENSECC_SOURCE_DIR)
 _require_defined(LICENSECC_BUILD_DIR)
 _require_defined(LICENSECC_PACKAGE_ROOT)
@@ -373,6 +451,41 @@ if("${_host_exe}" STREQUAL "")
 	message(FATAL_ERROR "Could not find packaged fail_closed_host executable under ${_host_consumer_dir}")
 endif()
 
+set(_decision_consumer_dir "${LICENSECC_PACKAGE_ROOT}/decision-consumer")
+set(_decision_source_dir "${LICENSECC_PACKAGE_ROOT}/decision-consumer-src")
+_write_decision_consumer("${_decision_source_dir}" "${LICENSECC_PROJECT_NAME}")
+set(_decision_configure_command
+	"${CMAKE_COMMAND}"
+	-S "${_decision_source_dir}"
+	-B "${_decision_consumer_dir}"
+	"-DCMAKE_PREFIX_PATH=${_prefix}"
+)
+_append_generator_args(_decision_configure_command)
+_run_checked("packaged decision consumer configure" ${_decision_configure_command})
+
+set(_decision_build_command "${CMAKE_COMMAND}" --build "${_decision_consumer_dir}")
+if(NOT "${LICENSECC_CONFIG}" STREQUAL "")
+	list(APPEND _decision_build_command --config "${LICENSECC_CONFIG}")
+endif()
+_run_checked("packaged decision consumer build" ${_decision_build_command})
+
+set(_decision_candidates
+	"${_decision_consumer_dir}/${LICENSECC_CONFIG}/decision_consumer.exe"
+	"${_decision_consumer_dir}/decision_consumer.exe"
+	"${_decision_consumer_dir}/${LICENSECC_CONFIG}/decision_consumer"
+	"${_decision_consumer_dir}/decision_consumer"
+)
+set(_decision_exe "")
+foreach(_candidate IN LISTS _decision_candidates)
+	if(EXISTS "${_candidate}")
+		set(_decision_exe "${_candidate}")
+		break()
+	endif()
+endforeach()
+if("${_decision_exe}" STREQUAL "")
+	message(FATAL_ERROR "Could not find packaged decision_consumer executable under ${_decision_consumer_dir}")
+endif()
+
 function(_find_lccgen out_var)
 	set(_lccgen_candidates
 		"${LICENSECC_BUILD_DIR}/extern/license-generator/src/license_generator/${LICENSECC_CONFIG}/lccgen.exe"
@@ -480,6 +593,7 @@ file(MAKE_DIRECTORY "${_licenses_dir}")
 _find_lccgen(_lccgen_exe)
 
 _issue_license("valid" _valid_license)
+_run_checked("packaged decision wrapper consumer forced tamper denial" "${_decision_exe}" "${_valid_license}")
 _run_minimal_case("valid license" 0 "license OK" "${_valid_license}" "-" "-" "-")
 _run_minimal_case("valid license with matching magic" 0 "license OK" "${_valid_license}" "${LICENSECC_PROJECT_NAME}" "0" "${LICENSECC_PROJECT_MAGIC_NUM}")
 if(NOT "${LICENSECC_PROJECT_MAGIC_NUM}" STREQUAL "0")

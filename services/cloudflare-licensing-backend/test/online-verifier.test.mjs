@@ -7,6 +7,7 @@ import { spawnSync } from "node:child_process";
 import { test } from "node:test";
 import worker, {
   canonicalPayloadForTests,
+  canonicalRequestProofPayloadForTests,
   resetSigningKeyCacheForTests,
   signingKeyImportCountForTests,
   validateVerifyRequest,
@@ -20,6 +21,7 @@ function bytesToPem(bytes, label) {
 }
 
 async function testKeyEnv(row, overrides = {}) {
+  const { deviceRows = [], ...envOverrides } = overrides;
   const keyPair = await crypto.subtle.generateKey(
     { name: "RSASSA-PKCS1-v1_5", modulusLength: 3072, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" },
     true,
@@ -31,7 +33,26 @@ async function testKeyEnv(row, overrides = {}) {
     ONLINE_SIGNING_KEY_ID: "sha256:test-online-key",
     MAX_ASSERTION_TTL_SECONDS: "300",
     DB: {
-      prepare() {
+      prepare(sql) {
+        if (sql.includes("FROM entitlement_devices")) {
+          return {
+            bind(project, feature, licenseFingerprint, deviceKeyId) {
+              return {
+                async first() {
+                  return (
+                    deviceRows.find(
+                      (device) =>
+                        device.project === project &&
+                        device.feature === feature &&
+                        device.license_fingerprint === licenseFingerprint &&
+                        device.device_key_id === deviceKeyId,
+                    ) ?? null
+                  );
+                },
+              };
+            },
+          };
+        }
         return {
           bind(project, feature, licenseFingerprint) {
             return {
@@ -51,7 +72,7 @@ async function testKeyEnv(row, overrides = {}) {
         };
       },
     },
-    ...overrides,
+    ...envOverrides,
   };
   return env;
 }
@@ -65,6 +86,64 @@ function validBody(overrides = {}) {
     nonce: "b".repeat(64),
     ...overrides,
   };
+}
+
+function base64FromBytes(bytes) {
+  return Buffer.from(bytes).toString("base64");
+}
+
+async function requestProofFixture(bodyOverrides = {}, proofOverrides = {}) {
+  const keyPair = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"]);
+  const spki = new Uint8Array(await crypto.subtle.exportKey("spki", keyPair.publicKey));
+  const deviceKeyId = `sha256:${createHash("sha256").update(Buffer.from(spki)).digest("hex")}`;
+  const body = validBody({
+    request_signature_version: 1,
+    device_key_id: deviceKeyId,
+    request_timestamp: 1_000_000,
+    request_signature_algorithm: "ecdsa-p256-sha256",
+    request_signature: "AA==",
+    ...bodyOverrides,
+  });
+  const validated = validateVerifyRequest(body);
+  assert.notEqual(validated, null);
+  const payload = canonicalRequestProofPayloadForTests(validated);
+  const signature = new Uint8Array(
+    await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, keyPair.privateKey, new TextEncoder().encode(payload)),
+  );
+  const signedBody = {
+    ...body,
+    request_signature: base64FromBytes(signature),
+    ...proofOverrides,
+  };
+  return {
+    body: signedBody,
+    deviceRow: {
+      project: signedBody.project,
+      feature: signedBody.feature,
+      license_fingerprint: signedBody.license_fingerprint,
+      device_key_id: deviceKeyId,
+      public_key_spki_der_base64: base64FromBytes(spki),
+      status: "active",
+    },
+  };
+}
+
+async function captureConsoleEvents(fn) {
+  const originalLog = console.log;
+  const originalWarn = console.warn;
+  const originalError = console.error;
+  const lines = [];
+  console.log = (line) => lines.push({ severity: "info", line: String(line) });
+  console.warn = (line) => lines.push({ severity: "warn", line: String(line) });
+  console.error = (line) => lines.push({ severity: "error", line: String(line) });
+  try {
+    await fn();
+  } finally {
+    console.log = originalLog;
+    console.warn = originalWarn;
+    console.error = originalError;
+  }
+  return lines.map((entry) => ({ severity: entry.severity, ...JSON.parse(entry.line) }));
 }
 
 function derPayloadOffset(bytes, offset) {
@@ -123,6 +202,12 @@ test("break-glass CLI transitions keep revoked terminal except revoke", () => {
   assert.doesNotMatch(revoked, /AND status != 'revoked'/);
 });
 
+test("break-glass CLI list does not require a fingerprint", () => {
+  const sql = sqlFor("list", {});
+  assert.match(sql, /FROM entitlements ORDER BY updated_at DESC LIMIT 100/);
+  assert.doesNotMatch(sql, /license_fingerprint =/);
+});
+
 test("schema permits sync audit actor type", () => {
   const schema = readFileSync("schema.sql", "utf8");
   const migration = readFileSync("migrations/0006_allow_sync_actor_type.sql", "utf8");
@@ -177,6 +262,17 @@ test("schema and migration 0007 permit the revoked-override audit event type", (
   assert.match(migration, /event_type IN \([^)]*'revoked-override'\)/);
 });
 
+test("schema and migration 0008 define entitlement device keys", () => {
+  const schema = readFileSync("schema.sql", "utf8");
+  const migration = readFileSync("migrations/0008_create_entitlement_devices.sql", "utf8");
+  for (const sql of [schema, migration]) {
+    assert.match(sql, /CREATE TABLE IF NOT EXISTS entitlement_devices/);
+    assert.match(sql, /device_key_id TEXT NOT NULL/);
+    assert.match(sql, /public_key_spki_der_base64 TEXT NOT NULL/);
+    assert.match(sql, /status TEXT NOT NULL CHECK \(status IN \('active', 'revoked', 'disabled'\)\)/);
+  }
+});
+
 test("interpretWranglerResult flags 0-row mutations and ignores reads", () => {
   // --remote --file (D1 import) reports rows_written; 0 means a guarded no-op.
   assert.equal(interpretWranglerResult([{ meta: { rows_written: 0 } }], "upsert"), "noop");
@@ -193,6 +289,62 @@ test("validates request schema", () => {
   assert.equal(validateVerifyRequest(validBody()).project, "DEFAULT");
   assert.equal(validateVerifyRequest(validBody({ nonce: "x" })), null);
   assert.equal(validateVerifyRequest(validBody({ license_fingerprint: "z".repeat(64) })), null);
+  assert.equal(validateVerifyRequest(validBody({ request_signature_version: 1 })), null);
+  assert.equal(
+    validateVerifyRequest(
+      validBody({
+        request_signature_version: 1,
+        device_key_id: `sha256:${"a".repeat(64)}`,
+        request_timestamp: 1_000_000,
+        request_signature_algorithm: "ecdsa-p256-sha256",
+        request_signature: "AA==",
+      }),
+    ).request_proof.device_key_id,
+    `sha256:${"a".repeat(64)}`,
+  );
+  assert.equal(
+    validateVerifyRequest(
+      validBody({
+        request_signature_version: 1,
+        device_key_id: `sha256:${"a".repeat(64)}`,
+        request_timestamp: 1_000_000,
+        request_signature_algorithm: "rsa-pkcs1-sha256",
+        request_signature: "AA==",
+      }),
+    ),
+    null,
+  );
+});
+
+test("canonical request proof payload is byte exact", () => {
+  const body = validateVerifyRequest(
+    validBody({
+      request_signature_version: 1,
+      device_key_id: `sha256:${"d".repeat(64)}`,
+      request_timestamp: 1_000_000,
+      request_signature_algorithm: "ecdsa-p256-sha256",
+      request_signature: "AA==",
+      client_hardening: 15,
+    }),
+  );
+  assert.notEqual(body, null);
+  assert.equal(
+    canonicalRequestProofPayloadForTests(body),
+    [
+      "purpose=licensecc-online-request",
+      "version=1",
+      "alg=ecdsa-p256-sha256",
+      "project=DEFAULT",
+      "feature=DEFAULT",
+      `license-fingerprint=${"a".repeat(64)}`,
+      "device-hash=",
+      `nonce=${"b".repeat(64)}`,
+      "request-timestamp=1000000",
+      "client-hardening=15",
+      `device-key-id=sha256:${"d".repeat(64)}`,
+      "",
+    ].join("\n"),
+  );
 });
 
 test("client_hardening is accepted but does not change the allow/deny decision", async () => {
@@ -227,6 +379,305 @@ test("client_hardening is accepted but does not change the allow/deny decision",
   // The telemetry must never leak into the signed canonical payload.
   const payload = Buffer.from(withBody.assertion.split(".")[1], "base64").toString("utf8");
   assert.doesNotMatch(payload, /client.?hardening/i);
+});
+
+test("client_hardening is logged on allow and deny paths but not signed", async () => {
+  const row = {
+    ...validBody(),
+    status: "active",
+    assertion_ttl_seconds: 120,
+    cache_ttl_seconds: 600,
+    revocation_seq: 3,
+  };
+  const env = await testKeyEnv(row);
+
+  let allowBody;
+  const allowLogs = await captureConsoleEvents(async () => {
+    const response = await worker.fetch(
+      new Request("https://example.test/v1/verify", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(validBody({ client_hardening: 15 })),
+      }),
+      env,
+    );
+    allowBody = await response.json();
+  });
+  const okLog = allowLogs.find((entry) => entry.event === "verify.ok");
+  assert.equal(okLog?.severity, "info");
+  assert.equal(okLog?.client_hardening, 15);
+  assert.equal(allowBody.ok, true);
+  const payload = Buffer.from(allowBody.assertion.split(".")[1], "base64").toString("utf8");
+  assert.doesNotMatch(payload, /client.?hardening/i);
+
+  let denyBody;
+  const denyLogs = await captureConsoleEvents(async () => {
+    const response = await worker.fetch(
+      new Request("https://example.test/v1/verify", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(validBody({ license_fingerprint: "c".repeat(64), client_hardening: 7 })),
+      }),
+      env,
+    );
+    denyBody = await response.json();
+  });
+  const deniedLog = denyLogs.find((entry) => entry.event === "verify.denied");
+  assert.equal(deniedLog?.severity, "warn");
+  assert.equal(deniedLog?.client_hardening, 7);
+  assert.equal(denyBody.ok, false);
+  assert.equal(denyBody.code, "entitlement_denied");
+});
+
+test("request proof soft mode logs missing proof but preserves allow behavior", async () => {
+  const row = {
+    ...validBody(),
+    status: "active",
+    assertion_ttl_seconds: 120,
+    cache_ttl_seconds: 600,
+    revocation_seq: 3,
+  };
+  const env = await testKeyEnv(row, { REQUEST_SIGNATURE_MODE: "soft" });
+  const logs = await captureConsoleEvents(async () => {
+    const response = await worker.fetch(
+      new Request("https://example.test/v1/verify", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(validBody()),
+      }),
+      env,
+    );
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).code, "entitlement_ok");
+  });
+  const proofLog = logs.find((entry) => entry.event === "verify.request_proof");
+  assert.equal(proofLog?.severity, "warn");
+  assert.equal(proofLog?.mode, "soft");
+  assert.equal(proofLog?.result, "missing");
+  const okLog = logs.find((entry) => entry.event === "verify.ok");
+  assert.equal(okLog?.request_signature_mode, "soft");
+  assert.equal(okLog?.request_proof, "missing");
+});
+
+test("request proof required mode denies missing proof before signing", async () => {
+  const row = {
+    ...validBody(),
+    status: "active",
+    assertion_ttl_seconds: 120,
+    cache_ttl_seconds: 600,
+    revocation_seq: 3,
+  };
+  const response = await worker.fetch(
+    new Request("https://example.test/v1/verify", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(validBody()),
+    }),
+    await testKeyEnv(row, { REQUEST_SIGNATURE_MODE: "required" }),
+  );
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), {
+    ok: false,
+    code: "request_proof_required",
+    server_time: Math.floor(Date.now() / 1000),
+  });
+});
+
+test("request proof required mode accepts a registered device signature", async () => {
+  const originalNow = Date.now;
+  Date.now = () => 1_000_000_000;
+  try {
+    const row = {
+      ...validBody(),
+      status: "active",
+      assertion_ttl_seconds: 120,
+      cache_ttl_seconds: 600,
+      revocation_seq: 3,
+    };
+    const proof = await requestProofFixture();
+    const env = await testKeyEnv(row, { REQUEST_SIGNATURE_MODE: "required", deviceRows: [proof.deviceRow] });
+    const logs = await captureConsoleEvents(async () => {
+      const response = await worker.fetch(
+        new Request("https://example.test/v1/verify", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(proof.body),
+        }),
+        env,
+      );
+      assert.equal(response.status, 200);
+      const body = await response.json();
+      assert.equal(body.ok, true);
+      assert.equal(body.code, "entitlement_ok");
+      assert.match(body.assertion, /^lccoa1\./);
+    });
+    const proofLog = logs.find((entry) => entry.event === "verify.request_proof");
+    assert.equal(proofLog?.severity, "info");
+    assert.equal(proofLog?.mode, "required");
+    assert.equal(proofLog?.result, "valid");
+  } finally {
+    Date.now = originalNow;
+  }
+});
+
+test("device key utility generates proof accepted by required request-proof mode", async () => {
+  const originalNow = Date.now;
+  Date.now = () => 1_000_000_000;
+  const outDir = mkdtempSync(join(tmpdir(), "licensecc-device-key-"));
+  try {
+    const generate = spawnSync(process.execPath, ["scripts/device-key.mjs", "generate", "--out-dir", outDir], {
+      cwd: process.cwd(),
+      encoding: "utf8",
+    });
+    assert.equal(generate.status, 0, generate.stderr);
+
+    const publicRecord = JSON.parse(readFileSync(join(outDir, "device_public_key.json"), "utf8"));
+    const spki = Buffer.from(publicRecord.public_key_spki_der_base64, "base64");
+    assert.equal(publicRecord.algorithm, "ecdsa-p256-sha256");
+    assert.equal(publicRecord.key_id, `sha256:${createHash("sha256").update(spki).digest("hex")}`);
+
+    const sign = spawnSync(
+      process.execPath,
+      [
+        "scripts/device-key.mjs",
+        "sign",
+        "--private-key",
+        join(outDir, "device_private_key.pkcs8.pem"),
+        "--device-key-id",
+        publicRecord.key_id,
+        "--fingerprint",
+        "a".repeat(64),
+        "--nonce",
+        "b".repeat(64),
+        "--client-hardening",
+        "15",
+        "--timestamp",
+        "1000000",
+      ],
+      { cwd: process.cwd(), encoding: "utf8" },
+    );
+    assert.equal(sign.status, 0, sign.stderr);
+    const proof = JSON.parse(sign.stdout);
+
+    const row = {
+      ...validBody(),
+      status: "active",
+      assertion_ttl_seconds: 120,
+      cache_ttl_seconds: 600,
+      revocation_seq: 3,
+    };
+    const env = await testKeyEnv(row, {
+      REQUEST_SIGNATURE_MODE: "required",
+      deviceRows: [
+        {
+          project: "DEFAULT",
+          feature: "DEFAULT",
+          license_fingerprint: "a".repeat(64),
+          device_key_id: publicRecord.key_id,
+          public_key_spki_der_base64: publicRecord.public_key_spki_der_base64,
+          status: "active",
+        },
+      ],
+    });
+    const response = await worker.fetch(
+      new Request("https://example.test/v1/verify", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(validBody({ client_hardening: 15, ...proof })),
+      }),
+      env,
+    );
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.ok, true);
+    assert.equal(body.code, "entitlement_ok");
+  } finally {
+    Date.now = originalNow;
+    rmSync(outDir, { recursive: true, force: true });
+  }
+});
+
+test("request proof required mode denies invalid and stale proof", async () => {
+  const originalNow = Date.now;
+  Date.now = () => 1_000_000_000;
+  try {
+    const row = {
+      ...validBody(),
+      status: "active",
+      assertion_ttl_seconds: 120,
+      cache_ttl_seconds: 600,
+      revocation_seq: 3,
+    };
+    const proof = await requestProofFixture();
+    const env = await testKeyEnv(row, { REQUEST_SIGNATURE_MODE: "required", deviceRows: [proof.deviceRow] });
+
+    const invalid = await worker.fetch(
+      new Request("https://example.test/v1/verify", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ...proof.body, request_signature: "AA==" }),
+      }),
+      env,
+    );
+    assert.equal(invalid.status, 200);
+    assert.deepEqual(await invalid.json(), {
+      ok: false,
+      code: "request_proof_invalid",
+      server_time: 1_000_000,
+    });
+
+    const staleProof = await requestProofFixture({ request_timestamp: 999_000 });
+    const stale = await worker.fetch(
+      new Request("https://example.test/v1/verify", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(staleProof.body),
+      }),
+      await testKeyEnv(row, { REQUEST_SIGNATURE_MODE: "required", deviceRows: [staleProof.deviceRow] }),
+    );
+    assert.equal(stale.status, 200);
+    assert.deepEqual(await stale.json(), {
+      ok: false,
+      code: "request_proof_stale",
+      server_time: 1_000_000,
+    });
+  } finally {
+    Date.now = originalNow;
+  }
+});
+
+test("request proof soft mode logs invalid proof but preserves allow behavior", async () => {
+  const originalNow = Date.now;
+  Date.now = () => 1_000_000_000;
+  try {
+    const row = {
+      ...validBody(),
+      status: "active",
+      assertion_ttl_seconds: 120,
+      cache_ttl_seconds: 600,
+      revocation_seq: 3,
+    };
+    const proof = await requestProofFixture();
+    const env = await testKeyEnv(row, { REQUEST_SIGNATURE_MODE: "soft", deviceRows: [proof.deviceRow] });
+    const logs = await captureConsoleEvents(async () => {
+      const response = await worker.fetch(
+        new Request("https://example.test/v1/verify", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ ...proof.body, request_signature: "AA==" }),
+        }),
+        env,
+      );
+      assert.equal(response.status, 200);
+      assert.equal((await response.json()).code, "entitlement_ok");
+    });
+    const proofLog = logs.find((entry) => entry.event === "verify.request_proof");
+    assert.equal(proofLog?.severity, "warn");
+    assert.equal(proofLog?.mode, "soft");
+    assert.equal(proofLog?.result, "invalid_signature");
+  } finally {
+    Date.now = originalNow;
+  }
 });
 
 test("invalid client_hardening values are rejected like other malformed fields", async () => {

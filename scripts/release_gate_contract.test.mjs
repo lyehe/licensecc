@@ -110,7 +110,7 @@ test("release gate contract pins required local command evidence", () => {
   assert.equal(REQUIRED_LOCAL_COMMANDS.get("documentation build"), "uv run --no-project python scripts/build_docs.py");
   assert.equal(
     REQUIRED_LOCAL_COMMANDS.get("focused C++ security/API tests"),
-    "ctest --test-dir build -C Debug -R test_(public_api|anti_tamper|online_verification|ctest_label_audit)$ --output-on-failure",
+    "ctest --test-dir build -C Debug -R test_(public_api|anti_tamper|online_verification|online_callback_failover|ctest_label_audit)$ --output-on-failure",
   );
   assert.equal(REQUIRED_LOCAL_COMMANDS.get("full CTest suite"), "ctest --test-dir build -C Debug --output-on-failure --timeout 900");
   for (const command of REQUIRED_LOCAL_COMMANDS.values()) {

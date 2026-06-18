@@ -32,6 +32,11 @@ highest accepted ``revocation_seq`` per entitlement tuple. This closes the
 normal restart rollback gap left by a process-local floor, while still assuming
 that a fully patched local machine can bypass local decisions.
 
+Client-reported hardening posture in online requests is telemetry only. It can
+help operators understand which local policies the client configured, but it is
+not signed into assertions and must not be treated as cryptographic proof that a
+customer-controlled host is trustworthy.
+
 Signing keys and algorithms
 ===========================
 
@@ -147,7 +152,7 @@ Recommended release checks
 Before shipping a runtime package, require these gates:
 
 * full Debug and Release test suites on supported platforms;
-* security-labeled parser, signature, public API, anti-tamper, package,
+* security-labeled parser, signature, public API, anti-tamper, online, package,
   install, hardware, platform, validation, verifier, and v201 facets with
   ``--no-tests=error``;
 * Linux ASan/UBSan coverage for direct executable tests;

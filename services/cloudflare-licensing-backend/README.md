@@ -82,7 +82,37 @@ also supports an optional Cloudflare rate-limit binding named
      --reason "initial entitlement"
    ```
 
-7. Deploy:
+7. Optional: enroll a device signing key for request proof-of-possession.
+   Generate the key on the client/device side, keep the private key in that
+   app's platform key store, and register only the generated public SPKI record:
+
+   ```console
+   npm run device-key -- generate --out-dir .device-key
+   npm run entitlement -- device-upsert ^
+     --fingerprint <64 hex fingerprint> ^
+     --device-key-id sha256:<64 hex key id> ^
+     --public-key-spki-der-base64 <base64 from .device-key/device_public_key.json> ^
+     --actor operator@example.com ^
+     --reason "initial device enrollment" ^
+     --remote
+   ```
+
+   The generated private-key file is for local integration tests and bootstrap
+   only. Production hosts should create or import the P-256 key through the OS
+   key store/secure enclave/TPM path when available, then persist the public
+   SPKI and `sha256:<spki der>` key id.
+
+   To smoke-test the signed request body fields during integration:
+
+   ```console
+   npm run device-key -- sign ^
+     --private-key .device-key/device_private_key.pkcs8.pem ^
+     --device-key-id sha256:<64 hex key id> ^
+     --fingerprint <64 hex fingerprint> ^
+     --nonce <64 hex nonce>
+   ```
+
+8. Deploy:
 
    ```console
    npm ci
@@ -92,7 +122,7 @@ also supports an optional Cloudflare rate-limit binding named
    npx wrangler deploy
    ```
 
-8. Validate a remote Worker-signed assertion with the C++ verifier test against
+9. Validate a remote Worker-signed assertion with the C++ verifier test against
    a staging/test D1 database:
 
    ```console
@@ -105,7 +135,7 @@ also supports an optional Cloudflare rate-limit binding named
    revokes the scratch entitlement, deletes the temporary Worker, and removes
    temporary key material.
 
-9. Validate the public verifier abuse controls against a staging Worker:
+10. Validate the public verifier abuse controls against a staging Worker:
 
    ```console
    npm run validate:public-verifier --url=https://licensecc-online-verifier.example.workers.dev --expect-rate-limit --json
@@ -129,6 +159,24 @@ also supports an optional Cloudflare rate-limit binding named
 - Direct `acquire_license_ex()` integrations keep a last-seen `revocation-seq`
   floor only for the current process. Use the decision wrapper or restore a
   host-persisted floor with the public floor helpers before checking licenses.
+- Request `client_hardening` is telemetry only. The Worker logs it on allow and
+  deny paths for operator visibility, but it is not included in the signed
+  assertion payload and must not be treated as proof of host integrity.
+- Request proof-of-possession is opt-in. Set `REQUEST_SIGNATURE_MODE=soft` to
+  log missing or invalid device-key proof while preserving otherwise-valid
+  allows, then move selected products to `required` only after clients register
+  device keys and support has a recovery path. `off` is the compatibility
+  default.
+- `required` request-proof mode expects `request_signature_version=1`,
+  `device_key_id=sha256:<64-hex>`, `request_timestamp`,
+  `request_signature_algorithm=ecdsa-p256-sha256`, and a base64
+  `request_signature` over the canonical request payload. The public key is
+  loaded from `entitlement_devices.public_key_spki_der_base64` for the exact
+  project/feature/license fingerprint and device key id.
+- `REQUEST_SIGNATURE_MAX_SKEW_SECONDS` bounds request timestamp skew for proof
+  verification. Keep the default small for production, and use `soft` mode to
+  learn whether customer clocks or proxies need product-specific handling before
+  enforcing it.
 - Active entitlement assertions use `assertion_ttl_seconds` and are clamped to
   `valid_until` when that optional D1 column is set. A `NULL` validity window
   means unbounded.

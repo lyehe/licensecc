@@ -452,7 +452,7 @@ function localGates(options, environment = {}) {
   if (ctestAvailable(environment)) {
     gates.push([
       "ctest",
-      ["--test-dir", "build", "-C", "Debug", "-R", "test_(public_api|anti_tamper|online_verification|ctest_label_audit)$", "--output-on-failure"],
+      ["--test-dir", "build", "-C", "Debug", "-R", "test_(public_api|anti_tamper|online_verification|online_callback_failover|ctest_label_audit)$", "--output-on-failure"],
       "focused C++ security/API tests",
     ]);
     if (options.full) {

@@ -71,6 +71,7 @@ set(_required_labels
 	validation
 	verifier
 	v201
+	config_attestation
 )
 
 if(LICENSECC_BUILD_FUZZERS)
@@ -109,6 +110,9 @@ set(_expected_label_entries
 	"test_public_api|security,public_api"
 	"test_anti_tamper|security,public_api,anti_tamper"
 	"test_online_verification|security,public_api,online"
+	"test_online_callback_failover|security,public_api,online"
+	"test_config_attestation|security,config_attestation"
+	"test_config_public_api|security,public_api,config_attestation"
 	"test_network|security,platform,hardware"
 	"test_execution_environment|security,platform"
 	"test_hw_identifier|security,hardware"

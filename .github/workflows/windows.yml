@@ -86,7 +86,7 @@ jobs:
          shell: bash
          working-directory: build
          run: |
-            for label in security parser signature base64 public_api generator package install platform hardware validation verifier v201; do
+            for label in security parser signature base64 public_api anti_tamper online generator package install platform hardware validation verifier v201; do
               echo "::group::ctest -L ${label}"
               ctest -C ${{ matrix.build_type }} -L "${label}" --output-on-failure --no-tests=error
               echo "::endgroup::"

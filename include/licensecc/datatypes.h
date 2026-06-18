@@ -75,6 +75,11 @@ typedef enum {
 #define LCC_TAMPER_FLAG_NONE 0u
 #define LCC_TAMPER_FLAG_STRICT_SOURCE_SHADOWING 0x00000001u
 #define LCC_ONLINE_FLAG_NONE 0u
+/**
+ * Client hardening posture bits sent to the online verifier as telemetry.
+ * These bits describe which local client-side policies were configured for the
+ * current request. They are not cryptographic proof that the host is clean.
+ */
 #define LCC_CLIENT_HARDENING_NONE 0u
 #define LCC_CLIENT_HARDENING_TAMPER_ENFORCE 0x00000001u
 #define LCC_CLIENT_HARDENING_HOST_INTEGRITY 0x00000002u
@@ -96,6 +101,14 @@ typedef enum {
 #define LCC_CONFIG_VERIFY_OPTIONS_VERSION 1u
 #define LCC_CONFIG_DECISION_VERSION 1u
 
+/**
+ * Host-supplied runtime integrity probe.
+ *
+ * Return true when no local tamper signal is detected. Return false to report a
+ * best-effort tamper signal; `detail_out`, when provided, should receive a
+ * short non-sensitive reason. The callback runs in the customer-controlled host
+ * process, so it is advisory and tamper-resistant, not tamper-proof.
+ */
 typedef bool (*LCC_HOST_INTEGRITY_CHECK)(void* user_data, char* detail_out, size_t detail_out_size);
 
 typedef enum {
@@ -126,6 +139,15 @@ typedef struct LccOnlineRequest {
 	uint32_t client_hardening;  // bitset of LCC_CLIENT_HARDENING_*; client configuration posture, telemetry only
 } LccOnlineRequest;
 
+/**
+ * Host-supplied online verifier transport callback.
+ *
+ * The callback receives the nonce-bound request and must write a signed online
+ * assertion envelope to `assertion_out`. If the provided buffer is too small,
+ * set `*assertion_out_size` to the required size and return
+ * ::LCC_ONLINE_CB_BUFFER_TOO_SMALL. Transport failures may be retried by host
+ * code; entitlement denials and malformed responses should fail closed.
+ */
 typedef LCC_ONLINE_CALLBACK_STATUS (*LCC_ONLINE_CHECK)(void* user_data, const LccOnlineRequest* request,
 													   char* assertion_out, size_t* assertion_out_size);
 
@@ -150,16 +172,37 @@ typedef enum {
 } LCC_LICENSE_DECISION;
 
 typedef struct LccRevocationFloorRecord {
+	/** Structure size, set by ::lcc_init_revocation_floor_record. */
 	uint32_t size;
+	/** Structure version, set to ::LCC_LICENSE_DECISION_VERSION. */
 	uint32_t version;
+	/** Project bound to the accepted online assertion. */
 	char project[LCC_API_ONLINE_PROJECT_SIZE + 1];
+	/** Feature bound to the accepted online assertion. */
 	char feature[LCC_API_FEATURE_NAME_SIZE + 1];
+	/** Hex fingerprint of the local license signature. */
 	char license_fingerprint[LCC_API_ONLINE_LICENSE_FINGERPRINT_SIZE + 1];
+	/** Monotonic server-issued revocation sequence. */
 	uint64_t revocation_seq;
 } LccRevocationFloorRecord;
 
+/**
+ * Loads the persisted revocation floor for the exact key in `key`.
+ *
+ * Return true and write the strongest stored revocation sequence to
+ * `revocation_seq_out`. A missing record should normally return true with zero;
+ * storage read failures should return false so the decision wrapper fails
+ * closed.
+ */
 typedef bool (*LCC_REVOCATION_FLOOR_LOAD)(void* user_data, const LccRevocationFloorRecord* key,
 										  uint64_t* revocation_seq_out);
+/**
+ * Stores the accepted revocation floor.
+ *
+ * Hosts should persist the maximum seen `revocation_seq` for the exact
+ * project/feature/license fingerprint. Return false on storage failure so the
+ * decision wrapper fails closed.
+ */
 typedef bool (*LCC_REVOCATION_FLOOR_STORE)(void* user_data, const LccRevocationFloorRecord* record);
 
 typedef struct LccLicenseDecisionOptions {
@@ -178,15 +221,24 @@ typedef struct LccLicenseDecisionOptions {
 } LccLicenseDecisionOptions;
 
 typedef struct LccLicenseDecision {
+	/** Structure size, set by ::lcc_init_license_decision. */
 	uint32_t size;
+	/** Structure version, set to ::LCC_LICENSE_DECISION_VERSION. */
 	uint32_t version;
+	/** Allow only when this is ::LCC_LICENSE_DECISION_ALLOW and event_type is ::LICENSE_OK. */
 	LCC_LICENSE_DECISION decision;
+	/** Final event code returned by ::lcc_acquire_license_decision. */
 	LCC_EVENT_TYPE event_type;
+	/** True when required online verification accepted a signed assertion. */
 	bool online_verified;
+	/** True when the persisted revocation floor loaded successfully. */
 	bool revocation_floor_loaded;
+	/** True when the accepted revocation floor was stored successfully. */
 	bool revocation_floor_stored;
+	/** True when the secure decision wrapper configured tamper enforcement. */
 	bool tamper_enforced;
 	uint32_t reserved;
+	/** Last loaded or accepted revocation floor record. */
 	LccRevocationFloorRecord revocation_floor;
 } LccLicenseDecision;
 
@@ -232,6 +284,13 @@ typedef struct LccConfigDecision {
 	char config_id[LCC_API_CONFIG_ID_SIZE + 1];
 	uint64_t config_seq;
 	bool bound_to_license;
+	/**
+	 * Reflects only that a non-empty device_hash was supplied in ::LccConfigInput
+	 * and matched the token's bound device_hash. It is NOT proof of device
+	 * possession or attestation: device_hash is caller-supplied input. For
+	 * cryptographic device binding use the online verifier's request-proof
+	 * (ECDSA device key) path, not this flag.
+	 */
 	bool bound_to_device;
 	uint32_t reserved;
 } LccConfigDecision;

@@ -147,7 +147,7 @@ const REQUIRED_LOCAL_COMMANDS = new Map([
   ["D1 backup dry-run", "npm --prefix services/cloudflare-d1-backup run dry-run"],
   [
     "focused C++ security/API tests",
-    "ctest --test-dir build -C Debug -R test_(public_api|anti_tamper|online_verification|ctest_label_audit)$ --output-on-failure",
+    "ctest --test-dir build -C Debug -R test_(public_api|anti_tamper|online_verification|online_callback_failover|ctest_label_audit)$ --output-on-failure",
   ],
   ["full CTest suite", "ctest --test-dir build -C Debug --output-on-failure --timeout 900"],
 ]);

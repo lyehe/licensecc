@@ -2,6 +2,7 @@
 
 #include <licensecc/licensecc.h>
 
+#include <cctype>
 #include <cstdlib>
 #include <cstddef>
 #include <cstring>
@@ -57,7 +58,7 @@ static const AuditEvent* find_status_event(const LicenseInfo& info, LCC_EVENT_TY
 	return nullptr;
 }
 
-static string issue_valid_license_file(const string& license_name) {
+static string issue_license_file(const string& license_name, const string& extra_args) {
 	std::filesystem::create_directories(LCC_LICENSES_BASE);
 	const string file_path = string(LCC_LICENSES_BASE) + "/" + license_name + ".lic";
 	std::remove(file_path.c_str());
@@ -66,10 +67,60 @@ static string issue_valid_license_file(const string& license_name) {
 	ss << " --" PARAM_PRIMARY_KEY " " << LCC_PROJECT_PRIVATE_KEY;
 	ss << " --" PARAM_LICENSE_OUTPUT " " << file_path;
 	ss << " --" PARAM_PROJECT_FOLDER " " << LCC_TEST_LICENSES_PROJECT;
+	if (!extra_args.empty()) {
+		ss << " " << extra_args;
+	}
 	const int ret = std::system(ss.str().c_str());
 	BOOST_REQUIRE_EQUAL(ret, 0);
 	BOOST_REQUIRE_MESSAGE(ifstream(file_path.c_str()).good(), "issued license exists: " + file_path);
 	return file_path;
+}
+
+static string issue_valid_license_file(const string& license_name) {
+	return issue_license_file(license_name, "");
+}
+
+static string read_binary_file(const string& file_path) {
+	ifstream input(file_path.c_str(), ios::binary);
+	BOOST_REQUIRE_MESSAGE(input.is_open(), "can open license file: " + file_path);
+	return string((istreambuf_iterator<char>(input)), istreambuf_iterator<char>());
+}
+
+static string with_corrupted_signature(string license_text) {
+	const string marker = "sig = ";
+	size_t pos = license_text.find(marker);
+	BOOST_REQUIRE_MESSAGE(pos != string::npos, "generated license has signature field");
+	pos += marker.size();
+	for (; pos < license_text.size(); ++pos) {
+		const unsigned char ch = static_cast<unsigned char>(license_text[pos]);
+		if (isalnum(ch) || license_text[pos] == '+' || license_text[pos] == '/') {
+			license_text[pos] = license_text[pos] == 'A' ? 'B' : 'A';
+			return license_text;
+		}
+	}
+	BOOST_REQUIRE_MESSAGE(false, "generated license signature has mutable base64 data");
+	return license_text;
+}
+
+static string write_license_text_file(const string& license_name, const string& license_text) {
+	std::filesystem::create_directories(LCC_LICENSES_BASE);
+	const string file_path = string(LCC_LICENSES_BASE) + "/" + license_name + ".lic";
+	std::remove(file_path.c_str());
+	ofstream output(file_path.c_str(), ios::binary);
+	BOOST_REQUIRE_MESSAGE(output.is_open(), "can write license fixture: " + file_path);
+	output << license_text;
+	output.close();
+	BOOST_REQUIRE_MESSAGE(ifstream(file_path.c_str()).good(), "license fixture exists: " + file_path);
+	return file_path;
+}
+
+static string with_shadow_product_section(string license_text) {
+	const size_t start = license_text.find('[');
+	const size_t end = license_text.find(']', start == string::npos ? 0 : start);
+	BOOST_REQUIRE_MESSAGE(start != string::npos && end != string::npos && end > start,
+						  "generated license has product section");
+	license_text.replace(start + 1, end - start - 1, "SHADOWED_UNLICENSED_PRODUCT");
+	return license_text;
 }
 
 static LicenseLocation license_path_location(const string& file_path) {
@@ -213,6 +264,13 @@ BOOST_AUTO_TEST_CASE(invalid_options_fail_closed_with_malformed) {
 	LicenseInfo version_info{};
 	BOOST_CHECK_EQUAL(acquire_license_ex(&caller, nullptr, &version_info, &options), LICENSE_MALFORMED);
 	BOOST_CHECK(has_status_event(version_info, LICENSE_MALFORMED));
+
+	lcc_init_license_check_options(&options);
+	memset(options.online_device_hash, 'a', sizeof(options.online_device_hash));
+	LicenseInfo unterminated_device_hash_info{};
+	BOOST_CHECK_EQUAL(acquire_license_ex(&caller, nullptr, &unterminated_device_hash_info, &options),
+					  LICENSE_MALFORMED);
+	BOOST_CHECK(has_status_event(unterminated_device_hash_info, LICENSE_MALFORMED));
 }
 
 BOOST_AUTO_TEST_CASE(v1_options_size_remains_accepted_and_ignores_online_tail) {
@@ -276,8 +334,102 @@ BOOST_AUTO_TEST_CASE(strict_source_shadowing_flag_reports_malformed_fallback_sha
 	lcc_init_license_check_options(&options);
 	LicenseInfo enforce_info{};
 	BOOST_CHECK_EQUAL(acquire_license_ex(&caller, &location, &enforce_info, &options), LICENSE_TAMPER_DETECTED);
-	BOOST_CHECK(find_status_event(enforce_info, LICENSE_TAMPER_DETECTED, SVRT_ERROR) != nullptr);
+	const AuditEvent* event = find_status_event(enforce_info, LICENSE_TAMPER_DETECTED, SVRT_ERROR);
+	BOOST_REQUIRE(event != nullptr);
+	BOOST_CHECK_EQUAL(strncmp(event->param2, "source-shadowing", strlen("source-shadowing")), 0);
 
+	std::remove(valid_path.c_str());
+}
+
+BOOST_AUTO_TEST_CASE(strict_source_shadowing_reports_corrupted_fallback_shadowing) {
+	RuntimePolicyGuard guard;
+	const string valid_path = issue_valid_license_file("anti-tamper-corrupted-source-shadow-valid");
+	const string corrupted_path = write_license_text_file(
+		"anti-tamper-corrupted-source-shadow", with_corrupted_signature(read_binary_file(valid_path)));
+	LicenseLocation location = license_path_location(corrupted_path + ";" + valid_path);
+	CallerInformations caller = default_caller();
+
+	LicenseCheckOptions options;
+	lcc_init_license_check_options(&options);
+	LicenseInfo info{};
+	BOOST_CHECK_EQUAL(acquire_license_ex(&caller, &location, &info, &options), LICENSE_TAMPER_DETECTED);
+	const AuditEvent* event = find_status_event(info, LICENSE_TAMPER_DETECTED, SVRT_ERROR);
+	BOOST_REQUIRE(event != nullptr);
+	BOOST_CHECK_EQUAL(strncmp(event->param2, "source-shadowing", strlen("source-shadowing")), 0);
+
+	std::remove(corrupted_path.c_str());
+	std::remove(valid_path.c_str());
+}
+
+BOOST_AUTO_TEST_CASE(strict_source_shadowing_reports_unlicensed_product_fallback_shadowing) {
+	RuntimePolicyGuard guard;
+	const string valid_path = issue_valid_license_file("anti-tamper-unlicensed-source-shadow-valid");
+	const string wrong_product_path = write_license_text_file(
+		"anti-tamper-unlicensed-source-shadow", with_shadow_product_section(read_binary_file(valid_path)));
+	LicenseLocation location = license_path_location(wrong_product_path + ";" + valid_path);
+	CallerInformations caller = default_caller();
+
+	LicenseCheckOptions options;
+	lcc_init_license_check_options(&options);
+	LicenseInfo info{};
+	BOOST_CHECK_EQUAL(acquire_license_ex(&caller, &location, &info, &options), LICENSE_TAMPER_DETECTED);
+	BOOST_CHECK(find_status_event(info, LICENSE_TAMPER_DETECTED, SVRT_ERROR) != nullptr);
+
+	std::remove(wrong_product_path.c_str());
+	std::remove(valid_path.c_str());
+}
+
+BOOST_AUTO_TEST_CASE(strict_source_shadowing_reports_expired_fallback_shadowing) {
+	RuntimePolicyGuard guard;
+	const string expired_path = issue_license_file("anti-tamper-expired-source-shadow", "--valid-to 2000-01-01");
+	const string valid_path = issue_valid_license_file("anti-tamper-expired-source-shadow-valid");
+	LicenseLocation location = license_path_location(expired_path + ";" + valid_path);
+	CallerInformations caller = default_caller();
+
+	LicenseCheckOptions options;
+	lcc_init_license_check_options(&options);
+	LicenseInfo info{};
+	BOOST_CHECK_EQUAL(acquire_license_ex(&caller, &location, &info, &options), LICENSE_TAMPER_DETECTED);
+	BOOST_CHECK(find_status_event(info, LICENSE_TAMPER_DETECTED, SVRT_ERROR) != nullptr);
+
+	std::remove(expired_path.c_str());
+	std::remove(valid_path.c_str());
+}
+
+BOOST_AUTO_TEST_CASE(strict_source_shadowing_reports_identifier_mismatch_fallback_shadowing) {
+	RuntimePolicyGuard guard;
+	const string mismatch_path =
+		issue_license_file("anti-tamper-identifier-source-shadow", "--client-signature AEBC-Q0RF-Rkc=");
+	const string valid_path = issue_valid_license_file("anti-tamper-identifier-source-shadow-valid");
+	LicenseLocation location = license_path_location(mismatch_path + ";" + valid_path);
+	CallerInformations caller = default_caller();
+
+	LicenseCheckOptions options;
+	lcc_init_license_check_options(&options);
+	LicenseInfo info{};
+	BOOST_CHECK_EQUAL(acquire_license_ex(&caller, &location, &info, &options), LICENSE_TAMPER_DETECTED);
+	BOOST_CHECK(find_status_event(info, LICENSE_TAMPER_DETECTED, SVRT_ERROR) != nullptr);
+
+	std::remove(mismatch_path.c_str());
+	std::remove(valid_path.c_str());
+}
+
+BOOST_AUTO_TEST_CASE(source_shadowing_flag_can_be_disabled_for_fallback_shadowing) {
+	RuntimePolicyGuard guard;
+	const string valid_path = issue_valid_license_file("anti-tamper-source-shadow-disabled-valid");
+	const string corrupted_path = write_license_text_file(
+		"anti-tamper-source-shadow-disabled", with_corrupted_signature(read_binary_file(valid_path)));
+	LicenseLocation location = license_path_location(corrupted_path + ";" + valid_path);
+	CallerInformations caller = default_caller();
+
+	LicenseCheckOptions options;
+	lcc_init_license_check_options(&options);
+	options.tamper_flags = LCC_TAMPER_FLAG_NONE;
+	LicenseInfo info{};
+	BOOST_CHECK_EQUAL(acquire_license_ex(&caller, &location, &info, &options), LICENSE_OK);
+	BOOST_CHECK(!has_status_event(info, LICENSE_TAMPER_DETECTED));
+
+	std::remove(corrupted_path.c_str());
 	std::remove(valid_path.c_str());
 }
 
