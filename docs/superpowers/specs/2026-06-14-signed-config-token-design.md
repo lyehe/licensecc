@@ -62,8 +62,9 @@ Provided:
   different product/license/device. With `device-hash` empty the token is
   portable across machines that hold the same license; set it to pin to one
   machine.
-- **Freshness:** `issued-at` / `expires-at` bound the validity window
-  (`expires-at=0` means never expires).
+- **Freshness:** `issued-at` / `expires-at` bound the validity window.
+  `expires-at` is required and must be a finite epoch second `> issued-at`;
+  `expires-at=0` is rejected (fail-closed — no never-expiring config tokens).
 - **Rollback protection:** a `config-seq` floor scoped per `config-id` and
   persisted by the host prevents reinstating an older version of the same
   config. Independent configs use distinct `config-id`s and never block one
@@ -137,7 +138,7 @@ config-id=<stable logical config identity; constant across versions>
 config-seq=<uint64; monotonic version within this config-id>
 config-hash=sha256:<64-hex of the raw config bytes>
 issued-at=<unix seconds>
-expires-at=<unix seconds; 0 = never expires>
+expires-at=<unix seconds; required, must be > issued-at; 0 is rejected>
 ```
 
 **Hashing rule:** the client hashes the **exact raw bytes** it will consume —
@@ -169,7 +170,7 @@ CMake OBJECT library, mirroring `online_verification`). Pipeline:
 4. Recompute `signature_sha256_hex(config_bytes)` and compare to `config-hash`.
 5. Validate binding: `project`, `feature`, `license-fingerprint`, and
    `device-hash` (when provided) must match the expected values.
-6. Validate window: `issued-at <= now (+ small skew)`, `expires-at >= now`.
+6. Validate window: `issued-at <= now (+ small skew)`, `expires-at != 0`, `expires-at >= now`.
 7. Validate `config-seq >= floor`; on success advance the floor.
 8. Fail closed on any error.
 
@@ -317,7 +318,7 @@ The offline signer (phases 1–6) is the shippable MVP; the worker endpoint
 | Envelope | New `lcccfg1` prefix + `purpose=licensecc-config-attestation` (distinct from `lccoa1`) |
 | Rollback floor scope | Keyed per `config-id`; independent configs do not interfere |
 | Device binding | Optional; empty `device-hash` makes the token portable across machines on the same license |
-| Token expiry | `expires-at=0` means never expires |
+| Token expiry | `expires-at` required and finite (`> issued-at`); `expires-at=0` rejected (no never-expiring tokens) |
 | Encoding | Standard base64 for both envelope segments (shared decoder with `lccoa1`) |
 
 ## 15. Security must-haves (format-independent checklist)
