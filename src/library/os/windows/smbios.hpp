@@ -319,13 +319,17 @@ public:
 
 	std::vector<header*> headers;
 
-	static byte_t* skip(byte_t*);
+	static byte_t *skip(byte_t *, const byte_t *end);
 
-	static header* extract_strings(header*, string_array_t&);
+	static header *extract_strings(header *, string_array_t &, const byte_t *end);
 
 	void feed(const void *raw_smbios, size_t size);
 
 	void clear();
+
+	// End of the parsed buffer; callers must pass this to extract_strings so the
+	// string-table walk stays within the allocation.
+	const byte_t *buffer_end() const { return raw_data_ + raw_size_; }
 
 protected:
 	byte_t *raw_data_ { };
@@ -333,43 +337,57 @@ protected:
 	size_t raw_size_ { };
 };
 
-inline byte_t* parser::skip(byte_t *x) {
-	auto *ptr = x + reinterpret_cast<header*>(x)->length;
-	size_t len;
-
-	if (*ptr == 0)
+inline byte_t *parser::skip(byte_t *x, const byte_t *end) {
+	// header->length is an unvalidated firmware byte; clamp the formatted-area
+	// jump and bound the string-table walk so a bogus length cannot read past end.
+	byte_t *ptr = x + reinterpret_cast<header *>(x)->length;
+	if (ptr >= end) {
+		return const_cast<byte_t *>(end);
+	}
+	if (*ptr == 0) {
 		ptr += 2;
-	else
-		do {
-			len = strlen(reinterpret_cast<const char*>(ptr));
+	} else {
+		while (ptr < end) {
+			size_t len = 0;
+			while (ptr + len < end && ptr[len] != 0) {
+				++len;
+			}
 			ptr += len + 1;
-		} while (len > 0);
-
-	return ptr;
+			if (len == 0) {
+				break;
+			}
+		}
+	}
+	return ptr > end ? const_cast<byte_t *>(end) : ptr;
 }
 
-inline header* parser::extract_strings(header *x, string_array_t &a) {
-	auto *ptr = reinterpret_cast<byte_t*>(x) + x->length;
+inline header *parser::extract_strings(header *x, string_array_t &a, const byte_t *end) {
+	byte_t *ptr = reinterpret_cast<byte_t *>(x) + x->length;
 
 	a.clear();
 	a.push_back(nullptr);
 
-	if (*ptr == 0)
+	if (ptr >= end) {
+		return reinterpret_cast<header *>(const_cast<byte_t *>(end));
+	}
+	if (*ptr == 0) {
 		ptr += 2;
-	else
-		for (;;) {
+	} else {
+		while (ptr < end) {
 			auto *str = reinterpret_cast<char*>(ptr);
-			const auto len = strlen(str);
-
+			size_t len = 0;
+			while (ptr + len < end && ptr[len] != 0) {
+				++len;
+			}
 			ptr += len + 1;
-
-			if (len == 0)
+			if (len == 0) {
 				break;
-
+			}
 			a.push_back(str);
 		}
+	}
 
-	return reinterpret_cast<header*>(ptr);
+	return reinterpret_cast<header *>(ptr > end ? const_cast<byte_t *>(end) : ptr);
 }
 
 inline void parser::feed(const void *raw_smbios, const size_t size) {
@@ -386,11 +404,13 @@ inline void parser::feed(const void *raw_smbios, const size_t size) {
 
 	memcpy(raw_data_, raw_smbios, size);
 
+	const byte_t *end = raw_data_ + raw_size_;
 	auto *x = raw_data_;
 
-	while (static_cast<size_t>(x - raw_data_) < raw_size_) {
+	// Require room for a full structure header before parsing it.
+	while (x + sizeof(header) <= end) {
 		headers.push_back(reinterpret_cast<header*>(x));
-		x = skip(x);
+		x = skip(x, end);
 	}
 }
 

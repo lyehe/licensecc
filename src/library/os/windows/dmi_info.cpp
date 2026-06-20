@@ -54,7 +54,7 @@ DmiInfo::DmiInfo() {
 
 		for (auto &header : smbios_parser.headers) {
 			string_array_t strings;
-			parser::extract_strings(header, strings);
+			parser::extract_strings(header, strings, smbios_parser.buffer_end());
 
 			switch (header->type) {
 				case types::baseboard_info: {

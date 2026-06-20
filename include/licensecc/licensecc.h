@@ -80,7 +80,9 @@ void lcc_init_config_verify_options(LccConfigVerifyOptions* options);
 void lcc_init_config_decision(LccConfigDecision* decision);
 /** Initializes ::LccConfigSeqFloorRecord (null-safe). */
 void lcc_init_config_seq_floor_record(LccConfigSeqFloorRecord* record);
-/** Bounded setter for the optional device hash (64 hex chars or empty). */
+/** Bounded setter for the optional device hash: copies it if it fits the field
+ * (otherwise clears it and returns false). The 64-hex-char-or-empty format is
+ * validated later by ::lcc_verify_config, not here. */
 bool lcc_set_config_device_hash(LccConfigInput* input, const char* device_hash);
 
 /**
@@ -175,13 +177,14 @@ LCC_EVENT_TYPE acquire_license(const CallerInformations* callerInformation, cons
  * with ::LICENSE_MALFORMED.
  *
  * Raw-path caveat: when you call ::acquire_license_ex directly with online
- * verification enabled, YOU own the revocation-floor lifecycle. The floor
- * load/store callbacks come from ::LicenseCheckOptions; if online verification is
- * enabled and they are absent, the call fails closed with
- * ::LICENSE_ONLINE_REQUIRED. Restore the persisted floor at startup and persist
- * the accepted revocation_seq after each success, or a restarted process can
- * accept a superseded assertion. ::lcc_acquire_license_decision does this
- * load/store wiring for you and is preferred for production hosts.
+ * verification enabled, it enforces only the PROCESS-LOCAL revocation floor (see
+ * ::lcc_set_online_revocation_floor / ::lcc_get_online_revocation_floor). It does
+ * not accept or invoke any persisted floor callbacks (::LicenseCheckOptions has
+ * none), so a process that restarts without restoring the floor can accept a
+ * superseded assertion. Restore the persisted floor at startup with
+ * ::lcc_set_online_revocation_floor. For persisted load/store wiring on every
+ * decision, use ::lcc_acquire_license_decision, which is preferred for production
+ * hosts.
  */
 LCC_EVENT_TYPE acquire_license_ex(const CallerInformations* callerInformation, const LicenseLocation* licenseLocation,
 								  LicenseInfo* license_out, const LicenseCheckOptions* options);
