@@ -15,6 +15,7 @@
 //#endif
 
 #include <cstdint>
+#include <mutex>
 #include <vector>
 
 #include <public_key.h>
@@ -36,13 +37,15 @@ static void free_resources(EVP_PKEY* pkey, EVP_MD_CTX* mdctx) {
 }
 
 static void initialize() {
-	static int initialized = 0;
-	if (initialized == 0) {
-		initialized = 1;
+	// Thread-safe one-time OpenSSL global init. The legacy ERR_load_*/add_all_algorithms
+	// calls are not re-entrant and the old non-atomic flag raced on the first concurrent
+	// verify.
+	static std::once_flag init_flag;
+	std::call_once(init_flag, []() {
 		ERR_load_ERR_strings();
 		ERR_load_crypto_strings();
 		OpenSSL_add_all_algorithms();
-	}
+	});
 }
 
 static FUNCTION_RETURN verify_signature_bytes(const std::vector<uint8_t>& payload,

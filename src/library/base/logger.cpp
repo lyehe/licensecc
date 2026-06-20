@@ -14,7 +14,13 @@
 #include <windows.h>
 #endif
 
+#include <mutex>
+
 static FILE *logFile = NULL;
+// Serializes lazy logFile init and the writes so a multi-threaded host calling the
+// public API (LOG_* fire on error paths) cannot race on the FILE* or interleave
+// vfprintf output.
+static std::mutex log_mutex;
 
 static void timenow(char * buffer) {
 	time_t rawtime;
@@ -52,6 +58,7 @@ static void getLogFname(char* logpath) {
 void _log(const char* format, ...) {
 	va_list args;
 	char * buffer;
+	std::lock_guard<std::mutex> guard(log_mutex);
 	if (logFile == NULL) {
 		char logpath[MAX_PATH];
 		getLogFname(logpath);
@@ -70,6 +77,7 @@ void _log(const char* format, ...) {
 }
 
 void _shutdown_log() {
+	std::lock_guard<std::mutex> guard(log_mutex);
 	if (logFile != NULL) {
 		fclose(logFile);
 		logFile = NULL;
