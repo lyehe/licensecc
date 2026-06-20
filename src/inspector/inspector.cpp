@@ -99,7 +99,10 @@ static void print_usage(const char* program_name) {
 static LCC_EVENT_TYPE verifyLicense(const string& fname) {
 	LicenseInfo licenseInfo;
 	LicenseLocation licLocation = {LICENSE_PATH};
-	std::copy(fname.begin(), fname.end(), licLocation.licenseData);
+	if (!lcc_set_license_path(&licLocation, fname.c_str())) {
+		cerr << "license path is too long: " << fname << endl;
+		return LICENSE_FILE_NOT_FOUND;
+	}
 	LCC_EVENT_TYPE result = acquire_license(nullptr, &licLocation, &licenseInfo);
 	if (result == LICENSE_OK) {
 		cout << "default project [" << LCC_PROJECT_NAME << "]: license OK" << endl;
@@ -112,9 +115,12 @@ static LCC_EVENT_TYPE verifyLicense(const string& fname) {
 	ini.GetAllSections(sections);
 	CallerInformations callerInformation = {};
 	for (CSimpleIniA::Entry section : sections) {
-		const string section_name(section.pItem, 15);
+		const string section_name(section.pItem);
 		if (section_name != LCC_PROJECT_NAME) {
-			std::copy(section_name.begin(), section_name.end(), callerInformation.feature_name);
+			if (!lcc_set_caller_feature_name(&callerInformation, section_name.c_str())) {
+				cerr << "project [" << section.pItem << "]: feature name is too long" << endl;
+				continue;
+			}
 			LCC_EVENT_TYPE result = acquire_license(&callerInformation, &licLocation, &licenseInfo);
 			if (result == LICENSE_OK) {
 				cout << "project [" << section.pItem << "]: license OK" << endl;
