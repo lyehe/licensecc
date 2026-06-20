@@ -12,19 +12,30 @@ Features and their status
 ****************************
 
 ======================================  ========================
- Feature                                 Implementation status    
+ Feature                                 Implementation status
 ======================================  ========================
-Trial license with expiry date          |:heavy_check_mark:|  
-Link software to "physical" hardware    |:heavy_check_mark:|  
-Virtual machine/docker detection        In progress           
+Trial license with expiry date          |:heavy_check_mark:|
+Link software to "physical" hardware    |:heavy_check_mark:|
+Virtual machine/docker/cloud detection  |:heavy_check_mark:|
 Easy license retrieval                  |:heavy_check_mark:|
 Licensed software components			|:heavy_check_mark:|
+Licensed software version range         |:heavy_check_mark:|
+Online license verification             |:heavy_check_mark:|
+Signed configuration tokens             |:heavy_check_mark:|
+Anti-tamper signal detection            |:heavy_check_mark:|
+License revocation / rollback floor     |:heavy_check_mark:|
 ARM support								Planned
-Manage licenses                         Planned               
-Easy Customizable limits                Planned               
-Java/C# bindings                        Planned               
-Floating/network licenses               Planned               
+Manage licenses                         Planned
+Easy Customizable limits                Planned
+Java/C# bindings                        Planned
+Floating/network licenses               Planned
 ======================================  ========================
+
+The hardware-binding, online-verification, config-attestation, and anti-tamper
+features were hardened for the 2.x security upgrade: new project keys default to
+RSA-3072 (the runtime enforces a 3072-bit floor), and ``lccinspector`` redacts
+hardware identifiers by default. See :doc:`security-model` and
+:doc:`security-notes` for the threat model and signing policy.
 
 Issue a "demo" license with only expiry date.
 ==============================================
@@ -37,9 +48,14 @@ Link the software to a physical hardware (a pc). In this scenario the software e
 
 Depending on the situation there are are different kinds of hardware id that can be used. See :ref:`execution limits <Execution limits>` section.
 
-Virtual machine detection (in progress)
+Virtual machine/docker/cloud detection
 ==========================================
-Detect if the software is running in a virtualized environment and (optionally) forbid the execution. This is useful if software editors want to prevent the execution in virtual machines (lxc/dockers...) and be able to compute a meaningful hardware id. 
+Detect if the software is running in a virtualized environment. ``identify_pc``
+reports the detected execution environment (bare metal, virtual machine,
+container, or cloud) through ``ExecutionEnvironmentInfo``, and the
+hardware-identification strategy adapts to it. This is useful if software editors
+want to detect execution in virtual machines (lxc/dockers...) and still compute a
+meaningful hardware id.
 Another use case is the software is to be used only in a specific class of virtualized environments. For instance it was initially packaged as a docker image, the software editor don't want it to be "extracted" and placed elsewhere.
 
 Licenses retrieval
@@ -49,9 +65,33 @@ It can handle multiple licenses at the same time. See the wiki page about :ref:`
  
 Licensed software components/features
 =========================================================
-A licensed software may be composed by many features (functions, components...) each one activable independently. Licensing system tells the licensed software which features are enabled, and which features are disabled. 
-For an example usage see `examples <https://github.com/open-license-manager/examples/tree/develop/program_features>`_ 
- 
+A licensed software may be composed by many features (functions, components...) each one activable independently. Licensing system tells the licensed software which features are enabled, and which features are disabled.
+For an example usage see `examples <https://github.com/open-license-manager/examples/tree/develop/program_features>`_
+
+Online license verification
+=========================================================
+Beyond the offline license check, a host can require a fresh server-signed
+assertion before granting access. The host supplies an ``LCC_ONLINE_CHECK``
+callback that fetches a signed assertion from the Cloudflare verifier backend;
+the library verifies that assertion locally and fails closed. This adds
+server-side revocation and a rollback floor on top of the offline license. See
+:doc:`/usage/integration` for the integration pattern.
+
+Signed configuration tokens
+=========================================================
+A server can sign a blob of configuration bytes and bind that signature to a
+valid local license. The application verifies the token offline through
+``lcc_verify_config`` before it honors the configuration, with config-hash
+binding, a validity window, and a durable per-config-id rollback floor. See
+:doc:`/usage/config-attestation`.
+
+Anti-tamper signal detection
+=========================================================
+The decision entry point (``lcc_acquire_license_decision``) can require a
+host-integrity callback and strict source-shadowing checks, aggregating
+tamper signals into a fail-closed allow/deny decision instead of a raw license
+status.
+
 License Management (planned)
 ==================================
 It is necessary to keep track of the licenses that have been issued, of the clients, and their hardware identifier. 
@@ -97,8 +137,8 @@ process memory                  Planned              Planned               Plann
 machine memory                  Planned              Planned               Planned                        Planned
 virtualization type             Planned              Planned               Planned                        Planned
 concurrent execution            Planned              Planned               Planned                        Planned
-licensed sw version             Planned              Planned               Planned                        Planned
-=============================== ==================== ====================  ============================== ==================== 
+licensed sw version             |:heavy_check_mark:| |:heavy_check_mark:|  |:heavy_check_mark:|           |:heavy_check_mark:|
+=============================== ==================== ====================  ============================== ====================
 
 Date
 =========
