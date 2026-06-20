@@ -406,8 +406,8 @@ void print_error(char out_buffer[LCC_API_ERROR_BUFFER_SIZE], const LicenseInfo* 
 	license::mstrlcpy(out_buffer, msg.c_str(), LCC_API_ERROR_BUFFER_SIZE);
 }
 
-bool identify_pc(LCC_API_HW_IDENTIFICATION_STRATEGY pc_id_method, char* chbuffer, size_t* bufSize,
-				 ExecutionEnvironmentInfo* execution_environment_info) {
+static bool identify_pc_impl(LCC_API_HW_IDENTIFICATION_STRATEGY pc_id_method, char* chbuffer, size_t* bufSize,
+							 ExecutionEnvironmentInfo* execution_environment_info) {
 	bool result = false;
 	if (bufSize != nullptr) {
 		if (*bufSize > LCC_API_PC_IDENTIFIER_SIZE && chbuffer != nullptr) {
@@ -429,6 +429,16 @@ bool identify_pc(LCC_API_HW_IDENTIFICATION_STRATEGY pc_id_method, char* chbuffer
 		execution_environment_info->virtualization_detail = exec_env.virtualization_detail();
 	}
 	return result;
+}
+
+bool identify_pc(LCC_API_HW_IDENTIFICATION_STRATEGY pc_id_method, char* chbuffer, size_t* bufSize,
+				 ExecutionEnvironmentInfo* execution_environment_info) {
+	// Top-level no-throw guard: no C++ exception may cross the C ABI boundary.
+	try {
+		return identify_pc_impl(pc_id_method, chbuffer, bufSize, execution_environment_info);
+	} catch (...) {
+		return false;
+	}
 }
 
 static void mergeLicenses(const vector<LicenseInfo>& licenses, LicenseInfo* license_out) {
@@ -824,14 +834,27 @@ static LCC_EVENT_TYPE acquire_license_internal(const CallerInformations* callerI
 	return result;
 }
 
-LCC_EVENT_TYPE acquire_license(const CallerInformations* callerInformation, const LicenseLocation* licenseLocation,
-							   LicenseInfo* license_out) {
+static LCC_EVENT_TYPE acquire_license_impl(const CallerInformations* callerInformation,
+										   const LicenseLocation* licenseLocation, LicenseInfo* license_out) {
 	license::EventRegistry er;
 	const bool strict_source_fatal = strict_source_fatal_enabled.load(std::memory_order_relaxed);
 	const LCC_EVENT_TYPE result =
 		acquire_license_internal(callerInformation, licenseLocation, license_out, strict_source_fatal, er, nullptr);
 	export_license_status(er, license_out);
 	return result;
+}
+
+LCC_EVENT_TYPE acquire_license(const CallerInformations* callerInformation, const LicenseLocation* licenseLocation,
+							   LicenseInfo* license_out) {
+	// Top-level no-throw guard: no C++ exception may cross the C ABI boundary.
+	try {
+		return acquire_license_impl(callerInformation, licenseLocation, license_out);
+	} catch (...) {
+		if (license_out != nullptr) {
+			*license_out = LicenseInfo{};
+		}
+		return LICENSE_MALFORMED;
+	}
 }
 
 static LCC_EVENT_TYPE acquire_license_with_runtime_checks(const CallerInformations* callerInformation,
@@ -976,8 +999,9 @@ static LCC_EVENT_TYPE acquire_license_with_runtime_checks(const CallerInformatio
 	return result;
 }
 
-LCC_EVENT_TYPE acquire_license_ex(const CallerInformations* callerInformation, const LicenseLocation* licenseLocation,
-								  LicenseInfo* license_out, const LicenseCheckOptions* options) {
+static LCC_EVENT_TYPE acquire_license_ex_impl(const CallerInformations* callerInformation,
+											  const LicenseLocation* licenseLocation, LicenseInfo* license_out,
+											  const LicenseCheckOptions* options) {
 	if (license_out != nullptr) {
 		*license_out = LicenseInfo{};
 	}
@@ -992,6 +1016,19 @@ LCC_EVENT_TYPE acquire_license_ex(const CallerInformations* callerInformation, c
 	}
 	return acquire_license_with_runtime_checks(callerInformation, licenseLocation, license_out, normalized_options,
 											   nullptr, nullptr);
+}
+
+LCC_EVENT_TYPE acquire_license_ex(const CallerInformations* callerInformation, const LicenseLocation* licenseLocation,
+								  LicenseInfo* license_out, const LicenseCheckOptions* options) {
+	// Top-level no-throw guard: no C++ exception may cross the C ABI boundary.
+	try {
+		return acquire_license_ex_impl(callerInformation, licenseLocation, license_out, options);
+	} catch (...) {
+		if (license_out != nullptr) {
+			*license_out = LicenseInfo{};
+		}
+		return LICENSE_MALFORMED;
+	}
 }
 
 static void populate_license_decision(LccLicenseDecision* decision_out, const LCC_EVENT_TYPE result,
@@ -1010,10 +1047,10 @@ static void populate_license_decision(LccLicenseDecision* decision_out, const LC
 	}
 }
 
-LCC_EVENT_TYPE lcc_acquire_license_decision(const CallerInformations* callerInformation,
-											const LicenseLocation* licenseLocation, LicenseInfo* license_out,
-											LccLicenseDecision* decision_out,
-											const LccLicenseDecisionOptions* options) {
+static LCC_EVENT_TYPE lcc_acquire_license_decision_impl(const CallerInformations* callerInformation,
+														const LicenseLocation* licenseLocation,
+														LicenseInfo* license_out, LccLicenseDecision* decision_out,
+														const LccLicenseDecisionOptions* options) {
 	if (license_out != nullptr) {
 		*license_out = LicenseInfo{};
 	}
@@ -1073,6 +1110,25 @@ LCC_EVENT_TYPE lcc_acquire_license_decision(const CallerInformations* callerInfo
 	return result;
 }
 
+LCC_EVENT_TYPE lcc_acquire_license_decision(const CallerInformations* callerInformation,
+											const LicenseLocation* licenseLocation, LicenseInfo* license_out,
+											LccLicenseDecision* decision_out,
+											const LccLicenseDecisionOptions* options) {
+	// Top-level no-throw guard: no C++ exception may cross the C ABI boundary.
+	try {
+		return lcc_acquire_license_decision_impl(callerInformation, licenseLocation, license_out, decision_out,
+												 options);
+	} catch (...) {
+		if (license_out != nullptr) {
+			*license_out = LicenseInfo{};
+		}
+		if (decision_out != nullptr) {
+			lcc_init_license_decision(decision_out);
+		}
+		return LICENSE_MALFORMED;
+	}
+}
+
 bool lcc_set_online_revocation_floor(const LccRevocationFloorRecord* record) {
 	string project;
 	string feature;
@@ -1105,9 +1161,10 @@ void lcc_set_strict_source_fatal_enabled(bool enabled) {
 	strict_source_fatal_enabled.store(enabled, std::memory_order_relaxed);
 }
 
-LCC_EVENT_TYPE lcc_verify_config(const CallerInformations* callerInformation, const LicenseLocation* licenseLocation,
-								 LicenseInfo* license_out, const LccConfigInput* input, LccConfigDecision* decision_out,
-								 const LccConfigVerifyOptions* options) {
+static LCC_EVENT_TYPE lcc_verify_config_impl(const CallerInformations* callerInformation,
+											 const LicenseLocation* licenseLocation, LicenseInfo* license_out,
+											 const LccConfigInput* input, LccConfigDecision* decision_out,
+											 const LccConfigVerifyOptions* options) {
 	if (license_out != nullptr) {
 		*license_out = LicenseInfo{};
 	}
@@ -1244,6 +1301,23 @@ LCC_EVENT_TYPE lcc_verify_config(const CallerInformations* callerInformation, co
 	}
 	export_license_status(er, license_out);
 	return LICENSE_OK;
+}
+
+LCC_EVENT_TYPE lcc_verify_config(const CallerInformations* callerInformation, const LicenseLocation* licenseLocation,
+								 LicenseInfo* license_out, const LccConfigInput* input, LccConfigDecision* decision_out,
+								 const LccConfigVerifyOptions* options) {
+	// Top-level no-throw guard: no C++ exception may cross the C ABI boundary.
+	try {
+		return lcc_verify_config_impl(callerInformation, licenseLocation, license_out, input, decision_out, options);
+	} catch (...) {
+		if (license_out != nullptr) {
+			*license_out = LicenseInfo{};
+		}
+		if (decision_out != nullptr) {
+			lcc_init_config_decision(decision_out);
+		}
+		return LICENSE_MALFORMED;
+	}
 }
 
 LCC_EVENT_TYPE confirm_license(char* featureName, LicenseLocation* licenseLocation) {

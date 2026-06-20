@@ -19,6 +19,18 @@ extern "C" {
 #include "datatypes.h"
 
 /**
+ * Compile-time library version. Kept in sync with the `project(... VERSION ...)`
+ * declaration in the top-level CMakeLists.txt (and doc/conf.py). Consumers can
+ * use these for conditional compilation and minimum-version assertions, e.g.
+ * `#if LCC_VERSION_NUMBER < 20100`.
+ */
+#define LCC_VERSION_MAJOR 2
+#define LCC_VERSION_MINOR 1
+#define LCC_VERSION_PATCH 0
+#define LCC_VERSION_STRING "2.1.0"
+#define LCC_VERSION_NUMBER ((LCC_VERSION_MAJOR * 10000) + (LCC_VERSION_MINOR * 100) + LCC_VERSION_PATCH)
+
+/**
  * Returns a static, human-readable description for an ::LCC_EVENT_TYPE code
  * (e.g. the value returned by ::acquire_license). The returned string is owned
  * by the library and must not be freed.
