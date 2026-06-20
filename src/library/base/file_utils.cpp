@@ -45,11 +45,18 @@ string get_file_contents(const char *filename, size_t max_size) {
 	string contents;
 	ifstream in(filename, std::ios::binary);
 	if (in) {
-		size_t index = (size_t)in.seekg(0, ios::end).tellg();
-		size_t limited_size = min(index, max_size);
+		const std::streamoff end_pos = in.seekg(0, ios::end).tellg();
+		// A negative tellg() (non-seekable or special file) must not be cast to a
+		// huge size_t; bound to max_size, then truncate to the bytes actually read
+		// so a short/special read never returns a zero-filled garbage tail.
+		size_t limited_size = max_size;
+		if (end_pos >= 0) {
+			limited_size = min(static_cast<size_t>(end_pos), max_size);
+		}
 		contents.resize(limited_size);
 		in.seekg(0, ios::beg);
 		in.read(&contents[0], limited_size);
+		contents.resize(static_cast<size_t>(in.gcount()));
 		in.close();
 	} else {
 		throw runtime_error(std::strerror(errno));

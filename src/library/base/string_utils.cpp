@@ -86,7 +86,13 @@ time_t seconds_from_epoch(const string &timeString) {
 	tm_value.tm_year = static_cast<int>(year) - 1900;
 	tm_value.tm_mon = static_cast<int>(month) - 1;
 	tm_value.tm_mday = static_cast<int>(day);
-	return mktime(&tm_value);
+	const time_t result = mktime(&tm_value);
+	if (result == static_cast<time_t>(-1)) {
+		// Date outside the platform's representable time_t range (e.g. a far-future
+		// year overflowing a 32-bit time_t). Callers wrap this and fail closed.
+		throw invalid_argument("Date [" + timeString + "] is outside the representable time range");
+	}
+	return result;
 }
 
 const vector<string> split_string(const string &licensePositions, char splitchar) {
