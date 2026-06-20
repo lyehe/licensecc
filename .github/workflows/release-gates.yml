@@ -91,6 +91,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+          cache: npm
+          cache-dependency-path: services/cloudflare-license-admin/package-lock.json
+
+      # admin-ui-workflow.test.mjs transpiles operatorWorkflow.ts at runtime via the
+      # `typescript` devDependency, so the admin service deps must be installed before
+      # `node --test` runs it. Without this the tooling job fails with ERR_MODULE_NOT_FOUND.
+      - name: Install admin service test deps
+        run: npm ci
+        working-directory: services/cloudflare-license-admin
 
       - name: Script tests
         run: |

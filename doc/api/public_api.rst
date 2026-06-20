@@ -66,6 +66,18 @@ Public data types
 .. doxygenstruct:: LccRevocationFloorRecord
    :members:
 
+.. doxygenstruct:: LccConfigInput
+   :members:
+
+.. doxygenstruct:: LccConfigVerifyOptions
+   :members:
+
+.. doxygenstruct:: LccConfigDecision
+   :members:
+
+.. doxygenstruct:: LccConfigSeqFloorRecord
+   :members:
+
 .. doxygenstruct:: CallerInformations
    :members:
 

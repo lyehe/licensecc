@@ -61,6 +61,7 @@ breathe_domain_by_extension = {"h" : "cpp"}
 nitpick_ignore = [
     ("cpp:identifier", "LCC_API_HW_IDENTIFICATION_STRATEGY"),
     ("cpp:identifier", "LCC_API_PATH_SIZE"),
+    ("cpp:identifier", "LCC_API_CONFIG_ID_SIZE"),
     ("cpp:identifier", "license"),
     ("cpp:identifier", "license::hw_identifier"),
     ("cpp:identifier", "size_t"),
