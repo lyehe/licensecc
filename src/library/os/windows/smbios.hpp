@@ -376,7 +376,13 @@ inline void parser::feed(const void *raw_smbios, const size_t size) {
 	clear();
 
 	raw_size_ = size;
-	raw_data_ = new byte_t[raw_size_];
+	// Allocate two extra NUL guard bytes so a truncated/malformed final structure's
+	// string-table walk (the strlen scans in skip/extract_strings and the consumer's
+	// std::string(strings[i])) always terminates within the allocation instead of
+	// over-reading the heap.
+	raw_data_ = new byte_t[raw_size_ + 2];
+	raw_data_[raw_size_] = 0;
+	raw_data_[raw_size_ + 1] = 0;
 
 	memcpy(raw_data_, raw_smbios, size);
 

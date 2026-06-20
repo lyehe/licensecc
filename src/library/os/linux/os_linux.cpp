@@ -79,9 +79,16 @@ static void parse_disk_id(const char *uuid, unsigned char *buffer_out, size_t ou
  */
 
 static std::string getAttribute(const std::string &source, const std::string &attrName) {
-	std::string attr_namefull = attrName + "=\"";
-	std::size_t startpos = source.find(attr_namefull) + attr_namefull.size();
-	std::size_t endpos = source.find("\"", startpos);
+	const std::string attr_namefull = attrName + "=\"";
+	const std::size_t namepos = source.find(attr_namefull);
+	if (namepos == std::string::npos) {
+		return std::string();
+	}
+	const std::size_t startpos = namepos + attr_namefull.size();
+	const std::size_t endpos = source.find("\"", startpos);
+	if (endpos == std::string::npos) {
+		return std::string();
+	}
 	return source.substr(startpos, endpos - startpos);
 }
 
@@ -91,7 +98,7 @@ FUNCTION_RETURN parse_blkid(const std::string &blkid_file_content, std::vector<D
 	for (std::size_t oldpos = 0, pos = 0; (pos = blkid_file_content.find("</device>", oldpos)) != std::string::npos;
 		 oldpos = pos + 1) {
 		DiskInfo diskInfo = {};
-		std::string cur_dev = blkid_file_content.substr(oldpos, pos);
+		std::string cur_dev = blkid_file_content.substr(oldpos, pos - oldpos);
 		diskInfo.id = diskNum++;
 		std::string device = cur_dev.substr(cur_dev.find_last_of(">") + 1);
 		mstrlcpy(diskInfo.device, device.c_str(), MAX_PATH);

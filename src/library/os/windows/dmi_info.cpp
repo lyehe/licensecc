@@ -61,7 +61,7 @@ DmiInfo::DmiInfo() {
 					auto *const x = reinterpret_cast<baseboard_info *>(header);
 
 					if (x->length == 0) break;
-					if (x->manufacturer_name > 0 && x->manufacturer_name < x->length) {
+					if (x->manufacturer_name > 0 && x->manufacturer_name < strings.size()) {
 						m_sys_vendor = strings[x->manufacturer_name];
 					}
 				} break;
@@ -69,7 +69,7 @@ DmiInfo::DmiInfo() {
 				case types::bios_info: {
 					auto *const x = reinterpret_cast<bios_info *>(header);
 					if (x->length == 0) break;
-					if (x->vendor > 0 && x->vendor < x->length) {
+					if (x->vendor > 0 && x->vendor < strings.size()) {
 						m_bios_vendor = strings[x->vendor];
 					}
 				} break;
@@ -78,7 +78,7 @@ DmiInfo::DmiInfo() {
 					auto *const x = reinterpret_cast<proc_info *>(header);
 
 					if (x->length == 0) break;
-					if (x->manufacturer > 0 && x->manufacturer < x->length) {
+					if (x->manufacturer > 0 && x->manufacturer < strings.size()) {
 						m_cpu_manufacturer = strings[x->manufacturer];
 					}
 					m_cpu_cores = static_cast<unsigned int>(x->cores);
@@ -88,8 +88,8 @@ DmiInfo::DmiInfo() {
 					auto *const x = reinterpret_cast<system_info *>(header);
 
 					if (x->length == 0) break;
-					if (x->manufacturer > 0 && x->manufacturer<x->length && x-> product_name > 0 &&
-						x->product_name < x->length) {
+					if (x->manufacturer > 0 && x->manufacturer < strings.size() && x->product_name > 0 &&
+						x->product_name < strings.size()) {
 						m_bios_description =
 							std::string(strings[x->manufacturer]) + std::string(strings[x->product_name]);
 					}
