@@ -36,7 +36,7 @@ Token format
 
 A config token is an envelope of three dot-separated parts::
 
-  lcccfg1.<base64url-payload>.<base64url-signature>
+  lcccfg1.<base64-payload>.<base64-signature>
 
 The signature algorithm is ``rsa-pkcs1-sha256`` (``RSASSA-PKCS1-v1_5`` with
 ``SHA-256``). The signed payload carries the ``key-id``
