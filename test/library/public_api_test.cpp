@@ -105,6 +105,22 @@ BOOST_AUTO_TEST_CASE(lcc_strerror_known_and_unknown) {
 	BOOST_CHECK(strlen(unknown) > 0);
 }
 
+#define LCC_TEST_STR2(x) #x
+#define LCC_TEST_STR(x) LCC_TEST_STR2(x)
+
+BOOST_AUTO_TEST_CASE(version_macros_match_cmake_project_version) {
+	// The public LCC_VERSION_* macros (licensecc.h) must stay in sync with the
+	// CMake project(... VERSION ...). LCC_EXPECTED_PROJECT_VERSION is injected by
+	// test/library/CMakeLists.txt; this fails the build if the header is bumped
+	// out of sync with project() (or not bumped on a version change).
+#ifdef LCC_EXPECTED_PROJECT_VERSION
+	BOOST_CHECK_EQUAL(std::string(LCC_VERSION_STRING), std::string(LCC_TEST_STR(LCC_EXPECTED_PROJECT_VERSION)));
+#endif
+	// Numeric form stays consistent with the components.
+	BOOST_CHECK_EQUAL(LCC_VERSION_NUMBER,
+					  (LCC_VERSION_MAJOR * 10000) + (LCC_VERSION_MINOR * 100) + LCC_VERSION_PATCH);
+}
+
 BOOST_AUTO_TEST_CASE(public_header_uses_licensecc_owned_path_size) {
 	BOOST_CHECK_EQUAL(sizeof(AuditEvent{}.license_reference), static_cast<size_t>(LCC_API_PATH_SIZE));
 }

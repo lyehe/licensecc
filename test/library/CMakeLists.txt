@@ -112,6 +112,14 @@ target_link_libraries(
  Boost::system
 )
 
+# Inject the CMake project version (unquoted) so the public header LCC_VERSION_*
+# macros cannot silently drift from project(... VERSION ...). The version test in
+# public_api_test.cpp stringifies and compares it, failing the build on drift.
+target_compile_definitions(
+ test_public_api
+ PRIVATE LCC_EXPECTED_PROJECT_VERSION=${PROJECT_VERSION}
+)
+
 ### Anti-tamper API and integration tests
 add_executable(
  test_anti_tamper
