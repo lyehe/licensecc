@@ -85,6 +85,16 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 option(BUILD_BENCHMARKS "Build performance benchmarks (no extra dependencies)" OFF)
 option(BUILD_FUZZERS "Build libFuzzer-based parser and decoder fuzz targets." OFF)
 option(LCC_BUILD_EXAMPLES "Build optional licensecc examples." OFF)
+
+# Internal file logging (writes a temp-dir open-license.log on error paths) is a debug
+# diagnostic, not a production feature: a linked library should not silently own a log
+# sink by default. Disable it for non-Debug configs; hosts opt back in everywhere with
+# -DLCC_ENABLE_LOGGING=ON. Applies to all targets defined below (library + tools + tests).
+option(LCC_ENABLE_LOGGING "Force-enable licensecc internal file logging in all build configs." OFF)
+if(NOT LCC_ENABLE_LOGGING)
+	add_compile_definitions($<$<NOT:$<CONFIG:Debug>>:LOG_DISABLED=1>)
+endif()
+
 SET(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake/")
 
 option(LCC_INSTALL_TOOLS

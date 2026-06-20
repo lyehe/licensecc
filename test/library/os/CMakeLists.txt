@@ -24,6 +24,19 @@ IF(WIN32)
 	)
 
 	ADD_TEST(NAME test_windows_disk_info COMMAND test_windows_disk_info)
+
+	add_executable( test_smbios
+	 smbios_test.cpp
+	)
+
+	target_link_libraries( test_smbios
+	 licensecc_static
+	 Boost::unit_test_framework
+	 Boost::filesystem
+	 Boost::system
+	)
+
+	ADD_TEST(NAME test_smbios COMMAND test_smbios)
 ENDIF(WIN32)
 
 IF(NOT DEFINED MINGW)
@@ -67,6 +80,10 @@ set_tests_properties(
 IF(WIN32)
 	set_tests_properties(
 	 test_windows_disk_info
+	 PROPERTIES LABELS "security;platform;hardware"
+	)
+	set_tests_properties(
+	 test_smbios
 	 PROPERTIES LABELS "security;platform;hardware"
 	)
 ENDIF(WIN32)

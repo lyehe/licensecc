@@ -138,12 +138,14 @@ if(LICENSECC_BUILD_INSPECTOR)
 	list(APPEND _expected_label_entries
 		"test_lccinspector_redaction|security,hardware,platform"
 		"test_lccinspector_blackbox_redaction|security,hardware,platform"
+		"test_lccinspector_short_section|security,hardware,platform"
 	)
 endif()
 
 if(LICENSECC_IS_WINDOWS)
 	list(APPEND _expected_label_entries
 		"test_windows_disk_info|security,platform,hardware"
+		"test_smbios|security,platform,hardware"
 	)
 else()
 	list(APPEND _expected_label_entries

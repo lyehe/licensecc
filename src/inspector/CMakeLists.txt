@@ -20,4 +20,9 @@ if(BUILD_TESTING)
 			"-DLCCINSPECTOR=$<TARGET_FILE:lccinspector>"
 			-P "${CMAKE_SOURCE_DIR}/test/lccinspector_redaction_blackbox.cmake")
 	set_tests_properties(test_lccinspector_blackbox_redaction PROPERTIES LABELS "security;hardware;platform")
+	add_test(NAME test_lccinspector_short_section
+		COMMAND ${CMAKE_COMMAND}
+			"-DLCCINSPECTOR=$<TARGET_FILE:lccinspector>"
+			-P "${CMAKE_SOURCE_DIR}/test/lccinspector_short_section.cmake")
+	set_tests_properties(test_lccinspector_short_section PROPERTIES LABELS "security;hardware;platform")
 endif()
