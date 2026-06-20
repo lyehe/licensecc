@@ -108,6 +108,7 @@ set(_expected_label_entries
 	"test_event_registry|security,validation"
 	"test_license_verifier|security,verifier"
 	"test_public_api|security,public_api"
+	"test_inspector_section|security,public_api"
 	"test_anti_tamper|security,public_api,anti_tamper"
 	"test_online_verification|security,public_api,online"
 	"test_online_callback_failover|security,public_api,online"
@@ -138,7 +139,6 @@ if(LICENSECC_BUILD_INSPECTOR)
 	list(APPEND _expected_label_entries
 		"test_lccinspector_redaction|security,hardware,platform"
 		"test_lccinspector_blackbox_redaction|security,hardware,platform"
-		"test_lccinspector_short_section|security,hardware,platform"
 	)
 endif()
 

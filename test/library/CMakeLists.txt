@@ -180,6 +180,19 @@ target_link_libraries(
  Boost::system
 )
 
+### Inspector section-classification unit tests (round-3 over-read regression)
+add_executable(
+ test_inspector_section
+ inspector_section_test.cpp
+)
+
+target_link_libraries(
+ test_inspector_section
+ licensecc_static
+ Boost::unit_test_framework
+ Boost::system
+)
+
 ADD_TEST(NAME test_license_reader COMMAND test_license_reader)
 ADD_TEST(NAME test_license_locator COMMAND test_license_locator)
 ADD_TEST(NAME test_base64 COMMAND test_base64)
@@ -191,10 +204,16 @@ ADD_TEST(NAME test_anti_tamper COMMAND test_anti_tamper)
 ADD_TEST(NAME test_online_verification COMMAND test_online_verification)
 ADD_TEST(NAME test_online_callback_failover COMMAND test_online_callback_failover)
 ADD_TEST(NAME test_config_attestation COMMAND test_config_attestation)
+ADD_TEST(NAME test_inspector_section COMMAND test_inspector_section)
 
 set_tests_properties(
  test_license_reader
  PROPERTIES LABELS "security;parser"
+)
+
+set_tests_properties(
+ test_inspector_section
+ PROPERTIES LABELS "security;public_api"
 )
 
 set_tests_properties(

@@ -13,6 +13,7 @@
 #include "../library/os/cpu_info.hpp"
 #include "../library/os/dmi_info.hpp"
 #include "../library/os/network.hpp"
+#include "inspector_section.hpp"
 
 using namespace std;
 using namespace license::os;
@@ -115,18 +116,20 @@ static LCC_EVENT_TYPE verifyLicense(const string& fname) {
 	ini.GetAllSections(sections);
 	CallerInformations callerInformation = {};
 	for (CSimpleIniA::Entry section : sections) {
-		const string section_name(section.pItem);
-		if (section_name != LCC_PROJECT_NAME) {
-			if (!lcc_set_caller_feature_name(&callerInformation, section_name.c_str())) {
-				cerr << "project [" << section.pItem << "]: feature name is too long" << endl;
-				continue;
-			}
-			LCC_EVENT_TYPE result = acquire_license(&callerInformation, &licLocation, &licenseInfo);
-			if (result == LICENSE_OK) {
-				cout << "project [" << section.pItem << "]: license OK" << endl;
-			} else {
-				cerr << "project [" << section.pItem << "]: " << lcc_strerror(result) << endl;
-			}
+		const lccinspector::SectionAction action =
+			lccinspector::classify_inspector_section(section.pItem, callerInformation);
+		if (action == lccinspector::SectionAction::SkipDefaultProject) {
+			continue;
+		}
+		if (action == lccinspector::SectionAction::NameTooLong) {
+			cerr << "project [" << section.pItem << "]: feature name is too long" << endl;
+			continue;
+		}
+		LCC_EVENT_TYPE feature_result = acquire_license(&callerInformation, &licLocation, &licenseInfo);
+		if (feature_result == LICENSE_OK) {
+			cout << "project [" << section.pItem << "]: license OK" << endl;
+		} else {
+			cerr << "project [" << section.pItem << "]: " << lcc_strerror(feature_result) << endl;
 		}
 	}
 	return result;
