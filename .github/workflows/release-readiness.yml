@@ -1,0 +1,123 @@
+name: Release_Readiness
+
+# Tag/manual release-readiness gate (IMPLEMENTATION_CHECKLIST P2 "Add release gates").
+# Runs on a release tag or a manual dispatch. The structural part (release-gate tooling
+# tests + secret/workspace hygiene) always runs and needs no credentials. The external
+# staging drills (Cloudflare Access / R2 restore / backup deploy / public-verifier) run
+# only when the staging secrets are configured, so this gate is GREEN before the secrets
+# exist and becomes the real release-readiness assertion once they are added.
+#
+# To enable the external drills, add these repository secrets (see README "Release
+# readiness" for what each is):
+#   LICENSECC_ADMIN_URL, LICENSECC_ACCESS_JWT, LICENSECC_NON_ADMIN_ACCESS_JWT,
+#   LICENSECC_R2_BACKUP_BUCKET, LICENSECC_R2_BACKUP_OBJECT_KEY,
+#   LICENSECC_RESTORE_SCRATCH_D1, LICENSECC_RESTORE_SOURCE_D1,
+#   LICENSECC_RESTORE_SCRATCH_CONFIG, LICENSECC_RESTORE_SOURCE_CONFIG,
+#   LICENSECC_RESTORE_R2_CONFIG, LICENSECC_BACKUP_URL,
+#   LICENSECC_BACKUP_WORKER_NAME, LICENSECC_BACKUP_WORKFLOW_NAME, LICENSECC_VERIFIER_URL
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  release-gate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: services/cloudflare-license-admin/package-lock.json
+
+      # --- Structural gate: the release-gate tooling itself must be sound. No credentials. ---
+      - name: Install admin service test deps
+        run: npm ci
+        working-directory: services/cloudflare-license-admin
+
+      - name: Release-gate script tests
+        run: |
+          node --test \
+            scripts/assert_release_ready.test.mjs \
+            scripts/external_gate_preflight.test.mjs \
+            scripts/release_gate_contract.test.mjs \
+            scripts/release_gates_workflow.test.mjs \
+            scripts/secret_hygiene_scan.test.mjs \
+            scripts/validate_release_gates.test.mjs \
+            scripts/workspace_hygiene_check.test.mjs
+
+      - name: Secret + workspace hygiene
+        run: |
+          node scripts/secret_hygiene_scan.mjs
+          node scripts/workspace_hygiene_check.mjs
+
+      # --- Detect whether the Cloudflare staging credentials are configured. ---
+      - name: Detect staging credentials
+        id: staging
+        env:
+          LICENSECC_ACCESS_JWT: ${{ secrets.LICENSECC_ACCESS_JWT }}
+        run: |
+          if [ -n "${LICENSECC_ACCESS_JWT:-}" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: External staging not configured (skipped)
+        if: steps.staging.outputs.configured != 'true'
+        run: |
+          echo "::notice::Cloudflare staging credentials are not configured."
+          echo "The external release-readiness drills (Access / R2 restore / backup"
+          echo "deploy / public-verifier) were skipped. Add the LICENSECC_* repo secrets"
+          echo "listed at the top of this workflow and re-run to enforce the full gate."
+
+      # --- Full external release-readiness gate: only with staging credentials. ---
+      # validate_release_gates.mjs --full also runs the local CTest-backed gates, which
+      # require a configured build/ tree; configure CMake first so CTestTestfile.cmake exists.
+      - name: Install build prerequisites
+        if: steps.staging.outputs.configured == 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build libssl-dev \
+            libboost-test-dev libboost-system-dev libboost-filesystem-dev
+
+      - name: Configure CMake (generate the CTest tree)
+        if: steps.staging.outputs.configured == 'true'
+        run: |
+          cmake -S . -B build -G Ninja -DLCC_PROJECT_NAME=release_gate
+
+      - name: External release-readiness drills + assertion
+        if: steps.staging.outputs.configured == 'true'
+        env:
+          LICENSECC_ADMIN_URL: ${{ secrets.LICENSECC_ADMIN_URL }}
+          LICENSECC_ACCESS_JWT: ${{ secrets.LICENSECC_ACCESS_JWT }}
+          LICENSECC_NON_ADMIN_ACCESS_JWT: ${{ secrets.LICENSECC_NON_ADMIN_ACCESS_JWT }}
+          LICENSECC_ACCESS_USE_CLOUDFLARED: ${{ secrets.LICENSECC_ACCESS_USE_CLOUDFLARED }}
+          LICENSECC_R2_BACKUP_BUCKET: ${{ secrets.LICENSECC_R2_BACKUP_BUCKET }}
+          LICENSECC_R2_BACKUP_OBJECT_KEY: ${{ secrets.LICENSECC_R2_BACKUP_OBJECT_KEY }}
+          LICENSECC_RESTORE_SCRATCH_D1: ${{ secrets.LICENSECC_RESTORE_SCRATCH_D1 }}
+          LICENSECC_RESTORE_SOURCE_D1: ${{ secrets.LICENSECC_RESTORE_SOURCE_D1 }}
+          LICENSECC_RESTORE_SCRATCH_CONFIG: ${{ secrets.LICENSECC_RESTORE_SCRATCH_CONFIG }}
+          LICENSECC_RESTORE_SOURCE_CONFIG: ${{ secrets.LICENSECC_RESTORE_SOURCE_CONFIG }}
+          LICENSECC_RESTORE_R2_CONFIG: ${{ secrets.LICENSECC_RESTORE_R2_CONFIG }}
+          LICENSECC_RESTORE_REQUIRE_STATUSES: ${{ secrets.LICENSECC_RESTORE_REQUIRE_STATUSES }}
+          LICENSECC_BACKUP_URL: ${{ secrets.LICENSECC_BACKUP_URL }}
+          LICENSECC_BACKUP_WORKER_NAME: ${{ secrets.LICENSECC_BACKUP_WORKER_NAME }}
+          LICENSECC_BACKUP_WORKFLOW_NAME: ${{ secrets.LICENSECC_BACKUP_WORKFLOW_NAME }}
+          LICENSECC_VERIFIER_URL: ${{ secrets.LICENSECC_VERIFIER_URL }}
+        run: |
+          set -euo pipefail
+          summary="$RUNNER_TEMP/release-ready.json"
+          node scripts/external_gate_preflight.mjs
+          node scripts/validate_release_gates.mjs --full --require-external --json-out "$summary"
+          node scripts/assert_release_ready.mjs "$summary"
