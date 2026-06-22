@@ -131,3 +131,27 @@ verified by the existing C++ `online_verification` (`lccoa1`).
 Phase: the floating slice (pool + checkout/heartbeat/release + client logic + tests).
 NOT in scope: reservations/options-file policy, named-user pools, metering, the commerce
 back-office (shared phase 2 with the lease platform).
+
+## Build status (2026-06-22) — built end to end, tested green
+
+| Piece | Tests |
+|---|---|
+| Migration 0011 (seat pool cols + `seat_checkouts`); D1 + Postgres port; also fixed the 0010 Postgres-port gap | schema parity green |
+| `SEAT_CHECKOUT_ATOMIC_SQL` (race-free, counts live seats) — shared by worker + SQL test | — |
+| Worker `/v1/checkout`·`/v1/heartbeat`·`/v1/release`: atomic acquire, seat `lccoa1`, lazy reclaim, borrow, overdraft, fail-closed | `seat-worker` 8/8 (verifiable token) |
+| SQLite seat-pool cap | `seat-pool` 6/6 (live cap, no-TOCTOU, expired-not-counted, release, heartbeat, borrow) |
+| `seat_client.hpp` state machine (online-required, distinct from the offline lease client) | `test_seat_client` 5/5 |
+| CI: SQL suites + parity + lint on Node 22; C++ Debug + lease ring + Node cross-language | label audit green |
+
+Backend: 76/76 unit, 18/18 SQL, lint ok. Reuse delivered as designed: the seat token is the
+existing `lccoa1` (verified by the shipped C++ `online_verification` — no new verification
+code), and the atomic cap is the rebind-cap pattern counting live rows.
+
+### Deviations / deferred (documented)
+
+1. **Online-required by design** — a held seat is offline-tolerant only within its grace
+   window; the bounded **borrow** path is the deliberate offline escape (built).
+2. **Overdraft** is an integer margin column (`allow_overdraft` = extra seats; 0 = hard cap),
+   not a percentage.
+3. **Reservations / options-file policy, named-user pools, metering** — out of scope (FlexNet
+   parity items deferred); commerce back-office is shared phase 2.
