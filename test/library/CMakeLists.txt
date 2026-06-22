@@ -193,6 +193,30 @@ target_link_libraries(
  Boost::system
 )
 
+### Clock floor (offline rollback protection) unit tests. Header-only; no library link.
+add_executable(
+ test_clock_floor
+ clock_floor_test.cpp
+)
+
+target_link_libraries(
+ test_clock_floor
+ Boost::unit_test_framework
+ Boost::system
+)
+
+### Lease client decision logic (state machine + durable-write gate). Header-only.
+add_executable(
+ test_lease_client
+ lease_client_test.cpp
+)
+
+target_link_libraries(
+ test_lease_client
+ Boost::unit_test_framework
+ Boost::system
+)
+
 ADD_TEST(NAME test_license_reader COMMAND test_license_reader)
 ADD_TEST(NAME test_license_locator COMMAND test_license_locator)
 ADD_TEST(NAME test_base64 COMMAND test_base64)
@@ -205,6 +229,8 @@ ADD_TEST(NAME test_online_verification COMMAND test_online_verification)
 ADD_TEST(NAME test_online_callback_failover COMMAND test_online_callback_failover)
 ADD_TEST(NAME test_config_attestation COMMAND test_config_attestation)
 ADD_TEST(NAME test_inspector_section COMMAND test_inspector_section)
+ADD_TEST(NAME test_clock_floor COMMAND test_clock_floor)
+ADD_TEST(NAME test_lease_client COMMAND test_lease_client)
 
 set_tests_properties(
  test_license_reader
@@ -213,6 +239,16 @@ set_tests_properties(
 
 set_tests_properties(
  test_inspector_section
+ PROPERTIES LABELS "security;public_api"
+)
+
+set_tests_properties(
+ test_clock_floor
+ PROPERTIES LABELS "security;verifier"
+)
+
+set_tests_properties(
+ test_lease_client
  PROPERTIES LABELS "security;public_api"
 )
 
