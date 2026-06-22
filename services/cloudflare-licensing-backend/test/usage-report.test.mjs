@@ -74,3 +74,33 @@ test("denial_rate is zero when there are no attempts", () => {
   assert.equal(summarizeUsage([]).denial_rate, 0);
   assert.equal(summarizeUsage([{ event_type: "release", ts: 1 }]).denial_rate, 0);
 });
+
+test("denial_rate is 1.0 when every attempt is denied (the strongest upsell signal)", () => {
+  assert.equal(summarizeUsage([{ event_type: "denied", ts: 1 }, { event_type: "denied", ts: 2 }]).denial_rate, 1);
+});
+
+// Regression for the hardening-pass HIGH: a seat that lapses (reclaim at its deadline) and is
+// then released late on shutdown emits TWO ends for one seat. A seat-blind sweep would apply a
+// phantom -1 that undercounts an UNRELATED concurrent seat. Seat-aware aggregation must not.
+test("a reclaim plus a late release for one seat does not undercount a concurrent seat", () => {
+  const rows = [
+    { event_type: "checkout", seat_id: "s1", device_key_id: "d1", ts: 100 },
+    { event_type: "reclaim", seat_id: "s1", ts: 150 }, // s1 actually freed here
+    { event_type: "checkout", seat_id: "s2", device_key_id: "d2", ts: 160 },
+    { event_type: "release", seat_id: "s1", ts: 170 }, // phantom duplicate end for s1
+    { event_type: "checkout", seat_id: "s3", device_key_id: "d3", ts: 200 },
+    { event_type: "release", seat_id: "s3", ts: 260 }, // s2 and s3 genuinely overlap [200,260]
+    { event_type: "release", seat_id: "s2", ts: 300 },
+  ];
+  // True peak is 2 (s2 & s3). A seat-blind sweep would report 1.
+  assert.equal(summarizeUsage(rows).peak_concurrent, 2);
+});
+
+test("seat-aware: a duplicate checkout for an already-live seat is ignored", () => {
+  const rows = [
+    { event_type: "checkout", seat_id: "s1", ts: 10 },
+    { event_type: "checkout", seat_id: "s1", ts: 20 }, // duplicate -> ignored
+    { event_type: "release", seat_id: "s1", ts: 30 },
+  ];
+  assert.equal(summarizeUsage(rows).peak_concurrent, 1);
+});

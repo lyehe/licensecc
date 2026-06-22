@@ -177,4 +177,28 @@ rate is the upsell signal. Built on top of the floating slice:
   baseline), 3 worker HTTP (summary, validation, auth).
 
 Storage decision: D1 `usage_events` (queryable + testable) now; Cloudflare Analytics Engine
-is the scale upgrade when event volume outgrows D1. Daily rollups + retention sweep deferred.
+is the scale upgrade when event volume outgrows D1. Daily rollups deferred.
+
+### Adversarial hardening pass (workflow `w0083g5r6`: 24 raised, 19 confirmed)
+
+Verdict SHIP-WITH-FIXES. One HIGH + the highest-value mediums folded in:
+
+- **HIGH — double-end undercount (the billable metric).** A seat that lapses (`reclaim` at its
+  deadline) and is then released late on shutdown emitted TWO ends for one seat; the seat-blind
+  sweep applied a phantom −1 that undercounted an unrelated concurrent seat → peak (and the
+  windowed baseline) biased **downward**, i.e. under-billing. Fixed at the root (`/v1/release`
+  only logs a release that actually freed a row — `DELETE … RETURNING`) AND as defense-in-depth
+  (the sweep-line is now **seat-aware**: it drops a second end for an already-closed seat; the
+  baseline uses `EXCEPT` so a double-ended seat is subtracted once). Regression-tested at the
+  pure, SQL, and worker levels.
+- **Idle-entitlement never-swept inflation** → a **`scheduled()` Cron Trigger** (every 5 min)
+  reclaims lapsed seats even with no further checkouts, keeping peak accurate; the factored
+  `sweepLapsedSeats` is shared with the lazy checkout-path sweep.
+- **Retention**: `usage_events` (90d) and `lease_issuance` (180d > max rebind window) are now
+  swept in `scheduled()` — closing the migration-0010 gap where `lease_issuance` had none.
+- **Observability**: dropped analytics writes now emit `usage.record_dropped` (warn) instead of
+  silently undercounting; large windows return `truncated: true`.
+
+Deferred lows (documented, not blocking): a partial UNIQUE index on terminal seat events as a
+storage-level double-end guard; half-open `[from,to)` report windows; clamp-underflow metadata;
+proactive seat reclaim on entitlement revoke. None affect the corrected peak/billing metric.

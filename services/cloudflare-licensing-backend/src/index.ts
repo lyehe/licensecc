@@ -1473,28 +1473,9 @@ async function handleSeatCheckout(request: Request, env: Env): Promise<Response>
     ts: now,
   });
 
-  // Lazy reclamation: sweep lapsed seats and record their reclaim at the ACTUAL deadline
-  // (when concurrency dropped), not the sweep time. Each swept row is recorded under its own
-  // entitlement. Best-effort.
-  try {
-    const swept = await env.DB.prepare(
-      "DELETE FROM seat_checkouts WHERE heartbeat_deadline < ? RETURNING project, feature, license_fingerprint, seat_id, heartbeat_deadline",
-    )
-      .bind(now)
-      .all<{ project: string; feature: string; license_fingerprint: string; seat_id: string; heartbeat_deadline: number }>();
-    for (const reclaimed of swept.results ?? []) {
-      await recordUsageEvent(env, {
-        project: reclaimed.project,
-        feature: reclaimed.feature,
-        fingerprint: reclaimed.license_fingerprint,
-        event_type: "reclaim",
-        seat_id: reclaimed.seat_id,
-        ts: Number(reclaimed.heartbeat_deadline),
-      });
-    }
-  } catch {
-    // reclamation is not load-bearing for this checkout
-  }
+  // Lazy reclamation on the hot path; a Cron Trigger (scheduled, below) also sweeps so idle
+  // entitlements with no further checkouts still get their seats reclaimed promptly.
+  await sweepLapsedSeats(env, now);
 
   let assertion: string;
   try {
@@ -1580,24 +1561,30 @@ async function handleSeatRelease(request: Request, env: Env): Promise<Response> 
     body = null;
   }
   if (body === null || body.seat_id === undefined) return json({ ok: false, code: "invalid_request" }, 400);
+  let removed: boolean;
   try {
-    await env.DB.prepare(
-      "DELETE FROM seat_checkouts WHERE project = ? AND feature = ? AND license_fingerprint = ? AND seat_id = ?",
+    const deleted = await env.DB.prepare(
+      "DELETE FROM seat_checkouts WHERE project = ? AND feature = ? AND license_fingerprint = ? AND seat_id = ? RETURNING seat_id",
     )
       .bind(body.project, body.feature, body.license_fingerprint, body.seat_id)
-      .run();
+      .first<{ seat_id: string }>();
+    removed = deleted !== null;
   } catch {
     return json({ ok: false, code: "verification_error" }, 503);
   }
-  await recordUsageEvent(env, {
-    project: body.project,
-    feature: body.feature,
-    fingerprint: body.license_fingerprint,
-    event_type: "release",
-    seat_id: body.seat_id,
-    ts: now,
-  });
-  // Idempotent: releasing an unknown/already-freed seat is success.
+  // Only record a release that actually freed a seat. A seat already reclaimed by the sweep (the
+  // routine lapse-then-release-on-shutdown lifecycle) must NOT emit a second end event -- that
+  // phantom -1 undercounts peak_concurrent. The HTTP response stays idempotent regardless.
+  if (removed) {
+    await recordUsageEvent(env, {
+      project: body.project,
+      feature: body.feature,
+      fingerprint: body.license_fingerprint,
+      event_type: "release",
+      seat_id: body.seat_id,
+      ts: now,
+    });
+  }
   return json({ ok: true, server_time: now });
 }
 
@@ -1606,6 +1593,10 @@ async function handleSeatRelease(request: Request, env: Env): Promise<Response> 
 // An append-only usage_events log (the FlexNet "report log") that the peak-concurrent /
 // denial-rate / adoption analytics aggregate over. Capture is best-effort: analytics must
 // never fail a license operation. The aggregations are pure (src/lease/usage_report.mjs).
+
+const USAGE_EVENT_RETENTION_SEC = 90 * 24 * 60 * 60; // reports cover up to 90d; longer => rollups
+const USAGE_REPORT_MAX_ROWS = 100000; // honest cap: beyond this a window report is flagged truncated
+const LEASE_ISSUANCE_RETENTION_SEC = 180 * 24 * 60 * 60; // > max rebind_window_sec so the rebind cap keeps its rows
 
 async function recordUsageEvent(
   env: Env,
@@ -1626,13 +1617,46 @@ async function recordUsageEvent(
     )
       .bind(e.project, e.feature, e.fingerprint, e.event_type, e.seat_id ?? null, e.device_key_id ?? null, e.reason ?? null, e.ts)
       .run();
+  } catch (error) {
+    // Best-effort: a missed analytics row must never break licensing -- but make the drop
+    // observable so a silent peak_concurrent undercount is detectable in logs.
+    logEvent("warn", "usage.record_dropped", {
+      project: e.project,
+      feature: e.feature,
+      event_type: e.event_type,
+      error: error instanceof Error ? error.message : "unknown",
+    });
+  }
+}
+
+// Sweep lapsed seats (heartbeat_deadline < now): delete them and record a 'reclaim' at the ACTUAL
+// deadline (when concurrency dropped), each under its own entitlement. Used lazily on the checkout
+// hot path and by the scheduled (cron) handler so idle entitlements still reclaim promptly.
+async function sweepLapsedSeats(env: Env, now: number): Promise<void> {
+  try {
+    const swept = await env.DB.prepare(
+      "DELETE FROM seat_checkouts WHERE heartbeat_deadline < ? RETURNING project, feature, license_fingerprint, seat_id, heartbeat_deadline",
+    )
+      .bind(now)
+      .all<{ project: string; feature: string; license_fingerprint: string; seat_id: string; heartbeat_deadline: number }>();
+    for (const reclaimed of swept.results ?? []) {
+      await recordUsageEvent(env, {
+        project: reclaimed.project,
+        feature: reclaimed.feature,
+        fingerprint: reclaimed.license_fingerprint,
+        event_type: "reclaim",
+        seat_id: reclaimed.seat_id,
+        ts: Number(reclaimed.heartbeat_deadline),
+      });
+    }
   } catch {
-    // best-effort: a missed analytics row must never break licensing
+    // best-effort: reclamation is not load-bearing for any single request
   }
 }
 
 interface UsageRow {
   event_type: string;
+  seat_id: string | null;
   device_key_id: string | null;
   ts: number;
 }
@@ -1640,9 +1664,14 @@ interface UsageRow {
 // Live seats at instant t (for a windowed report's baseline): checkouts minus ends before t.
 async function liveSeatsAt(env: Env, project: string, feature: string, fingerprint: string, t: number): Promise<number> {
   try {
+    // Distinct seats checked out before t minus distinct seats ended before t = seats still open
+    // at t. EXCEPT dedups by seat_id, so a seat with both a reclaim AND a release (a double-end)
+    // is subtracted once, not twice (which would silently deflate the baseline -> peak).
     const row = await env.DB.prepare(
-      "SELECT (SELECT COUNT(*) FROM usage_events WHERE project = ? AND feature = ? AND license_fingerprint = ? AND event_type = 'checkout' AND ts < ?) - " +
-        "(SELECT COUNT(*) FROM usage_events WHERE project = ? AND feature = ? AND license_fingerprint = ? AND event_type IN ('release', 'reclaim') AND ts < ?) AS baseline",
+      "SELECT COUNT(*) AS baseline FROM (" +
+        "SELECT seat_id FROM usage_events WHERE project = ? AND feature = ? AND license_fingerprint = ? AND seat_id IS NOT NULL AND event_type = 'checkout' AND ts < ? " +
+        "EXCEPT " +
+        "SELECT seat_id FROM usage_events WHERE project = ? AND feature = ? AND license_fingerprint = ? AND seat_id IS NOT NULL AND event_type IN ('release', 'reclaim') AND ts < ?)",
     )
       .bind(project, feature, fingerprint, t, project, feature, fingerprint, t)
       .first<{ baseline: number }>();
@@ -1672,17 +1701,21 @@ async function handleUsageReport(request: Request, env: Env): Promise<Response> 
   let rows: UsageRow[];
   try {
     const result = await env.DB.prepare(
-      "SELECT event_type, device_key_id, ts FROM usage_events WHERE project = ? AND feature = ? AND license_fingerprint = ? AND ts >= ? AND ts <= ? ORDER BY ts ASC",
+      "SELECT event_type, seat_id, device_key_id, ts FROM usage_events WHERE project = ? AND feature = ? AND license_fingerprint = ? AND ts >= ? AND ts <= ? ORDER BY ts ASC LIMIT ?",
     )
-      .bind(project, feature, fingerprint, windowFrom, windowTo)
+      .bind(project, feature, fingerprint, windowFrom, windowTo, USAGE_REPORT_MAX_ROWS + 1)
       .all<UsageRow>();
     rows = result.results ?? [];
   } catch {
     return json({ ok: false, code: "verification_error" }, 503);
   }
+  // Honest scale guard: if the window holds more events than the cap, the summary is over a
+  // prefix only -- flag it rather than report a silently-wrong peak. (Rollups remove the cap.)
+  const truncated = rows.length > USAGE_REPORT_MAX_ROWS;
+  if (truncated) rows = rows.slice(0, USAGE_REPORT_MAX_ROWS);
   const baseline = windowFrom > 0 ? await liveSeatsAt(env, project, feature, fingerprint, windowFrom) : 0;
   const summary = summarizeUsage(rows, baseline);
-  return json({ ok: true, project, feature, from: windowFrom, to: windowTo, server_time: now, ...summary });
+  return json({ ok: true, project, feature, from: windowFrom, to: windowTo, server_time: now, truncated, ...summary });
 }
 
 export default {
@@ -1718,6 +1751,24 @@ export default {
         error: error instanceof Error ? error.message : "unknown Worker error",
       });
       return json({ ok: false, code: "verification_error" }, 500);
+    }
+  },
+
+  // Cron Trigger: reclaim lapsed seats so idle entitlements still free seats and log their
+  // reclaim (keeping peak_concurrent accurate without waiting for a later checkout), and enforce
+  // retention on the append-only logs. Wire via [triggers] crons in wrangler.toml.
+  async scheduled(_event: unknown, env: Env): Promise<void> {
+    const now = Math.floor(Date.now() / 1000);
+    await sweepLapsedSeats(env, now);
+    try {
+      await env.DB.prepare("DELETE FROM usage_events WHERE ts < ?").bind(now - USAGE_EVENT_RETENTION_SEC).run();
+    } catch {
+      // best-effort
+    }
+    try {
+      await env.DB.prepare("DELETE FROM lease_issuance WHERE issued_at < ?").bind(now - LEASE_ISSUANCE_RETENTION_SEC).run();
+    } catch {
+      // best-effort
     }
   },
 };

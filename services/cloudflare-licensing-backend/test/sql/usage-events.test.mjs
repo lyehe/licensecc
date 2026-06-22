@@ -17,7 +17,13 @@ const migrationsDir = join(here, "..", "..", "migrations");
 const fingerprint = "a".repeat(64);
 
 const REPORT_SQL =
-  "SELECT event_type, device_key_id, ts FROM usage_events WHERE project = ? AND feature = ? AND license_fingerprint = ? AND ts >= ? AND ts <= ? ORDER BY ts ASC";
+  "SELECT event_type, seat_id, device_key_id, ts FROM usage_events WHERE project = ? AND feature = ? AND license_fingerprint = ? AND ts >= ? AND ts <= ? ORDER BY ts ASC";
+
+// Seat-aware baseline (matches liveSeatsAt in the Worker): distinct seats open at t.
+const BASELINE_SQL =
+  "SELECT COUNT(*) AS b FROM (" +
+  "SELECT seat_id FROM usage_events WHERE license_fingerprint = ? AND seat_id IS NOT NULL AND event_type = 'checkout' AND ts < ? " +
+  "EXCEPT SELECT seat_id FROM usage_events WHERE license_fingerprint = ? AND seat_id IS NOT NULL AND event_type IN ('release','reclaim') AND ts < ?)";
 
 function freshDb() {
   const db = new DatabaseSync(":memory:");
@@ -80,17 +86,30 @@ test("windowed report uses a baseline of seats open before the window", () => {
   // Inside the window [100, 200]: s2 still held, a third checked out.
   emit(db, "checkout", 120, { seatId: "s3", device: "d3" });
 
-  // Baseline = checkouts(<100) - ends(<100) = 2 - 1 = 1 (s2 still open at the window start).
-  const baselineRow = db
-    .prepare(
-      "SELECT (SELECT COUNT(*) FROM usage_events WHERE license_fingerprint=? AND event_type='checkout' AND ts < ?) - " +
-        "(SELECT COUNT(*) FROM usage_events WHERE license_fingerprint=? AND event_type IN ('release','reclaim') AND ts < ?) AS b",
-    )
-    .get(fingerprint, 100, fingerprint, 100);
+  // Baseline = distinct seats open at 100 = {s2} = 1 (s1 released before the window).
+  const baselineRow = db.prepare(BASELINE_SQL).get(fingerprint, 100, fingerprint, 100);
   assert.equal(baselineRow.b, 1);
 
   const s = summarizeUsage(report(db, 100, 200), baselineRow.b);
   // Baseline 1 (s2) + the s3 checkout at 120 -> peak 2 inside the window.
   assert.equal(s.peak_concurrent, 2);
+  db.close();
+});
+
+test("a reclaim plus a late release for one seat does not undercount peak (through the report query)", () => {
+  const db = freshDb();
+  emit(db, "checkout", 100, { seatId: "s1", device: "d1" });
+  emit(db, "reclaim", 150, { seatId: "s1" }); // s1 freed at its deadline
+  emit(db, "checkout", 160, { seatId: "s2", device: "d2" });
+  emit(db, "release", 170, { seatId: "s1" }); // phantom duplicate end for s1
+  emit(db, "checkout", 200, { seatId: "s3", device: "d3" });
+  emit(db, "release", 260, { seatId: "s3" });
+  emit(db, "release", 300, { seatId: "s2" });
+  const s = summarizeUsage(report(db, 0, 1000));
+  assert.equal(s.peak_concurrent, 2, "s2 & s3 overlap; the duplicate s1 end must not undercount");
+
+  // Baseline must also dedup the double-ended s1 (EXCEPT subtracts it once, not twice).
+  const b = db.prepare(BASELINE_SQL).get(fingerprint, 1000, fingerprint, 1000);
+  assert.equal(b.b, 0, "all seats closed by t=1000; no negative/over-subtracted baseline");
   db.close();
 });

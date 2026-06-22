@@ -43,9 +43,23 @@ export function buildReportSql(project, feature, fingerprint, from, to) {
   const t = Number.parseInt(String(to), 10);
   if (!Number.isInteger(f) || f < 0 || !Number.isInteger(t) || t < f) throw new Error("invalid --from/--to window");
   return (
-    "SELECT event_type, device_key_id, ts FROM usage_events " +
+    "SELECT event_type, seat_id, device_key_id, ts FROM usage_events " +
     `WHERE project='${project}' AND feature='${feature}' AND license_fingerprint='${fingerprint}' ` +
     `AND ts >= ${f} AND ts <= ${t} ORDER BY ts ASC`
+  );
+}
+
+// Distinct seats open at instant t (the windowed-report baseline; matches the Worker's liveSeatsAt).
+export function buildBaselineSql(project, feature, fingerprint, t) {
+  if (!SAFE_NAME.test(project) || !SAFE_NAME.test(feature)) throw new Error("invalid --project/--feature");
+  if (!HEX_64.test(fingerprint)) throw new Error("--fingerprint must be 64 lowercase hex characters");
+  const v = Number.parseInt(String(t), 10);
+  if (!Number.isInteger(v) || v < 0) throw new Error("invalid baseline instant");
+  const ent = `project='${project}' AND feature='${feature}' AND license_fingerprint='${fingerprint}'`;
+  return (
+    "SELECT COUNT(*) AS baseline FROM (" +
+    `SELECT seat_id FROM usage_events WHERE ${ent} AND seat_id IS NOT NULL AND event_type='checkout' AND ts < ${v} ` +
+    `EXCEPT SELECT seat_id FROM usage_events WHERE ${ent} AND seat_id IS NOT NULL AND event_type IN ('release','reclaim') AND ts < ${v})`
   );
 }
 
@@ -75,9 +89,13 @@ function main() {
   const feature = options.feature ?? "DEFAULT";
   const from = options.from ?? "0";
   const to = options.to ?? String(Math.floor(Date.now() / 1000));
-  const sql = buildReportSql(project, feature, fingerprint, from, to);
-  const rows = runD1(sql, options);
-  const summary = summarizeUsage(rows);
+  const rows = runD1(buildReportSql(project, feature, fingerprint, from, to), options);
+  // Windowed reports need the baseline of seats already open at the window start, or peak is
+  // under-reported. All-time reports (from=0) have no baseline.
+  const fromN = Number.parseInt(String(from), 10);
+  const baseline =
+    fromN > 0 ? Number(runD1(buildBaselineSql(project, feature, fingerprint, fromN), options)[0]?.baseline ?? 0) : 0;
+  const summary = summarizeUsage(rows, baseline);
   process.stdout.write(
     `usage report  ${project}/${feature}  fp=${fingerprint.slice(0, 12)}…  [${from}..${to}]\n` +
       `  peak concurrent : ${summary.peak_concurrent}\n` +

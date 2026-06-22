@@ -40,10 +40,23 @@ function makeEnv(state, overrides = {}) {
                 if (sql.startsWith("UPDATE seat_checkouts")) {
                   return state.heartbeatFound === false ? null : { seat_id: args[4] };
                 }
+                if (sql.startsWith("DELETE FROM seat_checkouts WHERE project")) {
+                  // release: DELETE ... RETURNING seat_id (removed iff a row existed)
+                  state.released = true;
+                  return state.releaseRemoved === false ? null : { seat_id: args[3] };
+                }
                 return null;
               },
+              async all() {
+                // checkout's lapsed-seat sweep: DELETE ... heartbeat_deadline < now ... RETURNING
+                return { results: state.swept ?? [] };
+              },
               async run() {
-                if (sql.startsWith("DELETE FROM seat_checkouts WHERE project")) state.released = true;
+                if (sql.startsWith("INSERT INTO usage_events")) {
+                  // bind: project, feature, fingerprint, event_type, seat_id, device_key_id, reason, ts
+                  state.usageEvents = state.usageEvents ?? [];
+                  state.usageEvents.push({ event_type: args[3], seat_id: args[4], ts: args[7] });
+                }
                 return {};
               },
             };
@@ -165,6 +178,22 @@ test("release frees the seat (idempotent)", async () => {
   assert.equal(res.status, 200);
   assert.equal((await res.json()).ok, true);
   assert.equal(state.released, true);
+});
+
+test("checkout sweeps lapsed seats and records reclaim at the seat's ACTUAL deadline", async () => {
+  resetSigningKeyCacheForTests();
+  const state = {
+    entitlement: seatEntitlement(),
+    swept: [
+      { project: "DEFAULT", feature: "DEFAULT", license_fingerprint: "a".repeat(64), seat_id: "old", heartbeat_deadline: 5000 },
+    ],
+  };
+  const res = await worker.fetch(req("/v1/checkout", checkoutBody()), makeEnv(state));
+  assert.equal(res.status, 200);
+  const reclaim = (state.usageEvents ?? []).find((e) => e.event_type === "reclaim");
+  assert.ok(reclaim, "a reclaim event was recorded for the swept seat");
+  assert.equal(reclaim.seat_id, "old");
+  assert.equal(reclaim.ts, 5000, "reclaim ts is the seat's heartbeat_deadline, not the sweep time");
 });
 
 test("auth + availability fail closed", async () => {

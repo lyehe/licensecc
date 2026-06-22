@@ -4,6 +4,12 @@ compatibility_date = "2026-06-03"
 workers_dev = true
 preview_urls = false
 
+# Cron Trigger: the scheduled() handler reclaims lapsed concurrent seats (so idle entitlements
+# still free seats and keep peak_concurrent accurate without waiting for a later checkout) and
+# enforces retention on the append-only usage_events / lease_issuance logs.
+[triggers]
+crons = ["*/5 * * * *"]
+
 [vars]
 D1_RATE_LIMIT_ENABLED = "0"
 D1_RATE_LIMIT_LIMIT = "20"

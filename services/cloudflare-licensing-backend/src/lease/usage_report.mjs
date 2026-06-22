@@ -26,12 +26,35 @@ export function computePeakConcurrent(events, baseline = 0) {
 
 // Map raw usage_events rows to sweep-line events. checkout -> +1; release/reclaim -> -1;
 // denied is not a concurrency change.
+//
+// SEAT-AWARE: a seat can legitimately produce a 'reclaim' (at its lapse deadline) AND a later
+// 'release' (client shutdown after a 410) -- two ends for one seat. A seat-blind sweep would
+// apply a phantom -1 that undercounts a DIFFERENT live seat under the same entitlement, biasing
+// peak_concurrent (the billable metric) downward. So we track open seat_ids and emit an end only
+// for a seat that is currently open (first-end-wins, which is the earlier reclaim deadline -- the
+// instant the seat actually became free), ignoring the duplicate. Rows are processed in ts order.
+// Rows without a seat_id (legacy/null) keep the old +1/-1 behavior so historical data aggregates.
 function toSweepEvents(rows) {
+  const ordered = [...rows].sort((a, b) => Number(a.ts) - Number(b.ts));
   const events = [];
-  for (const row of rows) {
+  const open = new Set();
+  for (const row of ordered) {
+    const seat = row.seat_id ?? null;
     if (row.event_type === "checkout") {
+      if (seat === null) {
+        events.push({ ts: Number(row.ts), type: "checkout" });
+        continue;
+      }
+      if (open.has(seat)) continue; // duplicate checkout for a live seat: ignore
+      open.add(seat);
       events.push({ ts: Number(row.ts), type: "checkout" });
     } else if (row.event_type === "release" || row.event_type === "reclaim") {
+      if (seat === null) {
+        events.push({ ts: Number(row.ts), type: "end" });
+        continue;
+      }
+      if (!open.has(seat)) continue; // second end for an already-closed seat: drop the phantom -1
+      open.delete(seat);
       events.push({ ts: Number(row.ts), type: "end" });
     }
   }
