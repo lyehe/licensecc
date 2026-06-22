@@ -17,6 +17,10 @@ CREATE TABLE IF NOT EXISTS entitlements (
   max_active_devices INTEGER NOT NULL DEFAULT 1,
   lease_seconds INTEGER NOT NULL DEFAULT 2592000,
   rebind_window_sec INTEGER NOT NULL DEFAULT 7776000,
+  pool_size INTEGER NOT NULL DEFAULT 0,
+  heartbeat_grace_sec INTEGER NOT NULL DEFAULT 900,
+  max_borrow_sec INTEGER NOT NULL DEFAULT 0,
+  allow_overdraft INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (project, feature, license_fingerprint)
 );
 
@@ -176,3 +180,20 @@ CREATE INDEX IF NOT EXISTS idx_lease_issuance_entitlement
 
 CREATE INDEX IF NOT EXISTS idx_lease_issuance_issued_at
   ON lease_issuance(issued_at);
+
+CREATE TABLE IF NOT EXISTS seat_checkouts (
+  project TEXT NOT NULL,
+  feature TEXT NOT NULL,
+  license_fingerprint TEXT NOT NULL,
+  seat_id TEXT NOT NULL,
+  client_instance_id TEXT NOT NULL,
+  mode TEXT NOT NULL CHECK (mode IN ('live', 'borrowed')),
+  checked_out_at INTEGER NOT NULL,
+  heartbeat_deadline INTEGER NOT NULL,
+  PRIMARY KEY (project, feature, license_fingerprint, seat_id),
+  FOREIGN KEY (project, feature, license_fingerprint)
+    REFERENCES entitlements(project, feature, license_fingerprint) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_seat_checkouts_live
+  ON seat_checkouts(project, feature, license_fingerprint, heartbeat_deadline);

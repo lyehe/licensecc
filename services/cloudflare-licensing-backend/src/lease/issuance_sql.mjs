@@ -16,3 +16,20 @@ export const LEASE_ISSUANCE_ATOMIC_SQL =
   "WHERE (SELECT COUNT(DISTINCT device_key_id) FROM lease_issuance " +
   "WHERE project = ? AND feature = ? AND license_fingerprint = ? AND issued_at >= ? AND device_key_id <> ?) < ? " +
   "RETURNING id";
+
+// Atomic concurrent-seat checkout (floating licensing). The INSERT lands only when the
+// count of LIVE seats (heartbeat_deadline > now) for the entitlement is below the pool
+// ceiling -- evaluated and written in ONE statement, so N concurrent checkouts can never
+// exceed the pool (the same race-free shape as the rebind cap, counting live rows instead
+// of distinct devices). RETURNING yields a row iff the seat was granted.
+//
+// Positional bind order (13 params):
+//   project, feature, license_fingerprint, seat_id, client_instance_id, mode,
+//   checked_out_at, heartbeat_deadline,
+//   project, feature, license_fingerprint, now, pool_ceiling
+export const SEAT_CHECKOUT_ATOMIC_SQL =
+  "INSERT INTO seat_checkouts (project, feature, license_fingerprint, seat_id, client_instance_id, mode, checked_out_at, heartbeat_deadline) " +
+  "SELECT ?, ?, ?, ?, ?, ?, ?, ? " +
+  "WHERE (SELECT COUNT(*) FROM seat_checkouts " +
+  "WHERE project = ? AND feature = ? AND license_fingerprint = ? AND heartbeat_deadline > ?) < ? " +
+  "RETURNING seat_id";

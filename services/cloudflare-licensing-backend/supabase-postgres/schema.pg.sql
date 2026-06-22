@@ -53,6 +53,13 @@ CREATE TABLE IF NOT EXISTS entitlements (
   notes                 TEXT    NOT NULL DEFAULT '',
   customer_id           TEXT    NULL,
   license_id            TEXT    NULL,
+  max_active_devices    BIGINT  NOT NULL DEFAULT 1,        -- migration 0010 (lease rebind ceiling)
+  lease_seconds         BIGINT  NOT NULL DEFAULT 2592000,
+  rebind_window_sec     BIGINT  NOT NULL DEFAULT 7776000,
+  pool_size             BIGINT  NOT NULL DEFAULT 0,         -- migration 0011 (floating)
+  heartbeat_grace_sec   BIGINT  NOT NULL DEFAULT 900,
+  max_borrow_sec        BIGINT  NOT NULL DEFAULT 0,
+  allow_overdraft       BIGINT  NOT NULL DEFAULT 0,
   PRIMARY KEY (project, feature, license_fingerprint)
 );
 
@@ -220,3 +227,45 @@ CREATE TABLE IF NOT EXISTS request_proof_nonces (
 
 CREATE INDEX IF NOT EXISTS idx_request_proof_nonces_expires_at
   ON request_proof_nonces(expires_at);
+
+-- Lease platform (migration 0010). SQLite INTEGER PRIMARY KEY AUTOINCREMENT ->
+-- BIGINT GENERATED ALWAYS AS IDENTITY. Append-only; backs the atomic device-rebind cap.
+CREATE TABLE IF NOT EXISTS lease_issuance (
+  id                  BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  project             TEXT NOT NULL,
+  feature             TEXT NOT NULL,
+  license_fingerprint TEXT NOT NULL,
+  device_key_id       TEXT NOT NULL,
+  lease_key_id        TEXT NOT NULL,
+  issued_at           BIGINT NOT NULL,
+  valid_from          BIGINT NOT NULL,
+  valid_to            BIGINT NOT NULL,
+  request_id          TEXT NULL,
+  FOREIGN KEY (project, feature, license_fingerprint)
+    REFERENCES entitlements(project, feature, license_fingerprint) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_lease_issuance_entitlement
+  ON lease_issuance(project, feature, license_fingerprint, issued_at);
+
+CREATE INDEX IF NOT EXISTS idx_lease_issuance_issued_at
+  ON lease_issuance(issued_at);
+
+-- Floating / concurrent licensing (migration 0011). One row per held seat; a LIVE seat is
+-- a row with heartbeat_deadline > now. The atomic checkout counts live seats < pool_size.
+CREATE TABLE IF NOT EXISTS seat_checkouts (
+  project TEXT NOT NULL,
+  feature TEXT NOT NULL,
+  license_fingerprint TEXT NOT NULL,
+  seat_id TEXT NOT NULL,
+  client_instance_id TEXT NOT NULL,
+  mode TEXT NOT NULL CHECK (mode IN ('live', 'borrowed')),
+  checked_out_at BIGINT NOT NULL,
+  heartbeat_deadline BIGINT NOT NULL,
+  PRIMARY KEY (project, feature, license_fingerprint, seat_id),
+  FOREIGN KEY (project, feature, license_fingerprint)
+    REFERENCES entitlements(project, feature, license_fingerprint) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_seat_checkouts_live
+  ON seat_checkouts(project, feature, license_fingerprint, heartbeat_deadline);

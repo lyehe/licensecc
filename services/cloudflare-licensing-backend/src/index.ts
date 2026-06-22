@@ -4,7 +4,7 @@ import {
   leaseCanonicalFields,
   utcDateFromEpoch,
 } from "./lease/canonical_payload.mjs";
-import { LEASE_ISSUANCE_ATOMIC_SQL } from "./lease/issuance_sql.mjs";
+import { LEASE_ISSUANCE_ATOMIC_SQL, SEAT_CHECKOUT_ATOMIC_SQL } from "./lease/issuance_sql.mjs";
 
 declare const Buffer:
   | {
@@ -1108,7 +1108,7 @@ function parseLeaseBody(raw: unknown): LeaseIssueBody | null {
   return body;
 }
 
-function leaseWithinValidity(row: LeaseEntitlementRow, nowSeconds: number): boolean {
+function leaseWithinValidity(row: { valid_from: number | null; valid_until: number | null }, nowSeconds: number): boolean {
   const validFrom = boundedTime(row.valid_from);
   const validUntil = boundedTime(row.valid_until);
   if (validFrom !== null && nowSeconds < validFrom) return false;
@@ -1281,6 +1281,280 @@ async function handleLeaseIssue(request: Request, env: Env): Promise<Response> {
   return json(response);
 }
 
+// ============================ Floating / concurrent licensing ============================
+//
+// A shared pool of N simultaneous seats per entitlement (design doc
+// 2026-06-22-floating-concurrent-licensing.md). Online-required: the server is the live
+// source of truth for who holds a seat. A held seat is a short-TTL lccoa1 assertion (the
+// SAME token /v1/verify mints and the C++ online_verification already validates) that the
+// client refreshes via heartbeat. Checkout is the race-free atomic cap counting LIVE seats;
+// disconnected clients are reclaimed when their heartbeat deadline lapses. Borrowing is the
+// bounded offline escape.
+
+const SEAT_DEFAULT_GRACE_SEC = 900;
+
+interface SeatEntitlementRow {
+  status: string;
+  valid_from: number | null;
+  valid_until: number | null;
+  pool_size: number;
+  heartbeat_grace_sec: number;
+  max_borrow_sec: number;
+  allow_overdraft: number;
+  revocation_seq: number;
+}
+
+interface SeatRequestBody {
+  project: string;
+  feature: string;
+  license_fingerprint: string;
+  client_instance_id: string;
+  nonce: string;
+  seat_id?: string;
+  borrow_seconds?: number;
+}
+
+function parseSeatBody(raw: unknown, needSeatId: boolean): SeatRequestBody | null {
+  if (raw === null || typeof raw !== "object") return null;
+  const value = raw as Record<string, unknown>;
+  const project = requireString(value.project);
+  const feature = requireString(value.feature);
+  const fingerprint = requireString(value.license_fingerprint);
+  const clientInstance = requireString(value.client_instance_id);
+  const nonce = requireString(value.nonce);
+  if (project === null || feature === null || fingerprint === null || clientInstance === null || nonce === null) {
+    return null;
+  }
+  const body: SeatRequestBody = {
+    project,
+    feature,
+    license_fingerprint: fingerprint,
+    client_instance_id: clientInstance,
+    nonce,
+  };
+  const seatId = requireString(value.seat_id);
+  if (needSeatId) {
+    if (seatId === null) return null;
+    body.seat_id = seatId;
+  } else if (seatId !== null) {
+    body.seat_id = seatId;
+  }
+  if (typeof value.borrow_seconds === "number" && Number.isInteger(value.borrow_seconds) && value.borrow_seconds > 0) {
+    body.borrow_seconds = value.borrow_seconds;
+  }
+  return body;
+}
+
+async function lookupSeatEntitlement(env: Env, body: SeatRequestBody): Promise<SeatEntitlementRow | null> {
+  return env.DB.prepare(
+    "SELECT status, valid_from, valid_until, pool_size, heartbeat_grace_sec, max_borrow_sec, allow_overdraft, revocation_seq FROM entitlements WHERE project = ? AND feature = ? AND license_fingerprint = ? LIMIT 1",
+  )
+    .bind(body.project, body.feature, body.license_fingerprint)
+    .first<SeatEntitlementRow>();
+}
+
+async function signSeatToken(
+  env: Env,
+  body: SeatRequestBody,
+  row: SeatEntitlementRow,
+  now: number,
+  deadline: number,
+): Promise<string> {
+  const claims: AssertionClaims = {
+    purpose: PURPOSE,
+    version: VERSION,
+    alg: ALGORITHM,
+    keyId: env.ONLINE_SIGNING_KEY_ID,
+    project: body.project,
+    feature: body.feature,
+    licenseFingerprint: body.license_fingerprint,
+    deviceHash: "",
+    nonce: body.nonce,
+    status: "ok",
+    issuedAt: now,
+    expiresAt: deadline,
+    cacheUntil: deadline,
+    revocationSeq: row.revocation_seq ?? 0,
+  };
+  return signAssertion(claims, env);
+}
+
+function seatAuthOrUnavailable(request: Request, env: Env): Response | null {
+  if (env.LEASE_ISSUE_BEARER !== undefined && env.LEASE_ISSUE_BEARER !== "") {
+    const auth = request.headers.get("authorization") ?? "";
+    if (auth !== `Bearer ${env.LEASE_ISSUE_BEARER}`) return json({ ok: false, code: "unauthorized" }, 401);
+  }
+  if (!env.ONLINE_SIGNING_PRIVATE_KEY_PKCS8_PEM || !env.ONLINE_SIGNING_KEY_ID) {
+    return json({ ok: false, code: "seat_signing_unavailable" }, 503);
+  }
+  return null;
+}
+
+async function handleSeatCheckout(request: Request, env: Env): Promise<Response> {
+  const now = Math.floor(Date.now() / 1000);
+  const gate = seatAuthOrUnavailable(request, env);
+  if (gate !== null) return gate;
+
+  let body: SeatRequestBody | null;
+  try {
+    body = parseSeatBody(await request.json(), /*needSeatId=*/ false);
+  } catch {
+    body = null;
+  }
+  if (body === null) return json({ ok: false, code: "invalid_request" }, 400);
+
+  let row: SeatEntitlementRow | null;
+  try {
+    row = await lookupSeatEntitlement(env, body);
+  } catch {
+    return json({ ok: false, code: "verification_error" }, 503);
+  }
+  if (row === null || row.status !== "active" || !leaseWithinValidity(row, now)) {
+    return json({ ok: false, code: "no_active_entitlement" }, 403);
+  }
+  if (row.pool_size <= 0) return json({ ok: false, code: "floating_disabled" }, 403);
+
+  // Live by default; borrow only when the entitlement permits it, bounded by max_borrow_sec.
+  let mode = "live";
+  const grace = row.heartbeat_grace_sec > 0 ? row.heartbeat_grace_sec : SEAT_DEFAULT_GRACE_SEC;
+  let deadline = now + grace;
+  if (body.borrow_seconds !== undefined) {
+    if (row.max_borrow_sec <= 0) return json({ ok: false, code: "borrowing_disabled" }, 403);
+    mode = "borrowed";
+    deadline = now + Math.min(body.borrow_seconds, row.max_borrow_sec);
+  }
+
+  const ceiling = row.pool_size + (row.allow_overdraft > 0 ? row.allow_overdraft : 0);
+  const seatId = crypto.randomUUID();
+  let granted: boolean;
+  try {
+    const inserted = await env.DB.prepare(SEAT_CHECKOUT_ATOMIC_SQL)
+      .bind(
+        body.project,
+        body.feature,
+        body.license_fingerprint,
+        seatId,
+        body.client_instance_id,
+        mode,
+        now,
+        deadline,
+        body.project,
+        body.feature,
+        body.license_fingerprint,
+        now,
+        ceiling,
+      )
+      .first<{ seat_id: string }>();
+    granted = inserted !== null;
+  } catch {
+    return json({ ok: false, code: "verification_error" }, 503);
+  }
+  if (!granted) return json({ ok: false, code: "pool_exhausted" }, 409);
+
+  // Lazy reclamation: sweep seats whose heartbeat deadline has lapsed. Best-effort.
+  try {
+    await env.DB.prepare("DELETE FROM seat_checkouts WHERE heartbeat_deadline < ?").bind(now).run();
+  } catch {
+    // reclamation is not load-bearing for this checkout
+  }
+
+  let assertion: string;
+  try {
+    assertion = await signSeatToken(env, body, row, now, deadline);
+  } catch {
+    return json({ ok: false, code: "seat_signing_error" }, 500);
+  }
+  return json({
+    ok: true,
+    assertion,
+    seat_id: seatId,
+    mode,
+    server_time: now,
+    expires_at: deadline,
+    heartbeat_in: Math.max(1, Math.floor(grace / 3)),
+  });
+}
+
+async function handleSeatHeartbeat(request: Request, env: Env): Promise<Response> {
+  const now = Math.floor(Date.now() / 1000);
+  const gate = seatAuthOrUnavailable(request, env);
+  if (gate !== null) return gate;
+
+  let body: SeatRequestBody | null;
+  try {
+    body = parseSeatBody(await request.json(), /*needSeatId=*/ true);
+  } catch {
+    body = null;
+  }
+  if (body === null || body.seat_id === undefined) return json({ ok: false, code: "invalid_request" }, 400);
+
+  let row: SeatEntitlementRow | null;
+  try {
+    row = await lookupSeatEntitlement(env, body);
+  } catch {
+    return json({ ok: false, code: "verification_error" }, 503);
+  }
+  if (row === null || row.status !== "active" || !leaseWithinValidity(row, now)) {
+    return json({ ok: false, code: "no_active_entitlement" }, 403);
+  }
+
+  const grace = row.heartbeat_grace_sec > 0 ? row.heartbeat_grace_sec : SEAT_DEFAULT_GRACE_SEC;
+  const deadline = now + grace;
+  // Refresh only a still-live, non-borrowed seat; a reclaimed/expired seat yields no row.
+  let refreshed: boolean;
+  try {
+    const updated = await env.DB.prepare(
+      "UPDATE seat_checkouts SET heartbeat_deadline = ? WHERE project = ? AND feature = ? AND license_fingerprint = ? AND seat_id = ? AND mode = 'live' AND heartbeat_deadline > ? RETURNING seat_id",
+    )
+      .bind(deadline, body.project, body.feature, body.license_fingerprint, body.seat_id, now)
+      .first<{ seat_id: string }>();
+    refreshed = updated !== null;
+  } catch {
+    return json({ ok: false, code: "verification_error" }, 503);
+  }
+  if (!refreshed) return json({ ok: false, code: "seat_reclaimed" }, 410);
+
+  let assertion: string;
+  try {
+    assertion = await signSeatToken(env, body, row, now, deadline);
+  } catch {
+    return json({ ok: false, code: "seat_signing_error" }, 500);
+  }
+  return json({
+    ok: true,
+    assertion,
+    server_time: now,
+    expires_at: deadline,
+    heartbeat_in: Math.max(1, Math.floor(grace / 3)),
+  });
+}
+
+async function handleSeatRelease(request: Request, env: Env): Promise<Response> {
+  const now = Math.floor(Date.now() / 1000);
+  if (env.LEASE_ISSUE_BEARER !== undefined && env.LEASE_ISSUE_BEARER !== "") {
+    const auth = request.headers.get("authorization") ?? "";
+    if (auth !== `Bearer ${env.LEASE_ISSUE_BEARER}`) return json({ ok: false, code: "unauthorized" }, 401);
+  }
+  let body: SeatRequestBody | null;
+  try {
+    body = parseSeatBody(await request.json(), /*needSeatId=*/ true);
+  } catch {
+    body = null;
+  }
+  if (body === null || body.seat_id === undefined) return json({ ok: false, code: "invalid_request" }, 400);
+  try {
+    await env.DB.prepare(
+      "DELETE FROM seat_checkouts WHERE project = ? AND feature = ? AND license_fingerprint = ? AND seat_id = ?",
+    )
+      .bind(body.project, body.feature, body.license_fingerprint, body.seat_id)
+      .run();
+  } catch {
+    return json({ ok: false, code: "verification_error" }, 503);
+  }
+  // Idempotent: releasing an unknown/already-freed seat is success.
+  return json({ ok: true, server_time: now });
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     try {
@@ -1293,6 +1567,15 @@ export default {
       }
       if (request.method === "POST" && (url.pathname === "/v1/activate" || url.pathname === "/v1/renew")) {
         return await handleLeaseIssue(request, env);
+      }
+      if (request.method === "POST" && url.pathname === "/v1/checkout") {
+        return await handleSeatCheckout(request, env);
+      }
+      if (request.method === "POST" && url.pathname === "/v1/heartbeat") {
+        return await handleSeatHeartbeat(request, env);
+      }
+      if (request.method === "POST" && url.pathname === "/v1/release") {
+        return await handleSeatRelease(request, env);
       }
       return json({ ok: false, code: "not_found" }, 404);
     } catch (error) {
