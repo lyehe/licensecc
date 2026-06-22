@@ -14,6 +14,9 @@ CREATE TABLE IF NOT EXISTS entitlements (
   notes TEXT NOT NULL DEFAULT '',
   customer_id TEXT NULL,
   license_id TEXT NULL,
+  max_active_devices INTEGER NOT NULL DEFAULT 1,
+  lease_seconds INTEGER NOT NULL DEFAULT 2592000,
+  rebind_window_sec INTEGER NOT NULL DEFAULT 7776000,
   PRIMARY KEY (project, feature, license_fingerprint)
 );
 
@@ -152,3 +155,24 @@ CREATE TABLE IF NOT EXISTS request_proof_nonces (
 
 CREATE INDEX IF NOT EXISTS idx_request_proof_nonces_expires_at
   ON request_proof_nonces(expires_at);
+
+CREATE TABLE IF NOT EXISTS lease_issuance (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  project TEXT NOT NULL,
+  feature TEXT NOT NULL,
+  license_fingerprint TEXT NOT NULL,
+  device_key_id TEXT NOT NULL,
+  lease_key_id TEXT NOT NULL,
+  issued_at INTEGER NOT NULL,
+  valid_from INTEGER NOT NULL,
+  valid_to INTEGER NOT NULL,
+  request_id TEXT NULL,
+  FOREIGN KEY (project, feature, license_fingerprint)
+    REFERENCES entitlements(project, feature, license_fingerprint) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_lease_issuance_entitlement
+  ON lease_issuance(project, feature, license_fingerprint, issued_at);
+
+CREATE INDEX IF NOT EXISTS idx_lease_issuance_issued_at
+  ON lease_issuance(issued_at);
