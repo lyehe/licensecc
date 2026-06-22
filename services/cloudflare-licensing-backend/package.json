@@ -15,6 +15,7 @@
     "migrate:remote": "npx wrangler d1 migrations apply DB --remote --config wrangler.toml",
     "entitlement": "node scripts/entitlement.mjs",
     "device-key": "node scripts/device-key.mjs",
+    "report": "node scripts/report.mjs",
     "generate-online-key": "node scripts/generate-online-key.mjs",
     "generate-online-assertion-fixture": "node scripts/generate-online-assertion-fixture.mjs",
     "validate:remote-cpp": "node scripts/remote-cpp-verify.mjs",

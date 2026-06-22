@@ -155,3 +155,26 @@ code), and the atomic cap is the rebind-cap pattern counting live rows.
    not a percentage.
 3. **Reservations / options-file policy, named-user pools, metering** — out of scope (FlexNet
    parity items deferred); commerce back-office is shared phase 2.
+
+## Usage reporting / analytics (built 2026-06-22) — what makes floating sellable
+
+FlexNet's reporting *is* a sales tool: peak concurrent usage right-sizes the pool, denial
+rate is the upsell signal. Built on top of the floating slice:
+
+- **Migration 0012 `usage_events`** — append-only log (the FlexNet "report log"). Seat state
+  is mutated/deleted, so it cannot answer "peak last month"; this can. D1 + Postgres + parity.
+- **Capture** (best-effort; never fails a license op): `/v1/checkout` emits `checkout` /
+  `denied`(pool_exhausted), `/v1/release` emits `release`, the reclaim sweep emits `reclaim`
+  at the seat's **actual** heartbeat deadline (when concurrency dropped), each under its own
+  entitlement. Leases are already in `lease_issuance`.
+- **Aggregation** (`src/lease/usage_report.mjs`, pure, Worker-safe): `computePeakConcurrent`
+  is a sweep line with a release-before-checkout tie rule + a baseline for windowed reports;
+  `summarizeUsage` → `{peak_concurrent, checkouts, releases, denials, denial_rate,
+  unique_devices}`.
+- **Surfaces**: `GET /v1/admin/report` (bearer-gated) + `scripts/report.mjs` CLI.
+- **Tests**: 9 pure sweep-line (ties, baseline, still-open, unbalanced, order-independence),
+  3 SQLite end-to-end (events → query → aggregate; genuine concurrency vs totals; windowed
+  baseline), 3 worker HTTP (summary, validation, auth).
+
+Storage decision: D1 `usage_events` (queryable + testable) now; Cloudflare Analytics Engine
+is the scale upgrade when event volume outgrows D1. Daily rollups + retention sweep deferred.

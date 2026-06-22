@@ -5,6 +5,7 @@ import {
   utcDateFromEpoch,
 } from "./lease/canonical_payload.mjs";
 import { LEASE_ISSUANCE_ATOMIC_SQL, SEAT_CHECKOUT_ATOMIC_SQL } from "./lease/issuance_sql.mjs";
+import { summarizeUsage } from "./lease/usage_report.mjs";
 
 declare const Buffer:
   | {
@@ -17,6 +18,7 @@ declare const Buffer:
 export interface D1PreparedStatementLike {
   bind(...values: unknown[]): D1PreparedStatementLike;
   first<T = unknown>(): Promise<T | null>;
+  all<T = unknown>(): Promise<{ results: T[] }>;
   run(): Promise<unknown>;
 }
 
@@ -1449,11 +1451,47 @@ async function handleSeatCheckout(request: Request, env: Env): Promise<Response>
   } catch {
     return json({ ok: false, code: "verification_error" }, 503);
   }
-  if (!granted) return json({ ok: false, code: "pool_exhausted" }, 409);
+  if (!granted) {
+    await recordUsageEvent(env, {
+      project: body.project,
+      feature: body.feature,
+      fingerprint: body.license_fingerprint,
+      event_type: "denied",
+      reason: "pool_exhausted",
+      ts: now,
+    });
+    return json({ ok: false, code: "pool_exhausted" }, 409);
+  }
 
-  // Lazy reclamation: sweep seats whose heartbeat deadline has lapsed. Best-effort.
+  await recordUsageEvent(env, {
+    project: body.project,
+    feature: body.feature,
+    fingerprint: body.license_fingerprint,
+    event_type: "checkout",
+    seat_id: seatId,
+    device_key_id: body.client_instance_id,
+    ts: now,
+  });
+
+  // Lazy reclamation: sweep lapsed seats and record their reclaim at the ACTUAL deadline
+  // (when concurrency dropped), not the sweep time. Each swept row is recorded under its own
+  // entitlement. Best-effort.
   try {
-    await env.DB.prepare("DELETE FROM seat_checkouts WHERE heartbeat_deadline < ?").bind(now).run();
+    const swept = await env.DB.prepare(
+      "DELETE FROM seat_checkouts WHERE heartbeat_deadline < ? RETURNING project, feature, license_fingerprint, seat_id, heartbeat_deadline",
+    )
+      .bind(now)
+      .all<{ project: string; feature: string; license_fingerprint: string; seat_id: string; heartbeat_deadline: number }>();
+    for (const reclaimed of swept.results ?? []) {
+      await recordUsageEvent(env, {
+        project: reclaimed.project,
+        feature: reclaimed.feature,
+        fingerprint: reclaimed.license_fingerprint,
+        event_type: "reclaim",
+        seat_id: reclaimed.seat_id,
+        ts: Number(reclaimed.heartbeat_deadline),
+      });
+    }
   } catch {
     // reclamation is not load-bearing for this checkout
   }
@@ -1551,8 +1589,100 @@ async function handleSeatRelease(request: Request, env: Env): Promise<Response> 
   } catch {
     return json({ ok: false, code: "verification_error" }, 503);
   }
+  await recordUsageEvent(env, {
+    project: body.project,
+    feature: body.feature,
+    fingerprint: body.license_fingerprint,
+    event_type: "release",
+    seat_id: body.seat_id,
+    ts: now,
+  });
   // Idempotent: releasing an unknown/already-freed seat is success.
   return json({ ok: true, server_time: now });
+}
+
+// ============================ Usage reporting (analytics) ============================
+//
+// An append-only usage_events log (the FlexNet "report log") that the peak-concurrent /
+// denial-rate / adoption analytics aggregate over. Capture is best-effort: analytics must
+// never fail a license operation. The aggregations are pure (src/lease/usage_report.mjs).
+
+async function recordUsageEvent(
+  env: Env,
+  e: {
+    project: string;
+    feature: string;
+    fingerprint: string;
+    event_type: "checkout" | "release" | "reclaim" | "denied";
+    seat_id?: string;
+    device_key_id?: string;
+    reason?: string;
+    ts: number;
+  },
+): Promise<void> {
+  try {
+    await env.DB.prepare(
+      "INSERT INTO usage_events (project, feature, license_fingerprint, event_type, seat_id, device_key_id, reason, ts) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+      .bind(e.project, e.feature, e.fingerprint, e.event_type, e.seat_id ?? null, e.device_key_id ?? null, e.reason ?? null, e.ts)
+      .run();
+  } catch {
+    // best-effort: a missed analytics row must never break licensing
+  }
+}
+
+interface UsageRow {
+  event_type: string;
+  device_key_id: string | null;
+  ts: number;
+}
+
+// Live seats at instant t (for a windowed report's baseline): checkouts minus ends before t.
+async function liveSeatsAt(env: Env, project: string, feature: string, fingerprint: string, t: number): Promise<number> {
+  try {
+    const row = await env.DB.prepare(
+      "SELECT (SELECT COUNT(*) FROM usage_events WHERE project = ? AND feature = ? AND license_fingerprint = ? AND event_type = 'checkout' AND ts < ?) - " +
+        "(SELECT COUNT(*) FROM usage_events WHERE project = ? AND feature = ? AND license_fingerprint = ? AND event_type IN ('release', 'reclaim') AND ts < ?) AS baseline",
+    )
+      .bind(project, feature, fingerprint, t, project, feature, fingerprint, t)
+      .first<{ baseline: number }>();
+    return Math.max(0, Number(row?.baseline ?? 0));
+  } catch {
+    return 0;
+  }
+}
+
+async function handleUsageReport(request: Request, env: Env): Promise<Response> {
+  if (env.LEASE_ISSUE_BEARER !== undefined && env.LEASE_ISSUE_BEARER !== "") {
+    const auth = request.headers.get("authorization") ?? "";
+    if (auth !== `Bearer ${env.LEASE_ISSUE_BEARER}`) return json({ ok: false, code: "unauthorized" }, 401);
+  }
+  const url = new URL(request.url);
+  const project = url.searchParams.get("project");
+  const feature = url.searchParams.get("feature");
+  const fingerprint = url.searchParams.get("license_fingerprint");
+  if (!project || !feature || !fingerprint) return json({ ok: false, code: "invalid_request" }, 400);
+
+  const now = Math.floor(Date.now() / 1000);
+  const fromParam = Number.parseInt(url.searchParams.get("from") ?? "", 10);
+  const toParam = Number.parseInt(url.searchParams.get("to") ?? "", 10);
+  const windowFrom = Number.isInteger(fromParam) && fromParam > 0 ? fromParam : 0;
+  const windowTo = Number.isInteger(toParam) && toParam > 0 ? toParam : now;
+
+  let rows: UsageRow[];
+  try {
+    const result = await env.DB.prepare(
+      "SELECT event_type, device_key_id, ts FROM usage_events WHERE project = ? AND feature = ? AND license_fingerprint = ? AND ts >= ? AND ts <= ? ORDER BY ts ASC",
+    )
+      .bind(project, feature, fingerprint, windowFrom, windowTo)
+      .all<UsageRow>();
+    rows = result.results ?? [];
+  } catch {
+    return json({ ok: false, code: "verification_error" }, 503);
+  }
+  const baseline = windowFrom > 0 ? await liveSeatsAt(env, project, feature, fingerprint, windowFrom) : 0;
+  const summary = summarizeUsage(rows, baseline);
+  return json({ ok: true, project, feature, from: windowFrom, to: windowTo, server_time: now, ...summary });
 }
 
 export default {
@@ -1576,6 +1706,9 @@ export default {
       }
       if (request.method === "POST" && url.pathname === "/v1/release") {
         return await handleSeatRelease(request, env);
+      }
+      if (request.method === "GET" && url.pathname === "/v1/admin/report") {
+        return await handleUsageReport(request, env);
       }
       return json({ ok: false, code: "not_found" }, 404);
     } catch (error) {

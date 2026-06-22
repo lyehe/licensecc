@@ -269,3 +269,21 @@ CREATE TABLE IF NOT EXISTS seat_checkouts (
 
 CREATE INDEX IF NOT EXISTS idx_seat_checkouts_live
   ON seat_checkouts(project, feature, license_fingerprint, heartbeat_deadline);
+
+-- Usage reporting (migration 0012). Append-only event log for peak/denial/adoption analytics.
+CREATE TABLE IF NOT EXISTS usage_events (
+  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  project TEXT NOT NULL,
+  feature TEXT NOT NULL,
+  license_fingerprint TEXT NOT NULL,
+  event_type TEXT NOT NULL CHECK (event_type IN ('checkout', 'release', 'reclaim', 'denied')),
+  seat_id TEXT NULL,
+  device_key_id TEXT NULL,
+  reason TEXT NULL,
+  ts BIGINT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_usage_events_window
+  ON usage_events(project, feature, license_fingerprint, ts);
+CREATE INDEX IF NOT EXISTS idx_usage_events_ts
+  ON usage_events(ts);
