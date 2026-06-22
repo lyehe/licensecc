@@ -114,6 +114,7 @@ add_test(NAME test_ctest_label_audit
 		-DLICENSECC_HAS_DMI_TEST=${LCC_HAS_DMI_TEST}
 		-DLICENSECC_BUILD_FUZZERS=$<BOOL:${BUILD_FUZZERS}>
 		-DLICENSECC_BUILD_INSPECTOR=$<BOOL:${LCC_BUILD_INSPECTOR}>
+		-DLICENSECC_BUILD_LEASE_RING_TEST=$<BOOL:${LCC_BUILD_LEASE_RING_TEST}>
 		-P ${CMAKE_CURRENT_SOURCE_DIR}/ctest_label_audit.cmake
 )
 set_tests_properties(test_ctest_label_audit PROPERTIES LABELS "security;validation")

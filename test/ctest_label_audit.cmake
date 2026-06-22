@@ -142,6 +142,12 @@ if(LICENSECC_BUILD_INSPECTOR)
 	)
 endif()
 
+if(LICENSECC_BUILD_LEASE_RING_TEST)
+	list(APPEND _expected_label_entries
+		"test_lease_ring|security,signature,verifier,public_api"
+	)
+endif()
+
 if(LICENSECC_IS_WINDOWS)
 	list(APPEND _expected_label_entries
 		"test_windows_disk_info|security,platform,hardware"

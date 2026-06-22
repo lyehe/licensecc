@@ -118,6 +118,36 @@ if(NOT "${LCC_CONFIG_ATTESTATION_RETIRED_KEY_IDS}" STREQUAL "")
     )
 endif()
 
+# Project verification ring (embedded cold-root key + additional hot lease keys).
+# Consumed by embedded_public_key_ring() in os/signature_verifier.hpp, which is
+# instantiated both in the os module (signature_verifier.cpp) and directly in
+# licensecc_static (limits/license_verifier.cpp), so the define lives on both.
+if(NOT "${LCC_ADDITIONAL_PUBLIC_KEY_RECORDS}" STREQUAL "")
+    if(TARGET os)
+        target_compile_definitions(os
+            PRIVATE
+                "LCC_ADDITIONAL_PUBLIC_KEY_RECORDS=${LCC_ADDITIONAL_PUBLIC_KEY_RECORDS}"
+        )
+    endif()
+    target_compile_definitions(licensecc_static
+        PUBLIC
+            "LCC_ADDITIONAL_PUBLIC_KEY_RECORDS=${LCC_ADDITIONAL_PUBLIC_KEY_RECORDS}"
+    )
+endif()
+
+if(NOT "${LCC_RETIRED_PUBLIC_KEY_IDS}" STREQUAL "")
+    if(TARGET os)
+        target_compile_definitions(os
+            PRIVATE
+                "LCC_RETIRED_PUBLIC_KEY_IDS=${LCC_RETIRED_PUBLIC_KEY_IDS}"
+        )
+    endif()
+    target_compile_definitions(licensecc_static
+        PUBLIC
+            "LCC_RETIRED_PUBLIC_KEY_IDS=${LCC_RETIRED_PUBLIC_KEY_IDS}"
+    )
+endif()
+
 add_library(licensecc::licensecc_static ALIAS licensecc_static)
 install(TARGETS licensecc_static EXPORT licensecc
 	ARCHIVE DESTINATION ${main_lib_dest}/${LCC_PROJECT_NAME}

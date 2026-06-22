@@ -43,6 +43,26 @@ set(LCC_CONFIG_ATTESTATION_PUBLIC_KEY_RECORDS "" CACHE STRING
 	"C++ expression list of license::os::SignaturePublicKey records trusted for config attestation tokens.")
 set(LCC_CONFIG_ATTESTATION_RETIRED_KEY_IDS "" CACHE STRING
 	"C string literal list of retired config attestation key ids, for example \"sha256:old\".")
+set(LCC_ADDITIONAL_PUBLIC_KEY_RECORDS "" CACHE STRING
+	"C++ expression list of additional license::os::SignaturePublicKey records added to the project verification ring (e.g. hot lease keys alongside the embedded cold-root key).")
+set(LCC_RETIRED_PUBLIC_KEY_IDS "" CACHE STRING
+	"C string literal list of retired project verification ring key ids, for example \"sha256:old\".")
+
+# Lease platform: populate the project verification ring from a checked-in ring
+# manifest so the hot/cold key split is a regeneration-durable generated artifact
+# (not a hand-edited, rebuild-clobbered public_key.h). See cmake/LeaseRing.cmake.
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/LeaseRing.cmake")
+set(LCC_LEASE_RING_MANIFEST "" CACHE FILEPATH
+	"Path to a lease ring manifest (ring.json) used to populate the project verification ring.")
+option(LCC_BUILD_LEASE_RING_TEST
+	"Configure a real 2-key lease ring from the checked-in test manifest and build the lease-ring golden test." OFF)
+if(NOT "${LCC_LEASE_RING_MANIFEST}" STREQUAL "")
+	lcc_apply_lease_ring_manifest("${LCC_LEASE_RING_MANIFEST}")
+elseif(LCC_BUILD_LEASE_RING_TEST)
+	# Generate an ephemeral hot key into the build tree (never committed) and wire it
+	# into the ring; exposes LCC_LEASE_TEST_HOT_KEY_PATH / _ID for test_lease_ring.
+	lcc_generate_test_lease_ring()
+endif()
 if(NOT "${LCC_SUPPORTED_LICENSE_FORMAT_MIN}" MATCHES "^[0-9]+$")
 	message(FATAL_ERROR "LCC_SUPPORTED_LICENSE_FORMAT_MIN must be numeric: ${LCC_SUPPORTED_LICENSE_FORMAT_MIN}")
 endif()
