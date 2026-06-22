@@ -217,6 +217,18 @@ target_link_libraries(
  Boost::system
 )
 
+### Floating (concurrent-seat) client decision logic. Header-only.
+add_executable(
+ test_seat_client
+ seat_client_test.cpp
+)
+
+target_link_libraries(
+ test_seat_client
+ Boost::unit_test_framework
+ Boost::system
+)
+
 ADD_TEST(NAME test_license_reader COMMAND test_license_reader)
 ADD_TEST(NAME test_license_locator COMMAND test_license_locator)
 ADD_TEST(NAME test_base64 COMMAND test_base64)
@@ -231,6 +243,7 @@ ADD_TEST(NAME test_config_attestation COMMAND test_config_attestation)
 ADD_TEST(NAME test_inspector_section COMMAND test_inspector_section)
 ADD_TEST(NAME test_clock_floor COMMAND test_clock_floor)
 ADD_TEST(NAME test_lease_client COMMAND test_lease_client)
+ADD_TEST(NAME test_seat_client COMMAND test_seat_client)
 
 set_tests_properties(
  test_license_reader
@@ -249,6 +262,11 @@ set_tests_properties(
 
 set_tests_properties(
  test_lease_client
+ PROPERTIES LABELS "security;public_api"
+)
+
+set_tests_properties(
+ test_seat_client
  PROPERTIES LABELS "security;public_api"
 )
 
