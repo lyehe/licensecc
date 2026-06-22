@@ -1,3 +1,11 @@
+import {
+  buildV201CanonicalPayload,
+  buildLeaseLicenseText,
+  leaseCanonicalFields,
+  utcDateFromEpoch,
+} from "./lease/canonical_payload.mjs";
+import { LEASE_ISSUANCE_ATOMIC_SQL } from "./lease/issuance_sql.mjs";
+
 declare const Buffer:
   | {
       from(value: string | ArrayBuffer | Uint8Array, encoding?: string): {
@@ -40,6 +48,12 @@ export interface Env {
   D1_GLOBAL_RATE_LIMIT_PERIOD_SECONDS?: string;
   REQUEST_SIGNATURE_MODE?: string;
   REQUEST_SIGNATURE_MAX_SKEW_SECONDS?: string;
+  // Lease platform (/v1/activate, /v1/renew). The HOT lease key is distinct from the
+  // online assertion key and from the cold-root project key (design doc D2/D6).
+  LEASE_SIGNING_PRIVATE_KEY_PKCS8_PEM?: string;
+  LEASE_SIGNING_KEY_ID?: string;
+  LEASE_ISSUE_BEARER?: string; // phase-1 placeholder authn; replaced by account_token (phase 2)
+  LEASE_SKEW_DAYS?: string; // signed valid-from backdate, default 2
 }
 
 export interface VerifyRequest {
@@ -1011,6 +1025,262 @@ async function handleVerify(request: Request, env: Env): Promise<Response> {
   });
 }
 
+// ============================ Lease platform (activate / renew) ============================
+//
+// Sliding-window, hardware-bound, signed v201 leases (design doc 2026-06-21). The Worker
+// is the public edge: it authenticates, checks the entitlement, CLAMPS the lease expiry to
+// the subscription end (so a cancelled/expired subscription cannot be over-issued), enforces
+// the device-rebind cap ATOMICALLY (no check-then-insert TOCTOU), then signs a lease with
+// the HOT lease key. The device-key ECDSA *proof* (relay-resistance) is the documented next
+// layer, wired to the existing entitlement_devices + request_proof_nonces machinery.
+
+const LEASE_DEFAULT_SKEW_DAYS = 2;
+const LEASE_DEFAULT_SECONDS = 2592000;
+
+interface LeaseEntitlementRow {
+  status: string;
+  valid_from: number | null;
+  valid_until: number | null;
+  max_active_devices: number;
+  lease_seconds: number;
+  rebind_window_sec: number;
+}
+
+interface LeaseIssueBody {
+  project: string;
+  feature: string;
+  license_fingerprint: string;
+  device_key_id: string;
+  hw_id?: string; // client-signature (XXXX-XXXX-XXXX) for the .lic offline HW binding
+  client_signature_source_strength?: string;
+  start_version?: string;
+  end_version?: string;
+  request_id?: string; // idempotency key
+}
+
+let cachedLeaseSigningKey: { cacheKey: string; keyPromise: Promise<CryptoKey> } | undefined;
+
+async function leaseSigningKeyFor(env: Env): Promise<CryptoKey> {
+  const pem = env.LEASE_SIGNING_PRIVATE_KEY_PKCS8_PEM ?? "";
+  const cacheKey = `${env.LEASE_SIGNING_KEY_ID ?? ""}\n${pem}`;
+  if (cachedLeaseSigningKey === undefined || cachedLeaseSigningKey.cacheKey !== cacheKey) {
+    cachedLeaseSigningKey = { cacheKey, keyPromise: importSigningKey(pem) };
+  }
+  return cachedLeaseSigningKey.keyPromise;
+}
+
+export function resetLeaseSigningKeyCacheForTests(): void {
+  cachedLeaseSigningKey = undefined;
+}
+
+async function signLeaseLicense(fields: Record<string, string | undefined>, env: Env): Promise<string> {
+  const payload = buildV201CanonicalPayload(fields);
+  const key = await leaseSigningKeyFor(env);
+  const signature = await crypto.subtle.sign({ name: "RSASSA-PKCS1-v1_5" }, key, payload.bytes);
+  return buildLeaseLicenseText(fields, base64FromBytes(new Uint8Array(signature)));
+}
+
+function requireString(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function parseLeaseBody(raw: unknown): LeaseIssueBody | null {
+  if (raw === null || typeof raw !== "object") return null;
+  const value = raw as Record<string, unknown>;
+  const project = requireString(value.project);
+  const feature = requireString(value.feature);
+  const licenseFingerprint = requireString(value.license_fingerprint);
+  const deviceKeyId = requireString(value.device_key_id);
+  if (project === null || feature === null || licenseFingerprint === null || deviceKeyId === null) return null;
+  const body: LeaseIssueBody = {
+    project,
+    feature,
+    license_fingerprint: licenseFingerprint,
+    device_key_id: deviceKeyId,
+  };
+  if (typeof value.hw_id === "string" && value.hw_id.length > 0) body.hw_id = value.hw_id;
+  if (typeof value.client_signature_source_strength === "string") {
+    body.client_signature_source_strength = value.client_signature_source_strength;
+  }
+  if (typeof value.start_version === "string") body.start_version = value.start_version;
+  if (typeof value.end_version === "string") body.end_version = value.end_version;
+  if (typeof value.request_id === "string" && value.request_id.length > 0) body.request_id = value.request_id;
+  return body;
+}
+
+function leaseWithinValidity(row: LeaseEntitlementRow, nowSeconds: number): boolean {
+  const validFrom = boundedTime(row.valid_from);
+  const validUntil = boundedTime(row.valid_until);
+  if (validFrom !== null && nowSeconds < validFrom) return false;
+  if (validUntil !== null && nowSeconds >= validUntil) return false;
+  return true;
+}
+
+async function lookupLeaseEntitlement(env: Env, body: LeaseIssueBody): Promise<LeaseEntitlementRow | null> {
+  return env.DB.prepare(
+    "SELECT status, valid_from, valid_until, max_active_devices, lease_seconds, rebind_window_sec FROM entitlements WHERE project = ? AND feature = ? AND license_fingerprint = ? LIMIT 1",
+  )
+    .bind(body.project, body.feature, body.license_fingerprint)
+    .first<LeaseEntitlementRow>();
+}
+
+// Atomic device-rebind cap. The INSERT lands only if the number of DISTINCT *other*
+// devices issued within the rebind window is below max_active_devices, so a renew of an
+// existing device always succeeds and a brand-new device is capped -- evaluated and written
+// in ONE statement (no check-then-insert race). Returns the inserted row, or null when the
+// cap would be exceeded. Mirrors the race-free consumeRequestProofNonce pattern.
+async function atomicLeaseIssuance(
+  env: Env,
+  body: LeaseIssueBody,
+  row: LeaseEntitlementRow,
+  now: number,
+  validFromEpoch: number,
+  validToEpoch: number,
+  leaseKeyId: string,
+): Promise<boolean> {
+  const windowStart = now - (row.rebind_window_sec > 0 ? row.rebind_window_sec : 0);
+  const maxDevices = row.max_active_devices > 0 ? row.max_active_devices : 1;
+  const inserted = await env.DB.prepare(LEASE_ISSUANCE_ATOMIC_SQL)
+    .bind(
+      body.project,
+      body.feature,
+      body.license_fingerprint,
+      body.device_key_id,
+      leaseKeyId,
+      now,
+      validFromEpoch,
+      validToEpoch,
+      body.request_id ?? null,
+      body.project,
+      body.feature,
+      body.license_fingerprint,
+      windowStart,
+      body.device_key_id,
+      maxDevices,
+    )
+    .first<{ id: number }>();
+  return inserted !== null;
+}
+
+async function getLeaseIdempotent(env: Env, requestId: string | undefined): Promise<unknown | null> {
+  if (requestId === undefined) return null;
+  try {
+    const row = await env.DB.prepare(
+      "SELECT response_json FROM mutation_idempotency WHERE scope = ? AND idempotency_key = ? LIMIT 1",
+    )
+      .bind("lease", requestId)
+      .first<{ response_json: string }>();
+    return row === null ? null : JSON.parse(row.response_json);
+  } catch {
+    return null; // best-effort; a missing idempotency hit just re-issues
+  }
+}
+
+async function putLeaseIdempotent(
+  env: Env,
+  requestId: string | undefined,
+  response: unknown,
+  now: number,
+): Promise<void> {
+  if (requestId === undefined) return;
+  try {
+    await env.DB.prepare(
+      "INSERT INTO mutation_idempotency (scope, idempotency_key, response_json, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(scope, idempotency_key) DO NOTHING",
+    )
+      .bind("lease", requestId, JSON.stringify(response), now)
+      .run();
+  } catch {
+    // best-effort; idempotency is an optimization, not a correctness gate here
+  }
+}
+
+async function handleLeaseIssue(request: Request, env: Env): Promise<Response> {
+  const now = Math.floor(Date.now() / 1000);
+
+  if (env.LEASE_ISSUE_BEARER !== undefined && env.LEASE_ISSUE_BEARER !== "") {
+    const auth = request.headers.get("authorization") ?? "";
+    if (auth !== `Bearer ${env.LEASE_ISSUE_BEARER}`) {
+      return json({ ok: false, code: "unauthorized" }, 401);
+    }
+  }
+  if (!env.LEASE_SIGNING_PRIVATE_KEY_PKCS8_PEM || !env.LEASE_SIGNING_KEY_ID) {
+    return json({ ok: false, code: "lease_signing_unavailable" }, 503);
+  }
+
+  let body: LeaseIssueBody | null;
+  try {
+    body = parseLeaseBody(await request.json());
+  } catch {
+    body = null;
+  }
+  if (body === null) return json({ ok: false, code: "invalid_request" }, 400);
+
+  const cached = await getLeaseIdempotent(env, body.request_id);
+  if (cached !== null) return json(cached);
+
+  let row: LeaseEntitlementRow | null;
+  try {
+    row = await lookupLeaseEntitlement(env, body);
+  } catch {
+    return json({ ok: false, code: "verification_error" }, 503);
+  }
+  if (row === null || row.status !== "active" || !leaseWithinValidity(row, now)) {
+    return json({ ok: false, code: "no_active_entitlement" }, 403);
+  }
+  const validUntil = boundedTime(row.valid_until);
+  if (validUntil !== null && validUntil <= now) {
+    return json({ ok: false, code: "expired_subscription" }, 403);
+  }
+
+  // Clamp the lease expiry to the subscription end (the kill-switch). Mandatory signed
+  // valid-from is backdated by SKEW_DAYS to absorb day-granularity skew.
+  const leaseSeconds = row.lease_seconds > 0 ? row.lease_seconds : LEASE_DEFAULT_SECONDS;
+  const validToEpoch = validUntil === null ? now + leaseSeconds : Math.min(now + leaseSeconds, validUntil);
+  const skewDays = Number.parseInt(env.LEASE_SKEW_DAYS ?? "", 10);
+  const effectiveSkewDays = Number.isInteger(skewDays) && skewDays >= 0 ? skewDays : LEASE_DEFAULT_SKEW_DAYS;
+  const validFromEpoch = Math.max(0, now - effectiveSkewDays * 86400);
+
+  let inserted: boolean;
+  try {
+    inserted = await atomicLeaseIssuance(env, body, row, now, validFromEpoch, validToEpoch, env.LEASE_SIGNING_KEY_ID);
+  } catch {
+    return json({ ok: false, code: "verification_error" }, 503);
+  }
+  if (!inserted) return json({ ok: false, code: "device_limit_exceeded" }, 403);
+
+  const fields = leaseCanonicalFields({
+    project: body.project,
+    feature: body.feature,
+    keyId: env.LEASE_SIGNING_KEY_ID,
+    validFrom: utcDateFromEpoch(validFromEpoch),
+    validTo: utcDateFromEpoch(validToEpoch),
+    clientSignature: body.hw_id,
+    clientSignatureSourceStrength: body.hw_id
+      ? body.client_signature_source_strength ?? "strong-disk-serial-or-uuid"
+      : undefined,
+    startVersion: body.start_version,
+    endVersion: body.end_version,
+  });
+
+  let lic: string;
+  try {
+    lic = await signLeaseLicense(fields, env);
+  } catch (error) {
+    logEvent("error", "lease.signing_error", {
+      request_id: requestId(request),
+      error: error instanceof Error ? error.message : "unknown signing error",
+    });
+    return json({ ok: false, code: "lease_signing_error" }, 500);
+  }
+
+  // renew_by is a SOFT anomaly signal (preserves offline-tolerance): a client that has not
+  // re-issued by then is surfaced server-side, but valid_to remains the hard offline limit.
+  const renewBy = now + Math.floor(leaseSeconds / 2);
+  const response = { ok: true, lic, server_time: now, renew_by: renewBy, valid_to_epoch: validToEpoch };
+  await putLeaseIdempotent(env, body.request_id, response, now);
+  return json(response);
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     try {
@@ -1020,6 +1290,9 @@ export default {
       }
       if (request.method === "POST" && url.pathname === "/v1/verify") {
         return await handleVerify(request, env);
+      }
+      if (request.method === "POST" && (url.pathname === "/v1/activate" || url.pathname === "/v1/renew")) {
+        return await handleLeaseIssue(request, env);
       }
       return json({ ok: false, code: "not_found" }, 404);
     } catch (error) {
