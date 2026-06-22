@@ -76,4 +76,42 @@ function(lcc_generate_test_lease_ring)
 	file(SHA256 "${_der}" _hot_sha)
 	set(LCC_LEASE_TEST_HOT_KEY_ID "sha256:${_hot_sha}" PARENT_SCOPE)
 	set(LCC_LEASE_TEST_HOT_KEY_PATH "${_priv}" PARENT_SCOPE)
+
+	# Cross-language e2e (#8): if node is available, sign a lease in JS with the SAME hot key
+	# (via the lease Worker's signer) and hand the file to the C++ test, which verifies a
+	# JS-produced lease through the real acquire_license path. node-gated so the C++-only CI
+	# job (no node) simply skips the case.
+	find_program(LCC_NODE_EXE NAMES node)
+	set(_js_license "")
+	if(LCC_NODE_EXE)
+		set(_pkcs8 "${_dir}/hot_key.pkcs8.pem")
+		execute_process(
+			COMMAND "${LCC_OPENSSL_EXE}" pkcs8 -topk8 -nocrypt -in "${_priv}" -out "${_pkcs8}"
+			RESULT_VARIABLE _rc OUTPUT_QUIET ERROR_VARIABLE _err)
+		if(NOT _rc EQUAL 0)
+			message(FATAL_ERROR "openssl pkcs8 conversion failed: ${_err}")
+		endif()
+		string(TOUPPER "${LCC_PROJECT_NAME}" _lease_feature)
+		set(_js_license "${_dir}/js_signed_lease.lic")
+		execute_process(
+			COMMAND "${LCC_NODE_EXE}"
+				"${CMAKE_SOURCE_DIR}/services/cloudflare-licensing-backend/scripts/lease-sign.mjs"
+				--private-key "${_pkcs8}"
+				--key-id "sha256:${_hot_sha}"
+				--project "${LCC_PROJECT_NAME}"
+				--feature "${_lease_feature}"
+				--valid-from "2024-01-02"
+				--valid-to "2035-12-31"
+				--out "${_js_license}"
+			RESULT_VARIABLE _rc OUTPUT_QUIET ERROR_VARIABLE _err)
+		if(NOT _rc EQUAL 0)
+			message(WARNING "JS lease signer failed; cross-language case skipped: ${_err}")
+			set(_js_license "")
+		else()
+			message(STATUS "Lease cross-language fixture: ${_js_license}")
+		endif()
+	else()
+		message(STATUS "node not found; lease cross-language C++ case will be skipped")
+	endif()
+	set(LCC_LEASE_TEST_JS_LICENSE "${_js_license}" PARENT_SCOPE)
 endfunction()

@@ -18,6 +18,8 @@
 
 #include <boost/test/unit_test.hpp>
 #include <algorithm>
+#include <fstream>
+#include <iterator>
 #include <memory>
 #include <string>
 #include <vector>
@@ -178,6 +180,30 @@ BOOST_AUTO_TEST_CASE(cold_key_license_still_verifies_after_ring_extension) {
 	LicenseInfo license{};
 	const LCC_EVENT_TYPE result = acquire_from_plain_data(v201_license_signed_by(cold_key_id, signature_b64), license);
 	BOOST_CHECK_EQUAL(result, LICENSE_OK);
+}
+
+// Cross-language e2e (#8): a lease signed in JavaScript (the lease Worker's signer,
+// lease-sign.mjs) with the same hot key verifies through the real C++ acquire_license path.
+// The fixture is produced at configure time when node is available; otherwise this case
+// logs a skip rather than silently passing.
+BOOST_AUTO_TEST_CASE(js_signed_lease_verifies_in_cpp_cross_language) {
+	const std::string js_path(LCC_LEASE_TEST_JS_LICENSE);
+	if (js_path.empty()) {
+		BOOST_TEST_MESSAGE("cross-language case skipped: no node at configure time (no JS lease fixture)");
+		return;
+	}
+	std::ifstream input(js_path.c_str(), std::ios::binary);
+	BOOST_REQUIRE_MESSAGE(input.is_open(), "can open JS-signed lease fixture: " + js_path);
+	const std::string license_text((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+
+	// Confirm it really is the JS lease bound to the hot key, then verify it end to end.
+	BOOST_CHECK_NE(license_text.find(std::string(LICENSE_KEY_ID) + " = " + hot_key_id()), std::string::npos);
+	BOOST_CHECK_NE(license_text.find(std::string(PARAM_EXPIRY_DATE) + " = 2035-12-31"), std::string::npos);
+
+	LicenseInfo license{};
+	const LCC_EVENT_TYPE result = acquire_from_plain_data(license_text, license);
+	BOOST_CHECK_EQUAL(result, LICENSE_OK);
+	BOOST_CHECK_EQUAL(license.license_version, LCC_LICENSE_FORMAT_VERSION_V201);
 }
 
 #endif  // LCC_ADDITIONAL_PUBLIC_KEY_RECORDS

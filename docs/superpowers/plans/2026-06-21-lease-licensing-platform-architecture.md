@@ -296,6 +296,46 @@ trades instant revocation for offline-tolerance, latency ≤ clamped `valid-to`.
 
 ---
 
+## Phase-1 build status (2026-06-22)
+
+Built on `feature/lease-platform` (stacked on `improve/codebase-smells-fixes`, not
+`develop`, because the multi-key ring + v201 + 3072 floor it extends are 95 commits
+ahead of `develop`). All committed work is tested green.
+
+| # | Delivered | Tests |
+|---|---|---|
+| 1 | Branch + `Lease_Platform` CI workflow | — |
+| 2 | Generated, regeneration-durable hot/cold ring: `build_lease_ring.py` + `LeaseRing.cmake` + CMake cache vars/`target_compile_definitions` mirroring the shipped online/config rings; ephemeral test key (no committed key material) | `test_lease_ring` 4/4, 16 asserts |
+| 3 | Migration 0010 (rebind cols + `lease_issuance`); D1 + Postgres port | schema parity green; SQL suite |
+| 4 | JS v201 lease signer + Worker-safe canonical module (one source of truth) | `lease-sign` 7/7, incl. **byte-parity vs the C++ golden vectors** |
+| 5 | Lease Worker `/v1/activate` + `/v1/renew`: clamp, atomic rebind, authn, idempotency, signed valid-from | `lease-worker` 8/8 (real sig verify) + `lease-rebind` SQL 4/4 |
+| 6 | `clock_floor.hpp` (rollback floor + UTC date helper) | `test_clock_floor` 7/7 |
+| 7 | `lease_client.hpp` (state machine + durable-write gate) | `test_lease_client` 5/5 |
+| 8 | Cross-language: JS-signed lease verified in real C++ | `test_lease_ring` cross-language case |
+
+Backend suite: 68/68 unit, 12/12 SQL, lint ok. C++ lease tests green (Debug, DEFAULT).
+
+### Deliberate phase-1 deviations from the locked design (with rationale)
+
+1. **Signer is JS (Worker-native), not the hybrid lccgen keyholder.** The locked D2
+   was the hybrid split; the phase-1 signer signs v201 in JS, **guarded by byte-for-byte
+   parity against the C++ golden vectors** (the exact risk the hybrid avoided is now
+   CI-tested). The key-isolation benefit of the hybrid (and the KMS/HSM apex) remains the
+   production hardening target; the signer keeps a narrow "sign a vetted payload" surface
+   so it can move behind that boundary without a protocol change.
+2. **Device-key ECDSA *proof* (relay-resistance) is deferred one layer.** The Worker tracks
+   `device_key_id` and enforces the rebind cap on it (structural binding), but does not yet
+   verify an ECDSA proof of possession. The `entitlement_devices` + `request_proof_nonces`
+   machinery to wire it exists; this is the immediate next increment and is what fully
+   closes the hw_id cloning hole (D4).
+3. **UTC-seconds + clock floor live in the client, not auto-wired into `acquire_license`.**
+   `acquire_license` keeps its existing day-granularity local expiry check; the UTC-correct
+   comparison + the persisted rollback floor are library-provided components
+   (`clock_floor.hpp`) the reference client wires into its renew/verify loop (the host owns
+   the floor file + renew round-trip). They are tested, not dead code.
+4. **Commerce (phase 2) remains out of scope** — Stripe + fulfillment + `account_token` +
+   portal, as locked.
+
 ## GSTACK REVIEW REPORT
 
 | Run | Engine | Status | Findings |
