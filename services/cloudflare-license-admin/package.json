@@ -19,6 +19,7 @@
     "validate:access-admin": "node scripts/validate-access-admin.mjs"
   },
   "dependencies": {
+    "@licensecc/cloudflare-licensing-backend": "file:../cloudflare-licensing-backend",
     "@vitejs/plugin-react": "^4.5.0",
     "jose": "^5.10.0",
     "react": "^19.1.0",

@@ -1,6 +1,7 @@
 import { createRemoteJWKSet, jwtVerify } from "jose";
 import type { JWTPayload } from "jose";
 import type { EntitlementInput, EntitlementPatch, EntitlementRecord, EntitlementStatus } from "../shared/api";
+import { entitlementId, decodeEntitlementId } from "@licensecc/cloudflare-licensing-backend/entitlements/entitlement_mutation";
 
 export interface D1PreparedStatementLike {
   bind(...values: unknown[]): D1PreparedStatementLike;
@@ -142,34 +143,6 @@ function nullableEpoch(value: unknown): number | null | undefined {
     return undefined;
   }
   return value;
-}
-
-function entitlementId(project: string, feature: string, licenseFingerprint: string): string {
-  const raw = JSON.stringify([project, feature, licenseFingerprint]);
-  const bytes = new TextEncoder().encode(raw);
-  let binary = "";
-  for (const byte of bytes) {
-    binary += String.fromCharCode(byte);
-  }
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
-}
-
-function decodeEntitlementId(id: string): { project: string; feature: string; license_fingerprint: string } | null {
-  try {
-    const padded = id.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(id.length / 4) * 4, "=");
-    const bytes = Uint8Array.from(atob(padded), (ch) => ch.charCodeAt(0));
-    const parsed = JSON.parse(new TextDecoder().decode(bytes)) as unknown;
-    if (!Array.isArray(parsed) || parsed.length !== 3) {
-      return null;
-    }
-    const [project, feature, licenseFingerprint] = parsed;
-    if (typeof project !== "string" || typeof feature !== "string" || typeof licenseFingerprint !== "string") {
-      return null;
-    }
-    return { project, feature, license_fingerprint: licenseFingerprint };
-  } catch {
-    return null;
-  }
 }
 
 function withId(row: Omit<EntitlementRecord, "id"> & { cache_ttl_seconds?: number }): EntitlementRecord {
