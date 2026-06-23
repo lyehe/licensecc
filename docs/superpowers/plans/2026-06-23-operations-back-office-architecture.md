@@ -304,9 +304,9 @@ conflict; B touches the admin Worker only.
 ## Implementation Tasks
 Synthesized from the review. P1 blocks ship; P2 same-branch; P3 follow-up.
 
-- [ ] **T1 (P1)** — foundation — Bind admin + licensing-backend Workers to one entitlements D1; demote forward sync to optional replica. Verify: both Workers read the same row by tuple.
-- [ ] **T2 (P1)** — foundation — Extract shared entitlement-mutation service; extend it to write all seat/device columns. Verify: admin and a direct call produce byte-identical rows incl. `pool_size`/`max_active_devices`.
-- [ ] **T3 (P1)** — schema — Extend `customers` (status, external_ref, UNIQUE email) + PG parity. Verify: dup-email insert rejected; `check-schema-parity.py` green.
+- [x] **T1 (P1)** — foundation — One entitlements D1 (admin + backend bind the same DB; sync demoted to optional replica); fixed the stale admin `migrations_dir`; documented in CLAUDE.md + `wrangler.example.jsonc`. Done in `09a3122`.
+- [ ] **T2 (P1)** — foundation — Extract shared entitlement-mutation service + add seat/device capacity writes. **Mechanism corrected post-review** (the `.mjs` re-export shim does NOT compile into the admin `dist-worker`; use a package dependency: backend `exports` + admin `file:` dep + bare specifier). **Behavior split:** `createEntitlement` stays byte-identical (do NOT add seat cols to its ON CONFLICT — that would clobber lease/seat-owned values); add a separate `setEntitlementCapacity()` for `pool_size`/`max_active_devices`/etc. Verify: admin 43 tests stay green; a parity test asserts admin-path vs direct-call rows are identical.
+- [x] **T3 (P1)** — schema — Migration 0013 extends `customers` (status, external_ref, partial-UNIQUE email); table-rebuild keeps `schema.sql` clean; PG ported. Verify: `check-schema-parity.py` → `schema parity ok` ✓. Done in `09a3122`.
 - [ ] **T4 (P1)** — fulfillment — `POST /v1/orders`: HMAC verify + atomic event-claim/ordering/projection/mutation; cancel→disabled; fingerprint contract. Verify: adversarial workflow (replay/reorder/conflict/crash) green.
 - [ ] **T5 (P1)** — identity — `account_tokens` (keyed HMAC + pepper_key_id) + bind `customer_id` on all runtime paths + hard bearer cutover. Verify: cross-account access denied; bearer cannot act cross-tuple.
 - [ ] **T6 (P1)** — portal — customer-scoped handlers + new customer-scoped report + OTP/magic-link + download-.lic via lease Worker. Verify: IDOR suite denies every cross-account read/write/report.
