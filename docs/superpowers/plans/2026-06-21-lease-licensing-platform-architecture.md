@@ -323,11 +323,15 @@ Backend suite: 68/68 unit, 12/12 SQL, lint ok. C++ lease tests green (Debug, DEF
    CI-tested). The key-isolation benefit of the hybrid (and the KMS/HSM apex) remains the
    production hardening target; the signer keeps a narrow "sign a vetted payload" surface
    so it can move behind that boundary without a protocol change.
-2. **Device-key ECDSA *proof* (relay-resistance) is deferred one layer.** The Worker tracks
-   `device_key_id` and enforces the rebind cap on it (structural binding), but does not yet
-   verify an ECDSA proof of possession. The `entitlement_devices` + `request_proof_nonces`
-   machinery to wire it exists; this is the immediate next increment and is what fully
-   closes the hw_id cloning hole (D4).
+2. **Device-key ECDSA *proof* (relay-resistance) — DONE (2026-06-23).** Lease `/activate`-`/renew`
+   and seat `/checkout` now verify an optional ECDSA proof of possession (`DEVICE_PROOF_MODE`
+   off|required), reusing the `/v1/verify` proof core (extracted `evaluateProofForRequest`):
+   skew + device lookup/status + ECDSA signature over the canonical payload + nonce replay
+   defense (`request_proof_nonces`). A presented proof binds the issuance to the registered,
+   non-exportable device key; `required` denies issuance without one — closing the hw_id
+   cloning hole (D4). Tested: 10 cases (valid binds, required-missing, tampered sig, unknown/
+   disabled device, replayed nonce, stale timestamp, off-mode back-compat, lease + seat). The
+   remaining ceiling is the device key's non-exportability (TPM/OS-keystore), still the apex.
 3. **UTC-seconds + clock floor live in the client, not auto-wired into `acquire_license`.**
    `acquire_license` keeps its existing day-granularity local expiry check; the UTC-correct
    comparison + the persisted rollback floor are library-provided components

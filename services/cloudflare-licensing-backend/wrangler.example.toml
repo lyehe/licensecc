@@ -20,6 +20,11 @@ D1_RATE_LIMIT_PERIOD_SECONDS = "60"
 # proof and is the PRODUCTION DEFAULT. Roll out off -> soft (observe) -> required.
 REQUEST_SIGNATURE_MODE = "required"
 REQUEST_SIGNATURE_MAX_SKEW_SECONDS = "300"
+# Device-proof gate for lease /activate-/renew + seat /checkout: off | required.
+# A presented ECDSA device proof is always verified (binds the issuance to a registered,
+# non-exportable key); "required" denies issuance without one -- set it in production to make
+# the hardware lock actually bind (a cloned hw_id alone cannot get a lease/seat).
+DEVICE_PROOF_MODE = "off"
 # Optional D1 limiter tier overrides. Defaults fall back to D1_RATE_LIMIT_*.
 # D1_CLIENT_RATE_LIMIT_LIMIT = "20"
 # D1_CLIENT_RATE_LIMIT_PERIOD_SECONDS = "60"

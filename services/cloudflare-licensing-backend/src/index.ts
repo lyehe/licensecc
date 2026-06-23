@@ -56,6 +56,10 @@ export interface Env {
   LEASE_SIGNING_KEY_ID?: string;
   LEASE_ISSUE_BEARER?: string; // phase-1 placeholder authn; replaced by account_token (phase 2)
   LEASE_SKEW_DAYS?: string; // signed valid-from backdate, default 2
+  // Device-proof (ECDSA relay-resistance) gate for lease/seat issuance: off | required.
+  // A presented proof is always verified; "required" denies issuance without one. Default off
+  // for back-compat; production sets "required" to make the hardware lock actually bind.
+  DEVICE_PROOF_MODE?: string;
 }
 
 export interface VerifyRequest {
@@ -763,6 +767,76 @@ async function consumeRequestProofNonce(
   }
 }
 
+// Verify a device proof: skew, device lookup + status, ECDSA signature over the canonical
+// payload, and nonce replay-defense. Returns the result WITHOUT the global-mode wrapper so it can
+// be reused by the lease/seat paths (which gate proof PRESENCE differently from /v1/verify).
+async function evaluateProofForRequest(
+  env: Env,
+  verifyRequest: VerifyRequest,
+  proof: RequestProof,
+  nowSeconds: number,
+): Promise<Omit<RequestProofEvaluation, "mode">> {
+  const maxSkewSeconds = parsePositiveInt(env.REQUEST_SIGNATURE_MAX_SKEW_SECONDS, 300, 3600);
+  if (Math.abs(nowSeconds - proof.request_timestamp) > maxSkewSeconds) {
+    return {
+      result: "stale_timestamp",
+      detail: "request proof timestamp is outside the accepted skew window",
+      device_key_id: proof.device_key_id,
+    };
+  }
+
+  let device: EntitlementDeviceRow | null;
+  try {
+    device = await lookupEntitlementDevice(env, verifyRequest);
+  } catch (error) {
+    return {
+      result: "d1_error",
+      detail: error instanceof Error ? error.message : "device lookup failed",
+      device_key_id: proof.device_key_id,
+    };
+  }
+  if (device === null) {
+    return {
+      result: "unknown_device",
+      detail: "device key is not registered for this entitlement",
+      device_key_id: proof.device_key_id,
+    };
+  }
+  if (device.status !== "active") {
+    return { result: "disabled_device", detail: "device key is not active", device_key_id: proof.device_key_id };
+  }
+
+  let valid: boolean;
+  try {
+    valid = await verifyRequestSignature(
+      device.public_key_spki_der_base64,
+      canonicalRequestProofPayload(verifyRequest),
+      proof.signature,
+    );
+  } catch (error) {
+    return {
+      result: "malformed_public_key",
+      detail: error instanceof Error ? error.message : "request proof verification failed",
+      device_key_id: proof.device_key_id,
+    };
+  }
+  if (!valid) {
+    return { result: "invalid_signature", detail: "request proof signature did not verify", device_key_id: proof.device_key_id };
+  }
+
+  // Signature, skew, and device are good. Now spend the nonce. This is the relay defense: a
+  // replay of this exact signed body finds the nonce already consumed.
+  const nonceState = await consumeRequestProofNonce(env, verifyRequest, proof, nowSeconds, maxSkewSeconds);
+  if (nonceState === "error") {
+    // Fail CLOSED: a replay store we cannot reach denies, never allows.
+    return { result: "d1_error", detail: "request proof nonce store is unavailable", device_key_id: proof.device_key_id };
+  }
+  if (nonceState === "replayed") {
+    return { result: "replayed_nonce", detail: "request proof nonce was already consumed", device_key_id: proof.device_key_id };
+  }
+  return { result: "valid", device_key_id: proof.device_key_id };
+}
+
 async function evaluateRequestProof(
   env: Env,
   verifyRequest: VerifyRequest,
@@ -776,90 +850,81 @@ async function evaluateRequestProof(
   if (proof === undefined) {
     return { mode, result: "missing", detail: "request proof is not present" };
   }
+  return { mode, ...(await evaluateProofForRequest(env, verifyRequest, proof, nowSeconds)) };
+}
 
-  const maxSkewSeconds = parsePositiveInt(env.REQUEST_SIGNATURE_MAX_SKEW_SECONDS, 300, 3600);
-  if (Math.abs(nowSeconds - proof.request_timestamp) > maxSkewSeconds) {
+// Parse the flat request-proof fields shared by /v1/verify, lease, and seat requests. The proof's
+// device key is the request's own device_key_id (already parsed). Returns { invalid: true } when
+// some proof fields are present but malformed, so the caller can reject rather than silently drop.
+function parseRequestProofFields(
+  input: Record<string, unknown>,
+  deviceKeyId: string | null,
+): { proof?: RequestProof; invalid: boolean } {
+  const present = [
+    input.request_signature_version,
+    input.request_timestamp,
+    input.request_signature_algorithm,
+    input.request_signature,
+  ].some((field) => field !== undefined);
+  if (!present) return { invalid: false };
+  const requestTimestamp = safeUnixSeconds(input.request_timestamp);
+  const requestSignature = safeBase64(input.request_signature, 512);
+  if (
+    input.request_signature_version === REQUEST_PROOF_VERSION &&
+    deviceKeyId !== null &&
+    requestTimestamp !== null &&
+    input.request_signature_algorithm === REQUEST_PROOF_ALGORITHM &&
+    requestSignature !== null
+  ) {
     return {
-      mode,
-      result: "stale_timestamp",
-      detail: "request proof timestamp is outside the accepted skew window",
-      device_key_id: proof.device_key_id,
+      invalid: false,
+      proof: {
+        version: REQUEST_PROOF_VERSION,
+        device_key_id: deviceKeyId,
+        request_timestamp: requestTimestamp,
+        algorithm: REQUEST_PROOF_ALGORITHM,
+        signature: requestSignature,
+      },
     };
   }
+  return { invalid: true };
+}
 
-  let device: EntitlementDeviceRow | null;
-  try {
-    device = await lookupEntitlementDevice(env, verifyRequest);
-  } catch (error) {
-    return {
-      mode,
-      result: "d1_error",
-      detail: error instanceof Error ? error.message : "device lookup failed",
-      device_key_id: proof.device_key_id,
-    };
-  }
-  if (device === null) {
-    return {
-      mode,
-      result: "unknown_device",
-      detail: "device key is not registered for this entitlement",
-      device_key_id: proof.device_key_id,
-    };
-  }
-  if (device.status !== "active") {
-    return {
-      mode,
-      result: "disabled_device",
-      detail: "device key is not active",
-      device_key_id: proof.device_key_id,
-    };
-  }
+function deviceProofMode(env: Env): "off" | "required" {
+  return env.DEVICE_PROOF_MODE === "required" ? "required" : "off";
+}
 
-  let valid: boolean;
-  try {
-    valid = await verifyRequestSignature(
-      device.public_key_spki_der_base64,
-      canonicalRequestProofPayload(verifyRequest),
-      proof.signature,
-    );
-  } catch (error) {
-    return {
-      mode,
-      result: "malformed_public_key",
-      detail: error instanceof Error ? error.message : "request proof verification failed",
-      device_key_id: proof.device_key_id,
-    };
+// Lease/seat device-proof gate (relay-resistance / anti-cloning). A presented proof is ALWAYS
+// verified (proving possession of the non-exportable device key binds the issuance to that
+// device); proof is REQUIRED only when DEVICE_PROOF_MODE=required. Reuses the /v1/verify core.
+async function checkDeviceProof(
+  env: Env,
+  fields: {
+    project: string;
+    feature: string;
+    license_fingerprint: string;
+    device_hash: string;
+    nonce: string;
+    client_hardening?: number;
+  },
+  proof: RequestProof | undefined,
+  now: number,
+): Promise<{ ok: boolean; code?: string }> {
+  if (proof === undefined) {
+    if (deviceProofMode(env) === "required") return { ok: false, code: "device_proof_required" };
+    return { ok: true };
   }
-  if (!valid) {
-    return {
-      mode,
-      result: "invalid_signature",
-      detail: "request proof signature did not verify",
-      device_key_id: proof.device_key_id,
-    };
-  }
-
-  // Signature, skew, and device are good. Now spend the nonce. This is the relay
-  // defense: a replay of this exact signed body finds the nonce already consumed.
-  const nonceState = await consumeRequestProofNonce(env, verifyRequest, proof, nowSeconds, maxSkewSeconds);
-  if (nonceState === "error") {
-    // Fail CLOSED: a replay store we cannot reach denies, never allows.
-    return {
-      mode,
-      result: "d1_error",
-      detail: "request proof nonce store is unavailable",
-      device_key_id: proof.device_key_id,
-    };
-  }
-  if (nonceState === "replayed") {
-    return {
-      mode,
-      result: "replayed_nonce",
-      detail: "request proof nonce was already consumed",
-      device_key_id: proof.device_key_id,
-    };
-  }
-  return { mode, result: "valid", device_key_id: proof.device_key_id };
+  const verifyRequest: VerifyRequest = {
+    project: fields.project,
+    feature: fields.feature,
+    license_fingerprint: fields.license_fingerprint,
+    device_hash: fields.device_hash,
+    nonce: fields.nonce,
+    client_hardening: fields.client_hardening,
+    request_proof: proof,
+  };
+  const evaluation = await evaluateProofForRequest(env, verifyRequest, proof, now);
+  return evaluation.result === "valid" ? { ok: true } : { ok: false, code: "device_proof_invalid" };
 }
 
 async function handleVerify(request: Request, env: Env): Promise<Response> {
@@ -1058,6 +1123,8 @@ interface LeaseIssueBody {
   start_version?: string;
   end_version?: string;
   request_id?: string; // idempotency key
+  nonce?: string; // required when a device proof is present (canonical payload + replay dedup)
+  request_proof?: RequestProof;
 }
 
 let cachedLeaseSigningKey: { cacheKey: string; keyPromise: Promise<CryptoKey> } | undefined;
@@ -1107,6 +1174,13 @@ function parseLeaseBody(raw: unknown): LeaseIssueBody | null {
   if (typeof value.start_version === "string") body.start_version = value.start_version;
   if (typeof value.end_version === "string") body.end_version = value.end_version;
   if (typeof value.request_id === "string" && value.request_id.length > 0) body.request_id = value.request_id;
+  if (typeof value.nonce === "string" && value.nonce.length > 0) body.nonce = value.nonce;
+  const proofResult = parseRequestProofFields(value, deviceKeyId);
+  if (proofResult.invalid) return null; // proof fields present but malformed -> reject
+  if (proofResult.proof !== undefined) {
+    if (body.nonce === undefined) return null; // a lease proof needs a nonce
+    body.request_proof = proofResult.proof;
+  }
   return body;
 }
 
@@ -1234,6 +1308,16 @@ async function handleLeaseIssue(request: Request, env: Env): Promise<Response> {
     return json({ ok: false, code: "expired_subscription" }, 403);
   }
 
+  // Device-proof gate (relay-resistance / anti-cloning): a presented proof binds the lease to the
+  // registered, non-exportable device key; required mode denies issuance without one.
+  const leaseProof = await checkDeviceProof(
+    env,
+    { project: body.project, feature: body.feature, license_fingerprint: body.license_fingerprint, device_hash: "", nonce: body.nonce ?? "", client_hardening: 0 },
+    body.request_proof,
+    now,
+  );
+  if (!leaseProof.ok) return json({ ok: false, code: leaseProof.code }, 403);
+
   // Clamp the lease expiry to the subscription end (the kill-switch). Mandatory signed
   // valid-from is backdated by SKEW_DAYS to absorb day-granularity skew.
   const leaseSeconds = row.lease_seconds > 0 ? row.lease_seconds : LEASE_DEFAULT_SECONDS;
@@ -1314,6 +1398,8 @@ interface SeatRequestBody {
   nonce: string;
   seat_id?: string;
   borrow_seconds?: number;
+  device_key_id?: string; // registered ECDSA device key (for the optional device proof)
+  request_proof?: RequestProof;
 }
 
 function parseSeatBody(raw: unknown, needSeatId: boolean): SeatRequestBody | null {
@@ -1344,6 +1430,11 @@ function parseSeatBody(raw: unknown, needSeatId: boolean): SeatRequestBody | nul
   if (typeof value.borrow_seconds === "number" && Number.isInteger(value.borrow_seconds) && value.borrow_seconds > 0) {
     body.borrow_seconds = value.borrow_seconds;
   }
+  const deviceKeyId = safeDeviceKeyId(value.device_key_id);
+  if (deviceKeyId !== null) body.device_key_id = deviceKeyId;
+  const proofResult = parseRequestProofFields(value, deviceKeyId);
+  if (proofResult.invalid) return null; // proof fields present but malformed -> reject
+  if (proofResult.proof !== undefined) body.request_proof = proofResult.proof;
   return body;
 }
 
@@ -1415,6 +1506,16 @@ async function handleSeatCheckout(request: Request, env: Env): Promise<Response>
     return json({ ok: false, code: "no_active_entitlement" }, 403);
   }
   if (row.pool_size <= 0) return json({ ok: false, code: "floating_disabled" }, 403);
+
+  // Device-proof gate (relay-resistance): a presented proof binds the seat to a registered device
+  // key; required mode denies a seat without one. The seat nonce doubles as the proof nonce.
+  const seatProof = await checkDeviceProof(
+    env,
+    { project: body.project, feature: body.feature, license_fingerprint: body.license_fingerprint, device_hash: "", nonce: body.nonce, client_hardening: 0 },
+    body.request_proof,
+    now,
+  );
+  if (!seatProof.ok) return json({ ok: false, code: seatProof.code }, 403);
 
   // Live by default; borrow only when the entitlement permits it, bounded by max_borrow_sec.
   let mode = "live";
