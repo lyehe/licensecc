@@ -6,12 +6,14 @@ on:
       - ".github/workflows/cloudflare-license-admin.yml"
       - "services/cloudflare-license-admin/**"
       - "services/cloudflare-licensing-backend/migrations/**"
+      - "services/cloudflare-licensing-backend/src/entitlements/**"
       - "doc/analysis/license-admin-vite-react*.rst"
   pull_request:
     paths:
       - ".github/workflows/cloudflare-license-admin.yml"
       - "services/cloudflare-license-admin/**"
       - "services/cloudflare-licensing-backend/migrations/**"
+      - "services/cloudflare-licensing-backend/src/entitlements/**"
       - "doc/analysis/license-admin-vite-react*.rst"
 
 permissions:

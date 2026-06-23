@@ -119,9 +119,21 @@ CREATE TABLE IF NOT EXISTS customers (
   external_ref  TEXT   NOT NULL DEFAULT ''                                                  -- migration 0013
 );
 
--- Partial unique index: email is optional (defaults ''), so blanks must not collide.
+-- Partial unique index: email is optional (defaults ''), so blanks must not
+-- collide. Keyed on lower(email) for CASE-INSENSITIVE uniqueness (matches the
+-- SQLite migration 0013).
+--
+-- NOTE: this file is a FRESH-PROVISION snapshot (all CREATE ... IF NOT EXISTS);
+-- there is no Postgres migration runner in this repo (D1/SQLite is the
+-- production ground truth, migrations/ is its source of truth). An EXISTING
+-- Postgres deployment will NOT pick up the migration-0013 changes from re-applying
+-- this snapshot — run the upgrade DDL manually:
+--   ALTER TABLE customers ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','disabled'));
+--   ALTER TABLE customers ADD COLUMN IF NOT EXISTS external_ref TEXT NOT NULL DEFAULT '';
+--   DROP INDEX IF EXISTS idx_customers_email;
+--   CREATE UNIQUE INDEX idx_customers_email ON customers(lower(email)) WHERE email <> '';
 CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_email
-  ON customers(email)
+  ON customers(lower(email))
   WHERE email <> '';
 
 -- =====================================================================================

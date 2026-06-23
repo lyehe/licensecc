@@ -74,7 +74,7 @@ CREATE TABLE IF NOT EXISTS customers (
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_email
-  ON customers(email)
+  ON customers(lower(email))
   WHERE email <> '';
 
 CREATE TABLE IF NOT EXISTS licenses (

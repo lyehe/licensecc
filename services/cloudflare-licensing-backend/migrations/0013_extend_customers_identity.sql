@@ -6,6 +6,9 @@
 -- unique index cannot collide with existing rows. The index is PARTIAL on
 -- `email <> ''` because `email` defaults to '' (NOT NULL DEFAULT '') — multiple
 -- customers may legitimately have no email, and those blanks must not collide.
+-- It is keyed on lower(email) so the uniqueness (and a future case-folding
+-- magic-link lookup) is CASE-INSENSITIVE — User@x and user@x are one customer.
+-- The write path (Slice 2) should still trim/lowercase on insert.
 --
 -- Implemented as a table REBUILD rather than ALTER ADD COLUMN so the serialized
 -- CREATE TABLE in sqlite_schema stays clean (no ALTER text-splice artifacts) and
@@ -30,5 +33,5 @@ DROP TABLE customers;
 ALTER TABLE customers_new RENAME TO customers;
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_email
-  ON customers(email)
+  ON customers(lower(email))
   WHERE email <> '';
