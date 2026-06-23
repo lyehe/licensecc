@@ -68,11 +68,14 @@ CREATE TABLE IF NOT EXISTS customers (
   email TEXT NOT NULL DEFAULT '',
   metadata_json TEXT NOT NULL DEFAULT '{}',
   created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL
+  updated_at INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled')),
+  external_ref TEXT NOT NULL DEFAULT ''
 );
 
-CREATE INDEX IF NOT EXISTS idx_customers_email
-  ON customers(email);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_email
+  ON customers(email)
+  WHERE email <> '';
 
 CREATE TABLE IF NOT EXISTS licenses (
   id TEXT PRIMARY KEY,

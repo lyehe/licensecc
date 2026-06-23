@@ -106,7 +106,7 @@ CREATE INDEX IF NOT EXISTS idx_entitlement_devices_entitlement
   ON entitlement_devices(project, feature, license_fingerprint);
 
 -- =====================================================================================
--- customers  (migration 0004)
+-- customers  (migration 0004; 0013 = status + external_ref + UNIQUE email)
 -- =====================================================================================
 CREATE TABLE IF NOT EXISTS customers (
   id            TEXT   PRIMARY KEY,
@@ -114,11 +114,15 @@ CREATE TABLE IF NOT EXISTS customers (
   email         TEXT   NOT NULL DEFAULT '',
   metadata_json TEXT   NOT NULL DEFAULT '{}',   -- jsonb option: metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb
   created_at    BIGINT NOT NULL,
-  updated_at    BIGINT NOT NULL
+  updated_at    BIGINT NOT NULL,
+  status        TEXT   NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled')),  -- migration 0013
+  external_ref  TEXT   NOT NULL DEFAULT ''                                                  -- migration 0013
 );
 
-CREATE INDEX IF NOT EXISTS idx_customers_email
-  ON customers(email);
+-- Partial unique index: email is optional (defaults ''), so blanks must not collide.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_email
+  ON customers(email)
+  WHERE email <> '';
 
 -- =====================================================================================
 -- licenses  (migration 0004)

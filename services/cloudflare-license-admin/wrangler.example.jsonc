@@ -12,6 +12,11 @@
     "binding": "ASSETS",
     "not_found_handling": "single-page-application"
   },
+  // Single source of truth: bind the SAME entitlements D1 as the licensing-backend
+  // Worker (database_name/database_id identical to its wrangler). One database, one
+  // audit log, no split-brain. The licensing-backend owns the migrations; the admin
+  // runs none of its own — migrations_dir points at the backend so a stray
+  // `wrangler d1 migrations apply` here cannot diverge the schema.
   "d1_databases": [
     {
       "binding": "DB",
@@ -29,6 +34,9 @@
     "ADMIN_ACCESS_READER_EMAILS": "",
     "PUBLIC_VERIFIER_URL": "https://example.workers.dev"
   }
-  // Set SYNC_API_TOKEN as a Worker secret for /api/sync/entitlements:
+  // PUBLIC_VERIFIER_URL + SYNC_API_TOKEN + /api/sync/entitlements are only needed
+  // for the OPTIONAL two-D1 replica topology (admin DB forward-synced to a separate
+  // verifier DB). In the default single-D1 topology above they are unused.
+  // Set SYNC_API_TOKEN as a Worker secret if you run the replica topology:
   // wrangler secret put SYNC_API_TOKEN
 }
