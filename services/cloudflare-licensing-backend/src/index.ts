@@ -143,6 +143,11 @@ interface RequestProofEvaluation {
 
 const PURPOSE = "licensecc-online-assertion";
 const REQUEST_PROOF_PURPOSE = "licensecc-online-request";
+// Per-operation proof audiences: a proof is signed over its operation, so a proof minted for
+// /v1/verify is NOT signature-valid at lease/seat issuance (and vice versa). Closes the
+// missing-audience confused-deputy flaw. /v1/verify keeps REQUEST_PROOF_PURPOSE unchanged.
+const LEASE_PROOF_PURPOSE = "licensecc-lease-request";
+const SEAT_PROOF_PURPOSE = "licensecc-seat-request";
 const VERSION = "1";
 const ALGORITHM = "rsa-pkcs1-sha256";
 const REQUEST_PROOF_VERSION: RequestProof["version"] = 1;
@@ -523,12 +528,12 @@ export function canonicalPayloadForTests(claims: AssertionClaims): string {
   return canonicalPayload(claims);
 }
 
-function canonicalRequestProofPayload(request: VerifyRequest): string {
+function canonicalRequestProofPayload(request: VerifyRequest, purpose: string = REQUEST_PROOF_PURPOSE): string {
   if (request.request_proof === undefined) {
     throw new Error("request proof is missing");
   }
   return (
-    `purpose=${REQUEST_PROOF_PURPOSE}\n` +
+    `purpose=${purpose}\n` +
     `version=${request.request_proof.version}\n` +
     `alg=${request.request_proof.algorithm}\n` +
     `project=${request.project}\n` +
@@ -542,8 +547,8 @@ function canonicalRequestProofPayload(request: VerifyRequest): string {
   );
 }
 
-export function canonicalRequestProofPayloadForTests(request: VerifyRequest): string {
-  return canonicalRequestProofPayload(request);
+export function canonicalRequestProofPayloadForTests(request: VerifyRequest, purpose?: string): string {
+  return canonicalRequestProofPayload(request, purpose);
 }
 
 function base64FromBytes(bytes: Uint8Array): string {
@@ -775,6 +780,7 @@ async function evaluateProofForRequest(
   verifyRequest: VerifyRequest,
   proof: RequestProof,
   nowSeconds: number,
+  purpose: string,
 ): Promise<Omit<RequestProofEvaluation, "mode">> {
   const maxSkewSeconds = parsePositiveInt(env.REQUEST_SIGNATURE_MAX_SKEW_SECONDS, 300, 3600);
   if (Math.abs(nowSeconds - proof.request_timestamp) > maxSkewSeconds) {
@@ -810,7 +816,7 @@ async function evaluateProofForRequest(
   try {
     valid = await verifyRequestSignature(
       device.public_key_spki_der_base64,
-      canonicalRequestProofPayload(verifyRequest),
+      canonicalRequestProofPayload(verifyRequest, purpose),
       proof.signature,
     );
   } catch (error) {
@@ -850,7 +856,7 @@ async function evaluateRequestProof(
   if (proof === undefined) {
     return { mode, result: "missing", detail: "request proof is not present" };
   }
-  return { mode, ...(await evaluateProofForRequest(env, verifyRequest, proof, nowSeconds)) };
+  return { mode, ...(await evaluateProofForRequest(env, verifyRequest, proof, nowSeconds, REQUEST_PROOF_PURPOSE)) };
 }
 
 // Parse the flat request-proof fields shared by /v1/verify, lease, and seat requests. The proof's
@@ -909,6 +915,7 @@ async function checkDeviceProof(
   },
   proof: RequestProof | undefined,
   now: number,
+  purpose: string,
 ): Promise<{ ok: boolean; code?: string }> {
   if (proof === undefined) {
     if (deviceProofMode(env) === "required") return { ok: false, code: "device_proof_required" };
@@ -923,7 +930,7 @@ async function checkDeviceProof(
     client_hardening: fields.client_hardening,
     request_proof: proof,
   };
-  const evaluation = await evaluateProofForRequest(env, verifyRequest, proof, now);
+  const evaluation = await evaluateProofForRequest(env, verifyRequest, proof, now, purpose);
   return evaluation.result === "valid" ? { ok: true } : { ok: false, code: "device_proof_invalid" };
 }
 
@@ -1291,9 +1298,6 @@ async function handleLeaseIssue(request: Request, env: Env): Promise<Response> {
   }
   if (body === null) return json({ ok: false, code: "invalid_request" }, 400);
 
-  const cached = await getLeaseIdempotent(env, body.request_id);
-  if (cached !== null) return json(cached);
-
   let row: LeaseEntitlementRow | null;
   try {
     row = await lookupLeaseEntitlement(env, body);
@@ -1308,6 +1312,12 @@ async function handleLeaseIssue(request: Request, env: Env): Promise<Response> {
     return json({ ok: false, code: "expired_subscription" }, 403);
   }
 
+  // Idempotency AFTER the entitlement/status/expiry gate, so a captured request_id cannot re-serve
+  // a lease for a now-revoked or -expired entitlement. (A cached hit is a benign return of the
+  // device-bound lease already issued for this request_id; valid_to was clamped at issuance.)
+  const cached = await getLeaseIdempotent(env, body.request_id);
+  if (cached !== null) return json(cached);
+
   // Device-proof gate (relay-resistance / anti-cloning): a presented proof binds the lease to the
   // registered, non-exportable device key; required mode denies issuance without one.
   const leaseProof = await checkDeviceProof(
@@ -1315,6 +1325,7 @@ async function handleLeaseIssue(request: Request, env: Env): Promise<Response> {
     { project: body.project, feature: body.feature, license_fingerprint: body.license_fingerprint, device_hash: "", nonce: body.nonce ?? "", client_hardening: 0 },
     body.request_proof,
     now,
+    LEASE_PROOF_PURPOSE,
   );
   if (!leaseProof.ok) return json({ ok: false, code: leaseProof.code }, 403);
 
@@ -1514,6 +1525,7 @@ async function handleSeatCheckout(request: Request, env: Env): Promise<Response>
     { project: body.project, feature: body.feature, license_fingerprint: body.license_fingerprint, device_hash: "", nonce: body.nonce, client_hardening: 0 },
     body.request_proof,
     now,
+    SEAT_PROOF_PURPOSE,
   );
   if (!seatProof.ok) return json({ ok: false, code: seatProof.code }, 403);
 
@@ -1570,7 +1582,9 @@ async function handleSeatCheckout(request: Request, env: Env): Promise<Response>
     fingerprint: body.license_fingerprint,
     event_type: "checkout",
     seat_id: seatId,
-    device_key_id: body.client_instance_id,
+    // The PROVEN device key (present only with a verified proof), not the attacker-chosen
+    // client_instance_id, so unique_devices counts cryptographically-verified devices.
+    device_key_id: body.request_proof !== undefined ? body.device_key_id : undefined,
     ts: now,
   });
 

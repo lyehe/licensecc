@@ -187,3 +187,15 @@ test("renew is idempotent on request_id (same lease, single issuance)", async ()
   assert.deepEqual(secondOut, firstOut, "idempotent replay returns the identical response");
   assert.equal(state.issuanceAttempts, 1, "second request did not issue a new lease");
 });
+
+test("idempotency does not re-serve a lease for a now-revoked entitlement", async () => {
+  // A request_id whose lease was cached, but the entitlement is now revoked. The entitlement gate
+  // runs BEFORE the idempotency cache, so the retry is denied -- no post-revocation re-serve.
+  const env = makeEnv({
+    entitlement: activeEntitlement({ status: "revoked" }),
+    idempotency: { "req-revoked": JSON.stringify({ ok: true, lic: "stale-cached" }) },
+  });
+  const res = await worker.fetch(leaseRequest(validBody({ request_id: "req-revoked" }), "/v1/renew"), env);
+  assert.equal(res.status, 403);
+  assert.equal((await res.json()).code, "no_active_entitlement");
+});

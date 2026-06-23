@@ -24,6 +24,9 @@ const ONLINE_PEM = bytesToPem(new Uint8Array(onlinePkcs8Der), "PRIVATE KEY");
 
 const FP = "a".repeat(64);
 const DEVICE_KEY_ID = "sha256:" + "1".repeat(64);
+// Per-operation proof audiences (must match the worker's LEASE_PROOF_PURPOSE / SEAT_PROOF_PURPOSE).
+const SEAT_PURPOSE = "licensecc-seat-request";
+const LEASE_PURPOSE = "licensecc-lease-request";
 
 let ecdsaPriv;
 let deviceSpkiB64;
@@ -96,7 +99,7 @@ function activeDevice(status = "active") {
 
 // Build the flat proof fields for a checkout/lease body, signing the canonical payload exactly
 // the worker reconstructs (device-hash="", client-hardening=0, the request's nonce).
-async function makeProofFields(nonce, { timestamp, tamper = false, deviceKeyId = DEVICE_KEY_ID } = {}) {
+async function makeProofFields(nonce, { timestamp, tamper = false, deviceKeyId = DEVICE_KEY_ID, purpose = SEAT_PURPOSE } = {}) {
   const ts = timestamp ?? Math.floor(Date.now() / 1000);
   const vr = {
     project: "DEFAULT",
@@ -107,7 +110,7 @@ async function makeProofFields(nonce, { timestamp, tamper = false, deviceKeyId =
     client_hardening: 0,
     request_proof: { version: 1, device_key_id: deviceKeyId, request_timestamp: ts, algorithm: "ecdsa-p256-sha256", signature: "" },
   };
-  const payload = canonicalRequestProofPayloadForTests(vr);
+  const payload = canonicalRequestProofPayloadForTests(vr, purpose);
   const sigBuf = await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, ecdsaPriv, new TextEncoder().encode(payload));
   const bytes = Buffer.from(sigBuf);
   if (tamper) bytes[0] ^= 0x01;
@@ -207,6 +210,40 @@ test("a disabled device is rejected", async () => {
   assert.equal((await res.json()).code, "device_proof_invalid");
 });
 
+test("a partial/malformed proof is rejected, never silently downgraded to no-proof", async () => {
+  const env = makeEnv({ entitlement: seatEntitlement(), device: activeDevice() });
+  // request_signature_version present but the signature is missing -> malformed -> 400, NOT a
+  // silent fallthrough to "no proof, off mode, granted".
+  const body = { ...baseCheckout("5".repeat(64)), device_key_id: DEVICE_KEY_ID, request_signature_version: 1 };
+  const res = await worker.fetch(checkoutReq(body), env);
+  assert.equal(res.status, 400);
+  assert.equal((await res.json()).code, "invalid_request");
+});
+
+test("lease /activate with a proof but no nonce is rejected", async () => {
+  resetSigningKeyCacheForTests();
+  const proof = await makeProofFields("4".repeat(64), { purpose: LEASE_PURPOSE });
+  const env = makeEnv(
+    { entitlement: { status: "active", valid_from: null, valid_until: null, max_active_devices: 1, lease_seconds: 2592000, rebind_window_sec: 7776000 }, device: activeDevice() },
+    { LEASE_SIGNING_PRIVATE_KEY_PKCS8_PEM: ONLINE_PEM, LEASE_SIGNING_KEY_ID: "sha256:" + "2".repeat(64) },
+  );
+  const body = {
+    project: "DEFAULT",
+    feature: "DEFAULT",
+    license_fingerprint: FP,
+    device_key_id: DEVICE_KEY_ID,
+    request_signature_version: proof.request_signature_version,
+    request_timestamp: proof.request_timestamp,
+    request_signature_algorithm: proof.request_signature_algorithm,
+    request_signature: proof.request_signature,
+  };
+  const res = await worker.fetch(
+    new Request("https://verifier.example/v1/activate", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
+    env,
+  );
+  assert.equal(res.status, 400);
+});
+
 test("off mode without a proof still proceeds (back-compat)", async () => {
   resetSigningKeyCacheForTests();
   const env = makeEnv({ entitlement: seatEntitlement(), device: activeDevice() }); // DEVICE_PROOF_MODE unset
@@ -214,10 +251,31 @@ test("off mode without a proof still proceeds (back-compat)", async () => {
   assert.equal(res.status, 200);
 });
 
+test("a proof signed for one operation does NOT verify at another (audience binding)", async () => {
+  resetSigningKeyCacheForTests();
+  // Sign a proof for the SEAT operation, present it to the LEASE endpoint /v1/activate.
+  const nonce = "6".repeat(64);
+  const seatProof = await makeProofFields(nonce, { purpose: SEAT_PURPOSE });
+  const env = makeEnv(
+    {
+      entitlement: { status: "active", valid_from: null, valid_until: null, max_active_devices: 1, lease_seconds: 2592000, rebind_window_sec: 7776000 },
+      device: activeDevice(),
+    },
+    { LEASE_SIGNING_PRIVATE_KEY_PKCS8_PEM: ONLINE_PEM, LEASE_SIGNING_KEY_ID: "sha256:" + "2".repeat(64) },
+  );
+  const body = { project: "DEFAULT", feature: "DEFAULT", license_fingerprint: FP, device_key_id: DEVICE_KEY_ID, nonce, ...{ request_signature_version: seatProof.request_signature_version, request_timestamp: seatProof.request_timestamp, request_signature_algorithm: seatProof.request_signature_algorithm, request_signature: seatProof.request_signature } };
+  const res = await worker.fetch(
+    new Request("https://verifier.example/v1/activate", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
+    env,
+  );
+  assert.equal(res.status, 403);
+  assert.equal((await res.json()).code, "device_proof_invalid");
+});
+
 test("lease /activate with a valid device proof is granted", async () => {
   resetSigningKeyCacheForTests();
   const nonce = "7".repeat(64);
-  const proof = await makeProofFields(nonce);
+  const proof = await makeProofFields(nonce, { purpose: LEASE_PURPOSE });
   const env = makeEnv(
     {
       entitlement: { status: "active", valid_from: null, valid_until: null, max_active_devices: 1, lease_seconds: 2592000, rebind_window_sec: 7776000 },

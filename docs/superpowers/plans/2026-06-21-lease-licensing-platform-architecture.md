@@ -329,9 +329,20 @@ Backend suite: 68/68 unit, 12/12 SQL, lint ok. C++ lease tests green (Debug, DEF
    skew + device lookup/status + ECDSA signature over the canonical payload + nonce replay
    defense (`request_proof_nonces`). A presented proof binds the issuance to the registered,
    non-exportable device key; `required` denies issuance without one — closing the hw_id
-   cloning hole (D4). Tested: 10 cases (valid binds, required-missing, tampered sig, unknown/
-   disabled device, replayed nonce, stale timestamp, off-mode back-compat, lease + seat). The
-   remaining ceiling is the device key's non-exportability (TPM/OS-keystore), still the apex.
+   cloning hole (D4). Hardened after an adversarial pass (2 HIGH + mediums confirmed, folded):
+   **per-operation audience binding** (the signed payload carries `licensecc-{lease,seat}-request`
+   so a `/v1/verify` proof is not valid at lease/seat issuance — a missing-`aud` confused-deputy
+   flaw); **lease idempotency moved after the entitlement/expiry gate** (a captured `request_id`
+   cannot re-serve a lease for a revoked entitlement); and **the seat checkout usage event records
+   the PROVEN device key, not the attacker-chosen `client_instance_id`** (so `unique_devices` is
+   trustworthy). Tested: 14 cases (valid binds, required-missing, tampered sig, unknown/disabled
+   device, replayed nonce, stale timestamp, off-mode back-compat, malformed-proof, no-nonce,
+   cross-operation rejection, revoked-retry, lease + seat).
+   Deferred should-fixes (documented, non-blocking): an `operation` column in the nonce namespace
+   (defense-in-depth; audience binding already prevents cross-endpoint use); lease/seat input
+   validation parity with `/v1/verify` (HEX_64 nonce, body-size guard, rate limiting) — bounded
+   resource abuse, not an auth bypass; a `seat_checkouts.device_key_id` audit column. The remaining
+   security ceiling is the device key's non-exportability (TPM/OS-keystore), still the apex.
 3. **UTC-seconds + clock floor live in the client, not auto-wired into `acquire_license`.**
    `acquire_license` keeps its existing day-granularity local expiry check; the UTC-correct
    comparison + the persisted rollback floor are library-provided components
