@@ -43,6 +43,28 @@ export function decodeEntitlementId(id) {
   }
 }
 
+// --- Shared SQL fragments ----------------------------------------------------
+// One source of truth for the column lists and invariants the mutators below
+// must keep in lockstep, interpolated into SELECT/RETURNING tails so a column or
+// the revocation-floor invariant is defined once, not hand-synced across 3-5 sites.
+
+/** The public entitlement column projection, in storage order. Every SELECT and
+ *  RETURNING tail in this module renders exactly these columns. */
+const ENTITLEMENT_COLUMNS =
+  "project, feature, license_fingerprint, device_hash, status, assertion_ttl_seconds, cache_ttl_seconds, revocation_seq, valid_from, valid_until, notes, customer_id, license_id, created_at, updated_at";
+
+/** UPDATE assignment that re-derives the revocation_seq floor from the audit log
+ *  and bumps it. Security-relevant (monotonic revocation counter) — keep identical
+ *  across every mutator. createEntitlement's ON CONFLICT form differs (it qualifies
+ *  columns with `entitlements.`) and is intentionally NOT this constant. */
+const REVOCATION_SEQ_BUMP =
+  "revocation_seq = max(revocation_seq, COALESCE((SELECT MAX(revocation_seq) FROM entitlement_events WHERE project = entitlements.project AND feature = entitlements.feature AND license_fingerprint = entitlements.license_fingerprint), revocation_seq)) + 1";
+
+/** Default assertion TTL (seconds) applied when an input omits it. Shared by
+ *  createEntitlement and entitlementMatchesInput so the sync no-op check cannot
+ *  drift from what createEntitlement actually writes. */
+const DEFAULT_ASSERTION_TTL_SECONDS = 300;
+
 /**
  * Re-attach the derived `id` to a freshly-read/written entitlement row, stripping
  * the internal-only cache_ttl_seconds column from the public shape.
@@ -56,8 +78,10 @@ export function withId(row) {
   };
 }
 
+/** Canonical public column projection (ENTITLEMENT_COLUMNS); the RETURNING tails
+ *  in the mutators must list these same columns in this order. */
 export function entitlementSelectSql(where) {
-  return `SELECT project, feature, license_fingerprint, device_hash, status, assertion_ttl_seconds, cache_ttl_seconds, revocation_seq, valid_from, valid_until, notes, customer_id, license_id, created_at, updated_at FROM entitlements ${where}`;
+  return `SELECT ${ENTITLEMENT_COLUMNS} FROM entitlements ${where}`;
 }
 
 export async function findEntitlement(env, key) {
@@ -228,16 +252,16 @@ export async function createEntitlement(
   if (prev?.status === "revoked") {
     throw new Error("revoked_terminal");
   }
-	const statement = env.DB.prepare(
-    "INSERT INTO entitlements (project, feature, license_fingerprint, device_hash, status, assertion_ttl_seconds, cache_ttl_seconds, revocation_seq, valid_from, valid_until, notes, customer_id, license_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT MAX(revocation_seq) + 1 FROM entitlement_events WHERE project = ? AND feature = ? AND license_fingerprint = ?), 1), ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(project, feature, license_fingerprint) DO UPDATE SET device_hash = excluded.device_hash, status = excluded.status, assertion_ttl_seconds = excluded.assertion_ttl_seconds, cache_ttl_seconds = excluded.cache_ttl_seconds, revocation_seq = max(entitlements.revocation_seq, COALESCE((SELECT MAX(revocation_seq) FROM entitlement_events WHERE project = entitlements.project AND feature = entitlements.feature AND license_fingerprint = entitlements.license_fingerprint), entitlements.revocation_seq)) + 1, valid_from = excluded.valid_from, valid_until = excluded.valid_until, notes = excluded.notes, customer_id = excluded.customer_id, license_id = excluded.license_id, updated_at = excluded.updated_at RETURNING project, feature, license_fingerprint, device_hash, status, assertion_ttl_seconds, cache_ttl_seconds, revocation_seq, valid_from, valid_until, notes, customer_id, license_id, created_at, updated_at",
+  const statement = env.DB.prepare(
+    `INSERT INTO entitlements (project, feature, license_fingerprint, device_hash, status, assertion_ttl_seconds, cache_ttl_seconds, revocation_seq, valid_from, valid_until, notes, customer_id, license_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT MAX(revocation_seq) + 1 FROM entitlement_events WHERE project = ? AND feature = ? AND license_fingerprint = ?), 1), ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(project, feature, license_fingerprint) DO UPDATE SET device_hash = excluded.device_hash, status = excluded.status, assertion_ttl_seconds = excluded.assertion_ttl_seconds, cache_ttl_seconds = excluded.cache_ttl_seconds, revocation_seq = max(entitlements.revocation_seq, COALESCE((SELECT MAX(revocation_seq) FROM entitlement_events WHERE project = entitlements.project AND feature = entitlements.feature AND license_fingerprint = entitlements.license_fingerprint), entitlements.revocation_seq)) + 1, valid_from = excluded.valid_from, valid_until = excluded.valid_until, notes = excluded.notes, customer_id = excluded.customer_id, license_id = excluded.license_id, updated_at = excluded.updated_at RETURNING ${ENTITLEMENT_COLUMNS}`,
   ).bind(
     input.project,
     input.feature,
     input.license_fingerprint,
     input.device_hash ?? "",
     input.status ?? "active",
-    input.assertion_ttl_seconds ?? 300,
-    input.assertion_ttl_seconds ?? 300,
+    input.assertion_ttl_seconds ?? DEFAULT_ASSERTION_TTL_SECONDS,
+    input.assertion_ttl_seconds ?? DEFAULT_ASSERTION_TTL_SECONDS,
     input.project,
     input.feature,
     input.license_fingerprint,
@@ -276,9 +300,9 @@ export async function patchEntitlement(env, key, patch, ctx, idempotency) {
   if (validFrom !== null && validUntil !== null && validFrom >= validUntil) {
     throw new Error("invalid_patch");
   }
-	const now = Math.floor(Date.now() / 1000);
-	const statement = env.DB.prepare(
-    "UPDATE entitlements SET device_hash = ?, assertion_ttl_seconds = ?, cache_ttl_seconds = ?, revocation_seq = max(revocation_seq, COALESCE((SELECT MAX(revocation_seq) FROM entitlement_events WHERE project = entitlements.project AND feature = entitlements.feature AND license_fingerprint = entitlements.license_fingerprint), revocation_seq)) + 1, valid_from = ?, valid_until = ?, notes = ?, customer_id = ?, license_id = ?, updated_at = ? WHERE project = ? AND feature = ? AND license_fingerprint = ? RETURNING project, feature, license_fingerprint, device_hash, status, assertion_ttl_seconds, cache_ttl_seconds, revocation_seq, valid_from, valid_until, notes, customer_id, license_id, created_at, updated_at",
+  const now = Math.floor(Date.now() / 1000);
+  const statement = env.DB.prepare(
+    `UPDATE entitlements SET device_hash = ?, assertion_ttl_seconds = ?, cache_ttl_seconds = ?, ${REVOCATION_SEQ_BUMP}, valid_from = ?, valid_until = ?, notes = ?, customer_id = ?, license_id = ?, updated_at = ? WHERE project = ? AND feature = ? AND license_fingerprint = ? RETURNING ${ENTITLEMENT_COLUMNS}`,
   ).bind(
     patch.device_hash ?? prev.device_hash,
     assertionTtl,
@@ -307,9 +331,9 @@ export async function transitionEntitlement(env, key, status, eventType, reason,
   if (prev.status === status) {
     return { data: prev, idempotencyRecorded: false };
   }
-	const now = Math.floor(Date.now() / 1000);
+  const now = Math.floor(Date.now() / 1000);
   const statement = env.DB.prepare(
-    "UPDATE entitlements SET status = ?, revocation_seq = max(revocation_seq, COALESCE((SELECT MAX(revocation_seq) FROM entitlement_events WHERE project = entitlements.project AND feature = entitlements.feature AND license_fingerprint = entitlements.license_fingerprint), revocation_seq)) + 1, updated_at = ? WHERE project = ? AND feature = ? AND license_fingerprint = ? RETURNING project, feature, license_fingerprint, device_hash, status, assertion_ttl_seconds, cache_ttl_seconds, revocation_seq, valid_from, valid_until, notes, customer_id, license_id, created_at, updated_at",
+    `UPDATE entitlements SET status = ?, ${REVOCATION_SEQ_BUMP}, updated_at = ? WHERE project = ? AND feature = ? AND license_fingerprint = ? RETURNING ${ENTITLEMENT_COLUMNS}`,
   ).bind(status, now, key.project, key.feature, key.license_fingerprint);
   return writeEntitlementWithAudit(env, key, statement, ctx, eventType, prev, reason, now, idempotency);
 }
@@ -317,7 +341,7 @@ export async function transitionEntitlement(env, key, status, eventType, reason,
 export function entitlementMatchesInput(row, input) {
   return row.device_hash === (input.device_hash ?? "") &&
     row.status === (input.status ?? "active") &&
-    row.assertion_ttl_seconds === (input.assertion_ttl_seconds ?? 300) &&
+    row.assertion_ttl_seconds === (input.assertion_ttl_seconds ?? DEFAULT_ASSERTION_TTL_SECONDS) &&
     row.valid_from === (input.valid_from ?? null) &&
     row.valid_until === (input.valid_until ?? null) &&
     row.notes === (input.notes ?? "") &&
@@ -411,11 +435,11 @@ export async function setEntitlementCapacity(env, key, capacity, ctx, idempotenc
   const now = Math.floor(Date.now() / 1000);
   const setClause = [
     ...assignments,
-    "revocation_seq = max(revocation_seq, COALESCE((SELECT MAX(revocation_seq) FROM entitlement_events WHERE project = entitlements.project AND feature = entitlements.feature AND license_fingerprint = entitlements.license_fingerprint), revocation_seq)) + 1",
+    REVOCATION_SEQ_BUMP,
     "updated_at = ?",
   ].join(", ");
   const statement = env.DB.prepare(
-    `UPDATE entitlements SET ${setClause} WHERE project = ? AND feature = ? AND license_fingerprint = ? RETURNING project, feature, license_fingerprint, device_hash, status, assertion_ttl_seconds, cache_ttl_seconds, revocation_seq, valid_from, valid_until, notes, customer_id, license_id, created_at, updated_at`,
+    `UPDATE entitlements SET ${setClause} WHERE project = ? AND feature = ? AND license_fingerprint = ? RETURNING ${ENTITLEMENT_COLUMNS}`,
   ).bind(
     ...values,
     now,

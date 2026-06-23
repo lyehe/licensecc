@@ -9,14 +9,14 @@ export type {
   EntitlementPatch,
 } from "@licensecc/cloudflare-licensing-backend/entitlements/entitlement_mutation";
 
-import type { EntitlementStatus, EntitlementInput } from "@licensecc/cloudflare-licensing-backend/entitlements/entitlement_mutation";
+import type { EntitlementStatus, EntitlementInput, EntitlementEventType } from "@licensecc/cloudflare-licensing-backend/entitlements/entitlement_mutation";
 
 export interface EntitlementEvent {
   id: number;
   project: string;
   feature: string;
   license_fingerprint: string;
-  event_type: "create" | "update" | "disable" | "reenable" | "revoke" | "upsert" | "revoked-override";
+  event_type: EntitlementEventType | "upsert" | "revoked-override";
   status: EntitlementStatus;
   revocation_seq: number;
   actor: string;
