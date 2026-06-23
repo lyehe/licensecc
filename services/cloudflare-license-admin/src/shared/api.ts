@@ -1,22 +1,15 @@
-export type EntitlementStatus = "active" | "disabled" | "revoked";
+// Canonical definitions for these four entitlement data types now live in the
+// shared mutation core's .d.ts so the admin Worker and the licensing backend
+// share ONE shape. Re-exported here so existing `../shared/api` import sites are
+// unchanged.
+export type {
+  EntitlementStatus,
+  EntitlementRecord,
+  EntitlementInput,
+  EntitlementPatch,
+} from "@licensecc/cloudflare-licensing-backend/entitlements/entitlement_mutation";
 
-export interface EntitlementRecord {
-  id: string;
-  project: string;
-  feature: string;
-  license_fingerprint: string;
-  device_hash: string;
-  status: EntitlementStatus;
-  assertion_ttl_seconds: number;
-  revocation_seq: number;
-  valid_from: number | null;
-  valid_until: number | null;
-  notes: string;
-  customer_id: string | null;
-  license_id: string | null;
-  created_at: number;
-  updated_at: number;
-}
+import type { EntitlementStatus, EntitlementInput } from "@licensecc/cloudflare-licensing-backend/entitlements/entitlement_mutation";
 
 export interface EntitlementEvent {
   id: number;
@@ -39,30 +32,6 @@ export interface ApiEnvelope<T> {
   code: string;
   request_id: string;
   data?: T;
-}
-
-export interface EntitlementInput {
-  project: string;
-  feature: string;
-  license_fingerprint: string;
-  device_hash?: string;
-  status?: EntitlementStatus;
-  assertion_ttl_seconds?: number;
-  valid_from?: number | null;
-  valid_until?: number | null;
-  notes?: string;
-  customer_id?: string | null;
-  license_id?: string | null;
-}
-
-export interface EntitlementPatch {
-  device_hash?: string;
-  assertion_ttl_seconds?: number;
-  valid_from?: number | null;
-  valid_until?: number | null;
-  notes?: string;
-  customer_id?: string | null;
-  license_id?: string | null;
 }
 
 export interface EntitlementSyncInput extends EntitlementInput {

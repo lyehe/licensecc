@@ -8,8 +8,9 @@ import worker from "../dist-worker/worker/index.js";
 const fingerprint = "a".repeat(64);
 
 // The exact field set the production json_object emits into entitlement_events.next_json
-// (src/worker/index.ts eventFromCurrentStatement). cache_ttl_seconds is present here even though
-// withId() strips it from the API response body; the drift-guard test pins this contract.
+// (eventFromCurrentStatement, now in the shared @licensecc/cloudflare-licensing-backend
+// entitlement_mutation core). cache_ttl_seconds is present here even though withId() strips
+// it from the API response body; the drift-guard test pins this contract.
 const NEXT_JSON_KEYS = [
   "project",
   "feature",
@@ -964,7 +965,9 @@ test("audit next_json carries the full production json_object field set", async 
 });
 
 test("production json_object next_json key set matches the audit contract (drift guard)", () => {
-  const src = readFileSync(new URL("../src/worker/index.ts", import.meta.url), "utf8");
+  // eventFromCurrentStatement moved into the shared entitlement_mutation core; read it there.
+  const moduleUrl = import.meta.resolve("@licensecc/cloudflare-licensing-backend/entitlements/entitlement_mutation");
+  const src = readFileSync(new URL(moduleUrl), "utf8");
   const match = /function eventFromCurrentStatement\([\s\S]*?json_object\(([\s\S]*?)\),\s*\n/.exec(src);
   assert.ok(match, "eventFromCurrentStatement json_object block not found");
   const keys = [...match[1].matchAll(/'([a-z_]+)'\s*,/g)].map((m) => m[1]);

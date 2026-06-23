@@ -1,19 +1,24 @@
 import { createRemoteJWKSet, jwtVerify } from "jose";
 import type { JWTPayload } from "jose";
 import type { EntitlementInput, EntitlementPatch, EntitlementRecord, EntitlementStatus } from "../shared/api";
-import { entitlementId, decodeEntitlementId } from "@licensecc/cloudflare-licensing-backend/entitlements/entitlement_mutation";
-
-export interface D1PreparedStatementLike {
-  bind(...values: unknown[]): D1PreparedStatementLike;
-  first<T = unknown>(): Promise<T | null>;
-  all<T = unknown>(): Promise<{ results: T[] }>;
-  run(): Promise<unknown>;
-}
-
-export interface D1DatabaseLike {
-  prepare(sql: string): D1PreparedStatementLike;
-  batch?(statements: D1PreparedStatementLike[]): Promise<unknown[]>;
-}
+import {
+  entitlementId,
+  decodeEntitlementId,
+  withId,
+  entitlementSelectSql,
+  findEntitlement,
+  createEntitlement,
+  patchEntitlement,
+  transitionEntitlement,
+  syncEntitlement,
+} from "@licensecc/cloudflare-licensing-backend/entitlements/entitlement_mutation";
+import type {
+  D1DatabaseLike,
+  Actor,
+  MutationContext,
+  IdempotencyCommit,
+  MutationResult,
+} from "@licensecc/cloudflare-licensing-backend/entitlements/entitlement_mutation";
 
 export interface Env {
   DB: D1DatabaseLike;
@@ -28,31 +33,6 @@ export interface Env {
   ADMIN_ACCESS_READER_EMAILS?: string;
   PUBLIC_VERIFIER_URL?: string;
   SYNC_API_TOKEN?: string;
-}
-
-interface Actor {
-  subject: string;
-  email: string;
-  role: "reader" | "admin";
-  actorType: "access" | "dev" | "sync";
-}
-
-interface MutationContext {
-  requestId: string;
-  actor: Actor;
-  ip: string;
-  idempotencyKey: string | null;
-  source: "admin" | "sync";
-}
-
-interface IdempotencyCommit {
-  scope: string;
-  responseCode: string;
-}
-
-interface MutationResult<T> {
-  data: T;
-  idempotencyRecorded: boolean;
 }
 
 const HEX_64 = /^[0-9a-fA-F]{64}$/;
@@ -143,15 +123,6 @@ function nullableEpoch(value: unknown): number | null | undefined {
     return undefined;
   }
   return value;
-}
-
-function withId(row: Omit<EntitlementRecord, "id"> & { cache_ttl_seconds?: number }): EntitlementRecord {
-  const publicRow = { ...row };
-  delete publicRow.cache_ttl_seconds;
-  return {
-    ...publicRow,
-    id: entitlementId(row.project, row.feature, row.license_fingerprint),
-  };
 }
 
 async function timingSafeEqual(a: string, b: string): Promise<boolean> {
@@ -369,17 +340,6 @@ function validateEntitlementPatch(value: unknown): EntitlementPatch | null {
   return patch;
 }
 
-function entitlementSelectSql(where: string): string {
-  return `SELECT project, feature, license_fingerprint, device_hash, status, assertion_ttl_seconds, cache_ttl_seconds, revocation_seq, valid_from, valid_until, notes, customer_id, license_id, created_at, updated_at FROM entitlements ${where}`;
-}
-
-async function findEntitlement(env: Env, key: { project: string; feature: string; license_fingerprint: string }): Promise<EntitlementRecord | null> {
-  const row = await env.DB.prepare(entitlementSelectSql("WHERE project = ? AND feature = ? AND license_fingerprint = ? LIMIT 1"))
-    .bind(key.project, key.feature, key.license_fingerprint)
-    .first<Omit<EntitlementRecord, "id">>();
-  return row === null ? null : withId(row);
-}
-
 async function listEntitlements(request: Request, env: Env, requestIdValue: string): Promise<Response> {
   const url = new URL(request.url);
   const filters: string[] = [];
@@ -457,294 +417,6 @@ async function rememberIdempotency(env: Env, scope: string, key: string | null, 
   await env.DB.prepare(
     "INSERT OR IGNORE INTO mutation_idempotency (scope, idempotency_key, response_json, created_at) VALUES (?, ?, ?, ?)",
   ).bind(scope, key, JSON.stringify(body), now).run();
-}
-
-function idempotencyFromCurrentStatement(
-  env: Env,
-  ctx: MutationContext,
-  key: { project: string; feature: string; license_fingerprint: string },
-  idempotency: IdempotencyCommit | null,
-  now: number,
-): D1PreparedStatementLike | null {
-  if (ctx.idempotencyKey === null || idempotency === null) {
-    return null;
-  }
-  return env.DB.prepare(
-    `INSERT OR IGNORE INTO mutation_idempotency (scope, idempotency_key, response_json, created_at)
-     SELECT ?, ?,
-       json_object(
-         'ok', json('true'),
-         'code', ?,
-         'request_id', ?,
-         'data', json_object(
-           'project', project,
-           'feature', feature,
-           'license_fingerprint', license_fingerprint,
-           'device_hash', device_hash,
-           'status', status,
-           'assertion_ttl_seconds', assertion_ttl_seconds,
-           'revocation_seq', revocation_seq,
-           'valid_from', valid_from,
-           'valid_until', valid_until,
-           'notes', notes,
-           'customer_id', customer_id,
-           'license_id', license_id,
-           'created_at', created_at,
-           'updated_at', updated_at,
-           'id', ?
-         )
-       ),
-       ?
-     FROM entitlements
-     WHERE project = ? AND feature = ? AND license_fingerprint = ?`,
-  ).bind(
-    idempotency.scope,
-    ctx.idempotencyKey,
-    idempotency.responseCode,
-    ctx.requestId,
-    entitlementId(key.project, key.feature, key.license_fingerprint),
-    now,
-    key.project,
-    key.feature,
-    key.license_fingerprint,
-  );
-}
-
-function eventFromCurrentStatement(
-  env: Env,
-  ctx: MutationContext,
-  eventType: "create" | "update" | "disable" | "reenable" | "revoke",
-  key: { project: string; feature: string; license_fingerprint: string },
-  prev: EntitlementRecord | null,
-  reason: string,
-  now: number,
-): D1PreparedStatementLike {
-  const source = ctx.source === "sync" ? "sync" : "admin";
-  return env.DB.prepare(
-    `INSERT INTO entitlement_events (project, feature, license_fingerprint, device_hash, event_type, status, revocation_seq, detail, actor, actor_type, source, request_id, ip, prev_json, next_json, reason, idempotency_key, created_at)
-     SELECT project, feature, license_fingerprint, device_hash, ?, status, revocation_seq, ?, ?, ?, '${source}', ?, ?, ?,
-       json_object(
-         'project', project,
-         'feature', feature,
-         'license_fingerprint', license_fingerprint,
-         'device_hash', device_hash,
-         'status', status,
-         'assertion_ttl_seconds', assertion_ttl_seconds,
-         'cache_ttl_seconds', cache_ttl_seconds,
-         'revocation_seq', revocation_seq,
-         'valid_from', valid_from,
-         'valid_until', valid_until,
-         'notes', notes,
-         'customer_id', customer_id,
-         'license_id', license_id,
-         'created_at', created_at,
-         'updated_at', updated_at,
-         'id', ?
-       ),
-       ?, ?, ?
-     FROM entitlements
-     WHERE project = ? AND feature = ? AND license_fingerprint = ?`,
-  ).bind(
-    eventType,
-    reason,
-    ctx.actor.email || ctx.actor.subject,
-    ctx.actor.actorType,
-    ctx.requestId,
-    ctx.ip,
-    prev === null ? "" : JSON.stringify(prev),
-    entitlementId(key.project, key.feature, key.license_fingerprint),
-    reason,
-    ctx.idempotencyKey,
-    now,
-    key.project,
-    key.feature,
-    key.license_fingerprint,
-  );
-}
-
-function batchReturnedRow<T>(result: unknown): T | null {
-  if (typeof result !== "object" || result === null || !("results" in result)) {
-    return null;
-  }
-  const rows = (result as { results?: unknown }).results;
-  if (!Array.isArray(rows) || rows.length === 0) {
-    return null;
-  }
-  return rows[0] as T;
-}
-
-async function writeEntitlementWithAudit(
-  env: Env,
-  key: { project: string; feature: string; license_fingerprint: string },
-  writeStatement: D1PreparedStatementLike,
-  ctx: MutationContext,
-  eventType: "create" | "update" | "disable" | "reenable" | "revoke",
-  prev: EntitlementRecord | null,
-  reason: string,
-  now: number,
-  idempotency: IdempotencyCommit | null,
-): Promise<MutationResult<EntitlementRecord>> {
-  // INVARIANT: the entitlement write, its audit event, and any idempotency record MUST commit atomically.
-  // Real Cloudflare D1 always exposes batch(); a missing batch() means a degraded or mocked binding, so we
-  // fail closed rather than perform two un-transactioned writes (which could persist a row with no audit
-  // event). Do NOT add a non-batch fallback here.
-  if (env.DB.batch === undefined) {
-    throw new Error("write_failed");
-  }
-  const statements = [
-    writeStatement,
-    eventFromCurrentStatement(env, ctx, eventType, key, prev, reason, now),
-  ];
-  const idempotencyStatement = idempotencyFromCurrentStatement(env, ctx, key, idempotency, now);
-  if (idempotencyStatement !== null) {
-    statements.push(idempotencyStatement);
-  }
-  const results = await env.DB.batch(statements);
-  const saved = batchReturnedRow<Omit<EntitlementRecord, "id">>(results[0]);
-  if (saved === null) {
-    throw new Error("write_failed");
-  }
-  return { data: withId(saved), idempotencyRecorded: idempotencyStatement !== null };
-}
-
-async function createEntitlement(
-  env: Env,
-  input: EntitlementInput,
-  ctx: MutationContext,
-  reason = "",
-  eventTypeOverride?: "create" | "update" | "disable" | "reenable" | "revoke",
-  idempotency: IdempotencyCommit | null = null,
-): Promise<MutationResult<EntitlementRecord>> {
-  const now = Math.floor(Date.now() / 1000);
-  const prev = await findEntitlement(env, input);
-  if (prev?.status === "revoked") {
-    throw new Error("revoked_terminal");
-  }
-	const statement = env.DB.prepare(
-    "INSERT INTO entitlements (project, feature, license_fingerprint, device_hash, status, assertion_ttl_seconds, cache_ttl_seconds, revocation_seq, valid_from, valid_until, notes, customer_id, license_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT MAX(revocation_seq) + 1 FROM entitlement_events WHERE project = ? AND feature = ? AND license_fingerprint = ?), 1), ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(project, feature, license_fingerprint) DO UPDATE SET device_hash = excluded.device_hash, status = excluded.status, assertion_ttl_seconds = excluded.assertion_ttl_seconds, cache_ttl_seconds = excluded.cache_ttl_seconds, revocation_seq = max(entitlements.revocation_seq, COALESCE((SELECT MAX(revocation_seq) FROM entitlement_events WHERE project = entitlements.project AND feature = entitlements.feature AND license_fingerprint = entitlements.license_fingerprint), entitlements.revocation_seq)) + 1, valid_from = excluded.valid_from, valid_until = excluded.valid_until, notes = excluded.notes, customer_id = excluded.customer_id, license_id = excluded.license_id, updated_at = excluded.updated_at RETURNING project, feature, license_fingerprint, device_hash, status, assertion_ttl_seconds, cache_ttl_seconds, revocation_seq, valid_from, valid_until, notes, customer_id, license_id, created_at, updated_at",
-  ).bind(
-    input.project,
-    input.feature,
-    input.license_fingerprint,
-    input.device_hash ?? "",
-    input.status ?? "active",
-    input.assertion_ttl_seconds ?? 300,
-    input.assertion_ttl_seconds ?? 300,
-    input.project,
-    input.feature,
-    input.license_fingerprint,
-    input.valid_from ?? null,
-    input.valid_until ?? null,
-    input.notes ?? "",
-    input.customer_id ?? null,
-    input.license_id ?? null,
-    prev?.created_at ?? now,
-    now,
-  );
-  return writeEntitlementWithAudit(
-    env,
-    input,
-    statement,
-    ctx,
-    eventTypeOverride ?? (prev === null ? "create" : "update"),
-    prev,
-    reason,
-    now,
-    idempotency,
-  );
-}
-
-async function patchEntitlement(env: Env, key: { project: string; feature: string; license_fingerprint: string }, patch: EntitlementPatch, ctx: MutationContext, idempotency: IdempotencyCommit | null): Promise<MutationResult<EntitlementRecord> | null> {
-  const prev = await findEntitlement(env, key);
-  if (prev === null) {
-    return null;
-  }
-  if (prev.status === "revoked") {
-    throw new Error("revoked_terminal");
-  }
-  const assertionTtl = patch.assertion_ttl_seconds ?? prev.assertion_ttl_seconds;
-  const validFrom = patch.valid_from !== undefined ? patch.valid_from : prev.valid_from;
-  const validUntil = patch.valid_until !== undefined ? patch.valid_until : prev.valid_until;
-  if (validFrom !== null && validUntil !== null && validFrom >= validUntil) {
-    throw new Error("invalid_patch");
-  }
-	const now = Math.floor(Date.now() / 1000);
-	const statement = env.DB.prepare(
-    "UPDATE entitlements SET device_hash = ?, assertion_ttl_seconds = ?, cache_ttl_seconds = ?, revocation_seq = max(revocation_seq, COALESCE((SELECT MAX(revocation_seq) FROM entitlement_events WHERE project = entitlements.project AND feature = entitlements.feature AND license_fingerprint = entitlements.license_fingerprint), revocation_seq)) + 1, valid_from = ?, valid_until = ?, notes = ?, customer_id = ?, license_id = ?, updated_at = ? WHERE project = ? AND feature = ? AND license_fingerprint = ? RETURNING project, feature, license_fingerprint, device_hash, status, assertion_ttl_seconds, cache_ttl_seconds, revocation_seq, valid_from, valid_until, notes, customer_id, license_id, created_at, updated_at",
-  ).bind(
-    patch.device_hash ?? prev.device_hash,
-    assertionTtl,
-    assertionTtl,
-    validFrom,
-    validUntil,
-    patch.notes ?? prev.notes,
-    patch.customer_id !== undefined ? patch.customer_id : prev.customer_id,
-    patch.license_id !== undefined ? patch.license_id : prev.license_id,
-    now,
-    key.project,
-    key.feature,
-    key.license_fingerprint,
-  );
-  return writeEntitlementWithAudit(env, key, statement, ctx, "update", prev, "", now, idempotency);
-}
-
-async function transitionEntitlement(env: Env, key: { project: string; feature: string; license_fingerprint: string }, status: EntitlementStatus, eventType: "disable" | "reenable" | "revoke", reason: string, ctx: MutationContext, idempotency: IdempotencyCommit | null): Promise<MutationResult<EntitlementRecord> | null> {
-  const prev = await findEntitlement(env, key);
-  if (prev === null) {
-    return null;
-  }
-  if (prev.status === "revoked" && eventType !== "revoke") {
-    throw new Error("revoked_terminal");
-  }
-  if (prev.status === status) {
-    return { data: prev, idempotencyRecorded: false };
-  }
-	const now = Math.floor(Date.now() / 1000);
-  const statement = env.DB.prepare(
-    "UPDATE entitlements SET status = ?, revocation_seq = max(revocation_seq, COALESCE((SELECT MAX(revocation_seq) FROM entitlement_events WHERE project = entitlements.project AND feature = entitlements.feature AND license_fingerprint = entitlements.license_fingerprint), revocation_seq)) + 1, updated_at = ? WHERE project = ? AND feature = ? AND license_fingerprint = ? RETURNING project, feature, license_fingerprint, device_hash, status, assertion_ttl_seconds, cache_ttl_seconds, revocation_seq, valid_from, valid_until, notes, customer_id, license_id, created_at, updated_at",
-  ).bind(status, now, key.project, key.feature, key.license_fingerprint);
-  return writeEntitlementWithAudit(env, key, statement, ctx, eventType, prev, reason, now, idempotency);
-}
-
-function entitlementMatchesInput(row: EntitlementRecord, input: EntitlementInput): boolean {
-  return row.device_hash === (input.device_hash ?? "") &&
-    row.status === (input.status ?? "active") &&
-    row.assertion_ttl_seconds === (input.assertion_ttl_seconds ?? 300) &&
-    row.valid_from === (input.valid_from ?? null) &&
-    row.valid_until === (input.valid_until ?? null) &&
-    row.notes === (input.notes ?? "") &&
-    row.customer_id === (input.customer_id ?? null) &&
-    row.license_id === (input.license_id ?? null);
-}
-
-function syncEventType(prev: EntitlementRecord | null, targetStatus: EntitlementStatus): "create" | "update" | "disable" | "reenable" | "revoke" {
-  if (targetStatus === "revoked") {
-    return "revoke";
-  }
-  if (prev === null) {
-    return targetStatus === "disabled" ? "disable" : "create";
-  }
-  if (prev.status !== targetStatus) {
-    return targetStatus === "disabled" ? "disable" : "reenable";
-  }
-  return "update";
-}
-
-async function syncEntitlement(env: Env, input: EntitlementInput, reason: string, ctx: MutationContext, idempotency: IdempotencyCommit | null): Promise<MutationResult<EntitlementRecord> | null> {
-  const key = {
-    project: input.project,
-    feature: input.feature,
-    license_fingerprint: input.license_fingerprint,
-  };
-  const prev = await findEntitlement(env, key);
-  if (prev !== null && entitlementMatchesInput(prev, input)) {
-    return { data: prev, idempotencyRecorded: false };
-  }
-  const targetStatus = input.status ?? "active";
-  if (prev?.status === "revoked" && targetStatus === "revoked") {
-    return { data: prev, idempotencyRecorded: false };
-  }
-  return createEntitlement(env, input, ctx, reason, syncEventType(prev, targetStatus), idempotency);
 }
 
 async function mutationResponse<T>(request: Request, env: Env, ctx: MutationContext, code: string, fn: (idempotency: IdempotencyCommit | null) => Promise<MutationResult<T> | null>): Promise<Response> {
