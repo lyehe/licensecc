@@ -60,6 +60,8 @@ CREATE TABLE IF NOT EXISTS entitlements (
   heartbeat_grace_sec   BIGINT  NOT NULL DEFAULT 900,
   max_borrow_sec        BIGINT  NOT NULL DEFAULT 0,
   allow_overdraft       BIGINT  NOT NULL DEFAULT 0,
+  last_applied_order_seq   BIGINT NOT NULL DEFAULT 0,  -- migration 0014
+  last_applied_order_epoch BIGINT NOT NULL DEFAULT 0,  -- migration 0014
   PRIMARY KEY (project, feature, license_fingerprint)
 );
 
@@ -303,3 +305,63 @@ CREATE INDEX IF NOT EXISTS idx_usage_events_window
   ON usage_events(project, feature, license_fingerprint, ts);
 CREATE INDEX IF NOT EXISTS idx_usage_events_ts
   ON usage_events(ts);
+
+-- =====================================================================================
+-- order-ingest  (migration 0014; Slice 1 — POST /v1/orders)
+-- NOTE: the order-ingest RUNTIME (entitlement-pg.mjs) is D1-first; these tables are
+-- the schema port so a fresh Postgres provision has them. The PG runtime apply path
+-- for orders is a tracked follow-up.
+-- =====================================================================================
+CREATE TABLE IF NOT EXISTS orders (
+  subscription_id     TEXT   NOT NULL,
+  project             TEXT   NOT NULL,
+  feature             TEXT   NOT NULL,
+  license_fingerprint TEXT   NOT NULL,
+  customer_id         TEXT   NULL,
+  license_id          TEXT   NULL,
+  last_seq            BIGINT NOT NULL DEFAULT 0,
+  order_epoch         BIGINT NOT NULL DEFAULT 0,
+  fingerprint_origin  TEXT   NOT NULL DEFAULT 'derived' CHECK (fingerprint_origin IN ('derived', 'supplied')),
+  created_at          BIGINT NOT NULL,
+  updated_at          BIGINT NOT NULL,
+  PRIMARY KEY (subscription_id, project, feature)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_fp_unique
+  ON orders(project, feature, license_fingerprint);
+
+CREATE TABLE IF NOT EXISTS order_events (
+  event_id        TEXT   NOT NULL,
+  subscription_id TEXT   NOT NULL,
+  project         TEXT   NOT NULL,
+  feature         TEXT   NOT NULL,
+  order_epoch     BIGINT NOT NULL,
+  seq             BIGINT NOT NULL,
+  intent          TEXT   NOT NULL,
+  key_id          TEXT   NOT NULL,
+  payload_digest  TEXT   NOT NULL,
+  raw_payload     TEXT   NOT NULL,
+  status          TEXT   NOT NULL CHECK (status IN ('accepted', 'processed', 'superseded', 'rejected')),
+  result_json     TEXT   NOT NULL DEFAULT '',
+  received_at     BIGINT NOT NULL,
+  processed_at    BIGINT NULL,
+  PRIMARY KEY (event_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_order_events_sub_seq
+  ON order_events(subscription_id, project, feature, order_epoch, seq);
+
+CREATE INDEX IF NOT EXISTS idx_order_events_unprocessed
+  ON order_events(subscription_id, project, feature, status);
+
+CREATE TABLE IF NOT EXISTS order_ingest_nonces (
+  key_id      TEXT   NOT NULL,
+  event_id    TEXT   NOT NULL,
+  timestamp   BIGINT NOT NULL,
+  consumed_at BIGINT NOT NULL,
+  expires_at  BIGINT NOT NULL,
+  PRIMARY KEY (key_id, event_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_order_ingest_nonces_expires_at
+  ON order_ingest_nonces(expires_at);
