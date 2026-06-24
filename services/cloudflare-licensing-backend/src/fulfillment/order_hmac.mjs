@@ -28,6 +28,15 @@ const MAX_SKEW_CAP_SECONDS = 3600;
 const textEncoder = new TextEncoder();
 
 /**
+ * The canonical bytes the order-ingest HMAC is computed over. Exported so the
+ * offline signer (scripts/order-sign.mjs) and this verifier share ONE framing and
+ * can never drift. `timestamp` is the canonical integer-string form of unix seconds.
+ */
+export function canonicalOrderSignedText(audience, timestamp, bodyText) {
+  return SIGNED_PREFIX + audience + "\n" + String(timestamp) + "\n" + bodyText;
+}
+
+/**
  * Worker-safe base64 -> bytes. atob is present in Workers and modern node; we never
  * reach for Buffer here so the module bundles identically everywhere. Throws on
  * malformed base64 (callers treat a throw as a hard failure / bad secret).
@@ -201,7 +210,7 @@ export async function verifyOrderHmac(request, env, bodyText) {
     return { ok: false, code: "bad_signature", keyId };
   }
 
-  const signedText = SIGNED_PREFIX + audience + "\n" + ts.canonical + "\n" + bodyText;
+  const signedText = canonicalOrderSignedText(audience, ts.canonical, bodyText);
 
   let valid;
   try {
