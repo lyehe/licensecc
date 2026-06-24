@@ -49,15 +49,20 @@ export function decodeEntitlementId(id) {
 // the revocation-floor invariant is defined once, not hand-synced across 3-5 sites.
 
 /** The public entitlement column projection, in storage order. Every SELECT and
- *  RETURNING tail in this module renders exactly these columns. */
-const ENTITLEMENT_COLUMNS =
+ *  RETURNING tail in this module renders exactly these columns. Exported so the
+ *  order-ingest apply path (Slice 1) can build its OWN floor-guarded entitlement
+ *  statements off the same single source of truth without re-coupling the admin
+ *  mutators below — keeping the admin write path byte-identical. */
+export const ENTITLEMENT_COLUMNS =
   "project, feature, license_fingerprint, device_hash, status, assertion_ttl_seconds, cache_ttl_seconds, revocation_seq, valid_from, valid_until, notes, customer_id, license_id, created_at, updated_at";
 
 /** UPDATE assignment that re-derives the revocation_seq floor from the audit log
  *  and bumps it. Security-relevant (monotonic revocation counter) — keep identical
  *  across every mutator. createEntitlement's ON CONFLICT form differs (it qualifies
- *  columns with `entitlements.`) and is intentionally NOT this constant. */
-const REVOCATION_SEQ_BUMP =
+ *  columns with `entitlements.`) and is intentionally NOT this constant. Exported
+ *  for the order-ingest apply path so its floor-guarded UPDATE/upsert reuses the
+ *  exact same monotonic bump rather than re-deriving it. */
+export const REVOCATION_SEQ_BUMP =
   "revocation_seq = max(revocation_seq, COALESCE((SELECT MAX(revocation_seq) FROM entitlement_events WHERE project = entitlements.project AND feature = entitlements.feature AND license_fingerprint = entitlements.license_fingerprint), revocation_seq)) + 1";
 
 /** Default assertion TTL (seconds) applied when an input omits it. Shared by
@@ -215,6 +220,7 @@ export async function writeEntitlementWithAudit(
   reason,
   now,
   idempotency,
+  extraStatements = [],
 ) {
   // INVARIANT: the entitlement write, its audit event, and any idempotency record MUST commit atomically.
   // Real Cloudflare D1 always exposes batch(); a missing batch() means a degraded or mocked binding, so we
@@ -230,6 +236,15 @@ export async function writeEntitlementWithAudit(
   const idempotencyStatement = idempotencyFromCurrentStatement(env, ctx, key, idempotency, now);
   if (idempotencyStatement !== null) {
     statements.push(idempotencyStatement);
+  }
+  // extraStatements (default []) are committed in the SAME transaction as the
+  // entitlement write + audit event. Admin callers never pass any, so their batch
+  // is byte-identical to before; the order-ingest apply path passes its in-batch
+  // `order_events` processed-mark here so the mutation and the mark are atomic
+  // (the exactly-once guarantee). The mark runs AFTER the entitlement write, so the
+  // floor's no-op (a stale re-apply) still marks the event processed.
+  for (const extra of extraStatements) {
+    statements.push(extra);
   }
   const results = await env.DB.batch(statements);
   const saved = batchReturnedRow(results[0]);

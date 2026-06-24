@@ -6,6 +6,9 @@ import {
 } from "./lease/canonical_payload.mjs";
 import { LEASE_ISSUANCE_ATOMIC_SQL, SEAT_CHECKOUT_ATOMIC_SQL } from "./lease/issuance_sql.mjs";
 import { summarizeUsage } from "./lease/usage_report.mjs";
+// Slice 1 order-ingest (POST /v1/orders): signed, exactly-once subscription fulfillment.
+// order_ingest.mjs is untyped Worker-safe JS (imported as a loose module surface).
+import { handleOrderIngest } from "./fulfillment/order_ingest.mjs";
 
 declare const Buffer:
   | {
@@ -60,6 +63,16 @@ export interface Env {
   // A presented proof is always verified; "required" denies issuance without one. Default off
   // for back-compat; production sets "required" to make the hardware lock actually bind.
   DEVICE_PROOF_MODE?: string;
+  // Slice 1 order-ingest (POST /v1/orders): the signed, exactly-once subscription
+  // fulfillment inbox. ORDER_HMAC_SECRETS is a JSON map {key_id: base64-secret} (each
+  // secret >= 32 bytes); the map / audience are asserted non-empty at verify time
+  // (fail-closed). ORDER_INGEST_MODE: required (default) | soft (observe-only) | off
+  // (dev-only). ORDER_MAX_SKEW_SECONDS default 300 (cap 3600). ORDER_INGEST_AUDIENCE
+  // (e.g. "prod"/"staging") is folded into the signed bytes to block cross-env replay.
+  ORDER_HMAC_SECRETS?: string;
+  ORDER_INGEST_MODE?: string;
+  ORDER_MAX_SKEW_SECONDS?: string;
+  ORDER_INGEST_AUDIENCE?: string;
 }
 
 export interface VerifyRequest {
@@ -1842,6 +1855,9 @@ export default {
       }
       if (request.method === "POST" && url.pathname === "/v1/verify") {
         return await handleVerify(request, env);
+      }
+      if (request.method === "POST" && url.pathname === "/v1/orders") {
+        return await handleOrderIngest(request, env);
       }
       if (request.method === "POST" && (url.pathname === "/v1/activate" || url.pathname === "/v1/renew")) {
         return await handleLeaseIssue(request, env);

@@ -236,3 +236,41 @@ also supports an optional Cloudflare rate-limit binding named
   `--customer-id`/`--license-id`; unspecified mutable fields use command defaults
   and reset to their defaults on conflict.
 - This reference service does not prevent local binary patching or API hooking.
+
+## Order ingest (`POST /v1/orders`)
+
+The signed, exactly-once subscription-fulfillment inbox (Slice 1). A billing
+back-office posts subscription lifecycle events (active / renewed / past_due /
+paused / payment_failed / canceled_at_period_end / resumed / quantity.changed /
+fraud.confirmed / chargeback) and the Worker projects them onto entitlements.
+
+- **Auth (HMAC).** Headers `X-LCC-Key-Id`, `X-LCC-Timestamp` (canonical integer
+  unix seconds), `X-LCC-Signature` (base64 HMAC-SHA256). The signed bytes are
+  `"POST\n/v1/orders\n" + ORDER_INGEST_AUDIENCE + "\n" + <ts> + "\n" + <raw body>`
+  — verified over the EXACT request bytes via `crypto.subtle.verify`
+  (constant-time). `ORDER_HMAC_SECRETS` is a JSON `{ key_id: base64-secret }` map
+  (each secret ≥ 32 bytes), loaded into a null-prototype map (so a `__proto__`
+  key_id cannot poison the lookup); an empty/short/malformed map fails closed.
+- **Mode.** `ORDER_INGEST_MODE`: `required` (default), `soft` (verify + observe,
+  never mutates), `off` (dev-only, 404). `ORDER_INGEST_AUDIENCE` blocks
+  cross-environment replay and is asserted non-empty in `required`.
+  `ORDER_MAX_SKEW_SECONDS` bounds timestamp skew (default 300, cap 3600). A
+  `(key_id, event_id)` nonce is spent LAST (after verify+skew) against
+  `order_ingest_nonces`; a replay is `401 replayed`, a nonce-store error is a
+  fail-closed `503`.
+- **Exactly-once.** Accept-then-apply: a durable cursor advance on
+  `orders(order_epoch, last_seq)` + an event claim into `order_events` commit in
+  one atomic batch (Step 3); the entitlement mutation and the `order_events`
+  `status='processed'` mark commit in the *same* batch (Step 4), guarded by the
+  per-entitlement monotonic floor `last_applied_order_{epoch,seq}`. A stale order
+  is observably `stale_ignored`; a crashed `accepted` row re-drives idempotently
+  (the floor makes re-apply self-superseding). A fingerprint belongs to exactly
+  one subscription (`409 fingerprint_owned`).
+- **Responses.** `200 applied` (with the entitlement snapshot + `license_fingerprint`),
+  cached replay (identical body), `200 stale_ignored`, `409 seq_conflict`,
+  `409 event_id_conflict`, `409 fingerprint_owned`, `200 no_entitlement`
+  (modify on a never-activated subscription — never materializes access),
+  `409 entitlement_revoked` (terminal), `401` (auth family), `400 invalid_order`,
+  `503 write_failed`. The body is read once with `request.text()` and capped at
+  `MAX_ORDER_BODY_BYTES = 16384`.
+- Set the HMAC key map as a secret: `wrangler secret put ORDER_HMAC_SECRETS`.

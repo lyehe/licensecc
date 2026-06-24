@@ -111,6 +111,12 @@ export interface EntitlementCapacity {
   allow_overdraft?: number;
 }
 
+// Shared SQL fragments (single source of truth) the order-ingest apply path reuses
+// to build its OWN floor-guarded entitlement statements without re-coupling the
+// admin mutators.
+export const ENTITLEMENT_COLUMNS: string;
+export const REVOCATION_SEQ_BUMP: string;
+
 export function entitlementId(project: string, feature: string, licenseFingerprint: string): string;
 export function decodeEntitlementId(id: string): EntitlementKey | null;
 
@@ -148,6 +154,10 @@ export function writeEntitlementWithAudit(
   reason: string,
   now: number,
   idempotency: IdempotencyCommit | null,
+  // Extra statements committed in the SAME batch/transaction as the entitlement
+  // write + audit event (default []). The order-ingest apply path passes its
+  // in-batch order_events processed-mark here so mutation + mark are atomic.
+  extraStatements?: D1PreparedStatementLike[],
 ): Promise<MutationResult<EntitlementRecord>>;
 
 export function createEntitlement(

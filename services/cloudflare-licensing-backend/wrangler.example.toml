@@ -25,6 +25,15 @@ REQUEST_SIGNATURE_MAX_SKEW_SECONDS = "300"
 # non-exportable key); "required" denies issuance without one -- set it in production to make
 # the hardware lock actually bind (a cloned hw_id alone cannot get a lease/seat).
 DEVICE_PROOF_MODE = "off"
+# --- Slice 1 order-ingest (POST /v1/orders): signed, exactly-once subscription fulfillment ---
+# Mode: required (default; reject unsigned/replayed) | soft (verify + observe, NEVER mutate) |
+# off (dev-only; the endpoint 404s). Roll out off -> soft -> required.
+ORDER_INGEST_MODE = "required"
+# Audience folded into the signed bytes to block cross-environment replay (e.g. prod/staging).
+# MUST be non-empty in required mode (asserted at verify time, fail-closed).
+ORDER_INGEST_AUDIENCE = "prod"
+# Accepted clock skew (seconds) for the signed X-LCC-Timestamp; default 300, hard cap 3600.
+ORDER_MAX_SKEW_SECONDS = "300"
 # Optional D1 limiter tier overrides. Defaults fall back to D1_RATE_LIMIT_*.
 # D1_CLIENT_RATE_LIMIT_LIMIT = "20"
 # D1_CLIENT_RATE_LIMIT_PERIOD_SECONDS = "60"
@@ -58,3 +67,7 @@ simple = { limit = 20, period = 60 }
 # Set these as Worker secrets, not plaintext vars:
 # wrangler secret put ONLINE_SIGNING_PRIVATE_KEY_PKCS8_PEM
 # wrangler secret put ONLINE_SIGNING_KEY_ID
+# Order-ingest HMAC key map: a JSON object { "<key_id>": "<base64-secret>" }; each secret
+# decodes to >= 32 bytes. The map is asserted non-empty / well-formed at verify time
+# (fail-closed). Rotate by adding a new key_id before retiring the old.
+# wrangler secret put ORDER_HMAC_SECRETS
