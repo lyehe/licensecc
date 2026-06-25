@@ -438,3 +438,38 @@ SELECT project, feature, license_fingerprint, device_key_id, status,
 FROM entitlement_devices
 WHERE project = $1 AND feature = $2 AND license_fingerprint = $3
 ORDER BY updated_at DESC LIMIT 100;
+
+-- =====================================================================================
+-- (C) ORDER-INGEST APPLY PATH  (Slice 1; SQLite original src/fulfillment/order_ingest.mjs)
+--     These statements are NOT inlined here: the order-apply path builds them dynamically at
+--     runtime in order-apply-pg.mjs (per-event floor binds, dynamic capacity SET, the descriptor
+--     kind), so a frozen .sql snapshot would drift. This section documents WHAT lives there and
+--     the THREE new SQLite-isms it translates (beyond the Group-A/B rules above), closing the
+--     "zero order statements" gap. The apply group runs in ONE transaction via runApplyTransaction()
+--     (pool.begin), preserving accept-then-apply, the apply-time monotonic floor on
+--     last_applied_order_{epoch,seq}, fingerprint ownership, and the in-txn processed-mark.
+--
+--   C-builders (order-apply-pg.mjs):
+--     pgAcceptBatch        -- 3a guarded cursor advance + 3b EXISTS-guarded event claim (RETURNING)
+--     pgCreateStatement    -- subscription.active upsert; ON CONFLICT floor = FLOOR_PREDICATE_CONFLICT
+--                             (reads EXCLUDED, ZERO bound floor params)
+--     pgPatchStatement     -- renew / cancel_at_period_end; WHERE FLOOR_PREDICATE_UPDATE (binds epoch,epoch,seq)
+--     pgTransitionStatement-- disable / reenable / revoke (status + seq + floor only)
+--     pgCapacityStatement  -- quantity.changed; dynamic capacity SET (allow-listed columns)
+--     pgOrderEventStatement-- audit event from the post-mutation row
+--     pgReclaimStatement   -- seat downgrade reclaim (RETURNING seat_id), role:'reclaim'
+--     pgProcessedMark      -- in-txn processed-mark (status='accepted' guard -> redrive no-op)
+--     pgTerminalMark       -- no_entitlement('processed') / revoked('rejected') terminal marks (standalone)
+--
+--   NEW SQLite-ism translations (in addition to the Group-A/B rules; pinned by order-apply-pg.test.mjs):
+--     json_object(k, v, ...)        ->  json_build_object(k, v, ...)::text
+--         PG16 json_object has different (array/format) arg semantics; json_build_object takes the
+--         positional k,v,... form. The ::text cast preserves the next_json TEXT column contract.
+--     seat_checkouts.rowid          ->  ctid
+--         Postgres physical-row id. Safe ONLY because the SELECT-ctid and DELETE-by-ctid run in the
+--         SAME transaction with no intervening UPDATE to seat_checkouts (the rowid version's window).
+--     max(0, x)                     ->  GREATEST(0, x)
+--         (the seat-reclaim LIMIT count clamp; same family as the scalar-max(a,b) rule above)
+--
+--   Tests: order-apply-pg.test.mjs (pure shape + mock-pg transaction, hermetic, `npm run test:pg`);
+--          order-apply-smoke-real-pg.mjs (real PG16, gated on DATABASE_URL).

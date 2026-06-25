@@ -48,6 +48,20 @@ Port rules applied (see inline notes in the `.sql` files for exact locations):
   arg. Naively collapsing it breaks the `revocation_seq` monotonicity invariant silently.
   The inner `MAX(revocation_seq)` over `entitlement_events` stays `MAX` (genuine aggregate).
 - `CHECK (col IN (...))` enums kept **verbatim** (incl. the values migrations 0006/0007 added).
+
+The **order-ingest apply path** (`order-apply-pg.mjs`, the port of `src/fulfillment/order_ingest.mjs`)
+introduces three more translations the entitlement port never exercised — pinned by
+`order-apply-pg.test.mjs`:
+
+- `json_object(k, v, ...)` -> `json_build_object(k, v, ...)::text`. PG16's `json_object` has
+  different (array/format) argument semantics; `json_build_object` takes the positional `k,v,...`
+  form, and the `::text` cast keeps the `next_json` **TEXT** column contract.
+- `seat_checkouts.rowid` -> `ctid` (the seat-reclaim delete-by-physical-row). Safe **only** because
+  the `SELECT ctid` and `DELETE … WHERE ctid IN (…)` run in the **same transaction** with no
+  intervening `UPDATE` to `seat_checkouts` — exactly the window the SQLite `rowid` version relies on.
+  Do not split the subquery out of the transaction.
+- `max(0, x)` -> `GREATEST(0, x)` (the reclaim `LIMIT` count clamp; same family as the scalar-`max`
+  rule above).
 - `TEXT NOT NULL DEFAULT ''` and `metadata_json TEXT DEFAULT '{}'` kept as `TEXT`
   (jsonb variants noted in comments; kept TEXT for byte-compatibility with existing tooling).
 - Composite TEXT primary keys and the composite `FOREIGN KEY ... ON DELETE CASCADE`: verbatim.
@@ -238,6 +252,9 @@ output, and exit codes -- but it runs against Postgres/Supabase via `postgres.js
 | `pg-sql.mjs` | `pgSqlFor(command, args)` -> `{ text, params }` (or an **ordered array** of them for multi-statement mutations). A faithful, command-for-command mirror of `entitlement.mjs`'s `sqlFor()` -- it reuses the **exact** validators, field builders, and per-command branching, so the two CLIs accept/reject identical inputs with identical messages. Only the SQL dialect (`$n` placeholders, `EXTRACT(EPOCH FROM now())::bigint`, `GREATEST`, `encode(gen_random_bytes(8),'hex')`, `EXCLUDED`) and the value-passing (`$n` + params, not embedded literals) differ. |
 | `entitlement-pg.mjs` | The runnable CLI. Parses the same flags, validates the same way, runs reads via one `pool.unsafe()` and mutations as an ordered list inside one `pool.begin()` transaction, and prints the same-shaped output. |
 | `entitlement-pg.test.mjs` | A `node --test` suite mirroring `test/sql/entitlement-cli-sql.test.mjs`, but executing `pgSqlFor()`'s statements against **`pg-mem`** (in-memory Postgres). |
+| `order-apply-pg.mjs` | The Slice-1 **order-ingest APPLY** port (mirror of `src/fulfillment/order_ingest.mjs`): per-event floor-guarded `{text, params}` builders (`pgCreateStatement`/`pgPatchStatement`/`pgTransitionStatement`/`pgCapacityStatement`/`pgOrderEventStatement`/`pgReclaimStatement`/`pgProcessedMark`/`pgAcceptBatch`) + `runApplyTransaction(pool, statements)` running the apply group in one `pool.begin()` transaction and returning the **primary RETURNING row** (applied vs superseded), not `result.count`. Preserves accept-then-apply, the apply-time monotonic floor, fingerprint ownership, and the in-txn processed-mark. **SQL + transaction runner only** — `POST /v1/orders` (HMAC/nonce/normalization) stays the unmodified Worker and is **not** wired into the PG server. |
+| `order-apply-pg.test.mjs` | Hermetic, **zero-dep** (`npm run test:pg`): pure SQL-shape/translate assertions over the builders + a mock-pg-client transaction test of `runApplyTransaction` (statement order, empty-RETURNING => `applied:false` superseded, reclaim seat-id mapping, rollback on throw). |
+| `order-apply-smoke-real-pg.mjs` | Real-PG16 smoke for the apply path, **gated on `DATABASE_URL`** (clean skip when unset). Exercises the constructs `pg-mem` cannot: the ON CONFLICT correlated floor, `FLOOR_PREDICATE_UPDATE` suppression, `json_build_object::text`, and the `ctid` + `GREATEST(0,..)` reclaim. *(No `pg-mem` layer is added for the apply path: the correlated floor needs the `pgMemRewrite` shim and `ctid`/reclaim is a `pg-mem` gap — the mock + this smoke are the authoritative checks, per the design.)* |
 
 ### Commands and flags
 
