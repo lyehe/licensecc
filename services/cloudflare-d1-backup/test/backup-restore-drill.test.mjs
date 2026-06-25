@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   REQUIRED_TABLES,
+  PRESENCE_ONLY_TABLES,
+  SENSITIVE_TABLES,
+  ALL_RESTORE_TABLES,
   compareCounts,
   countMapFromRows,
   countSql,
@@ -94,13 +97,65 @@ test("wrangler json parser tolerates advisory text before json", () => {
   assert.equal(parsed[0].results[0].x, 1);
 });
 
-test("count SQL covers required entitlement tables only", () => {
-  assert.deepEqual(REQUIRED_TABLES, ["entitlements", "entitlement_events", "mutation_idempotency"]);
-  assert.match(tableListSql(), /sqlite_master/);
+test("required tables cover the entitlement core plus the operations back-office", () => {
+  for (const table of [
+    "entitlements", "entitlement_events", "mutation_idempotency",
+    "customers", "licenses", "entitlement_devices",
+    "orders", "order_events",
+    "account_tokens", "account_token_revocations", "account_token_events",
+    "customer_events",
+  ]) {
+    assert.ok(REQUIRED_TABLES.includes(table), `REQUIRED_TABLES missing ${table}`);
+  }
   const sql = countSql();
   assert.match(sql, /FROM entitlements/);
-  assert.match(sql, /FROM entitlement_events/);
-  assert.match(sql, /FROM mutation_idempotency/);
+  assert.match(sql, /FROM orders/);
+  assert.match(sql, /FROM account_tokens/);
+  assert.match(sql, /FROM customer_events/);
+});
+
+test("presence-only tables cover the high-churn / ephemeral / swept set, disjoint from required", () => {
+  for (const table of [
+    "rate_limit_counters", "request_proof_nonces", "order_ingest_nonces",
+    "lease_issuance", "seat_checkouts", "usage_events",
+    "portal_otp", "portal_sessions", "portal_bootstrap_events",
+  ]) {
+    assert.ok(PRESENCE_ONLY_TABLES.includes(table), `PRESENCE_ONLY_TABLES missing ${table}`);
+  }
+  // Required and presence-only must not overlap (a table is either count-compared or not).
+  for (const table of REQUIRED_TABLES) {
+    assert.ok(!PRESENCE_ONLY_TABLES.includes(table), `${table} is in both required and presence-only`);
+  }
+  // ALL_RESTORE_TABLES is exactly the union.
+  assert.deepEqual([...ALL_RESTORE_TABLES].sort(), [...REQUIRED_TABLES, ...PRESENCE_ONLY_TABLES].sort());
+});
+
+test("presence assertion (tableListSql) covers every restored table", () => {
+  const sql = tableListSql();
+  assert.match(sql, /sqlite_master/);
+  for (const table of ALL_RESTORE_TABLES) {
+    assert.ok(sql.includes(`'${table}'`), `tableListSql does not assert ${table} present`);
+  }
+});
+
+test("sensitive tables are a real subset of restored tables (so they are presence-asserted)", () => {
+  assert.ok(SENSITIVE_TABLES.length > 0);
+  for (const table of SENSITIVE_TABLES) {
+    assert.ok(ALL_RESTORE_TABLES.includes(table), `sensitive table ${table} is not in the restore set`);
+  }
+});
+
+// Sensitive handling: the drill must NEVER read secret/PII column values — only COUNT(*) and
+// sqlite_master presence. Pin that the generated SQL is content-free (no SELECT *, no column
+// projection beyond the table_name literal + COUNT aggregate), for ALL tables including sensitive ones.
+test("count and presence SQL are content-free (no column projection on any table)", () => {
+  const sql = `${countSql(ALL_RESTORE_TABLES)} ; ${tableListSql()}`;
+  assert.doesNotMatch(sql, /SELECT \*/, "drill must not SELECT * any table");
+  // The only projected expressions are the literal table_name, COUNT(*), and sqlite_master's `name`.
+  // No HMAC / email / secret column name should ever appear in the drill's SQL.
+  for (const forbidden of ["token_hmac", "secret_hmac", "session_hmac", "code_hmac", "email", "raw_payload"]) {
+    assert.ok(!sql.includes(forbidden), `drill SQL references sensitive column ${forbidden}`);
+  }
 });
 
 test("count rows normalize to table count map", () => {

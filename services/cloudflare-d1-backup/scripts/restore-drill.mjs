@@ -6,7 +6,57 @@ import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 
-const REQUIRED_TABLES = ["entitlements", "entitlement_events", "mutation_idempotency"];
+// Durable, low-churn tables whose row counts are count-COMPARED source-vs-restored. Adding a table
+// here makes a restore that is missing it (or whose count drifted) a hard failure. Keep this to
+// audit/identity tables that don't churn between backup capture and the drill (so comparison is
+// meaningful): the entitlement core + the operations back-office (Slices 1-4).
+const REQUIRED_TABLES = [
+  "entitlements",
+  "entitlement_events",
+  "mutation_idempotency",
+  "customers",
+  "licenses",
+  "entitlement_devices",
+  "orders",
+  "order_events",
+  "account_tokens",
+  "account_token_revocations",
+  "account_token_events",
+  "customer_events",
+];
+
+// Must EXIST after a restore, but are NOT count-compared: high-churn lease/seat/usage state and
+// short-TTL swept tables (nonces / OTP / sessions / rate-limit counters). Their counts legitimately
+// drift between the backup snapshot and the drill, so comparing them would produce false mismatches —
+// presence is the contract that proves the schema migrations restored, count is not.
+const PRESENCE_ONLY_TABLES = [
+  "rate_limit_counters",
+  "request_proof_nonces",
+  "order_ingest_nonces",
+  "lease_issuance",
+  "seat_checkouts",
+  "usage_events",
+  "portal_otp",
+  "portal_sessions",
+  "portal_bootstrap_events",
+];
+
+// Tables holding keyed secret material (HMACs) or PII (email). The drill only ever runs COUNT(*) and
+// sqlite_master presence checks against EVERY table — never SELECT * or any column projection — so no
+// secret/PII value is ever read, logged, or placed in the summary. This list documents that guarantee
+// and is surfaced (names only) in the summary; `count SQL is content-free` test pins it.
+const SENSITIVE_TABLES = [
+  "customers",
+  "account_tokens",
+  "account_token_revocations",
+  "request_proof_nonces",
+  "order_ingest_nonces",
+  "portal_otp",
+  "portal_sessions",
+];
+
+// Every table the restored database must contain (presence-asserted as one set).
+const ALL_RESTORE_TABLES = [...REQUIRED_TABLES, ...PRESENCE_ONLY_TABLES];
 
 function usage(exitCode = 2) {
   console.error(`usage:
@@ -158,8 +208,8 @@ function firstResults(envelope) {
   return envelope[0].results;
 }
 
-function tableListSql() {
-  const quoted = REQUIRED_TABLES.map((table) => `'${table}'`).join(", ");
+function tableListSql(tables = ALL_RESTORE_TABLES) {
+  const quoted = tables.map((table) => `'${table}'`).join(", ");
   return `SELECT name FROM sqlite_master WHERE type = 'table' AND name IN (${quoted}) ORDER BY name`;
 }
 
@@ -328,22 +378,24 @@ function assertScratchSafe(options) {
     options.mode,
     "scratch D1 table inspection",
   );
-  const requiredAlreadyPresent = REQUIRED_TABLES.filter((table) => tables.includes(table));
-  if (requiredAlreadyPresent.length === 0) {
+  // Refuse to clobber a scratch DB that already holds ANY known table's data, not just the
+  // count-compared core — a stray account_tokens/orders row is just as much a "not empty" signal.
+  const alreadyPresent = ALL_RESTORE_TABLES.filter((table) => tables.includes(table));
+  if (alreadyPresent.length === 0) {
     return { existingTables: [], existingCounts: {} };
   }
   const existingCounts = tableCounts(
     options.scratchDatabase,
     options.scratchConfig,
     options.mode,
-    requiredAlreadyPresent,
+    alreadyPresent,
     "scratch D1 pre-restore count inspection",
   );
   const nonempty = Object.entries(existingCounts).filter(([, count]) => count > 0);
   if (nonempty.length > 0 && !options.allowNonemptyScratch) {
     throw new Error(`scratch database is not empty; refusing restore without --allow-nonempty-scratch: ${JSON.stringify(existingCounts)}`);
   }
-  return { existingTables: requiredAlreadyPresent, existingCounts };
+  return { existingTables: alreadyPresent, existingCounts };
 }
 
 function validateRestoredTables(options) {
@@ -353,17 +405,28 @@ function validateRestoredTables(options) {
     options.mode,
     "restored D1 table inspection",
   );
-  const missing = REQUIRED_TABLES.filter((table) => !tables.includes(table));
+  // Presence is asserted over the FULL set (required + presence-only): a restore missing any back-office
+  // table means the migrations did not fully apply.
+  const missing = ALL_RESTORE_TABLES.filter((table) => !tables.includes(table));
   if (missing.length > 0) {
     throw new Error(`restored scratch database is missing required tables: ${missing.join(", ")}`);
   }
-  return tableCounts(
-    options.scratchDatabase,
-    options.scratchConfig,
-    options.mode,
-    REQUIRED_TABLES,
-    "restored D1 count inspection",
-  );
+  return {
+    requiredCounts: tableCounts(
+      options.scratchDatabase,
+      options.scratchConfig,
+      options.mode,
+      REQUIRED_TABLES,
+      "restored D1 required-count inspection",
+    ),
+    presenceOnlyCounts: tableCounts(
+      options.scratchDatabase,
+      options.scratchConfig,
+      options.mode,
+      PRESENCE_ONLY_TABLES,
+      "restored D1 presence-only-count inspection",
+    ),
+  };
 }
 
 async function main() {
@@ -373,7 +436,7 @@ async function main() {
     const scratchBefore = assertScratchSafe(options);
     const sqlFile = downloadBackup(options, tempDir);
     restoreToScratch(options, sqlFile);
-    const restoredCounts = validateRestoredTables(options);
+    const { requiredCounts: restoredCounts, presenceOnlyCounts } = validateRestoredTables(options);
     const restoredEntitlementSemantics = entitlementSemantics(
       options.scratchDatabase,
       options.scratchConfig,
@@ -405,6 +468,9 @@ async function main() {
       backup_source: options.sqlFile === undefined ? { bucket: options.bucket, object_key: options.objectKey } : { sql_file: options.sqlFile },
       scratch_before: scratchBefore,
       restored_counts: restoredCounts,
+      restored_presence_only_counts: presenceOnlyCounts,
+      // Names only — these tables were counted (content-free), never their secret/PII columns read.
+      sensitive_tables_present: SENSITIVE_TABLES.filter((table) => table in restoredCounts || table in presenceOnlyCounts),
       source_counts: sourceCounts,
       restored_entitlement_semantics: restoredEntitlementSemantics,
       required_restored_statuses: options.requiredRestoredStatuses,
@@ -422,6 +488,9 @@ async function main() {
 
 export {
   REQUIRED_TABLES,
+  PRESENCE_ONLY_TABLES,
+  SENSITIVE_TABLES,
+  ALL_RESTORE_TABLES,
   compareCounts,
   countMapFromRows,
   countSql,
