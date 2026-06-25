@@ -7,7 +7,9 @@
     "build:worker": "tsc -p tsconfig.worker.json",
     "build:ui": "vite build",
     "build": "npm run build:worker && npm run build:ui",
+    "test:ui": "npm run build:ui && node --test test/portal-ui-workflow.test.mjs",
     "test": "npm run build:worker && node --experimental-sqlite --test test/portal-otp.test.mjs test/portal-session.test.mjs test/portal-ratelimit.test.mjs test/portal-worker.test.mjs",
+    "test:e2e": "playwright install chromium && playwright test --config playwright.config.mjs",
     "lint": "node scripts/lint.mjs",
     "dry-run": "npm run build && npx wrangler deploy --dry-run --config wrangler.example.jsonc",
     "migrate:local": "npx wrangler d1 migrations apply DB --local --config ../cloudflare-licensing-backend/wrangler.example.toml"
@@ -20,6 +22,7 @@
     "vite": "^6.3.5"
   },
   "devDependencies": {
+    "@playwright/test": "^1.60.0",
     "typescript": "^5.8.3",
     "wrangler": "^4.18.0"
   }

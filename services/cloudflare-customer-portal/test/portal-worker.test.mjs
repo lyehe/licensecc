@@ -145,7 +145,8 @@ test("A's checkout on A's tuple proxies the SERVER-RESOLVED fingerprint with a r
     assert.ok(Array.isArray(scopes.operations) && scopes.operations.includes("checkout"));
     assert.ok(scopes.allow_all === undefined, "never allow_all");
     assert.ok(!scopes.projects.includes("*") && !scopes.features.includes("*"), "scope axes are never *");
-    assert.ok(tok.expires_at <= NOW + 120 && tok.expires_at > NOW, "120s TTL");
+    // ~120s TTL; +5 slop absorbs a Date.now() second-boundary between NOW capture and the worker call.
+    assert.ok(tok.expires_at > NOW && tok.expires_at <= NOW + 125, "~120s TTL");
     db.close();
   } finally {
     stub.restore();
@@ -386,7 +387,7 @@ test("bootstrap-otp: a correct bearer issues a secret, audits append-only, 120s 
   assert.equal(audit.c, 1, "the bootstrap issuance is audited");
   // The OTP row exists and expires within 10 minutes (600s) of now.
   const otp = db.prepare("SELECT expires_at FROM portal_otp WHERE customer_id = 'A'").get();
-  assert.ok(otp.expires_at > NOW && otp.expires_at <= NOW + 600);
+  assert.ok(otp.expires_at > NOW && otp.expires_at <= NOW + 605); // +5 slop for the clock boundary
   db.close();
 });
 
