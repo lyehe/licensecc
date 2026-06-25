@@ -11,7 +11,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "npm run build && node --test test/*.mjs test/fulfillment/order_event.test.mjs test/fulfillment/order_hmac.test.mjs test/fulfillment/order_ingest_gates.test.mjs test/fulfillment/order_sign.test.mjs test/auth/account_token.test.mjs",
+    "test": "npm run build && node --test test/*.mjs test/fulfillment/order_event.test.mjs test/fulfillment/order_hmac.test.mjs test/fulfillment/order_ingest_gates.test.mjs test/fulfillment/order_sign.test.mjs test/auth/account_token.test.mjs test/auth/account_token_cli.test.mjs",
     "test:sql": "npm run build && node --experimental-sqlite --test test/sql/*.mjs test/fulfillment/order_ingest_exactly_once.test.mjs test/fulfillment/account_isolation.test.mjs",
     "test:e2e": "npm --prefix ../cloudflare-license-admin run build:worker && npm run build && node --test test/e2e/*.mjs",
     "lint": "node scripts/lint.mjs",
@@ -20,6 +20,7 @@
     "migrate:local": "npx wrangler d1 migrations apply DB --local --config wrangler.example.toml",
     "migrate:remote": "npx wrangler d1 migrations apply DB --remote --config wrangler.toml",
     "entitlement": "node scripts/entitlement.mjs",
+    "account-token": "node scripts/account-token.mjs",
     "device-key": "node scripts/device-key.mjs",
     "report": "node scripts/report.mjs",
     "order:sign": "node scripts/order-sign.mjs",
