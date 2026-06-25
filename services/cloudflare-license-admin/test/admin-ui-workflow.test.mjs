@@ -136,3 +136,58 @@ test("admin UI workflow builds transition paths and short fingerprints", async (
   assert.equal(workflow.shortHash("short"), "short");
   assert.equal(workflow.shortHash("a".repeat(64)), "aaaaaaaa...aaaaaaaa");
 });
+
+test("admin UI workflow builds filtered customer API paths", async () => {
+  const workflow = await loadWorkflowModule();
+  assert.equal(workflow.customersPath({ status: "", q: "" }), "/api/admin/customers");
+  assert.equal(
+    workflow.customersPath({ status: "disabled", q: "acme corp" }),
+    "/api/admin/customers?status=disabled&q=acme+corp",
+  );
+  assert.equal(workflow.customersPath({ status: "active", q: "" }), "/api/admin/customers?status=active");
+  assert.equal(workflow.customersPath({ status: "", q: "jane@example.com" }), "/api/admin/customers?q=jane%40example.com");
+});
+
+test("admin UI workflow builds customer detail and transition paths with encoding", async () => {
+  const workflow = await loadWorkflowModule();
+  assert.equal(workflow.customerDetailPath("cus_123"), "/api/admin/customers/cus_123");
+  assert.equal(workflow.customerDetailPath("cus/with space"), "/api/admin/customers/cus%2Fwith%20space");
+  assert.equal(workflow.customerTransitionPath("cus_123", "disable"), "/api/admin/customers/cus_123/disable");
+  assert.equal(workflow.customerTransitionPath("cus_123", "reenable"), "/api/admin/customers/cus_123/reenable");
+  assert.equal(workflow.customerTransitionPath("cus/x", "disable"), "/api/admin/customers/cus%2Fx/disable");
+});
+
+test("admin UI workflow customer action rules match kill-switch invariants", async () => {
+  const workflow = await loadWorkflowModule();
+  assert.equal(workflow.canRunCustomerAction("active", "disable"), true);
+  assert.equal(workflow.canRunCustomerAction("active", "reenable"), false);
+  assert.equal(workflow.canRunCustomerAction("disabled", "disable"), false);
+  assert.equal(workflow.canRunCustomerAction("disabled", "reenable"), true);
+  assert.equal(workflow.canRunCustomerAction("unknown", "disable"), false);
+  assert.equal(workflow.canRunCustomerAction("unknown", "reenable"), false);
+});
+
+test("admin UI workflow builds filtered license and order API paths", async () => {
+  const workflow = await loadWorkflowModule();
+  assert.equal(workflow.licensesPath({ project: "", customer_id: "", q: "" }), "/api/admin/licenses");
+  assert.equal(
+    workflow.licensesPath({ project: "DEFAULT", customer_id: "cus_1", q: "seat pack" }),
+    "/api/admin/licenses?project=DEFAULT&customer_id=cus_1&q=seat+pack",
+  );
+  assert.equal(workflow.licensesPath({ project: "DEFAULT", customer_id: "", q: "" }), "/api/admin/licenses?project=DEFAULT");
+
+  assert.equal(workflow.ordersPath({ status: "", subscription_id: "" }), "/api/admin/orders");
+  assert.equal(
+    workflow.ordersPath({ status: "accepted", subscription_id: "sub_42" }),
+    "/api/admin/orders?status=accepted&subscription_id=sub_42",
+  );
+  assert.equal(workflow.ordersPath({ status: "rejected", subscription_id: "" }), "/api/admin/orders?status=rejected");
+});
+
+test("admin UI workflow formats epoch timestamps", async () => {
+  const workflow = await loadWorkflowModule();
+  assert.equal(workflow.formatEpoch(null), "-");
+  assert.equal(workflow.formatEpoch(undefined), "-");
+  assert.equal(workflow.formatEpoch(1710000000), new Date(1710000000 * 1000).toLocaleString());
+  assert.equal(workflow.formatEpoch(0), new Date(0).toLocaleString());
+});

@@ -248,6 +248,29 @@ code {
   max-width: 480px;
 }
 
+.metrics.reportCards {
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  padding: 0;
+}
+
+.selectedRow td {
+  background: #eef3ec;
+}
+
+.staleRow td {
+  background: #fbeeec;
+}
+
+.staleFlag {
+  background: #efd9d6;
+  border-radius: 999px;
+  color: #8b3028;
+  font-size: 11px;
+  font-weight: 600;
+  margin-left: 6px;
+  padding: 2px 6px;
+}
+
 @media (max-width: 920px) {
   .topbar {
     align-items: stretch;

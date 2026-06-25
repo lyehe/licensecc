@@ -165,3 +165,65 @@ export function canRunAction(status: EntitlementStatus, action: EntitlementActio
   }
   return status !== "revoked";
 }
+
+export interface CustomerListFilter {
+  status: string;
+  q: string;
+}
+
+export function customersPath(filter: CustomerListFilter): string {
+  const params = new URLSearchParams();
+  if (filter.status !== "") params.set("status", filter.status);
+  if (filter.q !== "") params.set("q", filter.q);
+  return `/api/admin/customers${params.size === 0 ? "" : `?${params.toString()}`}`;
+}
+
+export function customerDetailPath(id: string): string {
+  return `/api/admin/customers/${encodeURIComponent(id)}`;
+}
+
+export type CustomerAction = "disable" | "reenable";
+
+export function customerTransitionPath(id: string, action: CustomerAction): string {
+  return `/api/admin/customers/${encodeURIComponent(id)}/${action}`;
+}
+
+export function canRunCustomerAction(status: string, action: CustomerAction): boolean {
+  if (action === "disable") {
+    return status === "active";
+  }
+  return status === "disabled";
+}
+
+export interface LicenseListFilter {
+  project: string;
+  customer_id: string;
+  q: string;
+}
+
+export function licensesPath(filter: LicenseListFilter): string {
+  const params = new URLSearchParams();
+  if (filter.project !== "") params.set("project", filter.project);
+  if (filter.customer_id !== "") params.set("customer_id", filter.customer_id);
+  if (filter.q !== "") params.set("q", filter.q);
+  return `/api/admin/licenses${params.size === 0 ? "" : `?${params.toString()}`}`;
+}
+
+export interface OrderListFilter {
+  status: string;
+  subscription_id: string;
+}
+
+export function ordersPath(filter: OrderListFilter): string {
+  const params = new URLSearchParams();
+  if (filter.status !== "") params.set("status", filter.status);
+  if (filter.subscription_id !== "") params.set("subscription_id", filter.subscription_id);
+  return `/api/admin/orders${params.size === 0 ? "" : `?${params.toString()}`}`;
+}
+
+export function formatEpoch(value: number | null | undefined): string {
+  if (value === null || value === undefined) {
+    return "-";
+  }
+  return new Date(value * 1000).toLocaleString();
+}
