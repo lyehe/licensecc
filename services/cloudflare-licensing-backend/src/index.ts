@@ -4,11 +4,20 @@ import {
   leaseCanonicalFields,
   utcDateFromEpoch,
 } from "./lease/canonical_payload.mjs";
-import { LEASE_ISSUANCE_ATOMIC_SQL, SEAT_CHECKOUT_ATOMIC_SQL } from "./lease/issuance_sql.mjs";
+import {
+  LEASE_ISSUANCE_ATOMIC_SQL,
+  SEAT_CHECKOUT_ATOMIC_SQL,
+  leaseIssuanceSqlOwned,
+  seatCheckoutSqlOwned,
+  seatHeartbeatSqlOwned,
+  seatReleaseSqlOwned,
+} from "./lease/issuance_sql.mjs";
 import { summarizeUsage } from "./lease/usage_report.mjs";
 // Slice 1 order-ingest (POST /v1/orders): signed, exactly-once subscription fulfillment.
 // order_ingest.mjs is untyped Worker-safe JS (imported as a loose module surface).
 import { handleOrderIngest } from "./fulfillment/order_ingest.mjs";
+// Slice 2 account-token isolation (Stage 3): per-customer credential + the per-endpoint gate.
+import { accountAuth, constantTimeEqual, readBearer } from "./auth/account_auth.mjs";
 
 declare const Buffer:
   | {
@@ -27,6 +36,25 @@ export interface D1PreparedStatementLike {
 
 export interface D1DatabaseLike {
   prepare(sql: string): D1PreparedStatementLike;
+  // F4: D1 Sessions strong read ("first-primary") so an emergency-revoked token is never served
+  // from a stale replica. Feature-detected at runtime (older bindings lack it).
+  withSession?(mode?: string): D1DatabaseLike;
+}
+
+// Minimal Workers ExecutionContext surface (we only use waitUntil to keep the throttled
+// last_used_at write + lazy re-pepper off the response path on the hot endpoints).
+export interface ExecutionContextLike {
+  waitUntil(promise: Promise<unknown>): void;
+}
+
+// Slice 2 isolation binding: the account-token mode + the authenticated customer_id threaded
+// from accountAuth() into the mutating SQL. In `off` mode customerId is null (legacy bearer):
+// the handlers MUST take the ORIGINAL non-owned SQL path, because the `*Owned` builders bind
+// `e.customer_id = ?` and `NULL = null` is never true — an owned query in off mode would match
+// no entitlement and break every lease/seat. Only `soft`/`required` use the `*Owned` builders.
+export interface IsolationBinding {
+  mode: "off" | "soft" | "required";
+  customerId: string | null;
 }
 
 export interface RateLimitBindingLike {
@@ -73,6 +101,17 @@ export interface Env {
   ORDER_INGEST_MODE?: string;
   ORDER_MAX_SKEW_SECONDS?: string;
   ORDER_INGEST_AUDIENCE?: string;
+  // Slice 2 account-token isolation (D9/D10). ACCOUNT_TOKEN_PEPPERS is a JSON map
+  // {id: base64 >= 32B} (fail-closed; null => 503 on the 6 scoped paths). MODE mirrors
+  // REQUEST_SIGNATURE_MODE: off (runtime default; legacy bearer + shadow-eval) | soft (token
+  // required, NULL-owner allowed+logged, populated-mismatch denied) | required (production;
+  // NULL/mismatch denied). EMERGENCY_OPERATOR_BEARER gates the SEPARATE /v1/emergency/* break-glass route
+  // ONLY (never the 6 scoped paths); unset = closed.
+  ACCOUNT_TOKEN_PEPPERS?: string;
+  ACCOUNT_TOKEN_ACTIVE_PEPPER_ID?: string;
+  ACCOUNT_TOKEN_MODE?: string;
+  ACCOUNT_TOKEN_LAST_USED_THROTTLE_SEC?: string;
+  EMERGENCY_OPERATOR_BEARER?: string;
 }
 
 export interface VerifyRequest {
@@ -1233,10 +1272,40 @@ async function atomicLeaseIssuance(
   validFromEpoch: number,
   validToEpoch: number,
   leaseKeyId: string,
+  isolation: IsolationBinding,
 ): Promise<boolean> {
   const windowStart = now - (row.rebind_window_sec > 0 ? row.rebind_window_sec : 0);
   const maxDevices = row.max_active_devices > 0 ? row.max_active_devices : 1;
-  const inserted = await env.DB.prepare(LEASE_ISSUANCE_ATOMIC_SQL)
+  // Off mode (legacy bearer, customerId null): the ORIGINAL non-owned cap guard. An owned guard
+  // would bind `e.customer_id = null` and match nothing, breaking issuance — so off must NOT use
+  // the owned SQL. The 15-param bind order is the original LEASE_ISSUANCE_ATOMIC_SQL contract.
+  if (isolation.mode === "off") {
+    const inserted = await env.DB.prepare(LEASE_ISSUANCE_ATOMIC_SQL)
+      .bind(
+        body.project,
+        body.feature,
+        body.license_fingerprint,
+        body.device_key_id,
+        leaseKeyId,
+        now,
+        validFromEpoch,
+        validToEpoch,
+        body.request_id ?? null,
+        body.project,
+        body.feature,
+        body.license_fingerprint,
+        windowStart,
+        body.device_key_id,
+        maxDevices,
+      )
+      .first<{ id: number }>();
+    return inserted !== null;
+  }
+  // soft / required: F2/F3 — the ownership EXISTS (customer_id + status='active' + validity) is
+  // folded into the cap guard, so a revoke/expiry/wrong-owner between the pre-read and this write
+  // cannot mint a lease. The signed lease derives from the guard-confirmed insert (RETURNING id),
+  // not the advisory pre-read. The device-count subquery stays tuple-scoped.
+  const inserted = await env.DB.prepare(leaseIssuanceSqlOwned(isolation.mode))
     .bind(
       body.project,
       body.feature,
@@ -1253,18 +1322,37 @@ async function atomicLeaseIssuance(
       windowStart,
       body.device_key_id,
       maxDevices,
+      // EXISTS ownership binds: project, feature, fingerprint, customer_id, now, now.
+      body.project,
+      body.feature,
+      body.license_fingerprint,
+      isolation.customerId,
+      now,
+      now,
     )
     .first<{ id: number }>();
   return inserted !== null;
 }
 
-async function getLeaseIdempotent(env: Env, requestId: string | undefined): Promise<unknown | null> {
+// F1: idempotency MUST be scoped by the authenticated customer_id so a replay of customer B's
+// request_id under customer A's token MISSES the cache (different scope) and falls through to the
+// ownership guard, which denies. In off/bearer mode the customerId is null -> the legacy "lease"
+// scope is preserved (no behavior change before the cutover).
+function leaseIdempotencyScope(isolation: IsolationBinding): string {
+  return isolation.customerId === null ? "lease" : `lease:${isolation.customerId}`;
+}
+
+async function getLeaseIdempotent(
+  env: Env,
+  requestId: string | undefined,
+  isolation: IsolationBinding,
+): Promise<unknown | null> {
   if (requestId === undefined) return null;
   try {
     const row = await env.DB.prepare(
       "SELECT response_json FROM mutation_idempotency WHERE scope = ? AND idempotency_key = ? LIMIT 1",
     )
-      .bind("lease", requestId)
+      .bind(leaseIdempotencyScope(isolation), requestId)
       .first<{ response_json: string }>();
     return row === null ? null : JSON.parse(row.response_json);
   } catch {
@@ -1277,28 +1365,28 @@ async function putLeaseIdempotent(
   requestId: string | undefined,
   response: unknown,
   now: number,
+  isolation: IsolationBinding,
 ): Promise<void> {
   if (requestId === undefined) return;
   try {
     await env.DB.prepare(
       "INSERT INTO mutation_idempotency (scope, idempotency_key, response_json, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(scope, idempotency_key) DO NOTHING",
     )
-      .bind("lease", requestId, JSON.stringify(response), now)
+      .bind(leaseIdempotencyScope(isolation), requestId, JSON.stringify(response), now)
       .run();
   } catch {
     // best-effort; idempotency is an optimization, not a correctness gate here
   }
 }
 
-async function handleLeaseIssue(request: Request, env: Env): Promise<Response> {
+async function handleLeaseIssue(
+  request: Request,
+  env: Env,
+  operation: "activate" | "renew",
+  ctx?: ExecutionContextLike,
+): Promise<Response> {
   const now = Math.floor(Date.now() / 1000);
 
-  if (env.LEASE_ISSUE_BEARER !== undefined && env.LEASE_ISSUE_BEARER !== "") {
-    const auth = request.headers.get("authorization") ?? "";
-    if (auth !== `Bearer ${env.LEASE_ISSUE_BEARER}`) {
-      return json({ ok: false, code: "unauthorized" }, 401);
-    }
-  }
   if (!env.LEASE_SIGNING_PRIVATE_KEY_PKCS8_PEM || !env.LEASE_SIGNING_KEY_ID) {
     return json({ ok: false, code: "lease_signing_unavailable" }, 503);
   }
@@ -1310,6 +1398,12 @@ async function handleLeaseIssue(request: Request, env: Env): Promise<Response> {
     body = null;
   }
   if (body === null) return json({ ok: false, code: "invalid_request" }, 400);
+
+  // Per-customer account-token gate (replaces the legacy LEASE_ISSUE_BEARER check). The
+  // returned customerId is bound into the mutating cap guard (off => null => legacy SQL path).
+  const auth = await accountAuth(request, env, operation, body.project, body.feature, now, ctx);
+  if (!auth.ok) return json({ ok: false, code: auth.code }, auth.status);
+  const isolation: IsolationBinding = { mode: auth.mode, customerId: auth.customerId };
 
   let row: LeaseEntitlementRow | null;
   try {
@@ -1328,7 +1422,7 @@ async function handleLeaseIssue(request: Request, env: Env): Promise<Response> {
   // Idempotency AFTER the entitlement/status/expiry gate, so a captured request_id cannot re-serve
   // a lease for a now-revoked or -expired entitlement. (A cached hit is a benign return of the
   // device-bound lease already issued for this request_id; valid_to was clamped at issuance.)
-  const cached = await getLeaseIdempotent(env, body.request_id);
+  const cached = await getLeaseIdempotent(env, body.request_id, isolation);
   if (cached !== null) return json(cached);
 
   // Device-proof gate (relay-resistance / anti-cloning): a presented proof binds the lease to the
@@ -1352,7 +1446,7 @@ async function handleLeaseIssue(request: Request, env: Env): Promise<Response> {
 
   let inserted: boolean;
   try {
-    inserted = await atomicLeaseIssuance(env, body, row, now, validFromEpoch, validToEpoch, env.LEASE_SIGNING_KEY_ID);
+    inserted = await atomicLeaseIssuance(env, body, row, now, validFromEpoch, validToEpoch, env.LEASE_SIGNING_KEY_ID, isolation);
   } catch {
     return json({ ok: false, code: "verification_error" }, 503);
   }
@@ -1387,7 +1481,7 @@ async function handleLeaseIssue(request: Request, env: Env): Promise<Response> {
   // re-issued by then is surfaced server-side, but valid_to remains the hard offline limit.
   const renewBy = now + Math.floor(leaseSeconds / 2);
   const response = { ok: true, lic, server_time: now, renew_by: renewBy, valid_to_epoch: validToEpoch };
-  await putLeaseIdempotent(env, body.request_id, response, now);
+  await putLeaseIdempotent(env, body.request_id, response, now, isolation);
   return json(response);
 }
 
@@ -1496,20 +1590,19 @@ async function signSeatToken(
   return signAssertion(claims, env);
 }
 
-function seatAuthOrUnavailable(request: Request, env: Env): Response | null {
-  if (env.LEASE_ISSUE_BEARER !== undefined && env.LEASE_ISSUE_BEARER !== "") {
-    const auth = request.headers.get("authorization") ?? "";
-    if (auth !== `Bearer ${env.LEASE_ISSUE_BEARER}`) return json({ ok: false, code: "unauthorized" }, 401);
-  }
+// Seat signing-availability check. Authn is now the per-customer accountAuth() gate (account-token
+// isolation), called separately by each seat handler so the customerId can be bound into the
+// mutating seat SQL. The legacy LEASE_ISSUE_BEARER bearer is handled inside accountAuth (off mode).
+function seatSigningUnavailable(env: Env): Response | null {
   if (!env.ONLINE_SIGNING_PRIVATE_KEY_PKCS8_PEM || !env.ONLINE_SIGNING_KEY_ID) {
     return json({ ok: false, code: "seat_signing_unavailable" }, 503);
   }
   return null;
 }
 
-async function handleSeatCheckout(request: Request, env: Env): Promise<Response> {
+async function handleSeatCheckout(request: Request, env: Env, ctx?: ExecutionContextLike): Promise<Response> {
   const now = Math.floor(Date.now() / 1000);
-  const gate = seatAuthOrUnavailable(request, env);
+  const gate = seatSigningUnavailable(env);
   if (gate !== null) return gate;
 
   let body: SeatRequestBody | null;
@@ -1519,6 +1612,10 @@ async function handleSeatCheckout(request: Request, env: Env): Promise<Response>
     body = null;
   }
   if (body === null) return json({ ok: false, code: "invalid_request" }, 400);
+
+  const auth = await accountAuth(request, env, "checkout", body.project, body.feature, now, ctx);
+  if (!auth.ok) return json({ ok: false, code: auth.code }, auth.status);
+  const isolation: IsolationBinding = { mode: auth.mode, customerId: auth.customerId };
 
   let row: SeatEntitlementRow | null;
   try {
@@ -1556,23 +1653,52 @@ async function handleSeatCheckout(request: Request, env: Env): Promise<Response>
   const seatId = crypto.randomUUID();
   let granted: boolean;
   try {
-    const inserted = await env.DB.prepare(SEAT_CHECKOUT_ATOMIC_SQL)
-      .bind(
-        body.project,
-        body.feature,
-        body.license_fingerprint,
-        seatId,
-        body.client_instance_id,
-        mode,
-        now,
-        deadline,
-        body.project,
-        body.feature,
-        body.license_fingerprint,
-        now,
-        ceiling,
-      )
-      .first<{ seat_id: string }>();
+    // off => original pool guard (customerId null can't bind an owned EXISTS); soft/required =>
+    // the owned guard folds the ownership EXISTS (customer_id + status='active' + validity) into
+    // the SAME atomic pool-cap statement (the pool COUNT subquery stays tuple-scoped).
+    const inserted =
+      isolation.mode === "off"
+        ? await env.DB.prepare(SEAT_CHECKOUT_ATOMIC_SQL)
+            .bind(
+              body.project,
+              body.feature,
+              body.license_fingerprint,
+              seatId,
+              body.client_instance_id,
+              mode,
+              now,
+              deadline,
+              body.project,
+              body.feature,
+              body.license_fingerprint,
+              now,
+              ceiling,
+            )
+            .first<{ seat_id: string }>()
+        : await env.DB.prepare(seatCheckoutSqlOwned(isolation.mode))
+            .bind(
+              body.project,
+              body.feature,
+              body.license_fingerprint,
+              seatId,
+              body.client_instance_id,
+              mode,
+              now,
+              deadline,
+              body.project,
+              body.feature,
+              body.license_fingerprint,
+              now,
+              ceiling,
+              // EXISTS ownership binds: project, feature, fingerprint, customer_id, now, now.
+              body.project,
+              body.feature,
+              body.license_fingerprint,
+              isolation.customerId,
+              now,
+              now,
+            )
+            .first<{ seat_id: string }>();
     granted = inserted !== null;
   } catch {
     return json({ ok: false, code: "verification_error" }, 503);
@@ -1622,9 +1748,9 @@ async function handleSeatCheckout(request: Request, env: Env): Promise<Response>
   });
 }
 
-async function handleSeatHeartbeat(request: Request, env: Env): Promise<Response> {
+async function handleSeatHeartbeat(request: Request, env: Env, ctx?: ExecutionContextLike): Promise<Response> {
   const now = Math.floor(Date.now() / 1000);
-  const gate = seatAuthOrUnavailable(request, env);
+  const gate = seatSigningUnavailable(env);
   if (gate !== null) return gate;
 
   let body: SeatRequestBody | null;
@@ -1634,6 +1760,10 @@ async function handleSeatHeartbeat(request: Request, env: Env): Promise<Response
     body = null;
   }
   if (body === null || body.seat_id === undefined) return json({ ok: false, code: "invalid_request" }, 400);
+
+  const auth = await accountAuth(request, env, "heartbeat", body.project, body.feature, now, ctx);
+  if (!auth.ok) return json({ ok: false, code: auth.code }, auth.status);
+  const isolation: IsolationBinding = { mode: auth.mode, customerId: auth.customerId };
 
   let row: SeatEntitlementRow | null;
   try {
@@ -1647,14 +1777,21 @@ async function handleSeatHeartbeat(request: Request, env: Env): Promise<Response
 
   const grace = row.heartbeat_grace_sec > 0 ? row.heartbeat_grace_sec : SEAT_DEFAULT_GRACE_SEC;
   const deadline = now + grace;
-  // Refresh only a still-live, non-borrowed seat; a reclaimed/expired seat yields no row.
+  // Refresh only a still-live, non-borrowed seat; a reclaimed/expired seat yields no row. off =>
+  // original UPDATE; soft/required => the owned UPDATE adds an ownership EXISTS so A can never
+  // heartbeat B's seat (bind order: deadline, project, feature, fingerprint, seat_id, now, customer_id).
   let refreshed: boolean;
   try {
-    const updated = await env.DB.prepare(
-      "UPDATE seat_checkouts SET heartbeat_deadline = ? WHERE project = ? AND feature = ? AND license_fingerprint = ? AND seat_id = ? AND mode = 'live' AND heartbeat_deadline > ? RETURNING seat_id",
-    )
-      .bind(deadline, body.project, body.feature, body.license_fingerprint, body.seat_id, now)
-      .first<{ seat_id: string }>();
+    const updated =
+      isolation.mode === "off"
+        ? await env.DB.prepare(
+            "UPDATE seat_checkouts SET heartbeat_deadline = ? WHERE project = ? AND feature = ? AND license_fingerprint = ? AND seat_id = ? AND mode = 'live' AND heartbeat_deadline > ? RETURNING seat_id",
+          )
+            .bind(deadline, body.project, body.feature, body.license_fingerprint, body.seat_id, now)
+            .first<{ seat_id: string }>()
+        : await env.DB.prepare(seatHeartbeatSqlOwned(isolation.mode))
+            .bind(deadline, body.project, body.feature, body.license_fingerprint, body.seat_id, now, isolation.customerId)
+            .first<{ seat_id: string }>();
     refreshed = updated !== null;
   } catch {
     return json({ ok: false, code: "verification_error" }, 503);
@@ -1676,12 +1813,8 @@ async function handleSeatHeartbeat(request: Request, env: Env): Promise<Response
   });
 }
 
-async function handleSeatRelease(request: Request, env: Env): Promise<Response> {
+async function handleSeatRelease(request: Request, env: Env, ctx?: ExecutionContextLike): Promise<Response> {
   const now = Math.floor(Date.now() / 1000);
-  if (env.LEASE_ISSUE_BEARER !== undefined && env.LEASE_ISSUE_BEARER !== "") {
-    const auth = request.headers.get("authorization") ?? "";
-    if (auth !== `Bearer ${env.LEASE_ISSUE_BEARER}`) return json({ ok: false, code: "unauthorized" }, 401);
-  }
   let body: SeatRequestBody | null;
   try {
     body = parseSeatBody(await request.json(), /*needSeatId=*/ true);
@@ -1689,13 +1822,26 @@ async function handleSeatRelease(request: Request, env: Env): Promise<Response> 
     body = null;
   }
   if (body === null || body.seat_id === undefined) return json({ ok: false, code: "invalid_request" }, 400);
+
+  const auth = await accountAuth(request, env, "release", body.project, body.feature, now, ctx);
+  if (!auth.ok) return json({ ok: false, code: auth.code }, auth.status);
+  const isolation: IsolationBinding = { mode: auth.mode, customerId: auth.customerId };
+
   let removed: boolean;
   try {
-    const deleted = await env.DB.prepare(
-      "DELETE FROM seat_checkouts WHERE project = ? AND feature = ? AND license_fingerprint = ? AND seat_id = ? RETURNING seat_id",
-    )
-      .bind(body.project, body.feature, body.license_fingerprint, body.seat_id)
-      .first<{ seat_id: string }>();
+    // off => original DELETE; soft/required => the owned DELETE adds an ownership EXISTS so A can
+    // never free B's seat (0 rows freed for a wrong/NULL owner; the {ok:true} stays idempotent).
+    // Bind order: project, feature, fingerprint, seat_id, customer_id.
+    const deleted =
+      isolation.mode === "off"
+        ? await env.DB.prepare(
+            "DELETE FROM seat_checkouts WHERE project = ? AND feature = ? AND license_fingerprint = ? AND seat_id = ? RETURNING seat_id",
+          )
+            .bind(body.project, body.feature, body.license_fingerprint, body.seat_id)
+            .first<{ seat_id: string }>()
+        : await env.DB.prepare(seatReleaseSqlOwned(isolation.mode))
+            .bind(body.project, body.feature, body.license_fingerprint, body.seat_id, isolation.customerId)
+            .first<{ seat_id: string }>();
     removed = deleted !== null;
   } catch {
     return json({ ok: false, code: "verification_error" }, 503);
@@ -1790,30 +1936,45 @@ interface UsageRow {
 }
 
 // Live seats at instant t (for a windowed report's baseline): checkouts minus ends before t.
-async function liveSeatsAt(env: Env, project: string, feature: string, fingerprint: string, t: number): Promise<number> {
+// The ownership EXISTS (soft/required) gates the baseline on the SAME entitlement-ownership
+// conjunct as the report read, so a foreign/NULL-owner entitlement contributes nothing to A's
+// baseline. off => the original tuple-scoped reads (customerId null can't bind an owned EXISTS).
+async function liveSeatsAt(
+  env: Env,
+  project: string,
+  feature: string,
+  fingerprint: string,
+  t: number,
+  isolation: IsolationBinding,
+): Promise<number> {
   try {
     // Distinct seats checked out before t minus distinct seats ended before t = seats still open
     // at t. EXCEPT dedups by seat_id, so a seat with both a reclaim AND a release (a double-end)
     // is subtracted once, not twice (which would silently deflate the baseline -> peak).
-    const row = await env.DB.prepare(
+    const ownership =
+      isolation.mode === "off"
+        ? ""
+        : "AND EXISTS (SELECT 1 FROM entitlements e WHERE e.project = usage_events.project AND e.feature = usage_events.feature " +
+          "AND e.license_fingerprint = usage_events.license_fingerprint AND " +
+          (isolation.mode === "soft" ? "(e.customer_id = ? OR e.customer_id IS NULL)" : "e.customer_id = ?") +
+          ") ";
+    const sql =
       "SELECT COUNT(*) AS baseline FROM (" +
-        "SELECT seat_id FROM usage_events WHERE project = ? AND feature = ? AND license_fingerprint = ? AND seat_id IS NOT NULL AND event_type = 'checkout' AND ts < ? " +
-        "EXCEPT " +
-        "SELECT seat_id FROM usage_events WHERE project = ? AND feature = ? AND license_fingerprint = ? AND seat_id IS NOT NULL AND event_type IN ('release', 'reclaim') AND ts < ?)",
-    )
-      .bind(project, feature, fingerprint, t, project, feature, fingerprint, t)
-      .first<{ baseline: number }>();
+      `SELECT seat_id FROM usage_events WHERE project = ? AND feature = ? AND license_fingerprint = ? AND seat_id IS NOT NULL AND event_type = 'checkout' AND ts < ? ${ownership}` +
+      "EXCEPT " +
+      `SELECT seat_id FROM usage_events WHERE project = ? AND feature = ? AND license_fingerprint = ? AND seat_id IS NOT NULL AND event_type IN ('release', 'reclaim') AND ts < ? ${ownership})`;
+    const binds: unknown[] =
+      isolation.mode === "off"
+        ? [project, feature, fingerprint, t, project, feature, fingerprint, t]
+        : [project, feature, fingerprint, t, isolation.customerId, project, feature, fingerprint, t, isolation.customerId];
+    const row = await env.DB.prepare(sql).bind(...binds).first<{ baseline: number }>();
     return Math.max(0, Number(row?.baseline ?? 0));
   } catch {
     return 0;
   }
 }
 
-async function handleUsageReport(request: Request, env: Env): Promise<Response> {
-  if (env.LEASE_ISSUE_BEARER !== undefined && env.LEASE_ISSUE_BEARER !== "") {
-    const auth = request.headers.get("authorization") ?? "";
-    if (auth !== `Bearer ${env.LEASE_ISSUE_BEARER}`) return json({ ok: false, code: "unauthorized" }, 401);
-  }
+async function handleUsageReport(request: Request, env: Env, ctx?: ExecutionContextLike): Promise<Response> {
   const url = new URL(request.url);
   const project = url.searchParams.get("project");
   const feature = url.searchParams.get("feature");
@@ -1821,18 +1982,34 @@ async function handleUsageReport(request: Request, env: Env): Promise<Response> 
   if (!project || !feature || !fingerprint) return json({ ok: false, code: "invalid_request" }, 400);
 
   const now = Math.floor(Date.now() / 1000);
+  const auth = await accountAuth(request, env, "report", project, feature, now, ctx);
+  if (!auth.ok) return json({ ok: false, code: auth.code }, auth.status);
+  const isolation: IsolationBinding = { mode: auth.mode, customerId: auth.customerId };
+
   const fromParam = Number.parseInt(url.searchParams.get("from") ?? "", 10);
   const toParam = Number.parseInt(url.searchParams.get("to") ?? "", 10);
   const windowFrom = Number.isInteger(fromParam) && fromParam > 0 ? fromParam : 0;
   const windowTo = Number.isInteger(toParam) && toParam > 0 ? toParam : now;
 
+  // off => the original tuple-scoped read; soft/required => fold the ownership EXISTS into the
+  // usage_events read so a foreign/NULL-owner entitlement's events never surface in A's report.
+  const reportOwnership =
+    isolation.mode === "off"
+      ? ""
+      : "AND EXISTS (SELECT 1 FROM entitlements e WHERE e.project = usage_events.project AND e.feature = usage_events.feature " +
+        "AND e.license_fingerprint = usage_events.license_fingerprint AND " +
+        (isolation.mode === "soft" ? "(e.customer_id = ? OR e.customer_id IS NULL)" : "e.customer_id = ?") +
+        ") ";
+  const reportSql =
+    `SELECT event_type, seat_id, device_key_id, ts FROM usage_events WHERE project = ? AND feature = ? AND license_fingerprint = ? AND ts >= ? AND ts <= ? ${reportOwnership}ORDER BY ts ASC LIMIT ?`;
+  const reportBinds: unknown[] =
+    isolation.mode === "off"
+      ? [project, feature, fingerprint, windowFrom, windowTo, USAGE_REPORT_MAX_ROWS + 1]
+      : [project, feature, fingerprint, windowFrom, windowTo, isolation.customerId, USAGE_REPORT_MAX_ROWS + 1];
+
   let rows: UsageRow[];
   try {
-    const result = await env.DB.prepare(
-      "SELECT event_type, seat_id, device_key_id, ts FROM usage_events WHERE project = ? AND feature = ? AND license_fingerprint = ? AND ts >= ? AND ts <= ? ORDER BY ts ASC LIMIT ?",
-    )
-      .bind(project, feature, fingerprint, windowFrom, windowTo, USAGE_REPORT_MAX_ROWS + 1)
-      .all<UsageRow>();
+    const result = await env.DB.prepare(reportSql).bind(...reportBinds).all<UsageRow>();
     rows = result.results ?? [];
   } catch {
     return json({ ok: false, code: "verification_error" }, 503);
@@ -1841,13 +2018,61 @@ async function handleUsageReport(request: Request, env: Env): Promise<Response> 
   // prefix only -- flag it rather than report a silently-wrong peak. (Rollups remove the cap.)
   const truncated = rows.length > USAGE_REPORT_MAX_ROWS;
   if (truncated) rows = rows.slice(0, USAGE_REPORT_MAX_ROWS);
-  const baseline = windowFrom > 0 ? await liveSeatsAt(env, project, feature, fingerprint, windowFrom) : 0;
+  const baseline = windowFrom > 0 ? await liveSeatsAt(env, project, feature, fingerprint, windowFrom, isolation) : 0;
   const summary = summarizeUsage(rows, baseline);
   return json({ ok: true, project, feature, from: windowFrom, to: windowTo, server_time: now, truncated, ...summary });
 }
 
+// D10 break-glass dispatcher. Reachable ONLY at /v1/emergency/* (a path the 6 scoped routes can
+// never produce), gated by a constant-time EMERGENCY_OPERATOR_BEARER compare. On a verified match
+// it forces a NON-ISOLATED env (ACCOUNT_TOKEN_MODE=off, no LEASE_ISSUE_BEARER) so the underlying
+// handler runs the legacy SQL path with customerId null — the operator override, not a customer's
+// scoped credential — and logs the use loudly. The bearer is never logged (L10).
+async function handleEmergencyRoute(
+  request: Request,
+  env: Env,
+  url: URL,
+  ctx?: ExecutionContextLike,
+): Promise<Response> {
+  const configured = env.EMERGENCY_OPERATOR_BEARER;
+  // Unset/empty => the route does not exist (no oracle): 404, same as any unknown path.
+  if (configured === undefined || configured === "") return json({ ok: false, code: "not_found" }, 404);
+  const raw = readBearer(request);
+  const okBearer = raw !== null && (await constantTimeEqual(raw, configured));
+  if (!okBearer) return json({ ok: false, code: "unauthorized" }, 401);
+
+  // Strip the /v1/emergency prefix to recover the target scoped path.
+  const target = url.pathname.slice("/v1/emergency".length); // e.g. "/v1/release"
+  logEvent("warn", "account.emergency_override_used", {
+    request_id: requestId(request),
+    method: request.method,
+    target,
+    client_ip: clientIp(request),
+  });
+
+  // Force the non-isolated path: off mode (customerId null) and no legacy bearer re-check.
+  const emergencyEnv: Env = { ...env, ACCOUNT_TOKEN_MODE: "off", LEASE_ISSUE_BEARER: "" };
+
+  if (request.method === "POST" && (target === "/v1/activate" || target === "/v1/renew")) {
+    return await handleLeaseIssue(request, emergencyEnv, target === "/v1/activate" ? "activate" : "renew", ctx);
+  }
+  if (request.method === "POST" && target === "/v1/checkout") {
+    return await handleSeatCheckout(request, emergencyEnv, ctx);
+  }
+  if (request.method === "POST" && target === "/v1/heartbeat") {
+    return await handleSeatHeartbeat(request, emergencyEnv, ctx);
+  }
+  if (request.method === "POST" && target === "/v1/release") {
+    return await handleSeatRelease(request, emergencyEnv, ctx);
+  }
+  if (request.method === "GET" && target === "/v1/admin/report") {
+    return await handleUsageReport(request, emergencyEnv, ctx);
+  }
+  return json({ ok: false, code: "not_found" }, 404);
+}
+
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx?: ExecutionContextLike): Promise<Response> {
     try {
       const url = new URL(request.url);
       if (request.method === "GET" && url.pathname === "/health") {
@@ -1859,20 +2084,27 @@ export default {
       if (request.method === "POST" && url.pathname === "/v1/orders") {
         return await handleOrderIngest(request, env);
       }
+      // D10 break-glass: a SEPARATE /v1/emergency/* route gated ONLY by EMERGENCY_OPERATOR_BEARER
+      // (constant-time), never reachable from the 6 scoped paths. On match it dispatches the
+      // corresponding handler with isolation FORCED off (non-isolated, customerId null) and logs
+      // loudly. Unset bearer or a non-match => 404/401 (no oracle that the route exists).
+      if (url.pathname.startsWith("/v1/emergency/")) {
+        return await handleEmergencyRoute(request, env, url, ctx);
+      }
       if (request.method === "POST" && (url.pathname === "/v1/activate" || url.pathname === "/v1/renew")) {
-        return await handleLeaseIssue(request, env);
+        return await handleLeaseIssue(request, env, url.pathname === "/v1/activate" ? "activate" : "renew", ctx);
       }
       if (request.method === "POST" && url.pathname === "/v1/checkout") {
-        return await handleSeatCheckout(request, env);
+        return await handleSeatCheckout(request, env, ctx);
       }
       if (request.method === "POST" && url.pathname === "/v1/heartbeat") {
-        return await handleSeatHeartbeat(request, env);
+        return await handleSeatHeartbeat(request, env, ctx);
       }
       if (request.method === "POST" && url.pathname === "/v1/release") {
-        return await handleSeatRelease(request, env);
+        return await handleSeatRelease(request, env, ctx);
       }
       if (request.method === "GET" && url.pathname === "/v1/admin/report") {
-        return await handleUsageReport(request, env);
+        return await handleUsageReport(request, env, ctx);
       }
       return json({ ok: false, code: "not_found" }, 404);
     } catch (error) {
