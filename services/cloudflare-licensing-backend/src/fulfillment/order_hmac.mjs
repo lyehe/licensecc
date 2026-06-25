@@ -41,7 +41,7 @@ export function canonicalOrderSignedText(audience, timestamp, bodyText) {
  * reach for Buffer here so the module bundles identically everywhere. Throws on
  * malformed base64 (callers treat a throw as a hard failure / bad secret).
  */
-function bytesFromBase64(value) {
+export function bytesFromBase64(value) {
   // atob is lenient about some inputs; the secret/sig length checks downstream are
   // what actually gate correctness, so we only need a faithful decode here.
   const binary = atob(value);
@@ -59,7 +59,7 @@ function bytesFromBase64(value) {
  * secret, or a secret shorter than 32 bytes. A null return means "no usable keys"
  * and the caller must reject every request.
  */
-function loadSecretMap(rawJson) {
+export function loadSecretMap(rawJson) {
   if (typeof rawJson !== "string" || rawJson.length === 0) {
     return null;
   }
@@ -104,7 +104,7 @@ function loadSecretMap(rawJson) {
  * key_id of "__proto__"/"constructor"/"hasOwnProperty" can only ever hit a real
  * data entry (or miss), never a forged function/object off Object.prototype.
  */
-function lookupSecret(map, keyId) {
+export function lookupSecret(map, keyId) {
   if (!Object.prototype.hasOwnProperty.call(map, keyId)) {
     return null;
   }

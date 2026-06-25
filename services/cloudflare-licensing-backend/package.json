@@ -11,7 +11,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "npm run build && node --test test/*.mjs test/fulfillment/order_event.test.mjs test/fulfillment/order_hmac.test.mjs test/fulfillment/order_ingest_gates.test.mjs test/fulfillment/order_sign.test.mjs",
+    "test": "npm run build && node --test test/*.mjs test/fulfillment/order_event.test.mjs test/fulfillment/order_hmac.test.mjs test/fulfillment/order_ingest_gates.test.mjs test/fulfillment/order_sign.test.mjs test/auth/account_token.test.mjs",
     "test:sql": "node --experimental-sqlite --test test/sql/*.mjs test/fulfillment/order_ingest_exactly_once.test.mjs",
     "test:e2e": "npm --prefix ../cloudflare-license-admin run build:worker && npm run build && node --test test/e2e/*.mjs",
     "lint": "node scripts/lint.mjs",
