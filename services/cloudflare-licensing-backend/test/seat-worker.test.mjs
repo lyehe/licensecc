@@ -32,9 +32,15 @@ function makeEnv(state, overrides = {}) {
           bind(...args) {
             return {
               async first() {
-                if (sql.includes("FROM entitlements")) return state.entitlement ?? null;
+                // Match ONLY the lookupSeatEntitlement SELECT — not the `FROM entitlements e` EXISTS
+                // that the T7-hardened heartbeat/checkout statements now embed (those must fall through
+                // to the UPDATE/INSERT branches below).
+                if (sql.startsWith("SELECT status, valid_from, valid_until")) return state.entitlement ?? null;
                 if (sql.startsWith("INSERT INTO seat_checkouts")) {
                   state.checkoutAttempts = (state.checkoutAttempts ?? 0) + 1;
+                  // bind order: project, feature, fingerprint, seatId, instance, mode, now, deadline
+                  state.insertedMode = args[5];
+                  state.insertedDeadline = args[7];
                   return state.seatGranted === false ? null : { seat_id: args[3] };
                 }
                 if (sql.startsWith("UPDATE seat_checkouts")) {
@@ -170,6 +176,39 @@ test("heartbeat refreshes a live seat, and returns 410 once reclaimed", async ()
   );
   assert.equal(reclaimed.status, 410);
   assert.equal((await reclaimed.json()).code, "seat_reclaimed");
+});
+
+// T7 revocation SLA — the signed seat token's offline deadline must never outlive the entitlement
+// window. A borrowed seat needs no heartbeat to deny it, so an unclamped max_borrow_sec would grant
+// offline access PAST valid_until; the clamp is the bound.
+test("borrow checkout clamps the seat deadline to valid_until (offline access cannot outlive expiry)", async () => {
+  resetSigningKeyCacheForTests();
+  const now = Math.floor(Date.now() / 1000);
+  const validUntil = now + 100;
+  const state = {
+    entitlement: seatEntitlement({ pool_size: 1, max_borrow_sec: 86400, valid_until: validUntil }),
+  };
+  const res = await worker.fetch(
+    req("/v1/checkout", checkoutBody({ borrow_seconds: 86400 })),
+    makeEnv(state),
+  );
+  assert.equal(res.status, 200);
+  assert.equal(state.insertedMode, "borrowed");
+  // Unclamped this would be now+86400; clamped it is exactly valid_until.
+  assert.equal(state.insertedDeadline, validUntil, "borrow deadline clamped to valid_until");
+  const body = await res.json();
+  assert.ok(body.expires_at <= validUntil, "signed token expiry within the entitlement window");
+});
+
+test("live checkout clamps the seat deadline to valid_until when grace would overrun it", async () => {
+  resetSigningKeyCacheForTests();
+  const now = Math.floor(Date.now() / 1000);
+  const validUntil = now + 10; // sooner than the 900s grace
+  const state = { entitlement: seatEntitlement({ pool_size: 1, heartbeat_grace_sec: 900, valid_until: validUntil }) };
+  const res = await worker.fetch(req("/v1/checkout", checkoutBody()), makeEnv(state));
+  assert.equal(res.status, 200);
+  assert.equal(state.insertedMode, "live");
+  assert.equal(state.insertedDeadline, validUntil, "live deadline clamped to valid_until");
 });
 
 test("release frees the seat (idempotent)", async () => {

@@ -9,8 +9,9 @@ import {
   SEAT_CHECKOUT_ATOMIC_SQL,
   leaseIssuanceSqlOwned,
   seatCheckoutSqlOwned,
-  seatHeartbeatSqlOwned,
+  seatHeartbeatSql,
   seatReleaseSqlOwned,
+  SEAT_OVERCAP_RECLAIM_SQL,
 } from "./lease/issuance_sql.mjs";
 import { summarizeUsage } from "./lease/usage_report.mjs";
 // Slice 1 order-ingest (POST /v1/orders): signed, exactly-once subscription fulfillment.
@@ -720,7 +721,7 @@ function entitlementWithinValidity(row: EntitlementRow, nowSeconds: number): boo
   return true;
 }
 
-function clampToValidUntil(row: EntitlementRow, timestamp: number): number {
+function clampToValidUntil(row: { valid_until?: number | null }, timestamp: number): number {
   const validUntil = boundedTime(row.valid_until);
   return validUntil === null ? timestamp : Math.min(timestamp, validUntil);
 }
@@ -1648,6 +1649,11 @@ async function handleSeatCheckout(request: Request, env: Env, ctx?: ExecutionCon
     mode = "borrowed";
     deadline = now + Math.min(body.borrow_seconds, row.max_borrow_sec);
   }
+  // T7 revocation SLA — clamp the seat deadline (the signed token's offline expiry) to the
+  // entitlement's valid_until. Otherwise a borrowed seat (no heartbeat to deny it) would hold a
+  // signed offline token granting access up to max_borrow_sec PAST the entitlement expiry. After
+  // the clamp, no seat token ever grants access beyond valid_until.
+  deadline = clampToValidUntil(row, deadline);
 
   const ceiling = row.pool_size + (row.allow_overdraft > 0 ? row.allow_overdraft : 0);
   const seatId = crypto.randomUUID();
@@ -1728,8 +1734,10 @@ async function handleSeatCheckout(request: Request, env: Env, ctx?: ExecutionCon
   });
 
   // Lazy reclamation on the hot path; a Cron Trigger (scheduled, below) also sweeps so idle
-  // entitlements with no further checkouts still get their seats reclaimed promptly.
+  // entitlements with no further checkouts still get their seats reclaimed promptly. T7: also
+  // reclaim seats above a downgraded pool ceiling so a capacity cut takes effect promptly.
   await sweepLapsedSeats(env, now);
+  await reclaimOvercapSeats(env, now);
 
   let assertion: string;
   try {
@@ -1776,22 +1784,21 @@ async function handleSeatHeartbeat(request: Request, env: Env, ctx?: ExecutionCo
   }
 
   const grace = row.heartbeat_grace_sec > 0 ? row.heartbeat_grace_sec : SEAT_DEFAULT_GRACE_SEC;
-  const deadline = now + grace;
-  // Refresh only a still-live, non-borrowed seat; a reclaimed/expired seat yields no row. off =>
-  // original UPDATE; soft/required => the owned UPDATE adds an ownership EXISTS so A can never
-  // heartbeat B's seat (bind order: deadline, project, feature, fingerprint, seat_id, now, customer_id).
+  // T7: clamp the refreshed deadline (and the signed token's expiry) to valid_until, so a heartbeat
+  // taken just before expiry never grants offline access past the entitlement window.
+  const deadline = clampToValidUntil(row, now + grace);
+  // Refresh only a still-live, non-borrowed seat; a reclaimed/expired seat yields no row. T7: the
+  // UPDATE now re-asserts status='active'+validity atomically (off omits the customer conjunct;
+  // soft/required add it so A can never heartbeat B's seat), closing the revoke/expire TOCTOU the
+  // pre-read alone left open. Bind order: deadline, project, feature, fingerprint, seat_id, now,
+  // now, now [, customer_id for soft/required].
   let refreshed: boolean;
   try {
-    const updated =
-      isolation.mode === "off"
-        ? await env.DB.prepare(
-            "UPDATE seat_checkouts SET heartbeat_deadline = ? WHERE project = ? AND feature = ? AND license_fingerprint = ? AND seat_id = ? AND mode = 'live' AND heartbeat_deadline > ? RETURNING seat_id",
-          )
-            .bind(deadline, body.project, body.feature, body.license_fingerprint, body.seat_id, now)
-            .first<{ seat_id: string }>()
-        : await env.DB.prepare(seatHeartbeatSqlOwned(isolation.mode))
-            .bind(deadline, body.project, body.feature, body.license_fingerprint, body.seat_id, now, isolation.customerId)
-            .first<{ seat_id: string }>();
+    const binds: unknown[] = [deadline, body.project, body.feature, body.license_fingerprint, body.seat_id, now, now, now];
+    if (isolation.mode !== "off") {
+      binds.push(isolation.customerId);
+    }
+    const updated = await env.DB.prepare(seatHeartbeatSql(isolation.mode)).bind(...binds).first<{ seat_id: string }>();
     refreshed = updated !== null;
   } catch {
     return json({ ok: false, code: "verification_error" }, 503);
@@ -1925,6 +1932,32 @@ async function sweepLapsedSeats(env: Env, now: number): Promise<void> {
     }
   } catch {
     // best-effort: reclamation is not load-bearing for any single request
+  }
+}
+
+// T7 downgrade reclaim — reclaim LIVE seats above an entitlement's CURRENT pool ceiling (after a
+// capacity downgrade), latest-alive kept. Each reclaimed seat records a 'reclaim' at its deadline
+// under its own entitlement, so the client's next heartbeat denies (seat_reclaimed) and over-cap
+// access ends within one sweep + grace. Best-effort, like sweepLapsedSeats; run on the checkout hot
+// path and the cron. Distinct from the lapsed sweep (which frees EXPIRED seats); this frees still-
+// live but now-over-capacity seats.
+async function reclaimOvercapSeats(env: Env, now: number): Promise<void> {
+  try {
+    const reclaimed = await env.DB.prepare(SEAT_OVERCAP_RECLAIM_SQL)
+      .bind(now, now)
+      .all<{ project: string; feature: string; license_fingerprint: string; seat_id: string; heartbeat_deadline: number }>();
+    for (const seat of reclaimed.results ?? []) {
+      await recordUsageEvent(env, {
+        project: seat.project,
+        feature: seat.feature,
+        fingerprint: seat.license_fingerprint,
+        event_type: "reclaim",
+        seat_id: seat.seat_id,
+        ts: now,
+      });
+    }
+  } catch {
+    // best-effort: downgrade reclamation is not load-bearing for any single request
   }
 }
 
@@ -2123,6 +2156,7 @@ export default {
   async scheduled(_event: unknown, env: Env): Promise<void> {
     const now = Math.floor(Date.now() / 1000);
     await sweepLapsedSeats(env, now);
+    await reclaimOvercapSeats(env, now);
     try {
       await env.DB.prepare("DELETE FROM usage_events WHERE ts < ?").bind(now - USAGE_EVENT_RETENTION_SEC).run();
     } catch {

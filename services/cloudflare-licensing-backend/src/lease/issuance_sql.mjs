@@ -108,11 +108,21 @@ export function seatCheckoutSqlOwned(mode) {
   );
 }
 
-// Heartbeat UPDATE with the ownership EXISTS. The EXISTS correlates to the seat_checkouts row
-// being updated (so the tuple is taken from the row, not re-bound) and adds only the customer
-// conjunct. Bind order (7 params): deadline, project, feature, license_fingerprint, seat_id,
-// now, customer_id.
-export function seatHeartbeatSqlOwned(mode) {
+// T7 revocation SLA — heartbeat UPDATE that ATOMICALLY re-asserts the entitlement is still
+// active AND inside its validity window, so a revoke/disable/expire landing between the handler's
+// pre-read and this UPDATE denies the refresh (closing the one-heartbeat TOCTOU the pre-read alone
+// left open). Without this, a revoked entitlement's live seats keep extending their deadline forever
+// and the revocation never takes effect. The EXISTS correlates to the row being updated (tuple taken
+// from seat_checkouts, not re-bound); soft/required additionally fold the customer ownership conjunct
+// (so A can never heartbeat B's seat). `off` is NOT customer-bound — it must omit the customer
+// predicate (a null customer_id would match nothing and deny every off-mode heartbeat).
+//
+// Bind order:
+//   off:          deadline, project, feature, license_fingerprint, seat_id, now, now, now
+//   soft/required: ...the same 8... , customer_id
+// (the three trailing `now`s: heartbeat_deadline > now, valid_from <= now, valid_until > now.)
+export function seatHeartbeatSql(mode) {
+  const customer = mode === "off" ? "" : `AND ${ownershipCustomerPredicate(mode)} `;
   return (
     "UPDATE seat_checkouts SET heartbeat_deadline = ? " +
     "WHERE project = ? AND feature = ? AND license_fingerprint = ? AND seat_id = ? " +
@@ -120,10 +130,33 @@ export function seatHeartbeatSqlOwned(mode) {
     "AND EXISTS (SELECT 1 FROM entitlements e " +
     "WHERE e.project = seat_checkouts.project AND e.feature = seat_checkouts.feature " +
     "AND e.license_fingerprint = seat_checkouts.license_fingerprint " +
-    `AND ${ownershipCustomerPredicate(mode)}) ` +
-    "RETURNING seat_id"
+    "AND e.status = 'active' " +
+    "AND (e.valid_from IS NULL OR e.valid_from <= ?) " +
+    "AND (e.valid_until IS NULL OR e.valid_until > ?) " +
+    customer +
+    ") RETURNING seat_id"
   );
 }
+
+// T7 downgrade reclaim — when an entitlement's capacity is lowered (pool_size / allow_overdraft),
+// the existing LIVE seats above the new ceiling keep heartbeating and the downgrade never takes
+// effect. This sweep reclaims the overflow: a live seat is deleted when at least `ceiling` OTHER
+// still-live seats (any mode — a borrowed seat holds a signed offline slot) outrank it by
+// heartbeat_deadline (latest-alive kept, ties broken by seat_id). Reclaiming the row makes the
+// client's next heartbeat deny (seat_reclaimed), so over-capacity access ends within one sweep +
+// grace. Only `mode='live'` rows are reclaimed (a borrowed seat's signed token can't be recalled).
+// Bind order (2 params): now, now.
+export const SEAT_OVERCAP_RECLAIM_SQL =
+  "DELETE FROM seat_checkouts WHERE seat_id IN (" +
+  "SELECT sc.seat_id FROM seat_checkouts sc " +
+  "JOIN entitlements e ON e.project = sc.project AND e.feature = sc.feature AND e.license_fingerprint = sc.license_fingerprint " +
+  "WHERE sc.mode = 'live' AND sc.heartbeat_deadline > ? " +
+  "AND (SELECT COUNT(*) FROM seat_checkouts s2 " +
+  "WHERE s2.project = sc.project AND s2.feature = sc.feature AND s2.license_fingerprint = sc.license_fingerprint " +
+  "AND s2.heartbeat_deadline > ? " +
+  "AND (s2.heartbeat_deadline > sc.heartbeat_deadline OR (s2.heartbeat_deadline = sc.heartbeat_deadline AND s2.seat_id > sc.seat_id))" +
+  ") >= (e.pool_size + CASE WHEN e.allow_overdraft > 0 THEN e.allow_overdraft ELSE 0 END)" +
+  ") RETURNING project, feature, license_fingerprint, seat_id, heartbeat_deadline";
 
 // Release DELETE with the ownership EXISTS. Bind order (5 params): project, feature,
 // license_fingerprint, seat_id, customer_id. 0 rows freed (wrong owner / absent) is idempotent
