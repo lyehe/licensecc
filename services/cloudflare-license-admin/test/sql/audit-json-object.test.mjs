@@ -16,7 +16,11 @@ import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const migrationsDir = join(here, "..", "..", "..", "cloudflare-licensing-backend", "migrations");
-const workerSource = join(here, "..", "..", "src", "worker", "index.ts");
+// eventFromCurrentStatement moved into the shared @licensecc/cloudflare-licensing-backend
+// entitlement_mutation core (T2 extraction); read the json_object expression from there, not
+// from src/worker/index.ts (which no longer contains it). Mirrors the drift-guard in
+// admin-worker.test.mjs so both point at the single canonical source.
+const mutationSource = fileURLToPath(import.meta.resolve("@licensecc/cloudflare-licensing-backend/entitlements/entitlement_mutation"));
 
 // The audit payload contract: the exact keys the production json_object emits (+ no others).
 const NEXT_JSON_KEYS = [
@@ -49,7 +53,7 @@ function freshDb() {
 // Extract the literal json_object(...) expression from eventFromCurrentStatement so the test runs the SAME
 // SQL the Worker ships (not a hand-copied duplicate that could silently drift).
 function productionJsonObjectExpression() {
-  const src = readFileSync(workerSource, "utf8");
+  const src = readFileSync(mutationSource, "utf8");
   const match = /function eventFromCurrentStatement\([\s\S]*?(json_object\([\s\S]*?\)),\s*\n/.exec(src);
   assert.ok(match, "could not locate eventFromCurrentStatement json_object expression");
   // The only bind placeholder inside the expression is the entitlement id ('id', ?); substitute a literal.
