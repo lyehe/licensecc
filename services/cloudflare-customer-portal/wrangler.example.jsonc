@@ -1,0 +1,51 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "licensecc-customer-portal",
+  "main": "src/worker/index.ts",
+  "compatibility_date": "2026-06-24",
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  },
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application"
+  },
+  // Single source of truth: bind the SAME entitlements D1 as the licensing-backend Worker
+  // (database_name identical to its wrangler). One database, one audit log, no split-brain.
+  // The licensing-backend owns the migrations (incl. 0016 portal_otp/portal_sessions); the
+  // portal runs none of its own — migrations_dir points at the backend so a stray
+  // `wrangler d1 migrations apply` here cannot diverge the schema.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "licensecc-online-verifier",
+      "database_id": "replace-with-d1-database-id",
+      "migrations_dir": "../cloudflare-licensing-backend/migrations"
+    }
+  ],
+  "vars": {
+    "ENVIRONMENT": "development",
+    // Invariant 7: the portal /health asserts the backend is in required mode (full account
+    // isolation). The portal proxies to the backend with per-action account tokens, so the
+    // backend MUST enforce isolation.
+    "ACCOUNT_TOKEN_MODE": "required",
+    // The portal's public origin — used to build magic-link URLs. NEVER taken from the request
+    // Host header (invariant 6); always this configured value.
+    "PORTAL_PUBLIC_ORIGIN": "https://portal.example.com",
+    // The licensing-backend origin the portal proxies per-action account tokens to (POST /v1/*).
+    "BACKEND_ORIGIN": "https://licensecc-online-verifier.example.workers.dev",
+    // Resend (or compatible) transactional email. email_unconfigured does NOT 503 — it falls
+    // back to operator bootstrap (blueprint (e)). Set the API key as a Worker SECRET.
+    "PORTAL_EMAIL_FROM": "",
+    "PORTAL_EMAIL_API_BASE": "https://api.resend.com"
+    // Secrets (wrangler secret put):
+    //   PORTAL_OTP_PEPPERS         JSON { key_id: base64-secret(>=32 bytes) } — OTP HMAC-at-rest
+    //   PORTAL_SESSION_PEPPERS     JSON { key_id: base64-secret(>=32 bytes) } — session HMAC-at-rest
+    //   ACCOUNT_TOKEN_PEPPERS      JSON { key_id: base64-secret } — mints the per-action account token
+    //   PORTAL_EMAIL_API_KEY       Resend API key (transactional email)
+    //   PORTAL_BOOTSTRAP_BEARER    break-glass operator OTP issuance (unset in steady state)
+    //   PORTAL_BOOTSTRAP_REQUIRE_ACCESS  "1" to require a Cloudflare Access JWT on bootstrap
+  }
+}

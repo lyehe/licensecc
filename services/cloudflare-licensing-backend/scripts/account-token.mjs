@@ -16,10 +16,27 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { generateAccountToken, hashToken, loadPepperMap } from "../src/auth/account_token.mjs";
+import {
+  buildIssue,
+  eventSql,
+  insertTokenSqlGuarded,
+  newTokenId,
+  nowEpoch,
+  sqlNullableString,
+  sqlString,
+  validatedEpoch,
+  validatedId,
+  validatedName,
+  validatedScopes,
+  validatedText,
+} from "../src/auth/account_token_issue.mjs";
 import { bytesFromBase64 } from "../src/fulfillment/order_hmac.mjs";
 
+// Re-exported so the existing CLI unit tests can import buildIssue / insertTokenSqlGuarded from
+// scripts/account-token.mjs unchanged after the extraction into account_token_issue.mjs.
+export { buildIssue, insertTokenSqlGuarded };
+
 const DEFAULT_DATABASE = "licensecc-online-verifier";
-const NAME = /^[A-Za-z0-9_.:-]+$/;
 const HEX_64 = /^[0-9a-fA-F]{64}$/;
 const textEncoder = new TextEncoder();
 
@@ -74,46 +91,11 @@ function parseArgs(argv) {
 // Validators (mirror entitlement.mjs).
 // ---------------------------------------------------------------------------
 
-function validatedName(value, label, maxLength) {
-  if (typeof value !== "string" || value.length === 0 || value.length > maxLength || !NAME.test(value)) {
-    throw new Error(`${label} must be 1-${maxLength} characters using letters, digits, _, ., :, or -`);
-  }
-  return value;
-}
-
 function validatedHex(value, label) {
   if (typeof value !== "string" || !HEX_64.test(value)) {
     throw new Error(`${label} must be exactly 64 hex characters`);
   }
   return value.toLowerCase();
-}
-
-function validatedId(value, label, maxLength) {
-  if (typeof value !== "string" || value.length === 0 || value.length > maxLength || /[\0\r\n']/.test(value)) {
-    throw new Error(`${label} must be 1-${maxLength} characters without quotes or control line breaks`);
-  }
-  return value;
-}
-
-function validatedText(value, label, maxLength, required = false) {
-  if (value === undefined || value === "") {
-    if (required) {
-      throw new Error(`${label} is required`);
-    }
-    return "";
-  }
-  if (typeof value !== "string" || value.length > maxLength || /[\0\r\n]/.test(value)) {
-    throw new Error(`${label} must be at most ${maxLength} characters without control line breaks`);
-  }
-  return value;
-}
-
-function validatedEpoch(value, label) {
-  const n = Number(value);
-  if (!Number.isInteger(n) || n < 0 || n > Number.MAX_SAFE_INTEGER || String(n) !== String(value)) {
-    throw new Error(`${label} must be a non-negative integer epoch (canonical form)`);
-  }
-  return n;
 }
 
 function validatedOverlap(value) {
@@ -127,71 +109,11 @@ function validatedOverlap(value) {
   return n;
 }
 
-function validatedScopes(options) {
-  const all = options["scopes-all"] === true;
-  const explicit = options.scopes;
-  // F5/I3: scopes is MANDATORY unless --scopes-all. No implicit {} master credential.
-  if (!all && (explicit === undefined || explicit === "")) {
-    throw new Error("issue requires explicit scopes: pass --scopes <json> or --scopes-all (no implicit master)");
-  }
-  if (all && explicit !== undefined) {
-    throw new Error("pass exactly one of --scopes or --scopes-all");
-  }
-  if (all) {
-    return JSON.stringify({ allow_all: true });
-  }
-  let parsed;
-  try {
-    parsed = JSON.parse(explicit);
-  } catch {
-    throw new Error("--scopes must be valid JSON");
-  }
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-    throw new Error("--scopes must be a JSON object");
-  }
-  if (parsed.allow_all !== true) {
-    const hasAxis = ["projects", "features", "operations"].some((k) => k in parsed);
-    if (!hasAxis) {
-      // An object with no allow_all and no axis denies everything (fail-closed) — refuse to mint a dead token.
-      throw new Error("--scopes must set allow_all:true or at least one of projects/features/operations");
-    }
-  }
-  // Re-serialize canonically so the stored value is exactly what tokenAllows() will parse.
-  return JSON.stringify(parsed);
-}
-
-function nowEpoch() {
-  return Math.floor(Date.now() / 1000);
-}
-
-function newTokenId() {
-  const r = new Uint8Array(16);
-  crypto.getRandomValues(r);
-  let hex = "";
-  for (const b of r) hex += b.toString(16).padStart(2, "0");
-  return `acct_${hex}`;
-}
-
 // ---------------------------------------------------------------------------
 // SQL helpers (mirror entitlement.mjs — single-quote escaping; CLI stamps cli/cli).
+// sqlString / sqlNullableString / eventSql / buildIssue / insertTokenSqlGuarded are imported from
+// ../src/auth/account_token_issue.mjs (the Worker-safe pure issue builders).
 // ---------------------------------------------------------------------------
-
-function sqlString(value) {
-  return `'${String(value).replace(/'/g, "''")}'`;
-}
-
-function sqlNullableString(value) {
-  return value === null || value === undefined || value === "" ? "NULL" : sqlString(value);
-}
-
-// Audit row for account_token_events. NEVER include the raw token (L10): we only ever pass the
-// token id, customer id, and operator-supplied reason.
-function eventSql({ accountTokenId, customerId, eventType, actor, reason = "" }) {
-  return (
-    `INSERT INTO account_token_events (account_token_id, customer_id, event_type, actor, actor_type, source, reason, request_id, created_at) ` +
-    `VALUES (${sqlString(accountTokenId)}, ${sqlString(customerId)}, ${sqlString(eventType)}, ${sqlString(actor)}, 'cli', 'cli', ${sqlString(reason)}, 'cli-' || lower(hex(randomblob(8))), unixepoch())`
-  );
-}
 
 // Bump (or create) the per-customer revocation floor. revoke / revoke-customer / merge call this so
 // the resolver's process-local floor rejects replica-stale 'active' rows after an emergency revoke.
@@ -223,49 +145,8 @@ async function mintTokenHmac(rawToken, pepperKeyId, pepperBytes) {
   return hashToken(pepperBytes, textEncoder.encode(rawToken));
 }
 
-/**
- * issue — require an explicit scope set (F5), a finite future expiry, and a named pepper. Generates
- * a token, hashes it under the pepper, and returns a single batch (token INSERT + 'issue' audit row).
- * The plaintext token is returned in the echo for one-time printing and is NEVER in the SQL.
- */
-export async function buildIssue(options, { now = nowEpoch(), pepperBytes, generated } = {}) {
-  const customerId = validatedId(options["customer-id"], "customer-id", 128);
-  const name = validatedText(options.name, "name", 128, true);
-  const scopesJson = validatedScopes(options);
-  const expiresAt = validatedEpoch(options["expires-at"], "expires-at");
-  if (expiresAt <= now) {
-    throw new Error("expires-at must be strictly greater than now");
-  }
-  const pepperKeyId = validatedName(options["pepper-key-id"] ?? "p1", "pepper-key-id", 128);
-  const actor = validatedText(options.actor, "actor", 128) || "cli";
-  if (pepperBytes === undefined) {
-    throw new Error("issue requires pepper bytes (--pepper-secret-b64 or ACCOUNT_TOKEN_PEPPERS)");
-  }
-
-  const token = generated ?? generateAccountToken();
-  const id = options._idOverride ?? newTokenId();
-  const tokenHmac = await mintTokenHmac(token.raw, pepperKeyId, pepperBytes);
-  // The token INSERT is guarded by a WHERE EXISTS on customers(active): "customer must exist+active"
-  // is an atomic SQL conjunct (no TOCTOU). A missing/disabled customer changes 0 rows (the wrapper
-  // reports the no-op + exit 3); the FK on account_tokens.customer_id is the belt-and-suspenders.
-  const sql = [
-    insertTokenSqlGuarded({ id, customerId, tokenHmac, pepperKeyId, tokenPrefix: token.token_prefix, name, scopesJson, expiresAt, actor }),
-    eventSql({ accountTokenId: id, customerId, eventType: "issue", actor, reason: name }),
-  ].join(";\n");
-
-  return { sql, id, tokenHmac, pepperKeyId, plaintext: token.raw, tokenPrefix: token.token_prefix, customerId, scopesJson, expiresAt };
-}
-
-// Token INSERT guarded so it inserts ONLY when the customer exists and is active. INSERT...SELECT
-// with a WHERE EXISTS makes "customer must exist+active" an atomic SQL conjunct (no TOCTOU): a
-// missing/disabled customer changes 0 rows (the wrapper reports the no-op).
-function insertTokenSqlGuarded({ id, customerId, tokenHmac, pepperKeyId, tokenPrefix, name, scopesJson, expiresAt, actor }) {
-  return (
-    `INSERT INTO account_tokens (id, customer_id, token_hmac, pepper_key_id, token_prefix, name, scopes_json, status, expires_at, last_used_at, replaced_by, created_by, created_at, updated_at) ` +
-    `SELECT ${sqlString(id)}, ${sqlString(customerId)}, ${sqlString(tokenHmac)}, ${sqlString(pepperKeyId)}, ${sqlString(tokenPrefix)}, ${sqlNullableString(name)}, ${sqlString(scopesJson)}, 'active', ${expiresAt}, NULL, NULL, ${sqlString(actor)}, unixepoch(), unixepoch() ` +
-    `WHERE EXISTS (SELECT 1 FROM customers WHERE id = ${sqlString(customerId)} AND status = 'active')`
-  );
-}
+// buildIssue + insertTokenSqlGuarded now live in ../src/auth/account_token_issue.mjs (Worker-safe)
+// and are imported above; re-exported from this module so the CLI tests' import sites are unchanged.
 
 /**
  * rotate — issue a NEW row (new raw, SAME customer/scopes/pepper unless overridden), point the OLD

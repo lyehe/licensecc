@@ -2133,5 +2133,18 @@ export default {
     } catch {
       // best-effort
     }
+    // Slice 3 customer-portal sweep: expired one-time OTP rows and revoked/expired sessions. Both
+    // are short-TTL auth artifacts (blueprint (b)); leaving them only grows the table — the auth
+    // path never serves an expired/consumed row, so deletion is purely housekeeping.
+    try {
+      await env.DB.prepare("DELETE FROM portal_otp WHERE expires_at < ?").bind(now).run();
+    } catch {
+      // best-effort
+    }
+    try {
+      await env.DB.prepare("DELETE FROM portal_sessions WHERE status = 'revoked' OR expires_at < ?").bind(now).run();
+    } catch {
+      // best-effort
+    }
   },
 };

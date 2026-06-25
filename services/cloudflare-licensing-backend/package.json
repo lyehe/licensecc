@@ -7,6 +7,18 @@
     "./entitlements/entitlement_mutation": {
       "types": "./src/entitlements/entitlement_mutation.d.ts",
       "default": "./src/entitlements/entitlement_mutation.mjs"
+    },
+    "./auth/account_token_issue": {
+      "default": "./src/auth/account_token_issue.mjs"
+    },
+    "./auth/account_token": {
+      "default": "./src/auth/account_token.mjs"
+    },
+    "./auth/account_auth": {
+      "default": "./src/auth/account_auth.mjs"
+    },
+    "./lease/usage_report": {
+      "default": "./src/lease/usage_report.mjs"
     }
   },
   "scripts": {

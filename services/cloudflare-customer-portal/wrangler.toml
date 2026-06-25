@@ -1,0 +1,33 @@
+name = "licensecc-customer-portal-test"
+main = "src/worker/index.ts"
+compatibility_date = "2026-06-24"
+workers_dev = true
+preview_urls = false
+
+[observability]
+enabled = true
+head_sampling_rate = 1
+
+[assets]
+directory = "./dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+
+[vars]
+ENVIRONMENT = "staging"
+# Invariant 7: /health asserts the backend runs in required mode (full account isolation).
+ACCOUNT_TOKEN_MODE = "required"
+PORTAL_PUBLIC_ORIGIN = "https://licensecc-customer-portal-test.splattingworks.workers.dev"
+BACKEND_ORIGIN = "https://licensecc-online-verifier-test.splattingworks.workers.dev"
+PORTAL_EMAIL_FROM = ""
+PORTAL_EMAIL_API_BASE = "https://api.resend.com"
+
+# Single source of truth: the portal Worker binds the SAME entitlements D1 as the
+# licensing-backend Worker (here, the shared verifier-test DB). One database, one audit
+# log, no split-brain. The licensing-backend owns the migrations; the portal runs none of
+# its own — point migrations_dir at the backend's migrations.
+[[d1_databases]]
+binding = "DB"
+database_name = "licensecc-online-verifier-test"
+database_id = "3fdd9f7a-fc1c-452c-a838-e1aa9e0cef4b"
+migrations_dir = "../cloudflare-licensing-backend/migrations"

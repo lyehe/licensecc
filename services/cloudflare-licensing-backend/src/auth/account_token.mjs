@@ -12,6 +12,10 @@
 
 import { loadSecretMap } from "../fulfillment/order_hmac.mjs";
 
+// Re-exported so Worker-safe consumers (e.g. the customer portal's OTP/session HMAC-at-rest) can
+// load a versioned pepper map via the SAME fail-closed loader without reaching into order_hmac.mjs.
+export { loadSecretMap };
+
 const TOKEN_PREFIX = "lcca_";
 const PREFIX_DISPLAY_LEN = 12;
 const TOKEN_BYTES = 32;            // 256-bit body
