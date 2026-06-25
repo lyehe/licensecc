@@ -273,3 +273,49 @@ CREATE TABLE IF NOT EXISTS order_ingest_nonces (
 
 CREATE INDEX IF NOT EXISTS idx_order_ingest_nonces_expires_at
   ON order_ingest_nonces(expires_at);
+
+CREATE TABLE IF NOT EXISTS account_tokens (
+  id TEXT PRIMARY KEY,
+  customer_id TEXT NOT NULL,
+  token_hmac TEXT NOT NULL,
+  pepper_key_id TEXT NOT NULL,
+  token_prefix TEXT NOT NULL,
+  name TEXT NOT NULL DEFAULT '',
+  scopes_json TEXT NOT NULL DEFAULT '{}',
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'revoked', 'disabled')),
+  expires_at INTEGER NOT NULL,
+  last_used_at INTEGER NULL,
+  replaced_by TEXT NULL,
+  created_by TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE,
+  FOREIGN KEY (replaced_by) REFERENCES account_tokens(id) ON DELETE SET NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_account_tokens_hmac ON account_tokens(token_hmac);
+CREATE INDEX IF NOT EXISTS idx_account_tokens_customer ON account_tokens(customer_id);
+CREATE INDEX IF NOT EXISTS idx_account_tokens_status ON account_tokens(status);
+
+CREATE TABLE IF NOT EXISTS account_token_revocations (
+  customer_id TEXT PRIMARY KEY,
+  revocation_seq INTEGER NOT NULL DEFAULT 0,
+  updated_at INTEGER NOT NULL,
+  FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS account_token_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  account_token_id TEXT NOT NULL,
+  customer_id TEXT NOT NULL,
+  event_type TEXT NOT NULL CHECK (event_type IN ('issue', 'rotate', 'revoke', 'revoke-customer', 'repepper', 'merge')),
+  actor TEXT NOT NULL DEFAULT '',
+  actor_type TEXT NOT NULL DEFAULT 'unknown' CHECK (actor_type IN ('access', 'dev', 'cli', 'sync', 'system', 'unknown')),
+  source TEXT NOT NULL DEFAULT 'admin',
+  reason TEXT NOT NULL DEFAULT '',
+  request_id TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_account_token_events_token ON account_token_events(account_token_id);
+CREATE INDEX IF NOT EXISTS idx_account_token_events_customer ON account_token_events(customer_id);
