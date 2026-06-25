@@ -291,3 +291,63 @@ code {
     grid-template-columns: 1fr;
   }
 }
+
+/* Pagination footer under each list table. */
+.tableFooter {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  padding: 8px 2px 2px;
+}
+
+/* Destructive action buttons (Revoke entitlement, Disable customer, modal Confirm). */
+button.danger {
+  border-color: #c2796f;
+  color: #8b3028;
+}
+
+button.danger:hover:not(:disabled) {
+  background: #8b3028;
+  border-color: #8b3028;
+  color: #ffffff;
+}
+
+/* Typed-confirm modal for irreversible / broad-blast actions. */
+.modalOverlay {
+  align-items: center;
+  background: rgba(27, 31, 35, 0.45);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding: 16px;
+  position: fixed;
+  z-index: 50;
+}
+
+.modal {
+  background: #ffffff;
+  border-radius: 10px;
+  box-shadow: 0 12px 40px rgba(27, 31, 35, 0.25);
+  max-width: 460px;
+  padding: 20px 22px;
+  width: 100%;
+}
+
+.modal.danger {
+  border-top: 4px solid #8b3028;
+}
+
+.modal h2 {
+  margin: 0 0 8px;
+}
+
+.modal p {
+  color: #485047;
+  line-height: 1.4;
+  margin: 0 0 12px;
+}
+
+.modal .actions {
+  justify-content: flex-end;
+  margin-top: 14px;
+}

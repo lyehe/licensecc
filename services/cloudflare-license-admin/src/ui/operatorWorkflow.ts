@@ -227,3 +227,20 @@ export function formatEpoch(value: number | null | undefined): string {
   }
   return new Date(value * 1000).toLocaleString();
 }
+
+// Append a `cursor` query param to an admin list path (which may already carry filters), for the
+// "Load more" pager that consumes the API's next_cursor. Pure so the pagination URL is unit-tested.
+export function withCursor(path: string, cursor: string): string {
+  return `${path}${path.includes("?") ? "&" : "?"}cursor=${encodeURIComponent(cursor)}`;
+}
+
+// Confirmation copy for the irreversible / broad-blast operator actions, echoing the exact target so
+// the typed-confirm modal can never fire on the wrong row. Pure (unit-tested).
+export function revokeEntitlementConfirm(item: { project: string; feature: string; license_fingerprint: string }): string {
+  return `Revoke the entitlement for ${item.project} / ${item.feature} (fingerprint ${shortHash(item.license_fingerprint)}). This is TERMINAL and cannot be undone.`;
+}
+
+export function disableCustomerConfirm(customer: { id: string; name: string }): string {
+  const who = customer.name !== "" ? `${customer.name} (${customer.id})` : customer.id;
+  return `Disable customer ${who}. This immediately severs all of their license/token auth and customer-portal access until you re-enable them.`;
+}

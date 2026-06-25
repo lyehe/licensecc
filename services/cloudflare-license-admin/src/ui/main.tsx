@@ -8,6 +8,7 @@ import {
   customerDetailPath,
   customerTransitionPath,
   customersPath,
+  disableCustomerConfirm,
   editFormFromEntitlement,
   emptyEntitlementEditForm,
   emptyEntitlementForm,
@@ -18,8 +19,10 @@ import {
   normalizeEntitlementPatch,
   ordersPath,
   patchPath,
+  revokeEntitlementConfirm,
   shortHash,
   transitionPath,
+  withCursor,
 } from "./operatorWorkflow";
 import "./styles.css";
 
@@ -207,6 +210,16 @@ function App(): React.ReactElement {
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
 
+  // Pagination cursors: the API returns next_cursor for each list; null = no more pages.
+  const [entitlementsCursor, setEntitlementsCursor] = useState<string | null>(null);
+  const [customersCursor, setCustomersCursor] = useState<string | null>(null);
+  const [licensesCursor, setLicensesCursor] = useState<string | null>(null);
+
+  // Typed-confirm modal for irreversible / broad-blast actions (Revoke entitlement, Disable customer).
+  const [confirmAction, setConfirmAction] = useState<
+    { title: string; body: string; requiresReason: boolean; run: () => Promise<void> } | null
+  >(null);
+
   const [customers, setCustomers] = useState<CustomerListItem[]>([]);
   const [customerFilter, setCustomerFilter] = useState({ status: "", q: "" });
   const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
@@ -231,14 +244,53 @@ function App(): React.ReactElement {
   async function refresh(): Promise<void> {
     const [summaryResponse, entitlementResponse, eventResponse] = await Promise.all([
       api<Summary>("/api/admin/summary"),
-      api<{ items: EntitlementRecord[] }>(entitlementsUrl),
+      api<{ items: EntitlementRecord[]; next_cursor: string | null }>(entitlementsUrl),
       api<{ items: EventItem[] }>("/api/admin/events"),
     ]);
     if (summaryResponse.ok && summaryResponse.data) setSummary(summaryResponse.data);
-    if (entitlementResponse.ok && entitlementResponse.data) setEntitlements(entitlementResponse.data.items);
+    if (entitlementResponse.ok && entitlementResponse.data) {
+      setEntitlements(entitlementResponse.data.items);
+      setEntitlementsCursor(entitlementResponse.data.next_cursor ?? null);
+    }
     if (eventResponse.ok && eventResponse.data) setEvents(eventResponse.data.items);
     const failed = [summaryResponse, entitlementResponse, eventResponse].find((item) => !item.ok);
     if (failed) setMessage(`${failed.code} (${failed.request_id})`);
+  }
+
+  // Fetch the next page (cursor != null) for a flat-list resource and APPEND it. The API returns
+  // next_cursor; this consumes it so operators can page past the first 50/100 rows (without it,
+  // every list was silently first-page-only).
+  async function loadMore<T>(
+    url: string,
+    cursor: string | null,
+    setItems: React.Dispatch<React.SetStateAction<T[]>>,
+    setCursor: React.Dispatch<React.SetStateAction<string | null>>,
+  ): Promise<void> {
+    if (cursor === null) {
+      return;
+    }
+    const response = await api<{ items: T[]; next_cursor: string | null }>(withCursor(url, cursor));
+    if (response.ok && response.data) {
+      const data = response.data;
+      setItems((prev) => [...prev, ...data.items]);
+      setCursor(data.next_cursor ?? null);
+    } else {
+      setMessage(`${response.code} (${response.request_id})`);
+    }
+  }
+
+  // Orders carry their cursor inside the OrdersResponse (alongside the summary), so they page separately.
+  async function loadMoreOrders(): Promise<void> {
+    if (orders === null || orders.next_cursor === null) {
+      return;
+    }
+    const response = await api<OrdersResponse>(withCursor(ordersUrl, orders.next_cursor));
+    if (response.ok && response.data) {
+      const data = response.data;
+      setOrders((prev) => (prev === null ? data : { ...data, items: [...prev.items, ...data.items] }));
+    } else {
+      setMessage(`${response.code} (${response.request_id})`);
+    }
   }
 
   useEffect(() => {
@@ -263,6 +315,7 @@ function App(): React.ReactElement {
       const response = await api<{ items: CustomerListItem[]; next_cursor: string | null }>(customersUrl);
       if (response.ok && response.data) {
         setCustomers(response.data.items);
+        setCustomersCursor(response.data.next_cursor ?? null);
       } else {
         setMessage(`${response.code} (${response.request_id})`);
       }
@@ -284,6 +337,7 @@ function App(): React.ReactElement {
       const response = await api<{ items: LicenseListItem[]; next_cursor: string | null }>(licensesUrl);
       if (response.ok && response.data) {
         setLicenses(response.data.items);
+        setLicensesCursor(response.data.next_cursor ?? null);
       } else {
         setMessage(`${response.code} (${response.request_id})`);
       }
@@ -343,10 +397,37 @@ function App(): React.ReactElement {
         const listResponse = await api<{ items: CustomerListItem[]; next_cursor: string | null }>(customersUrl);
         if (listResponse.ok && listResponse.data) {
           setCustomers(listResponse.data.items);
+          setCustomersCursor(listResponse.data.next_cursor ?? null);
         }
       }
     });
   }
+
+  // Typed-confirm gate for irreversible / broad-blast actions. The action only fires from the modal's
+  // Confirm, which (for reason-required actions) stays disabled until a reason is entered.
+  function requestConfirm(action: { title: string; body: string; requiresReason: boolean; run: () => Promise<void> }): void {
+    setConfirmAction(action);
+  }
+
+  async function confirmProceed(): Promise<void> {
+    const action = confirmAction;
+    if (action === null || (action.requiresReason && reason.trim() === "")) {
+      return;
+    }
+    setConfirmAction(null);
+    await action.run();
+  }
+
+  useEffect(() => {
+    if (confirmAction === null) {
+      return;
+    }
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === "Escape") setConfirmAction(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [confirmAction]);
 
   async function runMutation(work: () => Promise<void>): Promise<void> {
     if (busyRef.current) {
@@ -513,7 +594,7 @@ function App(): React.ReactElement {
                         <button disabled={busy || !canEditEntitlement(item.status)} onClick={() => beginEdit(item)}>Edit</button>
                         <button disabled={busy || !canRunAction(item.status, "disable")} onClick={() => void transition(item, "disable")}>Disable</button>
                         <button disabled={busy || !canRunAction(item.status, "reenable")} onClick={() => void transition(item, "reenable")}>Reenable</button>
-                        <button disabled={busy || !canRunAction(item.status, "revoke")} onClick={() => void transition(item, "revoke")}>Revoke</button>
+                        <button className="danger" disabled={busy || !canRunAction(item.status, "revoke")} onClick={() => requestConfirm({ title: "Revoke entitlement", body: revokeEntitlementConfirm(item), requiresReason: true, run: () => transition(item, "revoke") })}>Revoke</button>
                       </td>
                     </tr>
                     {editingId === item.id && (
@@ -539,6 +620,12 @@ function App(): React.ReactElement {
                 ))}
               </tbody>
             </table>
+            <div className="tableFooter">
+              <span className="muted">{entitlements.length} shown</span>
+              {entitlementsCursor !== null && (
+                <button type="button" disabled={busy} onClick={() => void loadMore(entitlementsUrl, entitlementsCursor, setEntitlements, setEntitlementsCursor)}>Load more</button>
+              )}
+            </div>
             <label className="reason">Reason<input value={reason} onChange={(event) => setReason(event.target.value)} /></label>
           </section>
         </section>
@@ -563,6 +650,7 @@ function App(): React.ReactElement {
               ))}
             </tbody>
           </table>
+          <div className="tableFooter"><span className="muted">{events.length} shown (most recent)</span></div>
         </section>
       )}
 
@@ -592,6 +680,12 @@ function App(): React.ReactElement {
                 ))}
               </tbody>
             </table>
+            <div className="tableFooter">
+              <span className="muted">{customers.length} shown</span>
+              {customersCursor !== null && (
+                <button type="button" disabled={busy} onClick={() => void loadMore(customersUrl, customersCursor, setCustomers, setCustomersCursor)}>Load more</button>
+              )}
+            </div>
           </section>
           <aside>
             {customerDetail === null ? (
@@ -607,7 +701,7 @@ function App(): React.ReactElement {
 
                 <label className="reason">Reason<input value={reason} onChange={(event) => setReason(event.target.value)} /></label>
                 <div className="actions">
-                  <button disabled={busy || !canRunCustomerAction(customerDetail.customer.status, "disable")} onClick={() => void customerTransition("disable")}>Disable</button>
+                  <button className="danger" disabled={busy || !canRunCustomerAction(customerDetail.customer.status, "disable")} onClick={() => requestConfirm({ title: "Disable customer", body: disableCustomerConfirm(customerDetail.customer), requiresReason: true, run: () => customerTransition("disable") })}>Disable</button>
                   <button disabled={busy || !canRunCustomerAction(customerDetail.customer.status, "reenable")} onClick={() => void customerTransition("reenable")}>Reenable</button>
                 </div>
 
@@ -720,6 +814,12 @@ function App(): React.ReactElement {
               ))}
             </tbody>
           </table>
+          <div className="tableFooter">
+            <span className="muted">{licenses.length} shown</span>
+            {licensesCursor !== null && (
+              <button type="button" disabled={busy} onClick={() => void loadMore(licensesUrl, licensesCursor, setLicenses, setLicensesCursor)}>Load more</button>
+            )}
+          </div>
         </section>
       )}
 
@@ -759,6 +859,12 @@ function App(): React.ReactElement {
               ))}
             </tbody>
           </table>
+          <div className="tableFooter">
+            <span className="muted">{(orders?.items ?? []).length} shown</span>
+            {orders?.next_cursor != null && (
+              <button type="button" disabled={busy} onClick={() => void loadMoreOrders()}>Load more</button>
+            )}
+          </div>
         </section>
       )}
 
@@ -779,6 +885,27 @@ function App(): React.ReactElement {
           <div><span>Order events 7d</span><strong>{report?.fulfillment.events_7d ?? 0}</strong></div>
           <div><span>Customer suspensions 7d</span><strong>{report?.customer_suspensions_7d ?? 0}</strong></div>
         </section>
+      )}
+
+      {confirmAction !== null && (
+        <div className="modalOverlay" role="presentation" onClick={() => setConfirmAction(null)}>
+          <div className="modal danger" role="dialog" aria-modal="true" aria-labelledby="confirmTitle" onClick={(event) => event.stopPropagation()}>
+            <h2 id="confirmTitle">{confirmAction.title}</h2>
+            <p>{confirmAction.body}</p>
+            {confirmAction.requiresReason && (
+              <label className="reason">Reason (required)<input autoFocus value={reason} onChange={(event) => setReason(event.target.value)} /></label>
+            )}
+            <div className="actions">
+              <button type="button" disabled={busy} onClick={() => setConfirmAction(null)}>Cancel</button>
+              <button
+                type="button"
+                className="danger"
+                disabled={busy || (confirmAction.requiresReason && reason.trim() === "")}
+                onClick={() => void confirmProceed()}
+              >Confirm</button>
+            </div>
+          </div>
+        </div>
       )}
     </main>
   );

@@ -216,8 +216,12 @@ test("admin UI completes entitlement lifecycle and blocks duplicate create submi
   await page.getByRole("button", { name: "Reenable" }).click();
   await expect(page.locator(".status.active")).toHaveText("active");
 
-  await page.locator(".reason").getByLabel("Reason").fill("chargeback");
+  await page.locator(".reason").getByLabel("Reason", { exact: true }).fill("chargeback");
+  // Revoke is irreversible -> it now opens a typed-confirm modal; the action fires only on Confirm.
   await page.getByRole("button", { name: "Revoke" }).click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await expect(page.locator(".status.revoked")).toHaveCount(0); // not revoked until confirmed
+  await page.getByRole("dialog").getByRole("button", { name: "Confirm" }).click();
   await expect(page.locator(".status.revoked")).toHaveText("revoked");
   await expect(page.getByRole("button", { name: "Edit" })).toBeDisabled();
   await expect(page.getByRole("button", { name: "Reenable" })).toBeDisabled();

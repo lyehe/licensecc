@@ -191,3 +191,28 @@ test("admin UI workflow formats epoch timestamps", async () => {
   assert.equal(workflow.formatEpoch(1710000000), new Date(1710000000 * 1000).toLocaleString());
   assert.equal(workflow.formatEpoch(0), new Date(0).toLocaleString());
 });
+
+test("withCursor appends a cursor param respecting an existing query string", async () => {
+  const workflow = await loadWorkflowModule();
+  // No existing query -> '?'; existing filters -> '&'; value is URL-encoded.
+  assert.equal(workflow.withCursor("/api/admin/customers", "50"), "/api/admin/customers?cursor=50");
+  assert.equal(
+    workflow.withCursor("/api/admin/customers?status=active", "100"),
+    "/api/admin/customers?status=active&cursor=100",
+  );
+  assert.equal(workflow.withCursor("/api/admin/orders", "a b/c"), "/api/admin/orders?cursor=a%20b%2Fc");
+});
+
+test("destructive-action confirm copy echoes the exact target", async () => {
+  const workflow = await loadWorkflowModule();
+  const revoke = workflow.revokeEntitlementConfirm({ project: "DEFAULT", feature: "pro", license_fingerprint: "a".repeat(64) });
+  assert.match(revoke, /Revoke the entitlement for DEFAULT \/ pro/);
+  assert.match(revoke, /TERMINAL and cannot be undone/);
+  assert.match(revoke, new RegExp(workflow.shortHash("a".repeat(64))));
+
+  const named = workflow.disableCustomerConfirm({ id: "cus_1", name: "Acme" });
+  assert.match(named, /Disable customer Acme \(cus_1\)/);
+  assert.match(named, /severs all of their license\/token auth and customer-portal access/);
+  // Falls back to the id when the name is empty.
+  assert.match(workflow.disableCustomerConfirm({ id: "cus_2", name: "" }), /Disable customer cus_2\./);
+});
