@@ -19,6 +19,9 @@ import { summarizeUsage } from "./lease/usage_report.mjs";
 import { handleOrderIngest } from "./fulfillment/order_ingest.mjs";
 // Slice 2 account-token isolation (Stage 3): per-customer credential + the per-endpoint gate.
 import { accountAuth, constantTimeEqual, readBearer } from "./auth/account_auth.mjs";
+// OpenAPI 3.1 doc-of-existing: the spec object + the self-contained /docs page. Served
+// UNAUTHENTICATED and EARLY (before any auth) so the API is self-describing without credentials.
+import { openApiSpec, docsHtml } from "./openapi.js";
 
 declare const Buffer:
   | {
@@ -2108,6 +2111,17 @@ export default {
   async fetch(request: Request, env: Env, ctx?: ExecutionContextLike): Promise<Response> {
     try {
       const url = new URL(request.url);
+      // OpenAPI doc-of-existing: unauthenticated, served EARLY (before any auth) and without
+      // disturbing the routes below. /openapi.json is the spec; /docs is a self-contained viewer.
+      if (request.method === "GET" && url.pathname === "/openapi.json") {
+        return json(openApiSpec);
+      }
+      if (request.method === "GET" && url.pathname === "/docs") {
+        return new Response(docsHtml, {
+          status: 200,
+          headers: { "content-type": "text/html; charset=utf-8" },
+        });
+      }
       if (request.method === "GET" && url.pathname === "/health") {
         return json({ ok: true, service: "licensecc-online-verifier" });
       }

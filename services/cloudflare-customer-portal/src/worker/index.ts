@@ -28,6 +28,7 @@ import * as sessionModule from "../auth/portal_session.mjs";
 import * as tokenModule from "../auth/portal_token.mjs";
 import * as emailModule from "../auth/portal_email.mjs";
 import type { ApiEnvelope } from "../shared/api";
+import { openApiDocument, DOCS_HTML } from "./openapi.js";
 
 type AnyFn = (...args: any[]) => any;
 const requestOtp = (otpModule as { requestOtp: AnyFn }).requestOtp;
@@ -505,6 +506,19 @@ export default {
     try {
       const url = new URL(request.url);
       const p = url.pathname;
+
+      // Unauthenticated API documentation (added early, before any auth or route dispatch). Does not
+      // disturb existing routes. /openapi.json serves the spec; /docs serves a self-contained,
+      // dependency-free HTML page that fetches and renders it.
+      if (request.method === "GET" && p === "/openapi.json") {
+        return json(openApiDocument, 200, { "cache-control": "no-store" });
+      }
+      if (request.method === "GET" && p === "/docs") {
+        return new Response(DOCS_HTML, {
+          status: 200,
+          headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" },
+        });
+      }
 
       if (request.method === "GET" && p === "/health") return health(env, reqId);
 

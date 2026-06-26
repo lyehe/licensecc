@@ -1,5 +1,7 @@
 import { createRemoteJWKSet, jwtVerify } from "jose";
 import type { JWTPayload } from "jose";
+import { openApiJson } from "./openapi.js";
+import { docsHtml } from "./docs_page.js";
 import type { EntitlementInput, EntitlementPatch, EntitlementRecord, EntitlementStatus } from "../shared/api";
 import {
   entitlementId,
@@ -893,6 +895,15 @@ async function handleApi(request: Request, env: Env): Promise<Response> {
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
+    // Unauthenticated API documentation, served EARLY (before auth) so the spec and
+    // the human-readable reference are always reachable. These add no behavior to any
+    // existing route — they only respond on /openapi.json and /docs.
+    if (request.method === "GET" && url.pathname === "/openapi.json") {
+      return new Response(openApiJson, { headers: { "content-type": "application/json; charset=utf-8" } });
+    }
+    if (request.method === "GET" && url.pathname === "/docs") {
+      return new Response(docsHtml, { headers: { "content-type": "text/html; charset=utf-8" } });
+    }
     if (url.pathname.startsWith("/api/admin/")) {
       return handleApi(request, env);
     }

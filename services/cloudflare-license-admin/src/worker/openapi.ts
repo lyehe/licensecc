@@ -1,0 +1,778 @@
+// OpenAPI 3.1 "doc-of-existing" for the Cloudflare License Admin Worker.
+//
+// This is a hand-maintained description of the routes ACTUALLY served by
+// src/worker/index.ts. It is pinned to the source by test/openapi-crosscheck.test.mjs
+// (the cross-check fails CI if a route is added/removed in the Worker without a matching
+// change here, or vice-versa). Keep `paths` in lock-step with the Worker's routing.
+//
+// Served unauthenticated by the Worker fetch handler (added EARLY, before auth):
+//   GET /openapi.json -> this object as application/json
+//   GET /docs         -> a self-contained HTML viewer (no external CDN)
+//
+// Envelope conventions (admin Worker): EVERY endpoint returns the flat JSON envelope
+//   { ok: boolean, code: string, request_id: string, data?: T }
+// success bodies set ok:true and carry `data`; error bodies set ok:false and omit `data`.
+
+// Minimal structural type for the slice of OpenAPI 3.1 we emit. We intentionally do not
+// pull an external types dependency (the Worker bundle stays dependency-free).
+export interface OpenApiDocument {
+  readonly openapi: "3.1.0";
+  readonly info: { readonly title: string; readonly version: string; readonly description?: string };
+  readonly servers: ReadonlyArray<{ readonly url: string; readonly description?: string }>;
+  readonly tags?: ReadonlyArray<{ readonly name: string; readonly description?: string }>;
+  readonly security?: ReadonlyArray<Record<string, ReadonlyArray<string>>>;
+  readonly paths: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
+  readonly components: {
+    readonly securitySchemes: Readonly<Record<string, unknown>>;
+    readonly schemas: Readonly<Record<string, unknown>>;
+    readonly parameters?: Readonly<Record<string, unknown>>;
+    readonly responses?: Readonly<Record<string, unknown>>;
+  };
+}
+
+// ── Reusable building blocks ────────────────────────────────────────────────
+
+// A reusable error envelope response: { ok:false, code, request_id }. The OpenAPI
+// status key it is filed under tells you the HTTP code; `code` is the machine string.
+function errorResponse(description: string, ...codes: ReadonlyArray<string>): Record<string, unknown> {
+  return {
+    description,
+    content: {
+      "application/json": {
+        schema: { $ref: "#/components/schemas/ErrorEnvelope" },
+        ...(codes.length > 0
+          ? { examples: Object.fromEntries(codes.map((code) => [code, { value: { ok: false, code, request_id: "1a2b3c-1" } } as const])) }
+          : {}),
+      },
+    },
+  };
+}
+
+// A success envelope response carrying `data` of the referenced schema.
+function okResponse(description: string, dataRef: string, code: string): Record<string, unknown> {
+  return {
+    description,
+    content: {
+      "application/json": {
+        schema: {
+          allOf: [
+            { $ref: "#/components/schemas/SuccessEnvelope" },
+            { type: "object", properties: { code: { const: code }, data: { $ref: dataRef } } },
+          ],
+        },
+      },
+    },
+  };
+}
+
+const idempotencyKeyHeader = {
+  name: "idempotency-key",
+  in: "header",
+  required: false,
+  description: "Optional idempotency key (max 128 chars). Mutations with the same scope+key+actor are cached and replayed from D1. An invalid (over-long/empty) value returns 400 invalid_idempotency_key.",
+  schema: { type: "string", maxLength: 128 },
+} as const;
+
+const idParam = {
+  name: "id",
+  in: "path",
+  required: true,
+  description: "Resource identifier from the URL path. For entitlements this is the encoded entitlement id; for customers it is the URI-decoded customer id.",
+  schema: { type: "string" },
+} as const;
+
+function limitCursorParams(): ReadonlyArray<Record<string, unknown>> {
+  return [
+    { name: "limit", in: "query", required: false, description: "Page size (default 50, clamped to max 100).", schema: { type: "integer", default: 50, minimum: 1, maximum: 100 } },
+    { name: "cursor", in: "query", required: false, description: "Opaque numeric offset cursor (default 0). Use `next_cursor` from the previous page.", schema: { type: "string", default: "0" } },
+  ];
+}
+
+// ── Path objects ────────────────────────────────────────────────────────────
+
+const ADMIN_SECURITY: ReadonlyArray<Record<string, ReadonlyArray<string>>> = [{ cloudflareAccess: [] }, { devBearer: [] }];
+const SYNC_SECURITY: ReadonlyArray<Record<string, ReadonlyArray<string>>> = [{ syncBearer: [] }];
+
+// Error responses shared by every authenticated admin endpoint (the auth gate runs first).
+const ADMIN_AUTH_ERRORS = {
+  "401": errorResponse("Authentication failed.", "missing_access_jwt", "admin_auth_not_configured"),
+  "403": errorResponse("Authorization failed.", "invalid_access_jwt", "admin_role_denied"),
+} as const;
+
+// Error responses shared by every admin MUTATION endpoint (auth + RBAC + body limits + idempotency).
+const ADMIN_MUTATION_AUTH_ERRORS = {
+  "401": errorResponse("Authentication failed.", "missing_access_jwt", "admin_auth_not_configured"),
+  "403": errorResponse("Authorization failed (RBAC / invalid JWT / admin role required).", "invalid_access_jwt", "admin_role_denied", "admin_role_required"),
+} as const;
+
+const paths: Record<string, Record<string, unknown>> = {
+  "/openapi.json": {
+    get: {
+      tags: ["meta"],
+      summary: "This OpenAPI 3.1 document",
+      operationId: "getOpenApiDocument",
+      security: [],
+      responses: {
+        "200": { description: "The OpenAPI document for this Worker.", content: { "application/json": { schema: { type: "object" } } } },
+      },
+    },
+  },
+  "/docs": {
+    get: {
+      tags: ["meta"],
+      summary: "Self-contained HTML API reference",
+      operationId: "getDocsPage",
+      security: [],
+      responses: {
+        "200": { description: "A dependency-free HTML page that fetches /openapi.json and renders the endpoint list.", content: { "text/html": { schema: { type: "string" } } } },
+      },
+    },
+  },
+
+  "/api/admin/summary": {
+    get: {
+      tags: ["admin:reports"],
+      summary: "Entitlement counts by status",
+      operationId: "getAdminSummary",
+      security: ADMIN_SECURITY,
+      responses: {
+        "200": okResponse("Entitlement counts.", "#/components/schemas/SummaryData", "summary"),
+        ...ADMIN_AUTH_ERRORS,
+      },
+    },
+  },
+  "/api/admin/report": {
+    get: {
+      tags: ["admin:reports"],
+      summary: "Comprehensive system report with all metrics",
+      operationId: "getAdminReport",
+      security: ADMIN_SECURITY,
+      responses: {
+        "200": okResponse("Full system metrics snapshot.", "#/components/schemas/ReportData", "report"),
+        ...ADMIN_AUTH_ERRORS,
+      },
+    },
+  },
+  "/api/admin/customers": {
+    get: {
+      tags: ["admin:customers"],
+      summary: "List customers with pagination and optional filtering",
+      operationId: "listCustomers",
+      security: ADMIN_SECURITY,
+      parameters: [
+        { name: "status", in: "query", required: false, description: "Filter by customer status.", schema: { type: "string", enum: ["active", "disabled"] } },
+        { name: "q", in: "query", required: false, description: "Case-insensitive contains search over id/email/name (max 128 chars).", schema: { type: "string", maxLength: 128 } },
+        ...limitCursorParams(),
+      ],
+      responses: {
+        "200": okResponse("Customer page.", "#/components/schemas/CustomersListData", "customers_listed"),
+        "400": errorResponse("Invalid query parameter (e.g. over-long search term).", "invalid_request"),
+        ...ADMIN_AUTH_ERRORS,
+      },
+    },
+  },
+  "/api/admin/customers/{id}": {
+    get: {
+      tags: ["admin:customers"],
+      summary: "Get detailed customer profile with related entitlements, tokens, licenses, orders, and events",
+      operationId: "getCustomer",
+      security: ADMIN_SECURITY,
+      parameters: [idParam],
+      responses: {
+        "200": okResponse("Customer detail bundle. Account-token HMAC and pepper_key_id are never returned.", "#/components/schemas/CustomerDetailData", "customer"),
+        ...ADMIN_AUTH_ERRORS,
+        "404": errorResponse("No customer with that id.", "not_found"),
+      },
+    },
+  },
+  "/api/admin/customers/{id}/disable": {
+    post: {
+      tags: ["admin:customers"],
+      summary: "Disable customer account (kill-switch, atomic with audit event)",
+      operationId: "disableCustomer",
+      security: ADMIN_SECURITY,
+      parameters: [idParam, idempotencyKeyHeader],
+      requestBody: {
+        required: true,
+        content: { "application/json": { schema: { $ref: "#/components/schemas/ReasonRequiredBody" } } },
+      },
+      responses: {
+        "200": okResponse("Customer disabled.", "#/components/schemas/CustomerRow", "customer_disabled"),
+        "400": errorResponse("Invalid request / json / idempotency key, or missing reason.", "invalid_request", "invalid_idempotency_key", "invalid_json", "reason_required"),
+        ...ADMIN_MUTATION_AUTH_ERRORS,
+        "404": errorResponse("No customer with that id.", "not_found"),
+        "409": errorResponse("Customer is not in the expected prior status (concurrent change).", "customer_status_conflict"),
+        "413": errorResponse("Request body exceeds 8192 bytes.", "body_too_large"),
+        "500": errorResponse("Mutation failed, or dev bearer enabled outside development.", "mutation_failed", "dev_bearer_forbidden_in_environment"),
+      },
+    },
+  },
+  "/api/admin/customers/{id}/reenable": {
+    post: {
+      tags: ["admin:customers"],
+      summary: "Re-enable customer account",
+      operationId: "reenableCustomer",
+      security: ADMIN_SECURITY,
+      parameters: [idParam, idempotencyKeyHeader],
+      requestBody: {
+        required: false,
+        description: "Empty JSON object accepted; any `reason` field is ignored.",
+        content: { "application/json": { schema: { $ref: "#/components/schemas/EmptyBody" } } },
+      },
+      responses: {
+        "200": okResponse("Customer re-enabled.", "#/components/schemas/CustomerRow", "customer_reenabled"),
+        "400": errorResponse("Invalid request / json / idempotency key.", "invalid_idempotency_key", "invalid_json", "invalid_request"),
+        ...ADMIN_MUTATION_AUTH_ERRORS,
+        "404": errorResponse("No customer with that id.", "not_found"),
+        "409": errorResponse("Customer is not in the expected prior status (concurrent change).", "customer_status_conflict"),
+        "413": errorResponse("Request body exceeds 8192 bytes.", "body_too_large"),
+        "500": errorResponse("Mutation failed, or dev bearer enabled outside development.", "mutation_failed", "dev_bearer_forbidden_in_environment"),
+      },
+    },
+  },
+  "/api/admin/licenses": {
+    get: {
+      tags: ["admin:licenses"],
+      summary: "List licenses with pagination and optional filtering",
+      operationId: "listLicenses",
+      security: ADMIN_SECURITY,
+      parameters: [
+        { name: "project", in: "query", required: false, description: "Exact-match project filter.", schema: { type: "string" } },
+        { name: "customer_id", in: "query", required: false, description: "Exact-match customer id filter.", schema: { type: "string" } },
+        { name: "q", in: "query", required: false, description: "Case-insensitive contains search over id/label (max 128 chars).", schema: { type: "string", maxLength: 128 } },
+        ...limitCursorParams(),
+      ],
+      responses: {
+        "200": okResponse("License page.", "#/components/schemas/LicensesListData", "licenses_listed"),
+        "400": errorResponse("Invalid query parameter (e.g. over-long search term).", "invalid_request"),
+        ...ADMIN_AUTH_ERRORS,
+      },
+    },
+  },
+  "/api/admin/orders": {
+    get: {
+      tags: ["admin:orders"],
+      summary: "List order events with fulfillment summary and staleness detection",
+      operationId: "listOrders",
+      security: ADMIN_SECURITY,
+      parameters: [
+        { name: "status", in: "query", required: false, description: "Filter by fulfillment status.", schema: { type: "string", enum: ["accepted", "processed", "superseded", "rejected"] } },
+        { name: "subscription_id", in: "query", required: false, description: "Exact-match subscription id filter.", schema: { type: "string" } },
+        { name: "stale_secs", in: "query", required: false, description: "Staleness threshold in seconds (default 300, clamped to 1..86400).", schema: { type: "integer", default: 300, minimum: 1, maximum: 86400 } },
+        ...limitCursorParams(),
+      ],
+      responses: {
+        "200": okResponse("Order-event page with fulfillment summary.", "#/components/schemas/OrdersListData", "orders_listed"),
+        ...ADMIN_AUTH_ERRORS,
+      },
+    },
+  },
+  "/api/admin/settings": {
+    get: {
+      tags: ["admin:reports"],
+      summary: "Get worker configuration and auth settings",
+      operationId: "getSettings",
+      security: ADMIN_SECURITY,
+      responses: {
+        "200": okResponse("Worker configuration.", "#/components/schemas/SettingsData", "settings"),
+        ...ADMIN_AUTH_ERRORS,
+      },
+    },
+  },
+  "/api/admin/entitlements": {
+    get: {
+      tags: ["admin:entitlements"],
+      summary: "List entitlements with pagination and optional filtering",
+      operationId: "listEntitlements",
+      security: ADMIN_SECURITY,
+      parameters: [
+        { name: "project", in: "query", required: false, description: "Exact-match project filter.", schema: { type: "string" } },
+        { name: "feature", in: "query", required: false, description: "Exact-match feature filter.", schema: { type: "string" } },
+        { name: "status", in: "query", required: false, description: "Exact-match status filter.", schema: { type: "string", enum: ["active", "disabled", "revoked"] } },
+        ...limitCursorParams(),
+      ],
+      responses: {
+        "200": okResponse("Entitlement page.", "#/components/schemas/EntitlementsListData", "entitlements_listed"),
+        ...ADMIN_AUTH_ERRORS,
+      },
+    },
+    post: {
+      tags: ["admin:entitlements"],
+      summary: "Create new entitlement (admin-only)",
+      operationId: "createEntitlement",
+      security: ADMIN_SECURITY,
+      parameters: [idempotencyKeyHeader],
+      requestBody: {
+        required: true,
+        content: { "application/json": { schema: { $ref: "#/components/schemas/EntitlementInput" } } },
+      },
+      responses: {
+        "200": okResponse("Entitlement created.", "#/components/schemas/EntitlementRecord", "entitlement_saved"),
+        "400": errorResponse("Invalid request / json / id / idempotency key.", "invalid_entitlement_id", "invalid_idempotency_key", "invalid_json", "invalid_request"),
+        ...ADMIN_MUTATION_AUTH_ERRORS,
+        "404": errorResponse("Referenced resource not found.", "not_found"),
+        "409": errorResponse("Target entitlement is revoked (terminal).", "revoked_entitlement_is_terminal"),
+        "413": errorResponse("Request body exceeds 8192 bytes.", "body_too_large"),
+        "500": errorResponse("Mutation failed, or dev bearer enabled outside development.", "mutation_failed", "dev_bearer_forbidden_in_environment"),
+      },
+    },
+  },
+  "/api/admin/entitlements/{id}": {
+    get: {
+      tags: ["admin:entitlements"],
+      summary: "Get single entitlement by ID",
+      operationId: "getEntitlement",
+      security: ADMIN_SECURITY,
+      parameters: [idParam],
+      responses: {
+        "200": okResponse("Entitlement record.", "#/components/schemas/EntitlementRecord", "entitlement"),
+        "400": errorResponse("Malformed entitlement id.", "invalid_entitlement_id"),
+        ...ADMIN_AUTH_ERRORS,
+        "404": errorResponse("No entitlement with that id.", "not_found"),
+      },
+    },
+    patch: {
+      tags: ["admin:entitlements"],
+      summary: "Update entitlement fields (admin-only)",
+      operationId: "patchEntitlement",
+      security: ADMIN_SECURITY,
+      parameters: [idParam, idempotencyKeyHeader],
+      requestBody: {
+        required: true,
+        content: { "application/json": { schema: { $ref: "#/components/schemas/EntitlementPatch" } } },
+      },
+      responses: {
+        "200": okResponse("Entitlement updated.", "#/components/schemas/EntitlementRecord", "entitlement_patched"),
+        "400": errorResponse("Invalid request / json / id / idempotency key.", "invalid_entitlement_id", "invalid_idempotency_key", "invalid_json", "invalid_request"),
+        ...ADMIN_MUTATION_AUTH_ERRORS,
+        "404": errorResponse("No entitlement with that id.", "not_found"),
+        "409": errorResponse("Target entitlement is revoked (terminal).", "revoked_entitlement_is_terminal"),
+        "413": errorResponse("Request body exceeds 8192 bytes.", "body_too_large"),
+        "500": errorResponse("Mutation failed, or dev bearer enabled outside development.", "mutation_failed", "dev_bearer_forbidden_in_environment"),
+      },
+    },
+  },
+  "/api/admin/entitlements/{id}/disable": {
+    post: {
+      tags: ["admin:entitlements"],
+      summary: "Disable entitlement (admin-only, requires reason)",
+      operationId: "disableEntitlement",
+      security: ADMIN_SECURITY,
+      parameters: [idParam, idempotencyKeyHeader],
+      requestBody: {
+        required: true,
+        content: { "application/json": { schema: { $ref: "#/components/schemas/ReasonRequiredBody" } } },
+      },
+      responses: {
+        "200": okResponse("Entitlement disabled.", "#/components/schemas/EntitlementRecord", "entitlement_disabled"),
+        "400": errorResponse("Invalid request / json / id / idempotency key, or missing reason.", "invalid_entitlement_id", "invalid_idempotency_key", "invalid_json", "invalid_request", "reason_required"),
+        ...ADMIN_MUTATION_AUTH_ERRORS,
+        "404": errorResponse("No entitlement with that id.", "not_found"),
+        "409": errorResponse("Target entitlement is revoked (terminal).", "revoked_entitlement_is_terminal"),
+        "413": errorResponse("Request body exceeds 8192 bytes.", "body_too_large"),
+        "500": errorResponse("Mutation failed, or dev bearer enabled outside development.", "mutation_failed", "dev_bearer_forbidden_in_environment"),
+      },
+    },
+  },
+  "/api/admin/entitlements/{id}/reenable": {
+    post: {
+      tags: ["admin:entitlements"],
+      summary: "Re-enable entitlement (admin-only)",
+      operationId: "reenableEntitlement",
+      security: ADMIN_SECURITY,
+      parameters: [idParam, idempotencyKeyHeader],
+      requestBody: {
+        required: false,
+        description: "Empty JSON object accepted.",
+        content: { "application/json": { schema: { $ref: "#/components/schemas/EmptyBody" } } },
+      },
+      responses: {
+        "200": okResponse("Entitlement re-enabled.", "#/components/schemas/EntitlementRecord", "entitlement_reenabled"),
+        "400": errorResponse("Invalid request / json / id / idempotency key.", "invalid_entitlement_id", "invalid_idempotency_key", "invalid_json", "invalid_request"),
+        ...ADMIN_MUTATION_AUTH_ERRORS,
+        "404": errorResponse("No entitlement with that id.", "not_found"),
+        "409": errorResponse("Target entitlement is revoked (terminal).", "revoked_entitlement_is_terminal"),
+        "413": errorResponse("Request body exceeds 8192 bytes.", "body_too_large"),
+        "500": errorResponse("Mutation failed, or dev bearer enabled outside development.", "mutation_failed", "dev_bearer_forbidden_in_environment"),
+      },
+    },
+  },
+  "/api/admin/entitlements/{id}/revoke": {
+    post: {
+      tags: ["admin:entitlements"],
+      summary: "Revoke entitlement (admin-only, terminal state, requires reason)",
+      operationId: "revokeEntitlement",
+      security: ADMIN_SECURITY,
+      parameters: [idParam, idempotencyKeyHeader],
+      requestBody: {
+        required: true,
+        content: { "application/json": { schema: { $ref: "#/components/schemas/ReasonRequiredBody" } } },
+      },
+      responses: {
+        "200": okResponse("Entitlement revoked (terminal).", "#/components/schemas/EntitlementRecord", "entitlement_revoked"),
+        "400": errorResponse("Invalid request / json / id / idempotency key, or missing reason.", "invalid_entitlement_id", "invalid_idempotency_key", "invalid_json", "invalid_request", "reason_required"),
+        ...ADMIN_MUTATION_AUTH_ERRORS,
+        "404": errorResponse("No entitlement with that id.", "not_found"),
+        "409": errorResponse("Target entitlement is already revoked (terminal).", "revoked_entitlement_is_terminal"),
+        "413": errorResponse("Request body exceeds 8192 bytes.", "body_too_large"),
+        "500": errorResponse("Mutation failed, or dev bearer enabled outside development.", "mutation_failed", "dev_bearer_forbidden_in_environment"),
+      },
+    },
+  },
+  "/api/admin/events": {
+    get: {
+      tags: ["admin:entitlements"],
+      summary: "List entitlement audit events (most recent first)",
+      operationId: "listEvents",
+      security: ADMIN_SECURITY,
+      parameters: [
+        { name: "limit", in: "query", required: false, description: "Page size (default 50, clamped to max 100).", schema: { type: "integer", default: 50, minimum: 1, maximum: 100 } },
+      ],
+      responses: {
+        "200": okResponse("Audit-event list.", "#/components/schemas/EventsListData", "events_listed"),
+        ...ADMIN_AUTH_ERRORS,
+      },
+    },
+  },
+  "/api/sync/entitlements": {
+    post: {
+      tags: ["sync"],
+      summary: "Sync entitlement from external system (creates or updates via idempotency)",
+      operationId: "syncEntitlement",
+      security: SYNC_SECURITY,
+      parameters: [idempotencyKeyHeader],
+      requestBody: {
+        required: true,
+        content: { "application/json": { schema: { $ref: "#/components/schemas/EntitlementSyncInput" } } },
+      },
+      responses: {
+        "200": okResponse("Entitlement synced (created or updated).", "#/components/schemas/EntitlementRecord", "entitlement_synced"),
+        "400": errorResponse("Invalid request / json / idempotency key, or missing reason for a non-active status.", "invalid_idempotency_key", "invalid_json", "invalid_request", "reason_required"),
+        "401": errorResponse("Sync token not configured on the Worker.", "sync_auth_not_configured"),
+        "403": errorResponse("Bearer token did not match SYNC_API_TOKEN.", "invalid_sync_token"),
+        "404": errorResponse("Referenced resource not found.", "not_found"),
+        "409": errorResponse("Target entitlement is revoked (terminal).", "revoked_entitlement_is_terminal"),
+        "413": errorResponse("Request body exceeds 8192 bytes.", "body_too_large"),
+        "500": errorResponse("Mutation failed.", "mutation_failed"),
+      },
+    },
+  },
+};
+
+// ── The document ────────────────────────────────────────────────────────────
+
+export const openApiDocument: OpenApiDocument = {
+  openapi: "3.1.0",
+  info: {
+    title: "Cloudflare License Admin API",
+    version: "0.1.0",
+    description:
+      "Operator back-office API for managing entitlements, customers, licenses, and orders. " +
+      "All /api/admin/* routes require Cloudflare Access JWT (reader or admin RBAC); mutations require the admin role. " +
+      "/api/sync/entitlements uses a separate bearer token (SYNC_API_TOKEN). " +
+      "Every response is the flat envelope { ok, code, request_id, data? }.",
+  },
+  servers: [{ url: "/" }],
+  tags: [
+    { name: "meta", description: "Spec + docs (unauthenticated)." },
+    { name: "admin:reports", description: "Aggregate reads: summary, report, settings." },
+    { name: "admin:customers", description: "Customer reads and kill-switch." },
+    { name: "admin:licenses", description: "License reads." },
+    { name: "admin:orders", description: "Order-event reads." },
+    { name: "admin:entitlements", description: "Entitlement reads, mutations, and audit events." },
+    { name: "sync", description: "External-system entitlement sync (separate bearer token)." },
+  ],
+  security: ADMIN_SECURITY,
+  paths,
+  components: {
+    securitySchemes: {
+      cloudflareAccess: {
+        type: "apiKey",
+        in: "header",
+        name: "cf-access-jwt-assertion",
+        description:
+          "Cloudflare Access JWT, verified against the configured issuer/audience/JWKS. The email claim is mapped to a role via ADMIN_ACCESS_ADMIN_EMAILS / ADMIN_ACCESS_READER_EMAILS. Reads allow reader or admin; mutations require admin.",
+      },
+      devBearer: {
+        type: "http",
+        scheme: "bearer",
+        description:
+          "Development-only bearer token (ADMIN_DEV_BEARER, gated by ADMIN_DEV_BEARER_ENABLED). Grants the admin role. Returns 500 dev_bearer_forbidden_in_environment if enabled outside ENVIRONMENT=development. Not for production use.",
+      },
+      syncBearer: {
+        type: "http",
+        scheme: "bearer",
+        description:
+          "Bearer token for /api/sync/entitlements, compared (timing-safe) against SYNC_API_TOKEN. Independent of Cloudflare Access; no reader/admin distinction.",
+      },
+    },
+    schemas: {
+      // ── Envelopes ──
+      SuccessEnvelope: {
+        type: "object",
+        required: ["ok", "code", "request_id"],
+        properties: {
+          ok: { const: true },
+          code: { type: "string", description: "Machine-readable success code (endpoint-specific)." },
+          request_id: { type: "string", description: "From cf-ray, else a generated UUID." },
+          data: { description: "Endpoint-specific payload." },
+        },
+      },
+      ErrorEnvelope: {
+        type: "object",
+        required: ["ok", "code", "request_id"],
+        properties: {
+          ok: { const: false },
+          code: { type: "string", description: "Machine-readable error code." },
+          request_id: { type: "string" },
+        },
+      },
+
+      // ── Request bodies ──
+      EmptyBody: { type: "object", description: "Empty JSON object (`{}`). An empty request body is also accepted.", additionalProperties: false },
+      ReasonRequiredBody: {
+        type: "object",
+        required: ["reason"],
+        properties: {
+          reason: { type: "string", maxLength: 1000, description: "Required audit reason. Must not contain newlines or NUL. Empty/missing returns 400 reason_required." },
+        },
+      },
+      EntitlementInput: {
+        type: "object",
+        required: ["project", "feature", "license_fingerprint", "device_hash"],
+        properties: {
+          project: { type: "string", maxLength: 127 },
+          feature: { type: "string", maxLength: 15 },
+          license_fingerprint: { type: "string", pattern: "^[0-9a-fA-F]{64}$", description: "64-char hex." },
+          device_hash: { type: "string", description: "64-char hex, or empty string for unbound.", oneOf: [{ pattern: "^[0-9a-fA-F]{64}$" }, { const: "" }] },
+          status: { type: "string", enum: ["active", "disabled", "revoked"], default: "active" },
+          assertion_ttl_seconds: { type: "integer", minimum: 1, maximum: 3600, default: 300 },
+          valid_from: { type: ["integer", "null"], minimum: 0, default: null, description: "Epoch seconds; must be < valid_until when both set." },
+          valid_until: { type: ["integer", "null"], minimum: 0, default: null, description: "Epoch seconds; must be > valid_from when both set." },
+          notes: { type: "string", maxLength: 1000, default: "" },
+          customer_id: { type: ["string", "null"], maxLength: 128, default: null },
+          license_id: { type: ["string", "null"], maxLength: 128, default: null },
+        },
+      },
+      EntitlementPatch: {
+        type: "object",
+        description: "All fields optional; only provided fields are updated. project/feature/license_fingerprint/status are NOT patchable.",
+        properties: {
+          device_hash: { type: "string", description: "64-char hex, or empty string." },
+          assertion_ttl_seconds: { type: "integer", minimum: 1, maximum: 3600 },
+          valid_from: { type: ["integer", "null"], minimum: 0 },
+          valid_until: { type: ["integer", "null"], minimum: 0 },
+          notes: { type: "string", maxLength: 1000 },
+          customer_id: { type: ["string", "null"], maxLength: 128 },
+          license_id: { type: ["string", "null"], maxLength: 128 },
+        },
+      },
+      EntitlementSyncInput: {
+        allOf: [
+          { $ref: "#/components/schemas/EntitlementInput" },
+          { type: "object", properties: { reason: { type: "string", maxLength: 1000, description: "Optional; required (non-empty) when status is disabled or revoked." } } },
+        ],
+      },
+
+      // ── Records ──
+      EntitlementRecord: {
+        type: "object",
+        properties: {
+          id: { type: "string", description: "Encoded entitlement id (project/feature/license_fingerprint)." },
+          project: { type: "string" },
+          feature: { type: "string" },
+          license_fingerprint: { type: "string" },
+          device_hash: { type: "string" },
+          status: { type: "string", enum: ["active", "disabled", "revoked"] },
+          assertion_ttl_seconds: { type: "integer" },
+          revocation_seq: { type: "integer" },
+          valid_from: { type: ["integer", "null"] },
+          valid_until: { type: ["integer", "null"] },
+          notes: { type: "string" },
+          customer_id: { type: ["string", "null"] },
+          license_id: { type: ["string", "null"] },
+          created_at: { type: "integer" },
+          updated_at: { type: "integer" },
+        },
+      },
+      CustomerRow: {
+        type: "object",
+        properties: {
+          id: { type: "string" },
+          name: { type: "string" },
+          email: { type: "string" },
+          status: { type: "string", enum: ["active", "disabled"] },
+          external_ref: { type: ["string", "null"] },
+          created_at: { type: "integer" },
+          updated_at: { type: "integer" },
+        },
+      },
+      CustomerListItem: {
+        allOf: [
+          { $ref: "#/components/schemas/CustomerRow" },
+          { type: "object", properties: { entitlement_count: { type: "integer" }, active_entitlement_count: { type: "integer" } } },
+        ],
+      },
+
+      // ── data payloads (the `data` field of each success envelope) ──
+      SummaryData: {
+        type: "object",
+        properties: {
+          entitlements: {
+            type: "object",
+            properties: { total: { type: "integer" }, active: { type: "integer" }, revoked: { type: "integer" }, disabled: { type: "integer" } },
+          },
+        },
+      },
+      ReportData: {
+        type: "object",
+        properties: {
+          generated_at: { type: "integer" },
+          entitlements: { type: "object", properties: { total: { type: "integer" }, active: { type: "integer" }, revoked: { type: "integer" }, disabled: { type: "integer" } } },
+          customers: { type: "object", properties: { total: { type: "integer" }, active: { type: "integer" }, disabled: { type: "integer" } } },
+          account_tokens: { type: "object", properties: { active: { type: "integer" } } },
+          licenses: { type: "object", properties: { total: { type: "integer" } } },
+          fulfillment: {
+            type: "object",
+            properties: {
+              accepted: { type: "integer" }, processed: { type: "integer" }, superseded: { type: "integer" }, rejected: { type: "integer" },
+              stale_accepted: { type: "integer" }, events_24h: { type: "integer" }, events_7d: { type: "integer" },
+            },
+          },
+          customer_suspensions_7d: { type: "integer" },
+        },
+      },
+      SettingsData: {
+        type: "object",
+        properties: {
+          environment: { type: "string" },
+          public_verifier_url: { type: "string" },
+          auth: { type: "string", enum: ["dev-bearer", "cloudflare-access"] },
+        },
+      },
+      CustomersListData: {
+        type: "object",
+        properties: {
+          items: { type: "array", items: { $ref: "#/components/schemas/CustomerListItem" } },
+          next_cursor: { type: ["string", "null"] },
+        },
+      },
+      CustomerDetailData: {
+        type: "object",
+        properties: {
+          customer: {
+            type: "object",
+            properties: {
+              id: { type: "string" }, name: { type: "string" }, email: { type: "string" }, status: { type: "string" },
+              external_ref: { type: ["string", "null"] }, metadata_json: { type: ["string", "null"] },
+              created_at: { type: "integer" }, updated_at: { type: "integer" },
+            },
+          },
+          entitlements: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                project: { type: "string" }, feature: { type: "string" }, license_fingerprint: { type: "string" }, status: { type: "string" },
+                valid_from: { type: ["integer", "null"] }, valid_until: { type: ["integer", "null"] }, revocation_seq: { type: "integer" }, updated_at: { type: "integer" },
+              },
+            },
+          },
+          account_tokens: {
+            type: "array",
+            description: "token_hmac and pepper_key_id are deliberately never returned.",
+            items: {
+              type: "object",
+              properties: {
+                id: { type: "string" }, token_prefix: { type: "string" }, name: { type: "string" }, status: { type: "string" },
+                scopes_json: { type: ["string", "null"] }, expires_at: { type: ["integer", "null"] }, last_used_at: { type: ["integer", "null"] }, created_at: { type: "integer" },
+              },
+            },
+          },
+          licenses: {
+            type: "array",
+            items: { type: "object", properties: { id: { type: "string" }, project: { type: "string" }, label: { type: ["string", "null"] }, created_at: { type: "integer" }, updated_at: { type: "integer" } } },
+          },
+          orders: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                subscription_id: { type: "string" }, project: { type: "string" }, feature: { type: "string" }, license_fingerprint: { type: "string" },
+                last_seq: { type: "integer" }, order_epoch: { type: "integer" }, updated_at: { type: "integer" },
+              },
+            },
+          },
+          events: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                id: { type: "integer" }, event_type: { type: "string" }, prev_status: { type: ["string", "null"] }, next_status: { type: ["string", "null"] },
+                actor: { type: "string" }, actor_type: { type: "string" }, reason: { type: ["string", "null"] }, created_at: { type: "integer" },
+              },
+            },
+          },
+        },
+      },
+      LicensesListData: {
+        type: "object",
+        properties: {
+          items: {
+            type: "array",
+            items: { type: "object", properties: { id: { type: "string" }, customer_id: { type: ["string", "null"] }, project: { type: "string" }, label: { type: ["string", "null"] }, created_at: { type: "integer" }, updated_at: { type: "integer" } } },
+          },
+          next_cursor: { type: ["string", "null"] },
+        },
+      },
+      OrdersListData: {
+        type: "object",
+        properties: {
+          items: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                event_id: { type: "string" }, subscription_id: { type: "string" }, project: { type: "string" }, feature: { type: "string" },
+                order_epoch: { type: "integer" }, seq: { type: "integer" }, intent: { type: "string" }, key_id: { type: ["string", "null"] }, status: { type: "string" },
+                received_at: { type: "integer" }, processed_at: { type: ["integer", "null"] }, stale: { type: "boolean" },
+              },
+            },
+          },
+          summary: {
+            type: "object",
+            properties: { accepted: { type: "integer" }, processed: { type: "integer" }, superseded: { type: "integer" }, rejected: { type: "integer" }, stale_accepted: { type: "integer" } },
+          },
+          stale_secs: { type: "integer" },
+          next_cursor: { type: ["string", "null"] },
+        },
+      },
+      EntitlementsListData: {
+        type: "object",
+        properties: {
+          items: { type: "array", items: { $ref: "#/components/schemas/EntitlementRecord" } },
+          next_cursor: { type: ["string", "null"] },
+        },
+      },
+      EventsListData: {
+        type: "object",
+        properties: {
+          items: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                id: { type: "integer" }, project: { type: "string" }, feature: { type: "string" }, license_fingerprint: { type: "string" },
+                event_type: { type: "string" }, status: { type: "string" }, revocation_seq: { type: "integer" }, actor: { type: "string" }, actor_type: { type: "string" },
+                source: { type: "string" }, request_id: { type: "string" }, reason: { type: ["string", "null"] }, created_at: { type: "integer" },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+};
+
+// Serialized once at module load — the /openapi.json route returns this verbatim.
+export const openApiJson: string = JSON.stringify(openApiDocument);
