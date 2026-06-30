@@ -261,6 +261,7 @@ export async function createEntitlement(
   reason = "",
   eventTypeOverride,
   idempotency = null,
+  extraStatements = [],
 ) {
   const now = Math.floor(Date.now() / 1000);
   const prev = await findEntitlement(env, input);
@@ -298,6 +299,10 @@ export async function createEntitlement(
     reason,
     now,
     idempotency,
+    // Optional extra statements committed in the SAME atomic batch as the INSERT (e.g. the policy
+    // capacity/trial side-write). Default [] keeps every existing caller byte-identical; the INSERT
+    // SQL + ENTITLEMENT_COLUMNS are untouched.
+    extraStatements,
   );
 }
 

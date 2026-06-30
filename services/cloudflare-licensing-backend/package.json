@@ -8,6 +8,10 @@
       "types": "./src/entitlements/entitlement_mutation.d.ts",
       "default": "./src/entitlements/entitlement_mutation.mjs"
     },
+    "./entitlements/policy": {
+      "types": "./src/entitlements/policy.d.ts",
+      "default": "./src/entitlements/policy.mjs"
+    },
     "./auth/account_token_issue": {
       "default": "./src/auth/account_token_issue.mjs"
     },

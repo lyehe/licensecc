@@ -23,6 +23,14 @@ CREATE TABLE IF NOT EXISTS entitlements (
   allow_overdraft INTEGER NOT NULL DEFAULT 0,
   last_applied_order_seq INTEGER NOT NULL DEFAULT 0,
   last_applied_order_epoch INTEGER NOT NULL DEFAULT 0,
+  policy_id TEXT NULL,
+  is_trial INTEGER NOT NULL DEFAULT 0,
+  trial_expiration_basis TEXT NULL,
+  trial_duration_sec INTEGER NOT NULL DEFAULT 0,
+  trial_one_per_device INTEGER NOT NULL DEFAULT 0,
+  trial_require_device_proof INTEGER NOT NULL DEFAULT 0,
+  trial_started_at INTEGER NULL,
+  trial_device_hash TEXT NULL,
   PRIMARY KEY (project, feature, license_fingerprint)
 );
 
@@ -384,3 +392,45 @@ CREATE TABLE IF NOT EXISTS customer_events (
 );
 
 CREATE INDEX IF NOT EXISTS idx_customer_events_customer ON customer_events(customer_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS entitlement_policies (
+  id                          TEXT PRIMARY KEY,
+  project                     TEXT NOT NULL,
+  name                        TEXT NOT NULL,
+  type                        TEXT NOT NULL CHECK (type IN ('trial', 'node_locked', 'floating', 'subscription')),
+  status                      TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled')),
+  valid_from_offset_sec       INTEGER NULL,
+  duration_sec                INTEGER NULL,
+  assertion_ttl_seconds       INTEGER NOT NULL DEFAULT 300,
+  pool_size                   INTEGER NOT NULL DEFAULT 0,
+  max_active_devices          INTEGER NOT NULL DEFAULT 1,
+  max_borrow_sec              INTEGER NOT NULL DEFAULT 0,
+  expiry_strategy             TEXT NOT NULL DEFAULT 'fixed_window' CHECK (expiry_strategy IN ('fixed_window', 'non_expiring')),
+  trial_expiration_basis      TEXT NOT NULL DEFAULT 'from_issue' CHECK (trial_expiration_basis IN ('from_issue', 'from_first_activation', 'from_first_use')),
+  trial_duration_sec          INTEGER NOT NULL DEFAULT 0,
+  trial_one_per_device        INTEGER NOT NULL DEFAULT 0,
+  trial_require_device_proof  INTEGER NOT NULL DEFAULT 0,
+  notes                       TEXT NOT NULL DEFAULT '',
+  created_at                  INTEGER NOT NULL,
+  updated_at                  INTEGER NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_entitlement_policies_name ON entitlement_policies(project, lower(name));
+
+CREATE TABLE IF NOT EXISTS policy_events (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  policy_id   TEXT NOT NULL,
+  project     TEXT NOT NULL,
+  event_type  TEXT NOT NULL CHECK (event_type IN ('create', 'update', 'disable', 'reenable')),
+  actor       TEXT NOT NULL DEFAULT '',
+  actor_type  TEXT NOT NULL DEFAULT 'unknown' CHECK (actor_type IN ('access', 'dev', 'cli', 'sync', 'system', 'unknown')),
+  source      TEXT NOT NULL DEFAULT 'admin',
+  reason      TEXT NOT NULL DEFAULT '',
+  request_id  TEXT NOT NULL DEFAULT '',
+  prev_json   TEXT NOT NULL DEFAULT '',
+  next_json   TEXT NOT NULL DEFAULT '',
+  created_at  INTEGER NOT NULL,
+  FOREIGN KEY (policy_id) REFERENCES entitlement_policies(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_policy_events_policy ON policy_events(policy_id, created_at DESC);
