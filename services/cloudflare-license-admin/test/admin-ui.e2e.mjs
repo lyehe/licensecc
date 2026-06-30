@@ -84,6 +84,10 @@ function makeAdminApiFixture() {
     if (method === "GET" && path === "/api/admin/entitlements") {
       return fulfill(200, makeEnvelope("entitlements", { items: entitlements.map(publicRecord) }));
     }
+    // The Entitlements tab loads active policies for the optional create-from-policy <select>.
+    if (method === "GET" && path === "/api/admin/policies") {
+      return fulfill(200, makeEnvelope("policies_listed", { items: [], next_cursor: null }));
+    }
     if (method === "POST" && path === "/api/admin/entitlements") {
       requests.creates += 1;
       await new Promise((resolve) => setTimeout(resolve, 100));
@@ -171,7 +175,8 @@ test("admin UI completes entitlement lifecycle and blocks duplicate create submi
   await createForm.getByLabel("Feature").fill("pro");
   await createForm.getByLabel("Fingerprint").fill("a".repeat(64));
   await createForm.getByLabel("Assertion TTL").fill("120");
-  await createForm.getByLabel("Valid from").fill("1710000000");
+  // Valid from / until are <input type="date"> (YYYY-MM-DD -> UTC-midnight epoch).
+  await createForm.getByLabel("Valid from").fill("2024-03-09");
   await createForm.getByLabel("Valid until").fill("");
   await createForm.getByLabel("Customer ID").fill("cus_e2e");
   await createForm.getByLabel("License ID").fill("lic_e2e");
@@ -191,7 +196,7 @@ test("admin UI completes entitlement lifecycle and blocks duplicate create submi
   await page.getByRole("button", { name: "Edit" }).click();
   const editForm = page.locator(".editForm");
   await editForm.getByLabel("Assertion TTL").fill("900");
-  await editForm.getByLabel("Valid until").fill("1720000000");
+  await editForm.getByLabel("Valid until").fill("2024-07-03");
   await editForm.getByLabel("Customer ID").fill("");
   await editForm.getByLabel("Notes").fill("");
   await editForm.getByRole("button", { name: "Update" }).click();
@@ -200,8 +205,8 @@ test("admin UI completes entitlement lifecycle and blocks duplicate create submi
   await expect.poll(() => api.requests.patches.length).toBe(1);
   expect(api.requests.patches[0]).toMatchObject({
     assertion_ttl_seconds: 900,
-    valid_from: 1710000000,
-    valid_until: 1720000000,
+    valid_from: 1709942400,
+    valid_until: 1719964800,
     notes: "",
     customer_id: null,
     license_id: "lic_e2e",

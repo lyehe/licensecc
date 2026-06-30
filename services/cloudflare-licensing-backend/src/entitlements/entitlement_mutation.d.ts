@@ -167,6 +167,10 @@ export function createEntitlement(
   reason?: string,
   eventTypeOverride?: EntitlementEventType,
   idempotency?: IdempotencyCommit | null,
+  // Extra statements committed in the SAME atomic batch as the INSERT (default []).
+  // The admin policy-stamp path passes the capacity/trial side-write here so the row +
+  // its frozen policy state commit together; the INSERT SQL is unchanged.
+  extraStatements?: D1PreparedStatementLike[],
 ): Promise<MutationResult<EntitlementRecord>>;
 
 export function patchEntitlement(

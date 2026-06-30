@@ -36,22 +36,26 @@ test("admin UI workflow builds filtered entitlement API paths", async () => {
 
 test("admin UI workflow normalizes create form payloads", async () => {
   const workflow = await loadWorkflowModule();
+  // Valid-from/until are now <input type="date"> (YYYY-MM-DD), converted to UTC-midnight epoch.
   const body = workflow.normalizeEntitlementForm({
     ...workflow.emptyEntitlementForm,
     license_fingerprint: "a".repeat(64),
     assertion_ttl_seconds: 120,
-    valid_from: "1710000000",
+    valid_from: "2024-03-09",
     valid_until: "",
     notes: "operator note",
     customer_id: "cus_123",
     license_id: "lic_123",
   });
 
+  // normalizeEntitlementForm drops the UI-only policy_id and date strings, emitting the EntitlementInput.
   assert.deepEqual(body, {
-    ...workflow.emptyEntitlementForm,
+    project: "DEFAULT",
+    feature: "DEFAULT",
     license_fingerprint: "a".repeat(64),
+    device_hash: "",
     assertion_ttl_seconds: 120,
-    valid_from: 1710000000,
+    valid_from: 1709942400,
     valid_until: null,
     notes: "operator note",
     customer_id: "cus_123",
@@ -63,17 +67,51 @@ test("admin UI workflow normalizes create form payloads", async () => {
   }), /assertion_ttl_seconds_must_be_between_1_and_3600/);
   assert.throws(() => workflow.normalizeEntitlementForm({
     ...workflow.emptyEntitlementForm,
-    valid_from: "not-a-number",
-  }), /valid_from_must_be_a_non_negative_integer/);
+    valid_from: "not-a-date",
+  }), /valid_from_must_be_a_valid_date/);
+});
+
+test("admin UI workflow stamps a create-from-policy payload (attaches policy_id)", async () => {
+  const workflow = await loadWorkflowModule();
+  const body = workflow.normalizeCreateFromPolicy({
+    ...workflow.emptyEntitlementForm,
+    policy_id: "pol_123",
+    license_fingerprint: "b".repeat(64),
+    valid_from: "2024-03-09",
+  });
+  // Carries the full EntitlementInput (overrides) PLUS policy_id so the backend stamps from the template.
+  assert.equal(body.policy_id, "pol_123");
+  assert.equal(body.license_fingerprint, "b".repeat(64));
+  assert.equal(body.valid_from, 1709942400);
+  assert.equal(body.project, "DEFAULT");
+});
+
+test("admin UI workflow converts dates to/from epoch (UTC-midnight, round-trips)", async () => {
+  const workflow = await loadWorkflowModule();
+  assert.equal(workflow.dateInputToEpoch("", "valid_from"), null);
+  assert.equal(workflow.dateInputToEpoch("1970-01-01", "valid_from"), 0);
+  assert.equal(workflow.dateInputToEpoch("2024-03-09", "valid_from"), 1709942400);
+  assert.equal(workflow.dateInputToEpoch("2024-07-03", "valid_until"), 1719964800);
+  assert.throws(() => workflow.dateInputToEpoch("2024-3-9", "valid_from"), /valid_from_must_be_a_valid_date/);
+  assert.throws(() => workflow.dateInputToEpoch("not-a-date", "valid_from"), /valid_from_must_be_a_valid_date/);
+  assert.throws(() => workflow.dateInputToEpoch("2024-13-40", "valid_until"), /valid_until_must_be_a_valid_date/);
+
+  assert.equal(workflow.epochToDateInput(null), "");
+  assert.equal(workflow.epochToDateInput(undefined), "");
+  assert.equal(workflow.epochToDateInput(0), "1970-01-01");
+  assert.equal(workflow.epochToDateInput(1709942400), "2024-03-09");
+  // Round-trip a UTC-midnight epoch.
+  assert.equal(workflow.dateInputToEpoch(workflow.epochToDateInput(1719964800), "x"), 1719964800);
 });
 
 test("admin UI workflow prepares entitlement edit patch payloads", async () => {
   const workflow = await loadWorkflowModule();
+  // valid_from is a UTC-midnight epoch so it round-trips through the YYYY-MM-DD edit field.
   const item = {
     id: "ent-123",
     device_hash: "b".repeat(64),
     assertion_ttl_seconds: 600,
-    valid_from: 1710000000,
+    valid_from: 1709942400,
     valid_until: null,
     notes: "existing note",
     customer_id: "cus_123",
@@ -83,7 +121,7 @@ test("admin UI workflow prepares entitlement edit patch payloads", async () => {
   assert.deepEqual(editForm, {
     device_hash: "b".repeat(64),
     assertion_ttl_seconds: 600,
-    valid_from: "1710000000",
+    valid_from: "2024-03-09",
     valid_until: "",
     notes: "existing note",
     customer_id: "cus_123",
@@ -93,7 +131,7 @@ test("admin UI workflow prepares entitlement edit patch payloads", async () => {
   const patch = workflow.normalizeEntitlementPatch({
     ...editForm,
     assertion_ttl_seconds: 900,
-    valid_until: "1720000000",
+    valid_until: "2024-07-03",
     notes: "",
     customer_id: "",
     license_id: "lic_123",
@@ -101,8 +139,8 @@ test("admin UI workflow prepares entitlement edit patch payloads", async () => {
   assert.deepEqual(patch, {
     device_hash: "b".repeat(64),
     assertion_ttl_seconds: 900,
-    valid_from: 1710000000,
-    valid_until: 1720000000,
+    valid_from: 1709942400,
+    valid_until: 1719964800,
     notes: "",
     customer_id: null,
     license_id: "lic_123",
@@ -215,4 +253,92 @@ test("destructive-action confirm copy echoes the exact target", async () => {
   assert.match(named, /severs all of their license\/token auth and customer-portal access/);
   // Falls back to the id when the name is empty.
   assert.match(workflow.disableCustomerConfirm({ id: "cus_2", name: "" }), /Disable customer cus_2\./);
+});
+
+test("admin UI workflow builds filtered policy API paths", async () => {
+  const workflow = await loadWorkflowModule();
+  assert.equal(workflow.policiesPath({ project: "", type: "", status: "" }), "/api/admin/policies");
+  assert.equal(
+    workflow.policiesPath({ project: "DEFAULT", type: "trial", status: "active" }),
+    "/api/admin/policies?project=DEFAULT&type=trial&status=active",
+  );
+  assert.equal(workflow.policiesPath({ project: "", type: "", status: "active" }), "/api/admin/policies?status=active");
+});
+
+test("admin UI workflow builds policy detail and transition paths with encoding", async () => {
+  const workflow = await loadWorkflowModule();
+  assert.equal(workflow.policyPath("pol_123"), "/api/admin/policies/pol_123");
+  assert.equal(workflow.policyPath("pol/with space"), "/api/admin/policies/pol%2Fwith%20space");
+  assert.equal(workflow.policyTransitionPath("pol_123", "disable"), "/api/admin/policies/pol_123/disable");
+  assert.equal(workflow.policyTransitionPath("pol_123", "reenable"), "/api/admin/policies/pol_123/reenable");
+  assert.equal(workflow.policyTransitionPath("pol/x", "disable"), "/api/admin/policies/pol%2Fx/disable");
+});
+
+test("admin UI workflow policy action rules match kill-switch invariants", async () => {
+  const workflow = await loadWorkflowModule();
+  assert.equal(workflow.canRunPolicyAction("active", "disable"), true);
+  assert.equal(workflow.canRunPolicyAction("active", "reenable"), false);
+  assert.equal(workflow.canRunPolicyAction("disabled", "disable"), false);
+  assert.equal(workflow.canRunPolicyAction("disabled", "reenable"), true);
+  assert.equal(workflow.canRunPolicyAction("unknown", "disable"), false);
+  assert.equal(workflow.canRunPolicyAction("unknown", "reenable"), false);
+});
+
+test("admin UI workflow normalizes the policy editor form", async () => {
+  const workflow = await loadWorkflowModule();
+  // Defaults: empty offset/duration -> null; trial flags false -> 0; numeric defaults pass through.
+  const minimal = workflow.normalizePolicyForm({ ...workflow.emptyPolicyForm, name: "Trial 14d" });
+  assert.deepEqual(minimal, {
+    project: "DEFAULT",
+    name: "Trial 14d",
+    type: "trial",
+    valid_from_offset_sec: null,
+    duration_sec: null,
+    assertion_ttl_seconds: 300,
+    pool_size: 0,
+    max_active_devices: 1,
+    max_borrow_sec: 0,
+    expiry_strategy: "fixed_window",
+    trial_expiration_basis: "from_issue",
+    trial_duration_sec: 0,
+    trial_one_per_device: 0,
+    trial_require_device_proof: 0,
+    notes: "",
+  });
+
+  // A fully-specified floating policy: offset/duration parsed, trial flags coerced to 1.
+  const full = workflow.normalizePolicyForm({
+    ...workflow.emptyPolicyForm,
+    project: "P",
+    name: "Floating",
+    type: "floating",
+    valid_from_offset_sec: "0",
+    duration_sec: "2592000",
+    pool_size: 25,
+    max_active_devices: 5,
+    max_borrow_sec: 86400,
+    expiry_strategy: "non_expiring",
+    trial_expiration_basis: "from_first_activation",
+    trial_duration_sec: 1209600,
+    trial_one_per_device: true,
+    trial_require_device_proof: true,
+    notes: "team plan",
+  });
+  assert.equal(full.duration_sec, 2592000);
+  assert.equal(full.pool_size, 25);
+  assert.equal(full.expiry_strategy, "non_expiring");
+  assert.equal(full.trial_one_per_device, 1);
+  assert.equal(full.trial_require_device_proof, 1);
+
+  // Out-of-range numeric fields throw the bounded-validator message.
+  assert.throws(() => workflow.normalizePolicyForm({ ...workflow.emptyPolicyForm, name: "x", assertion_ttl_seconds: 0 }), /assertion_ttl_seconds_must_be_between_1_and_3600/);
+  assert.throws(() => workflow.normalizePolicyForm({ ...workflow.emptyPolicyForm, name: "x", pool_size: -1 }), /pool_size_must_be_between_0_and_1000000/);
+  assert.throws(() => workflow.normalizePolicyForm({ ...workflow.emptyPolicyForm, name: "x", duration_sec: "-5" }), /duration_sec_must_be_between_0_and_/);
+});
+
+test("disable-policy confirm copy echoes the policy and clarifies frozen entitlements", async () => {
+  const workflow = await loadWorkflowModule();
+  const copy = workflow.disablePolicyConfirm({ name: "Trial 14d", type: "trial" });
+  assert.match(copy, /Disable policy "Trial 14d" \(trial\)/);
+  assert.match(copy, /already-stamped entitlements are frozen and unaffected/);
 });

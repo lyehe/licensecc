@@ -292,6 +292,35 @@ code {
   }
 }
 
+/* Trial sub-panel inside the policy editor (only shown when type === 'trial'). */
+.trialPanel {
+  border: 1px solid #d8ddd1;
+  border-radius: 6px;
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 10px 12px 12px;
+}
+
+.trialPanel legend {
+  color: #59645a;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 0 4px;
+}
+
+/* A checkbox + label on one row (policy trial flags), overriding the default stacked label grid. */
+label.checkboxRow {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+label.checkboxRow input {
+  min-height: 0;
+  width: auto;
+}
+
 /* Pagination footer under each list table. */
 .tableFooter {
   align-items: center;

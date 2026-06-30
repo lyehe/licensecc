@@ -248,7 +248,7 @@ function leasePath(op: "activate" | "renew", summary: string): Record<string, un
         "403": errorResponse(
           "forbidden_scope (token cannot " +
             op +
-            " on project:feature), no_active_entitlement, expired_subscription, device_proof_required, device_proof_invalid, or device_limit_exceeded.",
+            " on project:feature), no_active_entitlement, expired_subscription, device_proof_required, device_proof_invalid, device_limit_exceeded, trial_device_proof_required (trial requires a verified device proof and none was presented), or trial_device_locked (trial is one-per-device and this device differs from the device that started the trial).",
           "no_active_entitlement",
         ),
         "500": errorResponse("lease_signing_error: crypto signing failed.", "lease_signing_error"),
@@ -419,7 +419,7 @@ function emergencyLease(op: "activate" | "renew"): Record<string, unknown> {
         "400": errorResponse("invalid_request: malformed JSON or missing required fields.", "invalid_request"),
         "401": emergencyUnauthorized(),
         "403": errorResponse(
-          "no_active_entitlement, expired_subscription, device_proof_required, device_proof_invalid, or device_limit_exceeded.",
+          "no_active_entitlement, expired_subscription, device_proof_required, device_proof_invalid, device_limit_exceeded, trial_device_proof_required, or trial_device_locked.",
           "no_active_entitlement",
         ),
         "404": emergencyNotFound(),
@@ -759,6 +759,15 @@ export const openApiSpec: OpenApiDocument = {
           server_time: { type: "integer" },
           renew_by: { type: "integer", description: "Unix seconds." },
           valid_to_epoch: { type: "integer", description: "Unix seconds (hard offline expiry)." },
+          // UNSIGNED trial telemetry (Stage 4). Present only for trial entitlements; NOT part of the
+          // signed v201 canonical payload. trial=true marks the lease as a trial; trial_expires_at_epoch
+          // is the server-computed trial deadline (for from_first_activation/from_first_use the clock
+          // starts at the first activation), clamped to the subscription end. Omitted for non-trials.
+          trial: { type: "boolean", enum: [true], description: "Present (true) only for trial entitlements." },
+          trial_expires_at_epoch: {
+            type: "integer",
+            description: "Unix seconds. Server-computed trial deadline, clamped to valid_until. Omitted when the trial has no finite deadline.",
+          },
         },
       },
       SeatCheckoutRequest: {

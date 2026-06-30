@@ -40,6 +40,12 @@ const API_ROUTES = [
   { method: "GET", path: "/api/admin/licenses" },
   { method: "GET", path: "/api/admin/orders" },
   { method: "GET", path: "/api/admin/settings" },
+  { method: "GET", path: "/api/admin/policies" },
+  { method: "POST", path: "/api/admin/policies" },
+  { method: "GET", path: "/api/admin/policies/{id}" },
+  { method: "PATCH", path: "/api/admin/policies/{id}" },
+  { method: "POST", path: "/api/admin/policies/{id}/disable" },
+  { method: "POST", path: "/api/admin/policies/{id}/reenable" },
   { method: "GET", path: "/api/admin/entitlements" },
   { method: "POST", path: "/api/admin/entitlements" },
   { method: "GET", path: "/api/admin/entitlements/{id}" },
@@ -75,6 +81,11 @@ const TEMPLATED_ROUTE_SOURCE = {
   "/api/admin/entitlements/{id}/disable": String.raw`(?:\/(disable|reenable|revoke))?`,
   "/api/admin/entitlements/{id}/reenable": String.raw`(?:\/(disable|reenable|revoke))?`,
   "/api/admin/entitlements/{id}/revoke": String.raw`(?:\/(disable|reenable|revoke))?`,
+  // Policy detail GET is its own regex; the PATCH + disable/reenable mutations live in the
+  // combined `(?:\/(disable|reenable))?` form inside handlePolicyMutation.
+  "/api/admin/policies/{id}": String.raw`/^\/api\/admin\/policies\/([^/]+)$/`,
+  "/api/admin/policies/{id}/disable": String.raw`(?:\/(disable|reenable))?`,
+  "/api/admin/policies/{id}/reenable": String.raw`(?:\/(disable|reenable))?`,
 };
 
 function routePresentInSource(path) {

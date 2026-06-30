@@ -14,6 +14,13 @@ import {
   SEAT_OVERCAP_RECLAIM_SQL,
 } from "./lease/issuance_sql.mjs";
 import { summarizeUsage } from "./lease/usage_report.mjs";
+// Stage 4 server-computed trial timing for /v1/activate: frozen-trial device lock + write-once
+// activation clock, computed off the SAME entitlements row (no join to entitlement_policies).
+import {
+  evaluateTrialActivation,
+  trialLockKey,
+  buildTrialActivationStamp,
+} from "./lease/trial.mjs";
 // Slice 1 order-ingest (POST /v1/orders): signed, exactly-once subscription fulfillment.
 // order_ingest.mjs is untyped Worker-safe JS (imported as a loose module surface).
 import { handleOrderIngest } from "./fulfillment/order_ingest.mjs";
@@ -43,6 +50,10 @@ export interface D1DatabaseLike {
   // F4: D1 Sessions strong read ("first-primary") so an emergency-revoked token is never served
   // from a stale replica. Feature-detected at runtime (older bindings lack it).
   withSession?(mode?: string): D1DatabaseLike;
+  // Transactional multi-statement commit. Used by the entitlement-mutation core and (Stage 4) the
+  // lease cap-insert + write-once trial-activation stamp so "lease issued" and "trial clock started"
+  // commit atomically. Real D1 always exposes it; a missing batch() means a degraded/mocked binding.
+  batch?(statements: D1PreparedStatementLike[]): Promise<{ results: unknown[] }[]>;
 }
 
 // Minimal Workers ExecutionContext surface (we only use waitUntil to keep the throttled
@@ -972,10 +983,10 @@ async function checkDeviceProof(
   proof: RequestProof | undefined,
   now: number,
   purpose: string,
-): Promise<{ ok: boolean; code?: string }> {
+): Promise<{ ok: boolean; code?: string; proven: boolean }> {
   if (proof === undefined) {
-    if (deviceProofMode(env) === "required") return { ok: false, code: "device_proof_required" };
-    return { ok: true };
+    if (deviceProofMode(env) === "required") return { ok: false, code: "device_proof_required", proven: false };
+    return { ok: true, proven: false };
   }
   const verifyRequest: VerifyRequest = {
     project: fields.project,
@@ -987,7 +998,11 @@ async function checkDeviceProof(
     request_proof: proof,
   };
   const evaluation = await evaluateProofForRequest(env, verifyRequest, proof, now, purpose);
-  return evaluation.result === "valid" ? { ok: true } : { ok: false, code: "device_proof_invalid" };
+  // `proven` is true ONLY when the ECDSA proof actually verified (device known+active, signature
+  // valid, nonce fresh). The trial device-lock keys on this to require/bind a real device key.
+  return evaluation.result === "valid"
+    ? { ok: true, proven: true }
+    : { ok: false, code: "device_proof_invalid", proven: false };
 }
 
 async function handleVerify(request: Request, env: Env): Promise<Response> {
@@ -1174,6 +1189,14 @@ interface LeaseEntitlementRow {
   max_active_devices: number;
   lease_seconds: number;
   rebind_window_sec: number;
+  // Frozen trial state (stamped at policy-stamp time; read from the SAME row, NEVER joined).
+  is_trial: number;
+  trial_expiration_basis: string | null;
+  trial_duration_sec: number;
+  trial_one_per_device: number;
+  trial_require_device_proof: number;
+  trial_started_at: number | null;
+  trial_device_hash: string | null;
 }
 
 interface LeaseIssueBody {
@@ -1256,8 +1279,13 @@ function leaseWithinValidity(row: { valid_from: number | null; valid_until: numb
 }
 
 async function lookupLeaseEntitlement(env: Env, body: LeaseIssueBody): Promise<LeaseEntitlementRow | null> {
+  // The frozen trial columns ride the SAME single-row read (no join to entitlement_policies — the
+  // hot path must not join): the lease deadline + device lock are computed from this one row.
   return env.DB.prepare(
-    "SELECT status, valid_from, valid_until, max_active_devices, lease_seconds, rebind_window_sec FROM entitlements WHERE project = ? AND feature = ? AND license_fingerprint = ? LIMIT 1",
+    "SELECT status, valid_from, valid_until, max_active_devices, lease_seconds, rebind_window_sec, " +
+      "is_trial, trial_expiration_basis, trial_duration_sec, trial_one_per_device, " +
+      "trial_require_device_proof, trial_started_at, trial_device_hash " +
+      "FROM entitlements WHERE project = ? AND feature = ? AND license_fingerprint = ? LIMIT 1",
   )
     .bind(body.project, body.feature, body.license_fingerprint)
     .first<LeaseEntitlementRow>();
@@ -1277,65 +1305,78 @@ async function atomicLeaseIssuance(
   validToEpoch: number,
   leaseKeyId: string,
   isolation: IsolationBinding,
+  trialStamp?: D1PreparedStatementLike,
 ): Promise<boolean> {
   const windowStart = now - (row.rebind_window_sec > 0 ? row.rebind_window_sec : 0);
   const maxDevices = row.max_active_devices > 0 ? row.max_active_devices : 1;
   // Off mode (legacy bearer, customerId null): the ORIGINAL non-owned cap guard. An owned guard
   // would bind `e.customer_id = null` and match nothing, breaking issuance — so off must NOT use
   // the owned SQL. The 15-param bind order is the original LEASE_ISSUANCE_ATOMIC_SQL contract.
-  if (isolation.mode === "off") {
-    const inserted = await env.DB.prepare(LEASE_ISSUANCE_ATOMIC_SQL)
-      .bind(
-        body.project,
-        body.feature,
-        body.license_fingerprint,
-        body.device_key_id,
-        leaseKeyId,
-        now,
-        validFromEpoch,
-        validToEpoch,
-        body.request_id ?? null,
-        body.project,
-        body.feature,
-        body.license_fingerprint,
-        windowStart,
-        body.device_key_id,
-        maxDevices,
-      )
-      .first<{ id: number }>();
-    return inserted !== null;
+  const capInsert =
+    isolation.mode === "off"
+      ? env.DB.prepare(LEASE_ISSUANCE_ATOMIC_SQL).bind(
+          body.project,
+          body.feature,
+          body.license_fingerprint,
+          body.device_key_id,
+          leaseKeyId,
+          now,
+          validFromEpoch,
+          validToEpoch,
+          body.request_id ?? null,
+          body.project,
+          body.feature,
+          body.license_fingerprint,
+          windowStart,
+          body.device_key_id,
+          maxDevices,
+        )
+      : // soft / required: F2/F3 — the ownership EXISTS (customer_id + status='active' + validity) is
+        // folded into the cap guard, so a revoke/expiry/wrong-owner between the pre-read and this write
+        // cannot mint a lease. The signed lease derives from the guard-confirmed insert (RETURNING id),
+        // not the advisory pre-read. The device-count subquery stays tuple-scoped.
+        env.DB.prepare(leaseIssuanceSqlOwned(isolation.mode)).bind(
+          body.project,
+          body.feature,
+          body.license_fingerprint,
+          body.device_key_id,
+          leaseKeyId,
+          now,
+          validFromEpoch,
+          validToEpoch,
+          body.request_id ?? null,
+          body.project,
+          body.feature,
+          body.license_fingerprint,
+          windowStart,
+          body.device_key_id,
+          maxDevices,
+          // EXISTS ownership binds: project, feature, fingerprint, customer_id, now, now.
+          body.project,
+          body.feature,
+          body.license_fingerprint,
+          isolation.customerId,
+          now,
+          now,
+        );
+
+  // No trial activation stamp: the original single-statement path (unchanged behavior).
+  if (trialStamp === undefined) {
+    return (await capInsert.first<{ id: number }>()) !== null;
   }
-  // soft / required: F2/F3 — the ownership EXISTS (customer_id + status='active' + validity) is
-  // folded into the cap guard, so a revoke/expiry/wrong-owner between the pre-read and this write
-  // cannot mint a lease. The signed lease derives from the guard-confirmed insert (RETURNING id),
-  // not the advisory pre-read. The device-count subquery stays tuple-scoped.
-  const inserted = await env.DB.prepare(leaseIssuanceSqlOwned(isolation.mode))
-    .bind(
-      body.project,
-      body.feature,
-      body.license_fingerprint,
-      body.device_key_id,
-      leaseKeyId,
-      now,
-      validFromEpoch,
-      validToEpoch,
-      body.request_id ?? null,
-      body.project,
-      body.feature,
-      body.license_fingerprint,
-      windowStart,
-      body.device_key_id,
-      maxDevices,
-      // EXISTS ownership binds: project, feature, fingerprint, customer_id, now, now.
-      body.project,
-      body.feature,
-      body.license_fingerprint,
-      isolation.customerId,
-      now,
-      now,
-    )
-    .first<{ id: number }>();
-  return inserted !== null;
+
+  // Stage 4: a from_first_activation/from_first_use trial's FIRST activation. The cap INSERT and the
+  // WRITE-ONCE trial-clock stamp commit in ONE transaction so "lease issued" and "trial_started_at
+  // set" are atomic. The stamp's own EXISTS gate (over the just-inserted lease_issuance row) means a
+  // CAPPED issuance — where the INSERT lands no row — leaves trial_started_at NULL (no false start).
+  // We derive success solely from the cap insert's RETURNING id (results[0]).
+  if (env.DB.batch === undefined) {
+    // Degraded/mocked binding: fail closed rather than start the trial clock without an atomic lease.
+    return (await capInsert.first<{ id: number }>()) !== null;
+  }
+  const results = await env.DB.batch([capInsert, trialStamp]);
+  const capRows = results[0]?.results;
+  return Array.isArray(capRows) && capRows.length > 0;
 }
 
 // F1: idempotency MUST be scoped by the authenticated customer_id so a replay of customer B's
@@ -1440,17 +1481,46 @@ async function handleLeaseIssue(
   );
   if (!leaseProof.ok) return json({ ok: false, code: leaseProof.code }, 403);
 
+  // Stage 4: server-computed trial timing. The frozen trial columns were read off the SAME
+  // entitlements row (no join). Device lock (one-per-device / require-proof) is evaluated BEFORE any
+  // mutation and is fail-closed (403, no write). For from_first_activation/from_first_use the clock
+  // starts on this activation (write-once stamp, below); from_issue needs no stamp.
+  const trialLock = trialLockKey(body.device_key_id, leaseProof.proven);
+  const trial = evaluateTrialActivation(row, trialLock, leaseProof.proven, now);
+  if (trial.trial && trial.deny !== undefined) {
+    return json({ ok: false, code: trial.deny }, 403);
+  }
+
   // Clamp the lease expiry to the subscription end (the kill-switch). Mandatory signed
   // valid-from is backdated by SKEW_DAYS to absorb day-granularity skew.
   const leaseSeconds = row.lease_seconds > 0 ? row.lease_seconds : LEASE_DEFAULT_SECONDS;
-  const validToEpoch = validUntil === null ? now + leaseSeconds : Math.min(now + leaseSeconds, validUntil);
+  let validToEpoch = validUntil === null ? now + leaseSeconds : Math.min(now + leaseSeconds, validUntil);
+  // Trial deadline clamp: never let a trial lease outlive trial_started_at + trial_duration_sec.
+  // (Reuses the same min() discipline as the valid_until clamp above.)
+  const trialActivationExpiry = trial.trial ? trial.trialExpiresAt : null;
+  if (trialActivationExpiry !== null) validToEpoch = Math.min(validToEpoch, trialActivationExpiry);
+  // The trial deadline SURFACED in the envelope: the entitlement-level trial expiry clamped to the
+  // subscription end — independent of this lease's (possibly shorter) leaseSeconds budget. For an
+  // activation-basis trial it is start+duration clamped to valid_until; for from_issue the trial
+  // clock is valid_until itself (set at stamp time). null => omit the field.
+  const trialDeadline = trial.trial
+    ? trialActivationExpiry !== null
+      ? clampToValidUntil(row, trialActivationExpiry)
+      : validUntil
+    : null;
   const skewDays = Number.parseInt(env.LEASE_SKEW_DAYS ?? "", 10);
   const effectiveSkewDays = Number.isInteger(skewDays) && skewDays >= 0 ? skewDays : LEASE_DEFAULT_SKEW_DAYS;
   const validFromEpoch = Math.max(0, now - effectiveSkewDays * 86400);
 
+  // Write-once trial-activation stamp rides the SAME atomic batch as the cap insert (so the clock
+  // only starts when a lease actually lands). Only built on the FIRST activation of an activation-
+  // basis trial; idempotent re-activations (already started) and from_issue trials pass undefined.
+  const trialStamp =
+    trial.trial && trial.stamp ? buildTrialActivationStamp(env, body, trialLock, now) : undefined;
+
   let inserted: boolean;
   try {
-    inserted = await atomicLeaseIssuance(env, body, row, now, validFromEpoch, validToEpoch, env.LEASE_SIGNING_KEY_ID, isolation);
+    inserted = await atomicLeaseIssuance(env, body, row, now, validFromEpoch, validToEpoch, env.LEASE_SIGNING_KEY_ID, isolation, trialStamp);
   } catch {
     return json({ ok: false, code: "verification_error" }, 503);
   }
@@ -1484,7 +1554,21 @@ async function handleLeaseIssue(
   // renew_by is a SOFT anomaly signal (preserves offline-tolerance): a client that has not
   // re-issued by then is surfaced server-side, but valid_to remains the hard offline limit.
   const renewBy = now + Math.floor(leaseSeconds / 2);
-  const response = { ok: true, lic, server_time: now, renew_by: renewBy, valid_to_epoch: validToEpoch };
+  const response: {
+    ok: true;
+    lic: string;
+    server_time: number;
+    renew_by: number;
+    valid_to_epoch: number;
+    trial?: true;
+    trial_expires_at_epoch?: number;
+  } = { ok: true, lic, server_time: now, renew_by: renewBy, valid_to_epoch: validToEpoch };
+  // UNSIGNED trial telemetry in the envelope only. The signed v201/lccoa1 canonical payload is NOT
+  // touched (a deferred P2 ABI change). trial_expires_at_epoch is the clamped trial deadline.
+  if (trial.trial) {
+    response.trial = true;
+    if (trialDeadline !== null) response.trial_expires_at_epoch = trialDeadline;
+  }
   await putLeaseIdempotent(env, body.request_id, response, now, isolation);
   return json(response);
 }

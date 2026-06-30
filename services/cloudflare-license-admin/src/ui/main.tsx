@@ -1,24 +1,31 @@
 import React, { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import type { EntitlementRecord } from "../shared/api";
+import type { EntitlementRecord, Policy } from "../shared/api";
 import {
   canEditEntitlement,
   canRunAction,
   canRunCustomerAction,
+  canRunPolicyAction,
   customerDetailPath,
   customerTransitionPath,
   customersPath,
   disableCustomerConfirm,
+  disablePolicyConfirm,
   editFormFromEntitlement,
   emptyEntitlementEditForm,
   emptyEntitlementForm,
+  emptyPolicyForm,
   entitlementsPath,
   formatEpoch,
   licensesPath,
+  normalizeCreateFromPolicy,
   normalizeEntitlementForm,
   normalizeEntitlementPatch,
+  normalizePolicyForm,
   ordersPath,
   patchPath,
+  policiesPath,
+  policyTransitionPath,
   revokeEntitlementConfirm,
   shortHash,
   transitionPath,
@@ -199,7 +206,7 @@ function App(): React.ReactElement {
   const [entitlements, setEntitlements] = useState<EntitlementRecord[]>([]);
   const [events, setEvents] = useState<EventItem[]>([]);
   const [activeTab, setActiveTab] = useState<
-    "overview" | "entitlements" | "events" | "customers" | "licenses" | "fulfillment" | "reports"
+    "overview" | "entitlements" | "policies" | "events" | "customers" | "licenses" | "fulfillment" | "reports"
   >("overview");
   const [form, setForm] = useState(emptyEntitlementForm);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -233,6 +240,14 @@ function App(): React.ReactElement {
 
   const [report, setReport] = useState<Report | null>(null);
 
+  // Policies tab: list + editor + the active-policy options that feed the entitlement create <select>.
+  const [policies, setPolicies] = useState<Policy[]>([]);
+  const [policyFilter, setPolicyFilter] = useState({ project: "", type: "", status: "" });
+  const [policiesCursor, setPoliciesCursor] = useState<string | null>(null);
+  const [policyForm, setPolicyForm] = useState(emptyPolicyForm);
+  // Active policies offered in the entitlement create form's policy <select> (loaded on demand).
+  const [activePolicies, setActivePolicies] = useState<Policy[]>([]);
+
   const entitlementsUrl = useMemo(() => {
     return entitlementsPath(filter);
   }, [filter]);
@@ -240,6 +255,7 @@ function App(): React.ReactElement {
   const customersUrl = useMemo(() => customersPath(customerFilter), [customerFilter]);
   const licensesUrl = useMemo(() => licensesPath(licenseFilter), [licenseFilter]);
   const ordersUrl = useMemo(() => ordersPath(orderFilter), [orderFilter]);
+  const policiesUrl = useMemo(() => policiesPath(policyFilter), [policyFilter]);
 
   async function refresh(): Promise<void> {
     const [summaryResponse, entitlementResponse, eventResponse] = await Promise.all([
@@ -372,6 +388,39 @@ function App(): React.ReactElement {
     })();
   }, [activeTab]);
 
+  async function refreshPolicies(): Promise<void> {
+    const response = await api<{ items: Policy[]; next_cursor: string | null }>(policiesUrl);
+    if (response.ok && response.data) {
+      setPolicies(response.data.items);
+      setPoliciesCursor(response.data.next_cursor ?? null);
+    } else {
+      setMessage(`${response.code} (${response.request_id})`);
+    }
+  }
+
+  useEffect(() => {
+    if (activeTab !== "policies") {
+      return;
+    }
+    void refreshPolicies();
+  }, [activeTab, policiesUrl]);
+
+  // Load the active policies for the entitlement create <select> when the Entitlements tab opens.
+  // Filtered to status=active so disabled templates can't be picked for a new stamp.
+  useEffect(() => {
+    if (activeTab !== "entitlements") {
+      return;
+    }
+    void (async () => {
+      const response = await api<{ items: Policy[]; next_cursor: string | null }>(
+        policiesPath({ project: "", type: "", status: "active" }),
+      );
+      if (response.ok && response.data) {
+        setActivePolicies(response.data.items);
+      }
+    })();
+  }, [activeTab]);
+
   function selectCustomer(id: string): void {
     setSelectedCustomerId(id);
     if (id === selectedCustomerId) {
@@ -446,9 +495,11 @@ function App(): React.ReactElement {
   async function submitCreate(event: FormEvent): Promise<void> {
     event.preventDefault();
     await runMutation(async () => {
-      let body: ReturnType<typeof normalizeEntitlementForm>;
+      // A non-empty policy_id stamps from a policy (normalizeCreateFromPolicy attaches policy_id);
+      // empty is a plain direct create. Both share the same EntitlementInput validation/conversion.
+      let body: ReturnType<typeof normalizeEntitlementForm> | ReturnType<typeof normalizeCreateFromPolicy>;
       try {
-        body = normalizeEntitlementForm(form);
+        body = form.policy_id !== "" ? normalizeCreateFromPolicy(form) : normalizeEntitlementForm(form);
       } catch (error) {
         setMessage(error instanceof Error ? error.message : "invalid_form");
         return;
@@ -462,6 +513,44 @@ function App(): React.ReactElement {
       if (result.ok) {
         setForm(emptyEntitlementForm);
         await refresh();
+      }
+    });
+  }
+
+  async function submitPolicyCreate(event: FormEvent): Promise<void> {
+    event.preventDefault();
+    await runMutation(async () => {
+      let body: ReturnType<typeof normalizePolicyForm>;
+      try {
+        body = normalizePolicyForm(policyForm);
+      } catch (error) {
+        setMessage(error instanceof Error ? error.message : "invalid_form");
+        return;
+      }
+      const result = await api<Policy>("/api/admin/policies", {
+        method: "POST",
+        headers: { "idempotency-key": crypto.randomUUID() },
+        body: JSON.stringify(body),
+      });
+      setMessage(`${result.code} (${result.request_id})`);
+      if (result.ok) {
+        setPolicyForm(emptyPolicyForm);
+        await refreshPolicies();
+      }
+    });
+  }
+
+  async function policyTransition(policy: Policy, action: "disable" | "reenable"): Promise<void> {
+    await runMutation(async () => {
+      const result = await api<Policy>(policyTransitionPath(policy.id, action), {
+        method: "POST",
+        headers: { "idempotency-key": crypto.randomUUID() },
+        body: JSON.stringify(action === "disable" ? { reason } : {}),
+      });
+      setMessage(`${result.code} (${result.request_id})`);
+      if (result.ok) {
+        setReason("");
+        await refreshPolicies();
       }
     });
   }
@@ -524,6 +613,7 @@ function App(): React.ReactElement {
         <nav>
           <button className={activeTab === "overview" ? "active" : ""} onClick={() => setActiveTab("overview")}>Overview</button>
           <button className={activeTab === "entitlements" ? "active" : ""} onClick={() => setActiveTab("entitlements")}>Entitlements</button>
+          <button className={activeTab === "policies" ? "active" : ""} onClick={() => setActiveTab("policies")}>Policies</button>
           <button className={activeTab === "events" ? "active" : ""} onClick={() => setActiveTab("events")}>Events</button>
           <button className={activeTab === "customers" ? "active" : ""} onClick={() => setActiveTab("customers")}>Customers</button>
           <button className={activeTab === "licenses" ? "active" : ""} onClick={() => setActiveTab("licenses")}>Licenses</button>
@@ -546,13 +636,22 @@ function App(): React.ReactElement {
           <aside>
             <h2>Create</h2>
             <form onSubmit={(event) => void submitCreate(event)}>
+              <label>Policy (optional)
+                <select value={form.policy_id} onChange={(event) => setForm({ ...form, policy_id: event.target.value })}>
+                  <option value="">none (direct create)</option>
+                  {activePolicies.map((policy) => (
+                    <option key={policy.id} value={policy.id}>{policy.name} ({policy.type})</option>
+                  ))}
+                </select>
+              </label>
+              {form.policy_id !== "" && <p className="muted">Stamping from a policy. The fields below override the policy defaults; leave blank to inherit. Requires POLICY_STAMP_MODE=on.</p>}
               <label>Project<input value={form.project} onChange={(event) => setForm({ ...form, project: event.target.value })} /></label>
               <label>Feature<input value={form.feature} onChange={(event) => setForm({ ...form, feature: event.target.value })} /></label>
               <label>Fingerprint<input value={form.license_fingerprint} onChange={(event) => setForm({ ...form, license_fingerprint: event.target.value })} /></label>
               <label>Device hash<input value={form.device_hash} onChange={(event) => setForm({ ...form, device_hash: event.target.value })} /></label>
               <label>Assertion TTL<input type="number" value={form.assertion_ttl_seconds} onChange={(event) => setForm({ ...form, assertion_ttl_seconds: Number(event.target.value) })} /></label>
-              <label>Valid from<input value={form.valid_from} onChange={(event) => setForm({ ...form, valid_from: event.target.value })} /></label>
-              <label>Valid until<input value={form.valid_until} onChange={(event) => setForm({ ...form, valid_until: event.target.value })} /></label>
+              <label>Valid from<input type="date" value={form.valid_from} onChange={(event) => setForm({ ...form, valid_from: event.target.value })} /></label>
+              <label>Valid until<input type="date" value={form.valid_until} onChange={(event) => setForm({ ...form, valid_until: event.target.value })} /></label>
               <label>Customer ID<input value={form.customer_id} onChange={(event) => setForm({ ...form, customer_id: event.target.value })} /></label>
               <label>License ID<input value={form.license_id} onChange={(event) => setForm({ ...form, license_id: event.target.value })} /></label>
               <label>Notes<textarea value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} /></label>
@@ -603,8 +702,8 @@ function App(): React.ReactElement {
                           <form className="editForm" onSubmit={(event) => void submitPatch(event, item)}>
                             <label>Device hash<input value={editForm.device_hash} onChange={(event) => setEditForm({ ...editForm, device_hash: event.target.value })} /></label>
                             <label>Assertion TTL<input type="number" value={editForm.assertion_ttl_seconds} onChange={(event) => setEditForm({ ...editForm, assertion_ttl_seconds: Number(event.target.value) })} /></label>
-                            <label>Valid from<input value={editForm.valid_from} onChange={(event) => setEditForm({ ...editForm, valid_from: event.target.value })} /></label>
-                            <label>Valid until<input value={editForm.valid_until} onChange={(event) => setEditForm({ ...editForm, valid_until: event.target.value })} /></label>
+                            <label>Valid from<input type="date" value={editForm.valid_from} onChange={(event) => setEditForm({ ...editForm, valid_from: event.target.value })} /></label>
+                            <label>Valid until<input type="date" value={editForm.valid_until} onChange={(event) => setEditForm({ ...editForm, valid_until: event.target.value })} /></label>
                             <label>Customer ID<input value={editForm.customer_id} onChange={(event) => setEditForm({ ...editForm, customer_id: event.target.value })} /></label>
                             <label>License ID<input value={editForm.license_id} onChange={(event) => setEditForm({ ...editForm, license_id: event.target.value })} /></label>
                             <label className="wide">Notes<textarea value={editForm.notes} onChange={(event) => setEditForm({ ...editForm, notes: event.target.value })} /></label>
@@ -627,6 +726,107 @@ function App(): React.ReactElement {
               )}
             </div>
             <label className="reason">Reason<input value={reason} onChange={(event) => setReason(event.target.value)} /></label>
+          </section>
+        </section>
+      )}
+
+      {activeTab === "policies" && (
+        <section className="workspace">
+          <aside>
+            <h2>Policy editor</h2>
+            <form onSubmit={(event) => void submitPolicyCreate(event)}>
+              <label>Project<input value={policyForm.project} onChange={(event) => setPolicyForm({ ...policyForm, project: event.target.value })} /></label>
+              <label>Name<input value={policyForm.name} onChange={(event) => setPolicyForm({ ...policyForm, name: event.target.value })} /></label>
+              <label>Type
+                <select value={policyForm.type} onChange={(event) => setPolicyForm({ ...policyForm, type: event.target.value as Policy["type"] })}>
+                  <option value="trial">trial</option>
+                  <option value="node_locked">node_locked</option>
+                  <option value="floating">floating</option>
+                  <option value="subscription">subscription</option>
+                </select>
+              </label>
+              <label>Valid from offset (sec)<input type="number" value={policyForm.valid_from_offset_sec} onChange={(event) => setPolicyForm({ ...policyForm, valid_from_offset_sec: event.target.value })} /></label>
+              <label>Duration (sec)<input type="number" value={policyForm.duration_sec} onChange={(event) => setPolicyForm({ ...policyForm, duration_sec: event.target.value })} /></label>
+              <label>Assertion TTL<input type="number" value={policyForm.assertion_ttl_seconds} onChange={(event) => setPolicyForm({ ...policyForm, assertion_ttl_seconds: Number(event.target.value) })} /></label>
+              <label>Pool size<input type="number" value={policyForm.pool_size} onChange={(event) => setPolicyForm({ ...policyForm, pool_size: Number(event.target.value) })} /></label>
+              <label>Max active devices<input type="number" value={policyForm.max_active_devices} onChange={(event) => setPolicyForm({ ...policyForm, max_active_devices: Number(event.target.value) })} /></label>
+              <label>Max borrow (sec)<input type="number" value={policyForm.max_borrow_sec} onChange={(event) => setPolicyForm({ ...policyForm, max_borrow_sec: Number(event.target.value) })} /></label>
+              <label>Expiry strategy
+                <select value={policyForm.expiry_strategy} onChange={(event) => setPolicyForm({ ...policyForm, expiry_strategy: event.target.value as Policy["expiry_strategy"] })}>
+                  <option value="fixed_window">fixed_window</option>
+                  <option value="non_expiring">non_expiring</option>
+                </select>
+              </label>
+              {policyForm.type === "trial" && (
+                <fieldset className="trialPanel">
+                  <legend>Trial</legend>
+                  <label>Expiration basis
+                    <select value={policyForm.trial_expiration_basis} onChange={(event) => setPolicyForm({ ...policyForm, trial_expiration_basis: event.target.value as Policy["trial_expiration_basis"] })}>
+                      <option value="from_issue">from_issue</option>
+                      <option value="from_first_activation">from_first_activation</option>
+                      <option value="from_first_use">from_first_use</option>
+                    </select>
+                  </label>
+                  <label>Trial duration (sec)<input type="number" value={policyForm.trial_duration_sec} onChange={(event) => setPolicyForm({ ...policyForm, trial_duration_sec: Number(event.target.value) })} /></label>
+                  <label className="checkboxRow"><input type="checkbox" checked={policyForm.trial_one_per_device} onChange={(event) => setPolicyForm({ ...policyForm, trial_one_per_device: event.target.checked })} />One trial per device</label>
+                  <label className="checkboxRow"><input type="checkbox" checked={policyForm.trial_require_device_proof} onChange={(event) => setPolicyForm({ ...policyForm, trial_require_device_proof: event.target.checked })} />Require device proof</label>
+                </fieldset>
+              )}
+              <label>Notes<textarea value={policyForm.notes} onChange={(event) => setPolicyForm({ ...policyForm, notes: event.target.value })} /></label>
+              <button disabled={busy} type="submit">Create policy</button>
+            </form>
+          </aside>
+          <section className="tablePane">
+            <div className="filters">
+              <input placeholder="project" value={policyFilter.project} onChange={(event) => setPolicyFilter({ ...policyFilter, project: event.target.value })} />
+              <select value={policyFilter.type} onChange={(event) => setPolicyFilter({ ...policyFilter, type: event.target.value })}>
+                <option value="">all types</option>
+                <option value="trial">trial</option>
+                <option value="node_locked">node_locked</option>
+                <option value="floating">floating</option>
+                <option value="subscription">subscription</option>
+              </select>
+              <select value={policyFilter.status} onChange={(event) => setPolicyFilter({ ...policyFilter, status: event.target.value })}>
+                <option value="">all</option>
+                <option value="active">active</option>
+                <option value="disabled">disabled</option>
+              </select>
+            </div>
+            <table>
+              <thead><tr><th>Name</th><th>Project</th><th>Type</th><th>Details</th><th>Status</th><th>Actions</th></tr></thead>
+              <tbody>
+                {policies.map((policy) => (
+                  <tr key={policy.id}>
+                    <td>{policy.name}</td>
+                    <td>{policy.project}</td>
+                    <td>{policy.type}</td>
+                    <td>
+                      <div className="details">
+                        <span>TTL {policy.assertion_ttl_seconds}s</span>
+                        <span>Expiry {policy.expiry_strategy}</span>
+                        <span>Offset {policy.valid_from_offset_sec ?? "-"} / Duration {policy.duration_sec ?? "-"}</span>
+                        <span>Pool {policy.pool_size} / Max devices {policy.max_active_devices} / Borrow {policy.max_borrow_sec}s</span>
+                        {policy.type === "trial" && (
+                          <span>Trial {policy.trial_expiration_basis} {policy.trial_duration_sec}s {policy.trial_one_per_device === 1 ? "one-per-device" : ""} {policy.trial_require_device_proof === 1 ? "proof-required" : ""}</span>
+                        )}
+                        {policy.notes !== "" && <span>Notes {policy.notes}</span>}
+                      </div>
+                    </td>
+                    <td><span className={`status ${policy.status}`}>{policy.status}</span></td>
+                    <td className="actions">
+                      <button className="danger" disabled={busy || !canRunPolicyAction(policy.status, "disable")} onClick={() => requestConfirm({ title: "Disable policy", body: disablePolicyConfirm(policy), requiresReason: true, run: () => policyTransition(policy, "disable") })}>Disable</button>
+                      <button disabled={busy || !canRunPolicyAction(policy.status, "reenable")} onClick={() => void policyTransition(policy, "reenable")}>Reenable</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div className="tableFooter">
+              <span className="muted">{policies.length} shown</span>
+              {policiesCursor !== null && (
+                <button type="button" disabled={busy} onClick={() => void loadMore(policiesUrl, policiesCursor, setPolicies, setPoliciesCursor)}>Load more</button>
+              )}
+            </div>
           </section>
         </section>
       )}

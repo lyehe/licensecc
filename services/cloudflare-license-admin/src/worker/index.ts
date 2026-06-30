@@ -2,7 +2,18 @@ import { createRemoteJWKSet, jwtVerify } from "jose";
 import type { JWTPayload } from "jose";
 import { openApiJson } from "./openapi.js";
 import { docsHtml } from "./docs_page.js";
-import type { EntitlementInput, EntitlementPatch, EntitlementRecord, EntitlementStatus } from "../shared/api";
+import type {
+  EntitlementInput,
+  EntitlementPatch,
+  EntitlementRecord,
+  EntitlementStatus,
+  Policy,
+  PolicyInput,
+  PolicyPatch,
+  PolicyType,
+  ExpiryStrategy,
+  TrialExpirationBasis,
+} from "../shared/api";
 import {
   entitlementId,
   decodeEntitlementId,
@@ -22,6 +33,7 @@ import type {
   IdempotencyCommit,
   MutationResult,
 } from "@licensecc/cloudflare-licensing-backend/entitlements/entitlement_mutation";
+import { stampFromPolicy, buildPolicyStampStatement } from "@licensecc/cloudflare-licensing-backend/entitlements/policy";
 
 export interface Env {
   DB: D1DatabaseLike;
@@ -36,13 +48,20 @@ export interface Env {
   ADMIN_ACCESS_READER_EMAILS?: string;
   PUBLIC_VERIFIER_URL?: string;
   SYNC_API_TOKEN?: string;
+  // off (default) | on. Always lets operators CRUD policy templates (managing rows is
+  // harmless); gates only whether POST /api/admin/entitlements HONORS a policy_id.
+  POLICY_STAMP_MODE?: string;
 }
 
 const HEX_64 = /^[0-9a-fA-F]{64}$/;
 const MAX_PROJECT_SIZE = 127;
 const MAX_FEATURE_SIZE = 15;
 const MAX_NOTES_SIZE = 1000;
+const MAX_NAME_SIZE = 127;
 const MAX_BODY_BYTES = 8192;
+// A generous-but-bounded ceiling for the policy duration/offset/borrow integers
+// (~100 years in seconds). Keeps validators from accepting absurd or overflow values.
+const MAX_DURATION_SECONDS = 3_153_600_000;
 const jwksCache = new Map<string, ReturnType<typeof createRemoteJWKSet>>();
 
 function json<T>(body: T, status = 200, headers: HeadersInit = {}): Response {
@@ -343,6 +362,145 @@ function validateEntitlementPatch(value: unknown): EntitlementPatch | null {
   return patch;
 }
 
+// ── Policy validation (Stage 3) ──────────────────────────────────────────────
+// A nullable bounded integer: undefined -> keep default; null -> SQL NULL; otherwise an
+// integer in [min,max]. `undefined`-sentinel signals "invalid" (distinct from a valid null).
+function nullableBoundedInt(value: unknown, min: number, max: number): number | null | typeof INVALID {
+  if (value === null) {
+    return null;
+  }
+  if (typeof value !== "number" || !Number.isInteger(value) || value < min || value > max) {
+    return INVALID;
+  }
+  return value;
+}
+const INVALID = Symbol("invalid");
+
+const POLICY_TYPES: ReadonlyArray<PolicyType> = ["trial", "node_locked", "floating", "subscription"];
+const EXPIRY_STRATEGIES: ReadonlyArray<ExpiryStrategy> = ["fixed_window", "non_expiring"];
+const TRIAL_BASES: ReadonlyArray<TrialExpirationBasis> = ["from_issue", "from_first_activation", "from_first_use"];
+
+// Resolve the per-policy default columns. Each is "undefined -> default; else validate".
+// Returns null on ANY invalid field so the caller emits a single 400 invalid_request.
+function readPolicyColumns(input: Record<string, unknown>): {
+  valid_from_offset_sec: number | null;
+  duration_sec: number | null;
+  assertion_ttl_seconds: number;
+  pool_size: number;
+  max_active_devices: number;
+  max_borrow_sec: number;
+  expiry_strategy: ExpiryStrategy;
+  trial_expiration_basis: TrialExpirationBasis;
+  trial_duration_sec: number;
+  trial_one_per_device: number;
+  trial_require_device_proof: number;
+} | null {
+  const validFromOffset = input.valid_from_offset_sec === undefined ? null : nullableBoundedInt(input.valid_from_offset_sec, -MAX_DURATION_SECONDS, MAX_DURATION_SECONDS);
+  const duration = input.duration_sec === undefined ? null : nullableBoundedInt(input.duration_sec, 0, MAX_DURATION_SECONDS);
+  const assertionTtl = boundedInt(input.assertion_ttl_seconds ?? 300, 1, 3600);
+  const poolSize = boundedInt(input.pool_size ?? 0, 0, 1_000_000);
+  const maxActiveDevices = boundedInt(input.max_active_devices ?? 1, 0, 1_000_000);
+  const maxBorrow = boundedInt(input.max_borrow_sec ?? 0, 0, MAX_DURATION_SECONDS);
+  const expiryStrategy = input.expiry_strategy === undefined ? "fixed_window" : input.expiry_strategy;
+  const trialBasis = input.trial_expiration_basis === undefined ? "from_issue" : input.trial_expiration_basis;
+  const trialDuration = boundedInt(input.trial_duration_sec ?? 0, 0, MAX_DURATION_SECONDS);
+  const trialOnePerDevice = boundedInt(input.trial_one_per_device ?? 0, 0, 1);
+  const trialRequireProof = boundedInt(input.trial_require_device_proof ?? 0, 0, 1);
+  if (
+    validFromOffset === INVALID || duration === INVALID || assertionTtl === undefined ||
+    poolSize === undefined || maxActiveDevices === undefined || maxBorrow === undefined ||
+    !EXPIRY_STRATEGIES.includes(expiryStrategy as ExpiryStrategy) ||
+    !TRIAL_BASES.includes(trialBasis as TrialExpirationBasis) ||
+    trialDuration === undefined || trialOnePerDevice === undefined || trialRequireProof === undefined
+  ) {
+    return null;
+  }
+  return {
+    valid_from_offset_sec: validFromOffset,
+    duration_sec: duration,
+    assertion_ttl_seconds: assertionTtl,
+    pool_size: poolSize,
+    max_active_devices: maxActiveDevices,
+    max_borrow_sec: maxBorrow,
+    expiry_strategy: expiryStrategy as ExpiryStrategy,
+    trial_expiration_basis: trialBasis as TrialExpirationBasis,
+    trial_duration_sec: trialDuration,
+    trial_one_per_device: trialOnePerDevice,
+    trial_require_device_proof: trialRequireProof,
+  };
+}
+
+function validatePolicyInput(value: unknown): PolicyInput | null {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+  const input = value as Record<string, unknown>;
+  const project = safeString(input.project, MAX_PROJECT_SIZE);
+  const name = safeString(input.name, MAX_NAME_SIZE);
+  const type = input.type;
+  const notes = input.notes === undefined ? "" : safeNotes(input.notes);
+  const columns = readPolicyColumns(input);
+  if (
+    project === null || name === null || !POLICY_TYPES.includes(type as PolicyType) ||
+    notes === null || columns === null
+  ) {
+    return null;
+  }
+  return { project, name, type: type as PolicyType, notes, ...columns };
+}
+
+function validatePolicyPatch(value: unknown): PolicyPatch | null {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+  const input = value as Record<string, unknown>;
+  // project/name/type/status are NOT patchable — reject if present so callers can't
+  // believe they changed identity or flipped status outside disable/reenable.
+  if (input.project !== undefined || input.name !== undefined || input.type !== undefined || input.status !== undefined) {
+    return null;
+  }
+  const patch: PolicyPatch = {};
+  if (input.valid_from_offset_sec !== undefined) {
+    const v = nullableBoundedInt(input.valid_from_offset_sec, -MAX_DURATION_SECONDS, MAX_DURATION_SECONDS);
+    if (v === INVALID) return null;
+    patch.valid_from_offset_sec = v;
+  }
+  if (input.duration_sec !== undefined) {
+    const v = nullableBoundedInt(input.duration_sec, 0, MAX_DURATION_SECONDS);
+    if (v === INVALID) return null;
+    patch.duration_sec = v;
+  }
+  for (const [field, min, max] of [
+    ["assertion_ttl_seconds", 1, 3600],
+    ["pool_size", 0, 1_000_000],
+    ["max_active_devices", 0, 1_000_000],
+    ["max_borrow_sec", 0, MAX_DURATION_SECONDS],
+    ["trial_duration_sec", 0, MAX_DURATION_SECONDS],
+    ["trial_one_per_device", 0, 1],
+    ["trial_require_device_proof", 0, 1],
+  ] as const) {
+    if (input[field] !== undefined) {
+      const v = boundedInt(input[field], min, max);
+      if (v === undefined) return null;
+      patch[field] = v;
+    }
+  }
+  if (input.expiry_strategy !== undefined) {
+    if (!EXPIRY_STRATEGIES.includes(input.expiry_strategy as ExpiryStrategy)) return null;
+    patch.expiry_strategy = input.expiry_strategy as ExpiryStrategy;
+  }
+  if (input.trial_expiration_basis !== undefined) {
+    if (!TRIAL_BASES.includes(input.trial_expiration_basis as TrialExpirationBasis)) return null;
+    patch.trial_expiration_basis = input.trial_expiration_basis as TrialExpirationBasis;
+  }
+  if (input.notes !== undefined) {
+    const notes = safeNotes(input.notes);
+    if (notes === null) return null;
+    patch.notes = notes;
+  }
+  return patch;
+}
+
 async function listEntitlements(request: Request, env: Env, requestIdValue: string): Promise<Response> {
   const url = new URL(request.url);
   const filters: string[] = [];
@@ -450,6 +608,75 @@ async function mutationResponse<T>(request: Request, env: Env, ctx: MutationCont
   }
 }
 
+// Create an entitlement by STAMPING a policy (POST /api/admin/entitlements with a policy_id).
+// Gated by POLICY_STAMP_MODE: off (default) rejects 400 policy_stamping_disabled; on stamps.
+// The policy must exist and be status=active (else 404 policy_not_found). stampFromPolicy yields
+// the EXACT EntitlementInput createEntitlement already writes byte-identically PLUS the capacity +
+// frozen-trial side-state, which rides createEntitlement's extraStatements seam to land in the SAME
+// atomic batch as the INSERT. The body's target tuple + any per-field overrides flow through `overrides`.
+async function createFromPolicy(request: Request, env: Env, ctx: MutationContext, body: unknown, requestIdValue: string): Promise<Response> {
+  if (!policyStampOn(env)) {
+    return envelope(requestIdValue, "policy_stamping_disabled", undefined, 400);
+  }
+  const input = body as Record<string, unknown>;
+  // Validate the target tuple the stamp MUST carry (the same constraints as a direct create).
+  const project = safeString(input.project, MAX_PROJECT_SIZE);
+  const feature = safeString(input.feature, MAX_FEATURE_SIZE);
+  const licenseFingerprint = typeof input.license_fingerprint === "string" && HEX_64.test(input.license_fingerprint)
+    ? input.license_fingerprint
+    : null;
+  const policyId = typeof input.policy_id === "string" ? input.policy_id : null;
+  if (project === null || feature === null || licenseFingerprint === null || policyId === null || policyId.length > 128) {
+    return envelope(requestIdValue, "invalid_request", undefined, 400);
+  }
+  // Optional per-field overrides; each is "absent (undefined) -> fall back to policy" or
+  // "present-but-malformed -> 400". valid_from/valid_until are only validated when present
+  // (nullableEpoch returns undefined for both absent AND malformed, so gate on presence).
+  const deviceHash = input.device_hash === undefined || input.device_hash === ""
+    ? undefined
+    : typeof input.device_hash === "string" && HEX_64.test(input.device_hash)
+      ? input.device_hash
+      : null;
+  const assertionTtl = input.assertion_ttl_seconds === undefined ? undefined : boundedInt(input.assertion_ttl_seconds, 1, 3600);
+  const validFrom = input.valid_from === undefined ? undefined : nullableEpoch(input.valid_from);
+  const validUntil = input.valid_until === undefined ? undefined : nullableEpoch(input.valid_until);
+  const notes = input.notes === undefined ? undefined : safeNotes(input.notes);
+  const customerId = input.customer_id === undefined ? undefined : nullableSafeString(input.customer_id, 128);
+  const licenseId = input.license_id === undefined ? undefined : nullableSafeString(input.license_id, 128);
+  if (
+    deviceHash === null ||
+    (input.assertion_ttl_seconds !== undefined && assertionTtl === undefined) ||
+    (input.valid_from !== undefined && validFrom === undefined) ||
+    (input.valid_until !== undefined && validUntil === undefined) ||
+    (typeof validFrom === "number" && typeof validUntil === "number" && validFrom >= validUntil) ||
+    (input.notes !== undefined && notes === null) ||
+    (input.customer_id !== undefined && customerId === undefined) ||
+    (input.license_id !== undefined && licenseId === undefined)
+  ) {
+    return envelope(requestIdValue, "invalid_request", undefined, 400);
+  }
+  const policy = await findPolicy(env, policyId);
+  if (policy === null || policy.status !== "active") {
+    return envelope(requestIdValue, "policy_not_found", undefined, 404);
+  }
+  const now = Math.floor(Date.now() / 1000);
+  // Build the override set; undefined fields fall back to the policy default inside stampFromPolicy.
+  const overrides: Record<string, unknown> = { project, feature, license_fingerprint: licenseFingerprint };
+  if (deviceHash !== undefined) overrides.device_hash = deviceHash;
+  if (assertionTtl !== undefined) overrides.assertion_ttl_seconds = assertionTtl;
+  if (input.valid_from !== undefined) overrides.valid_from = validFrom;
+  if (input.valid_until !== undefined) overrides.valid_until = validUntil;
+  if (notes !== undefined) overrides.notes = notes;
+  if (customerId !== undefined) overrides.customer_id = customerId;
+  if (licenseId !== undefined) overrides.license_id = licenseId;
+  const stamp = stampFromPolicy(policy as never, overrides as never, now);
+  const key = { project, feature, license_fingerprint: licenseFingerprint };
+  return mutationResponse(request, env, ctx, "entitlement_saved", (idempotency) =>
+    createEntitlement(env, stamp.input, ctx, "", undefined, idempotency, [
+      buildPolicyStampStatement(env as never, key, policy.id, stamp.capacity, stamp.trial),
+    ]));
+}
+
 async function handleMutation(request: Request, env: Env, actor: Actor, requestIdValue: string): Promise<Response> {
   const adminError = requireAdmin(actor, requestIdValue);
   if (adminError !== null) {
@@ -473,6 +700,10 @@ async function handleMutation(request: Request, env: Env, actor: Actor, requestI
   }
 
   if (request.method === "POST" && url.pathname === "/api/admin/entitlements") {
+    const policyId = (body as Record<string, unknown>).policy_id;
+    if (policyId !== undefined && policyId !== null && policyId !== "") {
+      return createFromPolicy(request, env, ctx, body, requestIdValue);
+    }
     const input = validateEntitlementInput(body);
     if (input === null) {
       return envelope(requestIdValue, "invalid_request", undefined, 400);
@@ -838,6 +1069,263 @@ async function handleCustomerTransition(
   return json(responseBody);
 }
 
+// ── License-policy templates (Stage 3) ───────────────────────────────────────
+// CRUD over entitlement_policies. Reads are reader+admin; writes require requireAdmin.
+// Each write (create/patch/disable/reenable) commits the row mutation + a policy_events
+// audit row in ONE atomic batch, mirroring the customer kill-switch's guarded-UPDATE+audit
+// shape. Policy CRUD is ALWAYS available regardless of POLICY_STAMP_MODE — managing template
+// rows is harmless; the mode only gates whether a create HONORS a policy_id.
+
+// The full policy column projection, in storage order — every policy SELECT/RETURNING renders these.
+const POLICY_COLUMNS =
+  "id, project, name, type, status, valid_from_offset_sec, duration_sec, assertion_ttl_seconds, pool_size, max_active_devices, max_borrow_sec, expiry_strategy, trial_expiration_basis, trial_duration_sec, trial_one_per_device, trial_require_device_proof, notes, created_at, updated_at";
+
+function policyStampOn(env: Env): boolean {
+  return env.POLICY_STAMP_MODE === "on";
+}
+
+async function findPolicy(env: Env, policyId: string): Promise<Policy | null> {
+  return env.DB.prepare(`SELECT ${POLICY_COLUMNS} FROM entitlement_policies WHERE id = ? LIMIT 1`)
+    .bind(policyId)
+    .first<Policy>();
+}
+
+async function listPolicies(request: Request, env: Env, requestIdValue: string): Promise<Response> {
+  const url = new URL(request.url);
+  const filters: string[] = [];
+  const values: unknown[] = [];
+  for (const [query, column] of [["project", "project"], ["type", "type"], ["status", "status"]] as const) {
+    const value = url.searchParams.get(query);
+    if (value !== null && value !== "") {
+      filters.push(`${column} = ?`);
+      values.push(value);
+    }
+  }
+  const { limit, cursor } = boundedCursor(url);
+  const where = filters.length === 0 ? "" : `WHERE ${filters.join(" AND ")}`;
+  values.push(limit + 1, cursor);
+  const rows = await env.DB.prepare(
+    `SELECT ${POLICY_COLUMNS} FROM entitlement_policies ${where} ORDER BY updated_at DESC, id LIMIT ? OFFSET ?`,
+  ).bind(...values).all();
+  return envelope(requestIdValue, "policies_listed", {
+    items: rows.results.slice(0, limit),
+    next_cursor: rows.results.length > limit ? String(cursor + limit) : null,
+  });
+}
+
+async function getPolicy(env: Env, policyId: string, requestIdValue: string): Promise<Response> {
+  const policy = await findPolicy(env, policyId);
+  return policy === null ? envelope(requestIdValue, "not_found", undefined, 404) : envelope(requestIdValue, "policy", policy);
+}
+
+// Shared atomic write: INSERT/UPDATE the policy row + INSERT a policy_events audit row in one
+// batch, returning the persisted row. `eventType` is the audit verb; `reason` the audit reason.
+async function writePolicyWithAudit(
+  env: Env,
+  policyStatement: ReturnType<D1DatabaseLike["prepare"]>,
+  policyId: string,
+  project: string,
+  eventType: "create" | "update" | "disable" | "reenable",
+  reason: string,
+  actor: Actor,
+  requestIdValue: string,
+  now: number,
+): Promise<Record<string, unknown> | null> {
+  if (typeof env.DB.batch !== "function") {
+    return null;
+  }
+  const auditStatement = env.DB.prepare(
+    `INSERT INTO policy_events (policy_id, project, event_type, actor, actor_type, source, reason, request_id, prev_json, next_json, created_at)
+     SELECT ?, ?, ?, ?, ?, 'admin', ?, ?, '', json_object(${POLICY_COLUMNS.split(", ").map((c) => `'${c}', ${c}`).join(", ")}), ?
+     FROM entitlement_policies WHERE id = ?`,
+  ).bind(policyId, project, eventType, actor.email || actor.subject, actor.actorType, reason, requestIdValue, now, policyId);
+  const results = await env.DB.batch([policyStatement, auditStatement]);
+  return batchReturnedRow<Record<string, unknown>>(results[0]);
+}
+
+async function handlePolicyCreate(request: Request, env: Env, actor: Actor, body: unknown, requestIdValue: string): Promise<Response> {
+  const input = validatePolicyInput(body);
+  if (input === null) {
+    return envelope(requestIdValue, "invalid_request", undefined, 400);
+  }
+  const idempotencyKey = safeString(request.headers.get("idempotency-key"), 128);
+  if (request.headers.has("idempotency-key") && idempotencyKey === null) {
+    return envelope(requestIdValue, "invalid_idempotency_key", undefined, 400);
+  }
+  const scope = `POST:/api/admin/policies:${actor.subject}`;
+  const replay = await idempotentReplay(env, scope, idempotencyKey);
+  if (replay !== null) {
+    return replay;
+  }
+  if (typeof env.DB.batch !== "function") {
+    return envelope(requestIdValue, "mutation_failed", undefined, 500);
+  }
+  const id = crypto.randomUUID();
+  const now = Math.floor(Date.now() / 1000);
+  const insert = env.DB.prepare(
+    `INSERT INTO entitlement_policies (id, project, name, type, status, valid_from_offset_sec, duration_sec, assertion_ttl_seconds, pool_size, max_active_devices, max_borrow_sec, expiry_strategy, trial_expiration_basis, trial_duration_sec, trial_one_per_device, trial_require_device_proof, notes, created_at, updated_at)
+     VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING ${POLICY_COLUMNS}`,
+  ).bind(
+    id, input.project, input.name, input.type,
+    input.valid_from_offset_sec ?? null, input.duration_sec ?? null, input.assertion_ttl_seconds ?? 300,
+    input.pool_size ?? 0, input.max_active_devices ?? 1, input.max_borrow_sec ?? 0,
+    input.expiry_strategy ?? "fixed_window", input.trial_expiration_basis ?? "from_issue",
+    input.trial_duration_sec ?? 0, input.trial_one_per_device ?? 0, input.trial_require_device_proof ?? 0,
+    input.notes ?? "", now, now,
+  );
+  let row: Record<string, unknown> | null;
+  try {
+    row = await writePolicyWithAudit(env, insert, id, input.project, "create", "", actor, requestIdValue, now);
+  } catch (error) {
+    // The UNIQUE(project, lower(name)) index rejects a duplicate name within a project.
+    if (error instanceof Error && /UNIQUE|constraint/i.test(error.message)) {
+      return envelope(requestIdValue, "policy_name_conflict", undefined, 409);
+    }
+    return envelope(requestIdValue, "mutation_failed", undefined, 500);
+  }
+  if (row === null) {
+    return envelope(requestIdValue, "mutation_failed", undefined, 500);
+  }
+  const responseBody = { ok: true, code: "policy_created", request_id: requestIdValue, data: row };
+  await rememberIdempotency(env, scope, idempotencyKey, responseBody, now);
+  return json(responseBody);
+}
+
+async function handlePolicyPatch(request: Request, env: Env, actor: Actor, policyId: string, body: unknown, requestIdValue: string): Promise<Response> {
+  const patch = validatePolicyPatch(body);
+  if (patch === null) {
+    return envelope(requestIdValue, "invalid_request", undefined, 400);
+  }
+  const idempotencyKey = safeString(request.headers.get("idempotency-key"), 128);
+  if (request.headers.has("idempotency-key") && idempotencyKey === null) {
+    return envelope(requestIdValue, "invalid_idempotency_key", undefined, 400);
+  }
+  const scope = `PATCH:/api/admin/policies/:id:${actor.subject}`;
+  const replay = await idempotentReplay(env, scope, idempotencyKey);
+  if (replay !== null) {
+    return replay;
+  }
+  const existing = await findPolicy(env, policyId);
+  if (existing === null) {
+    return envelope(requestIdValue, "not_found", undefined, 404);
+  }
+  if (typeof env.DB.batch !== "function") {
+    return envelope(requestIdValue, "mutation_failed", undefined, 500);
+  }
+  const assignments: string[] = [];
+  const values: unknown[] = [];
+  for (const field of [
+    "valid_from_offset_sec", "duration_sec", "assertion_ttl_seconds", "pool_size", "max_active_devices",
+    "max_borrow_sec", "expiry_strategy", "trial_expiration_basis", "trial_duration_sec", "trial_one_per_device",
+    "trial_require_device_proof", "notes",
+  ] as const) {
+    const value = (patch as Record<string, unknown>)[field];
+    if (value !== undefined) {
+      assignments.push(`${field} = ?`);
+      values.push(value);
+    }
+  }
+  const now = Math.floor(Date.now() / 1000);
+  assignments.push("updated_at = ?");
+  values.push(now, policyId);
+  const update = env.DB.prepare(
+    `UPDATE entitlement_policies SET ${assignments.join(", ")} WHERE id = ? RETURNING ${POLICY_COLUMNS}`,
+  ).bind(...values);
+  let row: Record<string, unknown> | null;
+  try {
+    row = await writePolicyWithAudit(env, update, policyId, existing.project, "update", "", actor, requestIdValue, now);
+  } catch {
+    return envelope(requestIdValue, "mutation_failed", undefined, 500);
+  }
+  if (row === null) {
+    return envelope(requestIdValue, "not_found", undefined, 404);
+  }
+  const responseBody = { ok: true, code: "policy_patched", request_id: requestIdValue, data: row };
+  await rememberIdempotency(env, scope, idempotencyKey, responseBody, now);
+  return json(responseBody);
+}
+
+// Policy disable/reenable kill-switch: a guarded UPDATE (status flips only from the expected
+// prior status) + an audit row, atomic. Disabling a policy only blocks NEW stamps; it never
+// retro-mutates already-stamped entitlements (those are frozen copies).
+async function handlePolicyTransition(request: Request, env: Env, actor: Actor, policyId: string, action: "disable" | "reenable", body: unknown, requestIdValue: string): Promise<Response> {
+  const reason = safeNotes((body as Record<string, unknown>).reason) ?? "";
+  if (action === "disable" && reason === "") {
+    return envelope(requestIdValue, "reason_required", undefined, 400);
+  }
+  const idempotencyKey = safeString(request.headers.get("idempotency-key"), 128);
+  if (request.headers.has("idempotency-key") && idempotencyKey === null) {
+    return envelope(requestIdValue, "invalid_idempotency_key", undefined, 400);
+  }
+  const scope = `POST:/api/admin/policies/${action}:${actor.subject}`;
+  const replay = await idempotentReplay(env, scope, idempotencyKey);
+  if (replay !== null) {
+    return replay;
+  }
+  const existing = await findPolicy(env, policyId);
+  if (existing === null) {
+    return envelope(requestIdValue, "not_found", undefined, 404);
+  }
+  const expectedPrev = action === "disable" ? "active" : "disabled";
+  const next = action === "disable" ? "disabled" : "active";
+  if (existing.status !== expectedPrev) {
+    return envelope(requestIdValue, "policy_status_conflict", { status: existing.status }, 409);
+  }
+  if (typeof env.DB.batch !== "function") {
+    return envelope(requestIdValue, "mutation_failed", undefined, 500);
+  }
+  const now = Math.floor(Date.now() / 1000);
+  const update = env.DB.prepare(
+    `UPDATE entitlement_policies SET status = ?, updated_at = ? WHERE id = ? AND status = ? RETURNING ${POLICY_COLUMNS}`,
+  ).bind(next, now, policyId, expectedPrev);
+  let row: Record<string, unknown> | null;
+  try {
+    row = await writePolicyWithAudit(env, update, policyId, existing.project, action, reason, actor, requestIdValue, now);
+  } catch {
+    return envelope(requestIdValue, "mutation_failed", undefined, 500);
+  }
+  if (row === null) {
+    // Lost the guarded race — status changed between the pre-read and the UPDATE.
+    return envelope(requestIdValue, "policy_status_conflict", undefined, 409);
+  }
+  const responseBody = { ok: true, code: `policy_${action}d`, request_id: requestIdValue, data: row };
+  await rememberIdempotency(env, scope, idempotencyKey, responseBody, now);
+  return json(responseBody);
+}
+
+// Dispatch the policy writes (POST create, PATCH :id, POST :id/disable|reenable). All require
+// the admin role (requireAdmin) so reader RBAC blocks every write.
+async function handlePolicyMutation(request: Request, env: Env, actor: Actor, requestIdValue: string): Promise<Response> {
+  const adminError = requireAdmin(actor, requestIdValue);
+  if (adminError !== null) {
+    return adminError;
+  }
+  const url = new URL(request.url);
+  const body = await parseJsonBody(request, requestIdValue);
+  if (body instanceof Response) {
+    return body;
+  }
+  if (request.method === "POST" && url.pathname === "/api/admin/policies") {
+    return handlePolicyCreate(request, env, actor, body, requestIdValue);
+  }
+  const match = /^\/api\/admin\/policies\/([^/]+)(?:\/(disable|reenable))?$/.exec(url.pathname);
+  if (match === null) {
+    return envelope(requestIdValue, "not_found", undefined, 404);
+  }
+  const policyId = decodeURIComponent(match[1] ?? "");
+  if (policyId.length === 0 || policyId.length > 128) {
+    return envelope(requestIdValue, "invalid_request", undefined, 400);
+  }
+  const action = match[2];
+  if (request.method === "PATCH" && action === undefined) {
+    return handlePolicyPatch(request, env, actor, policyId, body, requestIdValue);
+  }
+  if (request.method === "POST" && (action === "disable" || action === "reenable")) {
+    return handlePolicyTransition(request, env, actor, policyId, action, body, requestIdValue);
+  }
+  return envelope(requestIdValue, "not_found", undefined, 404);
+}
+
 async function handleApi(request: Request, env: Env): Promise<Response> {
   const id = requestId(request);
   const auth = await authenticate(request, env, id);
@@ -870,6 +1358,16 @@ async function handleApi(request: Request, env: Env): Promise<Response> {
   }
   if (request.method === "GET" && url.pathname === "/api/admin/settings") {
     return settings(env, id);
+  }
+  if (request.method === "GET" && url.pathname === "/api/admin/policies") {
+    return listPolicies(request, env, id);
+  }
+  const policyDetail = /^\/api\/admin\/policies\/([^/]+)$/.exec(url.pathname);
+  if (request.method === "GET" && policyDetail !== null) {
+    return getPolicy(env, decodeURIComponent(policyDetail[1] ?? ""), id);
+  }
+  if (["POST", "PATCH"].includes(request.method) && url.pathname.startsWith("/api/admin/policies")) {
+    return handlePolicyMutation(request, env, auth, id);
   }
   if (request.method === "GET" && url.pathname === "/api/admin/entitlements") {
     return listEntitlements(request, env, id);
@@ -922,4 +1420,6 @@ export const adminInternalsForTests = {
   decodeEntitlementId,
   validateEntitlementInput,
   validateEntitlementPatch,
+  validatePolicyInput,
+  validatePolicyPatch,
 };
