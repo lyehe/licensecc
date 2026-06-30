@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      net8.0 is targeted so RSA.ImportRSAPublicKey (PKCS#1 RSAPublicKey import) is available in-box
+      with NO external package dependencies. ImportRSAPublicKey is part of the netstandard2.1+ /
+      .NET Core 3.0+ surface; netstandard2.0 lacks it, so net8.0 (allowed by the task) is the clean,
+      zero-dependency target. The verifier uses only System.Security.Cryptography and the BCL.
+    -->
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <!-- CS1591 (missing XML doc): the claim/DTO property bags are self-describing; documenting every
+         field would be noise. All behavior-bearing types/methods are documented. -->
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+
+    <!-- NuGet packaging metadata -->
+    <PackageId>Licensecc.Client</PackageId>
+    <Version>0.1.0</Version>
+    <Authors>licensecc</Authors>
+    <Description>
+      .NET client SDK for the licensecc online licensing backend: a fail-closed offline verifier
+      for the lccoa1 online-assertion and lcccfg1 config-attestation signed tokens (RSA-PKCS1-SHA256),
+      plus a thin HttpClient wrapper for the licensing-backend HTTP API. Covers the HTTP + token
+      contract only; binary anti-tamper / hardware fingerprinting stays in the C++ library.
+    </Description>
+    <PackageTags>licensecc;licensing;rsa;token;verification</PackageTags>
+    <PackageLicenseExpression>BSD-3-Clause</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/open-license-manager/licensecc</RepositoryUrl>
+  </PropertyGroup>
+
+</Project>
