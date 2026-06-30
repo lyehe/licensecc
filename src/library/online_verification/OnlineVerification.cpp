@@ -423,6 +423,58 @@ OnlineVerificationResult evaluate(const OnlineVerificationRequest& request) {
 	return result;
 }
 
+OnlineVerificationResult notify_release(const OnlineVerificationRequest& request) {
+	OnlineVerificationResult result;
+	result.policy = request.policy;
+	if (request.online_check == nullptr) {
+		return failure_result(request, LICENSE_ONLINE_REQUIRED, "online callback is not configured");
+	}
+
+	const std::string nonce = generate_nonce();
+	if (nonce.empty()) {
+		return failure_result(request, LICENSE_ONLINE_VERIFICATION_FAILED, "online nonce generation failed");
+	}
+	LccOnlineRequest public_request{};
+	public_request.size = sizeof(public_request);
+	public_request.version = LCC_ONLINE_REQUEST_VERSION;
+	public_request.policy = LCC_ONLINE_REQUIRE;
+	public_request.flags = request.flags;
+	public_request.timeout_ms = request.timeout_ms;
+	public_request.client_hardening = request.client_hardening;
+	if (!copy_public_request_field(public_request.project, sizeof(public_request.project), request.project) ||
+		!copy_public_request_field(public_request.feature, sizeof(public_request.feature), request.feature) ||
+		!copy_public_request_field(public_request.license_fingerprint,
+								   sizeof(public_request.license_fingerprint), request.license_fingerprint) ||
+		!copy_public_request_field(public_request.device_hash, sizeof(public_request.device_hash),
+								   request.device_hash) ||
+		!copy_public_request_field(public_request.nonce, sizeof(public_request.nonce), nonce)) {
+		return failure_result(request, LICENSE_ONLINE_VERIFICATION_FAILED, "online request field exceeds API buffer");
+	}
+
+	// The release response carries no assertion (the server just frees the seat), so we discard the
+	// output buffer and never run verify_assertion_envelope. A held seat lapses server-side on
+	// heartbeat timeout regardless, so a declined/failed callback here is advisory, not a denial.
+	char assertion[LCC_API_ONLINE_ASSERTION_SIZE + 1] = {};
+	size_t assertion_size = sizeof(assertion);
+	LCC_ONLINE_CALLBACK_STATUS status = LCC_ONLINE_CB_MALFORMED_RESPONSE;
+	try {
+		status = request.online_check(request.online_user_data, &public_request, assertion, &assertion_size);
+		result.callback_invoked = true;
+	} catch (const std::exception& ex) {
+		return failure_result(request, LICENSE_ONLINE_VERIFICATION_FAILED, ex.what());
+	} catch (...) {
+		return failure_result(request, LICENSE_ONLINE_VERIFICATION_FAILED, "online release callback threw");
+	}
+	assertion[sizeof(assertion) - 1] = '\0';  // defensive, mirrors evaluate(); the body is then discarded
+
+	if (status != LCC_ONLINE_CB_OK) {
+		return failure_result(request, event_for_callback_status(status),
+							  std::string("online release callback returned ") + callback_status_name(status));
+	}
+	result.accepted = true;
+	return result;
+}
+
 void append_audit_event(const OnlineVerificationResult& result, EventRegistry& event_registry) {
 	if (!result.failed()) {
 		return;

@@ -297,6 +297,9 @@ BOOST_AUTO_TEST_CASE(public_abi_enum_values_are_stable) {
 	BOOST_CHECK_EQUAL(static_cast<int>(LCC_ONLINE_CB_HOST_DECLINED), 4);
 	BOOST_CHECK_EQUAL(static_cast<int>(LCC_ONLINE_CB_MALFORMED_RESPONSE), 5);
 	BOOST_CHECK_EQUAL(static_cast<uint32_t>(LCC_ONLINE_FLAG_NONE), 0U);
+	// Lifecycle purpose bits are ABI once hosts branch endpoints on them; pin the values.
+	BOOST_CHECK_EQUAL(static_cast<uint32_t>(LCC_ONLINE_FLAG_PURPOSE_HEARTBEAT), 1U);
+	BOOST_CHECK_EQUAL(static_cast<uint32_t>(LCC_ONLINE_FLAG_PURPOSE_RELEASE), 2U);
 	BOOST_CHECK_EQUAL(static_cast<uint32_t>(LCC_ONLINE_REQUEST_VERSION), 2U);
 	BOOST_CHECK_EQUAL(static_cast<uint32_t>(LCC_CLIENT_HARDENING_NONE), 0U);
 	BOOST_CHECK_EQUAL(static_cast<uint32_t>(LCC_CLIENT_HARDENING_TAMPER_ENFORCE), 1U);
@@ -356,6 +359,8 @@ BOOST_AUTO_TEST_CASE(public_api_symbols_are_linkable) {
 	BOOST_CHECK(acquire_license != nullptr);
 	BOOST_CHECK(acquire_license_ex != nullptr);
 	BOOST_CHECK(lcc_acquire_license_decision != nullptr);
+	BOOST_CHECK(lcc_confirm_license != nullptr);
+	BOOST_CHECK(lcc_release_license != nullptr);
 	BOOST_CHECK(lcc_set_online_revocation_floor != nullptr);
 	BOOST_CHECK(lcc_get_online_revocation_floor != nullptr);
 	BOOST_CHECK(lcc_set_environment_license_sources_enabled != nullptr);

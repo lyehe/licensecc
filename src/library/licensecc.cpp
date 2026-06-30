@@ -1050,7 +1050,8 @@ static void populate_license_decision(LccLicenseDecision* decision_out, const LC
 static LCC_EVENT_TYPE lcc_acquire_license_decision_impl(const CallerInformations* callerInformation,
 														const LicenseLocation* licenseLocation,
 														LicenseInfo* license_out, LccLicenseDecision* decision_out,
-														const LccLicenseDecisionOptions* options) {
+														const LccLicenseDecisionOptions* options,
+														uint32_t online_purpose_flags) {
 	if (license_out != nullptr) {
 		*license_out = LicenseInfo{};
 	}
@@ -1087,6 +1088,8 @@ static LCC_EVENT_TYPE lcc_acquire_license_decision_impl(const CallerInformations
 	}
 
 	LicenseCheckOptions check_options = secure_decision_check_options(normalized_decision_options);
+	// Lifecycle purpose hint (heartbeat) for the host callback; verify path passes LCC_ONLINE_FLAG_NONE.
+	check_options.online_flags |= online_purpose_flags;
 	LicenseCheckOptions normalized_check_options;
 	string check_options_error;
 	if (!license::anti_tamper::normalize_options(&check_options, normalized_check_options, check_options_error)) {
@@ -1117,13 +1120,104 @@ LCC_EVENT_TYPE lcc_acquire_license_decision(const CallerInformations* callerInfo
 	// Top-level no-throw guard: no C++ exception may cross the C ABI boundary.
 	try {
 		return lcc_acquire_license_decision_impl(callerInformation, licenseLocation, license_out, decision_out,
-												 options);
+												 options, LCC_ONLINE_FLAG_NONE);
 	} catch (...) {
 		if (license_out != nullptr) {
 			*license_out = LicenseInfo{};
 		}
 		if (decision_out != nullptr) {
 			lcc_init_license_decision(decision_out);
+		}
+		return LICENSE_MALFORMED;
+	}
+}
+
+LCC_EVENT_TYPE lcc_confirm_license(const CallerInformations* callerInformation,
+								   const LicenseLocation* licenseLocation, LicenseInfo* license_out,
+								   LccLicenseDecision* decision_out, const LccLicenseDecisionOptions* options) {
+	// A confirm (heartbeat) is the same secure decision flow as acquire, only with the heartbeat
+	// purpose hinted to the host callback so it POSTs the keepalive endpoint and threads its seat id.
+	try {
+		return lcc_acquire_license_decision_impl(callerInformation, licenseLocation, license_out, decision_out,
+												 options, LCC_ONLINE_FLAG_PURPOSE_HEARTBEAT);
+	} catch (...) {
+		if (license_out != nullptr) {
+			*license_out = LicenseInfo{};
+		}
+		if (decision_out != nullptr) {
+			lcc_init_license_decision(decision_out);
+		}
+		return LICENSE_MALFORMED;
+	}
+}
+
+static LCC_EVENT_TYPE lcc_release_license_impl(const CallerInformations* callerInformation,
+											   const LicenseLocation* licenseLocation, LicenseInfo* license_out,
+											   const LccLicenseDecisionOptions* options) {
+	if (license_out != nullptr) {
+		*license_out = LicenseInfo{};
+	}
+	license::EventRegistry er;
+	LccLicenseDecisionOptions normalized_decision_options;
+	string decision_options_error;
+	if (!normalize_decision_options(options, normalized_decision_options, decision_options_error)) {
+		const LCC_EVENT_TYPE result =
+			add_malformed_api_input_event(er, "LccLicenseDecisionOptions", decision_options_error.c_str());
+		export_license_status(er, license_out);
+		return result;
+	}
+	if (normalized_decision_options.online_check == nullptr) {
+		const LCC_EVENT_TYPE result = add_runtime_security_failure_event(
+			er, LICENSE_ONLINE_REQUIRED, "LccLicenseDecisionOptions", "online callback is required");
+		export_license_status(er, license_out);
+		return result;
+	}
+
+	// Release needs the binding (project/feature/fingerprint) to name the seat. Read the local
+	// license to recover it; if the license can no longer be read there is nothing to release.
+	const bool strict_source_fatal = strict_source_fatal_enabled.load(std::memory_order_relaxed);
+	AcquiredLicenseContext license_context;
+	const LCC_EVENT_TYPE read_result =
+		acquire_license_internal(callerInformation, licenseLocation, license_out, strict_source_fatal, er,
+								 &license_context);
+	if (read_result != LICENSE_OK) {
+		export_license_status(er, license_out);
+		return read_result;
+	}
+
+	license::online_verification::OnlineVerificationRequest request;
+	request.policy = license::online_verification::OnlinePolicy::Require;
+	request.flags = LCC_ONLINE_FLAG_PURPOSE_RELEASE;
+	request.timeout_ms = normalized_decision_options.online_timeout_ms;
+	request.online_check = normalized_decision_options.online_check;
+	request.online_user_data = normalized_decision_options.online_user_data;
+	request.project = license_context.project;
+	request.feature = license_context.feature;
+	request.license_fingerprint = license_context.license_fingerprint;
+	request.device_hash = normalized_decision_options.online_device_hash;
+
+	const license::online_verification::OnlineVerificationResult release_result =
+		license::online_verification::notify_release(request);
+	if (release_result.failed()) {
+		// Best-effort teardown: surface the failure as an advisory event but do not deny anything.
+		// The seat lapses server-side on heartbeat timeout regardless.
+		license::online_verification::append_audit_event(release_result, er);
+		export_license_status(er, license_out);
+		return release_result.event_type;
+	}
+	export_license_status(er, license_out);
+	return LICENSE_OK;
+}
+
+LCC_EVENT_TYPE lcc_release_license(const CallerInformations* callerInformation,
+								   const LicenseLocation* licenseLocation, LicenseInfo* license_out,
+								   const LccLicenseDecisionOptions* options) {
+	// Top-level no-throw guard: no C++ exception may cross the C ABI boundary.
+	try {
+		return lcc_release_license_impl(callerInformation, licenseLocation, license_out, options);
+	} catch (...) {
+		if (license_out != nullptr) {
+			*license_out = LicenseInfo{};
 		}
 		return LICENSE_MALFORMED;
 	}

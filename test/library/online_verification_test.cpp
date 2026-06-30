@@ -225,6 +225,7 @@ struct CallbackState {
 	uint64_t revocation_seq = 1;
 	string replay_assertion;
 	string last_assertion;
+	uint32_t last_flags = 0xFFFFFFFFu;
 };
 
 struct FloorStoreState {
@@ -292,6 +293,9 @@ static LCC_ONLINE_CALLBACK_STATUS signing_callback(void* user_data, const LccOnl
 	CallbackState* state = static_cast<CallbackState*>(user_data);
 	if (state != nullptr) {
 		++state->calls;
+		if (request != nullptr) {
+			state->last_flags = request->flags;
+		}
 		if (state->status != LCC_ONLINE_CB_OK) {
 			return state->status;
 		}
@@ -1207,6 +1211,126 @@ BOOST_AUTO_TEST_CASE(invalid_online_options_fail_closed) {
 	lcc_init_license_info(&info);
 	BOOST_CHECK_EQUAL(acquire_license_ex(&caller, nullptr, &info, &options), LICENSE_MALFORMED);
 	BOOST_CHECK(has_status_event(info, LICENSE_MALFORMED));
+}
+
+// ---- Network-license lifecycle: lcc_confirm_license / lcc_release_license ----
+
+BOOST_AUTO_TEST_CASE(confirm_license_runs_heartbeat_purpose_and_persists_floor) {
+	RuntimePolicyGuard guard;
+	const string valid_path = issue_valid_license_file("confirm-heartbeat-valid");
+	LicenseLocation location = license_path_location(valid_path);
+	CallerInformations caller = default_caller();
+
+	CallbackState online_state;
+	online_state.revocation_seq = 7;
+	FloorStoreState floor_state;
+	floor_state.floor = 4;
+	LccLicenseDecisionOptions options = secure_decision_options(online_state, floor_state);
+
+	LicenseInfo info{};
+	LccLicenseDecision decision;
+	lcc_init_license_decision(&decision);
+	const LCC_EVENT_TYPE result = lcc_confirm_license(&caller, &location, &info, &decision, &options);
+
+	// A confirm is the full secure decision flow re-run with the heartbeat purpose hinted to the
+	// host callback (and never the release bit), advancing/persisting the revocation floor.
+	BOOST_REQUIRE_EQUAL(result, LICENSE_OK);
+	BOOST_CHECK_EQUAL(decision.decision, LCC_LICENSE_DECISION_ALLOW);
+	BOOST_CHECK(decision.online_verified);
+	BOOST_CHECK(decision.revocation_floor_stored);
+	BOOST_CHECK((online_state.last_flags & LCC_ONLINE_FLAG_PURPOSE_HEARTBEAT) != 0u);
+	BOOST_CHECK((online_state.last_flags & LCC_ONLINE_FLAG_PURPOSE_RELEASE) == 0u);
+	BOOST_CHECK_EQUAL(floor_state.floor, 7U);
+	BOOST_CHECK_EQUAL(online_state.calls, 1);
+
+	std::remove(valid_path.c_str());
+}
+
+BOOST_AUTO_TEST_CASE(confirm_license_requires_online_and_floor_callbacks) {
+	RuntimePolicyGuard guard;
+	const string valid_path = issue_valid_license_file("confirm-requires-callbacks");
+	LicenseLocation location = license_path_location(valid_path);
+	CallerInformations caller = default_caller();
+	LicenseInfo info{};
+	LccLicenseDecision decision;
+	lcc_init_license_decision(&decision);
+
+	const LCC_EVENT_TYPE result = lcc_confirm_license(&caller, &location, &info, &decision, nullptr);
+	BOOST_CHECK_EQUAL(result, LICENSE_ONLINE_REQUIRED);
+	BOOST_CHECK_EQUAL(decision.decision, LCC_LICENSE_DECISION_DENY);
+
+	std::remove(valid_path.c_str());
+}
+
+BOOST_AUTO_TEST_CASE(release_license_invokes_release_purpose_without_touching_floor) {
+	RuntimePolicyGuard guard;
+	const string valid_path = issue_valid_license_file("release-purpose-valid");
+	LicenseLocation location = license_path_location(valid_path);
+	CallerInformations caller = default_caller();
+
+	CallbackState online_state;
+	FloorStoreState floor_state;
+	LccLicenseDecisionOptions options = secure_decision_options(online_state, floor_state);
+
+	LicenseInfo info{};
+	const LCC_EVENT_TYPE result = lcc_release_license(&caller, &location, &info, &options);
+
+	// Release hints the release purpose to the host, succeeds on a successful callback, and never
+	// verifies an assertion or touches the revocation floor (a held seat lapses server-side anyway).
+	BOOST_CHECK_EQUAL(result, LICENSE_OK);
+	BOOST_CHECK_EQUAL(online_state.calls, 1);
+	BOOST_CHECK((online_state.last_flags & LCC_ONLINE_FLAG_PURPOSE_RELEASE) != 0u);
+	BOOST_CHECK((online_state.last_flags & LCC_ONLINE_FLAG_PURPOSE_HEARTBEAT) == 0u);
+	BOOST_CHECK_EQUAL(floor_state.load_calls, 0);
+	BOOST_CHECK_EQUAL(floor_state.store_calls, 0);
+
+	std::remove(valid_path.c_str());
+}
+
+BOOST_AUTO_TEST_CASE(release_license_requires_online_callback) {
+	RuntimePolicyGuard guard;
+	CallerInformations caller = default_caller();
+
+	LicenseInfo info{};
+	const LCC_EVENT_TYPE result = lcc_release_license(&caller, nullptr, &info, nullptr);
+	BOOST_CHECK_EQUAL(result, LICENSE_ONLINE_REQUIRED);
+	BOOST_CHECK(has_status_event(info, LICENSE_ONLINE_REQUIRED));
+}
+
+BOOST_AUTO_TEST_CASE(release_license_reports_declined_callback_as_advisory) {
+	RuntimePolicyGuard guard;
+	const string valid_path = issue_valid_license_file("release-declined");
+	LicenseLocation location = license_path_location(valid_path);
+	CallerInformations caller = default_caller();
+
+	CallbackState online_state;
+	online_state.status = LCC_ONLINE_CB_HOST_DECLINED;
+	FloorStoreState floor_state;
+	LccLicenseDecisionOptions options = secure_decision_options(online_state, floor_state);
+
+	LicenseInfo info{};
+	const LCC_EVENT_TYPE result = lcc_release_license(&caller, &location, &info, &options);
+	// Best-effort teardown: the callback ran and a decline is advisory (non-OK), never a crash.
+	BOOST_CHECK(result != LICENSE_OK);
+	BOOST_CHECK_EQUAL(online_state.calls, 1);
+
+	std::remove(valid_path.c_str());
+}
+
+BOOST_AUTO_TEST_CASE(release_license_without_readable_license_does_not_call_callback) {
+	RuntimePolicyGuard guard;
+	CallerInformations caller = default_caller();
+	LicenseLocation location = license_path_location("does-not-exist-release.lic");
+
+	CallbackState online_state;
+	FloorStoreState floor_state;
+	LccLicenseDecisionOptions options = secure_decision_options(online_state, floor_state);
+
+	LicenseInfo info{};
+	const LCC_EVENT_TYPE result = lcc_release_license(&caller, &location, &info, &options);
+	// No readable local license => no seat binding => release never reaches the network.
+	BOOST_CHECK(result != LICENSE_OK);
+	BOOST_CHECK_EQUAL(online_state.calls, 0);
 }
 
 }  // namespace test

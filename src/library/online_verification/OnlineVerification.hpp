@@ -90,6 +90,16 @@ bool verify_assertion_envelope(const std::string& assertion, const OnlineVerific
 							   OnlineAssertionClaims* claims_out, std::string& error,
 							   LCC_EVENT_TYPE& failure_event, bool& used_cache);
 OnlineVerificationResult evaluate(const OnlineVerificationRequest& request);
+/**
+ * Best-effort seat release. Builds the public ::LccOnlineRequest (carrying the
+ * caller's purpose flags, e.g. ::LCC_ONLINE_FLAG_PURPOSE_RELEASE) and invokes
+ * the host online_check callback exactly like ::evaluate, but the release
+ * response carries no assertion: there is nothing to verify, the revocation
+ * floor is left untouched, and success is simply a successful callback. A
+ * failed/declined callback yields a failed result the caller can report as an
+ * advisory event without denying anything.
+ */
+OnlineVerificationResult notify_release(const OnlineVerificationRequest& request);
 void append_audit_event(const OnlineVerificationResult& result, EventRegistry& event_registry);
 void set_trusted_public_keys_for_tests(const std::vector<OnlineVerificationPublicKey>& public_keys);
 void set_revocation_floor(const std::string& project, const std::string& feature,

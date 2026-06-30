@@ -14,7 +14,10 @@ namespace anti_tamper {
 namespace {
 
 const uint32_t kSupportedFlags = LCC_TAMPER_FLAG_STRICT_SOURCE_SHADOWING;
-const uint32_t kSupportedOnlineFlags = LCC_ONLINE_FLAG_NONE;
+// Lifecycle purpose hints (set by lcc_confirm_license / lcc_release_license) are valid online flags;
+// they are opaque host hints, not verifier behavior, but must pass option validation.
+const uint32_t kSupportedOnlineFlags =
+	LCC_ONLINE_FLAG_PURPOSE_HEARTBEAT | LCC_ONLINE_FLAG_PURPOSE_RELEASE;
 const uint32_t kOptionsVersionV1 = 1;
 const char kHostIntegrityReference[] = "HostIntegrityCheck";
 const char kSourceShadowingPrefix[] = "source-shadowing";

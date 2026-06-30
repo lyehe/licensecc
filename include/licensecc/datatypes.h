@@ -76,6 +76,21 @@ typedef enum {
 #define LCC_TAMPER_FLAG_STRICT_SOURCE_SHADOWING 0x00000001u
 #define LCC_ONLINE_FLAG_NONE 0u
 /**
+ * Online-request purpose bits, carried in ::LccOnlineRequest.flags (and set by
+ * the library through ::LicenseCheckOptions.online_flags). They tell the host
+ * ::LCC_ONLINE_CHECK callback which lifecycle operation this request is, so it
+ * can POST to the matching endpoint and thread the seat/session id it owns:
+ *   - neither bit set  -> initial verify  (host POSTs /v1/verify)
+ *   - PURPOSE_HEARTBEAT -> confirm/keepalive (host POSTs /v1/heartbeat)
+ *   - PURPOSE_RELEASE   -> seat release    (host POSTs /v1/release)
+ * The two bits are mutually exclusive; the library never sets both. Hosts that
+ * predate these bits (treating flags as opaque and always hitting /v1/verify)
+ * keep working for the verify path. The library owns neither the transport nor
+ * the seat id; the host carries the seat id returned by /v1/checkout.
+ */
+#define LCC_ONLINE_FLAG_PURPOSE_HEARTBEAT 0x00000001u
+#define LCC_ONLINE_FLAG_PURPOSE_RELEASE 0x00000002u
+/**
  * Client hardening posture bits sent to the online verifier as telemetry.
  * These bits describe which local client-side policies were configured for the
  * current request. They are not cryptographic proof that the host is clean.

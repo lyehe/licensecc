@@ -217,6 +217,47 @@ LCC_EVENT_TYPE lcc_acquire_license_decision(const CallerInformations* callerInfo
 											const LccLicenseDecisionOptions* options);
 
 /**
+ * Network/floating-license lifecycle: re-confirm a held license online
+ * (heartbeat). Call this periodically after ::lcc_acquire_license_decision has
+ * granted a seat, on the cadence the server advertised (the host learns it from
+ * the verify/checkout response). It runs the same secure decision flow as
+ * ::lcc_acquire_license_decision -- local license read, tamper enforcement,
+ * required online verification, persisted revocation-floor load/store -- but
+ * stamps ::LCC_ONLINE_FLAG_PURPOSE_HEARTBEAT in the ::LccOnlineRequest so the
+ * host callback POSTs to the heartbeat endpoint and threads the seat id it
+ * holds. The server's heartbeat response is a fresh signed assertion, verified
+ * locally exactly like the initial check; a reclaimed/expired seat makes the
+ * host callback decline (e.g. ::LCC_ONLINE_CB_HOST_DECLINED), and this returns
+ * a denial. Returns ::LICENSE_OK only when the decision is
+ * ::LCC_LICENSE_DECISION_ALLOW. Same options/contract as
+ * ::lcc_acquire_license_decision (online_check + revocation floor load/store are
+ * required); fails closed on any failure. This supersedes the legacy
+ * ::confirm_license stub for online hosts.
+ */
+LCC_EVENT_TYPE lcc_confirm_license(const CallerInformations* callerInformation,
+								   const LicenseLocation* licenseLocation, LicenseInfo* license_out,
+								   LccLicenseDecision* decision_out, const LccLicenseDecisionOptions* options);
+
+/**
+ * Network/floating-license lifecycle: release a held seat (best-effort
+ * check-in). Call this at orderly shutdown so the server frees the seat
+ * immediately instead of waiting for the heartbeat to lapse. It reads the local
+ * license to recover the binding (project/feature/fingerprint), then invokes the
+ * host ::LCC_ONLINE_CHECK callback with ::LCC_ONLINE_FLAG_PURPOSE_RELEASE so the
+ * host POSTs to the release endpoint with the seat id it holds. The release
+ * response carries no assertion, so none is verified and no revocation floor is
+ * touched. This is teardown, not an entitlement decision: a transport failure is
+ * non-fatal (the seat lapses server-side via heartbeat timeout regardless) and
+ * is reported as an advisory online event in `license_out`. Returns
+ * ::LICENSE_OK when the release callback succeeded. `options` needs only
+ * `online_check` (revocation-floor callbacks are not required here). Supersedes
+ * the legacy ::release_license stub for online hosts.
+ */
+LCC_EVENT_TYPE lcc_release_license(const CallerInformations* callerInformation,
+								   const LicenseLocation* licenseLocation, LicenseInfo* license_out,
+								   const LccLicenseDecisionOptions* options);
+
+/**
  * Verifies a server-signed configuration token against the bytes the
  * application will use, binding it to a valid local license. This is the
  * combined entry point: it performs the one license read (use it instead of
@@ -271,16 +312,16 @@ void lcc_set_environment_license_sources_enabled(bool enabled);
 void lcc_set_strict_source_fatal_enabled(bool enabled);
 
 /**
- * Not implemented yet, useful (later) for network licenses.
- * Should be called from time to time to confirm we're still using the
- * license. Until this API is implemented, it fails closed and must not be used
- * as an entitlement decision. Use ::acquire_license for authorization.
+ * Legacy network-license placeholder. This signature is unimplemented and fails
+ * closed; it must not be used as an entitlement decision. Online hosts should use
+ * ::lcc_confirm_license (the heartbeat lifecycle entry point); offline hosts use
+ * ::acquire_license for authorization.
  */
 LCC_EVENT_TYPE confirm_license(char* featureName, LicenseLocation* licenseLocation);
 /**
- * Not implemented yet, useful (later) for network licenses.
- * Until this API is implemented, it fails closed and must not be used as an
- * entitlement decision. Use ::acquire_license for authorization.
+ * Legacy network-license placeholder. This signature is unimplemented and fails
+ * closed; it must not be used as an entitlement decision. Online hosts should use
+ * ::lcc_release_license (the seat-release lifecycle entry point).
  */
 LCC_EVENT_TYPE release_license(char* featureName, LicenseLocation licenseLocation);
 
