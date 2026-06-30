@@ -424,6 +424,14 @@ D-spec drift; the two-format conflation trap; PKCS#1-vs-SPKI import differences 
 
 ## Workstream F — Dashboards/analytics UI + operator triage
 
+> **STATUS — DONE** (commit `f247ee5`, pushed to lyehe). 3 admin routes (GET /report/timeseries bucketed
+> checkouts/denials/denial_rate/fulfillment; GET /report/expiring; POST /entitlements/:id/release-seats —
+> admin-only/reason/idempotent, live-only DELETE+reclaim so peak_concurrent stays accurate) + inline-SVG
+> charts (zero dep; pure unit-tested geometry, CSS owns aesthetics) + expiring-soon panel + an
+> entitlement-health badge (suspended>expired>expiring>healthy) + a "Release seats" verb via the confirm
+> modal. createEntitlement byte-identical; OpenAPI+cross-check green. Gates: test 53 / sql 60 / openapi 7
+> / ui 35 / e2e 3 / lint. (peak_concurrent-over-time stays the point-in-time card; a future enhancement.)
+
 ### Goal
 Convert the admin **Reports** tab (14 flat number cards) and **Fulfillment** tab (5 cards) into a lightweight, dependency-free analytics surface, and give operators a one-click triage verb. Concretely: inline-SVG time-series for `peak_concurrent`/`seats_in_use` and a `denial_rate` trend, an entitlements-expiring-in-7/30-days list, a fulfillment-events-over-time chart, a red entitlement-health badge on rows holding expired/expiring-soon/suspended licenses, and an admin-only **force-release seat / end-the-lease** verb backed by the existing seat-reclaim SQL. Mostly front-end (`src/ui/main.tsx`, a new `charts.tsx`, `src/ui/operatorWorkflow.ts`, `styles.css`) plus two small read endpoints and one mutating reclaim endpoint in `src/worker/index.ts` — all on the already-shared single D1.
 
