@@ -148,6 +148,18 @@ _Each section is a buildable design grounded in the real files; phase + effort +
 
 ## Workstream A — License-policy/template object + Trial model (keystone)
 
+> **STATUS — DONE (2026-06-29), commits `04ecb80` (Stage 1+2) + `4ee669f` (Stage 3-5), pushed to lyehe.**
+> Migrations 0018/0019 (entitlement_policies + policy_events + frozen trial columns on entitlements;
+> parity green, PG ported); `stampFromPolicy`/`buildPolicyStampStatement` riding `createEntitlement`'s
+> extraStatements seam (INSERT byte-identical, 218/+50 tests unchanged); admin policy CRUD +
+> create-from-policy gated by `POLICY_STAMP_MODE=off|on`; server-computed `/v1/activate` trial timing
+> (write-once stamp atomic with the cap-insert, device-lock fail-closed, valid_to clamp); admin Policies
+> tab + pick-policy-then-override create with date pickers. Forks resolved as: proven-device_key_id-else-
+> device_hash lock + opt-in `trial_require_device_proof`; frozen stamp-time policies; from_first_use→
+> from_first_activation in P1; UNIQUE(project, lower(name)). Stage 4 adversarially reviewed clean.
+> Follow-ups: the signed-token `trial` field (P2 ABI), and confirming the live-D1 UNIQUE error wording
+> for the 409 name-conflict (degrades to 500 otherwise; dup still rejected).
+
 ### Goal
 Turn the flat `entitlements` row (operators hand-type epoch TTLs) into a reusable **policy/template** object — Trial, Node-locked, Floating, Subscription — that stamps default windows and capacity into new entitlements, plus a server-computed **trial model** (`from_issue | from_first_activation | from_first_use`) with a device re-request lock. This is the foundation later attributes (named-user, metering, maintenance windows) hang off.
 
