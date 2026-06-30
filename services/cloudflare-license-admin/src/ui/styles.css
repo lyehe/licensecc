@@ -505,3 +505,209 @@ button.searchResult:hover:not(:disabled) .searchResultMeta {
     max-width: none;
   }
 }
+
+/* ── Workstream F — inline-SVG charts, expiring-soon, health badge, force-release ──
+   The SVGs carry ONLY geometry + an aria-label (from operatorWorkflow.ts); every colour,
+   stroke, and fill below is owned by CSS so the chart math stays pure and unit-tested. */
+
+.reportsTab {
+  display: grid;
+  gap: 24px;
+  padding: 0 0 24px;
+}
+
+/* Range selectors (last 7d/30d/90d; expiring 7/30/90) — a small inline button group. */
+.rangeSelector {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.rangeSelector button {
+  min-height: 28px;
+  padding: 4px 10px;
+}
+
+.chartPanels {
+  display: grid;
+  gap: 14px;
+  padding: 0 24px;
+}
+
+.chartGrid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: 1fr 1fr;
+}
+
+.chartCard {
+  background: #ffffff;
+  border: 1px solid #d8ddd1;
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+}
+
+.chartCard h3 {
+  color: #485047;
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.chartHint {
+  margin: 0;
+}
+
+/* The SVG fills its card width; the fixed viewBox + preserveAspectRatio="none" lets the geometry
+   stretch to the container. A subtle inner backdrop separates it from the card. */
+.chart {
+  background: #f8faf6;
+  border: 1px solid #e5e9e0;
+  border-radius: 6px;
+  display: block;
+  height: 120px;
+  width: 100%;
+}
+
+.chartEmpty {
+  align-items: center;
+  background: #f8faf6;
+  border: 1px dashed #cbd6c6;
+  border-radius: 6px;
+  display: flex;
+  font-size: 13px;
+  height: 120px;
+  justify-content: center;
+  padding: 12px;
+  text-align: center;
+}
+
+/* Line/area aesthetics — vector-effect keeps the stroke crisp under the non-uniform scale. */
+.chartLine {
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.chartArea {
+  stroke: none;
+}
+
+.checkoutsArea {
+  fill: rgba(40, 95, 82, 0.16);
+}
+
+.checkoutsLine {
+  stroke: #285f52;
+}
+
+.denialsLine {
+  stroke: #8b3028;
+  stroke-dasharray: 4 3;
+}
+
+.denialRateLine {
+  stroke: #7a5c10;
+}
+
+.chartBar {
+  fill: #285f52;
+}
+
+/* Legend chips beneath the line/area chart. */
+.chartLegend {
+  display: flex;
+  gap: 14px;
+}
+
+.legend {
+  align-items: center;
+  color: #485047;
+  display: inline-flex;
+  font-size: 12px;
+  gap: 6px;
+}
+
+.legend::before {
+  border-radius: 2px;
+  content: "";
+  display: inline-block;
+  height: 10px;
+  width: 14px;
+}
+
+.checkoutsLegend::before {
+  background: #285f52;
+}
+
+.denialsLegend::before {
+  background: #8b3028;
+}
+
+.fulfillmentSpark {
+  margin: 0 24px 14px;
+}
+
+/* Expiring-soon panel. */
+.expiringHead {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.expiringSoonRow td {
+  background: #fbf6ec;
+}
+
+.daysLeft {
+  border-radius: 999px;
+  display: inline-block;
+  font-weight: 600;
+  min-width: 36px;
+  padding: 2px 8px;
+  text-align: center;
+}
+
+.daysLeft.urgent {
+  background: #f0e9cf;
+  color: #7a5c10;
+}
+
+/* Entitlement-health badge next to the status pill. Reuses the .status palette
+   (green/amber/red): healthy=green, expiring=amber, expired/suspended=red. */
+.healthBadge {
+  border-radius: 999px;
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 600;
+  margin-left: 6px;
+  padding: 2px 8px;
+  text-transform: capitalize;
+}
+
+.health-healthy {
+  background: #dfeee7;
+  color: #285f52;
+}
+
+.health-expiring {
+  background: #f0e9cf;
+  color: #7a5c10;
+}
+
+.health-expired,
+.health-suspended {
+  background: #efd9d6;
+  color: #8b3028;
+}
+
+@media (max-width: 920px) {
+  .chartGrid {
+    grid-template-columns: 1fr;
+  }
+}

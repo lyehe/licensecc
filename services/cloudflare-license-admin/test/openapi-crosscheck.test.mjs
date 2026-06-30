@@ -33,6 +33,8 @@ const META_ROUTES = [
 const API_ROUTES = [
   { method: "GET", path: "/api/admin/summary" },
   { method: "GET", path: "/api/admin/report" },
+  { method: "GET", path: "/api/admin/report/timeseries" },
+  { method: "GET", path: "/api/admin/report/expiring" },
   { method: "GET", path: "/api/admin/customers" },
   { method: "GET", path: "/api/admin/customers/{id}" },
   { method: "POST", path: "/api/admin/customers/{id}/disable" },
@@ -58,6 +60,7 @@ const API_ROUTES = [
   { method: "GET", path: "/api/admin/entitlements" },
   { method: "POST", path: "/api/admin/entitlements" },
   { method: "POST", path: "/api/admin/entitlements/batch" },
+  { method: "POST", path: "/api/admin/entitlements/{id}/release-seats" },
   { method: "GET", path: "/api/admin/entitlements/{id}" },
   { method: "PATCH", path: "/api/admin/entitlements/{id}" },
   { method: "POST", path: "/api/admin/entitlements/{id}/disable" },
@@ -88,6 +91,8 @@ const TEMPLATED_ROUTE_SOURCE = {
   // The detail GET route AND the disable/reenable/revoke mutations are both covered by
   // entitlement regexes; the mutation actions live in the combined `(?:\/(disable|reenable|revoke))?` form.
   "/api/admin/entitlements/{id}": String.raw`/^\/api\/admin\/entitlements\/([^/]+)$/`,
+  // Force-release has its own dedicated regex, matched before the generic mutation dispatch.
+  "/api/admin/entitlements/{id}/release-seats": String.raw`/^\/api\/admin\/entitlements\/([^/]+)\/release-seats$/`,
   "/api/admin/entitlements/{id}/disable": String.raw`(?:\/(disable|reenable|revoke))?`,
   "/api/admin/entitlements/{id}/reenable": String.raw`(?:\/(disable|reenable|revoke))?`,
   "/api/admin/entitlements/{id}/revoke": String.raw`(?:\/(disable|reenable|revoke))?`,

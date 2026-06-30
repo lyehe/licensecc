@@ -206,3 +206,52 @@ export interface EntitlementTrialFields {
   trial_started_at?: number | null;
   trial_device_hash?: string | null;
 }
+
+// ── Workstream F: usage-analytics reports + the stuck-seat force-release lever ─
+// Three new admin routes that read the SAME D1 the backend owns: a bucketed usage
+// time-series + fulfillment counts (for the inline-SVG charts), an expiring-soon
+// entitlement list, and an admin-only "release the seats stuck on a dead machine"
+// force-release that mirrors the backend's reclaim discipline.
+
+// GET /api/admin/report/timeseries — one row per bucket over the [from,to] window. checkouts /
+// releases / denials come from usage_events.ts; fulfillment_events from order_events.received_at.
+// denial_rate = denials / (checkouts + denials), 0 when the bucket saw neither.
+export interface TimeseriesBucket {
+  start: number;
+  checkouts: number;
+  releases: number;
+  denials: number;
+  denial_rate: number;
+  fulfillment_events: number;
+}
+
+export interface TimeseriesData {
+  from: number;
+  to: number;
+  bucket_seconds: number;
+  buckets: TimeseriesBucket[];
+}
+
+// GET /api/admin/report/expiring — active entitlements whose valid_until falls in (now, now+within].
+// days_left is the ceil of (valid_until - now) / 86400 so "0 days left" never appears for a future row.
+export interface ExpiringEntitlement {
+  project: string;
+  feature: string;
+  license_fingerprint: string;
+  customer_id: string | null;
+  valid_until: number;
+  days_left: number;
+}
+
+export interface ExpiringData {
+  items: ExpiringEntitlement[];
+  next_cursor: string | null;
+}
+
+// POST /api/admin/entitlements/:id/release-seats — admin-only. Reclaims the LIVE seat_checkouts for
+// the entitlement tuple and records one 'reclaim' usage_events row per seat (reason='force_release').
+// 0 released is a valid idempotent success.
+export interface ReleaseSeatsData {
+  released: number;
+  seat_ids: string[];
+}

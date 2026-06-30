@@ -541,3 +541,244 @@ export function navigationForResult(result: SearchResult): SearchNavigation {
 export function csvExportPath(base: string): string {
   return `${base}${base.includes("?") ? "&" : "?"}format=csv`;
 }
+
+// ── Workstream F UI: usage-analytics reports, expiring-soon, entitlement-health, force-release ──
+// Pure helpers (unit-tested) for the inline-SVG charts (geometry only — CSS owns aesthetics), the
+// expiring-soon panel, the entitlement-health classifier, and the stuck-seat force-release verb.
+// None of these touch the shared mutation core; the backend is byte-identical and untouched.
+
+// The time-series window selector offers a small fixed set of look-backs (last 7d / 30d / 90d).
+// `range` is the look-back in seconds; the path lets the backend default `to` to now and bucket
+// the [now-range, now] window. `buckets` is optional (the backend defaults + clamps it).
+export type TimeseriesRange = 7 | 30 | 90;
+
+export const TIMESERIES_RANGE_DAYS: ReadonlyArray<TimeseriesRange> = [7, 30, 90];
+
+// Build the time-series path for a "last N days" look-back. We send `from` (now - N*86400) and let
+// the backend default `to` to now, so the window always ends at the current instant. `buckets` rides
+// along when provided (the backend clamps it to [1,200]); omit it to take the backend default of 24.
+export function timeseriesPath(rangeDays: TimeseriesRange, buckets?: number, now: number = Math.floor(Date.now() / 1000)): string {
+  const from = now - rangeDays * 86400;
+  const params = new URLSearchParams();
+  params.set("from", String(from));
+  params.set("to", String(now));
+  if (buckets !== undefined) {
+    params.set("buckets", String(buckets));
+  }
+  return `/api/admin/report/timeseries?${params.toString()}`;
+}
+
+// Build the expiring-soon path for a "within N days" horizon. The backend clamps within_days to
+// [1,365] and paginates with limit/cursor; we only attach within_days here (the pager appends cursor
+// via withCursor, exactly like the other list endpoints).
+export function expiringPath(withinDays: number): string {
+  const params = new URLSearchParams();
+  params.set("within_days", String(withinDays));
+  return `/api/admin/report/expiring?${params.toString()}`;
+}
+
+// The force-release verb: POST /api/admin/entitlements/:id/release-seats. The id is the SAME encoded
+// entitlement id the other entitlement routes use (it may contain '/', so it is path-segment encoded).
+export function releaseSeatsPath(id: string): string {
+  return `/api/admin/entitlements/${id}/release-seats`;
+}
+
+// Confirm copy for the force-release verb. It force-reclaims ALL live seats for the entitlement so a
+// stuck/dead-machine seat frees up; the seats reappear the moment a live client re-checks-out. Pure
+// (unit-tested), echoing the exact target so the typed-confirm modal can never fire on the wrong row.
+export function releaseSeatsConfirm(item: { project: string; feature: string; license_fingerprint: string }): string {
+  return `Force-release ALL live seats for ${item.project} / ${item.feature} (fingerprint ${shortHash(item.license_fingerprint)}). This frees a seat stuck on a dead/unreachable machine; live clients simply re-acquire on their next checkout.`;
+}
+
+// ── Inline-SVG chart geometry (pure, unit-tested; NO charting dependency) ──────
+// These return ONLY geometry (path `d` strings / rect arrays / scaled y positions). The SVG element
+// carries the geometry + an aria-label; the CSS owns every colour/stroke/fill. Coordinates use the
+// SVG convention y-down (0 at the top), so a larger value maps to a SMALLER y. An empty/degenerate
+// input yields an empty path or empty rect list (the React layer renders an empty-state instead).
+
+// Scale a value into [0, height] with y-down orientation, given the data's [min,max]. When min===max
+// (a flat series, including all-zero) every point sits on the horizontal mid-line so the chart reads as
+// "flat" rather than collapsing to the top or bottom. `pad` insets the top/bottom so the stroke is not
+// clipped at the edges.
+export function scaleY(value: number, min: number, max: number, height: number, pad = 2): number {
+  const usable = Math.max(0, height - pad * 2);
+  if (max <= min) {
+    return pad + usable / 2;
+  }
+  const t = (value - min) / (max - min);
+  // y-down: the max value sits at the top (pad), the min at the bottom (height - pad).
+  return pad + (1 - t) * usable;
+}
+
+// Even x positions for N points across [0, width] (first at x=0, last at x=width). One point pins to
+// the left edge; zero points yields an empty array.
+export function pointXs(count: number, width: number): number[] {
+  if (count <= 0) {
+    return [];
+  }
+  if (count === 1) {
+    return [0];
+  }
+  const step = width / (count - 1);
+  return Array.from({ length: count }, (_, i) => Math.round(i * step * 1000) / 1000);
+}
+
+// linePath(values, width, height) -> an SVG path `d` string with min/max auto-scaling (y-down). Each
+// value maps to an evenly-spaced x; the path is a polyline (M ... L ...). An empty input -> "" (the
+// caller renders the empty-state). A single value -> a short flat segment at its scaled y so a 1-point
+// series still draws. The scale spans [min(values), max(values)] (a flat series renders on the mid-line).
+export function linePath(values: ReadonlyArray<number>, width: number, height: number, pad = 2): string {
+  if (values.length === 0) {
+    return "";
+  }
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const xs = pointXs(values.length, width);
+  if (values.length === 1) {
+    const y = round(scaleY(values[0] ?? 0, min, max, height, pad));
+    // A flat 1-point segment across the full width so a single bucket still renders a visible line.
+    return `M 0 ${y} L ${round(width)} ${y}`;
+  }
+  return values
+    .map((value, i) => `${i === 0 ? "M" : "L"} ${round(xs[i] ?? 0)} ${round(scaleY(value, min, max, height, pad))}`)
+    .join(" ");
+}
+
+// linePathScaled is linePath drawn on an EXTERNAL [scaleMin, scaleMax] y-scale instead of the
+// values' own min/max, so several series can share one axis (e.g. a denials line read against the
+// combined checkouts+denials range). Empty values -> "". A degenerate scale (scaleMax<=scaleMin)
+// puts every point on the mid-line. A single value draws a flat full-width segment at its scaled y.
+export function linePathScaled(
+  values: ReadonlyArray<number>,
+  scaleMin: number,
+  scaleMax: number,
+  width: number,
+  height: number,
+  pad = 2,
+): string {
+  if (values.length === 0) {
+    return "";
+  }
+  if (values.length === 1) {
+    const y = round(scaleY(values[0] ?? 0, scaleMin, scaleMax, height, pad));
+    return `M 0 ${y} L ${round(width)} ${y}`;
+  }
+  const xs = pointXs(values.length, width);
+  return values
+    .map((value, i) => `${i === 0 ? "M" : "L"} ${round(xs[i] ?? 0)} ${round(scaleY(value, scaleMin, scaleMax, height, pad))}`)
+    .join(" ");
+}
+
+// areaPath(values, width, height) -> a CLOSED `d` string: the linePath, dropped to the baseline
+// (y=height) at the last x, back to the baseline at the first x, and closed. Used as a filled area
+// UNDER the checkouts line. Empty input -> "". Shares linePath's scaling so the fill hugs the stroke.
+export function areaPath(values: ReadonlyArray<number>, width: number, height: number, pad = 2): string {
+  const line = linePath(values, width, height, pad);
+  if (line === "") {
+    return "";
+  }
+  const xs = pointXs(values.length, width);
+  const lastX = values.length === 1 ? width : (xs[xs.length - 1] ?? 0);
+  const firstX = values.length === 1 ? 0 : (xs[0] ?? 0);
+  return `${line} L ${round(lastX)} ${round(height)} L ${round(firstX)} ${round(height)} Z`;
+}
+
+// areaPathScaled is areaPath on an EXTERNAL [scaleMin,scaleMax] y-scale (so the filled area hugs a
+// line drawn with linePathScaled). Empty values -> "".
+export function areaPathScaled(
+  values: ReadonlyArray<number>,
+  scaleMin: number,
+  scaleMax: number,
+  width: number,
+  height: number,
+  pad = 2,
+): string {
+  const line = linePathScaled(values, scaleMin, scaleMax, width, height, pad);
+  if (line === "") {
+    return "";
+  }
+  const xs = pointXs(values.length, width);
+  const lastX = values.length === 1 ? width : (xs[xs.length - 1] ?? 0);
+  const firstX = values.length === 1 ? 0 : (xs[0] ?? 0);
+  return `${line} L ${round(lastX)} ${round(height)} L ${round(firstX)} ${round(height)} Z`;
+}
+
+// One positioned bar for a bar/spark chart.
+export interface BarRect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+// barRects(values, width, height) -> evenly-spaced bars across [0,width]. Each bar's height is its
+// value scaled by the data MAX (not min/max): a zero value is a zero-height bar, the max value fills
+// the chart, so a fulfillment-events spark reads as true magnitudes from the baseline. `gap` (a
+// fraction in [0,1)) is the inter-bar spacing as a fraction of the slot width. Empty input -> []; an
+// all-zero series -> zero-height bars at the baseline (the caller may swap in the empty-state).
+export function barRects(values: ReadonlyArray<number>, width: number, height: number, gap = 0.2): BarRect[] {
+  if (values.length === 0) {
+    return [];
+  }
+  const max = Math.max(...values, 0);
+  const slot = width / values.length;
+  const clampedGap = Math.min(Math.max(gap, 0), 0.9);
+  const barWidth = slot * (1 - clampedGap);
+  const offset = (slot - barWidth) / 2;
+  return values.map((value, i) => {
+    const h = max <= 0 ? 0 : round((value / max) * height);
+    return {
+      x: round(i * slot + offset),
+      y: round(height - h),
+      w: round(barWidth),
+      h,
+    };
+  });
+}
+
+// Whether a numeric series is empty OR entirely zero — the guard the chart components use to render an
+// empty-state ("no activity in this window") instead of a flat-line/zero-bar chart that reads as data.
+export function isEmptySeries(values: ReadonlyArray<number>): boolean {
+  return values.length === 0 || values.every((value) => value === 0);
+}
+
+// ── Entitlement-health classifier (pure, unit-tested) ─────────────────────────
+// Classify an entitlement for the health badge. Precedence (most-severe-first):
+//   suspended — status is disabled or revoked (an operator/terminal kill, regardless of dates).
+//   expired   — ACTIVE but valid_until is set and in the past (valid_until <= now).
+//   expiring  — ACTIVE and valid_until is within the next `expiringWithinDays` days.
+//   healthy   — everything else (active, non-expiring, or expiring beyond the horizon).
+// A null/undefined valid_until on an active row is non-expiring -> always healthy.
+export type EntitlementHealth = "healthy" | "expiring" | "expired" | "suspended";
+
+export function entitlementHealth(
+  status: string,
+  validUntil: number | null | undefined,
+  now: number,
+  expiringWithinDays = 30,
+): EntitlementHealth {
+  if (status === "disabled" || status === "revoked") {
+    return "suspended";
+  }
+  // Anything not active and not suspended (an unknown status) is treated as healthy — the status pill
+  // already surfaces the raw value; the badge only escalates on the cases above.
+  if (status !== "active") {
+    return "healthy";
+  }
+  if (validUntil === null || validUntil === undefined) {
+    return "healthy";
+  }
+  if (validUntil <= now) {
+    return "expired";
+  }
+  if (validUntil <= now + expiringWithinDays * 86400) {
+    return "expiring";
+  }
+  return "healthy";
+}
+
+// Round to 3 decimals so the emitted SVG path strings are compact and the unit tests assert exact
+// values (sub-pixel precision beyond this is invisible and just bloats the markup).
+function round(value: number): number {
+  return Math.round(value * 1000) / 1000;
+}

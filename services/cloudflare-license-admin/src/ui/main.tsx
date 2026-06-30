@@ -1,9 +1,13 @@
 import React, { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import type { EntitlementRecord, Policy } from "../shared/api";
+import type { EntitlementRecord, ExpiringEntitlement, Policy, TimeseriesBucket } from "../shared/api";
 import {
   EntitlementAction,
   SearchResult,
+  TimeseriesRange,
+  TIMESERIES_RANGE_DAYS,
+  areaPathScaled,
+  barRects,
   batchBody,
   batchPath,
   canEditEntitlement,
@@ -20,9 +24,14 @@ import {
   emptyEntitlementEditForm,
   emptyEntitlementForm,
   emptyPolicyForm,
+  entitlementHealth,
   entitlementsPath,
+  expiringPath,
   formatEpoch,
+  isEmptySeries,
   licensesPath,
+  linePath,
+  linePathScaled,
   navigationForResult,
   normalizeCreateFromPolicy,
   normalizeEntitlementForm,
@@ -32,14 +41,17 @@ import {
   patchPath,
   policiesPath,
   policyTransitionPath,
+  releaseSeatsConfirm,
+  releaseSeatsPath,
   revokeEntitlementConfirm,
   searchPath,
   shortHash,
   summarizeBatchResults,
+  timeseriesPath,
   transitionPath,
   withCursor,
 } from "./operatorWorkflow";
-import type { BatchRowResult } from "./operatorWorkflow";
+import type { BatchRowResult, BarRect, EntitlementHealth } from "./operatorWorkflow";
 import "./styles.css";
 
 interface Summary {
@@ -199,6 +211,114 @@ interface Report {
   customer_suspensions_7d: number;
 }
 
+// ── Workstream F: usage-analytics time-series + expiring-soon response shapes ──
+interface TimeseriesData {
+  from: number;
+  to: number;
+  bucket_seconds: number;
+  buckets: TimeseriesBucket[];
+}
+
+interface ExpiringData {
+  items: ExpiringEntitlement[];
+  next_cursor: string | null;
+}
+
+// ── Inline-SVG chart geometry constants (the viewBox the geometry helpers scale into) ──
+// The SVGs use a fixed viewBox and scale to the container via CSS (width:100%), so the geometry
+// helpers work in a stable coordinate space. CHART_PAD insets the line stroke from the top/bottom edge.
+const CHART_WIDTH = 600;
+const CHART_HEIGHT = 120;
+const CHART_PAD = 6;
+
+// A small line/area chart for two series sharing one y-scale (checkouts area + denials line). The
+// SVG carries ONLY geometry + an aria-label; every colour/stroke/fill comes from the CSS classes.
+// An empty-or-all-zero `checkouts`+`denials` renders the empty-state instead of a flat chart.
+function LineAreaChart({
+  checkouts,
+  denials,
+  label,
+}: {
+  checkouts: number[];
+  denials: number[];
+  label: string;
+}): React.ReactElement {
+  if (isEmptySeries(checkouts) && isEmptySeries(denials)) {
+    return <div className="chartEmpty muted">No usage activity in this window.</div>;
+  }
+  // Both series share ONE scale (the combined min/max) so the denials line reads relative to checkouts.
+  const combined = [...checkouts, ...denials];
+  const scaleMin = Math.min(...combined);
+  const scaleMax = Math.max(...combined);
+  // Area + checkouts line on the shared scale; the denials line on the SAME scale so the two lines
+  // are directly comparable on one axis.
+  const area = areaPathScaled(checkouts, scaleMin, scaleMax, CHART_WIDTH, CHART_HEIGHT, CHART_PAD);
+  const checkoutLine = linePathScaled(checkouts, scaleMin, scaleMax, CHART_WIDTH, CHART_HEIGHT, CHART_PAD);
+  const denialLine = linePathScaled(denials, scaleMin, scaleMax, CHART_WIDTH, CHART_HEIGHT, CHART_PAD);
+  return (
+    <svg
+      className="chart lineChart"
+      viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`}
+      preserveAspectRatio="none"
+      role="img"
+      aria-label={label}
+    >
+      {area !== "" && <path className="chartArea checkoutsArea" d={area} />}
+      {checkoutLine !== "" && <path className="chartLine checkoutsLine" d={checkoutLine} fill="none" />}
+      {denialLine !== "" && <path className="chartLine denialsLine" d={denialLine} fill="none" />}
+    </svg>
+  );
+}
+
+// A denial-rate trend line (a fraction in [0,1] per bucket). linePath auto-scales to the series'
+// own min/max, which is what we want here (the trend's shape matters more than the absolute 0..1).
+function DenialRateChart({ rates, label }: { rates: number[]; label: string }): React.ReactElement {
+  if (isEmptySeries(rates)) {
+    return <div className="chartEmpty muted">No denials in this window.</div>;
+  }
+  const line = linePath(rates, CHART_WIDTH, CHART_HEIGHT, CHART_PAD);
+  return (
+    <svg
+      className="chart lineChart"
+      viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`}
+      preserveAspectRatio="none"
+      role="img"
+      aria-label={label}
+    >
+      <path className="chartLine denialRateLine" d={line} fill="none" />
+    </svg>
+  );
+}
+
+// A fulfillment-events-over-time bar spark. barRects scales each bar by the series MAX so a zero
+// bucket is a zero-height bar. Empty-or-all-zero renders the empty-state.
+function BarSparkChart({ values, label }: { values: number[]; label: string }): React.ReactElement {
+  if (isEmptySeries(values)) {
+    return <div className="chartEmpty muted">No fulfillment events in this window.</div>;
+  }
+  const rects: BarRect[] = barRects(values, CHART_WIDTH, CHART_HEIGHT);
+  return (
+    <svg
+      className="chart barChart"
+      viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`}
+      preserveAspectRatio="none"
+      role="img"
+      aria-label={label}
+    >
+      {rects.map((rect, i) => (
+        <rect key={i} className="chartBar" x={rect.x} y={rect.y} width={rect.w} height={rect.h} />
+      ))}
+    </svg>
+  );
+}
+
+// The colored health badge rendered next to an entitlement's status pill. Pure presentational —
+// the classification is the unit-tested entitlementHealth helper; the CSS owns the green/amber/red.
+function HealthBadge({ status, validUntil, now }: { status: string; validUntil: number | null | undefined; now: number }): React.ReactElement {
+  const health: EntitlementHealth = entitlementHealth(status, validUntil, now);
+  return <span className={`healthBadge health-${health}`}>{health}</span>;
+}
+
 async function api<T>(path: string, init?: RequestInit): Promise<ApiEnvelope<T>> {
   const response = await fetch(path, {
     ...init,
@@ -254,6 +374,18 @@ function App(): React.ReactElement {
   const [orderFilter, setOrderFilter] = useState({ status: "", subscription_id: "" });
 
   const [report, setReport] = useState<Report | null>(null);
+
+  // Workstream F — usage-analytics time-series (Reports + Fulfillment charts). `range` is the
+  // last-N-days look-back; the data is the bucketed [from,to] response. `now` is captured once per
+  // load so the from/to window is stable across the render. The Fulfillment bar spark reuses the
+  // SAME data (no second fetch — the timeseries carries fulfillment_events per bucket).
+  const [timeseriesRange, setTimeseriesRange] = useState<TimeseriesRange>(7);
+  const [timeseries, setTimeseries] = useState<TimeseriesData | null>(null);
+
+  // Workstream F — expiring-soon panel (Reports tab). `withinDays` is the 7/30/90 horizon.
+  const [expiringWithinDays, setExpiringWithinDays] = useState(30);
+  const [expiring, setExpiring] = useState<ExpiringEntitlement[]>([]);
+  const [expiringCursor, setExpiringCursor] = useState<string | null>(null);
 
   // Policies tab: list + editor + the active-policy options that feed the entitlement create <select>.
   const [policies, setPolicies] = useState<Policy[]>([]);
@@ -411,6 +543,64 @@ function App(): React.ReactElement {
       }
     })();
   }, [activeTab]);
+
+  // Workstream F — load the bucketed usage time-series for the Reports + Fulfillment charts whenever
+  // either tab is open and the range changes. ONE fetch feeds both tabs' charts (the Fulfillment bar
+  // spark reads fulfillment_events from the same buckets), so the data is shared, not re-fetched.
+  useEffect(() => {
+    if (activeTab !== "reports" && activeTab !== "fulfillment") {
+      return;
+    }
+    void (async () => {
+      const response = await api<TimeseriesData>(timeseriesPath(timeseriesRange));
+      if (response.ok && response.data) {
+        setTimeseries(response.data);
+      } else {
+        setMessage(`${response.code} (${response.request_id})`);
+      }
+    })();
+  }, [activeTab, timeseriesRange]);
+
+  // Workstream F — load the expiring-soon list when the Reports tab opens or the horizon changes.
+  async function refreshExpiring(): Promise<void> {
+    const response = await api<ExpiringData>(expiringPath(expiringWithinDays));
+    if (response.ok && response.data) {
+      setExpiring(response.data.items);
+      setExpiringCursor(response.data.next_cursor ?? null);
+    } else {
+      setMessage(`${response.code} (${response.request_id})`);
+    }
+  }
+
+  useEffect(() => {
+    if (activeTab !== "reports") {
+      return;
+    }
+    void refreshExpiring();
+  }, [activeTab, expiringWithinDays]);
+
+  // Page the next slice of the expiring-soon list (cursor != null) and APPEND it, like the other lists.
+  async function loadMoreExpiring(): Promise<void> {
+    if (expiringCursor === null) {
+      return;
+    }
+    const response = await api<ExpiringData>(withCursor(expiringPath(expiringWithinDays), expiringCursor));
+    if (response.ok && response.data) {
+      const data = response.data;
+      setExpiring((prev) => [...prev, ...data.items]);
+      setExpiringCursor(data.next_cursor ?? null);
+    } else {
+      setMessage(`${response.code} (${response.request_id})`);
+    }
+  }
+
+  // Deep-link an expiring-soon row to the Entitlements tab filtered to its exact project + feature
+  // (the same destination a global-search entitlement result uses). The operator lands on the grid
+  // row to act on it (renew/disable/release).
+  function deepLinkToEntitlement(row: ExpiringEntitlement): void {
+    setFilter({ project: row.project, feature: row.feature, status: "" });
+    setActiveTab("entitlements");
+  }
 
   async function refreshPolicies(): Promise<void> {
     const response = await api<{ items: Policy[]; next_cursor: string | null }>(policiesUrl);
@@ -627,6 +817,29 @@ function App(): React.ReactElement {
     });
   }
 
+  // ── Workstream F — force-release the live seats stuck on a dead machine ───────
+  // Admin-affecting WRITE routed through the typed-confirm modal (reason required). One POST to
+  // /entitlements/:id/release-seats reclaims ALL live seats; the status line reports "released N
+  // seats" and the lists refresh. Reuses runMutation/busy + the idempotency-key header exactly like
+  // the single transitions.
+  async function releaseSeats(item: EntitlementRecord): Promise<void> {
+    await runMutation(async () => {
+      const result = await api<{ released: number; seat_ids: string[] }>(releaseSeatsPath(item.id), {
+        method: "POST",
+        headers: { "idempotency-key": crypto.randomUUID() },
+        body: JSON.stringify({ reason: currentReason() }),
+      });
+      if (result.ok && result.data) {
+        const n = result.data.released;
+        setMessage(`released ${n} seat${n === 1 ? "" : "s"} (${result.request_id})`);
+        setReason("");
+        await refresh();
+      } else {
+        setMessage(`${result.code} (${result.request_id})`);
+      }
+    });
+  }
+
   // ── Workstream C — BULK selection ────────────────────────────────────────────
   // Whenever the entitlement list reloads (filter change OR Load-more append), drop any selection of
   // rows that are no longer present so the bulk bar never acts on a stale/off-page id.
@@ -757,6 +970,10 @@ function App(): React.ReactElement {
       }
     });
   }
+
+  // Current epoch seconds, captured once per render for the health badge classification. (The badge
+  // is presentational; a per-render snapshot is precise enough and keeps the classifier pure/testable.)
+  const nowSeconds = Math.floor(Date.now() / 1000);
 
   return (
     <main>
@@ -899,13 +1116,17 @@ function App(): React.ReactElement {
                           {item.notes !== "" && <span>Notes {item.notes}</span>}
                         </div>
                       </td>
-                      <td><span className={`status ${item.status}`}>{item.status}</span></td>
+                      <td>
+                        <span className={`status ${item.status}`}>{item.status}</span>
+                        <HealthBadge status={item.status} validUntil={item.valid_until} now={nowSeconds} />
+                      </td>
                       <td>{item.revocation_seq}</td>
                       <td className="actions">
                         <button disabled={busy || !canEditEntitlement(item.status)} onClick={() => beginEdit(item)}>Edit</button>
                         <button disabled={busy || !canRunAction(item.status, "disable")} onClick={() => void transition(item, "disable")}>Disable</button>
                         <button disabled={busy || !canRunAction(item.status, "reenable")} onClick={() => void transition(item, "reenable")}>Reenable</button>
                         <button className="danger" disabled={busy || !canRunAction(item.status, "revoke")} onClick={() => requestConfirm({ title: "Revoke entitlement", body: revokeEntitlementConfirm(item), requiresReason: true, run: () => transition(item, "revoke") })}>Revoke</button>
+                        <button className="danger" disabled={busy} onClick={() => requestConfirm({ title: "Release seats", body: releaseSeatsConfirm(item), requiresReason: true, run: () => releaseSeats(item) })}>Release seats</button>
                       </td>
                     </tr>
                     {editingId === item.id && (
@@ -1130,7 +1351,10 @@ function App(): React.ReactElement {
                         <td>{ent.project}</td>
                         <td>{ent.feature}</td>
                         <td><code>{shortHash(ent.license_fingerprint)}</code></td>
-                        <td><span className={`status ${ent.status}`}>{ent.status}</span></td>
+                        <td>
+                          <span className={`status ${ent.status}`}>{ent.status}</span>
+                          <HealthBadge status={ent.status} validUntil={ent.valid_until} now={nowSeconds} />
+                        </td>
                         <td>{ent.revocation_seq}</td>
                         <td>{formatEpoch(ent.valid_until)}</td>
                       </tr>
@@ -1248,6 +1472,26 @@ function App(): React.ReactElement {
             <div><span>Rejected</span><strong>{orders?.summary.rejected ?? 0}</strong></div>
             <div><span>Stale</span><strong>{orders?.summary.stale_accepted ?? 0}</strong></div>
           </section>
+          <div className="chartCard fulfillmentSpark">
+            <div className="expiringHead">
+              <h3>Fulfillment events over time</h3>
+              <div className="rangeSelector" role="group" aria-label="Fulfillment spark range">
+                <span className="muted">Window</span>
+                {TIMESERIES_RANGE_DAYS.map((days) => (
+                  <button
+                    key={days}
+                    type="button"
+                    className={timeseriesRange === days ? "active" : ""}
+                    onClick={() => setTimeseriesRange(days)}
+                  >last {days}d</button>
+                ))}
+              </div>
+            </div>
+            <BarSparkChart
+              values={(timeseries?.buckets ?? []).map((b) => b.fulfillment_events)}
+              label={`Fulfillment (order) events over the last ${timeseriesRange} days`}
+            />
+          </div>
           <div className="filters">
             <select value={orderFilter.status} onChange={(event) => setOrderFilter({ ...orderFilter, status: event.target.value })}>
               <option value="">all</option>
@@ -1285,21 +1529,103 @@ function App(): React.ReactElement {
       )}
 
       {activeTab === "reports" && (
-        <section className="grid metrics reportCards">
-          <div><span>Entitlements total</span><strong>{report?.entitlements.total ?? 0}</strong></div>
-          <div><span>Entitlements active</span><strong>{report?.entitlements.active ?? 0}</strong></div>
-          <div><span>Entitlements revoked</span><strong>{report?.entitlements.revoked ?? 0}</strong></div>
-          <div><span>Entitlements disabled</span><strong>{report?.entitlements.disabled ?? 0}</strong></div>
-          <div><span>Customers total</span><strong>{report?.customers.total ?? 0}</strong></div>
-          <div><span>Customers active</span><strong>{report?.customers.active ?? 0}</strong></div>
-          <div><span>Customers disabled</span><strong>{report?.customers.disabled ?? 0}</strong></div>
-          <div><span>Active account tokens</span><strong>{report?.account_tokens.active ?? 0}</strong></div>
-          <div><span>Licenses total</span><strong>{report?.licenses.total ?? 0}</strong></div>
-          <div><span>Fulfillment processed</span><strong>{report?.fulfillment.processed ?? 0}</strong></div>
-          <div><span>Fulfillment stale accepted</span><strong>{report?.fulfillment.stale_accepted ?? 0}</strong></div>
-          <div><span>Order events 24h</span><strong>{report?.fulfillment.events_24h ?? 0}</strong></div>
-          <div><span>Order events 7d</span><strong>{report?.fulfillment.events_7d ?? 0}</strong></div>
-          <div><span>Customer suspensions 7d</span><strong>{report?.customer_suspensions_7d ?? 0}</strong></div>
+        <section className="reportsTab">
+          <section className="grid metrics reportCards">
+            <div><span>Entitlements total</span><strong>{report?.entitlements.total ?? 0}</strong></div>
+            <div><span>Entitlements active</span><strong>{report?.entitlements.active ?? 0}</strong></div>
+            <div><span>Entitlements revoked</span><strong>{report?.entitlements.revoked ?? 0}</strong></div>
+            <div><span>Entitlements disabled</span><strong>{report?.entitlements.disabled ?? 0}</strong></div>
+            <div><span>Customers total</span><strong>{report?.customers.total ?? 0}</strong></div>
+            <div><span>Customers active</span><strong>{report?.customers.active ?? 0}</strong></div>
+            <div><span>Customers disabled</span><strong>{report?.customers.disabled ?? 0}</strong></div>
+            <div><span>Active account tokens</span><strong>{report?.account_tokens.active ?? 0}</strong></div>
+            <div><span>Licenses total</span><strong>{report?.licenses.total ?? 0}</strong></div>
+            <div><span>Fulfillment processed</span><strong>{report?.fulfillment.processed ?? 0}</strong></div>
+            <div><span>Fulfillment stale accepted</span><strong>{report?.fulfillment.stale_accepted ?? 0}</strong></div>
+            <div><span>Order events 24h</span><strong>{report?.fulfillment.events_24h ?? 0}</strong></div>
+            <div><span>Order events 7d</span><strong>{report?.fulfillment.events_7d ?? 0}</strong></div>
+            <div><span>Customer suspensions 7d</span><strong>{report?.customer_suspensions_7d ?? 0}</strong></div>
+          </section>
+
+          <section className="chartPanels">
+            <div className="rangeSelector" role="group" aria-label="Time-series range">
+              <span className="muted">Window</span>
+              {TIMESERIES_RANGE_DAYS.map((days) => (
+                <button
+                  key={days}
+                  type="button"
+                  className={timeseriesRange === days ? "active" : ""}
+                  onClick={() => setTimeseriesRange(days)}
+                >last {days}d</button>
+              ))}
+            </div>
+            <div className="chartGrid">
+              <div className="chartCard">
+                <h3>Checkouts vs denials</h3>
+                <LineAreaChart
+                  checkouts={(timeseries?.buckets ?? []).map((b) => b.checkouts)}
+                  denials={(timeseries?.buckets ?? []).map((b) => b.denials)}
+                  label={`Checkouts (filled) versus denials over the last ${timeseriesRange} days`}
+                />
+                <div className="chartLegend">
+                  <span className="legend checkoutsLegend">checkouts</span>
+                  <span className="legend denialsLegend">denials</span>
+                </div>
+              </div>
+              <div className="chartCard">
+                <h3>Denial-rate trend</h3>
+                <DenialRateChart
+                  rates={(timeseries?.buckets ?? []).map((b) => b.denial_rate)}
+                  label={`Denial rate (denials over checkout attempts) over the last ${timeseriesRange} days`}
+                />
+                <p className="muted chartHint">Rising denial rate is the seat-pool upsell signal.</p>
+              </div>
+            </div>
+          </section>
+
+          <section className="tablePane full expiringPanel">
+            <div className="expiringHead">
+              <h2>Expiring soon</h2>
+              <div className="rangeSelector" role="group" aria-label="Expiring horizon">
+                {[7, 30, 90].map((days) => (
+                  <button
+                    key={days}
+                    type="button"
+                    className={expiringWithinDays === days ? "active" : ""}
+                    onClick={() => setExpiringWithinDays(days)}
+                  >{days}d</button>
+                ))}
+              </div>
+            </div>
+            {expiring.length === 0 ? (
+              <p className="muted">No active entitlements expire within {expiringWithinDays} days.</p>
+            ) : (
+              <table>
+                <thead><tr><th>Project</th><th>Feature</th><th>Fingerprint</th><th>Customer</th><th>Expires</th><th>Days left</th><th></th></tr></thead>
+                <tbody>
+                  {expiring.map((row) => (
+                    <tr key={`${row.project}/${row.feature}/${row.license_fingerprint}`} className={row.days_left <= 7 ? "expiringSoonRow" : ""}>
+                      <td>{row.project}</td>
+                      <td>{row.feature}</td>
+                      <td><code>{shortHash(row.license_fingerprint)}</code></td>
+                      <td>{row.customer_id ?? "-"}</td>
+                      <td>{formatEpoch(row.valid_until)}</td>
+                      <td><span className={`daysLeft ${row.days_left <= 7 ? "urgent" : ""}`}>{row.days_left}</span></td>
+                      <td className="actions">
+                        <button type="button" disabled={busy} onClick={() => deepLinkToEntitlement(row)}>View</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+            <div className="tableFooter">
+              <span className="muted">{expiring.length} shown</span>
+              {expiringCursor !== null && (
+                <button type="button" disabled={busy} onClick={() => void loadMoreExpiring()}>Load more</button>
+              )}
+            </div>
+          </section>
         </section>
       )}
 

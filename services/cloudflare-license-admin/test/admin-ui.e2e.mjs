@@ -24,6 +24,10 @@ function makeAdminApiFixture() {
     batches: [],
     searches: [],
     csvExports: [],
+    // Workstream F — usage-analytics reports + force-release.
+    timeseries: [],
+    expiring: [],
+    releaseSeats: [],
   };
 
   // A couple of customers so the Customers tab + a global-search customer deep-link have rows.
@@ -127,6 +131,55 @@ function makeAdminApiFixture() {
         }
       }
       return fulfill(200, makeEnvelope("search_results", { results }));
+    }
+    // Workstream F — usage-analytics time-series. Deterministic buckets so the inline-SVG charts have
+    // a visible (non-empty) line/area/bar to render.
+    if (method === "GET" && path === "/api/admin/report/timeseries") {
+      requests.timeseries.push(url.search);
+      const from = Number(url.searchParams.get("from")) || 0;
+      const to = Number(url.searchParams.get("to")) || from + 4;
+      const buckets = [
+        { start: from, checkouts: 2, releases: 1, denials: 0, denial_rate: 0, fulfillment_events: 1 },
+        { start: from + 1, checkouts: 4, releases: 2, denials: 1, denial_rate: 0.2, fulfillment_events: 3 },
+        { start: from + 2, checkouts: 1, releases: 0, denials: 3, denial_rate: 0.75, fulfillment_events: 0 },
+      ];
+      return fulfill(200, makeEnvelope("report_timeseries", { from, to, bucket_seconds: 1, buckets }));
+    }
+    // Workstream F — expiring-soon list.
+    if (method === "GET" && path === "/api/admin/report/expiring") {
+      requests.expiring.push(url.searchParams.get("within_days"));
+      const items = [
+        { project: "DEFAULT", feature: "pro", license_fingerprint: "a".repeat(64), customer_id: "cus_acme", valid_until: 1_760_500_000, days_left: 3 },
+        { project: "DEFAULT", feature: "ent", license_fingerprint: "b".repeat(64), customer_id: null, valid_until: 1_762_000_000, days_left: 21 },
+      ];
+      return fulfill(200, makeEnvelope("report_expiring", { items, next_cursor: null }));
+    }
+    if (method === "GET" && path === "/api/admin/report") {
+      return fulfill(200, makeEnvelope("report", {
+        generated_at: now,
+        entitlements: summary().entitlements,
+        customers: { total: customers.length, active: 1, disabled: 1 },
+        account_tokens: { active: 0 },
+        licenses: { total: 0 },
+        fulfillment: { accepted: 0, processed: 0, superseded: 0, rejected: 0, stale_accepted: 0, events_24h: 0, events_7d: 0 },
+        customer_suspensions_7d: 0,
+      }));
+    }
+    // Workstream F — force-release the live seats on a dead machine (admin-only WRITE).
+    const releaseMatch = /^\/api\/admin\/entitlements\/([^/]+)\/release-seats$/.exec(path);
+    if (method === "POST" && releaseMatch !== null) {
+      const body = await jsonBody(request);
+      requests.releaseSeats.push({ id: releaseMatch[1], reason: body.reason ?? "" });
+      return fulfill(200, makeEnvelope("seats_released", { released: 2, seat_ids: ["seat_1", "seat_2"] }));
+    }
+    // Fulfillment tab's order list (the bar spark reuses the timeseries; this feeds the table/cards).
+    if (method === "GET" && path === "/api/admin/orders") {
+      return fulfill(200, makeEnvelope("orders_listed", {
+        items: [],
+        summary: { accepted: 0, processed: 0, superseded: 0, rejected: 0, stale_accepted: 0 },
+        stale_secs: 300,
+        next_cursor: null,
+      }));
     }
     if (method === "GET" && path === "/api/admin/customers") {
       return fulfill(200, makeEnvelope("customers_listed", { items: customers.map((item) => ({ ...item })), next_cursor: null }));
@@ -378,4 +431,64 @@ test("admin UI runs bulk transitions, global search deep-link, and CSV export", 
   await expect.poll(() => api.requests.csvExports.length).toBeGreaterThan(0);
   expect(api.requests.csvExports.at(-1)).toBe("/api/admin/customers");
   await expect(page.getByText(/exported customers\.csv/)).toBeVisible();
+});
+
+test("admin UI renders Workstream F charts, expiring panel, health badge, and force-release", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  await page.route("**/api/admin/**", api.route);
+
+  await page.goto("/");
+
+  // Seed one entitlement so the health badge + force-release verb have a row to act on.
+  await page.getByRole("button", { name: "Entitlements", exact: true }).click();
+  const createForm = page.locator("aside form");
+  await createForm.getByLabel("Feature").fill("pro");
+  await createForm.getByLabel("Fingerprint").fill("a".repeat(64));
+  await createForm.getByRole("button", { name: "Save" }).click();
+  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
+
+  // HEALTH BADGE: an active, non-expiring (no valid_until) entitlement reads as "healthy".
+  await expect(page.locator(".healthBadge.health-healthy")).toHaveText("healthy");
+
+  // FORCE-RELEASE: the danger verb routes through the typed-confirm modal (reason required).
+  await page.locator(".reason").getByLabel("Reason", { exact: true }).fill("dead machine");
+  await page.getByRole("button", { name: "Release seats" }).click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await page.getByRole("dialog").getByRole("button", { name: "Confirm" }).click();
+  await expect.poll(() => api.requests.releaseSeats.length).toBe(1);
+  expect(api.requests.releaseSeats[0].reason).toBe("dead machine");
+  await expect(page.getByText(/released 2 seats/)).toBeVisible();
+
+  // REPORTS TAB: the inline-SVG charts render (aria-labelled), plus the expiring-soon panel rows.
+  await page.getByRole("button", { name: "Reports" }).click();
+  await expect.poll(() => api.requests.timeseries.length).toBeGreaterThan(0);
+  await expect(page.getByRole("img", { name: /Checkouts .* versus denials/ })).toBeVisible();
+  await expect(page.getByRole("img", { name: /Denial rate/ })).toBeVisible();
+  // The expiring-soon panel lists the in-window rows; the first deep-links to its entitlement.
+  await expect(page.getByRole("heading", { name: "Expiring soon" })).toBeVisible();
+  await expect.poll(() => api.requests.expiring.length).toBeGreaterThan(0);
+  await expect(page.locator(".expiringPanel tbody tr")).toHaveCount(2);
+  await expect(page.locator(".expiringPanel tbody tr").first().locator(".daysLeft")).toHaveText("3");
+
+  // The expiring horizon selector re-queries with the chosen within_days.
+  await page.locator(".expiringPanel .rangeSelector").getByRole("button", { name: "90d" }).click();
+  await expect.poll(() => api.requests.expiring.at(-1)).toBe("90");
+
+  // The time-series window selector re-queries the timeseries for the chosen look-back.
+  const before = api.requests.timeseries.length;
+  await page.locator(".chartPanels .rangeSelector").getByRole("button", { name: "last 30d" }).click();
+  await expect.poll(() => api.requests.timeseries.length).toBeGreaterThan(before);
+
+  // Deep-link from an expiring row into the Entitlements tab filtered to that project/feature.
+  await page.locator(".expiringPanel tbody tr").first().getByRole("button", { name: "View" }).click();
+  await expect(page.locator("nav button.active")).toHaveText("Entitlements");
+
+  // FULFILLMENT TAB: the fulfillment-events bar spark renders (aria-labelled).
+  await page.getByRole("button", { name: "Fulfillment" }).click();
+  await expect(page.getByRole("img", { name: /Fulfillment .* events/ })).toBeVisible();
+
+  // No secret material ever leaks into the rendered DOM.
+  const pageText = await page.locator("body").innerText();
+  expect(pageText).not.toContain("PRIVATE KEY");
+  expect(pageText).not.toContain("Bearer ");
 });

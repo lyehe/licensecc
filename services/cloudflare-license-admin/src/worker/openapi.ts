@@ -169,6 +169,40 @@ const paths: Record<string, Record<string, unknown>> = {
       },
     },
   },
+  "/api/admin/report/timeseries": {
+    get: {
+      tags: ["admin:reports"],
+      summary: "Bucketed usage + fulfillment time-series over a [from,to] window (reader+admin)",
+      operationId: "getReportTimeseries",
+      security: ADMIN_SECURITY,
+      parameters: [
+        { name: "from", in: "query", required: false, description: "Window start (epoch seconds). Defaults to `to` minus 7 days.", schema: { type: "integer", minimum: 0 } },
+        { name: "to", in: "query", required: false, description: "Window end (epoch seconds, exclusive upper edge). Defaults to now.", schema: { type: "integer", minimum: 0 } },
+        { name: "buckets", in: "query", required: false, description: "Number of equal buckets to split the window into (default 24, clamped to 1..200).", schema: { type: "integer", default: 24, minimum: 1, maximum: 200 } },
+      ],
+      responses: {
+        "200": okResponse("Per-bucket usage (checkouts/releases/denials/denial_rate) + fulfillment_events.", "#/components/schemas/TimeseriesData", "report_timeseries"),
+        "400": errorResponse("Invalid window (from >= to).", "invalid_request"),
+        ...ADMIN_AUTH_ERRORS,
+      },
+    },
+  },
+  "/api/admin/report/expiring": {
+    get: {
+      tags: ["admin:reports"],
+      summary: "Active entitlements expiring within N days, soonest first (reader+admin)",
+      operationId: "getReportExpiring",
+      security: ADMIN_SECURITY,
+      parameters: [
+        { name: "within_days", in: "query", required: false, description: "Look-ahead horizon in days (default 30, clamped to 1..365).", schema: { type: "integer", default: 30, minimum: 1, maximum: 365 } },
+        ...limitCursorParams(),
+      ],
+      responses: {
+        "200": okResponse("Expiring-soon entitlement page (valid_until ASC) with days_left.", "#/components/schemas/ExpiringData", "report_expiring"),
+        ...ADMIN_AUTH_ERRORS,
+      },
+    },
+  },
   "/api/admin/customers": {
     get: {
       tags: ["admin:customers"],
@@ -746,6 +780,30 @@ const paths: Record<string, Record<string, unknown>> = {
       },
     },
   },
+  "/api/admin/entitlements/{id}/release-seats": {
+    post: {
+      tags: ["admin:entitlements"],
+      summary: "Force-release the LIVE seats stuck on a dead machine (admin-only, requires reason)",
+      operationId: "releaseEntitlementSeats",
+      security: ADMIN_SECURITY,
+      parameters: [idParam, idempotencyKeyHeader],
+      requestBody: {
+        required: true,
+        content: { "application/json": { schema: { $ref: "#/components/schemas/ReasonRequiredBody" } } },
+      },
+      responses: {
+        "200": okResponse(
+          "Reclaimed the entitlement's LIVE seat_checkouts (heartbeat_deadline > now) and wrote a 'reclaim' usage_events row per seat. `released:0` is a valid idempotent success.",
+          "#/components/schemas/ReleaseSeatsData",
+          "seats_released",
+        ),
+        "400": errorResponse("Invalid request / json / id / idempotency key, or missing reason.", "invalid_entitlement_id", "invalid_idempotency_key", "invalid_json", "reason_required"),
+        ...ADMIN_MUTATION_AUTH_ERRORS,
+        "413": errorResponse("Request body exceeds 8192 bytes.", "body_too_large"),
+        "500": errorResponse("Mutation failed, or dev bearer enabled outside development.", "mutation_failed", "dev_bearer_forbidden_in_environment"),
+      },
+    },
+  },
   "/api/admin/search": {
     get: {
       tags: ["admin:reports"],
@@ -1308,6 +1366,60 @@ export const openApiDocument: OpenApiDocument = {
               },
             },
           },
+        },
+      },
+      TimeseriesData: {
+        type: "object",
+        description:
+          "Bucketed usage-analytics over [from,to). `buckets` is a dense, fixed-length array (zero-filled gaps); each bucket aggregates usage_events (by ts) + order_events (by received_at).",
+        properties: {
+          from: { type: "integer", description: "Window start (epoch seconds)." },
+          to: { type: "integer", description: "Window end (epoch seconds, exclusive)." },
+          bucket_seconds: { type: "integer", description: "Nominal bucket width; the last bucket absorbs any integer remainder of the span." },
+          buckets: {
+            type: "array",
+            items: {
+              type: "object",
+              required: ["start", "checkouts", "releases", "denials", "denial_rate", "fulfillment_events"],
+              properties: {
+                start: { type: "integer", description: "Bucket start (epoch seconds)." },
+                checkouts: { type: "integer", description: "usage_events event_type='checkout' in this bucket." },
+                releases: { type: "integer", description: "usage_events event_type IN ('release','reclaim') in this bucket." },
+                denials: { type: "integer", description: "usage_events event_type='denied' in this bucket." },
+                denial_rate: { type: "number", description: "denials / (checkouts + denials); 0 when the bucket saw no attempts (the upsell signal)." },
+                fulfillment_events: { type: "integer", description: "order_events received_at in this bucket." },
+              },
+            },
+          },
+        },
+      },
+      ExpiringData: {
+        type: "object",
+        properties: {
+          items: {
+            type: "array",
+            items: {
+              type: "object",
+              required: ["project", "feature", "license_fingerprint", "valid_until", "days_left"],
+              properties: {
+                project: { type: "string" },
+                feature: { type: "string" },
+                license_fingerprint: { type: "string" },
+                customer_id: { type: ["string", "null"] },
+                valid_until: { type: "integer", description: "Epoch seconds the entitlement expires at." },
+                days_left: { type: "integer", description: "ceil((valid_until - now)/86400); >=1 for a still-future expiry." },
+              },
+            },
+          },
+          next_cursor: { type: ["string", "null"] },
+        },
+      },
+      ReleaseSeatsData: {
+        type: "object",
+        required: ["released", "seat_ids"],
+        properties: {
+          released: { type: "integer", description: "Count of LIVE seats reclaimed (0 is a valid idempotent success)." },
+          seat_ids: { type: "array", items: { type: "string" }, description: "The reclaimed seat_ids (sorted)." },
         },
       },
     },

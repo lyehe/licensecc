@@ -437,6 +437,154 @@ test("admin UI workflow maps each search-result type to its deep-link navigation
   );
 });
 
+// ── Workstream F: report path builders (timeseries / expiring / release-seats) ──
+test("admin UI workflow builds the timeseries path with a from/to window for a last-N-days range", async () => {
+  const workflow = await loadWorkflowModule();
+  // A fixed `now` makes the from/to window deterministic. from = now - days*86400; to = now.
+  const now = 1_700_000_000;
+  assert.equal(
+    workflow.timeseriesPath(7, undefined, now),
+    `/api/admin/report/timeseries?from=${now - 7 * 86400}&to=${now}`,
+  );
+  assert.equal(
+    workflow.timeseriesPath(30, undefined, now),
+    `/api/admin/report/timeseries?from=${now - 30 * 86400}&to=${now}`,
+  );
+  // buckets rides along when provided.
+  assert.equal(
+    workflow.timeseriesPath(90, 24, now),
+    `/api/admin/report/timeseries?from=${now - 90 * 86400}&to=${now}&buckets=24`,
+  );
+  // The exported range list is the three look-backs the selector offers.
+  assert.deepEqual(workflow.TIMESERIES_RANGE_DAYS, [7, 30, 90]);
+});
+
+test("admin UI workflow builds the expiring + release-seats paths", async () => {
+  const workflow = await loadWorkflowModule();
+  assert.equal(workflow.expiringPath(30), "/api/admin/report/expiring?within_days=30");
+  assert.equal(workflow.expiringPath(7), "/api/admin/report/expiring?within_days=7");
+  // Compose with withCursor for the pager (mirrors the other lists).
+  assert.equal(
+    workflow.withCursor(workflow.expiringPath(90), "50"),
+    "/api/admin/report/expiring?within_days=90&cursor=50",
+  );
+  assert.equal(workflow.releaseSeatsPath("ent-123"), "/api/admin/entitlements/ent-123/release-seats");
+});
+
+test("force-release confirm copy echoes the exact target and warns it frees all live seats", async () => {
+  const workflow = await loadWorkflowModule();
+  const copy = workflow.releaseSeatsConfirm({ project: "DEFAULT", feature: "pro", license_fingerprint: "a".repeat(64) });
+  assert.match(copy, /Force-release ALL live seats for DEFAULT \/ pro/);
+  assert.match(copy, new RegExp(workflow.shortHash("a".repeat(64))));
+  assert.match(copy, /dead\/unreachable machine/);
+});
+
+// ── Workstream F: entitlement-health classifier ────────────────────────────────
+test("admin UI workflow classifies entitlement health by status + valid_until window", async () => {
+  const workflow = await loadWorkflowModule();
+  const now = 1_700_000_000;
+  const DAY = 86400;
+  // suspended: disabled/revoked beats every date consideration.
+  assert.equal(workflow.entitlementHealth("disabled", now + 100 * DAY, now), "suspended");
+  assert.equal(workflow.entitlementHealth("revoked", null, now), "suspended");
+  assert.equal(workflow.entitlementHealth("disabled", now - DAY, now), "suspended");
+  // expired: active AND valid_until in the past (<= now).
+  assert.equal(workflow.entitlementHealth("active", now - 1, now), "expired");
+  assert.equal(workflow.entitlementHealth("active", now, now), "expired");
+  // expiring: active AND valid_until within the default 30-day horizon.
+  assert.equal(workflow.entitlementHealth("active", now + 5 * DAY, now), "expiring");
+  assert.equal(workflow.entitlementHealth("active", now + 30 * DAY, now), "expiring");
+  // healthy: active, non-expiring (null) OR expiry beyond the horizon.
+  assert.equal(workflow.entitlementHealth("active", null, now), "healthy");
+  assert.equal(workflow.entitlementHealth("active", undefined, now), "healthy");
+  assert.equal(workflow.entitlementHealth("active", now + 31 * DAY, now), "healthy");
+  // A custom horizon narrows/widens the expiring band.
+  assert.equal(workflow.entitlementHealth("active", now + 10 * DAY, now, 7), "healthy");
+  assert.equal(workflow.entitlementHealth("active", now + 10 * DAY, now, 14), "expiring");
+  // An unknown status is never escalated (the status pill shows the raw value).
+  assert.equal(workflow.entitlementHealth("pending", now - DAY, now), "healthy");
+});
+
+// ── Workstream F: inline-SVG chart geometry (pure helpers) ─────────────────────
+test("admin UI workflow scaleY maps values y-down with a flat-series mid-line", async () => {
+  const workflow = await loadWorkflowModule();
+  // y-down: the MAX value sits at the top (= pad), the MIN at the bottom (= height - pad).
+  assert.equal(workflow.scaleY(10, 0, 10, 100, 0), 0); // max -> top
+  assert.equal(workflow.scaleY(0, 0, 10, 100, 0), 100); // min -> bottom
+  assert.equal(workflow.scaleY(5, 0, 10, 100, 0), 50); // midpoint
+  // pad insets both edges.
+  assert.equal(workflow.scaleY(10, 0, 10, 100, 10), 10);
+  assert.equal(workflow.scaleY(0, 0, 10, 100, 10), 90);
+  // A flat series (max <= min, including all-zero) sits on the mid-line, not collapsed to an edge.
+  assert.equal(workflow.scaleY(0, 0, 0, 100, 0), 50);
+  assert.equal(workflow.scaleY(7, 7, 7, 100, 10), 50);
+});
+
+test("admin UI workflow pointXs spreads N points across the width", async () => {
+  const workflow = await loadWorkflowModule();
+  assert.deepEqual(workflow.pointXs(0, 600), []);
+  assert.deepEqual(workflow.pointXs(1, 600), [0]); // single point pins to the left edge
+  assert.deepEqual(workflow.pointXs(2, 600), [0, 600]);
+  assert.deepEqual(workflow.pointXs(3, 600), [0, 300, 600]);
+  assert.deepEqual(workflow.pointXs(5, 600), [0, 150, 300, 450, 600]);
+});
+
+test("admin UI workflow linePath emits a min/max-scaled polyline 'd' string", async () => {
+  const workflow = await loadWorkflowModule();
+  // Empty -> "" (the caller renders the empty-state).
+  assert.equal(workflow.linePath([], 600, 100), "");
+  // A single value -> a flat full-width segment at its scaled y (mid-line for a 1-point series).
+  assert.equal(workflow.linePath([5], 600, 100, 0), "M 0 50 L 600 50");
+  // A rising series: first point at the bottom (min), last at the top (max), y-down.
+  assert.equal(workflow.linePath([0, 10], 600, 100, 0), "M 0 100 L 600 0");
+  assert.equal(workflow.linePath([0, 5, 10], 600, 100, 0), "M 0 100 L 300 50 L 600 0");
+  // A flat (all-equal) series rides the mid-line across the width.
+  assert.equal(workflow.linePath([4, 4, 4], 600, 100, 0), "M 0 50 L 300 50 L 600 50");
+});
+
+test("admin UI workflow linePathScaled draws a series on an external shared y-scale", async () => {
+  const workflow = await loadWorkflowModule();
+  // Drawn against [0,10] regardless of the values' own range, so several series share one axis.
+  assert.equal(workflow.linePathScaled([0, 5], 0, 10, 600, 100, 0), "M 0 100 L 600 50");
+  assert.equal(workflow.linePathScaled([10, 10], 0, 10, 600, 100, 0), "M 0 0 L 600 0");
+  // A degenerate external scale puts every point on the mid-line.
+  assert.equal(workflow.linePathScaled([3, 7], 5, 5, 600, 100, 0), "M 0 50 L 600 50");
+  assert.equal(workflow.linePathScaled([], 0, 10, 600, 100), "");
+});
+
+test("admin UI workflow areaPath closes the line down to the baseline", async () => {
+  const workflow = await loadWorkflowModule();
+  assert.equal(workflow.areaPath([], 600, 100), "");
+  // The line, then down to the baseline at the last x, across to the first x, and closed (Z).
+  assert.equal(workflow.areaPath([0, 10], 600, 100, 0), "M 0 100 L 600 0 L 600 100 L 0 100 Z");
+  // A single value: a full-width flat segment, closed to the baseline.
+  assert.equal(workflow.areaPath([5], 600, 100, 0), "M 0 50 L 600 50 L 600 100 L 0 100 Z");
+  // areaPathScaled mirrors it on an external scale.
+  assert.equal(workflow.areaPathScaled([0, 5], 0, 10, 600, 100, 0), "M 0 100 L 600 50 L 600 100 L 0 100 Z");
+});
+
+test("admin UI workflow barRects positions value-scaled bars from the baseline", async () => {
+  const workflow = await loadWorkflowModule();
+  assert.deepEqual(workflow.barRects([], 600, 100), []);
+  // Two bars over width 600 -> slot 300; gap 0.2 -> barWidth 240, offset 30. Heights scale by the MAX.
+  const rects = workflow.barRects([5, 10], 600, 100, 0.2);
+  assert.equal(rects.length, 2);
+  assert.deepEqual(rects[0], { x: 30, y: 50, w: 240, h: 50 }); // 5/10 -> half height
+  assert.deepEqual(rects[1], { x: 330, y: 0, w: 240, h: 100 }); // 10/10 -> full height
+  // An all-zero series -> zero-height bars sitting on the baseline (y === height).
+  const zero = workflow.barRects([0, 0], 600, 100, 0.2);
+  assert.equal(zero[0].h, 0);
+  assert.equal(zero[0].y, 100);
+});
+
+test("admin UI workflow isEmptySeries guards the chart empty-state", async () => {
+  const workflow = await loadWorkflowModule();
+  assert.equal(workflow.isEmptySeries([]), true);
+  assert.equal(workflow.isEmptySeries([0, 0, 0]), true);
+  assert.equal(workflow.isEmptySeries([0, 1, 0]), false);
+  assert.equal(workflow.isEmptySeries([3]), false);
+});
+
 // ── Workstream C: CSV export path ──────────────────────────────────────────────
 test("admin UI workflow appends format=csv respecting an existing query string", async () => {
   const workflow = await loadWorkflowModule();

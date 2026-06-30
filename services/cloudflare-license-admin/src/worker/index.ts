@@ -16,6 +16,8 @@ import type {
   WebhookEndpoint,
   WebhookEndpointInput,
   WebhookEndpointPatch,
+  TimeseriesBucket,
+  ExpiringEntitlement,
 } from "../shared/api";
 import {
   entitlementId,
@@ -1973,6 +1975,220 @@ async function handleWebhookMutation(request: Request, env: Env, actor: Actor, r
   return envelope(requestIdValue, "not_found", undefined, 404);
 }
 
+// ── Workstream F: usage-analytics reports + stuck-seat force-release ───────────
+// Three routes over the SAME backend-owned D1. The two reports are reader+admin reads
+// (GET /api/admin/report/timeseries, /api/admin/report/expiring); the force-release WRITE
+// (POST /api/admin/entitlements/:id/release-seats) is admin-only + reason-required + audited.
+// Design: the existing GET /api/admin/report (point-in-time counts) is the closest pattern.
+// The sweep-line peak_concurrent stays the point-in-time card — the time-series is a separate,
+// single-pass GROUP-BY aggregation and deliberately does NOT re-derive concurrency.
+
+// Default time-series window when ?from/?to are omitted: the last 7 days.
+const TIMESERIES_DEFAULT_WINDOW_SECS = 604800;
+// Bucket count bounds: default 24 (an hour each over a day), hard ceiling 200 (keeps the
+// computed GROUP BY index small and the response bounded).
+const TIMESERIES_DEFAULT_BUCKETS = 24;
+const TIMESERIES_MAX_BUCKETS = 200;
+// within_days bounds for the expiring report (default 30, hard ceiling 365).
+const EXPIRING_DEFAULT_WITHIN_DAYS = 30;
+const EXPIRING_MAX_WITHIN_DAYS = 365;
+const SECONDS_PER_DAY = 86400;
+
+// Parse a non-negative epoch-seconds query param, or null when absent/blank/malformed.
+function epochParam(url: URL, name: string): number | null {
+  const raw = url.searchParams.get(name);
+  if (raw === null || raw === "") {
+    return null;
+  }
+  const value = Number(raw);
+  return Number.isInteger(value) && value >= 0 ? value : null;
+}
+
+// GET /api/admin/report/timeseries?from=&to=&buckets= (reader+admin). Bucket [from,to] into N
+// equal buckets and aggregate, per bucket, usage_events (checkout/release+reclaim/denied by ts)
+// and order_events (fulfillment_events by received_at) in a SINGLE-PASS GROUP BY over a computed
+// bucket index. The bucket index is CAST((ts - from) * buckets / span) clamped to [0, buckets-1];
+// the time window itself bounds the scan (indexed on ts / received_at).
+async function reportTimeseries(request: Request, env: Env, requestIdValue: string): Promise<Response> {
+  const url = new URL(request.url);
+  const now = Math.floor(Date.now() / 1000);
+  const to = epochParam(url, "to") ?? now;
+  const from = epochParam(url, "from") ?? to - TIMESERIES_DEFAULT_WINDOW_SECS;
+  // A non-positive window is a client error: there is nothing to bucket.
+  if (from >= to) {
+    return envelope(requestIdValue, "invalid_request", undefined, 400);
+  }
+  const buckets = Math.min(
+    Math.max(Number(url.searchParams.get("buckets") ?? String(TIMESERIES_DEFAULT_BUCKETS)) || TIMESERIES_DEFAULT_BUCKETS, 1),
+    TIMESERIES_MAX_BUCKETS,
+  );
+  const span = to - from;
+  // bucket_seconds is the nominal width; the LAST bucket absorbs any integer remainder so the
+  // window is fully covered (the clamp on the computed index keeps a ts == to inside bucket N-1).
+  const bucketSeconds = Math.max(1, Math.floor(span / buckets));
+
+  // The computed bucket index, shared by both aggregations. (? = from, ? = buckets, ? = span).
+  // CAST(... AS INTEGER) truncates toward zero; MIN(..., buckets-1) clamps the right edge so a
+  // row exactly at `to` (or any half-open boundary rounding) lands in the final bucket, never N.
+  const bucketIndexExpr = (tsColumn: string): string =>
+    `MIN(CAST((${tsColumn} - ?) * ? / ? AS INTEGER), ?)`;
+
+  // Usage events: one GROUP BY over the window, counting each event_type per bucket.
+  const usageRows = await env.DB.prepare(
+    `SELECT ${bucketIndexExpr("ts")} AS bucket,
+       SUM(CASE WHEN event_type = 'checkout' THEN 1 ELSE 0 END) AS checkouts,
+       SUM(CASE WHEN event_type IN ('release', 'reclaim') THEN 1 ELSE 0 END) AS releases,
+       SUM(CASE WHEN event_type = 'denied' THEN 1 ELSE 0 END) AS denials
+     FROM usage_events WHERE ts >= ? AND ts < ? GROUP BY bucket`,
+  ).bind(from, buckets, span, buckets - 1, from, to).all<{ bucket: number; checkouts: number; releases: number; denials: number }>();
+
+  // Fulfillment events: order_events bucketed by received_at over the same window.
+  const orderRows = await env.DB.prepare(
+    `SELECT ${bucketIndexExpr("received_at")} AS bucket, COUNT(*) AS fulfillment_events
+     FROM order_events WHERE received_at >= ? AND received_at < ? GROUP BY bucket`,
+  ).bind(from, buckets, span, buckets - 1, from, to).all<{ bucket: number; fulfillment_events: number }>();
+
+  // Dense the sparse GROUP BY results into a fixed [0..buckets-1] array (zero-filled gaps).
+  const out: TimeseriesBucket[] = [];
+  for (let i = 0; i < buckets; ++i) {
+    out.push({ start: from + i * bucketSeconds, checkouts: 0, releases: 0, denials: 0, denial_rate: 0, fulfillment_events: 0 });
+  }
+  for (const row of usageRows.results) {
+    const bucket = out[row.bucket];
+    if (bucket === undefined) {
+      continue;
+    }
+    bucket.checkouts = Number(row.checkouts) || 0;
+    bucket.releases = Number(row.releases) || 0;
+    bucket.denials = Number(row.denials) || 0;
+    const attempts = bucket.checkouts + bucket.denials;
+    // denial_rate = denials / (checkouts + denials); 0 when the bucket saw no attempts. Mirrors
+    // usage_report.mjs (denials / checkout-attempts is the upsell signal).
+    bucket.denial_rate = attempts === 0 ? 0 : bucket.denials / attempts;
+  }
+  for (const row of orderRows.results) {
+    const bucket = out[row.bucket];
+    if (bucket !== undefined) {
+      bucket.fulfillment_events = Number(row.fulfillment_events) || 0;
+    }
+  }
+  return envelope(requestIdValue, "report_timeseries", { from, to, bucket_seconds: bucketSeconds, buckets: out });
+}
+
+// GET /api/admin/report/expiring?within_days=&limit=&cursor= (reader+admin). Active entitlements
+// whose valid_until is in the open window (now, now + within_days*86400], ordered soonest-first,
+// cursor-paginated. days_left is ceil((valid_until - now)/86400) so a row expiring in <1 day still
+// reports 1, never 0.
+async function reportExpiring(request: Request, env: Env, requestIdValue: string): Promise<Response> {
+  const url = new URL(request.url);
+  const now = Math.floor(Date.now() / 1000);
+  const withinDays = Math.min(
+    Math.max(Number(url.searchParams.get("within_days") ?? String(EXPIRING_DEFAULT_WITHIN_DAYS)) || EXPIRING_DEFAULT_WITHIN_DAYS, 1),
+    EXPIRING_MAX_WITHIN_DAYS,
+  );
+  const horizon = now + withinDays * SECONDS_PER_DAY;
+  const { limit, cursor } = boundedCursor(url);
+  const rows = await env.DB.prepare(
+    `SELECT project, feature, license_fingerprint, customer_id, valid_until
+       FROM entitlements
+      WHERE status = 'active' AND valid_until IS NOT NULL AND valid_until > ? AND valid_until <= ?
+      ORDER BY valid_until ASC, project, feature, license_fingerprint
+      LIMIT ? OFFSET ?`,
+  ).bind(now, horizon, limit + 1, cursor).all<Omit<ExpiringEntitlement, "days_left">>();
+  const items: ExpiringEntitlement[] = rows.results.slice(0, limit).map((row) => ({
+    project: row.project,
+    feature: row.feature,
+    license_fingerprint: row.license_fingerprint,
+    customer_id: row.customer_id ?? null,
+    valid_until: row.valid_until,
+    days_left: Math.max(1, Math.ceil((row.valid_until - now) / SECONDS_PER_DAY)),
+  }));
+  return envelope(requestIdValue, "report_expiring", {
+    items,
+    next_cursor: rows.results.length > limit ? String(cursor + limit) : null,
+  });
+}
+
+// POST /api/admin/entitlements/:id/release-seats (ADMIN-ONLY, reason REQUIRED). The operator lever
+// for "a seat is stuck on a dead machine": atomically DELETE the LIVE seat_checkouts (heartbeat_deadline
+// > now) for the entitlement tuple RETURNING seat_id, and INSERT one 'reclaim' usage_events row per
+// reclaimed seat (reason='force_release') in the SAME batch — mirroring the backend's reclaim discipline
+// so peak_concurrent stays accurate. 0 released is a valid idempotent {ok:true}. Idempotency-Key supported.
+async function handleReleaseSeats(request: Request, env: Env, actor: Actor, encodedId: string, requestIdValue: string): Promise<Response> {
+  const adminError = requireAdmin(actor, requestIdValue);
+  if (adminError !== null) {
+    return adminError;
+  }
+  const key = decodeEntitlementId(encodedId);
+  if (key === null) {
+    return envelope(requestIdValue, "invalid_entitlement_id", undefined, 400);
+  }
+  const idempotencyKey = safeString(request.headers.get("idempotency-key"), 128);
+  if (request.headers.has("idempotency-key") && idempotencyKey === null) {
+    return envelope(requestIdValue, "invalid_idempotency_key", undefined, 400);
+  }
+  const body = await parseJsonBody(request, requestIdValue);
+  if (body instanceof Response) {
+    return body;
+  }
+  const reason = safeNotes((body as Record<string, unknown>).reason) ?? "";
+  if (reason === "") {
+    return envelope(requestIdValue, "reason_required", undefined, 400);
+  }
+  const scope = `POST:/api/admin/entitlements/release-seats:${actor.subject}`;
+  const replay = await idempotentReplay(env, scope, idempotencyKey);
+  if (replay !== null) {
+    return replay;
+  }
+  if (typeof env.DB.batch !== "function") {
+    return envelope(requestIdValue, "mutation_failed", undefined, 500);
+  }
+  const now = Math.floor(Date.now() / 1000);
+  // First, learn which LIVE seats we will reclaim (a SELECT scoped to the tuple, heartbeat_deadline
+  // > now). We then DELETE exactly those seat_ids and write a matching 'reclaim' row for each in ONE
+  // atomic batch — the DELETE re-guards heartbeat_deadline > now so a seat that lapsed/renewed between
+  // the read and the batch is consistently handled (the reclaim rows are built from the DELETE's
+  // RETURNING set in the live-seat-count path; here we mirror it via the pre-read + guarded DELETE).
+  const live = await env.DB.prepare(
+    "SELECT seat_id FROM seat_checkouts WHERE project = ? AND feature = ? AND license_fingerprint = ? AND heartbeat_deadline > ? ORDER BY seat_id",
+  ).bind(key.project, key.feature, key.license_fingerprint, now).all<{ seat_id: string }>();
+  const seatIds = live.results.map((row) => row.seat_id);
+  if (seatIds.length === 0) {
+    // Idempotent no-op: nothing live to reclaim. Still a success (the dead machine left no live seat,
+    // or a prior release already swept them). Record under the idempotency key so a replay is stable.
+    const responseBody = { ok: true, code: "seats_released", request_id: requestIdValue, data: { released: 0, seat_ids: [] } };
+    await rememberIdempotency(env, scope, idempotencyKey, responseBody, now);
+    return json(responseBody);
+  }
+  // Atomic batch: a guarded DELETE RETURNING the reclaimed seat_ids, then one best-effort-shaped
+  // 'reclaim' usage_events INSERT per seat (device_key_id NULL, reason='force_release', ts=now) —
+  // identical column discipline to the backend's quantity-downgrade reclaim, so the usage analytics
+  // and peak_concurrent sweep stay accurate.
+  const statements = [
+    env.DB.prepare(
+      "DELETE FROM seat_checkouts WHERE project = ? AND feature = ? AND license_fingerprint = ? AND heartbeat_deadline > ? RETURNING seat_id",
+    ).bind(key.project, key.feature, key.license_fingerprint, now),
+    ...seatIds.map((seat) =>
+      env.DB.prepare(
+        "INSERT INTO usage_events (project, feature, license_fingerprint, event_type, seat_id, device_key_id, reason, ts) VALUES (?, ?, ?, 'reclaim', ?, NULL, 'force_release', ?)",
+      ).bind(key.project, key.feature, key.license_fingerprint, seat, now),
+    ),
+  ];
+  let deletedRows: Array<{ seat_id: string }>;
+  try {
+    const results = await env.DB.batch(statements);
+    const first = results[0] as { results?: Array<{ seat_id: string }> } | undefined;
+    deletedRows = first?.results ?? [];
+  } catch {
+    return envelope(requestIdValue, "mutation_failed", undefined, 500);
+  }
+  // Report the seats the guarded DELETE actually removed (authoritative over the pre-read).
+  const released = deletedRows.map((row) => row.seat_id).sort();
+  const responseBody = { ok: true, code: "seats_released", request_id: requestIdValue, data: { released: released.length, seat_ids: released } };
+  await rememberIdempotency(env, scope, idempotencyKey, responseBody, now);
+  return json(responseBody);
+}
+
 async function handleApi(request: Request, env: Env): Promise<Response> {
   const id = requestId(request);
   const auth = await authenticate(request, env, id);
@@ -1985,6 +2201,12 @@ async function handleApi(request: Request, env: Env): Promise<Response> {
   }
   if (request.method === "GET" && url.pathname === "/api/admin/report") {
     return report(env, id);
+  }
+  if (request.method === "GET" && url.pathname === "/api/admin/report/timeseries") {
+    return reportTimeseries(request, env, id);
+  }
+  if (request.method === "GET" && url.pathname === "/api/admin/report/expiring") {
+    return reportExpiring(request, env, id);
   }
   if (request.method === "GET" && url.pathname === "/api/admin/customers") {
     return listCustomers(request, env, id);
@@ -2051,6 +2273,12 @@ async function handleApi(request: Request, env: Env): Promise<Response> {
   }
   if (request.method === "POST" && url.pathname === "/api/admin/entitlements/batch") {
     return handleBatchTransition(request, env, auth, id);
+  }
+  // Force-release lives at /entitlements/:id/release-seats — match it before the generic
+  // entitlement mutation dispatch so the encoded id (which can contain '/') is not misrouted.
+  const releaseSeats = /^\/api\/admin\/entitlements\/([^/]+)\/release-seats$/.exec(url.pathname);
+  if (request.method === "POST" && releaseSeats !== null) {
+    return handleReleaseSeats(request, env, auth, releaseSeats[1] ?? "", id);
   }
   if (["POST", "PATCH"].includes(request.method)) {
     return handleMutation(request, env, auth, id);
