@@ -380,3 +380,128 @@ button.danger:hover:not(:disabled) {
   justify-content: flex-end;
   margin-top: 14px;
 }
+
+/* ── Workstream C — global search (header), bulk bar, checkbox column ────────── */
+
+/* Global search lives in the topbar between the title and the nav. The results dropdown is
+   absolutely positioned under the input so it overlays content without reflowing the page. */
+.globalSearch {
+  display: flex;
+  flex: 1;
+  gap: 8px;
+  max-width: 460px;
+  position: relative;
+}
+
+.globalSearch input {
+  flex: 1;
+}
+
+.globalSearch button {
+  white-space: nowrap;
+}
+
+.searchResults {
+  background: #ffffff;
+  border: 1px solid #d8ddd1;
+  border-radius: 8px;
+  box-shadow: 0 12px 40px rgba(27, 31, 35, 0.18);
+  left: 0;
+  max-height: 420px;
+  overflow-y: auto;
+  padding: 10px;
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 40;
+}
+
+.searchResultsHead {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.searchEmpty {
+  margin: 6px 2px;
+}
+
+.searchGroup {
+  margin-bottom: 8px;
+}
+
+.searchGroup h3 {
+  color: #59645a;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  margin: 6px 2px 4px;
+  text-transform: uppercase;
+}
+
+button.searchResult {
+  align-items: baseline;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  text-align: left;
+  width: 100%;
+}
+
+.searchResultLabel {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.searchResultMeta {
+  flex-shrink: 0;
+  font-size: 12px;
+}
+
+button.searchResult:hover:not(:disabled) .searchResultMeta {
+  color: #dfeee7;
+}
+
+/* The bulk-action bar shown above the entitlement grid when >=1 row is checked. */
+.bulkBar {
+  align-items: center;
+  background: #eef3ec;
+  border: 1px solid #cbd6c6;
+  border-radius: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 8px 12px;
+}
+
+.bulkBar span {
+  color: #485047;
+  font-size: 13px;
+  font-weight: 600;
+  margin-right: 4px;
+}
+
+/* The checkbox column (select-all header + per-row) is narrow and centered. */
+.checkCol {
+  text-align: center;
+  width: 36px;
+}
+
+.checkCol input {
+  margin: 0;
+  min-height: 0;
+  width: auto;
+}
+
+.eventsToolbar {
+  grid-template-columns: max-content;
+  justify-content: flex-end;
+}
+
+@media (max-width: 920px) {
+  .globalSearch {
+    max-width: none;
+  }
+}

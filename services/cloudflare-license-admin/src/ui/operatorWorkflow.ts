@@ -414,3 +414,130 @@ export function disableCustomerConfirm(customer: { id: string; name: string }): 
   const who = customer.name !== "" ? `${customer.name} (${customer.id})` : customer.id;
   return `Disable customer ${who}. This immediately severs all of their license/token auth and customer-portal access until you re-enable them.`;
 }
+
+// ── Workstream C UI: bulk transitions, global search, CSV export (pure helpers) ───────────────
+// All path/parse helpers live here (unit-tested) so the React layer stays a thin, declarative shell
+// over them — exactly as the entitlement/customer/policy helpers above. None of these touch the
+// shared mutation core; the backend composes transitionEntitlement per-row (createEntitlement is
+// byte-identical and untouched).
+
+// The batch transition endpoint. Body { action, reason, ids[] }; one bad row never aborts the rest.
+export function batchPath(): string {
+  return "/api/admin/entitlements/batch";
+}
+
+// Build the body the batch endpoint validates. `reason` rides along (the backend requires it for
+// disable/revoke); ids are the encoded entitlement ids of the selected rows. Pure so the body is
+// asserted without a network round-trip.
+export function batchBody(action: EntitlementAction, ids: ReadonlyArray<string>, reason: string): {
+  action: EntitlementAction;
+  reason: string;
+  ids: string[];
+} {
+  return { action, reason, ids: [...ids] };
+}
+
+// Per-row result the batch endpoint returns (one entry per input id, in input order).
+export interface BatchRowResult {
+  id: string;
+  ok: boolean;
+  code: string;
+}
+
+// Roll a batch result up into a one-line operator summary, e.g. "12 ok, 1 revoked-terminal, 1 not-found".
+// The ok count is collapsed to a single "<n> ok"; every distinct failure code is counted and rendered
+// with the `entitlement_`/`_entitlement_is_terminal` noise trimmed to a short slug. Pure (unit-tested).
+export function summarizeBatchResults(results: ReadonlyArray<BatchRowResult>): string {
+  const okCount = results.filter((row) => row.ok).length;
+  const failures = new Map<string, number>();
+  for (const row of results) {
+    if (!row.ok) {
+      const slug = batchFailureSlug(row.code);
+      failures.set(slug, (failures.get(slug) ?? 0) + 1);
+    }
+  }
+  const parts: string[] = [`${okCount} ok`];
+  for (const [slug, count] of failures) {
+    parts.push(`${count} ${slug}`);
+  }
+  return parts.join(", ");
+}
+
+// Shorten a per-row failure code to a compact slug for the summary line. Unknown codes pass through.
+function batchFailureSlug(code: string): string {
+  if (code === "revoked_entitlement_is_terminal") {
+    return "revoked-terminal";
+  }
+  if (code === "invalid_entitlement_id") {
+    return "invalid-id";
+  }
+  if (code === "not_found") {
+    return "not-found";
+  }
+  if (code === "mutation_failed") {
+    return "failed";
+  }
+  return code;
+}
+
+// ── Global search ─────────────────────────────────────────────────────────────
+export function searchPath(q: string): string {
+  const params = new URLSearchParams();
+  params.set("q", q);
+  return `/api/admin/search?${params.toString()}`;
+}
+
+// A single mixed-type search result row (mirrors the Worker's SearchData items). `type` + the
+// type-specific identity fields drive the deep-link via navigationForResult.
+export type SearchResultType = "customer" | "license" | "entitlement" | "order";
+
+export interface SearchResult {
+  type: SearchResultType;
+  id: string;
+  label: string;
+  project?: string;
+  feature?: string;
+  license_fingerprint?: string;
+  email?: string;
+  status?: string;
+  external_ref?: string | null;
+  customer_id?: string | null;
+}
+
+// The tabs a search result can deep-link into (a subset of App's activeTab union).
+export type NavigableTab = "customers" | "entitlements" | "licenses" | "fulfillment";
+
+// A deep-link target: which tab to open, the filter to apply on that tab, and (for a customer) the
+// id to select. The React layer applies `filter` to the destination tab's filter state and switches
+// `tab`; `selectCustomerId` (customer only) drives selectCustomer so the detail pane opens.
+export interface SearchNavigation {
+  tab: NavigableTab;
+  filter: Record<string, string>;
+  selectCustomerId?: string;
+}
+
+// Map a search result to its deep-link navigation (pure, unit-tested):
+//   customer    -> Customers tab, search filter q=id, AND select the customer (detail pane opens).
+//   entitlement -> Entitlements tab filtered to its exact project + feature.
+//   license     -> Licenses tab filtered to its project (when known) + q=id so the single row anchors.
+//   order       -> Fulfillment tab filtered by subscription_id (the result id IS the subscription id).
+export function navigationForResult(result: SearchResult): SearchNavigation {
+  if (result.type === "customer") {
+    return { tab: "customers", filter: { status: "", q: result.id }, selectCustomerId: result.id };
+  }
+  if (result.type === "entitlement") {
+    return { tab: "entitlements", filter: { project: result.project ?? "", feature: result.feature ?? "", status: "" } };
+  }
+  if (result.type === "license") {
+    return { tab: "licenses", filter: { project: result.project ?? "", customer_id: "", q: result.id } };
+  }
+  return { tab: "fulfillment", filter: { status: "", subscription_id: result.id } };
+}
+
+// ── CSV export ──────────────────────────────────────────────────────────────────
+// Append `format=csv` to an admin list path (which may already carry filters), so the
+// "Export CSV" button downloads the current-filter CSV the JSON list would have returned.
+// Pure so the export URL is unit-tested, mirroring withCursor's contract.
+export function csvExportPath(base: string): string {
+  return `${base}${base.includes("?") ? "&" : "?"}format=csv`;
+}

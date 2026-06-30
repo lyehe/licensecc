@@ -107,6 +107,40 @@ export interface PolicyPatch {
   notes?: string;
 }
 
+// ── Workstream C: bulk transition + global search response shapes ─────────────
+// The admin Worker's POST /api/admin/entitlements/batch returns one row per input id (input order);
+// a bad row never aborts the others, so each carries its own ok/code.
+export interface BatchRowResult {
+  id: string;
+  ok: boolean;
+  code: string;
+}
+
+export interface BatchResultData {
+  results: BatchRowResult[];
+}
+
+// GET /api/admin/search returns mixed-type rows; `type` + the type-specific identity fields drive
+// the UI deep-link (see navigationForResult in operatorWorkflow.ts).
+export type SearchResultType = "customer" | "license" | "entitlement" | "order";
+
+export interface SearchResult {
+  type: SearchResultType;
+  id: string;
+  label: string;
+  project?: string;
+  feature?: string;
+  license_fingerprint?: string;
+  email?: string;
+  status?: string;
+  external_ref?: string | null;
+  customer_id?: string | null;
+}
+
+export interface SearchData {
+  results: SearchResult[];
+}
+
 // Optional frozen-trial + provenance columns surfaced on an entitlement record that
 // was stamped from a policy. Read by dedicated SELECTs (not part of ENTITLEMENT_COLUMNS).
 export interface EntitlementTrialFields {

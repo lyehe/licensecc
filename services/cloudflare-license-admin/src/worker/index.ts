@@ -512,10 +512,21 @@ async function listEntitlements(request: Request, env: Env, requestIdValue: stri
       values.push(value);
     }
   }
+  const where = filters.length === 0 ? "" : `WHERE ${filters.join(" AND ")}`;
+  if (wantsCsv(url)) {
+    // CSV export: SAME filters, but bounded by the CSV cap instead of a page cursor.
+    const csvRows = await env.DB.prepare(`${entitlementSelectSql(where)} ORDER BY updated_at DESC LIMIT ?`)
+      .bind(...values, CSV_ROW_CAP)
+      .all<Omit<EntitlementRecord, "id">>();
+    return csvResponse(
+      "entitlements.csv",
+      ["id", "project", "feature", "license_fingerprint", "device_hash", "status", "assertion_ttl_seconds", "revocation_seq", "valid_from", "valid_until", "notes", "customer_id", "license_id", "created_at", "updated_at"],
+      csvRows.results.map(withId) as unknown as ReadonlyArray<Record<string, unknown>>,
+    );
+  }
   const limit = Math.min(Number(url.searchParams.get("limit") ?? "50") || 50, 100);
   const cursor = Math.max(Number(url.searchParams.get("cursor") ?? "0") || 0, 0);
   values.push(limit + 1, cursor);
-  const where = filters.length === 0 ? "" : `WHERE ${filters.join(" AND ")}`;
   const rows = await env.DB.prepare(`${entitlementSelectSql(where)} ORDER BY updated_at DESC LIMIT ? OFFSET ?`)
     .bind(...values)
     .all<Omit<EntitlementRecord, "id">>();
@@ -528,9 +539,21 @@ async function listEntitlements(request: Request, env: Env, requestIdValue: stri
 
 async function listEvents(request: Request, env: Env, requestIdValue: string): Promise<Response> {
   const url = new URL(request.url);
+  const eventColumns = "id, project, feature, license_fingerprint, event_type, status, revocation_seq, actor, actor_type, source, request_id, reason, created_at";
+  if (wantsCsv(url)) {
+    // CSV export: same ORDER BY, bounded by the CSV cap (the `limit` page size does not apply).
+    const csvRows = await env.DB.prepare(
+      `SELECT ${eventColumns} FROM entitlement_events ORDER BY created_at DESC, id DESC LIMIT ?`,
+    ).bind(CSV_ROW_CAP).all<Record<string, unknown>>();
+    return csvResponse(
+      "events.csv",
+      ["id", "project", "feature", "license_fingerprint", "event_type", "status", "revocation_seq", "actor", "actor_type", "source", "request_id", "reason", "created_at"],
+      csvRows.results,
+    );
+  }
   const limit = Math.min(Number(url.searchParams.get("limit") ?? "50") || 50, 100);
   const rows = await env.DB.prepare(
-    "SELECT id, project, feature, license_fingerprint, event_type, status, revocation_seq, actor, actor_type, source, request_id, reason, created_at FROM entitlement_events ORDER BY created_at DESC, id DESC LIMIT ?",
+    `SELECT ${eventColumns} FROM entitlement_events ORDER BY created_at DESC, id DESC LIMIT ?`,
   ).bind(limit).all();
   return envelope(requestIdValue, "events_listed", { items: rows.results });
 }
@@ -809,6 +832,66 @@ function boundedCursor(url: URL): { limit: number; cursor: number } {
   };
 }
 
+// ── Workstream C BACKEND: CSV export, global search, bulk transitions ─────────
+// CSV export rides ?format=csv on the EXISTING list routes (no new routes, so the
+// OpenAPI cross-check is undisturbed). Global search and bulk transitions are the
+// only TWO new routes. Design: admin Worker conventions in CLAUDE.md (Slice 4 +
+// entitlement transitions are the closest existing patterns).
+
+// Hard ceiling on a single CSV export. A list endpoint with ?format=csv streams up to
+// this many rows (the SAME filters as the JSON list), then appends a trailing comment row
+// noting the cap so an operator can tell a truncated export from a complete one.
+const CSV_ROW_CAP = 10000;
+// Cap on the number of ids a single bulk transition may carry (over -> 400 too_many).
+const BATCH_MAX_IDS = 100;
+// Per-type fan-out cap for global search (bounded so no single type floods the result).
+const SEARCH_PER_TYPE_LIMIT = 10;
+
+// CSV-escape one field: stringify, then quote + double any embedded quote. null/undefined
+// render as the empty string. Always quoted so commas/newlines/quotes in data are inert.
+function csvField(value: unknown): string {
+  const text = value === null || value === undefined ? "" : String(value);
+  return `"${text.replace(/"/g, '""')}"`;
+}
+
+// Render header + rows (each a record keyed by `columns`) as a CSV body, then append a
+// trailing comment row when the export hit the cap so truncation is visible to the reader.
+function toCsv(columns: ReadonlyArray<string>, rows: ReadonlyArray<Record<string, unknown>>, capped: boolean): string {
+  const lines = [columns.map(csvField).join(",")];
+  for (const row of rows) {
+    lines.push(columns.map((column) => csvField(row[column])).join(","));
+  }
+  if (capped) {
+    lines.push(csvField(`# export truncated at the ${CSV_ROW_CAP}-row cap; narrow your filters for the full set`));
+  }
+  return `${lines.join("\r\n")}\r\n`;
+}
+
+// Build the streaming text/csv Response with an attachment Content-Disposition.
+function csvResponse(filename: string, columns: ReadonlyArray<string>, rows: ReadonlyArray<Record<string, unknown>>): Response {
+  const capped = rows.length >= CSV_ROW_CAP;
+  return new Response(toCsv(columns, rows.slice(0, CSV_ROW_CAP), capped), {
+    headers: {
+      "content-type": "text/csv; charset=utf-8",
+      "content-disposition": `attachment; filename="${filename}"`,
+    },
+  });
+}
+
+function wantsCsv(url: URL): boolean {
+  return url.searchParams.get("format") === "csv";
+}
+
+// Turn a user search term into a PREFIX LIKE pattern (`q%`), escaping the wildcards so the
+// literal term anchors at the start. Used for the hex license_fingerprint prefix search.
+function likePrefix(value: unknown): string | null {
+  const term = safeString(value, 128);
+  if (term === null) {
+    return null;
+  }
+  return `${term.toLowerCase().replace(/[\\%_]/g, (ch) => `\\${ch}`)}%`;
+}
+
 async function listCustomers(request: Request, env: Env, requestIdValue: string): Promise<Response> {
   const url = new URL(request.url);
   const filters: string[] = [];
@@ -827,15 +910,25 @@ async function listCustomers(request: Request, env: Env, requestIdValue: string)
     filters.push("(lower(c.id) LIKE ? ESCAPE '\\' OR lower(c.email) LIKE ? ESCAPE '\\' OR lower(c.name) LIKE ? ESCAPE '\\')");
     values.push(like, like, like);
   }
-  const { limit, cursor } = boundedCursor(url);
   const where = filters.length === 0 ? "" : `WHERE ${filters.join(" AND ")}`;
-  values.push(limit + 1, cursor);
-  const rows = await env.DB.prepare(
+  const projection =
     `SELECT c.id, c.name, c.email, c.status, c.external_ref, c.created_at, c.updated_at,
        (SELECT COUNT(*) FROM entitlements e WHERE e.customer_id = c.id) AS entitlement_count,
        (SELECT COUNT(*) FROM entitlements e WHERE e.customer_id = c.id AND e.status = 'active') AS active_entitlement_count
-     FROM customers c ${where} ORDER BY c.updated_at DESC, c.id LIMIT ? OFFSET ?`,
-  ).bind(...values).all();
+     FROM customers c ${where}`;
+  if (wantsCsv(url)) {
+    const csvRows = await env.DB.prepare(`${projection} ORDER BY c.updated_at DESC, c.id LIMIT ?`)
+      .bind(...values, CSV_ROW_CAP).all<Record<string, unknown>>();
+    return csvResponse(
+      "customers.csv",
+      ["id", "name", "email", "status", "external_ref", "entitlement_count", "active_entitlement_count", "created_at", "updated_at"],
+      csvRows.results,
+    );
+  }
+  const { limit, cursor } = boundedCursor(url);
+  values.push(limit + 1, cursor);
+  const rows = await env.DB.prepare(`${projection} ORDER BY c.updated_at DESC, c.id LIMIT ? OFFSET ?`)
+    .bind(...values).all();
   return envelope(requestIdValue, "customers_listed", {
     items: rows.results.slice(0, limit),
     next_cursor: rows.results.length > limit ? String(cursor + limit) : null,
@@ -1067,6 +1160,143 @@ async function handleCustomerTransition(
   const responseBody = { ok: true, code: `customer_${action}d`, request_id: requestIdValue, data: updated };
   await rememberIdempotency(env, scope, idempotencyKey, responseBody, now);
   return json(responseBody);
+}
+
+// ── Bulk entitlement transitions (Workstream C) ──────────────────────────────
+// POST /api/admin/entitlements/batch — admin-only. Body { action, reason, ids[] }.
+// Composes the SHARED transitionEntitlement once per id; one bad row never aborts the
+// others (per-row success/failure is collected). createEntitlement is NOT touched.
+//
+// FOOTGUN guarded here: mutation_idempotency is keyed by (scope, idempotency_key). If every
+// row reused the SAME idempotency key, the FIRST row's cached response would be replayed for
+// every subsequent row (mergeable only by accident). So each row gets a DISTINCT sub-key
+// `<base>:<id>` derived from the request's Idempotency-Key (or a generated batch id), and the
+// scope mirrors the single mutations (METHOD:pathname:actor.subject) so a re-POST of the same
+// batch with the same Idempotency-Key replays each row's OWN cached response — not row #1's.
+async function handleBatchTransition(request: Request, env: Env, actor: Actor, requestIdValue: string): Promise<Response> {
+  const adminError = requireAdmin(actor, requestIdValue);
+  if (adminError !== null) {
+    return adminError;
+  }
+  const headerKey = safeString(request.headers.get("idempotency-key"), 128);
+  if (request.headers.has("idempotency-key") && headerKey === null) {
+    return envelope(requestIdValue, "invalid_idempotency_key", undefined, 400);
+  }
+  const body = await parseJsonBody(request, requestIdValue);
+  if (body instanceof Response) {
+    return body;
+  }
+  const input = body as Record<string, unknown>;
+  const action = input.action;
+  if (action !== "disable" && action !== "reenable" && action !== "revoke") {
+    return envelope(requestIdValue, "invalid_request", undefined, 400);
+  }
+  const reason = safeNotes(input.reason) ?? "";
+  if ((action === "disable" || action === "revoke") && reason === "") {
+    return envelope(requestIdValue, "reason_required", undefined, 400);
+  }
+  const ids = input.ids;
+  if (!Array.isArray(ids) || ids.length === 0 || ids.some((id) => typeof id !== "string")) {
+    return envelope(requestIdValue, "invalid_request", undefined, 400);
+  }
+  if (ids.length > BATCH_MAX_IDS) {
+    return envelope(requestIdValue, "too_many", undefined, 400);
+  }
+  // The per-row idempotency BASE: the caller's key, or a stable per-request batch id when absent
+  // (a generated base means no cross-request replay, but the rows are still mutually distinct).
+  const baseKey = headerKey ?? `batch:${crypto.randomUUID()}`;
+  const targetStatus = action === "reenable" ? "active" : action === "disable" ? "disabled" : "revoked";
+  const transition = action as "disable" | "reenable" | "revoke";
+  const scope = `POST:${new URL(request.url).pathname}:${actor.subject}`;
+  const results: Array<{ id: string; ok: boolean; code: string }> = [];
+  for (const id of ids as string[]) {
+    const key = decodeEntitlementId(id);
+    if (key === null) {
+      results.push({ id, ok: false, code: "invalid_entitlement_id" });
+      continue;
+    }
+    // DISTINCT per-row sub-key — the heart of the footgun guard.
+    const rowKey = `${baseKey}:${id}`;
+    const ctx: MutationContext = {
+      actor,
+      requestId: requestIdValue,
+      ip: clientIp(request),
+      idempotencyKey: rowKey,
+      source: "admin",
+    };
+    const replay = await idempotentReplay(env, scope, rowKey);
+    if (replay !== null) {
+      results.push({ id, ok: true, code: `entitlement_${transition}d` });
+      continue;
+    }
+    try {
+      const idempotency = { scope, responseCode: `entitlement_${transition}d` };
+      const result = await transitionEntitlement(env, key, targetStatus, transition, reason, ctx, idempotency);
+      if (result === null) {
+        results.push({ id, ok: false, code: "not_found" });
+        continue;
+      }
+      if (!result.idempotencyRecorded) {
+        const rowBody = { ok: true, code: `entitlement_${transition}d`, request_id: requestIdValue, data: result.data };
+        await rememberIdempotency(env, scope, rowKey, rowBody, Math.floor(Date.now() / 1000));
+      }
+      results.push({ id, ok: true, code: `entitlement_${transition}d` });
+    } catch (error) {
+      if (error instanceof Error && error.message === "revoked_terminal") {
+        results.push({ id, ok: false, code: "revoked_entitlement_is_terminal" });
+        continue;
+      }
+      results.push({ id, ok: false, code: "mutation_failed" });
+    }
+  }
+  return envelope(requestIdValue, "batch_done", { results });
+}
+
+// ── Global search (Workstream C) ──────────────────────────────────────────────
+// GET /api/admin/search?q=&limit= — reader+admin. Fans out an escaped LIKE across the
+// already-isolated tables (customers/licenses/entitlements/orders), bounded per type, so the
+// UI can deep-link a single typed result. No oracle concern: the route is admin-authenticated.
+async function globalSearch(request: Request, env: Env, requestIdValue: string): Promise<Response> {
+  const url = new URL(request.url);
+  const rawQ = url.searchParams.get("q");
+  if (rawQ === null || rawQ === "") {
+    return envelope(requestIdValue, "invalid_request", undefined, 400);
+  }
+  const like = likeContains(rawQ);
+  const prefix = likePrefix(rawQ);
+  if (like === null || prefix === null) {
+    return envelope(requestIdValue, "invalid_request", undefined, 400);
+  }
+  const perType = Math.min(Number(url.searchParams.get("limit") ?? String(SEARCH_PER_TYPE_LIMIT)) || SEARCH_PER_TYPE_LIMIT, SEARCH_PER_TYPE_LIMIT);
+  const [customers, licenses, entitlements, orders] = await Promise.all([
+    env.DB.prepare(
+      "SELECT id, name, email, external_ref, status FROM customers WHERE lower(id) LIKE ? ESCAPE '\\' OR lower(email) LIKE ? ESCAPE '\\' OR lower(name) LIKE ? ESCAPE '\\' OR lower(external_ref) LIKE ? ESCAPE '\\' ORDER BY updated_at DESC, id LIMIT ?",
+    ).bind(like, like, like, like, perType).all<Record<string, unknown>>(),
+    env.DB.prepare(
+      "SELECT id, project, label, customer_id FROM licenses WHERE lower(id) LIKE ? ESCAPE '\\' OR lower(label) LIKE ? ESCAPE '\\' ORDER BY updated_at DESC, id LIMIT ?",
+    ).bind(like, like, perType).all<Record<string, unknown>>(),
+    env.DB.prepare(
+      "SELECT project, feature, license_fingerprint, status, customer_id FROM entitlements WHERE license_fingerprint LIKE ? ESCAPE '\\' ORDER BY updated_at DESC LIMIT ?",
+    ).bind(prefix, perType).all<Record<string, unknown>>(),
+    env.DB.prepare(
+      "SELECT subscription_id, project, feature, license_fingerprint, customer_id FROM orders WHERE lower(subscription_id) LIKE ? ESCAPE '\\' ORDER BY updated_at DESC LIMIT ?",
+    ).bind(like, perType).all<Record<string, unknown>>(),
+  ]);
+  const results: Array<Record<string, unknown>> = [];
+  for (const row of customers.results) {
+    results.push({ type: "customer", id: row.id, label: row.name, email: row.email, status: row.status, external_ref: row.external_ref });
+  }
+  for (const row of licenses.results) {
+    results.push({ type: "license", id: row.id, label: row.label, project: row.project, customer_id: row.customer_id });
+  }
+  for (const row of entitlements.results) {
+    const id = entitlementId(String(row.project), String(row.feature), String(row.license_fingerprint));
+    results.push({ type: "entitlement", id, label: row.license_fingerprint, project: row.project, feature: row.feature, status: row.status, customer_id: row.customer_id });
+  }
+  for (const row of orders.results) {
+    results.push({ type: "order", id: row.subscription_id, label: row.subscription_id, project: row.project, feature: row.feature, license_fingerprint: row.license_fingerprint, customer_id: row.customer_id });
+  }
+  return envelope(requestIdValue, "search_results", { results });
 }
 
 // ── License-policy templates (Stage 3) ───────────────────────────────────────
@@ -1348,6 +1578,9 @@ async function handleApi(request: Request, env: Env): Promise<Response> {
   if (request.method === "GET" && url.pathname === "/api/admin/orders") {
     return listOrders(request, env, id);
   }
+  if (request.method === "GET" && url.pathname === "/api/admin/search") {
+    return globalSearch(request, env, id);
+  }
   const customerAction = /^\/api\/admin\/customers\/([^/]+)\/(disable|reenable)$/.exec(url.pathname);
   if (request.method === "POST" && customerAction !== null) {
     return handleCustomerTransition(request, env, auth, decodeURIComponent(customerAction[1] ?? ""), customerAction[2] as "disable" | "reenable", id);
@@ -1383,6 +1616,9 @@ async function handleApi(request: Request, env: Env): Promise<Response> {
     }
     const row = await findEntitlement(env, key);
     return row === null ? envelope(id, "not_found", undefined, 404) : envelope(id, "entitlement", row);
+  }
+  if (request.method === "POST" && url.pathname === "/api/admin/entitlements/batch") {
+    return handleBatchTransition(request, env, auth, id);
   }
   if (["POST", "PATCH"].includes(request.method)) {
     return handleMutation(request, env, auth, id);

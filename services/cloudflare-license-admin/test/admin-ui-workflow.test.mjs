@@ -342,3 +342,118 @@ test("disable-policy confirm copy echoes the policy and clarifies frozen entitle
   assert.match(copy, /Disable policy "Trial 14d" \(trial\)/);
   assert.match(copy, /already-stamped entitlements are frozen and unaffected/);
 });
+
+// ── Workstream C: bulk transitions ────────────────────────────────────────────
+test("admin UI workflow builds the bulk transition path and body", async () => {
+  const workflow = await loadWorkflowModule();
+  assert.equal(workflow.batchPath(), "/api/admin/entitlements/batch");
+  assert.deepEqual(workflow.batchBody("disable", ["a", "b"], "audit"), {
+    action: "disable",
+    reason: "audit",
+    ids: ["a", "b"],
+  });
+  // The ids array is copied (a new array), so a later mutation of the source can't leak into the body.
+  const ids = ["x"];
+  const body = workflow.batchBody("revoke", ids, "chargeback");
+  ids.push("y");
+  assert.deepEqual(body.ids, ["x"]);
+});
+
+test("admin UI workflow summarizes per-row batch results into one operator line", async () => {
+  const workflow = await loadWorkflowModule();
+  // All ok -> just the ok count.
+  assert.equal(
+    workflow.summarizeBatchResults([
+      { id: "a", ok: true, code: "entitlement_disabled" },
+      { id: "b", ok: true, code: "entitlement_disabled" },
+    ]),
+    "2 ok",
+  );
+  // Mixed: ok count collapses; each distinct failure code becomes a short slug + count.
+  assert.equal(
+    workflow.summarizeBatchResults([
+      { id: "a", ok: true, code: "entitlement_revoked" },
+      { id: "b", ok: false, code: "revoked_entitlement_is_terminal" },
+      { id: "c", ok: false, code: "not_found" },
+      { id: "d", ok: false, code: "revoked_entitlement_is_terminal" },
+    ]),
+    "1 ok, 2 revoked-terminal, 1 not-found",
+  );
+  // Unknown failure codes pass through verbatim; invalid-id + failed get their slugs.
+  assert.equal(
+    workflow.summarizeBatchResults([
+      { id: "a", ok: false, code: "invalid_entitlement_id" },
+      { id: "b", ok: false, code: "mutation_failed" },
+      { id: "c", ok: false, code: "weird_code" },
+    ]),
+    "0 ok, 1 invalid-id, 1 failed, 1 weird_code",
+  );
+  assert.equal(workflow.summarizeBatchResults([]), "0 ok");
+});
+
+// ── Workstream C: global search path + result-to-navigation mapping ────────────
+test("admin UI workflow builds the global search path with an encoded query", async () => {
+  const workflow = await loadWorkflowModule();
+  assert.equal(workflow.searchPath("acme"), "/api/admin/search?q=acme");
+  assert.equal(workflow.searchPath("jane@example.com"), "/api/admin/search?q=jane%40example.com");
+  assert.equal(workflow.searchPath("a b/c"), "/api/admin/search?q=a+b%2Fc");
+});
+
+test("admin UI workflow maps each search-result type to its deep-link navigation", async () => {
+  const workflow = await loadWorkflowModule();
+
+  // A customer deep-links to the Customers tab, filters to itself, AND selects it (detail pane opens).
+  assert.deepEqual(
+    workflow.navigationForResult({ type: "customer", id: "cus_1", label: "Acme", email: "a@b.c", status: "active" }),
+    { tab: "customers", filter: { status: "", q: "cus_1" }, selectCustomerId: "cus_1" },
+  );
+
+  // An entitlement deep-links to the Entitlements tab filtered to its exact project + feature.
+  assert.deepEqual(
+    workflow.navigationForResult({ type: "entitlement", id: "ent-enc", label: "a".repeat(64), project: "DEFAULT", feature: "pro", status: "active" }),
+    { tab: "entitlements", filter: { project: "DEFAULT", feature: "pro", status: "" } },
+  );
+
+  // A license deep-links to the Licenses tab filtered to its project + q=id.
+  assert.deepEqual(
+    workflow.navigationForResult({ type: "license", id: "lic_9", label: "Seat pack", project: "DEFAULT", customer_id: "cus_1" }),
+    { tab: "licenses", filter: { project: "DEFAULT", customer_id: "", q: "lic_9" } },
+  );
+
+  // An order deep-links to the Fulfillment tab filtered by subscription_id (the result id).
+  assert.deepEqual(
+    workflow.navigationForResult({ type: "order", id: "sub_42", label: "sub_42", project: "DEFAULT", feature: "pro" }),
+    { tab: "fulfillment", filter: { status: "", subscription_id: "sub_42" } },
+  );
+
+  // Missing optional project/feature on an entitlement/license fall back to empty (no undefined leaks).
+  assert.deepEqual(
+    workflow.navigationForResult({ type: "entitlement", id: "x", label: "y" }),
+    { tab: "entitlements", filter: { project: "", feature: "", status: "" } },
+  );
+  assert.deepEqual(
+    workflow.navigationForResult({ type: "license", id: "lic_x", label: "z" }),
+    { tab: "licenses", filter: { project: "", customer_id: "", q: "lic_x" } },
+  );
+});
+
+// ── Workstream C: CSV export path ──────────────────────────────────────────────
+test("admin UI workflow appends format=csv respecting an existing query string", async () => {
+  const workflow = await loadWorkflowModule();
+  // No existing query -> '?'; existing filters -> '&'. Mirrors withCursor's join logic.
+  assert.equal(workflow.csvExportPath("/api/admin/entitlements"), "/api/admin/entitlements?format=csv");
+  assert.equal(
+    workflow.csvExportPath("/api/admin/entitlements?project=DEFAULT&status=active"),
+    "/api/admin/entitlements?project=DEFAULT&status=active&format=csv",
+  );
+  assert.equal(workflow.csvExportPath("/api/admin/customers?q=acme"), "/api/admin/customers?q=acme&format=csv");
+  // Composes with the real path builders so the export uses the SAME filters as the JSON list.
+  assert.equal(
+    workflow.csvExportPath(workflow.entitlementsPath({ project: "P", feature: "", status: "active" })),
+    "/api/admin/entitlements?project=P&status=active&format=csv",
+  );
+  assert.equal(
+    workflow.csvExportPath(workflow.customersPath({ status: "disabled", q: "" })),
+    "/api/admin/customers?status=disabled&format=csv",
+  );
+});

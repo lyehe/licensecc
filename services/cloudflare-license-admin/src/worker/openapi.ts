@@ -88,6 +88,22 @@ function limitCursorParams(): ReadonlyArray<Record<string, unknown>> {
   ];
 }
 
+// CSV export rides the existing list path: `?format=csv` streams a text/csv attachment of
+// the rows the JSON list would return (SAME filters), capped at 10000 rows. No new route.
+const formatCsvParam = {
+  name: "format",
+  in: "query",
+  required: false,
+  description: "When `csv`, the endpoint returns a text/csv attachment (Content-Disposition) of the rows the JSON list would return, using the SAME filters, capped at 10000 rows (a trailing comment row marks truncation). Omit (or any other value) for the default JSON envelope.",
+  schema: { type: "string", enum: ["csv"] },
+} as const;
+
+// The shared text/csv export response documented on every list endpoint that accepts ?format=csv.
+const csvExportResponse = {
+  description: "CSV export (returned only when ?format=csv). text/csv attachment of up to 10000 rows; a trailing comment row marks a truncated export.",
+  content: { "text/csv": { schema: { type: "string" } } },
+} as const;
+
 // ── Path objects ────────────────────────────────────────────────────────────
 
 const ADMIN_SECURITY: ReadonlyArray<Record<string, ReadonlyArray<string>>> = [{ cloudflareAccess: [] }, { devBearer: [] }];
@@ -163,9 +179,10 @@ const paths: Record<string, Record<string, unknown>> = {
         { name: "status", in: "query", required: false, description: "Filter by customer status.", schema: { type: "string", enum: ["active", "disabled"] } },
         { name: "q", in: "query", required: false, description: "Case-insensitive contains search over id/email/name (max 128 chars).", schema: { type: "string", maxLength: 128 } },
         ...limitCursorParams(),
+        formatCsvParam,
       ],
       responses: {
-        "200": okResponse("Customer page.", "#/components/schemas/CustomersListData", "customers_listed"),
+        "200": okResponse("Customer page (JSON), or a CSV attachment when ?format=csv.", "#/components/schemas/CustomersListData", "customers_listed"),
         "400": errorResponse("Invalid query parameter (e.g. over-long search term).", "invalid_request"),
         ...ADMIN_AUTH_ERRORS,
       },
@@ -405,9 +422,10 @@ const paths: Record<string, Record<string, unknown>> = {
         { name: "feature", in: "query", required: false, description: "Exact-match feature filter.", schema: { type: "string" } },
         { name: "status", in: "query", required: false, description: "Exact-match status filter.", schema: { type: "string", enum: ["active", "disabled", "revoked"] } },
         ...limitCursorParams(),
+        formatCsvParam,
       ],
       responses: {
-        "200": okResponse("Entitlement page.", "#/components/schemas/EntitlementsListData", "entitlements_listed"),
+        "200": okResponse("Entitlement page (JSON), or a CSV attachment when ?format=csv.", "#/components/schemas/EntitlementsListData", "entitlements_listed"),
         ...ADMIN_AUTH_ERRORS,
       },
     },
@@ -542,9 +560,51 @@ const paths: Record<string, Record<string, unknown>> = {
       security: ADMIN_SECURITY,
       parameters: [
         { name: "limit", in: "query", required: false, description: "Page size (default 50, clamped to max 100).", schema: { type: "integer", default: 50, minimum: 1, maximum: 100 } },
+        formatCsvParam,
       ],
       responses: {
-        "200": okResponse("Audit-event list.", "#/components/schemas/EventsListData", "events_listed"),
+        "200": okResponse("Audit-event list (JSON), or a CSV attachment when ?format=csv.", "#/components/schemas/EventsListData", "events_listed"),
+        ...ADMIN_AUTH_ERRORS,
+      },
+    },
+  },
+  "/api/admin/entitlements/batch": {
+    post: {
+      tags: ["admin:entitlements"],
+      summary: "Bulk transition entitlements (admin-only): disable/reenable/revoke up to 100 ids, per-row results",
+      operationId: "batchTransitionEntitlements",
+      security: ADMIN_SECURITY,
+      parameters: [idempotencyKeyHeader],
+      requestBody: {
+        required: true,
+        content: { "application/json": { schema: { $ref: "#/components/schemas/BatchTransitionInput" } } },
+      },
+      responses: {
+        "200": okResponse(
+          "Batch processed. Per-row {id, ok, code}; one bad row never aborts the others. Each row carries a DISTINCT idempotency sub-key so a re-POST with the same Idempotency-Key replays each row's own result (never row #1's).",
+          "#/components/schemas/BatchResultData",
+          "batch_done",
+        ),
+        "400": errorResponse("Invalid action/ids/json/idempotency key, more than 100 ids, or a missing reason for disable/revoke.", "invalid_request", "invalid_idempotency_key", "invalid_json", "too_many", "reason_required"),
+        ...ADMIN_MUTATION_AUTH_ERRORS,
+        "413": errorResponse("Request body exceeds 8192 bytes.", "body_too_large"),
+        "500": errorResponse("Dev bearer enabled outside development.", "dev_bearer_forbidden_in_environment"),
+      },
+    },
+  },
+  "/api/admin/search": {
+    get: {
+      tags: ["admin:reports"],
+      summary: "Global search across customers, licenses, entitlements, and orders (reader+admin)",
+      operationId: "globalSearch",
+      security: ADMIN_SECURITY,
+      parameters: [
+        { name: "q", in: "query", required: true, description: "Search term (1..128 chars). Contains-match (escaped LIKE) on customers (id/email/name/external_ref), licenses (id/label), orders (subscription_id); PREFIX-match on the hex entitlement license_fingerprint.", schema: { type: "string", minLength: 1, maxLength: 128 } },
+        { name: "limit", in: "query", required: false, description: "Per-type result cap (default 10, clamped to 10).", schema: { type: "integer", default: 10, minimum: 1, maximum: 10 } },
+      ],
+      responses: {
+        "200": okResponse("Mixed-type search results for UI deep-linking.", "#/components/schemas/SearchData", "search_results"),
+        "400": errorResponse("Empty or over-long q.", "invalid_request"),
         ...ADMIN_AUTH_ERRORS,
       },
     },
@@ -967,6 +1027,58 @@ export const openApiDocument: OpenApiDocument = {
                 id: { type: "integer" }, project: { type: "string" }, feature: { type: "string" }, license_fingerprint: { type: "string" },
                 event_type: { type: "string" }, status: { type: "string" }, revocation_seq: { type: "integer" }, actor: { type: "string" }, actor_type: { type: "string" },
                 source: { type: "string" }, request_id: { type: "string" }, reason: { type: ["string", "null"] }, created_at: { type: "integer" },
+              },
+            },
+          },
+        },
+      },
+      BatchTransitionInput: {
+        type: "object",
+        required: ["action", "ids"],
+        description: "Bulk transition body. `reason` is required (non-empty) for disable/revoke. `ids` is the encoded entitlement ids (1..100).",
+        properties: {
+          action: { type: "string", enum: ["disable", "reenable", "revoke"] },
+          reason: { type: "string", maxLength: 1000, description: "Required (non-empty) for disable/revoke; ignored for reenable." },
+          ids: { type: "array", minItems: 1, maxItems: 100, items: { type: "string", description: "Encoded entitlement id." } },
+        },
+      },
+      BatchResultData: {
+        type: "object",
+        properties: {
+          results: {
+            type: "array",
+            description: "One entry per input id (in input order). `ok:false` rows carry a per-row failure code (not_found, revoked_entitlement_is_terminal, invalid_entitlement_id, mutation_failed).",
+            items: {
+              type: "object",
+              properties: {
+                id: { type: "string" },
+                ok: { type: "boolean" },
+                code: { type: "string", description: "Per-row success or failure code." },
+              },
+            },
+          },
+        },
+      },
+      SearchData: {
+        type: "object",
+        properties: {
+          results: {
+            type: "array",
+            description: "Mixed-type results across customers/licenses/entitlements/orders. `type` + `id` let the UI deep-link.",
+            items: {
+              type: "object",
+              required: ["type", "id", "label"],
+              properties: {
+                type: { type: "string", enum: ["customer", "license", "entitlement", "order"] },
+                id: { type: "string", description: "Deep-link key: customer id, license id, encoded entitlement id, or subscription id." },
+                label: { type: "string" },
+                project: { type: "string" },
+                feature: { type: "string" },
+                license_fingerprint: { type: "string" },
+                email: { type: "string" },
+                status: { type: "string" },
+                external_ref: { type: ["string", "null"] },
+                customer_id: { type: ["string", "null"] },
               },
             },
           },

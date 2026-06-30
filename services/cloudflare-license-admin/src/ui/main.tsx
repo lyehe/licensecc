@@ -2,10 +2,15 @@ import React, { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { EntitlementRecord, Policy } from "../shared/api";
 import {
+  EntitlementAction,
+  SearchResult,
+  batchBody,
+  batchPath,
   canEditEntitlement,
   canRunAction,
   canRunCustomerAction,
   canRunPolicyAction,
+  csvExportPath,
   customerDetailPath,
   customerTransitionPath,
   customersPath,
@@ -18,6 +23,7 @@ import {
   entitlementsPath,
   formatEpoch,
   licensesPath,
+  navigationForResult,
   normalizeCreateFromPolicy,
   normalizeEntitlementForm,
   normalizeEntitlementPatch,
@@ -27,10 +33,13 @@ import {
   policiesPath,
   policyTransitionPath,
   revokeEntitlementConfirm,
+  searchPath,
   shortHash,
+  summarizeBatchResults,
   transitionPath,
   withCursor,
 } from "./operatorWorkflow";
+import type { BatchRowResult } from "./operatorWorkflow";
 import "./styles.css";
 
 interface Summary {
@@ -212,6 +221,12 @@ function App(): React.ReactElement {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState(emptyEntitlementEditForm);
   const [reason, setReason] = useState("");
+  // A ref mirroring `reason` so a mutation invoked from the typed-confirm modal reads the LATEST reason
+  // (the modal lets the operator type the reason AFTER opening, which would otherwise be a stale-closure
+  // capture). currentReason() is the single read point for every reason-carrying mutation.
+  const reasonRef = useRef("");
+  reasonRef.current = reason;
+  const currentReason = (): string => reasonRef.current;
   const [message, setMessage] = useState("");
   const [filter, setFilter] = useState({ project: "", feature: "", status: "" });
   const [busy, setBusy] = useState(false);
@@ -247,6 +262,15 @@ function App(): React.ReactElement {
   const [policyForm, setPolicyForm] = useState(emptyPolicyForm);
   // Active policies offered in the entitlement create form's policy <select> (loaded on demand).
   const [activePolicies, setActivePolicies] = useState<Policy[]>([]);
+
+  // Workstream C — BULK: the ids of the entitlement rows the operator has checked. A bulk-action bar
+  // appears when >=1 is selected; clicking a bulk action routes through the typed-confirm modal.
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
+  // Workstream C — GLOBAL SEARCH: the header search box query, its results, and whether the dropdown
+  // is open. Results are mixed-type; clicking one deep-links via navigationForResult.
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<SearchResult[] | null>(null);
 
   const entitlementsUrl = useMemo(() => {
     return entitlementsPath(filter);
@@ -437,7 +461,7 @@ function App(): React.ReactElement {
       const result = await api<CustomerListItem>(customerTransitionPath(id, action), {
         method: "POST",
         headers: { "idempotency-key": crypto.randomUUID() },
-        body: JSON.stringify(action === "disable" ? { reason } : {}),
+        body: JSON.stringify(action === "disable" ? { reason: currentReason() } : {}),
       });
       setMessage(`${result.code} (${result.request_id})`);
       if (result.ok) {
@@ -460,7 +484,7 @@ function App(): React.ReactElement {
 
   async function confirmProceed(): Promise<void> {
     const action = confirmAction;
-    if (action === null || (action.requiresReason && reason.trim() === "")) {
+    if (action === null || (action.requiresReason && currentReason().trim() === "")) {
       return;
     }
     setConfirmAction(null);
@@ -545,7 +569,7 @@ function App(): React.ReactElement {
       const result = await api<Policy>(policyTransitionPath(policy.id, action), {
         method: "POST",
         headers: { "idempotency-key": crypto.randomUUID() },
-        body: JSON.stringify(action === "disable" ? { reason } : {}),
+        body: JSON.stringify(action === "disable" ? { reason: currentReason() } : {}),
       });
       setMessage(`${result.code} (${result.request_id})`);
       if (result.ok) {
@@ -593,12 +617,143 @@ function App(): React.ReactElement {
       const result = await api<EntitlementRecord>(transitionPath(item, action), {
         method: "POST",
         headers: { "idempotency-key": crypto.randomUUID() },
-        body: JSON.stringify({ reason }),
+        body: JSON.stringify({ reason: currentReason() }),
       });
       setMessage(`${result.code} (${result.request_id})`);
       if (result.ok) {
         setReason("");
         await refresh();
+      }
+    });
+  }
+
+  // ── Workstream C — BULK selection ────────────────────────────────────────────
+  // Whenever the entitlement list reloads (filter change OR Load-more append), drop any selection of
+  // rows that are no longer present so the bulk bar never acts on a stale/off-page id.
+  useEffect(() => {
+    setSelectedIds((prev) => {
+      const present = new Set(entitlements.map((item) => item.id));
+      const next = new Set([...prev].filter((id) => present.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [entitlements]);
+
+  function toggleSelected(id: string): void {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  }
+
+  // Select-all toggles the LOADED rows (the page in view). Checked when every loaded row is selected.
+  const allSelected = entitlements.length > 0 && entitlements.every((item) => selectedIds.has(item.id));
+  function toggleSelectAll(): void {
+    setSelectedIds(allSelected ? new Set() : new Set(entitlements.map((item) => item.id)));
+  }
+
+  // Confirm copy for a bulk transition, echoing the action + selected count so the typed-confirm modal
+  // names exactly what it will blast (revoke notes the terminal/irreversible nature).
+  function bulkConfirmBody(action: EntitlementAction): string {
+    const count = selectedIds.size;
+    const noun = `${count} selected entitlement${count === 1 ? "" : "s"}`;
+    if (action === "revoke") {
+      return `Revoke ${noun}. Revocation is TERMINAL and cannot be undone; already-revoked rows are reported as revoked-terminal and skipped.`;
+    }
+    return `Disable ${noun}. Disabled entitlements stop verifying until re-enabled.`;
+  }
+
+  // Run a bulk transition over the selected ids: ONE POST to /entitlements/batch (the backend composes
+  // the shared transitionEntitlement per row). Renders the per-row roll-up and refreshes. Reuses the
+  // runMutation/busy gate + the idempotency-key header, exactly like the single transitions.
+  async function runBatch(action: EntitlementAction): Promise<void> {
+    const ids = [...selectedIds];
+    if (ids.length === 0) {
+      return;
+    }
+    await runMutation(async () => {
+      const result = await api<{ results: BatchRowResult[] }>(batchPath(), {
+        method: "POST",
+        headers: { "idempotency-key": crypto.randomUUID() },
+        body: JSON.stringify(batchBody(action, ids, currentReason())),
+      });
+      if (result.ok && result.data) {
+        setMessage(`${action}: ${summarizeBatchResults(result.data.results)} (${result.request_id})`);
+        setReason("");
+        setSelectedIds(new Set());
+        await refresh();
+      } else {
+        setMessage(`${result.code} (${result.request_id})`);
+      }
+    });
+  }
+
+  // ── Workstream C — GLOBAL SEARCH ─────────────────────────────────────────────
+  async function submitSearch(event: FormEvent): Promise<void> {
+    event.preventDefault();
+    const q = searchQuery.trim();
+    if (q === "") {
+      setSearchResults(null);
+      return;
+    }
+    const response = await api<{ results: SearchResult[] }>(searchPath(q));
+    if (response.ok && response.data) {
+      setSearchResults(response.data.results);
+    } else {
+      setSearchResults([]);
+      setMessage(`${response.code} (${response.request_id})`);
+    }
+  }
+
+  // Deep-link a clicked search result: apply its destination tab's filter, switch tabs, and (for a
+  // customer) select it so the detail pane opens. Closes the dropdown. Filters are pure (navigationForResult).
+  function navigateToResult(result: SearchResult): void {
+    const nav = navigationForResult(result);
+    if (nav.tab === "customers") {
+      setCustomerFilter({ status: nav.filter.status ?? "", q: nav.filter.q ?? "" });
+      if (nav.selectCustomerId !== undefined) {
+        setSelectedCustomerId(nav.selectCustomerId);
+      }
+    } else if (nav.tab === "entitlements") {
+      setFilter({ project: nav.filter.project ?? "", feature: nav.filter.feature ?? "", status: nav.filter.status ?? "" });
+    } else if (nav.tab === "licenses") {
+      setLicenseFilter({ project: nav.filter.project ?? "", customer_id: nav.filter.customer_id ?? "", q: nav.filter.q ?? "" });
+    } else {
+      setOrderFilter({ status: nav.filter.status ?? "", subscription_id: nav.filter.subscription_id ?? "" });
+    }
+    setActiveTab(nav.tab);
+    setSearchResults(null);
+    setSearchQuery("");
+  }
+
+  // ── Workstream C — CSV EXPORT ────────────────────────────────────────────────
+  // Download the current-filter CSV: fetch the ?format=csv variant of the active list URL and trigger
+  // a browser download via an <a download> + object URL. The SAME filters as the on-screen list (the
+  // export URL is built from the list URL by the pure csvExportPath helper).
+  async function downloadCsv(listUrl: string, filename: string): Promise<void> {
+    await runMutation(async () => {
+      try {
+        const response = await fetch(csvExportPath(listUrl));
+        if (!response.ok) {
+          setMessage(`csv_export_failed (${response.status})`);
+          return;
+        }
+        const blob = await response.blob();
+        const objectUrl = URL.createObjectURL(blob);
+        const anchor = document.createElement("a");
+        anchor.href = objectUrl;
+        anchor.download = filename;
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+        URL.revokeObjectURL(objectUrl);
+        setMessage(`exported ${filename}`);
+      } catch {
+        setMessage("csv_export_failed");
       }
     });
   }
@@ -610,6 +765,52 @@ function App(): React.ReactElement {
           <h1>licensecc admin</h1>
           <p>{message || "ready"}</p>
         </div>
+        <form className="globalSearch" onSubmit={(event) => void submitSearch(event)}>
+          <input
+            type="search"
+            placeholder="Search customers, licenses, entitlements, orders"
+            aria-label="Global search"
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+          />
+          <button type="submit">Search</button>
+          {searchResults !== null && (
+            <div className="searchResults" role="listbox" aria-label="Search results">
+              <div className="searchResultsHead">
+                <span className="muted">{searchResults.length} result{searchResults.length === 1 ? "" : "s"}</span>
+                <button type="button" onClick={() => { setSearchResults(null); setSearchQuery(""); }}>Close</button>
+              </div>
+              {searchResults.length === 0 ? (
+                <p className="muted searchEmpty">No matches.</p>
+              ) : (
+                (["customer", "license", "entitlement", "order"] as const)
+                  .filter((type) => searchResults.some((result) => result.type === type))
+                  .map((type) => (
+                    <div className="searchGroup" key={type}>
+                      <h3>{type}s</h3>
+                      {searchResults.filter((result) => result.type === type).map((result) => (
+                        <button
+                          type="button"
+                          className="searchResult"
+                          role="option"
+                          key={`${result.type}:${result.id}`}
+                          onClick={() => navigateToResult(result)}
+                        >
+                          <span className="searchResultLabel">{result.type === "entitlement" || result.type === "license" ? shortHash(result.label) : result.label}</span>
+                          <span className="muted searchResultMeta">
+                            {result.type === "customer" && (result.email ?? "")}
+                            {result.type === "entitlement" && `${result.project ?? ""} / ${result.feature ?? ""}`}
+                            {result.type === "license" && `${result.project ?? ""} · ${result.id}`}
+                            {result.type === "order" && (result.project ?? "")}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  ))
+              )}
+            </div>
+          )}
+        </form>
         <nav>
           <button className={activeTab === "overview" ? "active" : ""} onClick={() => setActiveTab("overview")}>Overview</button>
           <button className={activeTab === "entitlements" ? "active" : ""} onClick={() => setActiveTab("entitlements")}>Entitlements</button>
@@ -668,13 +869,24 @@ function App(): React.ReactElement {
                 <option value="disabled">disabled</option>
                 <option value="revoked">revoked</option>
               </select>
+              <button type="button" disabled={busy} onClick={() => void downloadCsv(entitlementsUrl, "entitlements.csv")}>Export CSV</button>
             </div>
+            {selectedIds.size > 0 && (
+              <div className="bulkBar">
+                <span>{selectedIds.size} selected</span>
+                <button type="button" disabled={busy} onClick={() => requestConfirm({ title: "Disable selected entitlements", body: bulkConfirmBody("disable"), requiresReason: true, run: () => runBatch("disable") })}>Disable</button>
+                <button type="button" disabled={busy} onClick={() => void runBatch("reenable")}>Reenable</button>
+                <button type="button" className="danger" disabled={busy} onClick={() => requestConfirm({ title: "Revoke selected entitlements", body: bulkConfirmBody("revoke"), requiresReason: true, run: () => runBatch("revoke") })}>Revoke selected</button>
+                <button type="button" disabled={busy} onClick={() => setSelectedIds(new Set())}>Clear</button>
+              </div>
+            )}
             <table>
-              <thead><tr><th>Project</th><th>Feature</th><th>Fingerprint</th><th>Details</th><th>Status</th><th>Seq</th><th>Actions</th></tr></thead>
+              <thead><tr><th className="checkCol"><input type="checkbox" aria-label="Select all loaded rows" checked={allSelected} onChange={toggleSelectAll} /></th><th>Project</th><th>Feature</th><th>Fingerprint</th><th>Details</th><th>Status</th><th>Seq</th><th>Actions</th></tr></thead>
               <tbody>
                 {entitlements.map((item) => (
                   <React.Fragment key={item.id}>
                     <tr>
+                      <td className="checkCol"><input type="checkbox" aria-label={`Select ${item.project}/${item.feature}`} checked={selectedIds.has(item.id)} onChange={() => toggleSelected(item.id)} /></td>
                       <td>{item.project}</td>
                       <td>{item.feature}</td>
                       <td><code>{shortHash(item.license_fingerprint)}</code></td>
@@ -698,7 +910,7 @@ function App(): React.ReactElement {
                     </tr>
                     {editingId === item.id && (
                       <tr className="editRow">
-                        <td colSpan={7}>
+                        <td colSpan={8}>
                           <form className="editForm" onSubmit={(event) => void submitPatch(event, item)}>
                             <label>Device hash<input value={editForm.device_hash} onChange={(event) => setEditForm({ ...editForm, device_hash: event.target.value })} /></label>
                             <label>Assertion TTL<input type="number" value={editForm.assertion_ttl_seconds} onChange={(event) => setEditForm({ ...editForm, assertion_ttl_seconds: Number(event.target.value) })} /></label>
@@ -833,6 +1045,9 @@ function App(): React.ReactElement {
 
       {activeTab === "events" && (
         <section className="tablePane full">
+          <div className="filters eventsToolbar">
+            <button type="button" disabled={busy} onClick={() => void downloadCsv("/api/admin/events", "events.csv")}>Export CSV</button>
+          </div>
           <table>
             <thead><tr><th>Time</th><th>Event</th><th>Project</th><th>Feature</th><th>Fingerprint</th><th>Source</th><th>Actor</th><th>Seq</th></tr></thead>
             <tbody>
@@ -864,6 +1079,7 @@ function App(): React.ReactElement {
                 <option value="disabled">disabled</option>
               </select>
               <input placeholder="search id / email / name" value={customerFilter.q} onChange={(event) => setCustomerFilter({ ...customerFilter, q: event.target.value })} />
+              <button type="button" disabled={busy} onClick={() => void downloadCsv(customersUrl, "customers.csv")}>Export CSV</button>
             </div>
             <table>
               <thead><tr><th>ID</th><th>Name</th><th>Email</th><th>Status</th><th>Entitlements</th><th>Active</th></tr></thead>

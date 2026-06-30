@@ -21,7 +21,28 @@ function makeAdminApiFixture() {
     creates: 0,
     patches: [],
     transitions: [],
+    batches: [],
+    searches: [],
+    csvExports: [],
   };
+
+  // A couple of customers so the Customers tab + a global-search customer deep-link have rows.
+  const customers = [
+    { id: "cus_acme", name: "Acme Corp", email: "ops@acme.test", status: "active", external_ref: "ext_1", created_at: 1_700_000_000, updated_at: 1_700_000_000, entitlement_count: 2, active_entitlement_count: 1 },
+    { id: "cus_globex", name: "Globex", email: "billing@globex.test", status: "disabled", external_ref: "", created_at: 1_700_000_500, updated_at: 1_700_000_900, entitlement_count: 0, active_entitlement_count: 0 },
+  ];
+
+  function customerDetail(id) {
+    const customer = customers.find((item) => item.id === id);
+    return {
+      customer: { ...customer, metadata_json: "{}" },
+      entitlements: [],
+      account_tokens: [],
+      licenses: [],
+      orders: [],
+      events: [],
+    };
+  }
 
   function publicRecord(row) {
     return { ...row };
@@ -75,8 +96,68 @@ function makeAdminApiFixture() {
       body: JSON.stringify(body),
     });
 
+    // Workstream C — CSV export rides ?format=csv on the list routes. Record the export and return a
+    // tiny text/csv body so the UI's <a download> blob path runs end-to-end.
+    if (method === "GET" && url.searchParams.get("format") === "csv") {
+      requests.csvExports.push(path);
+      return route.fulfill({
+        status: 200,
+        contentType: "text/csv; charset=utf-8",
+        headers: { "content-disposition": `attachment; filename="${path.split("/").pop()}.csv"` },
+        body: "id\r\n\"row-1\"\r\n",
+      });
+    }
+
     if (method === "GET" && path === "/api/admin/summary") {
       return fulfill(200, makeEnvelope("summary", summary()));
+    }
+    // Workstream C — global search. Fans out a fixed set keyed off the loaded entitlements + customers.
+    if (method === "GET" && path === "/api/admin/search") {
+      const q = url.searchParams.get("q") ?? "";
+      requests.searches.push(q);
+      const results = [];
+      for (const customer of customers) {
+        if (customer.name.toLowerCase().includes(q.toLowerCase()) || customer.id.includes(q)) {
+          results.push({ type: "customer", id: customer.id, label: customer.name, email: customer.email, status: customer.status, external_ref: customer.external_ref });
+        }
+      }
+      for (const ent of entitlements) {
+        if (ent.license_fingerprint.startsWith(q)) {
+          results.push({ type: "entitlement", id: ent.id, label: ent.license_fingerprint, project: ent.project, feature: ent.feature, status: ent.status, customer_id: ent.customer_id });
+        }
+      }
+      return fulfill(200, makeEnvelope("search_results", { results }));
+    }
+    if (method === "GET" && path === "/api/admin/customers") {
+      return fulfill(200, makeEnvelope("customers_listed", { items: customers.map((item) => ({ ...item })), next_cursor: null }));
+    }
+    const customerDetailMatch = /^\/api\/admin\/customers\/([^/]+)$/.exec(path);
+    if (method === "GET" && customerDetailMatch !== null) {
+      return fulfill(200, makeEnvelope("customer", customerDetail(decodeURIComponent(customerDetailMatch[1]))));
+    }
+    // Workstream C — bulk transitions. One POST carries action/reason/ids; returns per-row results.
+    if (method === "POST" && path === "/api/admin/entitlements/batch") {
+      const body = await jsonBody(request);
+      requests.batches.push(body);
+      now += 1;
+      const results = [];
+      for (const id of body.ids) {
+        const row = findById(id);
+        if (row === undefined) {
+          results.push({ id, ok: false, code: "not_found" });
+          continue;
+        }
+        if (body.action === "revoke" && row.status === "revoked") {
+          results.push({ id, ok: false, code: "revoked_entitlement_is_terminal" });
+          continue;
+        }
+        row.status = body.action === "reenable" ? "active" : body.action === "disable" ? "disabled" : "revoked";
+        row.revocation_seq += 1;
+        row.updated_at = now;
+        addEvent(body.action, row, body.reason ?? "");
+        results.push({ id, ok: true, code: `entitlement_${body.action}d` });
+      }
+      return fulfill(200, makeEnvelope("batch_done", { results }));
     }
     if (method === "GET" && path === "/api/admin/events") {
       return fulfill(200, makeEnvelope("events", { items: events.map((item) => ({ ...item })) }));
@@ -243,4 +324,58 @@ test("admin UI completes entitlement lifecycle and blocks duplicate create submi
   expect(pageText).not.toContain("BEGIN");
   expect(pageText).not.toContain("Bearer ");
   expect(pageText).not.toContain("Cf-Access-Jwt-Assertion");
+});
+
+test("admin UI runs bulk transitions, global search deep-link, and CSV export", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  await page.route("**/api/admin/**", api.route);
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "Entitlements", exact: true }).click();
+
+  // Seed two entitlements via the create form (the fixture stores them so bulk/search can act).
+  async function createEntitlement(feature, fingerprint) {
+    const createForm = page.locator("aside form");
+    await createForm.getByLabel("Feature").fill(feature);
+    await createForm.getByLabel("Fingerprint").fill(fingerprint);
+    await createForm.getByRole("button", { name: "Save" }).click();
+    await expect(page.getByText(/entitlement_saved/)).toBeVisible();
+  }
+  await createEntitlement("pro", "a".repeat(64));
+  await createEntitlement("ent", "b".repeat(64));
+  await expect(page.locator("tbody .checkCol input[type=checkbox]")).toHaveCount(2);
+
+  // BULK: select all loaded rows -> the bulk bar appears -> Disable -> typed-confirm (reason) -> Confirm.
+  await page.getByLabel("Select all loaded rows").check();
+  await expect(page.locator(".bulkBar")).toContainText("2 selected");
+  await page.locator(".bulkBar").getByRole("button", { name: "Disable" }).click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await page.getByRole("dialog").getByLabel(/Reason/).fill("quarterly audit");
+  await page.getByRole("dialog").getByRole("button", { name: "Confirm" }).click();
+
+  await expect.poll(() => api.requests.batches.length).toBe(1);
+  expect(api.requests.batches[0]).toMatchObject({ action: "disable", reason: "quarterly audit" });
+  expect(api.requests.batches[0].ids).toHaveLength(2);
+  // The per-row roll-up renders in the status line, and the rows refreshed to disabled.
+  await expect(page.getByText(/disable: 2 ok/)).toBeVisible();
+  await expect(page.locator(".status.disabled")).toHaveCount(2);
+  // Selection cleared after the batch (the bulk bar is gone).
+  await expect(page.locator(".bulkBar")).toHaveCount(0);
+
+  // GLOBAL SEARCH: search a customer name -> results dropdown -> click -> deep-link to Customers tab.
+  await page.getByLabel("Global search").fill("Acme");
+  await page.getByRole("button", { name: "Search", exact: true }).click();
+  await expect(page.locator(".searchResults")).toBeVisible();
+  await expect.poll(() => api.requests.searches.at(-1)).toBe("Acme");
+  await page.locator(".searchResult").filter({ hasText: "Acme Corp" }).click();
+  // Deep-linked: Customers tab is active and the searched customer's detail pane is open.
+  await expect(page.locator("nav button.active")).toHaveText("Customers");
+  await expect(page.getByRole("heading", { name: "Acme Corp" })).toBeVisible();
+  await expect(page.locator(".searchResults")).toHaveCount(0);
+
+  // CSV EXPORT: the Customers pane Export CSV button hits ?format=csv with the active filter.
+  await page.locator(".tablePane .filters").getByRole("button", { name: "Export CSV" }).click();
+  await expect.poll(() => api.requests.csvExports.length).toBeGreaterThan(0);
+  expect(api.requests.csvExports.at(-1)).toBe("/api/admin/customers");
+  await expect(page.getByText(/exported customers\.csv/)).toBeVisible();
 });
