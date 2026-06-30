@@ -141,6 +141,59 @@ export interface SearchData {
   results: SearchResult[];
 }
 
+// ── Webhook endpoint CRUD + delivery status (migration 0020) ──────────────────
+// webhook_endpoints are operator-managed CONFIG rows (URL + a csv event_types filter).
+// The signing secret is NEVER stored here — it lives only in the Worker-env
+// WEBHOOK_SIGNING_SECRETS map (the repo forbids plaintext secrets in D1). The
+// dispatcher (a strictly read-side cron-drained outbox in the licensing backend)
+// enqueues + delivers; this admin surface only manages the endpoint rows and lets an
+// operator inspect / redrive the webhook_deliveries outbox.
+export type WebhookStatus = "active" | "disabled";
+
+export interface WebhookEndpoint {
+  id: string;
+  url: string;
+  event_types: string; // csv filter; "" = all event types
+  status: WebhookStatus;
+  description: string;
+  created_at: number;
+  updated_at: number;
+}
+
+// Create body. `url` is required and MUST be https (else 400 invalid_url). event_types
+// (csv filter; "" = all) and description take the column default when omitted.
+export interface WebhookEndpointInput {
+  url: string;
+  event_types?: string;
+  description?: string;
+}
+
+// Patch body. Only url / event_types / description are mutable. status flips only via
+// disable/reenable; id/created_at are immutable. All fields optional.
+export interface WebhookEndpointPatch {
+  url?: string;
+  event_types?: string;
+  description?: string;
+}
+
+export type WebhookDeliveryStatus = "pending" | "delivered" | "failed";
+export type WebhookEventSource = "entitlement" | "customer" | "order";
+
+export interface WebhookDelivery {
+  id: number;
+  endpoint_id: string;
+  event_source: WebhookEventSource;
+  event_id: number;
+  event_type: string;
+  status: WebhookDeliveryStatus;
+  attempts: number;
+  last_status: number;
+  last_error: string;
+  next_attempt_at: number;
+  created_at: number;
+  delivered_at: number | null;
+}
+
 // Optional frozen-trial + provenance columns surfaced on an entitlement record that
 // was stamped from a policy. Read by dedicated SELECTs (not part of ENTITLEMENT_COLUMNS).
 export interface EntitlementTrialFields {

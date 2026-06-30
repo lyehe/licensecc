@@ -532,3 +532,48 @@ CREATE TABLE IF NOT EXISTS policy_events (
 );
 
 CREATE INDEX IF NOT EXISTS idx_policy_events_policy ON policy_events(policy_id, created_at DESC);
+
+-- =====================================================================================
+-- webhook dispatch  (migration 0020 — read-side cron-drained transactional outbox)
+--   * INTEGER PRIMARY KEY AUTOINCREMENT -> BIGINT GENERATED ALWAYS AS IDENTITY
+--   * epoch columns (created_at/updated_at/next_attempt_at/delivered_at) -> BIGINT
+--   * counter columns (event_id/attempts/last_status/last_id) -> BIGINT (64-bit-intent)
+-- The dispatcher itself runs only in the D1/SQLite Worker cron; this is the parity port.
+-- =====================================================================================
+CREATE TABLE IF NOT EXISTS webhook_endpoints (
+  id          TEXT   PRIMARY KEY,
+  url         TEXT   NOT NULL,
+  event_types TEXT   NOT NULL DEFAULT '',
+  status      TEXT   NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled')),
+  description TEXT   NOT NULL DEFAULT '',
+  created_at  BIGINT NOT NULL,
+  updated_at  BIGINT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_webhook_endpoints_status ON webhook_endpoints(status);
+
+CREATE TABLE IF NOT EXISTS webhook_deliveries (
+  id              BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  endpoint_id     TEXT   NOT NULL,
+  event_source    TEXT   NOT NULL CHECK (event_source IN ('entitlement', 'customer', 'order')),
+  event_id        BIGINT NOT NULL,
+  event_type      TEXT   NOT NULL DEFAULT '',
+  payload_json    TEXT   NOT NULL DEFAULT '',
+  status          TEXT   NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'delivered', 'failed')),
+  attempts        BIGINT NOT NULL DEFAULT 0,
+  last_status     BIGINT NOT NULL DEFAULT 0,
+  last_error      TEXT   NOT NULL DEFAULT '',
+  next_attempt_at BIGINT NOT NULL DEFAULT 0,
+  created_at      BIGINT NOT NULL,
+  delivered_at    BIGINT NULL,
+  UNIQUE (endpoint_id, event_source, event_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_due
+  ON webhook_deliveries(status, next_attempt_at);
+
+CREATE TABLE IF NOT EXISTS webhook_cursor (
+  event_source TEXT   PRIMARY KEY,
+  last_id      BIGINT NOT NULL DEFAULT 0,
+  updated_at   BIGINT NOT NULL
+);

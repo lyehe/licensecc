@@ -26,6 +26,7 @@ import {
 import { handleOrderIngest } from "./fulfillment/order_ingest.mjs";
 // Slice 2 account-token isolation (Stage 3): per-customer credential + the per-endpoint gate.
 import { accountAuth, constantTimeEqual, readBearer } from "./auth/account_auth.mjs";
+import { enqueueAndDeliverWebhooks } from "./webhooks/webhook.mjs";
 // OpenAPI 3.1 doc-of-existing: the spec object + the self-contained /docs page. Served
 // UNAUTHENTICATED and EARLY (before any auth) so the API is self-describing without credentials.
 import { openApiSpec, docsHtml } from "./openapi.js";
@@ -127,6 +128,13 @@ export interface Env {
   ACCOUNT_TOKEN_MODE?: string;
   ACCOUNT_TOKEN_LAST_USED_THROTTLE_SEC?: string;
   EMERGENCY_OPERATOR_BEARER?: string;
+  // Webhook dispatcher (cron-drained read-side outbox). WEBHOOK_SIGNING_SECRETS is a JSON map
+  // {keyId: base64-secret} (each secret >= 32 bytes), mirroring ORDER_HMAC_SECRETS; the active
+  // WEBHOOK_SIGNING_KEY_ID names which key signs deliveries. Fail-closed: with no usable secret /
+  // missing active key the dispatcher logs + skips delivery (never sends unsigned). No per-endpoint
+  // secret is ever stored in D1.
+  WEBHOOK_SIGNING_SECRETS?: string;
+  WEBHOOK_SIGNING_KEY_ID?: string;
 }
 
 export interface VerifyRequest {
@@ -2278,5 +2286,11 @@ export default {
     } catch {
       // best-effort
     }
+    // Webhook dispatcher: a strictly READ-SIDE, cron-drained transactional outbox over the existing
+    // audit tables (entitlement_events/customer_events/order_events). Runs AFTER the sweeps above,
+    // best-effort — enqueueAndDeliverWebhooks never throws, so a webhook problem can never break the
+    // seat/retention housekeeping or the cron. Emission is UNMETERED: this is the ONLY place webhooks
+    // are emitted (never inline / waitUntil on a request path).
+    await enqueueAndDeliverWebhooks(env, now, logEvent);
   },
 };

@@ -23,6 +23,9 @@
     },
     "./lease/usage_report": {
       "default": "./src/lease/usage_report.mjs"
+    },
+    "./webhooks/webhook": {
+      "default": "./src/webhooks/webhook.mjs"
     }
   },
   "scripts": {

@@ -90,3 +90,13 @@ simple = { limit = 20, period = 60 }
 # Break-glass operator bearer for the SEPARATE /v1/emergency/* route ONLY (never the scoped paths).
 # Unset = closed (the route 404s). Use only for incident recovery; every use is logged at warn.
 # wrangler secret put EMERGENCY_OPERATOR_BEARER
+# Webhook signing key map: a JSON object { "<key_id>": "<base64-secret>" }; each secret decodes to
+# >= 32 bytes (fail-closed; mirrors ORDER_HMAC_SECRETS). The cron-drained webhook dispatcher signs
+# each delivery HMAC-SHA256 over "<t>.<rawjsonbody>" and sends header
+#   Licensecc-Signature: t=<epoch>,keyid=<id>,v1=<hex>
+# Receivers MUST enforce a 5-minute replay window on t. With no usable secret / missing active key the
+# dispatcher logs + SKIPS delivery (never sends unsigned). No per-endpoint secret is stored in D1.
+# wrangler secret put WEBHOOK_SIGNING_SECRETS
+# WEBHOOK_SIGNING_KEY_ID names the active key (a key in WEBHOOK_SIGNING_SECRETS) that signs deliveries.
+# It is a non-secret selector, so it MAY be a [vars] entry; kept here next to its map for clarity.
+# wrangler secret put WEBHOOK_SIGNING_KEY_ID

@@ -434,3 +434,41 @@ CREATE TABLE IF NOT EXISTS policy_events (
 );
 
 CREATE INDEX IF NOT EXISTS idx_policy_events_policy ON policy_events(policy_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS webhook_endpoints (
+  id          TEXT PRIMARY KEY,
+  url         TEXT NOT NULL,
+  event_types TEXT NOT NULL DEFAULT '',
+  status      TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled')),
+  description TEXT NOT NULL DEFAULT '',
+  created_at  INTEGER NOT NULL,
+  updated_at  INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_webhook_endpoints_status ON webhook_endpoints(status);
+
+CREATE TABLE IF NOT EXISTS webhook_deliveries (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  endpoint_id     TEXT NOT NULL,
+  event_source    TEXT NOT NULL CHECK (event_source IN ('entitlement', 'customer', 'order')),
+  event_id        INTEGER NOT NULL,
+  event_type      TEXT NOT NULL DEFAULT '',
+  payload_json    TEXT NOT NULL DEFAULT '',
+  status          TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'delivered', 'failed')),
+  attempts        INTEGER NOT NULL DEFAULT 0,
+  last_status     INTEGER NOT NULL DEFAULT 0,
+  last_error      TEXT NOT NULL DEFAULT '',
+  next_attempt_at INTEGER NOT NULL DEFAULT 0,
+  created_at      INTEGER NOT NULL,
+  delivered_at    INTEGER NULL,
+  UNIQUE (endpoint_id, event_source, event_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_due
+  ON webhook_deliveries(status, next_attempt_at);
+
+CREATE TABLE IF NOT EXISTS webhook_cursor (
+  event_source TEXT PRIMARY KEY,
+  last_id      INTEGER NOT NULL DEFAULT 0,
+  updated_at   INTEGER NOT NULL
+);

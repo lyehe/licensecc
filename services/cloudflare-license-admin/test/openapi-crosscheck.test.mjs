@@ -47,6 +47,14 @@ const API_ROUTES = [
   { method: "PATCH", path: "/api/admin/policies/{id}" },
   { method: "POST", path: "/api/admin/policies/{id}/disable" },
   { method: "POST", path: "/api/admin/policies/{id}/reenable" },
+  { method: "GET", path: "/api/admin/webhooks" },
+  { method: "POST", path: "/api/admin/webhooks" },
+  { method: "GET", path: "/api/admin/webhooks/deliveries" },
+  { method: "POST", path: "/api/admin/webhooks/deliveries/{id}/redrive" },
+  { method: "GET", path: "/api/admin/webhooks/{id}" },
+  { method: "PATCH", path: "/api/admin/webhooks/{id}" },
+  { method: "POST", path: "/api/admin/webhooks/{id}/disable" },
+  { method: "POST", path: "/api/admin/webhooks/{id}/reenable" },
   { method: "GET", path: "/api/admin/entitlements" },
   { method: "POST", path: "/api/admin/entitlements" },
   { method: "POST", path: "/api/admin/entitlements/batch" },
@@ -88,6 +96,13 @@ const TEMPLATED_ROUTE_SOURCE = {
   "/api/admin/policies/{id}": String.raw`/^\/api\/admin\/policies\/([^/]+)$/`,
   "/api/admin/policies/{id}/disable": String.raw`(?:\/(disable|reenable))?`,
   "/api/admin/policies/{id}/reenable": String.raw`(?:\/(disable|reenable))?`,
+  // Webhook detail GET is its own regex; PATCH + disable/reenable live in the combined
+  // `(?:\/(disable|reenable))?` form inside handleWebhookMutation. Redrive has its own
+  // numeric-id regex under /deliveries/:id/redrive (matched before the endpoint :id regex).
+  "/api/admin/webhooks/{id}": String.raw`/^\/api\/admin\/webhooks\/([^/]+)(?:\/(disable|reenable))?$/`,
+  "/api/admin/webhooks/{id}/disable": String.raw`(?:\/(disable|reenable))?`,
+  "/api/admin/webhooks/{id}/reenable": String.raw`(?:\/(disable|reenable))?`,
+  "/api/admin/webhooks/deliveries/{id}/redrive": String.raw`/^\/api\/admin\/webhooks\/deliveries\/(\d+)\/redrive$/`,
 };
 
 function routePresentInSource(path) {
