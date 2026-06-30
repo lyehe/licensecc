@@ -311,6 +311,16 @@ Large. Depends on Workstream A only if A relocates the shared mutation module or
 
 ## Workstream D — Integration Surface: OpenAPI 3.1, Signed Outbound Webhooks, Commerce Adapter
 
+> **STATUS — mostly done.** OpenAPI doc-of-existing for all 3 Workers (`caf6ef7`). **Signed outbound
+> webhooks DONE** (`708cc4a`, pushed to lyehe): migration 0020 (webhook_endpoints/deliveries/cursor); a
+> READ-SIDE cron-drained transactional outbox over the audit tables with EXACTLY-ONCE enqueue
+> (cursor + UNIQUE), HMAC-SHA256 signing from the env `WEBHOOK_SIGNING_SECRETS` map (no secret in D1,
+> fail-closed, constant-time `verifyWebhookSignature` helper), capped bounded-fetch delivery with backoff,
+> emission cron-only/UNMETERED + never-throws; 8 admin CRUD routes (endpoints + delivery status + redrive).
+> Adversarially reviewed (independent probe: signing rejects tampered/expired/wrong-key; 2 enqueue passes
+> = 1 delivery). **Remaining in D: the Stripe/Paddle commerce adapter** (intentionally deferred — separate
+> concern; order-ingest stays provider-agnostic) and an optional webhook UI tab (API-managed today).
+
 ### Goal
 Promote the three Workers from an undocumented private REST contract to a documented, integrable platform with three deliverables: (1) an OpenAPI 3.1 document per Worker at `GET /openapi.json` + a rendered `GET /docs`; (2) a signed outbound-webhook dispatcher that fans the *already-recorded* audit events to operator endpoints; (3) a one-file Stripe→`/v1/orders` reference adapter. All three reuse the existing `{ok,code,request_id,data}` envelope, cursor pagination, and `Idempotency-Key` conventions verbatim.
 
