@@ -359,6 +359,15 @@ Real-SQLite outbox matrices (`test/sql/`, the `DatabaseSync` + all-migrations ha
 
 ## Workstream E — Multi-language client SDKs (C#/.NET + Python)
 
+> **STATUS — DONE** (commit `0ba24f0`, pushed to lyehe). `sdks/python` (PyPI `licensecc`, dep cryptography)
+> + `sdks/dotnet` (NuGet `Licensecc.Client`, net8.0). Each: the offline `lccoa1`/`lcccfg1` token verifier
+> (RSA-PKCS1-SHA256 against the trusted key, full canonical-payload parse + purpose/binding/time-window/
+> revocation-floor claims, fail-closed, PKCS#1↔SPKI import handled, 3072-bit floor) + a thin HTTP client
+> (verify/activate/renew/checkout/heartbeat/release over the flat envelope). Parity-tested against the repo
+> golden vectors; independently re-verified (Python pytest 57/57 + uv build; .NET dotnet test 41/41) + an
+> out-of-band adversarial probe (golden-valid + 7 fail-closed rejections). Anti-tamper/HW-fingerprinting
+> stays C++-only (documented). CSV/Stripe untouched (separate concerns).
+
 ### Goal
 Most ISVs are not C++ shops. Today the only first-class integration is the C++ static lib (`src/library/`), which excludes the majority of the market. Workstream E ships officially-supported **C#/.NET** and **Python** SDKs that (1) wrap the client-facing HTTP endpoints and (2) port the **offline signed-token verification** kernel so a non-C++ host can verify server-signed `lccoa1.` online assertions and `v201` leases against an embedded public-key ring — without shelling out to the C++ lib. The C++ static lib remains the **deep-enforcement / anti-tamper** path; the SDKs deliberately cover only the HTTP + token contract.
 
