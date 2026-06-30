@@ -475,6 +475,17 @@ Extend `test/sql/admin-console.test.mjs` (real `node:sqlite` over shared migrati
 
 ## Workstream G — C++ client lease/seat lifecycle (`confirm_license()` / `release_license()`)
 
+> **STATUS — SEAT half DONE (2026-06-30, commit `e554417`, pushed to lyehe). Lease half (activate/renew orchestrator) DEFERRED.**
+> Shipped the **seat** lifecycle minimally + additively, reusing the existing online-assertion verify path (a held seat IS a short-TTL `lccoa1.` the existing `online_verification::evaluate` already verifies — no new crypto, no orchestrator): `lcc_confirm_license` (heartbeat) + `lcc_release_license` (seat release) in `licensecc.cpp`; `online_verification::notify_release` (build+invoke callback, no assertion verify, no floor touch); purpose-flag bits `LCC_ONLINE_FLAG_PURPOSE_HEARTBEAT|_RELEASE` on `LccOnlineRequest.flags`; `AntiTamper kSupportedOnlineFlags` widened. Full ctest 44/44 (+6 lifecycle tests + ABI pins). Adversarial review + the happy-path test caught a real blocker (the heartbeat flag was rejected by `normalize_options` → `LICENSE_MALFORMED`), fixed before commit.
+>
+> **Open decisions — RESOLVED (toward minimalism / reuse / invariant-preservation; I made the calls):**
+> 1. *Legacy verbs?* KEEP `confirm_license`/`release_license` as fail-closed shims; add the real verbs as `lcc_confirm_license`/`lcc_release_license` (NOT `lcc_seat_*`) — reads as the modern replacement, preserves the `unimplemented_authorization_apis_fail_closed` contract.
+> 2. *One unified `LCC_LIFECYCLE_HTTP` vs two?* NEITHER — reuse the **existing `LCC_ONLINE_CHECK`** with a purpose-flag hint. Avoids a new permanent callback-ABI commitment entirely; the host maps the bit to `/v1/heartbeat` or `/v1/release` and threads its `seat_id`.
+> 3. *Library owns file I/O?* NO — callback-only / host-owns (the existing floor pattern); core stays HTTP-free.
+> 4. *Built-in HTTP transport?* NO — preserves the CLAUDE.md "core does no HTTP" invariant.
+>
+> **Still TODO for full G:** the **offline-lease** half — `lcc_lease_acquire/renew/release` wiring `lease_client`/`clock_floor` against `/v1/activate`,`/v1/renew` with durable `.lic` writes (`should_replace_lease`) + the wall-clock floor. That genuinely needs the richer body-carrying callback this section describes below (verify/seat reuse the assertion path; leases carry a v201 `.lic` body). Treat the design below as the spec for that follow-up.
+
 ### Goal
 Implement the network-license lifecycle in the C++ library so a host wires ONE transport callback and gets turnkey acquire/renew/release for **offline leases** and checkout/heartbeat/release for **floating seats**, with the persisted clock floor + revocation floor anti-rollback already enforced. Today `confirm_license`/`release_license` are fail-closed stubs returning `PRODUCT_NOT_LICENSED` (`src/library/licensecc.cpp:1323-1333`), and the load-bearing decision logic exists only as pure, unwired reference headers — so every host hand-rolls HTTP, idempotency, durable writes, and rollback floors. G closes that gap.
 
