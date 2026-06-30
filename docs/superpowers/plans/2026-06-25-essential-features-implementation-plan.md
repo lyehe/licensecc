@@ -253,6 +253,13 @@ Seats keyed by `client_instance_id` not `device_key_id` (precise per-device seat
 
 ## Workstream C — Operator console scale: pagination, bulk ops, CSV, confirm dialogs, global search
 
+> **STATUS — DONE.** Pagination + destructive-action confirm dialog (`d1145ac`); bulk transitions
+> (`POST /api/admin/entitlements/batch`, per-row idempotency footgun guarded) + global search
+> (`GET /api/admin/search`) + CSV export (`?format=csv` on the list endpoints) + the multi-select bulk UI
+> / header search / Export-CSV buttons (`2d4e15d`, pushed to lyehe). CSV **import** deferred (overlaps
+> order-ingest + create-from-policy). Bulk idempotency adversarially reviewed clean; admin test 53 /
+> test:sql 32 / test:openapi 7 / test:ui 24 / e2e 2 / lint all green.
+
 ### Goal
 The admin SPA (`services/cloudflare-license-admin`) is first-page-only, has no bulk lifecycle ops, no CSV in/out, fires destructive Revoke on a single click, and offers no cross-resource search. This workstream makes the console usable at fleet scale without touching the C++ verifier or the byte-identical entitlement write path.
 
