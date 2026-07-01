@@ -23,12 +23,17 @@ source of truth, per the OpenAPI doc.
 from __future__ import annotations
 
 import json
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
 DEFAULT_TIMEOUT_SECONDS = 15.0
+DEFAULT_MAX_RETRIES = 2
+DEFAULT_RETRY_BACKOFF_SECONDS = 0.5
+# 429 (rate limited) + transient 5xx are retryable; 4xx (auth/validation) and 200 are not.
+RETRYABLE_STATUSES = frozenset({429, 502, 503, 504})
 
 
 @dataclass(frozen=True)
@@ -78,11 +83,17 @@ class HttpClient:
         account_token: str | None = None,
         timeout: float = DEFAULT_TIMEOUT_SECONDS,
         user_agent: str = "licensecc-python-sdk/0.1.0",
+        max_retries: int = DEFAULT_MAX_RETRIES,
+        retry_backoff: float = DEFAULT_RETRY_BACKOFF_SECONDS,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.account_token = account_token
         self.timeout = timeout
         self.user_agent = user_agent
+        # Bounded retry: a transient transport failure or a 429/5xx is retried up to max_retries times,
+        # honoring a Retry-After header, else exponential backoff. Set max_retries=0 to disable.
+        self.max_retries = max(0, int(max_retries))
+        self.retry_backoff = max(0.0, float(retry_backoff))
 
     # -- transport -------------------------------------------------------------
 
@@ -97,19 +108,30 @@ class HttpClient:
         if self.account_token:
             headers["Authorization"] = f"Bearer {self.account_token}"
         request = urllib.request.Request(url, data=payload, headers=headers, method="POST")
-        try:
-            with urllib.request.urlopen(request, timeout=self.timeout) as response:
-                status = response.getcode()
-                raw = response.read()
-        except urllib.error.HTTPError as exc:
-            # The Worker returns the FLAT envelope even on 4xx/5xx — parse it.
-            status = exc.code
-            raw = exc.read()
-        except urllib.error.URLError as exc:
-            return ApiResponse(status=0, ok=False, code=None, data={}, error=str(exc.reason))
-        except Exception as exc:  # noqa: BLE001 - surface transport errors, never raise
-            return ApiResponse(status=0, ok=False, code=None, data={}, error=str(exc))
-        return _parse_response(status, raw)
+
+        attempt = 0
+        while True:
+            retry_after: float | None = None
+            try:
+                with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                    return _parse_response(response.getcode(), response.read())
+            except urllib.error.HTTPError as exc:
+                # The Worker returns the FLAT envelope even on 4xx/5xx — parse it.
+                if exc.code in RETRYABLE_STATUSES and attempt < self.max_retries:
+                    retry_after = _parse_retry_after(exc.headers.get("Retry-After") if exc.headers else None)
+                else:
+                    return _parse_response(exc.code, exc.read())
+            except urllib.error.URLError as exc:
+                if attempt >= self.max_retries:
+                    return ApiResponse(status=0, ok=False, code=None, data={}, error=str(exc.reason))
+            except Exception as exc:  # noqa: BLE001 - surface transport errors, never raise
+                if attempt >= self.max_retries:
+                    return ApiResponse(status=0, ok=False, code=None, data={}, error=str(exc))
+            # Retryable outcome: back off (Retry-After, else exponential) and try again.
+            delay = retry_after if retry_after is not None else self.retry_backoff * (2 ** attempt)
+            if delay > 0:
+                time.sleep(delay)
+            attempt += 1
 
     def health(self) -> ApiResponse:
         """``GET /health`` — service liveness."""
@@ -186,6 +208,15 @@ class HttpClient:
     def release(self, body: Mapping[str, Any]) -> ApiResponse:
         """``POST /v1/release`` — release a seat (idempotent). ``seat_id`` required."""
         return self._post("/v1/release", body)
+
+
+def _parse_retry_after(value: str | None) -> float | None:
+    """Retry-After as delay seconds. Only the integer-seconds form is honored; the HTTP-date form
+    falls back to exponential backoff (returns None)."""
+    if value is None:
+        return None
+    stripped = value.strip()
+    return float(stripped) if stripped.isdigit() else None
 
 
 def _parse_response(status: int, raw: bytes) -> ApiResponse:

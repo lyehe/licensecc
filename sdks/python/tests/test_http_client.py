@@ -158,3 +158,39 @@ def test_parse_response_ok_requires_json_true(body):
 def test_parse_response_ok_accepts_only_boolean_true():
     resp = hc._parse_response(200, json.dumps({"ok": True}).encode("utf-8"))
     assert resp.ok is True
+
+
+def test_retries_on_429_then_succeeds(monkeypatch):
+    calls = {"n": 0}
+
+    def fake_urlopen(request, timeout=None):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            body = json.dumps({"ok": False, "code": "rate_limited"}).encode("utf-8")
+            raise urllib.error.HTTPError(request.full_url, 429, "Too Many Requests", hdrs=None, fp=io.BytesIO(body))
+        return _FakeResponse(200, {"ok": True, "assertion": "lccoa1.x.y"})
+
+    monkeypatch.setattr(hc.time, "sleep", lambda _s: None)
+    monkeypatch.setattr(hc.urllib.request, "urlopen", fake_urlopen)
+    resp = HttpClient("https://verifier.example.com").verify("DEFAULT", "EXPORT", "a" * 64, "c" * 64)
+    assert resp.ok
+    assert calls["n"] == 2  # one retry after the 429
+
+
+def test_max_retries_zero_disables_retry(monkeypatch):
+    def fake_urlopen(request, timeout=None):
+        body = json.dumps({"ok": False, "code": "rate_limited"}).encode("utf-8")
+        raise urllib.error.HTTPError(request.full_url, 429, "Too Many Requests", hdrs=None, fp=io.BytesIO(body))
+
+    monkeypatch.setattr(hc.time, "sleep", lambda _s: None)
+    monkeypatch.setattr(hc.urllib.request, "urlopen", fake_urlopen)
+    resp = HttpClient("https://verifier.example.com", max_retries=0).verify("DEFAULT", "EXPORT", "a" * 64, "c" * 64)
+    assert not resp.ok
+    assert resp.status == 429
+    assert resp.code == "rate_limited"
+
+
+def test_parse_retry_after_seconds_only():
+    assert hc._parse_retry_after("5") == 5.0
+    assert hc._parse_retry_after("Wed, 21 Oct 2025 07:28:00 GMT") is None
+    assert hc._parse_retry_after(None) is None
