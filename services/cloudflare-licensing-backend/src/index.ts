@@ -27,6 +27,7 @@ import { handleOrderIngest } from "./fulfillment/order_ingest.mjs";
 // Slice 2 account-token isolation (Stage 3): per-customer credential + the per-endpoint gate.
 import { accountAuth, constantTimeEqual, readBearer } from "./auth/account_auth.mjs";
 import { enqueueAndDeliverWebhooks } from "./webhooks/webhook.mjs";
+import { appendAuditDigest } from "./audit/audit_digest.mjs";
 // OpenAPI 3.1 doc-of-existing: the spec object + the self-contained /docs page. Served
 // UNAUTHENTICATED and EARLY (before any auth) so the API is self-describing without credentials.
 import { openApiSpec, docsHtml } from "./openapi.js";
@@ -2330,5 +2331,13 @@ export default {
     // seat/retention housekeeping or the cron. Emission is UNMETERED: this is the ONLY place webhooks
     // are emitted (never inline / waitUntil on a request path).
     await enqueueAndDeliverWebhooks(env, now, logEvent);
+    // Tamper-evident audit digest (R6.4): append one hash-chain segment over the new entitlement_events.
+    // READ-ONLY over the log + append-only to audit_digests; best-effort so a digest problem never
+    // breaks the cron.
+    try {
+      await appendAuditDigest(env, now);
+    } catch {
+      // best-effort
+    }
   },
 };

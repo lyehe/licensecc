@@ -579,3 +579,18 @@ CREATE TABLE IF NOT EXISTS webhook_cursor (
   last_id      BIGINT NOT NULL DEFAULT 0,
   updated_at   BIGINT NOT NULL
 );
+
+-- =====================================================================================
+-- audit_digests  (migration 0022) -- tamper-evident hash chain over entitlement_events.
+-- =====================================================================================
+CREATE TABLE IF NOT EXISTS audit_digests (
+  id          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  source      TEXT   NOT NULL,
+  up_to_id    BIGINT NOT NULL,
+  event_count BIGINT NOT NULL,
+  prev_digest TEXT   NOT NULL DEFAULT '',
+  digest      TEXT   NOT NULL,
+  created_at  BIGINT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_audit_digests_source ON audit_digests(source, id);

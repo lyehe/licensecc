@@ -472,3 +472,15 @@ CREATE TABLE IF NOT EXISTS webhook_cursor (
   last_id      INTEGER NOT NULL DEFAULT 0,
   updated_at   INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS audit_digests (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  source      TEXT    NOT NULL,
+  up_to_id    INTEGER NOT NULL,
+  event_count INTEGER NOT NULL,
+  prev_digest TEXT    NOT NULL DEFAULT '',
+  digest      TEXT    NOT NULL,
+  created_at  INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_audit_digests_source ON audit_digests(source, id);
