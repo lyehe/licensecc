@@ -135,3 +135,26 @@ def test_transport_error_returns_typed_response(monkeypatch):
     assert resp.status == 0
     assert not resp.ok
     assert resp.error is not None
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"ok": "false"},  # truthy string — the old bool() coercion read this as a grant
+        {"ok": "true"},
+        {"ok": 1},
+        {"ok": 0},
+        {"ok": None},
+        {"ok": "1"},
+        {},  # missing
+    ],
+)
+def test_parse_response_ok_requires_json_true(body):
+    # Only a real JSON boolean true is a grant; every other shape is fail-closed.
+    resp = hc._parse_response(200, json.dumps(body).encode("utf-8"))
+    assert resp.ok is False
+
+
+def test_parse_response_ok_accepts_only_boolean_true():
+    resp = hc._parse_response(200, json.dumps({"ok": True}).encode("utf-8"))
+    assert resp.ok is True

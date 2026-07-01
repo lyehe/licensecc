@@ -195,7 +195,9 @@ def _parse_response(status: int, raw: bytes) -> ApiResponse:
         return ApiResponse(status=status, ok=False, code=None, data={}, error=f"malformed JSON: {exc}")
     if not isinstance(data, dict):
         return ApiResponse(status=status, ok=False, code=None, data={}, error="response was not a JSON object")
-    ok = bool(data.get("ok", False))
+    # Strictly require a real JSON boolean true. bool("false") is truthy, so the
+    # previous bool(...) coercion read a string/number body as a grant (fail-open).
+    ok = data.get("ok") is True
     code = data.get("code")
     code = code if isinstance(code, str) else None
     return ApiResponse(status=status, ok=ok, code=code, data=data)
