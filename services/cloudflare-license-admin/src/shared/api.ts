@@ -158,22 +158,31 @@ export interface WebhookEndpoint {
   description: string;
   created_at: number;
   updated_at: number;
+  // Per-tenant scope (audit R2.2). null/"" = global (all events). When set, the endpoint receives
+  // only events carrying + matching that dimension. Set one dimension, not both (events are single-
+  // dimension): scope_project matches entitlement/order events; scope_customer_id matches customer events.
+  scope_project: string | null;
+  scope_customer_id: string | null;
 }
 
 // Create body. `url` is required and MUST be https (else 400 invalid_url). event_types
-// (csv filter; "" = all) and description take the column default when omitted.
+// (csv filter; "" = all) and description take the column default when omitted. scope_* omitted = global.
 export interface WebhookEndpointInput {
   url: string;
   event_types?: string;
   description?: string;
+  scope_project?: string;
+  scope_customer_id?: string;
 }
 
-// Patch body. Only url / event_types / description are mutable. status flips only via
+// Patch body. Only url / event_types / description / scope_* are mutable. status flips only via
 // disable/reenable; id/created_at are immutable. All fields optional.
 export interface WebhookEndpointPatch {
   url?: string;
   event_types?: string;
   description?: string;
+  scope_project?: string;
+  scope_customer_id?: string;
 }
 
 export type WebhookDeliveryStatus = "pending" | "delivered" | "failed";

@@ -443,7 +443,7 @@ CREATE TABLE IF NOT EXISTS webhook_endpoints (
   description TEXT NOT NULL DEFAULT '',
   created_at  INTEGER NOT NULL,
   updated_at  INTEGER NOT NULL
-);
+  , scope_project TEXT, scope_customer_id TEXT);
 
 CREATE INDEX IF NOT EXISTS idx_webhook_endpoints_status ON webhook_endpoints(status);
 

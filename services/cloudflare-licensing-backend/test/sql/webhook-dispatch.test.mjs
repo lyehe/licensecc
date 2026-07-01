@@ -85,10 +85,15 @@ function freshDb() {
   return db;
 }
 
-function addEndpoint(db, id, { url = `https://hook.test/${id}`, eventTypes = "", status = "active" } = {}) {
+function addEndpoint(
+  db,
+  id,
+  { url = `https://hook.test/${id}`, eventTypes = "", status = "active", scopeProject = null, scopeCustomer = null } = {},
+) {
   db.prepare(
-    "INSERT INTO webhook_endpoints (id, url, event_types, status, description, created_at, updated_at) VALUES (?,?,?,?,'',?,?)",
-  ).run(id, url, eventTypes, status, 1000, 1000);
+    "INSERT INTO webhook_endpoints (id, url, event_types, status, description, created_at, updated_at, scope_project, scope_customer_id) " +
+      "VALUES (?,?,?,?,'',?,?,?,?)",
+  ).run(id, url, eventTypes, status, 1000, 1000, scopeProject, scopeCustomer);
 }
 
 function addEntitlementEvent(db, eventType, createdAt) {
@@ -147,6 +152,35 @@ test("enqueue is exactly-once across re-runs (the UNIQUE + cursor)", async () =>
   addEntitlementEvent(db, "revoke", 104);
   await enqueueWebhooks(env, 202);
   assert.equal(countDeliveries(db), 5, "only the new event is added");
+  db.close();
+});
+
+test("endpoint scope filters events to the matching tenant dimension (R2.2)", async () => {
+  const db = freshDb();
+  const env = { DB: new D1Like(db) };
+  addEndpoint(db, "global"); // both scope columns null -> every event (back-compat)
+  addEndpoint(db, "projP", { scopeProject: "P" }); // only project-P entitlement/order events
+  addEndpoint(db, "projX", { scopeProject: "X" }); // project X -> nothing here
+  addEndpoint(db, "custC", { scopeCustomer: "cust_1" }); // only customer_events for cust_1
+
+  addEntitlementEvent(db, "create", 100); // project P
+  addOrderEvent(db, "evt_1", "subscription.active", 101); // project P
+  addCustomerEvent(db, "cust_1", "disable", 102); // customer cust_1
+
+  await enqueueWebhooks(env, 200);
+
+  assert.equal(countDeliveries(db, "WHERE endpoint_id = 'global'"), 3, "global endpoint gets every event");
+  assert.equal(
+    countDeliveries(db, "WHERE endpoint_id = 'projP'"),
+    2,
+    "project-scoped endpoint gets the 2 project-P events, not the customer event",
+  );
+  assert.equal(countDeliveries(db, "WHERE endpoint_id = 'projX'"), 0, "wrong-project endpoint gets nothing");
+  assert.equal(
+    countDeliveries(db, "WHERE endpoint_id = 'custC'"),
+    1,
+    "customer-scoped endpoint gets only the matching customer event",
+  );
   db.close();
 });
 

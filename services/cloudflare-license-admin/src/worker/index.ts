@@ -576,6 +576,21 @@ function safeWebhookDescription(value: unknown): string | null {
   return value;
 }
 
+// A per-tenant scope value (audit R2.2): "" (global) or a bounded single-line token (a project name
+// or customer id). Returns "" for absent/blank, the token for a valid string, or null when invalid.
+function safeWebhookScope(value: unknown): string | null {
+  if (value === undefined || value === null || value === "") {
+    return "";
+  }
+  if (typeof value !== "string" || value.length > 128) {
+    return null;
+  }
+  if (value.includes("\n") || value.includes("\r") || value.includes("\0") || value.includes(",")) {
+    return null;
+  }
+  return value;
+}
+
 // Validate a create body. `url` is required and must be https. Returns null on ANY invalid
 // field (the caller emits 400 invalid_request); a bad URL is reported separately as
 // invalid_url, so the caller distinguishes the two.
@@ -587,13 +602,15 @@ function validateWebhookInput(value: unknown): WebhookEndpointInput | "invalid_u
   const url = safeWebhookUrl(input.url);
   const eventTypes = safeWebhookEventTypes(input.event_types);
   const description = safeWebhookDescription(input.description);
-  if (eventTypes === null || description === null) {
+  const scopeProject = safeWebhookScope(input.scope_project);
+  const scopeCustomer = safeWebhookScope(input.scope_customer_id);
+  if (eventTypes === null || description === null || scopeProject === null || scopeCustomer === null) {
     return null;
   }
   if (url === INVALID) {
     return "invalid_url";
   }
-  return { url, event_types: eventTypes, description };
+  return { url, event_types: eventTypes, description, scope_project: scopeProject, scope_customer_id: scopeCustomer };
 }
 
 // Validate a patch body. Only url / event_types / description are mutable; status / id /
@@ -628,6 +645,15 @@ function validateWebhookPatch(value: unknown): WebhookEndpointPatch | "invalid_u
       return null;
     }
     patch.description = description;
+  }
+  for (const field of ["scope_project", "scope_customer_id"] as const) {
+    if (input[field] !== undefined) {
+      const scope = safeWebhookScope(input[field]);
+      if (scope === null) {
+        return null;
+      }
+      patch[field] = scope;
+    }
   }
   return patch;
 }
@@ -1695,7 +1721,8 @@ async function handlePolicyMutation(request: Request, env: Env, actor: Actor, re
 // disable/reenable are single-statement RETURNING mutations (idempotent), NOT a write+audit
 // batch (audit "where applicable" — it is not applicable to a config row with no event log).
 
-const WEBHOOK_ENDPOINT_COLUMNS = "id, url, event_types, status, description, created_at, updated_at";
+const WEBHOOK_ENDPOINT_COLUMNS =
+  "id, url, event_types, status, description, created_at, updated_at, scope_project, scope_customer_id";
 const WEBHOOK_DELIVERY_COLUMNS =
   "id, endpoint_id, event_source, event_id, event_type, status, attempts, last_status, last_error, next_attempt_at, created_at, delivered_at";
 
@@ -1794,9 +1821,21 @@ async function handleWebhookCreate(request: Request, env: Env, actor: Actor, bod
   let row: WebhookEndpoint | null;
   try {
     row = await env.DB.prepare(
-      `INSERT INTO webhook_endpoints (id, url, event_types, status, description, created_at, updated_at)
-       VALUES (?, ?, ?, 'active', ?, ?, ?) RETURNING ${WEBHOOK_ENDPOINT_COLUMNS}`,
-    ).bind(id, input.url, input.event_types ?? "", input.description ?? "", now, now).first<WebhookEndpoint>();
+      `INSERT INTO webhook_endpoints
+         (id, url, event_types, status, description, created_at, updated_at, scope_project, scope_customer_id)
+       VALUES (?, ?, ?, 'active', ?, ?, ?, ?, ?) RETURNING ${WEBHOOK_ENDPOINT_COLUMNS}`,
+    )
+      .bind(
+        id,
+        input.url,
+        input.event_types ?? "",
+        input.description ?? "",
+        now,
+        now,
+        input.scope_project ? input.scope_project : null,
+        input.scope_customer_id ? input.scope_customer_id : null,
+      )
+      .first<WebhookEndpoint>();
   } catch {
     return envelope(requestIdValue, "mutation_failed", undefined, 500);
   }
@@ -1827,11 +1866,13 @@ async function handleWebhookPatch(request: Request, env: Env, actor: Actor, endp
   }
   const assignments: string[] = [];
   const values: unknown[] = [];
-  for (const field of ["url", "event_types", "description"] as const) {
+  for (const field of ["url", "event_types", "description", "scope_project", "scope_customer_id"] as const) {
     const value = (patch as Record<string, unknown>)[field];
     if (value !== undefined) {
+      // A blank scope value clears the scope back to global (NULL); other fields store their string.
+      const isScope = field === "scope_project" || field === "scope_customer_id";
       assignments.push(`${field} = ?`);
-      values.push(value);
+      values.push(isScope && value === "" ? null : value);
     }
   }
   const now = Math.floor(Date.now() / 1000);

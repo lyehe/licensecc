@@ -547,7 +547,9 @@ CREATE TABLE IF NOT EXISTS webhook_endpoints (
   status      TEXT   NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled')),
   description TEXT   NOT NULL DEFAULT '',
   created_at  BIGINT NOT NULL,
-  updated_at  BIGINT NOT NULL
+  updated_at  BIGINT NOT NULL,
+  scope_project     TEXT,   -- migration 0021 (per-tenant webhook scope; NULL = global)
+  scope_customer_id TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_webhook_endpoints_status ON webhook_endpoints(status);

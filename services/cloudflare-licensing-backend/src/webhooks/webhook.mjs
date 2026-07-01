@@ -286,9 +286,31 @@ export function nextBackoff(attempts) {
 /** Load the active endpoints once per tick (cheap; the set is operator-sized, not user-sized). */
 async function loadActiveEndpoints(env) {
   const res = await env.DB.prepare(
-    "SELECT id, url, event_types FROM webhook_endpoints WHERE status = 'active'",
+    "SELECT id, url, event_types, scope_project, scope_customer_id FROM webhook_endpoints WHERE status = 'active'",
   ).all();
   return res.results ?? [];
+}
+
+/**
+ * Per-tenant scope filter (audit R2.2). A global endpoint (both scope columns null/empty) receives
+ * every event (back-compat). An endpoint scoped on a dimension receives ONLY events that carry AND
+ * match that dimension: entitlement/order events carry `project`; customer events carry `customer_id`.
+ * An endpoint scoped on a dimension the event does not carry (e.g. a project-scoped endpoint vs a
+ * customer event) does not match, so a webhook no longer fans every tenant's row snapshots out to
+ * every endpoint. (Note: entitlement_events carry project but not customer_id, so a customer-scoped
+ * endpoint receives customer_events only, not that customer's entitlement changes.)
+ */
+function endpointScopeMatches(endpoint, source, row) {
+  const scopeProject = endpoint.scope_project;
+  const scopeCustomer = endpoint.scope_customer_id;
+  const hasProjectScope = typeof scopeProject === "string" && scopeProject.length > 0;
+  const hasCustomerScope = typeof scopeCustomer === "string" && scopeCustomer.length > 0;
+  if (!hasProjectScope && !hasCustomerScope) return true; // global endpoint
+  const eventProject = source === "customer" ? null : row.project ?? null;
+  const eventCustomer = source === "customer" ? row.customer_id ?? null : null;
+  if (hasProjectScope && eventProject !== scopeProject) return false;
+  if (hasCustomerScope && eventCustomer !== scopeCustomer) return false;
+  return true;
 }
 
 /** Read the per-source cursor high-water mark (0 if never run). */
@@ -328,6 +350,7 @@ async function enqueueSource(env, source, endpoints, now) {
     if (eventId > maxId) maxId = eventId;
     for (const endpoint of endpoints) {
       if (!eventTypeMatches(endpoint.event_types, row.event_type)) continue;
+      if (!endpointScopeMatches(endpoint, source, row)) continue;
       const payload = buildWebhookPayload(source, row);
       const payloadJson = JSON.stringify(payload);
       // INSERT OR IGNORE: the UNIQUE guard turns a duplicate (re-run) into a silent no-op. next_
