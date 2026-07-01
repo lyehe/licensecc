@@ -1258,7 +1258,7 @@ void lcc_set_strict_source_fatal_enabled(bool enabled) {
 static LCC_EVENT_TYPE lcc_verify_config_impl(const CallerInformations* callerInformation,
 											 const LicenseLocation* licenseLocation, LicenseInfo* license_out,
 											 const LccConfigInput* input, LccConfigDecision* decision_out,
-											 const LccConfigVerifyOptions* options) {
+											 const LccConfigVerifyOptions* options, bool require_floor) {
 	if (license_out != nullptr) {
 		*license_out = LicenseInfo{};
 	}
@@ -1275,6 +1275,19 @@ static LCC_EVENT_TYPE lcc_verify_config_impl(const CallerInformations* callerInf
 			decision_out->event_type = LICENSE_MALFORMED;
 		}
 		return LICENSE_MALFORMED;
+	}
+	// Secure entry point: the config-seq rollback floor is MANDATORY. Without a persisted floor a
+	// captured config token is replayable in-window and re-usable out-of-window under a rolled-back
+	// clock, so lcc_verify_config_decision refuses to run floor-blind (mirrors the online decision
+	// wrapper's mandatory revocation floor). normalize guarantees load/store are both-or-neither.
+	if (require_floor && normalized.config_seq_floor_load == nullptr) {
+		const LCC_EVENT_TYPE result = add_malformed_api_input_event(
+			er, "LccConfigVerifyOptions", "config-seq floor load/store callbacks are required");
+		export_license_status(er, license_out);
+		if (decision_out != nullptr) {
+			decision_out->event_type = result;
+		}
+		return result;
 	}
 
 	AcquiredLicenseContext license_context;
@@ -1402,7 +1415,29 @@ LCC_EVENT_TYPE lcc_verify_config(const CallerInformations* callerInformation, co
 								 const LccConfigVerifyOptions* options) {
 	// Top-level no-throw guard: no C++ exception may cross the C ABI boundary.
 	try {
-		return lcc_verify_config_impl(callerInformation, licenseLocation, license_out, input, decision_out, options);
+		return lcc_verify_config_impl(callerInformation, licenseLocation, license_out, input, decision_out, options,
+									  /*require_floor=*/false);
+	} catch (...) {
+		if (license_out != nullptr) {
+			*license_out = LicenseInfo{};
+		}
+		if (decision_out != nullptr) {
+			lcc_init_config_decision(decision_out);
+		}
+		return LICENSE_MALFORMED;
+	}
+}
+
+LCC_EVENT_TYPE lcc_verify_config_decision(const CallerInformations* callerInformation,
+										  const LicenseLocation* licenseLocation, LicenseInfo* license_out,
+										  const LccConfigInput* input, LccConfigDecision* decision_out,
+										  const LccConfigVerifyOptions* options) {
+	// Secure config entry point: identical to lcc_verify_config but REQUIRES the persisted
+	// config-seq rollback floor (rejects null floor callbacks) so a config token can never be
+	// accepted replay/rollback-blind.
+	try {
+		return lcc_verify_config_impl(callerInformation, licenseLocation, license_out, input, decision_out, options,
+									  /*require_floor=*/true);
 	} catch (...) {
 		if (license_out != nullptr) {
 			*license_out = LicenseInfo{};

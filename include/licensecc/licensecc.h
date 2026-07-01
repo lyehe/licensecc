@@ -270,11 +270,32 @@ LCC_EVENT_TYPE lcc_release_license(const CallerInformations* callerInformation,
  * `decision_out->decision` to deny. `license_out` receives the license audit
  * status; `decision_out` receives the config decision. Invalid size/version
  * inputs fail closed with ::LICENSE_MALFORMED.
+ *
+ * REPLAY/ROLLBACK CAVEAT: the config-seq rollback floor
+ * (`config_seq_floor_load`/`store` in ::LccConfigVerifyOptions) is OPTIONAL for
+ * this primitive. If you wire no floor, a captured config token is replayable
+ * within its time window and re-usable after expiry under a rolled-back host
+ * clock -- the signature/binding/window checks alone do not stop that. Production
+ * hosts should prefer ::lcc_verify_config_decision, which REQUIRES a persisted
+ * floor, exactly as ::lcc_acquire_license_decision requires the revocation floor.
  */
 LCC_EVENT_TYPE lcc_verify_config(const CallerInformations* callerInformation,
 								 const LicenseLocation* licenseLocation, LicenseInfo* license_out,
 								 const LccConfigInput* input, LccConfigDecision* decision_out,
 								 const LccConfigVerifyOptions* options);
+
+/**
+ * Secure config-verification entry point. Identical to ::lcc_verify_config but
+ * REQUIRES the durable config-seq rollback floor: if `config_seq_floor_load` /
+ * `config_seq_floor_store` in `options` are null it fails closed with
+ * ::LICENSE_MALFORMED instead of accepting the token floor-blind. This closes the
+ * config-token replay/clock-rollback exposure and is the recommended entry point
+ * for production hosts consuming signed config tokens.
+ */
+LCC_EVENT_TYPE lcc_verify_config_decision(const CallerInformations* callerInformation,
+										  const LicenseLocation* licenseLocation, LicenseInfo* license_out,
+										  const LccConfigInput* input, LccConfigDecision* decision_out,
+										  const LccConfigVerifyOptions* options);
 
 /**
  * Process-local online revocation-floor helpers, useful for tests and for hosts

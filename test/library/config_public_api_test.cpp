@@ -314,5 +314,70 @@ BOOST_AUTO_TEST_CASE(verify_config_enforces_durable_config_seq_floor) {
     std::remove(path.c_str());
 }
 
+BOOST_AUTO_TEST_CASE(verify_config_decision_requires_the_durable_floor) {
+    inject_project_config_key();
+    const std::string path = issue_config_license("config-api-decision");
+    const std::string fingerprint = fingerprint_of_issued_license(path);
+    const std::string body = "{\"flag\":true}";
+    const std::vector<uint8_t> config_bytes(body.begin(), body.end());
+
+    LicenseLocation location;
+    lcc_init_license_location(&location, LICENSE_PATH);
+    BOOST_REQUIRE(lcc_set_license_path(&location, path.c_str()));
+    CallerInformations caller = config_caller();
+
+    const std::string token = config_token_for(fingerprint, config_bytes, "", 4);
+    auto make_input = [&]() {
+        LccConfigInput input;
+        lcc_init_config_input(&input);
+        input.token = token.c_str();
+        input.config_bytes = config_bytes.data();
+        input.config_len = config_bytes.size();
+        return input;
+    };
+
+    // No options / no floor callbacks -> the secure entry point refuses to run floor-blind, even for
+    // an otherwise-valid token that plain lcc_verify_config would accept.
+    {
+        LccConfigInput input = make_input();
+        LicenseInfo info{};
+        LccConfigDecision decision;
+        lcc_init_config_decision(&decision);
+        BOOST_CHECK_EQUAL(lcc_verify_config_decision(&caller, &location, &info, &input, &decision, nullptr),
+                          LICENSE_MALFORMED);
+        BOOST_CHECK_EQUAL(decision.decision, LCC_LICENSE_DECISION_DENY);
+    }
+    // Sanity: plain lcc_verify_config DOES accept the same token with no floor (the documented weaker
+    // primitive) -- proving the decision wrapper's refusal is the added guard, not a token fault.
+    {
+        LccConfigInput input = make_input();
+        LicenseInfo info{};
+        LccConfigDecision decision;
+        lcc_init_config_decision(&decision);
+        BOOST_CHECK_EQUAL(lcc_verify_config(&caller, &location, &info, &input, &decision, nullptr), LICENSE_OK);
+    }
+    // With both floor callbacks set, the decision wrapper accepts and persists the floor.
+    {
+        ConfigFloorStore store;
+        LccConfigVerifyOptions options;
+        lcc_init_config_verify_options(&options);
+        options.config_seq_floor_load = &ConfigFloorStore::load;
+        options.config_seq_floor_store = &ConfigFloorStore::store;
+        options.config_seq_floor_user_data = &store;
+        LccConfigInput input = make_input();
+        LicenseInfo info{};
+        LccConfigDecision decision;
+        lcc_init_config_decision(&decision);
+        BOOST_CHECK_EQUAL(lcc_verify_config_decision(&caller, &location, &info, &input, &decision, &options),
+                          LICENSE_OK);
+        BOOST_CHECK_EQUAL(decision.decision, LCC_LICENSE_DECISION_ALLOW);
+        BOOST_CHECK(decision.config_seq_floor_stored);
+        BOOST_CHECK_EQUAL(decision.config_seq_floor.config_seq, 4u);
+    }
+
+    license::config_attestation::set_trusted_public_keys_for_tests({});
+    std::remove(path.c_str());
+}
+
 }  // namespace test
 }  // namespace license
