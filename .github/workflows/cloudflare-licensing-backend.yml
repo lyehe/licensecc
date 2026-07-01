@@ -69,8 +69,14 @@ jobs:
       - name: SQL tests
         run: npm run test:sql
 
+      - name: Postgres adapter tests
+        run: npm run test:pg
+
       - name: Check schema parity
         run: npm run schema:parity
+
+      - name: Check Postgres schema parity
+        run: npm run schema:parity:pg
 
       - name: Dry-run deploy
         run: npm run dry-run

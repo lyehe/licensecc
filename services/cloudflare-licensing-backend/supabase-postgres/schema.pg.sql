@@ -2,7 +2,7 @@
 --
 -- PostgreSQL / Supabase port of the licensecc licensing backend schema.
 -- Ground truth: services/cloudflare-licensing-backend/schema.sql (SQLite/D1, built from
---   migrations/0001..0008). This is a faithful 1:1 port: every table, column, default,
+--   migrations/0001..0020). This is a faithful 1:1 port: every table, column, default,
 --   CHECK enum, composite primary key, index, and the composite ON DELETE CASCADE FK are
 --   preserved. The ONLY behavioral differences are the documented type/identity changes
 --   required by Postgres (see header notes per change).
