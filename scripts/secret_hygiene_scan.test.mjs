@@ -47,3 +47,24 @@ test("secret hygiene scan flags real-looking secret assignments but not placehol
   assert.deepEqual(findings.map((finding) => finding.kind), ["secret_assignment"]);
   assert.equal(findings[0].name, "CLOUDFLARE_API_TOKEN");
 });
+
+test("secret hygiene scan flags a high-entropy value that merely contains a placeholder word (R4.7)", () => {
+  // Low-entropy hand-written placeholders stay placeholders.
+  assert.equal(isPlaceholderValue("test-bearer"), true);
+  assert.equal(isPlaceholderValue("local-dev"), true);
+  assert.equal(isPlaceholderValue("your-secret-here"), true);
+  // A high-entropy random token is a REAL secret even though it contains "test".
+  assert.equal(isPlaceholderValue("test_a1b2c3d4e5f6g7h8i9j0k1l2"), false);
+  const findings = scanText("fixture.txt", "ADMIN_BEARER=test_a1b2c3d4e5f6g7h8i9j0k1l2");
+  assert.deepEqual(findings.map((finding) => finding.kind), ["secret_assignment"]);
+});
+
+test("secret hygiene scan skips template-literal PEM construction but flags a static marker (R4.7)", () => {
+  const marker = "-----BEGIN " + "PRIVATE KEY-----";
+  // A template literal wrapping RUNTIME key bytes (contains ${...}) is not a committed key.
+  const templated = "LEASE_PEM = `" + marker + "\\n${b64}\\n-----END PRIVATE KEY-----`";
+  assert.equal(scanText("fixture.mjs", templated).length, 0);
+  // A static marker line (no interpolation) is still flagged.
+  const findings = scanText("fixture.txt", marker + "\nMIIEabc");
+  assert.deepEqual(findings.map((finding) => finding.kind), ["private_key_marker"]);
+});

@@ -25,6 +25,8 @@ const REQUIRED_IGNORED_PATHS = [
   "services/cloudflare-licensing-backend/.online-key/online_private_key.pkcs8.pem",
 ];
 
+// Match NAME=value for the bounded secret-env-name list. (`:`-style scanning was tried but matches
+// JS/TS object properties like `NAME: token.token`, a false positive in this mixed codebase.)
 const SECRET_ASSIGNMENT = new RegExp(`(?:^|[\\s;])(${SECRET_ENV_NAMES.join("|")})\\s*=(?!=)\\s*([^\\s"'\\\`]+)`, "g");
 const PRIVATE_KEY_MARKER = /-----BEGIN (?:RSA |EC |OPENSSH |PRIVATE )?PRIVATE KEY-----/;
 const JWT_LIKE = /\b[A-Za-z0-9_-]{40,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\b/;
@@ -64,6 +66,32 @@ function isTextPath(path) {
   return TEXT_EXTENSIONS.has(pathExt(path)) || path.includes("CMakeLists.txt") || path.includes("Doxyfile");
 }
 
+// Shannon entropy (bits/char) of a string. A real random token (base64/hex API token, JWT segment)
+// sits around 4-6 bits/char; hand-written placeholders like "test-bearer" or "your-secret" are low.
+function shannonEntropyBitsPerChar(value) {
+  if (value.length === 0) {
+    return 0;
+  }
+  const freq = new Map();
+  for (const ch of value) {
+    freq.set(ch, (freq.get(ch) ?? 0) + 1);
+  }
+  let bits = 0;
+  for (const count of freq.values()) {
+    const p = count / value.length;
+    bits -= p * Math.log2(p);
+  }
+  return bits;
+}
+
+// A value that LOOKS like a random secret: long enough, high per-char entropy. Used to override the
+// fuzzy word-based placeholder guesses so a real high-entropy token that merely CONTAINS a word like
+// "test"/"local"/"secret" is still flagged rather than waved through (audit R4.7).
+function looksHighEntropy(value) {
+  const stripped = value.trim().replace(/^['"]|['"]$/g, "");
+  return stripped.length >= 20 && shannonEntropyBitsPerChar(stripped) >= 3.5;
+}
+
 function isPlaceholderValue(value) {
   const normalized = value.trim().replace(/^['"]|['"]$/g, "").toLowerCase();
   if (normalized === "") {
@@ -74,6 +102,11 @@ function isPlaceholderValue(value) {
   }
   if (normalized.includes("redacted") || normalized.includes("replace") || normalized.includes("example")) {
     return true;
+  }
+  // A high-entropy value is a real secret even if it contains a placeholder-ish word: check BEFORE
+  // the fuzzy word matches so "test_<random>" / "local-<random>" are not waved through.
+  if (looksHighEntropy(value)) {
+    return false;
   }
   if (normalized.includes("secret") || normalized.includes("test") || normalized.includes("local")) {
     return true;
@@ -89,7 +122,10 @@ function scanText(path, content) {
   const lines = content.split(/\r?\n/);
   for (let index = 0; index < lines.length; ++index) {
     const line = lines[index];
-    if (PRIVATE_KEY_MARKER.test(line)) {
+    // Flag a committed private-key marker, but NOT a template literal that wraps a RUNTIME-generated
+    // key (`-----BEGIN PRIVATE KEY-----\n${b64}...`, common in test fixtures): a real committed key is
+    // static base64, never a `${...}` interpolation on the marker line (audit R4.7).
+    if (PRIVATE_KEY_MARKER.test(line) && !line.includes("${")) {
       findings.push({ path, line: index + 1, kind: "private_key_marker" });
     }
     if (JWT_LIKE.test(line)) {

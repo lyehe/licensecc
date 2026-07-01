@@ -11,7 +11,7 @@ jobs:
       runs-on: ubuntu-22.04
       timeout-minutes: 20
       steps:
-      -  uses: actions/checkout@v4
+      -  uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
          with:
             submodules: recursive
       -  name: Install documentation dependencies
@@ -35,7 +35,7 @@ jobs:
           build_type: ["Debug", "Release"]
 
       steps:
-      -  uses: actions/checkout@v4
+      -  uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
          with:
             submodules: recursive
       -  name: Patch vendored license generator
@@ -124,7 +124,7 @@ jobs:
       runs-on: ubuntu-22.04
       timeout-minutes: 60
       steps:
-      -  uses: actions/checkout@v4
+      -  uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
          with:
             submodules: recursive
       -  name: Patch vendored license generator
@@ -178,7 +178,7 @@ jobs:
       runs-on: ubuntu-22.04
       timeout-minutes: 45
       steps:
-      -  uses: actions/checkout@v4
+      -  uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
          with:
             submodules: recursive
       -  name: Patch vendored license generator
