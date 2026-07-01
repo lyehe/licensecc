@@ -81,6 +81,16 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/ValidateLicenseccIdentity.cmake")
 lcc_validate_project_name("${LCC_PROJECT_NAME}")
 lcc_validate_project_magic_num("${LCC_PROJECT_MAGIC_NUM}")
 
+# Audit R6.6: magic 0 makes LCC_VERIFY_MAGIC (lic_info.m_magic == LCC_PROJECT_MAGIC_NUM) inert -- a
+# null CallerInformations also has m_magic 0, so the anti-tamper magic binding does nothing. Warn so
+# an integrator who expects the magic check to bind sets a non-zero LCC_PROJECT_MAGIC_NUM on purpose.
+if("${LCC_PROJECT_MAGIC_NUM}" STREQUAL "0")
+	message(WARNING
+		"LCC_PROJECT_MAGIC_NUM is 0: the anti-tamper magic check is INERT (a null or zero-magic caller "
+		"passes). Set -DLCC_PROJECT_MAGIC_NUM=<non-zero> and pass the same value via "
+		"CallerInformations.magic to make the magic binding effective.")
+endif()
+
 set(LCC_PROJECT_PUBLIC_KEY "${LCC_PROJECTS_BASE_DIR}/${LCC_PROJECT_NAME}/include/licensecc/${LCC_PROJECT_NAME}/public_key.h")
 set(LCC_PROJECT_PRIVATE_KEY "${LCC_PROJECTS_BASE_DIR}/${LCC_PROJECT_NAME}/private_key.rsa")
 set(LCC_CONFIG_NAME "${CMAKE_BUILD_TYPE}")

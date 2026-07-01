@@ -43,6 +43,15 @@ const unordered_map<int, string> descByCloudProvider = {{PROV_UNKNOWN, "Provider
 
 static const char* kRedactedHardwareValue = "<redacted>";
 
+// Safe description lookup: a value the OS layer returns that is not in the table (an unexpected
+// virtualization/cloud enum) must NOT dereference map::end() (undefined behavior / crash). Return a
+// readable fallback instead (audit R6.6).
+template <typename Map, typename Key>
+static string describe(const Map& table, Key key) {
+	const auto it = table.find(key);
+	return it != table.end() ? it->second : ("Unknown (" + to_string(static_cast<long long>(key)) + ")");
+}
+
 static string hardware_value_for_output(const string& value, const bool raw_hardware_output) {
 	return raw_hardware_output ? value : kRedactedHardwareValue;
 }
@@ -87,6 +96,15 @@ static int run_redaction_self_test() {
 	const unsigned char mac[6] = {0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff};
 	if (format_mac_address(mac) != "aa:bb:cc:dd:ee:ff") {
 		return 5;
+	}
+	// describe() returns the mapped value for a known key and a safe fallback for an unknown key
+	// (never dereferences map::end()).
+	const unordered_map<int, string> table = {{0, "zero"}};
+	if (describe(table, 0) != "zero") {
+		return 6;
+	}
+	if (describe(table, 999).rfind("Unknown", 0) != 0) {
+		return 7;
 	}
 	return 0;
 }
@@ -173,9 +191,9 @@ int main(int argc, char* argv[]) {
 			std::cout << x.second << ": NA" << endl;
 		}
 	}
-	cout << "Virtualiz. class :" << descByVirt.find(exec_env_info.virtualization)->second << endl;
-	cout << "Virtualiz. detail:" << descByVirtDetail.find(exec_env_info.virtualization_detail)->second << endl;
-	cout << "Cloud provider   :" << descByCloudProvider.find(exec_env_info.cloud_provider)->second << endl;
+	cout << "Virtualiz. class :" << describe(descByVirt, exec_env_info.virtualization) << endl;
+	cout << "Virtualiz. detail:" << describe(descByVirtDetail, exec_env_info.virtualization_detail) << endl;
+	cout << "Cloud provider   :" << describe(descByCloudProvider, exec_env_info.cloud_provider) << endl;
 
 	std::vector<license::os::OsAdapterInfo> adapterInfos;
 	FUNCTION_RETURN ret = license::os::getAdapterInfos(adapterInfos);
@@ -220,8 +238,10 @@ int main(int argc, char* argv[]) {
 	if (find_license_with_env_var) {
 		char* env_var_value = getenv(LCC_LICENSE_LOCATION_ENV_VAR);
 		if (env_var_value != nullptr && env_var_value[0] != '\0') {
-			cout << "environment variable [" << LCC_LICENSE_LOCATION_ENV_VAR << "] value [" << env_var_value << "]"
-				 << endl;
+			// Redact the env-var value by default: a license path can carry user/host/tenant info
+			// (audit R6.6). The file-open loop below still uses the raw value; only the echo is redacted.
+			cout << "environment variable [" << LCC_LICENSE_LOCATION_ENV_VAR << "] value ["
+				 << hardware_value_for_output(string(env_var_value), raw_hardware_output) << "]" << endl;
 			const vector<string> declared_licenses = license::split_string(string(env_var_value), ';');
 			for (string fname : declared_licenses) {
 				ifstream license_file(fname);
