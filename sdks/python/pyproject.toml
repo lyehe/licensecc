@@ -29,6 +29,7 @@ test = ["pytest>=7.0"]
 [project.urls]
 Homepage = "https://github.com/open-license-manager/licensecc"
 Source = "https://github.com/open-license-manager/licensecc"
+Issues = "https://github.com/open-license-manager/licensecc/issues"
 
 [build-system]
 requires = ["hatchling"]

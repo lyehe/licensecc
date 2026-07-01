@@ -30,6 +30,15 @@
     <PackageTags>licensecc;licensing;rsa;token;verification</PackageTags>
     <PackageLicenseExpression>BSD-3-Clause</PackageLicenseExpression>
     <RepositoryUrl>https://github.com/open-license-manager/licensecc</RepositoryUrl>
+    <!-- R5.2 publish-readiness: project URL, a README that renders on NuGet, and a restore lockfile. -->
+    <PackageProjectUrl>https://github.com/open-license-manager/licensecc</PackageProjectUrl>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Pack the README (rendered on NuGet.org) from the SDK root. -->
+    <None Include="../../README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
 
 </Project>
