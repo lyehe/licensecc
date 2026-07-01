@@ -26,6 +26,10 @@
     },
     "./webhooks/webhook": {
       "default": "./src/webhooks/webhook.mjs"
+    },
+    "./audit/audit_digest": {
+      "types": "./src/audit/audit_digest.d.ts",
+      "default": "./src/audit/audit_digest.mjs"
     }
   },
   "scripts": {

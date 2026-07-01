@@ -35,6 +35,7 @@ const API_ROUTES = [
   { method: "GET", path: "/api/admin/report" },
   { method: "GET", path: "/api/admin/report/timeseries" },
   { method: "GET", path: "/api/admin/report/expiring" },
+  { method: "GET", path: "/api/admin/audit/verify" },
   { method: "GET", path: "/api/admin/customers" },
   { method: "GET", path: "/api/admin/customers/{id}" },
   { method: "POST", path: "/api/admin/customers/{id}/disable" },

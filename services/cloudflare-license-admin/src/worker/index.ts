@@ -39,6 +39,7 @@ import type {
   MutationResult,
 } from "@licensecc/cloudflare-licensing-backend/entitlements/entitlement_mutation";
 import { stampFromPolicy, buildPolicyStampStatement } from "@licensecc/cloudflare-licensing-backend/entitlements/policy";
+import { verifyAuditChain } from "@licensecc/cloudflare-licensing-backend/audit/audit_digest";
 
 export interface Env {
   DB: D1DatabaseLike;
@@ -2120,6 +2121,18 @@ async function reportTimeseries(request: Request, env: Env, requestIdValue: stri
 // whose valid_until is in the open window (now, now + within_days*86400], ordered soonest-first,
 // cursor-paginated. days_left is ceil((valid_until - now)/86400) so a row expiring in <1 day still
 // reports 1, never 0.
+// GET /api/admin/audit/verify (reader+admin). Replays the tamper-evident hash chain over
+// entitlement_events (audit R6.4) and reports whether it verifies. status 200 = the check ran; the
+// tamper signal is data.audit_chain.ok (false + brokenAt/reason when a covered event was altered/deleted).
+async function auditVerify(env: Env, requestIdValue: string): Promise<Response> {
+  try {
+    const result = await verifyAuditChain(env);
+    return envelope(requestIdValue, result.ok ? "audit_chain_ok" : "audit_chain_broken", { audit_chain: result }, 200);
+  } catch {
+    return envelope(requestIdValue, "audit_verify_failed", undefined, 503);
+  }
+}
+
 async function reportExpiring(request: Request, env: Env, requestIdValue: string): Promise<Response> {
   const url = new URL(request.url);
   const now = Math.floor(Date.now() / 1000);
@@ -2248,6 +2261,9 @@ async function handleApi(request: Request, env: Env): Promise<Response> {
   }
   if (request.method === "GET" && url.pathname === "/api/admin/report/expiring") {
     return reportExpiring(request, env, id);
+  }
+  if (request.method === "GET" && url.pathname === "/api/admin/audit/verify") {
+    return auditVerify(env, id);
   }
   if (request.method === "GET" && url.pathname === "/api/admin/customers") {
     return listCustomers(request, env, id);

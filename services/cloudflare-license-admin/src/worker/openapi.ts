@@ -203,6 +203,22 @@ const paths: Record<string, Record<string, unknown>> = {
       },
     },
   },
+  "/api/admin/audit/verify": {
+    get: {
+      tags: ["admin:reports"],
+      summary: "Verify the tamper-evident audit hash chain over entitlement_events (reader+admin)",
+      operationId: "verifyAuditChain",
+      security: ADMIN_SECURITY,
+      responses: {
+        "200": okResponse(
+          "The chain-verification result; data.audit_chain.ok is false with brokenAt/reason when tampering is detected.",
+          "#/components/schemas/AuditChainData",
+          "audit_chain_ok",
+        ),
+        ...ADMIN_AUTH_ERRORS,
+      },
+    },
+  },
   "/api/admin/customers": {
     get: {
       tags: ["admin:customers"],
@@ -1389,6 +1405,21 @@ export const openApiDocument: OpenApiDocument = {
                 denial_rate: { type: "number", description: "denials / (checkouts + denials); 0 when the bucket saw no attempts (the upsell signal)." },
                 fulfillment_events: { type: "integer", description: "order_events received_at in this bucket." },
               },
+            },
+          },
+        },
+      },
+      AuditChainData: {
+        type: "object",
+        properties: {
+          audit_chain: {
+            type: "object",
+            required: ["ok", "checked"],
+            properties: {
+              ok: { type: "boolean", description: "True when the hash chain over entitlement_events verifies intact." },
+              checked: { type: "integer", description: "Number of digest segments verified." },
+              brokenAt: { type: "integer", description: "audit_digests.id of the segment that diverged (present when ok=false)." },
+              reason: { type: "string", description: "prev_digest_mismatch | event_count_mismatch | digest_mismatch (present when ok=false)." },
             },
           },
         },
