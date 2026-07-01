@@ -835,7 +835,16 @@ export async function handleOrderIngest(request, env) {
     return jsonResponse({ ok: false, code: "invalid_order" }, 400);
   }
 
-  // Step 0f — spend the (key_id, event_id) replay nonce LAST (after verify+skew).
+  // soft mode: observe-only. Verify + normalize succeeded, but NEVER mutate AND never spend the
+  // replay nonce. Spending it here (before this return) permanently burned the (key_id,event_id):
+  // after the operator flipped soft->required, the first real delivery of that event was rejected
+  // as 'replayed' and never applied. The replay/skew guards protect the APPLY path, so they run
+  // only in required mode; a later required-mode (re)delivery of the same event applies it once.
+  if (mode === "soft") {
+    return jsonResponse({ ok: true, code: "observed", license_fingerprint: null }, 200);
+  }
+
+  // Step 0f — spend the (key_id, event_id) replay nonce LAST (after verify+skew), required mode only.
   const maxSkew = clampMaxSkew(env?.ORDER_MAX_SKEW_SECONDS);
   const nonceState = await spendOrderNonce(env, hmac.keyId, order.event_id, now, maxSkew);
   if (nonceState === "replayed") {
@@ -843,11 +852,6 @@ export async function handleOrderIngest(request, env) {
   }
   if (nonceState === "error") {
     return jsonResponse({ ok: false, code: "write_failed" }, 503);
-  }
-
-  // soft mode: observe-only. Verify + normalize succeeded, but NEVER mutate.
-  if (mode === "soft") {
-    return jsonResponse({ ok: true, code: "observed", license_fingerprint: null }, 200);
   }
 
   const digest = await payloadDigest(order);
