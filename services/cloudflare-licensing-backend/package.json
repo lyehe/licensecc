@@ -34,7 +34,7 @@
     "test:openapi": "npm run build && node --test test/openapi-spec.test.mjs",
     "test:sql": "npm run build && node --experimental-sqlite --test test/sql/*.mjs test/fulfillment/order_ingest_exactly_once.test.mjs test/fulfillment/account_isolation.test.mjs",
     "test:e2e": "npm --prefix ../cloudflare-license-admin run build:worker && npm run build && node --test test/e2e/*.mjs",
-    "test:pg": "node --test supabase-postgres/translate.test.mjs supabase-postgres/order-apply-pg.test.mjs",
+    "test:pg": "node --test supabase-postgres/translate.test.mjs supabase-postgres/order-apply-pg.test.mjs supabase-postgres/pg-route-guard.test.mjs",
     "lint": "node scripts/lint.mjs",
     "schema:parity": "uv run --no-project python scripts/check-schema-parity.py",
     "schema:parity:pg": "uv run --no-project --with sqlglot python scripts/check-pg-parity.py",

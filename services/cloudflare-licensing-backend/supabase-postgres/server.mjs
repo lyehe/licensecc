@@ -37,6 +37,7 @@ import { webcrypto } from "node:crypto";
 
 import { createPostgresDatabase, closePool } from "./db-postgres.mjs";
 import { CLIENT_IP_HEADERS, clientIpFromRequest, assertSafeBind } from "../host-common.mjs";
+import { isSupportedPgRoute } from "./pg-route-guard.mjs";
 
 // --- Node <20 crypto shim (the Worker uses crypto.subtle for RSA sign / ECDSA verify) ---
 if (typeof globalThis.crypto === "undefined") {
@@ -176,6 +177,20 @@ async function webResponseToNode(response, res) {
 const server = createServer(async (req, res) => {
   try {
     const request = await nodeRequestToWeb(req);
+    // R3.2: this adapter supports ONLY the verify path; fence everything else so a misdirected
+    // request fails fast and clearly instead of hitting untranslatable order/webhook/mutator SQL.
+    const pathname = new URL(request.url).pathname;
+    if (!isSupportedPgRoute(request.method, pathname)) {
+      res.writeHead(501, { "content-type": "application/json" });
+      res.end(
+        JSON.stringify({
+          ok: false,
+          code: "not_supported_on_postgres_adapter",
+          error: "the Postgres adapter serves only GET /health and POST /v1/verify; other routes are D1-only",
+        }),
+      );
+      return;
+    }
     const response = await worker.fetch(request, buildEnv());
     await webResponseToNode(response, res);
   } catch (error) {
