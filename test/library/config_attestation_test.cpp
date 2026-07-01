@@ -348,5 +348,30 @@ BOOST_AUTO_TEST_CASE(golden_config_token_verifies_via_embedded_ring_without_seam
 }
 #endif  // LCC_CONFIG_ATTESTATION_PUBLIC_KEY_RECORDS
 
+BOOST_AUTO_TEST_CASE(verifier_rejects_wrong_algorithm) {
+	// A non-pinned signature algorithm (even a plausible one) is rejected -- alg agility is not
+	// implied by the signed token; only rsa-pkcs1-sha256 is accepted.
+	auto e = base_expected();
+	auto c = make_claims(e);
+	c.algorithm = "rsa-pss-sha256";
+	const string token = token_for(c);
+	string error;
+	config_attestation::ConfigVerifyFailure failure = config_attestation::ConfigVerifyFailure::None;
+	BOOST_CHECK(!config_attestation::verify_config_envelope(token, e, nullptr, error, failure));
+	BOOST_CHECK(failure != config_attestation::ConfigVerifyFailure::None);
+}
+
+BOOST_AUTO_TEST_CASE(verifier_rejects_future_issued_token_beyond_clock_skew) {
+	// A token issued more than the 300s skew in the future relative to `now` is rejected -- the
+	// defense against a host clock rolled back to before the token was issued. Here now=100 and
+	// issued-at=900 (make_claims default), an 800s future issuance, well beyond the skew.
+	auto e = base_expected(100);
+	const string token = token_for(make_claims(e));
+	string error;
+	config_attestation::ConfigVerifyFailure failure = config_attestation::ConfigVerifyFailure::None;
+	BOOST_CHECK(!config_attestation::verify_config_envelope(token, e, nullptr, error, failure));
+	BOOST_CHECK(failure == config_attestation::ConfigVerifyFailure::Expired);
+}
+
 }  // namespace test
 }  // namespace license

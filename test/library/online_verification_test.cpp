@@ -11,6 +11,7 @@
 #include <fstream>
 #include <memory>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -1331,6 +1332,25 @@ BOOST_AUTO_TEST_CASE(release_license_without_readable_license_does_not_call_call
 	// No readable local license => no seat binding => release never reaches the network.
 	BOOST_CHECK(result != LICENSE_OK);
 	BOOST_CHECK_EQUAL(online_state.calls, 0);
+}
+
+BOOST_AUTO_TEST_CASE(evaluate_contains_a_throwing_online_callback) {
+	// A host online_check that throws must not cross the extern "C" boundary: evaluate()'s
+	// try/catch converts it to a fail-closed online failure, never a crash.
+	online_verification::reset_revocation_floors_for_tests();
+	online_verification::OnlineVerificationRequest request;
+	request.policy = online_verification::OnlinePolicy::Require;
+	request.online_check = [](void*, const LccOnlineRequest*, char*, size_t*) -> LCC_ONLINE_CALLBACK_STATUS {
+		throw std::runtime_error("online callback boom");
+	};
+	request.project = LCC_PROJECT_NAME;
+	request.feature = kOnlineFeatureName;
+	request.license_fingerprint = std::string(LCC_API_ONLINE_LICENSE_FINGERPRINT_SIZE, 'a');
+
+	const online_verification::OnlineVerificationResult result = online_verification::evaluate(request);
+	BOOST_CHECK(result.failed());
+	BOOST_CHECK_EQUAL(result.event_type, LICENSE_ONLINE_VERIFICATION_FAILED);
+	online_verification::reset_revocation_floors_for_tests();
 }
 
 }  // namespace test
