@@ -22,6 +22,7 @@ class RejectionCode(str, enum.Enum):
 
     # Signature / key selection
     UNKNOWN_KEY_ID = "unknown_key_id"
+    RETIRED_KEY_ID = "retired_key_id"
     SIGNATURE_INVALID = "signature_invalid"
     KEY_TOO_WEAK = "key_too_weak"
     MISSING_SIGNATURE_METADATA = "missing_signature_metadata"

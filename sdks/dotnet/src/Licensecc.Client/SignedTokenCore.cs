@@ -166,9 +166,10 @@ namespace Licensecc.Client
         /// rsa-pkcs1-sha256, a known key-id, a key-id that matches its DER digest, and a >= 3072-bit key.
         /// </summary>
         public static bool TryVerifySignature(byte[] payload, byte[] signature, string payloadText,
-            TrustedKeyRing keyRing, out string error)
+            TrustedKeyRing keyRing, IReadOnlySet<string>? retiredKeyIds, out bool retired, out string error)
         {
             error = string.Empty;
+            retired = false;
 
             if (!ExtractPreverifyField(payloadText, "alg", out string algorithm) ||
                 !ExtractPreverifyField(payloadText, "key-id", out string keyId))
@@ -180,6 +181,15 @@ namespace Licensecc.Client
             if (algorithm != AlgorithmRsaPkcs1Sha256)
             {
                 error = "unsupported signature algorithm";
+                return false;
+            }
+
+            // A retired key-id is rejected before crypto and before trusted-key selection, so a
+            // rotated-out key that is still in the ring for continuity no longer verifies.
+            if (retiredKeyIds != null && retiredKeyIds.Contains(keyId))
+            {
+                retired = true;
+                error = "retired key-id";
                 return false;
             }
 

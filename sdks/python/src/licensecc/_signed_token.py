@@ -174,11 +174,15 @@ def verify_payload_signature(
     signature_bytes: bytes,
     trusted_keys: list[TrustedPublicKey],
     min_public_key_bits: int,
+    retired_key_ids: "set[str] | None" = None,
 ) -> VerificationResult | None:
     """RSA-PKCS1-SHA256 verify against the key chosen by the payload's key-id.
 
     Returns None on success, or a typed rejection. The key is selected strictly
-    by the ``key-id`` claim: an unknown key-id is rejected before any crypto.
+    by the ``key-id`` claim: an unknown key-id is rejected before any crypto. A
+    key-id in ``retired_key_ids`` is rejected before crypto too, so a rotated-out
+    key that is still present in the trusted ring for continuity no longer
+    verifies -- matching the C++ verifier's retired-key list.
     """
     declared_alg = extract_preverify_field(payload_text, "alg")
     key_id = extract_preverify_field(payload_text, "key-id")
@@ -189,6 +193,10 @@ def verify_payload_signature(
     if declared_alg != ALG_RSA_PKCS1_SHA256:
         return VerificationResult.reject(
             RejectionCode.METADATA_MISMATCH, f"unsupported alg {declared_alg!r}"
+        )
+    if retired_key_ids and key_id in retired_key_ids:
+        return VerificationResult.reject(
+            RejectionCode.RETIRED_KEY_ID, f"key-id {key_id!r} is retired"
         )
 
     selected: TrustedPublicKey | None = None

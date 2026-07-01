@@ -267,3 +267,20 @@ def test_never_raises_on_garbage(trusted):
         )
         assert result.ok is False
         assert result.code is not None
+
+
+def test_retired_key_id_rejected_before_crypto(online_golden, trusted):
+    # The golden token's own key-id, marked retired, is rejected even though the key is still
+    # in the trusted ring for continuity (matches the C++ retired-key list, before any crypto).
+    result = verify_online_assertion(
+        online_golden.token, _expected(), trusted, retired_key_ids={online_golden.key_id}
+    )
+    assert result.ok is False
+    assert result.code == RejectionCode.RETIRED_KEY_ID
+
+
+def test_retired_set_not_matching_key_id_still_verifies(online_golden, trusted):
+    result = verify_online_assertion(
+        online_golden.token, _expected(), trusted, retired_key_ids={"sha256:" + "0" * 64}
+    )
+    assert result.ok

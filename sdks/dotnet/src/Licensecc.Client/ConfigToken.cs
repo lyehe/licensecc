@@ -48,6 +48,11 @@ namespace Licensecc.Client
 
         /// <summary>Trusted key ring the signature is verified against. Required.</summary>
         public TrustedKeyRing? TrustedKeys { get; set; }
+
+        /// <summary>Optional set of retired key-ids. A token whose key-id is in this set is rejected
+        /// before crypto (returns <see cref="VerifyFailureCode.RetiredKey"/>), even if the key is still
+        /// present in <see cref="TrustedKeys"/>. Mirrors the C++ verifier's retired-key list.</summary>
+        public IReadOnlySet<string>? RetiredKeyIds { get; set; }
     }
 
     /// <summary>
@@ -79,9 +84,10 @@ namespace Licensecc.Client
             string payloadText = System.Text.Encoding.UTF8.GetString(payload);
 
             if (!SignedTokenCore.TryVerifySignature(payload, signature, payloadText, expected.TrustedKeys,
-                    out string signatureError))
+                    expected.RetiredKeyIds, out bool retired, out string signatureError))
             {
-                return VerifyResult<ConfigTokenClaims>.Failure(VerifyFailureCode.Signature, signatureError);
+                return VerifyResult<ConfigTokenClaims>.Failure(
+                    retired ? VerifyFailureCode.RetiredKey : VerifyFailureCode.Signature, signatureError);
             }
 
             if (!TryParseClaims(payloadText, out ConfigTokenClaims claims, out string parseError))

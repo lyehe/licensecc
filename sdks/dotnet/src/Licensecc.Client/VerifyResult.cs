@@ -19,6 +19,10 @@ namespace Licensecc.Client
         /// <summary>Signature did not verify, key-id unknown, or the key failed policy (e.g. &lt; 3072 bits).</summary>
         Signature,
 
+        /// <summary>The token's key-id is in the caller's retired-key set; rejected before crypto,
+        /// even if the key is still present in the trusted ring. Mirrors the C++ retired-key list.</summary>
+        RetiredKey,
+
         /// <summary>Canonical payload malformed: wrong field order, missing/extra/duplicate field,
         /// missing trailing newline, embedded CR, or a non-numeric integer field.</summary>
         Payload,

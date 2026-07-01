@@ -141,8 +141,12 @@ def verify_config_token(
     token: str,
     expected: ConfigAttestationExpected,
     trusted_keys: list[TrustedPublicKey],
+    retired_key_ids: "set[str] | None" = None,
 ) -> VerificationResult:
-    """Verify an ``lcccfg1`` token end-to-end. Returns a typed result, never raises."""
+    """Verify an ``lcccfg1`` token end-to-end. Returns a typed result, never raises.
+
+    A ``retired_key_ids`` key-id is rejected before crypto (matches the C++ verifier).
+    """
     envelope, rejection = split_envelope(token, ENVELOPE_PREFIX)
     if rejection is not None:
         return rejection
@@ -153,6 +157,7 @@ def verify_config_token(
         envelope.signature_bytes,
         trusted_keys,
         MIN_PUBLIC_KEY_BITS,
+        retired_key_ids,
     )
     if rejection is not None:
         return rejection

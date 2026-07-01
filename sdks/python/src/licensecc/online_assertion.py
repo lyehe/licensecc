@@ -183,12 +183,14 @@ def verify_online_assertion(
     token: str,
     expected: OnlineAssertionExpected,
     trusted_keys: list[TrustedPublicKey],
+    retired_key_ids: "set[str] | None" = None,
 ) -> VerificationResult:
     """Verify an ``lccoa1`` token end-to-end. Returns a typed result, never raises.
 
     Order of checks (fail-closed, matching the C++ verifier):
       1. split + base64-decode the 3-part envelope (prefix/arity/canonical b64),
-      2. RSA-PKCS1-SHA256 verify against the key selected by ``key-id``,
+      2. RSA-PKCS1-SHA256 verify against the key selected by ``key-id`` (a
+         ``retired_key_ids`` key-id is rejected before crypto),
       3. parse the canonical payload (order/duplicates/trailing/values),
       4. validate claims (purpose/alg/version/status, binding, hex shape, time
          window, cache window, revocation floor).
@@ -203,6 +205,7 @@ def verify_online_assertion(
         envelope.signature_bytes,
         trusted_keys,
         MIN_PUBLIC_KEY_BITS,
+        retired_key_ids,
     )
     if rejection is not None:
         return rejection

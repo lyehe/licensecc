@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using Licensecc.Client;
@@ -285,6 +286,27 @@ namespace Licensecc.Client.Tests
             VerifyResult<OnlineAssertionClaims> result = OnlineAssertionVerifier.Verify(Token, expected);
             Assert.IsFalse(result.Ok, "Expected rejection (" + expectedCode + ") but token was accepted.");
             Assert.AreEqual(expectedCode, result.Code, "Detail: " + result.Detail);
+        }
+
+        [TestMethod]
+        public void Negative_RetiredKeyId_RejectedBeforeCrypto()
+        {
+            // The golden token's own key-id, marked retired, is rejected even though the key is still
+            // in the trusted ring for continuity (matches the C++ retired-key list, before crypto).
+            OnlineAssertionExpected expected = BaseExpected();
+            expected.RetiredKeyIds = new HashSet<string> { KeyId };
+            VerifyResult<OnlineAssertionClaims> result = OnlineAssertionVerifier.Verify(Token, expected);
+            Assert.IsFalse(result.Ok);
+            Assert.AreEqual(VerifyFailureCode.RetiredKey, result.Code);
+        }
+
+        [TestMethod]
+        public void Positive_RetiredSetNotMatchingKeyId_StillVerifies()
+        {
+            OnlineAssertionExpected expected = BaseExpected();
+            expected.RetiredKeyIds = new HashSet<string> { "sha256:" + new string('0', 64) };
+            VerifyResult<OnlineAssertionClaims> result = OnlineAssertionVerifier.Verify(Token, expected);
+            Assert.IsTrue(result.Ok, result.Detail);
         }
 
         private static byte[] HexToBytes(string hex)
