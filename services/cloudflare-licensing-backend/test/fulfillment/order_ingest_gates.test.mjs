@@ -208,3 +208,64 @@ test("soft mode observes (verify+normalize) but NEVER mutates", async () => {
   assert.equal(body.license_fingerprint, null);
   assert.equal(calls.batch, 0, "soft mode never mutates");
 });
+
+// --- R2.1 signer-scope authz -------------------------------------------------
+
+test("signer scope required + out-of-project -> 403 signer_scope_forbidden (no mutation)", async () => {
+  const { db, calls } = stubDb({ failBatch: true });
+  const env = baseEnv({
+    DB: db,
+    ORDER_SIGNER_SCOPE_MODE: "required",
+    ORDER_SIGNER_SCOPES: JSON.stringify({ [KEY_ID]: { project: "OTHER" } }),
+  });
+  const res = await handleOrderIngest(await signedRequest(env, validBody()), env);
+  assert.equal(res.status, 403);
+  assert.equal((await res.json()).code, "signer_scope_forbidden");
+  assert.equal(calls.batch, 0, "an out-of-scope signer never reaches the mutator");
+});
+
+test("signer scope required + no scope entry for the key -> 403 (fail-closed)", async () => {
+  const { db } = stubDb();
+  const env = baseEnv({
+    DB: db,
+    ORDER_SIGNER_SCOPE_MODE: "required",
+    ORDER_SIGNER_SCOPES: JSON.stringify({ "some-other-key": { project: "DEFAULT" } }),
+  });
+  const res = await handleOrderIngest(await signedRequest(env, validBody()), env);
+  assert.equal(res.status, 403);
+  assert.equal((await res.json()).code, "signer_scope_forbidden");
+});
+
+test("signer scope required but no scope map -> 503 config_error", async () => {
+  const { db } = stubDb();
+  const env = baseEnv({ DB: db, ORDER_SIGNER_SCOPE_MODE: "required" });
+  const res = await handleOrderIngest(await signedRequest(env, validBody()), env);
+  assert.equal(res.status, 503);
+  assert.equal((await res.json()).code, "config_error");
+});
+
+test("signer scope required + in-scope project -> passes the scope gate", async () => {
+  const { db } = stubDb({ failBatch: false });
+  const env = baseEnv({
+    DB: db,
+    ORDER_SIGNER_SCOPE_MODE: "required",
+    ORDER_SIGNER_SCOPES: JSON.stringify({ [KEY_ID]: { project: "DEFAULT" } }),
+  });
+  const res = await handleOrderIngest(await signedRequest(env, validBody()), env);
+  assert.notEqual(res.status, 403);
+  assert.notEqual((await res.json()).code, "signer_scope_forbidden");
+});
+
+test("signer scope soft + out-of-project -> observes, does NOT block", async () => {
+  const { db, calls } = stubDb({ failBatch: true });
+  const env = baseEnv({
+    DB: db,
+    ORDER_INGEST_MODE: "soft",
+    ORDER_SIGNER_SCOPE_MODE: "soft",
+    ORDER_SIGNER_SCOPES: JSON.stringify({ [KEY_ID]: { project: "OTHER" } }),
+  });
+  const res = await handleOrderIngest(await signedRequest(env, validBody()), env);
+  assert.equal(res.status, 200);
+  assert.equal((await res.json()).code, "observed");
+  assert.equal(calls.batch, 0);
+});

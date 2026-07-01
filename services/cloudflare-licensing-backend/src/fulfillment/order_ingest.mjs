@@ -110,6 +110,47 @@ function ingestMode(env) {
   return "required";
 }
 
+// --- ORDER_SIGNER_SCOPE gate (audit R2.1) ------------------------------------
+// Bind each order-HMAC key-id to an allowed project/customer so ONE shared signing key can no longer
+// create/revoke ANY customer's entitlements. Staged off (default, back-compat) -> soft (log the
+// violation, still process) -> required (deny out-of-scope). ORDER_SIGNER_SCOPES is a JSON map
+// { "<keyId>": { "project"?: "<p>", "customer_id"?: "<c>" } }; a keyId absent from the map is
+// out-of-scope in required mode (fail-closed: every signer must declare its scope).
+
+/** off (default) | soft | required. */
+function signerScopeMode(env) {
+  const raw = env?.ORDER_SIGNER_SCOPE_MODE;
+  return raw === "soft" || raw === "required" ? raw : "off";
+}
+
+/** Parse ORDER_SIGNER_SCOPES; null when unset/blank/malformed. */
+function loadSignerScopes(env) {
+  const raw = env?.ORDER_SIGNER_SCOPES;
+  if (typeof raw !== "string" || raw.length === 0) return null;
+  try {
+    const obj = JSON.parse(raw);
+    return obj !== null && typeof obj === "object" && !Array.isArray(obj) ? obj : null;
+  } catch {
+    return null;
+  }
+}
+
+/** null when in-scope, else a short reason string. `scopes` is the parsed map (non-null). */
+function signerScopeViolation(scopes, keyId, order) {
+  const scope = scopes[keyId];
+  if (scope === null || typeof scope !== "object") {
+    return "no scope entry for signer key-id";
+  }
+  if (typeof scope.project === "string" && scope.project.length > 0 && order.project !== scope.project) {
+    return "order project is outside the signer's scope";
+  }
+  const orderCustomer = order.customer?.id ?? null;
+  if (typeof scope.customer_id === "string" && scope.customer_id.length > 0 && orderCustomer !== scope.customer_id) {
+    return "order customer is outside the signer's scope";
+  }
+  return null;
+}
+
 // --- nonce spend (Step 0, runs LAST, fail-closed) ----------------------------
 
 /**
@@ -833,6 +874,25 @@ export async function handleOrderIngest(request, env) {
   const order = normalizeOrderEvent(parsedBody, now);
   if (order.error) {
     return jsonResponse({ ok: false, code: "invalid_order" }, 400);
+  }
+
+  // Step 0e2 — signer-scope authz (audit R2.1). Orthogonal to the ingest mode: a signer that is not
+  // allowed to write this project/customer is denied even in ingest-soft (it is an authz failure, not
+  // a mutation). Runs before the ingest-soft observe-return so violations are surfaced there too.
+  const scopeMode = signerScopeMode(env);
+  if (scopeMode !== "off") {
+    const scopes = loadSignerScopes(env);
+    if (scopes === null) {
+      // Enforcement requested but no usable scope map => operator misconfig, fail-closed 503.
+      return jsonResponse({ ok: false, code: "config_error" }, 503);
+    }
+    const violation = signerScopeViolation(scopes, hmac.keyId, order);
+    if (violation !== null) {
+      if (scopeMode === "required") {
+        return jsonResponse({ ok: false, code: "signer_scope_forbidden" }, 403);
+      }
+      console.warn(`order signer scope violation (soft): key=${hmac.keyId}: ${violation}`);
+    }
   }
 
   // soft mode: observe-only. Verify + normalize succeeded, but NEVER mutate AND never spend the
