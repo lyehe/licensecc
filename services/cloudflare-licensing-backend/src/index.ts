@@ -2199,6 +2199,31 @@ async function handleEmergencyRoute(
   return json({ ok: false, code: "not_found" }, 404);
 }
 
+// Config-consistency warnings (audit R2.3): surface half-configured deploys where a security
+// secret is present but its enforcing mode is left off, so an operator who set the peppers/keys
+// but forgot to flip a mode sees it on /health instead of silently shipping a permissive posture.
+function configConsistencyWarnings(env: Env): string[] {
+  const warnings: string[] = [];
+  const has = (v: string | undefined): boolean => typeof v === "string" && v.length > 0;
+  if (has(env.ACCOUNT_TOKEN_PEPPERS) && env.ACCOUNT_TOKEN_MODE !== "required") {
+    warnings.push(
+      "ACCOUNT_TOKEN_PEPPERS is set but ACCOUNT_TOKEN_MODE is not 'required' — per-customer isolation is not enforced",
+    );
+  }
+  if (has(env.ONLINE_SIGNING_PRIVATE_KEY_PKCS8_PEM) && (env.REQUEST_SIGNATURE_MODE ?? "off") === "off") {
+    warnings.push(
+      "online signing is configured but REQUEST_SIGNATURE_MODE is off — request device-proofs are not enforced",
+    );
+  }
+  const scoped = env as unknown as { ORDER_SIGNER_SCOPES?: string; ORDER_SIGNER_SCOPE_MODE?: string };
+  if (has(scoped.ORDER_SIGNER_SCOPES) && (scoped.ORDER_SIGNER_SCOPE_MODE ?? "off") === "off") {
+    warnings.push(
+      "ORDER_SIGNER_SCOPES is set but ORDER_SIGNER_SCOPE_MODE is off — order signer scoping is not enforced",
+    );
+  }
+  return warnings;
+}
+
 export default {
   async fetch(request: Request, env: Env, ctx?: ExecutionContextLike): Promise<Response> {
     try {
@@ -2215,7 +2240,12 @@ export default {
         });
       }
       if (request.method === "GET" && url.pathname === "/health") {
-        return json({ ok: true, service: "licensecc-online-verifier" });
+        const configWarnings = configConsistencyWarnings(env);
+        return json({
+          ok: true,
+          service: "licensecc-online-verifier",
+          ...(configWarnings.length > 0 ? { config_warnings: configWarnings } : {}),
+        });
       }
       if (request.method === "POST" && url.pathname === "/v1/verify") {
         return await handleVerify(request, env);
