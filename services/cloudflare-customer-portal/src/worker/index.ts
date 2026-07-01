@@ -418,8 +418,15 @@ async function apiAction(
   // body NEVER supplies the fingerprint — it is server-resolved from the session-bound entitlement.
   if (fingerprint === null) return envelope(reqId, "not_found", undefined, 404);
 
-  // Invariant 2: mint takes the SESSION ONLY — no body field reaches the mint.
-  const minted = await mintSessionToken(env, session, { operationClass: "action", now });
+  // Invariant 2: identity is SESSION-ONLY (session.customer_id). The narrow (project,feature,operation)
+  // is the already-owner-verified tuple + the server-controlled operation; the mint re-verifies it
+  // against the customer's own entitlements and scopes the token to exactly that (audit R2.5 least
+  // privilege) — a forged/unowned tuple still mints nothing.
+  const minted = await mintSessionToken(env, session, {
+    operationClass: "action",
+    now,
+    narrow: { project, feature, operation },
+  });
   if (minted.code === "config_error") return envelope(reqId, "config_error", undefined, 503);
   if (!minted.ok) return envelope(reqId, "not_found", undefined, 404);
 
@@ -452,7 +459,12 @@ async function apiDownload(
   const fingerprint = await resolveOwnedFingerprint(env, session.customer_id, project, feature);
   if (fingerprint === null) return envelope(reqId, "not_found", undefined, 404);
 
-  const minted = await mintSessionToken(env, session, { operationClass: "action", now });
+  // Download performs an activate; scope the token to exactly this owned tuple + "activate" (R2.5).
+  const minted = await mintSessionToken(env, session, {
+    operationClass: "action",
+    now,
+    narrow: { project, feature, operation: "activate" },
+  });
   if (minted.code === "config_error") return envelope(reqId, "config_error", undefined, 503);
   if (!minted.ok) return envelope(reqId, "not_found", undefined, 404);
 

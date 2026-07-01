@@ -142,7 +142,9 @@ test("A's checkout on A's tuple proxies the SERVER-RESOLVED fingerprint with a r
     const scopes = JSON.parse(tok.scopes_json);
     assert.deepEqual(scopes.projects, ["DEFAULT"]);
     assert.deepEqual(scopes.features, ["DEFAULT"]);
-    assert.ok(Array.isArray(scopes.operations) && scopes.operations.includes("checkout"));
+    // R2.5 least privilege: the token is scoped to EXACTLY the one operation being proxied, not all
+    // five action ops (deepEqual, not includes -- the un-narrowed mint would carry all five here).
+    assert.deepEqual(scopes.operations, ["checkout"]);
     assert.ok(scopes.allow_all === undefined, "never allow_all");
     assert.ok(!scopes.projects.includes("*") && !scopes.features.includes("*"), "scope axes are never *");
     // ~120s TTL; +5 slop absorbs a Date.now() second-boundary between NOW capture and the worker call.

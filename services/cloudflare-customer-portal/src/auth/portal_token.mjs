@@ -43,7 +43,11 @@ function activePepper(env, peppers) {
  *   { ok:true,  raw, code:"ok" }         the ephemeral plaintext token (used ONCE, then discarded;
  *                                        never returned to the browser, never persisted client-side).
  */
-export async function mintSessionToken(env, session, { operationClass = "read", now = Math.floor(Date.now() / 1000) } = {}) {
+export async function mintSessionToken(
+  env,
+  session,
+  { operationClass = "read", now = Math.floor(Date.now() / 1000), narrow = null } = {},
+) {
   const customerId = session?.customer_id;
   if (typeof customerId !== "string" || customerId.length === 0) {
     return { ok: false, code: "config_error" };
@@ -58,13 +62,35 @@ export async function mintSessionToken(env, session, { operationClass = "read", 
     "SELECT DISTINCT project, feature FROM entitlements WHERE customer_id = ?",
   ).bind(customerId).all();
   const list = rows?.results ?? [];
-  const projects = [...new Set(list.map((r) => r.project))];
-  const features = [...new Set(list.map((r) => r.feature))];
-  if (projects.length === 0 || features.length === 0) {
+  const ownedProjects = [...new Set(list.map((r) => r.project))];
+  const ownedFeatures = [...new Set(list.map((r) => r.feature))];
+  if (ownedProjects.length === 0 || ownedFeatures.length === 0) {
     return { ok: false, code: "no_entitlements" };
   }
 
-  const operations = operationClass === "action" ? ACTION_OPERATIONS : READ_OPERATIONS;
+  const classOps = operationClass === "action" ? ACTION_OPERATIONS : READ_OPERATIONS;
+
+  // Least privilege (audit R2.5): when the caller passes the single (project,feature,operation) it is
+  // about to proxy, scope the ephemeral token to exactly that tuple + that one op instead of ALL the
+  // customer's entitlements and ALL five action ops. The tuple is RE-VERIFIED against the customer's
+  // own entitlements here (the mint stays self-validating -- identity is still session.customer_id,
+  // and a tuple/op the customer does not own mints nothing), so this narrowing cannot widen scope.
+  let projects = ownedProjects;
+  let features = ownedFeatures;
+  let operations = classOps;
+  if (narrow && typeof narrow.project === "string" && typeof narrow.feature === "string") {
+    const owns = list.some((r) => r.project === narrow.project && r.feature === narrow.feature);
+    const op =
+      typeof narrow.operation === "string" && classOps.indexOf(narrow.operation) !== -1
+        ? narrow.operation
+        : null;
+    if (!owns || op === null) {
+      return { ok: false, code: "no_entitlements" };
+    }
+    projects = [narrow.project];
+    features = [narrow.feature];
+    operations = [op];
+  }
   const scopes = JSON.stringify({ projects, features, operations });
 
   // buildIssue mints an opaque lcca_ token, hashes it under the active pepper, and returns the INSERT
