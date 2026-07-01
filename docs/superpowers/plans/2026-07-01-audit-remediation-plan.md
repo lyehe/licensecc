@@ -26,6 +26,11 @@
 
 Priority logic: correctness before scale before ops before features; anything that is a *prerequisite* for a larger planned item (e.g. webhook tenant-scoping before a webhook UI) sequences ahead of it.
 
+## Progress
+
+- **Phase 1 — DONE (2026-07-01, pushed to lyehe).** R1.1 `lcc_verify_config_decision` mandatory floor (`0a53c44`), R1.2 Python `ok` fail-open (`9b68d4e`), R1.3 SDK retired-key enforcement Python+.NET (`10a4cc7`), R1.4/R1.6 config-freshness + throwing-callback fail-closed tests (`fa3a79d`), R1.5 C++ memory-safety edges (`f7924e6`), R3.1 Postgres-parity CI gate (`4548bc7`). ctest 44/44, pytest + dotnet green. Note: R1.4 verification revealed config already mirrors the online issued-at-future check (300s skew) — the "gap" was a missing *test*, now pinned. R1.6 covered throwing-callback + config negatives; the online empty-ring case is already covered by the existing unknown-key test; the end-to-end foreign-resign crack fixture is deferred (safe-by-construction, already unit-tested at the `verify_signature` layer).
+- **Phases 2–4 — in progress.**
+
 ---
 
 ## Phase 1 — Security correctness
