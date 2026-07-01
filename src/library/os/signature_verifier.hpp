@@ -396,8 +396,23 @@ inline unsigned int rsa_public_key_bits_from_pkcs1_der(const std::vector<uint8_t
 		offset != public_key_der.size()) {
 		return 0;
 	}
-	(void)exponent_start;
-	(void)exponent_length;
+	// Reject a pathological public exponent: e must be odd and >= 3. e=1 makes the
+	// signature a no-op (signature == message); e even (incl. 0/2) is not a valid RSA
+	// exponent. Keys are embedded and key_id-bound so this is defense-in-depth, but cheap.
+	while (exponent_length > 0 && public_key_der[exponent_start] == 0U) {
+		++exponent_start;
+		--exponent_length;
+	}
+	if (exponent_length == 0) {
+		return 0;  // e == 0
+	}
+	const uint8_t exponent_lsb = public_key_der[exponent_start + exponent_length - 1];
+	if ((exponent_lsb & 1U) == 0U) {
+		return 0;  // even exponent
+	}
+	if (exponent_length == 1 && exponent_lsb < 3U) {
+		return 0;  // e == 1
+	}
 	return signature_bit_length_from_big_endian(public_key_der, modulus_start, modulus_length);
 }
 

@@ -168,9 +168,15 @@ bool EventRegistry::turnErrorsIntoWarnings() {
 }
 
 void EventRegistry::exportLastEvents(AuditEvent *auditEvents, int nlogs) {
+	// Bounds guard: a non-positive nlogs would make sizeof(AuditEvent) * nlogs
+	// underflow to a huge size_t and OOB-memset. Callers pass a fixed positive
+	// count today, but keep the primitive self-safe.
+	if (auditEvents == nullptr || nlogs <= 0) {
+		return;
+	}
 	// zero the whole destination first so unused slots are well-defined for
 	// consumers iterating the array (e.g. print_error).
-	memset(auditEvents, 0, sizeof(AuditEvent) * nlogs);
+	memset(auditEvents, 0, sizeof(AuditEvent) * static_cast<size_t>(nlogs));
 	const int sizeToCopy = min(nlogs, (int)logs.size());
 	std::copy(logs.end() - sizeToCopy, logs.end(), auditEvents);
 }

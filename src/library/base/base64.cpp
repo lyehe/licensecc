@@ -6,8 +6,9 @@ using namespace std;
 
 const static char* b64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
-// maps A=>0,B=>1..
-const static unsigned char unb64[] = {
+// maps A=>0,B=>1.. Sized to a full 256 so any unsigned char index (0..255) is in
+// bounds; the initializer zero-fills the tail (the compiler errors if it overflows).
+const static unsigned char unb64[256] = {
 	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	// 10
 	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	// 20
 	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	// 30
@@ -34,7 +35,7 @@ const static unsigned char unb64[] = {
 	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	// 240
 	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	// 250
 	0,	0,	0,	0,	0,	0,
-};	// This array has 255 elements
+};	// 256 elements (indices 0..255)
 
 // review api
 static void add_CR_if_needed(string& encodeBuffer, int lineLenght) {
