@@ -1133,6 +1133,14 @@ async function handleVerify(request: Request, env: Env): Promise<Response> {
     project: verifyRequest.project,
     feature: verifyRequest.feature,
     licenseFingerprint: verifyRequest.license_fingerprint,
+    // device-hash is an ECHO, not a server attestation (audit R2.4): the C++ verifier checks the
+    // assertion's device-hash against the client's OWN sent value (expected.device_hash =
+    // request.device_hash), so it must equal what the caller sent. When binding is satisfied via the
+    // proven-ECDSA-device path with a non-matching self-asserted hash, the echoed value is the
+    // caller's own claim (not an attacker escalation -- it attests nothing the caller didn't already
+    // hold). Signing the entitlement's bound hash instead would break that echo-check for the proof
+    // path; making device-hash a server attestation is a coordinated signed-token-semantics change
+    // (version bump + golden-vector regen), deferred per the ABI landmine, not a server-only edit.
     deviceHash: verifyRequest.device_hash ?? "",
     nonce: verifyRequest.nonce,
     status: "ok",
