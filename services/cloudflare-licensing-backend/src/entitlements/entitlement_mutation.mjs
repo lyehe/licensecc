@@ -409,9 +409,13 @@ export async function transitionEntitlementDevice(env, key, deviceKeyId, deviceS
   const detail = `${action} ${shortDeviceKeyId(deviceKeyId)}${reason === "" ? "" : `: ${reason}`}`;
   // The entitlement write is a pure revocation_seq bump (status unchanged); RETURNING feeds the
   // audit event's SELECT and the response row. The device UPDATE rides in the SAME atomic batch.
+  // The bump is guarded by a device-EXISTS clause (mirroring the CLI's deviceExistsWhere): if the
+  // device is deleted in the tiny window between the pre-read above and this batch, the UPDATE
+  // matches 0 rows -> RETURNING is empty -> writeEntitlementWithAudit fails closed (no phantom
+  // seq bump + audit event for a device that is gone).
   const writeStatement = env.DB.prepare(
-    `UPDATE entitlements SET ${REVOCATION_SEQ_BUMP}, updated_at = ? WHERE project = ? AND feature = ? AND license_fingerprint = ? RETURNING ${ENTITLEMENT_COLUMNS}`,
-  ).bind(now, key.project, key.feature, key.license_fingerprint);
+    `UPDATE entitlements SET ${REVOCATION_SEQ_BUMP}, updated_at = ? WHERE project = ? AND feature = ? AND license_fingerprint = ? AND EXISTS (SELECT 1 FROM entitlement_devices WHERE project = ? AND feature = ? AND license_fingerprint = ? AND device_key_id = ?) RETURNING ${ENTITLEMENT_COLUMNS}`,
+  ).bind(now, key.project, key.feature, key.license_fingerprint, key.project, key.feature, key.license_fingerprint, deviceKeyId);
   const deviceStatement = env.DB.prepare(
     "UPDATE entitlement_devices SET status = ?, updated_at = ? WHERE project = ? AND feature = ? AND license_fingerprint = ? AND device_key_id = ?",
   ).bind(deviceStatus, now, key.project, key.feature, key.license_fingerprint, deviceKeyId);
