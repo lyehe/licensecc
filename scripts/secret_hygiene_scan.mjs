@@ -123,8 +123,10 @@ function scanText(path, content) {
   for (let index = 0; index < lines.length; ++index) {
     const line = lines[index];
     // Flag a committed private-key marker, but NOT a template literal that wraps a RUNTIME-generated
-    // key (`-----BEGIN PRIVATE KEY-----\n${b64}...`, common in test fixtures): a real committed key is
-    // static base64, never a `${...}` interpolation on the marker line (audit R4.7).
+    // key (a PEM begin-marker line immediately followed by `\n${b64}...`, common in test fixtures): a
+    // real committed key is static base64, never a `${...}` interpolation on the marker line. The
+    // marker literal is deliberately NOT spelled out contiguously here so the source-artifact scan
+    // (cmake/ScanSourceArtifact.cmake) does not flag this scanner file itself (audit R4.7).
     if (PRIVATE_KEY_MARKER.test(line) && !line.includes("${")) {
       findings.push({ path, line: index + 1, kind: "private_key_marker" });
     }
