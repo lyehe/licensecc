@@ -103,6 +103,7 @@ interface EventItem {
   actor: string;
   actor_type: string;
   revocation_seq: number;
+  detail: string;
   created_at: number;
 }
 
@@ -1564,7 +1565,7 @@ function App(): React.ReactElement {
             <button type="button" disabled={busy} onClick={() => void downloadCsv("/api/admin/events", "events.csv")}>Export CSV</button>
           </div>
           <table>
-            <thead><tr><th>Time</th><th>Event</th><th>Project</th><th>Feature</th><th>Fingerprint</th><th>Source</th><th>Actor</th><th>Seq</th></tr></thead>
+            <thead><tr><th>Time</th><th>Event</th><th>Project</th><th>Feature</th><th>Fingerprint</th><th>Source</th><th>Actor</th><th>Detail</th><th>Seq</th></tr></thead>
             <tbody>
               {events.map((item) => (
                 <tr key={item.id}>
@@ -1575,6 +1576,7 @@ function App(): React.ReactElement {
                   <td><code>{shortHash(item.license_fingerprint)}</code></td>
                   <td>{item.source}</td>
                   <td>{item.actor} <span className="muted">({item.actor_type})</span></td>
+                  <td>{item.detail}</td>
                   <td>{item.revocation_seq}</td>
                 </tr>
               ))}

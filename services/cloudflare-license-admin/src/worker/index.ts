@@ -699,7 +699,10 @@ async function listEntitlements(request: Request, env: Env, requestIdValue: stri
 
 async function listEvents(request: Request, env: Env, requestIdValue: string): Promise<Response> {
   const url = new URL(request.url);
-  const eventColumns = "id, project, feature, license_fingerprint, event_type, status, revocation_seq, actor, actor_type, source, request_id, reason, created_at";
+  // `detail` carries the device-transition attribution ("device-revoke <keyId>: <reason>") that a
+  // device revoke/disable writes on an event_type='update' row (audit R6.5); surface it so the console
+  // + CSV distinguish a device revocation from a plain entitlement edit.
+  const eventColumns = "id, project, feature, license_fingerprint, event_type, status, revocation_seq, actor, actor_type, source, request_id, reason, detail, created_at";
   if (wantsCsv(url)) {
     // CSV export: same ORDER BY, bounded by the CSV cap (the `limit` page size does not apply).
     const csvRows = await env.DB.prepare(
@@ -707,7 +710,7 @@ async function listEvents(request: Request, env: Env, requestIdValue: string): P
     ).bind(CSV_ROW_CAP).all<Record<string, unknown>>();
     return csvResponse(
       "events.csv",
-      ["id", "project", "feature", "license_fingerprint", "event_type", "status", "revocation_seq", "actor", "actor_type", "source", "request_id", "reason", "created_at"],
+      ["id", "project", "feature", "license_fingerprint", "event_type", "status", "revocation_seq", "actor", "actor_type", "source", "request_id", "reason", "detail", "created_at"],
       csvRows.results,
     );
   }
