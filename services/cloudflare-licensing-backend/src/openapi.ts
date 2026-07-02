@@ -362,6 +362,33 @@ const releasePath: Record<string, unknown> = {
   },
 };
 
+const meterPath: Record<string, unknown> = {
+  post: {
+    tags: ["report"],
+    summary:
+      "Report metered consumption against an entitlement for the current rolling period. Enforces meter_quota (429 quota_exceeded) only when the entitlement's meter_quota > 0; the default 0 counts only. Ownership-scoped in soft/required modes.",
+    operationId: "postMeter",
+    security: [{ accountToken: [] }, { leaseBearer: [] }],
+    description:
+      "Authenticated by an account token (scoped to project+feature+report) or legacy LEASE_ISSUE_BEARER (off mode only). units defaults to 1. A rejected over-quota increment records nothing (the counter never crosses the quota).",
+    requestBody: jsonBody("#/components/schemas/MeterRequest"),
+    responses: {
+      "200": {
+        description: "Units recorded for the current period.",
+        content: { "application/json": { schema: { $ref: "#/components/schemas/MeterSuccess" } } },
+      },
+      "400": errorResponse("invalid_request (missing project/feature/license_fingerprint) or invalid_units (units not a positive integer).", "invalid_request"),
+      "401": ACCOUNT_TOKEN_AUTH_ERRORS["401"],
+      "403": errorResponse("forbidden_scope (token scopes disallow report on project:feature) or no_active_entitlement.", "no_active_entitlement"),
+      "429": errorResponse("quota_exceeded: meter_quota > 0 and the increment would exceed it (nothing recorded).", "quota_exceeded"),
+      "503": errorResponse(
+        "config_error (ACCOUNT_TOKEN_PEPPERS absent/unparseable in soft/required mode) or verification_error (D1 errors).",
+        "verification_error",
+      ),
+    },
+  },
+};
+
 const reportPath: Record<string, unknown> = {
   get: {
     tags: ["report"],
@@ -499,6 +526,29 @@ const emergencyReleasePath: Record<string, unknown> = {
   },
 };
 
+const emergencyMeterPath: Record<string, unknown> = {
+  post: {
+    tags: ["emergency"],
+    summary:
+      "Break-glass emergency override for metered consumption. Non-isolated operator path (ACCOUNT_TOKEN_MODE forced off).",
+    operationId: "postEmergencyMeter",
+    security: [{ emergencyBearer: [] }],
+    requestBody: jsonBody("#/components/schemas/MeterRequest"),
+    responses: {
+      "200": {
+        description: "Units recorded for the current period.",
+        content: { "application/json": { schema: { $ref: "#/components/schemas/MeterSuccess" } } },
+      },
+      "400": errorResponse("invalid_request or invalid_units.", "invalid_request"),
+      "401": emergencyUnauthorized(),
+      "403": errorResponse("no_active_entitlement.", "no_active_entitlement"),
+      "404": emergencyNotFound(),
+      "429": errorResponse("quota_exceeded.", "quota_exceeded"),
+      "503": errorResponse("verification_error.", "verification_error"),
+    },
+  },
+};
+
 const emergencyReportPath: Record<string, unknown> = {
   get: {
     tags: ["emergency"],
@@ -555,12 +605,14 @@ export const openApiSpec: OpenApiDocument = {
     "/v1/checkout": checkoutPath,
     "/v1/heartbeat": heartbeatPath,
     "/v1/release": releasePath,
+    "/v1/meter": meterPath,
     "/v1/admin/report": reportPath,
     "/v1/emergency/v1/activate": emergencyLease("activate"),
     "/v1/emergency/v1/renew": emergencyLease("renew"),
     "/v1/emergency/v1/checkout": emergencyCheckoutPath,
     "/v1/emergency/v1/heartbeat": emergencyHeartbeatPath,
     "/v1/emergency/v1/release": emergencyReleasePath,
+    "/v1/emergency/v1/meter": emergencyMeterPath,
     "/v1/emergency/v1/admin/report": emergencyReportPath,
   },
   components: {
@@ -855,6 +907,29 @@ export const openApiSpec: OpenApiDocument = {
         properties: {
           ok: { type: "boolean", enum: [true] },
           server_time: { type: "integer" },
+        },
+      },
+      MeterRequest: {
+        type: "object",
+        required: ["project", "feature", "license_fingerprint"],
+        properties: {
+          project: { type: "string" },
+          feature: { type: "string" },
+          license_fingerprint: { type: "string" },
+          units: { type: "integer", minimum: 1, description: "Positive integer; defaults to 1 when omitted." },
+        },
+        additionalProperties: true,
+      },
+      MeterSuccess: {
+        type: "object",
+        required: ["ok", "server_time", "units_consumed", "quota", "period_start", "period_end"],
+        properties: {
+          ok: { type: "boolean" },
+          server_time: { type: "integer" },
+          units_consumed: { type: "integer", description: "Cumulative units for the current period after this call." },
+          quota: { type: "integer", description: "meter_quota (0 = unlimited / count-only)." },
+          period_start: { type: "integer", description: "Unix seconds; start of the current rolling period." },
+          period_end: { type: "integer", description: "Unix seconds; period_start + meter_period_sec." },
         },
       },
       ReportSuccess: {

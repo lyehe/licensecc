@@ -14,6 +14,7 @@ import {
   SEAT_OVERCAP_RECLAIM_SQL,
 } from "./lease/issuance_sql.mjs";
 import { summarizeUsage } from "./lease/usage_report.mjs";
+import { meterUsage } from "./lease/metering.mjs";
 // Stage 4 server-computed trial timing for /v1/activate: frozen-trial device lock + write-once
 // activation clock, computed off the SAME entitlements row (no join to entitlement_policies).
 import {
@@ -1973,6 +1974,45 @@ async function handleSeatRelease(request: Request, env: Env, ctx?: ExecutionCont
   return json({ ok: true, server_time: now });
 }
 
+// Metered consumption (R6.3). Account-authed under the "report" scope (metering IS a usage report;
+// reusing it avoids widening the account-token operation axis). The counter is per-customer isolated
+// exactly like seats: accountAuth binds (project, feature, customer), and meterUsage's entitlement
+// read carries the owner conjunct so a customer can only meter its own entitlement. Body:
+// { project, feature, license_fingerprint, units? } (units defaults to 1). Enforcement (429
+// quota_exceeded) only bites when the entitlement's meter_quota > 0; the default 0 counts only.
+async function handleMeter(request: Request, env: Env, ctx?: ExecutionContextLike): Promise<Response> {
+  const now = Math.floor(Date.now() / 1000);
+  let raw: unknown;
+  try {
+    raw = await request.json();
+  } catch {
+    return json({ ok: false, code: "invalid_request" }, 400);
+  }
+  if (raw === null || typeof raw !== "object") return json({ ok: false, code: "invalid_request" }, 400);
+  const value = raw as Record<string, unknown>;
+  const project = requireString(value.project);
+  const feature = requireString(value.feature);
+  const fingerprint = requireString(value.license_fingerprint);
+  if (project === null || feature === null || fingerprint === null) {
+    return json({ ok: false, code: "invalid_request" }, 400);
+  }
+  // Absent units => a single unit; a present-but-non-numeric units => -1 so meterUsage rejects it.
+  const units = value.units === undefined ? 1 : typeof value.units === "number" ? value.units : -1;
+
+  const auth = await accountAuth(request, env, "report", project, feature, now, ctx);
+  if (!auth.ok) return json({ ok: false, code: auth.code }, auth.status);
+  const isolation: IsolationBinding = { mode: auth.mode, customerId: auth.customerId };
+
+  let result: { ok: boolean; status: number; code?: string; units_consumed?: number; quota?: number; period_start?: number; period_end?: number };
+  try {
+    result = await meterUsage(env, { project, feature, license_fingerprint: fingerprint }, isolation, units, now);
+  } catch {
+    return json({ ok: false, code: "verification_error" }, 503);
+  }
+  const { status, ...payload } = result;
+  return json({ server_time: now, ...payload }, status);
+}
+
 // ============================ Usage reporting (analytics) ============================
 //
 // An append-only usage_events log (the FlexNet "report log") that the peak-concurrent /
@@ -2202,6 +2242,9 @@ async function handleEmergencyRoute(
   if (request.method === "POST" && target === "/v1/release") {
     return await handleSeatRelease(request, emergencyEnv, ctx);
   }
+  if (request.method === "POST" && target === "/v1/meter") {
+    return await handleMeter(request, emergencyEnv, ctx);
+  }
   if (request.method === "GET" && target === "/v1/admin/report") {
     return await handleUsageReport(request, emergencyEnv, ctx);
   }
@@ -2280,6 +2323,9 @@ export default {
       }
       if (request.method === "POST" && url.pathname === "/v1/release") {
         return await handleSeatRelease(request, env, ctx);
+      }
+      if (request.method === "POST" && url.pathname === "/v1/meter") {
+        return await handleMeter(request, env, ctx);
       }
       if (request.method === "GET" && url.pathname === "/v1/admin/report") {
         return await handleUsageReport(request, env, ctx);

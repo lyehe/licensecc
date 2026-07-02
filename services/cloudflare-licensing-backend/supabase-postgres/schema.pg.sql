@@ -70,6 +70,8 @@ CREATE TABLE IF NOT EXISTS entitlements (
   trial_require_device_proof INTEGER NOT NULL DEFAULT 0,
   trial_started_at           BIGINT  NULL,
   trial_device_hash          TEXT    NULL,
+  meter_quota                BIGINT  NOT NULL DEFAULT 0,        -- migration 0023 (metered consumption)
+  meter_period_sec           BIGINT  NOT NULL DEFAULT 2592000,
   PRIMARY KEY (project, feature, license_fingerprint)
 );
 
@@ -594,3 +596,19 @@ CREATE TABLE IF NOT EXISTS audit_digests (
 );
 
 CREATE INDEX IF NOT EXISTS idx_audit_digests_source ON audit_digests(source, id);
+
+-- =====================================================================================
+-- usage_meters  (migration 0023) -- metered consumption per entitlement per billing period.
+-- =====================================================================================
+CREATE TABLE IF NOT EXISTS usage_meters (
+  project             TEXT   NOT NULL,
+  feature             TEXT   NOT NULL,
+  license_fingerprint TEXT   NOT NULL,
+  period_start        BIGINT NOT NULL,
+  units_consumed      BIGINT NOT NULL DEFAULT 0,
+  updated_at          BIGINT NOT NULL,
+  PRIMARY KEY (project, feature, license_fingerprint, period_start)
+);
+
+CREATE INDEX IF NOT EXISTS idx_usage_meters_entitlement
+  ON usage_meters(project, feature, license_fingerprint);

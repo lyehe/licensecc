@@ -35,6 +35,7 @@ const CANONICAL_ROUTES = [
   ["POST", "/v1/checkout"],
   ["POST", "/v1/heartbeat"],
   ["POST", "/v1/release"],
+  ["POST", "/v1/meter"],
   ["GET", "/v1/admin/report"],
   // emergency break-glass overrides (/v1/emergency + the scoped target)
   ["POST", "/v1/emergency/v1/activate"],
@@ -42,6 +43,7 @@ const CANONICAL_ROUTES = [
   ["POST", "/v1/emergency/v1/checkout"],
   ["POST", "/v1/emergency/v1/heartbeat"],
   ["POST", "/v1/emergency/v1/release"],
+  ["POST", "/v1/emergency/v1/meter"],
   ["GET", "/v1/emergency/v1/admin/report"],
 ];
 
