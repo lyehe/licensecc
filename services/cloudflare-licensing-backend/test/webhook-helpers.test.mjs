@@ -37,6 +37,7 @@ test("buildWebhookPayload normalizes each source's BEFORE/AFTER state", () => {
     feature: "F",
     license_fingerprint: "a".repeat(64),
     status: "active",
+    detail: "device-revoke sha256:aabbccdd...: chargeback",
     prev_json: '{"status":"disabled"}',
     next_json: '{"status":"active"}',
   });
@@ -50,6 +51,8 @@ test("buildWebhookPayload normalizes each source's BEFORE/AFTER state", () => {
       feature: "F",
       license_fingerprint: "a".repeat(64),
       status: "active",
+      // Device-transition attribution surfaced to subscribers (audit R6.5).
+      detail: "device-revoke sha256:aabbccdd...: chargeback",
       prev: { status: "disabled" },
       next: { status: "active" },
     },

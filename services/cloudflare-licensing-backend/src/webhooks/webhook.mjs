@@ -49,7 +49,7 @@ const SOURCE_SELECT = {
   // entitlement_events: integer id; carries BEFORE/AFTER as prev_json/next_json.
   entitlement:
     "SELECT id AS event_id, event_type, created_at AS occurred_at, project, feature, license_fingerprint, " +
-    "status, prev_json, next_json FROM entitlement_events WHERE id > ? ORDER BY id ASC LIMIT ?",
+    "status, detail, prev_json, next_json FROM entitlement_events WHERE id > ? ORDER BY id ASC LIMIT ?",
   // customer_events: integer id; carries BEFORE/AFTER as prev_status/next_status.
   customer:
     "SELECT id AS event_id, event_type, created_at AS occurred_at, customer_id, prev_status, next_status " +
@@ -110,6 +110,9 @@ export function buildWebhookPayload(eventSource, row) {
         feature: row.feature,
         license_fingerprint: row.license_fingerprint,
         status: row.status,
+        // Device transitions encode their action here ("device-revoke <keyId>: <reason>") on an
+        // event_type='update' row; surface it so subscribers can attribute the change (audit R6.5).
+        detail: row.detail ?? "",
         prev: parseJsonColumn(row.prev_json),
         next: parseJsonColumn(row.next_json),
       },
