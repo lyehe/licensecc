@@ -3,11 +3,12 @@ add_subdirectory("base")
 add_subdirectory("anti_tamper")
 add_subdirectory("online_verification")
 add_subdirectory("config_attestation")
+add_subdirectory("activation")
 add_subdirectory("os")
 add_subdirectory("locate")
 add_subdirectory("hw_identifier")
 
-foreach(_lcc_generated_metadata_target IN ITEMS signed_token base anti_tamper online_verification config_attestation os locate hw_identifier)
+foreach(_lcc_generated_metadata_target IN ITEMS signed_token base anti_tamper online_verification config_attestation activation os locate hw_identifier)
     if(TARGET ${_lcc_generated_metadata_target})
         add_dependencies(${_lcc_generated_metadata_target} project_initialize)
     endif()
@@ -26,6 +27,7 @@ ADD_LIBRARY(licensecc_static STATIC
     $<TARGET_OBJECTS:signed_token>
     $<TARGET_OBJECTS:online_verification>
     $<TARGET_OBJECTS:config_attestation>
+    $<TARGET_OBJECTS:activation>
 )
 
 if(CODE_COVERAGE AND UNIX)

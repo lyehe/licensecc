@@ -7,12 +7,15 @@
 #include <string.h>
 #include <iomanip>
 #include <sstream>
+#include <ctime>
+#include <random>
 #include "../library/base/string_utils.h"
 #include "../library/ini/SimpleIni.h"
 #include "../library/os/dmi_info.hpp"
 #include "../library/os/cpu_info.hpp"
 #include "../library/os/dmi_info.hpp"
 #include "../library/os/network.hpp"
+#include "../library/activation/ActivationRequest.hpp"
 #include "inspector_section.hpp"
 
 using namespace std;
@@ -111,8 +114,64 @@ static int run_redaction_self_test() {
 
 static void print_usage(const char* program_name) {
 	cout << "Usage: " << program_name << " [--raw-hardware-identifiers] [license-file]" << endl;
+	cout << "       " << program_name << " --activation-request [--feature <name>]" << endl;
+	cout << "       " << program_name << " --decode-activation-request <lccareq1-string>" << endl;
 	cout << "Hardware identifiers, IP addresses, and MAC addresses are redacted by default." << endl;
 	cout << "Use --raw-hardware-identifiers only for trusted diagnostic handoff." << endl;
+	cout << "--activation-request prints a copy-pasteable offline-activation request for an" << endl;
+	cout << "air-gapped machine; an operator decodes it (--decode-activation-request) and issues a" << endl;
+	cout << "hardware-bound license in response." << endl;
+}
+
+// Air-gapped machine side: print a canonical, copy-pasteable activation-request string for this
+// machine's DEFAULT hardware identifier. The request is unsigned -- its integrity comes from the
+// hardware-bound .lic the operator issues in response (which the normal verifier validates).
+static int emit_activation_request(const string& feature) {
+	char hw_identifier[LCC_API_PC_IDENTIFIER_SIZE + 1];
+	size_t bufSize = sizeof(hw_identifier);
+	memset(hw_identifier, 0, sizeof(hw_identifier));
+	ExecutionEnvironmentInfo exec_env_info;
+	if (!identify_pc(STRATEGY_DEFAULT, hw_identifier, &bufSize, &exec_env_info)) {
+		cerr << "Unable to compute the hardware identifier for this machine." << endl;
+		return 1;
+	}
+	license::activation::ActivationRequestFields fields;
+	fields.project = LCC_PROJECT_NAME;
+	fields.feature = feature;
+	fields.hwid = hw_identifier;
+	std::random_device rd;
+	fields.nonce = (static_cast<uint64_t>(rd()) << 32) ^ static_cast<uint64_t>(rd());
+	fields.issued_at = static_cast<uint64_t>(time(nullptr));
+	const string request = license::activation::build_activation_request(fields);
+	if (request.empty()) {
+		cerr << "Unable to build the activation request (invalid field value)." << endl;
+		return 1;
+	}
+	cout << request << endl;
+	return 0;
+}
+
+// Operator side: decode an activation request and print the fields plus the ready-to-run license
+// generator command that issues a hardware-bound license for the reported machine.
+static int emit_decoded_activation_request(const string& token) {
+	license::activation::ActivationRequestFields fields;
+	string error;
+	if (!license::activation::parse_activation_request(token, fields, error)) {
+		cerr << error << endl;
+		return 1;
+	}
+	cout << "project:   " << fields.project << endl;
+	cout << "feature:   " << fields.feature << endl;
+	cout << "hwid:      " << fields.hwid << endl;
+	cout << "nonce:     " << fields.nonce << endl;
+	cout << "issued-at: " << fields.issued_at << endl;
+	cout << endl;
+	cout << "Issue a hardware-bound license for this machine with:" << endl;
+	cout << "  lccgen license issue --project-folder projects/" << fields.project
+		 << " --client-signature " << fields.hwid << " --feature-names " << fields.feature
+		 << " --license-version 201 --target-license-format-max 201"
+		 << " --valid-to <YYYYMMDD> --output-file-name <out.lic>" << endl;
+	return 0;
 }
 
 static LCC_EVENT_TYPE verifyLicense(const string& fname) {
@@ -155,6 +214,8 @@ static LCC_EVENT_TYPE verifyLicense(const string& fname) {
 
 int main(int argc, char* argv[]) {
 	bool raw_hardware_output = false;
+	bool activation_request_mode = false;
+	string activation_feature = LCC_PROJECT_NAME;  // default feature == project name
 	string license_path;
 	for (int i = 1; i < argc; ++i) {
 		const string arg(argv[i]);
@@ -169,6 +230,25 @@ int main(int argc, char* argv[]) {
 		if (arg == "--self-test-redaction") {
 			return run_redaction_self_test();
 		}
+		if (arg == "--activation-request") {
+			activation_request_mode = true;
+			continue;
+		}
+		if (arg == "--feature") {
+			if (i + 1 >= argc) {
+				cerr << "--feature requires a value" << endl;
+				return 1;
+			}
+			activation_feature = argv[++i];
+			continue;
+		}
+		if (arg == "--decode-activation-request") {
+			if (i + 1 >= argc) {
+				cerr << "--decode-activation-request requires a value" << endl;
+				return 1;
+			}
+			return emit_decoded_activation_request(argv[++i]);
+		}
 		if (license_path.empty()) {
 			license_path = arg;
 			continue;
@@ -176,6 +256,10 @@ int main(int argc, char* argv[]) {
 		cerr << "Unexpected argument: " << arg << endl;
 		print_usage(argv[0]);
 		return 1;
+	}
+
+	if (activation_request_mode) {
+		return emit_activation_request(activation_feature);
 	}
 
 	char hw_identifier[LCC_API_PC_IDENTIFIER_SIZE + 1];

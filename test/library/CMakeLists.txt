@@ -56,6 +56,19 @@ target_link_libraries(
  Boost::system
 )
 
+### Offline activation-request codec tests
+add_executable(
+ test_activation_request
+ activation_request_test.cpp
+)
+
+target_link_libraries(
+ test_activation_request
+ licensecc_static
+ Boost::unit_test_framework
+ Boost::system
+)
+
 ### v201 canonical payload tests
 add_executable(
  test_v201_canonical_payload
@@ -232,6 +245,7 @@ target_link_libraries(
 ADD_TEST(NAME test_license_reader COMMAND test_license_reader)
 ADD_TEST(NAME test_license_locator COMMAND test_license_locator)
 ADD_TEST(NAME test_base64 COMMAND test_base64)
+ADD_TEST(NAME test_activation_request COMMAND test_activation_request)
 ADD_TEST(NAME test_v201_canonical_payload COMMAND test_v201_canonical_payload)
 ADD_TEST(NAME test_event_registry COMMAND test_event_registry)
 ADD_TEST(NAME test_license_verifier COMMAND test_license_verifier)
@@ -278,6 +292,11 @@ set_tests_properties(
 set_tests_properties(
  test_base64
  PROPERTIES LABELS "security;base64"
+)
+
+set_tests_properties(
+ test_activation_request
+ PROPERTIES LABELS "security;activation;base64"
 )
 
 set_tests_properties(

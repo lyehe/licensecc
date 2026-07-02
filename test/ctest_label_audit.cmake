@@ -72,6 +72,7 @@ set(_required_labels
 	verifier
 	v201
 	config_attestation
+	activation
 )
 
 if(LICENSECC_BUILD_FUZZERS)
@@ -104,6 +105,7 @@ set(_expected_label_entries
 	"test_license_reader|security,parser"
 	"test_license_locator|security,parser,base64,public_api"
 	"test_base64|security,base64"
+	"test_activation_request|security,activation,base64"
 	"test_v201_canonical_payload|security,validation,v201"
 	"test_event_registry|security,validation"
 	"test_license_verifier|security,verifier"
@@ -125,6 +127,7 @@ set(_expected_label_entries
 	"test_date|security,parser,verifier"
 	"test_it_hw_identifier|security,hardware,generator"
 	"test_standard_license|security,signature,generator"
+	"test_activation_it|security,activation,generator"
 	"test_signature_verifier|security,signature"
 )
 

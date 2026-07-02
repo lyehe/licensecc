@@ -15,7 +15,19 @@ add_executable( test_standard_license
 target_link_libraries( test_standard_license
  licensecc_static
  license_generator_snippet
- Boost::unit_test_framework 
+ Boost::unit_test_framework
+ Boost::filesystem
+ Boost::system
+)
+
+add_executable( test_activation_it
+ activation_it_test.cpp
+)
+
+target_link_libraries( test_activation_it
+ licensecc_static
+ license_generator_snippet
+ Boost::unit_test_framework
  Boost::filesystem
  Boost::system
 )
@@ -71,12 +83,14 @@ ADD_TEST(NAME test_crack COMMAND test_crack WORKING_DIRECTORY ${CMAKE_BINARY_DIR
 ADD_TEST(NAME test_date COMMAND test_date WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 ADD_TEST(NAME test_it_hw_identifier COMMAND test_it_hw_identifier WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 ADD_TEST(NAME test_standard_license COMMAND test_standard_license WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+ADD_TEST(NAME test_activation_it COMMAND test_activation_it WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 ADD_TEST(NAME test_signature_verifier COMMAND test_signature_verifier WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 
 set_tests_properties(test_crack PROPERTIES LABELS "security;parser;signature;public_api")
 set_tests_properties(test_date PROPERTIES LABELS "security;parser;verifier")
 set_tests_properties(test_it_hw_identifier PROPERTIES LABELS "security;hardware;generator")
 set_tests_properties(test_standard_license PROPERTIES LABELS "security;signature;generator")
+set_tests_properties(test_activation_it PROPERTIES LABELS "security;activation;generator")
 set_tests_properties(test_signature_verifier PROPERTIES LABELS "security;signature")
 
 # Lease platform: 2-key hot/cold ring golden test. Built only when the build baked a
