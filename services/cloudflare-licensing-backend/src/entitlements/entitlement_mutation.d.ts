@@ -124,6 +124,11 @@ export interface EntitlementCapacity {
   heartbeat_grace_sec?: number;
   max_borrow_sec?: number;
   allow_overdraft?: number;
+  // Metering quota (audit R6.3): a per-period consumption ceiling (0 = unlimited/count-only) and the
+  // rolling-period length in seconds. Settable through the capacity chokepoint so the quota is
+  // configurable via order-ingest / admin, not just raw SQL.
+  meter_quota?: number;
+  meter_period_sec?: number;
 }
 
 // Shared SQL fragments (single source of truth) the order-ingest apply path reuses

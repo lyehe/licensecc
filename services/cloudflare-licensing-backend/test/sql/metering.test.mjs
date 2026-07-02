@@ -13,6 +13,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { meterUsage } from "../../src/lease/metering.mjs";
+import { setEntitlementCapacity } from "../../src/entitlements/entitlement_mutation.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const migrationsDir = join(here, "..", "..", "migrations");
@@ -50,6 +51,18 @@ class D1Like {
   }
   prepare(sql) {
     return new PreparedStatement(this.db, sql);
+  }
+  async batch(statements) {
+    const out = [];
+    this.db.exec("BEGIN");
+    try {
+      for (const s of statements) out.push({ results: this.db.prepare(s.sql).all(...s.params), success: true });
+      this.db.exec("COMMIT");
+    } catch (e) {
+      this.db.exec("ROLLBACK");
+      throw e;
+    }
+    return out;
   }
 }
 
@@ -178,5 +191,43 @@ test("an out-of-window entitlement is refused (R6.3)", async () => {
   seed(db, { valid_from: NOW + 100 }); // not yet valid
   const env = { DB: new D1Like(db) };
   assert.equal((await meterUsage(env, KEY, OFF, 1, NOW)).code, "no_active_entitlement");
+  db.close();
+});
+
+test("units is bounded — an absurd value cannot corrupt the int64 counter (R6.3)", async () => {
+  const db = freshDb();
+  seed(db);
+  const env = { DB: new D1Like(db) };
+  // Above the per-call cap, and beyond MAX_SAFE_INTEGER -> rejected, not written.
+  assert.equal((await meterUsage(env, KEY, OFF, 1_000_000_001, NOW)).code, "invalid_units");
+  assert.equal((await meterUsage(env, KEY, OFF, 1e20, NOW)).code, "invalid_units");
+  assert.equal((await meterUsage(env, KEY, OFF, Number.MAX_SAFE_INTEGER, NOW)).code, "invalid_units");
+  // The cap boundary itself is allowed.
+  assert.equal((await meterUsage(env, KEY, OFF, 1_000_000_000, NOW)).ok, true);
+  db.close();
+});
+
+// The HIGH gap the completeness critic found: the quota was enforceable but not CONFIGURABLE through
+// any supported surface. Proves it is now settable via the capacity chokepoint (order-ingest / admin).
+test("meter_quota is configurable via setEntitlementCapacity and then enforced (R6.3)", async () => {
+  const db = freshDb();
+  seed(db); // default meter_quota = 0 (count-only)
+  const env = { DB: new D1Like(db) };
+  const ctx = { actor: { subject: "op", email: "op@x.test", role: "admin", actorType: "access" }, requestId: "r1", ip: "", idempotencyKey: null, source: "admin" };
+
+  // Count-only initially: a large call is allowed.
+  assert.equal((await meterUsage(env, KEY, OFF, 8, NOW)).ok, true);
+
+  // Operator sets a quota through the supported capacity path.
+  const set = await setEntitlementCapacity(env, KEY, { meter_quota: 10, meter_period_sec: 3600 }, ctx, null);
+  assert.notEqual(set, null);
+  assert.equal(db.prepare("SELECT meter_quota FROM entitlements WHERE license_fingerprint = ?").get(FP).meter_quota, 10);
+
+  // The next period now enforces the quota that was configured (period_sec=3600 -> a fresh bucket).
+  const later = NOW + 3600;
+  assert.equal((await meterUsage(env, KEY, OFF, 7, later)).ok, true); // 7 <= 10
+  const over = await meterUsage(env, KEY, OFF, 5, later); // 7 + 5 = 12 > 10 -> rejected
+  assert.equal(over.code, "quota_exceeded");
+  assert.equal(over.units_consumed, 7);
   db.close();
 });

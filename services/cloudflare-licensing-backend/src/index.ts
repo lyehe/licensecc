@@ -1980,6 +1980,11 @@ async function handleSeatRelease(request: Request, env: Env, ctx?: ExecutionCont
 // read carries the owner conjunct so a customer can only meter its own entitlement. Body:
 // { project, feature, license_fingerprint, units? } (units defaults to 1). Enforcement (429
 // quota_exceeded) only bites when the entitlement's meter_quota > 0; the default 0 counts only.
+// Rate-limiting note: like the other ACCOUNT-AUTHED mutating endpoints (seat checkout/heartbeat/
+// release, lease activate/renew), /v1/meter is gated by a valid per-customer account token rather than
+// the D1/limiter tiers that protect the UNAUTHENTICATED public /v1/verify path. A flood is therefore
+// bounded to the token holder's own isolated entitlement (self-directed billing drift), consistent
+// with every sibling account-authed route — not the open-abuse surface checkRateLimit exists for.
 async function handleMeter(request: Request, env: Env, ctx?: ExecutionContextLike): Promise<Response> {
   const now = Math.floor(Date.now() / 1000);
   let raw: unknown;
@@ -2022,6 +2027,10 @@ async function handleMeter(request: Request, env: Env, ctx?: ExecutionContextLik
 const USAGE_EVENT_RETENTION_SEC = 90 * 24 * 60 * 60; // reports cover up to 90d; longer => rollups
 const USAGE_REPORT_MAX_ROWS = 100000; // honest cap: beyond this a window report is flagged truncated
 const LEASE_ISSUANCE_RETENTION_SEC = 180 * 24 * 60 * 60; // > max rebind_window_sec so the rebind cap keeps its rows
+// usage_meters reads only the CURRENT rolling period, so a period row is dead once its window closes.
+// Keep ~13 months (a full year of monthly periods + margin for billing reconciliation), matching the
+// retention discipline every other high-churn counter table has (audit R6.3 retention gap).
+const USAGE_METER_RETENTION_SEC = 400 * 24 * 60 * 60;
 
 async function recordUsageEvent(
   env: Env,
@@ -2355,6 +2364,14 @@ export default {
     }
     try {
       await env.DB.prepare("DELETE FROM lease_issuance WHERE issued_at < ?").bind(now - LEASE_ISSUANCE_RETENTION_SEC).run();
+    } catch {
+      // best-effort
+    }
+    try {
+      // Metering counter retention (audit R6.3): drop closed-period usage_meters rows past the window
+      // (reads only ever touch the current period). Without this the table grows one row per
+      // entitlement per period forever — the only counter table that lacked a sweep.
+      await env.DB.prepare("DELETE FROM usage_meters WHERE period_start < ?").bind(now - USAGE_METER_RETENTION_SEC).run();
     } catch {
       // best-effort
     }

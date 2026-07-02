@@ -463,11 +463,15 @@ export async function syncEntitlement(env, input, reason, ctx, idempotency) {
   return createEntitlement(env, input, ctx, reason, syncEventType(prev, targetStatus), idempotency);
 }
 
-// The seat/device capacity columns this module is allowed to write. Deliberately
-// disjoint from createEntitlement's INSERT...ON CONFLICT column set: those are
-// owned by the lease/seat subsystem and must not be clobbered on an admin upsert.
+// The seat/device capacity + metering-quota columns this module is allowed to write.
+// Deliberately disjoint from createEntitlement's INSERT...ON CONFLICT column set: those
+// are owned by the lease/seat subsystem and must not be clobbered on an admin upsert.
 // setEntitlementCapacity is the single chokepoint for quantity changes (Slice 1
 // order-ingest) so capacity can be moved without touching the entitlement body.
+// meter_quota / meter_period_sec (audit R6.3) live here so a per-period consumption
+// quota is CONFIGURABLE through the supported capacity path (order-ingest / admin),
+// not just via raw SQL; both are non-negative integers (meterUsage treats a 0/absent
+// period_sec as the 30d default), so isNonNegativeInteger validates them unchanged.
 const CAPACITY_COLUMNS = new Set([
   "max_active_devices",
   "lease_seconds",
@@ -476,6 +480,8 @@ const CAPACITY_COLUMNS = new Set([
   "heartbeat_grace_sec",
   "max_borrow_sec",
   "allow_overdraft",
+  "meter_quota",
+  "meter_period_sec",
 ]);
 
 function isNonNegativeInteger(value) {

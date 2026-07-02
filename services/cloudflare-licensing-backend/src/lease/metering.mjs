@@ -2,13 +2,25 @@
 //
 // entitlements cap CONCURRENCY (pool_size) and DEVICES (max_active_devices) but not CONSUMPTION.
 // meterUsage() increments a per-entitlement, per-rolling-period counter (usage_meters) and enforces
-// meter_quota when it is > 0 (0 = unlimited / count-only). The increment is isolation-bound exactly
-// like the seat mutations: in soft/required mode the entitlement must be owned by the caller's
-// customer (a NULL-owner is allowed only in soft), so a customer can never meter another's usage.
+// meter_quota when it is > 0 (0 = unlimited / count-only).
 //
-// Enforcement is atomic: INSERT-OR-IGNORE the period row at 0, then a CONDITIONAL increment that only
-// applies when (quota = 0 OR units_consumed + units <= quota). A rejected increment records nothing,
-// so the counter never crosses the quota (no TOCTOU over-count under D1's per-object serialization).
+// ISOLATION: the entitlement is read with the caller's owner conjunct (off => none; soft => owner OR
+// NULL; required => owner only), so a customer can only meter its OWN entitlement -- meterUsage never
+// touches another tenant's data. NOTE this differs deliberately from the seat/lease mutations, which
+// fold the ownership EXISTS INTO the write to close a TOCTOU: for SEATS a stale write grants ACCESS
+// (a live seat), so it must be denied atomically; for METERING the write only increments a per-
+// fingerprint accounting counter (usage_meters carries no customer_id -- there is exactly one meter
+// per fingerprint), so the worst a sub-millisecond revoke/expire race can do is record one extra unit
+// for an already-admitted in-flight request -- harmless billing drift, never an access decision.
+//
+// QUOTA enforcement is atomic: upsert the period row at 0 (INSERT ... ON CONFLICT DO NOTHING, portable
+// to SQLite/D1 AND Postgres), then a CONDITIONAL increment that only applies when
+// (quota = 0 OR units_consumed + units <= quota). A rejected increment records nothing, so the counter
+// never crosses the quota (no over-count under D1's per-object serialization).
+
+// A single call may not report an absurd unit count: cap it well below 2^53 so units_consumed stays a
+// safe integer (SQLite INTEGER / PG BIGINT are int64; JS Number loses precision above 2^53).
+const MAX_METER_UNITS = 1_000_000_000;
 
 function entitlementValid(row, now) {
   const validFrom = row.valid_from === null || row.valid_from === undefined ? null : Number(row.valid_from);
@@ -22,7 +34,7 @@ function entitlementValid(row, now) {
  * { ok, status, code?, units_consumed?, quota?, period_start?, period_end? }.
  */
 export async function meterUsage(env, body, isolation, units, now) {
-  if (!Number.isInteger(units) || units <= 0) {
+  if (!Number.isSafeInteger(units) || units <= 0 || units > MAX_METER_UNITS) {
     return { ok: false, status: 400, code: "invalid_units" };
   }
   // Isolation-bound entitlement read (mirrors the seat SQL): off => no owner conjunct; soft => owner
@@ -51,9 +63,11 @@ export async function meterUsage(env, body, isolation, units, now) {
   const periodStart = Math.floor(now / periodSec) * periodSec;
   const periodEnd = periodStart + periodSec;
 
+  // Portable upsert of the period row at 0 (SQLite/D1 AND Postgres both accept ON CONFLICT DO NOTHING;
+  // SQLite-only INSERT OR IGNORE would break under the Postgres adapter, which the pg schema advertises).
   await env.DB.prepare(
-    "INSERT OR IGNORE INTO usage_meters (project, feature, license_fingerprint, period_start, units_consumed, updated_at) " +
-      "VALUES (?, ?, ?, ?, 0, ?)",
+    "INSERT INTO usage_meters (project, feature, license_fingerprint, period_start, units_consumed, updated_at) " +
+      "VALUES (?, ?, ?, ?, 0, ?) ON CONFLICT (project, feature, license_fingerprint, period_start) DO NOTHING",
   )
     .bind(body.project, body.feature, body.license_fingerprint, periodStart, now)
     .run();
