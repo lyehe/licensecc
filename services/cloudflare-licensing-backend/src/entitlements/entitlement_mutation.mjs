@@ -358,6 +358,66 @@ export async function transitionEntitlement(env, key, status, eventType, reason,
   return writeEntitlementWithAudit(env, key, statement, ctx, eventType, prev, reason, now, idempotency);
 }
 
+// List the registered device keys for an entitlement (relay-resistance devices, table
+// entitlement_devices). Read-only; newest-touched first. Mirrors the CLI `device-list`.
+export async function listEntitlementDevices(env, key) {
+  const result = await env.DB.prepare(
+    "SELECT project, feature, license_fingerprint, device_key_id, status, created_at, updated_at, last_seen_at, notes FROM entitlement_devices WHERE project = ? AND feature = ? AND license_fingerprint = ? ORDER BY updated_at DESC LIMIT 200",
+  )
+    .bind(key.project, key.feature, key.license_fingerprint)
+    .all();
+  return Array.isArray(result?.results) ? result.results : [];
+}
+
+function shortDeviceKeyId(deviceKeyId) {
+  if (deviceKeyId.startsWith("sha256:") && deviceKeyId.length >= 15) {
+    return `sha256:${deviceKeyId.slice(7, 15)}...`;
+  }
+  return deviceKeyId.length > 12 ? `${deviceKeyId.slice(0, 12)}...` : deviceKeyId;
+}
+
+// Transition ONE device key of an entitlement (revoke/disable/reenable) — the admin-console equivalent
+// of the CLI `device-revoke`/`device-disable`. Atomic (D1 batch, via writeEntitlementWithAudit): the
+// device status UPDATE, the entitlement revocation_seq bump (so cached online assertions are
+// invalidated on the next check), and the audit event all commit together. Mirrors the CLI exactly:
+// the audit row uses the constraint-safe event_type 'update' with a `device-<action> <keyId>: <reason>`
+// detail (entitlement_events.event_type has no device-specific value). Returns null when the
+// ENTITLEMENT does not exist; throws 'device_not_found' when the entitlement exists but the device key
+// does not, and 'device_revoked_terminal' when trying to move a revoked device to a non-revoked status.
+export async function transitionEntitlementDevice(env, key, deviceKeyId, deviceStatus, reason, ctx, idempotency) {
+  const prev = await findEntitlement(env, key);
+  if (prev === null) {
+    return null;
+  }
+  const device = await env.DB.prepare(
+    "SELECT status FROM entitlement_devices WHERE project = ? AND feature = ? AND license_fingerprint = ? AND device_key_id = ? LIMIT 1",
+  )
+    .bind(key.project, key.feature, key.license_fingerprint, deviceKeyId)
+    .first();
+  if (device === null) {
+    throw new Error("device_not_found");
+  }
+  if (device.status === "revoked" && deviceStatus !== "revoked") {
+    throw new Error("device_revoked_terminal");
+  }
+  if (device.status === deviceStatus) {
+    // Idempotent no-op: no status change, so no revocation_seq bump and no audit event.
+    return { data: prev, idempotencyRecorded: false };
+  }
+  const now = Math.floor(Date.now() / 1000);
+  const action = deviceStatus === "revoked" ? "device-revoke" : deviceStatus === "disabled" ? "device-disable" : "device-reenable";
+  const detail = `${action} ${shortDeviceKeyId(deviceKeyId)}${reason === "" ? "" : `: ${reason}`}`;
+  // The entitlement write is a pure revocation_seq bump (status unchanged); RETURNING feeds the
+  // audit event's SELECT and the response row. The device UPDATE rides in the SAME atomic batch.
+  const writeStatement = env.DB.prepare(
+    `UPDATE entitlements SET ${REVOCATION_SEQ_BUMP}, updated_at = ? WHERE project = ? AND feature = ? AND license_fingerprint = ? RETURNING ${ENTITLEMENT_COLUMNS}`,
+  ).bind(now, key.project, key.feature, key.license_fingerprint);
+  const deviceStatement = env.DB.prepare(
+    "UPDATE entitlement_devices SET status = ?, updated_at = ? WHERE project = ? AND feature = ? AND license_fingerprint = ? AND device_key_id = ?",
+  ).bind(deviceStatus, now, key.project, key.feature, key.license_fingerprint, deviceKeyId);
+  return writeEntitlementWithAudit(env, key, writeStatement, ctx, "update", prev, detail, now, idempotency, [deviceStatement]);
+}
+
 export function entitlementMatchesInput(row, input) {
   return row.device_hash === (input.device_hash ?? "") &&
     row.status === (input.status ?? "active") &&

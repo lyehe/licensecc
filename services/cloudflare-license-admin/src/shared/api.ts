@@ -7,6 +7,8 @@ export type {
   EntitlementRecord,
   EntitlementInput,
   EntitlementPatch,
+  DeviceStatus,
+  EntitlementDeviceRecord,
 } from "@licensecc/cloudflare-licensing-backend/entitlements/entitlement_mutation";
 
 import type { EntitlementStatus, EntitlementInput, EntitlementEventType } from "@licensecc/cloudflare-licensing-backend/entitlements/entitlement_mutation";

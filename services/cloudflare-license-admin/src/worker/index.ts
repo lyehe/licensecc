@@ -28,6 +28,8 @@ import {
   createEntitlement,
   patchEntitlement,
   transitionEntitlement,
+  transitionEntitlementDevice,
+  listEntitlementDevices,
   syncEntitlement,
   batchReturnedRow,
 } from "@licensecc/cloudflare-licensing-backend/entitlements/entitlement_mutation";
@@ -784,6 +786,12 @@ async function mutationResponse<T>(request: Request, env: Env, ctx: MutationCont
     }
     if (error instanceof Error && error.message === "invalid_patch") {
       return envelope(ctx.requestId, "invalid_request", undefined, 400);
+    }
+    if (error instanceof Error && error.message === "device_not_found") {
+      return envelope(ctx.requestId, "device_not_found", undefined, 404);
+    }
+    if (error instanceof Error && error.message === "device_revoked_terminal") {
+      return envelope(ctx.requestId, "device_is_terminal", undefined, 409);
     }
     return envelope(ctx.requestId, "mutation_failed", undefined, 500);
   }
@@ -2243,6 +2251,74 @@ async function handleReleaseSeats(request: Request, env: Env, actor: Actor, enco
   return json(responseBody);
 }
 
+// GET /api/admin/entitlements/:id/devices (reader+admin). Lists the entitlement's registered
+// relay-resistance device keys (entitlement_devices). 404 if the entitlement itself is absent, so a
+// bad id is never silently an empty list.
+async function handleDeviceList(env: Env, encodedId: string, requestIdValue: string): Promise<Response> {
+  const key = decodeEntitlementId(encodedId);
+  if (key === null) {
+    return envelope(requestIdValue, "invalid_entitlement_id", undefined, 400);
+  }
+  const ent = await findEntitlement(env, key);
+  if (ent === null) {
+    return envelope(requestIdValue, "not_found", undefined, 404);
+  }
+  const devices = await listEntitlementDevices(env, key);
+  return envelope(requestIdValue, "devices_listed", { items: devices });
+}
+
+const DEVICE_KEY_ID_RE = /^sha256:[0-9a-f]{64}$/;
+
+// POST /api/admin/entitlements/:id/devices/:deviceKeyId/(revoke|disable|reenable) (ADMIN-ONLY; reason
+// REQUIRED for revoke/disable). The console equivalent of the CLI device-revoke/device-disable: it
+// flips ONE device key's status and bumps the entitlement's revocation_seq so the online-verify path
+// refuses that device on its next proof-carrying check (pre-TTL, non-coarse revoke — closes the R6.1
+// loop). transitionEntitlementDevice commits the device UPDATE + seq bump + audit event atomically.
+async function handleDeviceTransition(
+  request: Request,
+  env: Env,
+  actor: Actor,
+  encodedId: string,
+  encodedDeviceKeyId: string,
+  action: "revoke" | "disable" | "reenable",
+  requestIdValue: string,
+): Promise<Response> {
+  const adminError = requireAdmin(actor, requestIdValue);
+  if (adminError !== null) {
+    return adminError;
+  }
+  const key = decodeEntitlementId(encodedId);
+  if (key === null) {
+    return envelope(requestIdValue, "invalid_entitlement_id", undefined, 400);
+  }
+  const deviceKeyId = decodeURIComponent(encodedDeviceKeyId);
+  if (!DEVICE_KEY_ID_RE.test(deviceKeyId)) {
+    return envelope(requestIdValue, "invalid_device_key_id", undefined, 400);
+  }
+  const idempotencyKey = safeString(request.headers.get("idempotency-key"), 128);
+  if (request.headers.has("idempotency-key") && idempotencyKey === null) {
+    return envelope(requestIdValue, "invalid_idempotency_key", undefined, 400);
+  }
+  const body = await parseJsonBody(request, requestIdValue);
+  if (body instanceof Response) {
+    return body;
+  }
+  const reason = safeNotes((body as Record<string, unknown>).reason) ?? "";
+  if ((action === "revoke" || action === "disable") && reason === "") {
+    return envelope(requestIdValue, "reason_required", undefined, 400);
+  }
+  const ctx: MutationContext = {
+    actor,
+    requestId: requestIdValue,
+    ip: clientIp(request),
+    idempotencyKey: idempotencyKey ?? null,
+    source: "admin",
+  };
+  const targetStatus = action === "revoke" ? "revoked" : action === "disable" ? "disabled" : "active";
+  return mutationResponse(request, env, ctx, `device_${action}d`, (idempotency) =>
+    transitionEntitlementDevice(env, key, deviceKeyId, targetStatus, reason, ctx, idempotency));
+}
+
 async function handleApi(request: Request, env: Env): Promise<Response> {
   const id = requestId(request);
   const auth = await authenticate(request, env, id);
@@ -2319,6 +2395,10 @@ async function handleApi(request: Request, env: Env): Promise<Response> {
   if (request.method === "GET" && url.pathname === "/api/admin/events") {
     return listEvents(request, env, id);
   }
+  const deviceList = /^\/api\/admin\/entitlements\/([^/]+)\/devices$/.exec(url.pathname);
+  if (request.method === "GET" && deviceList !== null) {
+    return handleDeviceList(env, deviceList[1] ?? "", id);
+  }
   const detail = /^\/api\/admin\/entitlements\/([^/]+)$/.exec(url.pathname);
   if (request.method === "GET" && detail !== null) {
     const key = decodeEntitlementId(detail[1] ?? "");
@@ -2336,6 +2416,12 @@ async function handleApi(request: Request, env: Env): Promise<Response> {
   const releaseSeats = /^\/api\/admin\/entitlements\/([^/]+)\/release-seats$/.exec(url.pathname);
   if (request.method === "POST" && releaseSeats !== null) {
     return handleReleaseSeats(request, env, auth, releaseSeats[1] ?? "", id);
+  }
+  // Device transition lives at /entitlements/:id/devices/:deviceKeyId/(revoke|disable|reenable) —
+  // match it before the generic entitlement mutation dispatch (whose regex would otherwise 404 it).
+  const deviceTransition = /^\/api\/admin\/entitlements\/([^/]+)\/devices\/([^/]+)\/(revoke|disable|reenable)$/.exec(url.pathname);
+  if (request.method === "POST" && deviceTransition !== null) {
+    return handleDeviceTransition(request, env, auth, deviceTransition[1] ?? "", deviceTransition[2] ?? "", deviceTransition[3] as "revoke" | "disable" | "reenable", id);
   }
   if (["POST", "PATCH"].includes(request.method)) {
     return handleMutation(request, env, auth, id);

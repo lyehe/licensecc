@@ -12,6 +12,21 @@ export interface EntitlementKey {
 // re-exports these so there is exactly ONE definition shared across packages.
 export type EntitlementStatus = "active" | "disabled" | "revoked";
 
+// A registered relay-resistance device key (table entitlement_devices).
+export type DeviceStatus = "active" | "revoked" | "disabled";
+
+export interface EntitlementDeviceRecord {
+  project: string;
+  feature: string;
+  license_fingerprint: string;
+  device_key_id: string;
+  status: DeviceStatus;
+  created_at: number;
+  updated_at: number;
+  last_seen_at: number | null;
+  notes: string;
+}
+
 export interface EntitlementRecord {
   id: string;
   project: string;
@@ -186,6 +201,18 @@ export function transitionEntitlement(
   key: EntitlementKey,
   status: EntitlementStatus,
   eventType: "disable" | "reenable" | "revoke",
+  reason: string,
+  ctx: MutationContext,
+  idempotency: IdempotencyCommit | null,
+): Promise<MutationResult<EntitlementRecord> | null>;
+
+export function listEntitlementDevices(env: MutationEnv, key: EntitlementKey): Promise<EntitlementDeviceRecord[]>;
+
+export function transitionEntitlementDevice(
+  env: MutationEnv,
+  key: EntitlementKey,
+  deviceKeyId: string,
+  deviceStatus: DeviceStatus,
   reason: string,
   ctx: MutationContext,
   idempotency: IdempotencyCommit | null,

@@ -426,6 +426,50 @@ test("disable-webhook confirm copy echoes the endpoint URL and clarifies queued 
   assert.match(copy, /queued or failed deliveries already recorded are unaffected/);
 });
 
+// ── Entitlement devices tab (audit R6.5 — closes R6.1) ─────────────────────────
+test("admin UI workflow builds device list + transition paths with encoding", async () => {
+  const workflow = await loadWorkflowModule();
+  const dev = `sha256:${"b".repeat(64)}`;
+  assert.equal(workflow.entitlementDevicesPath("ent-123"), "/api/admin/entitlements/ent-123/devices");
+  assert.equal(workflow.entitlementDevicesPath("ent/x"), "/api/admin/entitlements/ent%2Fx/devices");
+  assert.equal(
+    workflow.deviceTransitionPath("ent-123", dev, "revoke"),
+    `/api/admin/entitlements/ent-123/devices/sha256%3A${"b".repeat(64)}/revoke`,
+  );
+  assert.equal(
+    workflow.deviceTransitionPath("ent-123", dev, "disable"),
+    `/api/admin/entitlements/ent-123/devices/sha256%3A${"b".repeat(64)}/disable`,
+  );
+  assert.equal(
+    workflow.deviceTransitionPath("ent-123", dev, "reenable"),
+    `/api/admin/entitlements/ent-123/devices/sha256%3A${"b".repeat(64)}/reenable`,
+  );
+});
+
+test("admin UI workflow device action rules make revoke terminal", async () => {
+  const workflow = await loadWorkflowModule();
+  assert.equal(workflow.canRunDeviceAction("active", "disable"), true);
+  assert.equal(workflow.canRunDeviceAction("active", "reenable"), false);
+  assert.equal(workflow.canRunDeviceAction("active", "revoke"), true);
+  assert.equal(workflow.canRunDeviceAction("disabled", "disable"), false);
+  assert.equal(workflow.canRunDeviceAction("disabled", "reenable"), true);
+  assert.equal(workflow.canRunDeviceAction("disabled", "revoke"), true);
+  // A revoked device is terminal: no action is available.
+  assert.equal(workflow.canRunDeviceAction("revoked", "disable"), false);
+  assert.equal(workflow.canRunDeviceAction("revoked", "reenable"), false);
+  assert.equal(workflow.canRunDeviceAction("revoked", "revoke"), false);
+});
+
+test("admin UI workflow renders short device key ids and device confirm copy", async () => {
+  const workflow = await loadWorkflowModule();
+  assert.equal(workflow.shortDeviceKeyId(`sha256:${"b".repeat(64)}`), "sha256:bbbbbbbb…");
+  assert.equal(workflow.shortDeviceKeyId("short"), "short");
+  const revoke = workflow.revokeDeviceConfirm({ device_key_id: `sha256:${"b".repeat(64)}` });
+  assert.match(revoke, /Revoke device key sha256:bbbbbbbb…/);
+  assert.match(revoke, /TERMINAL/);
+  assert.match(workflow.disableDeviceConfirm({ device_key_id: `sha256:${"b".repeat(64)}` }), /Disable device key sha256:bbbbbbbb…/);
+});
+
 // ── Workstream C: bulk transitions ────────────────────────────────────────────
 test("admin UI workflow builds the bulk transition path and body", async () => {
   const workflow = await loadWorkflowModule();

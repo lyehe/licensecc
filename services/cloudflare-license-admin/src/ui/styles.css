@@ -733,7 +733,8 @@ button.searchResult:hover:not(:disabled) .searchResultMeta {
   word-break: break-all;
 }
 
-/* Recent-deliveries pane under the webhook endpoints table (audit R6.5). */
+/* Recent-deliveries pane under the webhook endpoints table + the per-entitlement device pane
+   (audit R6.5). */
 .deliveriesPane {
   border-top: 1px solid #e2e2e2;
   margin-top: 24px;
@@ -742,4 +743,16 @@ button.searchResult:hover:not(:disabled) .searchResultMeta {
 
 .deliveriesPane h3 {
   margin: 0 0 12px;
+}
+
+/* A button styled as an inline link (e.g. the device pane's "close"). */
+.linkish {
+  background: none;
+  border: 0;
+  color: #2a6f97;
+  cursor: pointer;
+  font-size: 12px;
+  margin-left: 10px;
+  padding: 0;
+  text-decoration: underline;
 }

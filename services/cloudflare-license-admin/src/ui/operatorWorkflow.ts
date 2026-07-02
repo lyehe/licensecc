@@ -536,6 +536,50 @@ export function normalizeWebhookForm(form: WebhookFormState): WebhookEndpointInp
   };
 }
 
+// ── Entitlement devices (audit R6.5 — closes R6.1) ───────────────────────────
+// Pure helpers for the per-entitlement device pane: list/transition path builders, the
+// action-availability rule (revoke is terminal), a short key-id renderer, and confirm copy.
+
+export function entitlementDevicesPath(entitlementId: string): string {
+  return `/api/admin/entitlements/${encodeURIComponent(entitlementId)}/devices`;
+}
+
+export type DeviceAction = "revoke" | "disable" | "reenable";
+
+export function deviceTransitionPath(entitlementId: string, deviceKeyId: string, action: DeviceAction): string {
+  return `/api/admin/entitlements/${encodeURIComponent(entitlementId)}/devices/${encodeURIComponent(deviceKeyId)}/${action}`;
+}
+
+// A revoked device is terminal (cannot be disabled/reenabled). disable acts on an active device;
+// reenable on a disabled one; revoke on any non-revoked device.
+export function canRunDeviceAction(status: string, action: DeviceAction): boolean {
+  if (status === "revoked") {
+    return false;
+  }
+  if (action === "disable") {
+    return status === "active";
+  }
+  if (action === "reenable") {
+    return status === "disabled";
+  }
+  return true; // revoke: any non-revoked device
+}
+
+export function shortDeviceKeyId(deviceKeyId: string): string {
+  if (deviceKeyId.startsWith("sha256:") && deviceKeyId.length >= 15) {
+    return `sha256:${deviceKeyId.slice(7, 15)}…`;
+  }
+  return deviceKeyId.length > 12 ? `${deviceKeyId.slice(0, 12)}…` : deviceKeyId;
+}
+
+export function revokeDeviceConfirm(device: { device_key_id: string }): string {
+  return `Revoke device key ${shortDeviceKeyId(device.device_key_id)}. This is TERMINAL: the device is refused on its next online check (before token TTL) and cannot be re-enabled.`;
+}
+
+export function disableDeviceConfirm(device: { device_key_id: string }): string {
+  return `Disable device key ${shortDeviceKeyId(device.device_key_id)}. It is refused on its next online check; you can re-enable it later.`;
+}
+
 export function formatEpoch(value: number | null | undefined): string {
   if (value === null || value === undefined) {
     return "-";

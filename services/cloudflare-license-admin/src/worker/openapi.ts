@@ -81,6 +81,14 @@ const idParam = {
   schema: { type: "string" },
 } as const;
 
+const deviceKeyIdParam = {
+  name: "deviceKeyId",
+  in: "path",
+  required: true,
+  description: "The relay-resistance device key id, form `sha256:<64-hex>` (URL-encoded in the path).",
+  schema: { type: "string", pattern: "^sha256:[0-9a-f]{64}$" },
+} as const;
+
 function limitCursorParams(): ReadonlyArray<Record<string, unknown>> {
   return [
     { name: "limit", in: "query", required: false, description: "Page size (default 50, clamped to max 100).", schema: { type: "integer", default: 50, minimum: 1, maximum: 100 } },
@@ -820,6 +828,83 @@ const paths: Record<string, Record<string, unknown>> = {
       },
     },
   },
+  "/api/admin/entitlements/{id}/devices": {
+    get: {
+      tags: ["admin:entitlements"],
+      summary: "List the entitlement's registered relay-resistance device keys (reader+admin)",
+      operationId: "listEntitlementDevices",
+      security: ADMIN_SECURITY,
+      parameters: [idParam],
+      responses: {
+        "200": okResponse("The entitlement's device keys (newest-touched first, max 200).", "#/components/schemas/DevicesListData", "devices_listed"),
+        "400": errorResponse("Malformed entitlement id.", "invalid_entitlement_id"),
+        ...ADMIN_AUTH_ERRORS,
+        "404": errorResponse("No entitlement with that id.", "not_found"),
+      },
+    },
+  },
+  "/api/admin/entitlements/{id}/devices/{deviceKeyId}/revoke": {
+    post: {
+      tags: ["admin:entitlements"],
+      summary: "Revoke ONE device key (admin-only, terminal, requires reason). Bumps revocation_seq so the online-verify path refuses that device pre-TTL.",
+      operationId: "revokeEntitlementDevice",
+      security: ADMIN_SECURITY,
+      parameters: [idParam, deviceKeyIdParam, idempotencyKeyHeader],
+      requestBody: {
+        required: true,
+        content: { "application/json": { schema: { $ref: "#/components/schemas/ReasonRequiredBody" } } },
+      },
+      responses: {
+        "200": okResponse("Device revoked; entitlement revocation_seq bumped.", "#/components/schemas/EntitlementRecord", "device_revoked"),
+        "400": errorResponse("Invalid entitlement id / device key id / json / idempotency key, or missing reason.", "invalid_entitlement_id", "invalid_device_key_id", "invalid_idempotency_key", "invalid_json", "reason_required"),
+        ...ADMIN_MUTATION_AUTH_ERRORS,
+        "404": errorResponse("No entitlement with that id, or no such device key.", "not_found", "device_not_found"),
+        "409": errorResponse("Device is already revoked (terminal).", "device_is_terminal"),
+        "413": errorResponse("Request body exceeds 8192 bytes.", "body_too_large"),
+        "500": errorResponse("Mutation failed, or dev bearer enabled outside development.", "mutation_failed", "dev_bearer_forbidden_in_environment"),
+      },
+    },
+  },
+  "/api/admin/entitlements/{id}/devices/{deviceKeyId}/disable": {
+    post: {
+      tags: ["admin:entitlements"],
+      summary: "Disable ONE device key (admin-only, reversible, requires reason). Bumps revocation_seq.",
+      operationId: "disableEntitlementDevice",
+      security: ADMIN_SECURITY,
+      parameters: [idParam, deviceKeyIdParam, idempotencyKeyHeader],
+      requestBody: {
+        required: true,
+        content: { "application/json": { schema: { $ref: "#/components/schemas/ReasonRequiredBody" } } },
+      },
+      responses: {
+        "200": okResponse("Device disabled; entitlement revocation_seq bumped.", "#/components/schemas/EntitlementRecord", "device_disabled"),
+        "400": errorResponse("Invalid entitlement id / device key id / json / idempotency key, or missing reason.", "invalid_entitlement_id", "invalid_device_key_id", "invalid_idempotency_key", "invalid_json", "reason_required"),
+        ...ADMIN_MUTATION_AUTH_ERRORS,
+        "404": errorResponse("No entitlement with that id, or no such device key.", "not_found", "device_not_found"),
+        "409": errorResponse("Device is revoked (terminal); cannot disable.", "device_is_terminal"),
+        "413": errorResponse("Request body exceeds 8192 bytes.", "body_too_large"),
+        "500": errorResponse("Mutation failed, or dev bearer enabled outside development.", "mutation_failed", "dev_bearer_forbidden_in_environment"),
+      },
+    },
+  },
+  "/api/admin/entitlements/{id}/devices/{deviceKeyId}/reenable": {
+    post: {
+      tags: ["admin:entitlements"],
+      summary: "Re-enable a disabled device key (admin-only). Bumps revocation_seq. Reason optional.",
+      operationId: "reenableEntitlementDevice",
+      security: ADMIN_SECURITY,
+      parameters: [idParam, deviceKeyIdParam, idempotencyKeyHeader],
+      responses: {
+        "200": okResponse("Device re-enabled; entitlement revocation_seq bumped.", "#/components/schemas/EntitlementRecord", "device_reenabled"),
+        "400": errorResponse("Invalid entitlement id / device key id / json / idempotency key.", "invalid_entitlement_id", "invalid_device_key_id", "invalid_idempotency_key", "invalid_json"),
+        ...ADMIN_MUTATION_AUTH_ERRORS,
+        "404": errorResponse("No entitlement with that id, or no such device key.", "not_found", "device_not_found"),
+        "409": errorResponse("Device is revoked (terminal); cannot re-enable.", "device_is_terminal"),
+        "413": errorResponse("Request body exceeds 8192 bytes.", "body_too_large"),
+        "500": errorResponse("Mutation failed, or dev bearer enabled outside development.", "mutation_failed", "dev_bearer_forbidden_in_environment"),
+      },
+    },
+  },
   "/api/admin/search": {
     get: {
       tags: ["admin:reports"],
@@ -1457,6 +1542,29 @@ export const openApiDocument: OpenApiDocument = {
         properties: {
           released: { type: "integer", description: "Count of LIVE seats reclaimed (0 is a valid idempotent success)." },
           seat_ids: { type: "array", items: { type: "string" }, description: "The reclaimed seat_ids (sorted)." },
+        },
+      },
+      EntitlementDevice: {
+        type: "object",
+        description: "A registered relay-resistance device key (entitlement_devices). The public key is not surfaced here.",
+        required: ["project", "feature", "license_fingerprint", "device_key_id", "status", "created_at", "updated_at"],
+        properties: {
+          project: { type: "string" },
+          feature: { type: "string" },
+          license_fingerprint: { type: "string" },
+          device_key_id: { type: "string", description: "sha256:<64-hex>." },
+          status: { type: "string", enum: ["active", "revoked", "disabled"] },
+          created_at: { type: "integer" },
+          updated_at: { type: "integer" },
+          last_seen_at: { type: ["integer", "null"], description: "Last time this device presented a valid request proof (null if never)." },
+          notes: { type: "string" },
+        },
+      },
+      DevicesListData: {
+        type: "object",
+        required: ["items"],
+        properties: {
+          items: { type: "array", items: { $ref: "#/components/schemas/EntitlementDevice" }, description: "The entitlement's device keys, newest-touched first (max 200)." },
         },
       },
     },

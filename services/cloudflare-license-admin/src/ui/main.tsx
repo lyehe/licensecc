@@ -1,6 +1,7 @@
 import React, { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type {
+  EntitlementDeviceRecord,
   EntitlementRecord,
   ExpiringEntitlement,
   Policy,
@@ -21,9 +22,13 @@ import {
   canEditEntitlement,
   canRunAction,
   canRunCustomerAction,
+  canRunDeviceAction,
   canRunPolicyAction,
   canRunWebhookAction,
   csvExportPath,
+  deviceTransitionPath,
+  disableDeviceConfirm,
+  entitlementDevicesPath,
   customerDetailPath,
   customerTransitionPath,
   customersPath,
@@ -55,8 +60,10 @@ import {
   policyTransitionPath,
   releaseSeatsConfirm,
   releaseSeatsPath,
+  revokeDeviceConfirm,
   revokeEntitlementConfirm,
   searchPath,
+  shortDeviceKeyId,
   shortHash,
   summarizeBatchResults,
   timeseriesPath,
@@ -67,7 +74,7 @@ import {
   webhooksPath,
   withCursor,
 } from "./operatorWorkflow";
-import type { BatchRowResult, BarRect, EntitlementHealth } from "./operatorWorkflow";
+import type { BatchRowResult, BarRect, EntitlementHealth, DeviceAction } from "./operatorWorkflow";
 import "./styles.css";
 
 interface Summary {
@@ -419,6 +426,11 @@ function App(): React.ReactElement {
   const [webhookForm, setWebhookForm] = useState(emptyWebhookForm);
   const [webhookDeliveries, setWebhookDeliveries] = useState<WebhookDelivery[]>([]);
   const [webhookDeliveryFilter, setWebhookDeliveryFilter] = useState({ endpoint_id: "", status: "" });
+
+  // Per-entitlement device pane (audit R6.5, closes R6.1): the entitlement id whose registered
+  // relay-resistance device keys are shown (null = pane closed) + the loaded devices.
+  const [deviceEntitlementId, setDeviceEntitlementId] = useState<string | null>(null);
+  const [devices, setDevices] = useState<EntitlementDeviceRecord[]>([]);
 
   // Workstream C — BULK: the ids of the entitlement rows the operator has checked. A bulk-action bar
   // appears when >=1 is selected; clicking a bulk action routes through the typed-confirm modal.
@@ -886,6 +898,47 @@ function App(): React.ReactElement {
     setWebhookDeliveryFilter({ endpoint_id: endpointId, status: "" });
   }
 
+  // ── Entitlement devices (audit R6.5, closes R6.1) ────────────────────────────
+  async function loadDevices(entitlementId: string): Promise<void> {
+    const response = await api<{ items: EntitlementDeviceRecord[] }>(entitlementDevicesPath(entitlementId));
+    if (response.ok && response.data) {
+      setDevices(response.data.items);
+    } else {
+      setDevices([]);
+      setMessage(`${response.code} (${response.request_id})`);
+    }
+  }
+
+  // Open the device pane for an entitlement (or close it if the same row is toggled).
+  function toggleDevices(entitlementId: string): void {
+    if (deviceEntitlementId === entitlementId) {
+      setDeviceEntitlementId(null);
+      setDevices([]);
+      return;
+    }
+    setDeviceEntitlementId(entitlementId);
+    void loadDevices(entitlementId);
+  }
+
+  async function deviceTransition(device: EntitlementDeviceRecord, action: DeviceAction): Promise<void> {
+    if (deviceEntitlementId === null) {
+      return;
+    }
+    const entitlementId = deviceEntitlementId;
+    await runMutation(async () => {
+      const result = await api<EntitlementRecord>(deviceTransitionPath(entitlementId, device.device_key_id, action), {
+        method: "POST",
+        headers: { "idempotency-key": crypto.randomUUID() },
+        body: JSON.stringify(action === "reenable" ? {} : { reason: currentReason() }),
+      });
+      setMessage(`${result.code} (${result.request_id})`);
+      if (result.ok) {
+        if (action !== "reenable") setReason("");
+        await loadDevices(entitlementId);
+      }
+    });
+  }
+
   function beginEdit(item: EntitlementRecord): void {
     setEditingId(item.id);
     setEditForm(editFormFromEntitlement(item));
@@ -1245,6 +1298,7 @@ function App(): React.ReactElement {
                         <button disabled={busy || !canRunAction(item.status, "reenable")} onClick={() => void transition(item, "reenable")}>Reenable</button>
                         <button className="danger" disabled={busy || !canRunAction(item.status, "revoke")} onClick={() => requestConfirm({ title: "Revoke entitlement", body: revokeEntitlementConfirm(item), requiresReason: true, run: () => transition(item, "revoke") })}>Revoke</button>
                         <button className="danger" disabled={busy} onClick={() => requestConfirm({ title: "Release seats", body: releaseSeatsConfirm(item), requiresReason: true, run: () => releaseSeats(item) })}>Release seats</button>
+                        <button type="button" disabled={busy} aria-expanded={deviceEntitlementId === item.id} onClick={() => toggleDevices(item.id)}>Devices</button>
                       </td>
                     </tr>
                     {editingId === item.id && (
@@ -1276,6 +1330,35 @@ function App(): React.ReactElement {
                 <button type="button" disabled={busy} onClick={() => void loadMore(entitlementsUrl, entitlementsCursor, setEntitlements, setEntitlementsCursor)}>Load more</button>
               )}
             </div>
+
+            {deviceEntitlementId !== null && (
+              <section className="deliveriesPane" aria-label="Registered devices">
+                <h3>Devices for {shortHash(deviceEntitlementId)}
+                  <button type="button" className="linkish" disabled={busy} onClick={() => toggleDevices(deviceEntitlementId)}>close</button>
+                </h3>
+                <p className="muted">Revoking or disabling a device bumps the entitlement's revocation_seq, so the online-verify path refuses that device on its next proof-carrying check (before token TTL). Revoke is terminal.</p>
+                <table>
+                  <caption className="srOnly">Registered device keys</caption>
+                  <thead><tr><th scope="col">Device key</th><th scope="col">Status</th><th scope="col">Created</th><th scope="col">Last seen</th><th scope="col">Actions</th></tr></thead>
+                  <tbody>
+                    {devices.map((device) => (
+                      <tr key={device.device_key_id}>
+                        <td className="mono">{shortDeviceKeyId(device.device_key_id)}</td>
+                        <td><span className={`status ${device.status}`}>{device.status}</span></td>
+                        <td>{formatEpoch(device.created_at)}</td>
+                        <td>{formatEpoch(device.last_seen_at)}</td>
+                        <td className="actions">
+                          <button disabled={busy || !canRunDeviceAction(device.status, "disable")} onClick={() => requestConfirm({ title: "Disable device", body: disableDeviceConfirm(device), requiresReason: true, run: () => deviceTransition(device, "disable") })}>Disable</button>
+                          <button disabled={busy || !canRunDeviceAction(device.status, "reenable")} onClick={() => void deviceTransition(device, "reenable")}>Reenable</button>
+                          <button className="danger" disabled={busy || !canRunDeviceAction(device.status, "revoke")} onClick={() => requestConfirm({ title: "Revoke device", body: revokeDeviceConfirm(device), requiresReason: true, run: () => deviceTransition(device, "revoke") })}>Revoke</button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {devices.length === 0 && <p className="muted">No devices registered for this entitlement.</p>}
+              </section>
+            )}
             <label className="reason">Reason<input value={reason} onChange={(event) => setReason(event.target.value)} /></label>
           </section>
         </section>

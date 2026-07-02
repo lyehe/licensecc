@@ -67,6 +67,10 @@ const API_ROUTES = [
   { method: "POST", path: "/api/admin/entitlements/{id}/disable" },
   { method: "POST", path: "/api/admin/entitlements/{id}/reenable" },
   { method: "POST", path: "/api/admin/entitlements/{id}/revoke" },
+  { method: "GET", path: "/api/admin/entitlements/{id}/devices" },
+  { method: "POST", path: "/api/admin/entitlements/{id}/devices/{deviceKeyId}/revoke" },
+  { method: "POST", path: "/api/admin/entitlements/{id}/devices/{deviceKeyId}/disable" },
+  { method: "POST", path: "/api/admin/entitlements/{id}/devices/{deviceKeyId}/reenable" },
   { method: "GET", path: "/api/admin/events" },
   { method: "POST", path: "/api/sync/entitlements" },
 ];
@@ -97,6 +101,12 @@ const TEMPLATED_ROUTE_SOURCE = {
   "/api/admin/entitlements/{id}/disable": String.raw`(?:\/(disable|reenable|revoke))?`,
   "/api/admin/entitlements/{id}/reenable": String.raw`(?:\/(disable|reenable|revoke))?`,
   "/api/admin/entitlements/{id}/revoke": String.raw`(?:\/(disable|reenable|revoke))?`,
+  // Device list has its own regex; the three device transitions share one revoke|disable|reenable
+  // regex, matched before the generic entitlement mutation dispatch.
+  "/api/admin/entitlements/{id}/devices": String.raw`/^\/api\/admin\/entitlements\/([^/]+)\/devices$/`,
+  "/api/admin/entitlements/{id}/devices/{deviceKeyId}/revoke": String.raw`/^\/api\/admin\/entitlements\/([^/]+)\/devices\/([^/]+)\/(revoke|disable|reenable)$/`,
+  "/api/admin/entitlements/{id}/devices/{deviceKeyId}/disable": String.raw`/^\/api\/admin\/entitlements\/([^/]+)\/devices\/([^/]+)\/(revoke|disable|reenable)$/`,
+  "/api/admin/entitlements/{id}/devices/{deviceKeyId}/reenable": String.raw`/^\/api\/admin\/entitlements\/([^/]+)\/devices\/([^/]+)\/(revoke|disable|reenable)$/`,
   // Policy detail GET is its own regex; the PATCH + disable/reenable mutations live in the
   // combined `(?:\/(disable|reenable))?` form inside handlePolicyMutation.
   "/api/admin/policies/{id}": String.raw`/^\/api\/admin\/policies\/([^/]+)$/`,
