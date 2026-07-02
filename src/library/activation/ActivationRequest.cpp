@@ -31,9 +31,49 @@ bool append_line(std::ostringstream& out, const char* key, const std::string& va
 	return true;
 }
 
+// Locale-safe range checks (matching parse_uint64's style). A project/feature name is a bounded
+// identifier; the hwid is canonical base64 groups joined by '-' (the HwIdentifier::print() charset).
+bool is_name_char(char c) {
+	return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '.' || c == '_' ||
+		   c == '-';
+}
+bool is_hwid_char(char c) {
+	return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '+' || c == '/' ||
+		   c == '=' || c == '-';
+}
+
+// A field value must be non-empty, bounded, and drawn ONLY from the given charset. This is a
+// security boundary, not cosmetics: the decoded fields are interpolated by the operator side
+// (lcc-inspector --decode-activation-request) into a suggested `lccgen license issue ...` command
+// run on the private-key-holding host. Restricting to identifier/base64 charsets (no spaces, no
+// shell metacharacters, no '--flags'-enabling whitespace) closes an argument/command-injection
+// channel from an untrusted, unsigned request. Legitimate project/feature names and the canonical
+// hwid all fit these sets.
+bool valid_field(const std::string& value, bool (*char_ok)(char), std::size_t max_len) {
+	if (value.empty() || value.size() > max_len) {
+		return false;
+	}
+	for (const char c : value) {
+		if (!char_ok(c)) {
+			return false;
+		}
+	}
+	return true;
+}
+
+bool fields_have_safe_charsets(const std::string& project, const std::string& feature, const std::string& hwid) {
+	return valid_field(project, is_name_char, 127) && valid_field(feature, is_name_char, 127) &&
+		   valid_field(hwid, is_hwid_char, 64);
+}
+
 }  // namespace
 
 std::string build_activation_request(const ActivationRequestFields& fields) {
+	// Refuse to emit a request whose fields fall outside the safe charsets the parser enforces, so a
+	// request this library produces always round-trips (and we never mint an injection-shaped value).
+	if (!fields_have_safe_charsets(fields.project, fields.feature, fields.hwid)) {
+		return std::string();
+	}
 	std::ostringstream payload;
 	if (!append_line(payload, kProjectKey, fields.project) || !append_line(payload, kFeatureKey, fields.feature) ||
 		!append_line(payload, kHwidKey, fields.hwid)) {
@@ -93,6 +133,15 @@ bool parse_activation_request(const std::string& token, ActivationRequestFields&
 	}
 	if (pos != payload.size()) {
 		error = "activation request: unexpected trailing data";
+		return false;
+	}
+	// SECURITY: the decoded project/feature/hwid are consumed by the operator side, which interpolates
+	// them into a suggested `lccgen license issue ...` command on the private-key-holding host. The
+	// request is UNSIGNED and attacker-controllable, so enforce strict charsets (no spaces, no shell
+	// metacharacters, no '--flag'-enabling bytes) to close an argument/command-injection channel. Also
+	// rejects empty required fields (a silently-malformed operator command otherwise).
+	if (!fields_have_safe_charsets(out.project, out.feature, out.hwid)) {
+		error = "activation request: a field is empty or contains characters outside its allowed charset";
 		return false;
 	}
 	if (!signed_token::parse_uint64(nonce_str, out.nonce)) {

@@ -20,7 +20,10 @@ namespace activation {
 // Envelope: `lccareq1.<base64(payload)>` where payload is canonical `key=value\n` lines:
 //   project=<name>\nfeature=<name>\nhwid=<XXXX-XXXX-XXXX=>\nnonce=<uint>\nissued-at=<uint>\n
 // The framing tolerates '=' inside a value (the canonical hwid ends in base64 padding) by
-// splitting each line on its FIRST '='; only line breaks are rejected.
+// splitting each line on its FIRST '='. Because the request is UNSIGNED and the operator side
+// interpolates the decoded fields into a suggested `lccgen` command on the key-holding host, each
+// field is charset-restricted (project/feature: identifier chars; hwid: canonical base64 groups) and
+// must be non-empty -- this closes an argument/command-injection channel from a hostile request.
 
 struct ActivationRequestFields {
 	std::string project;

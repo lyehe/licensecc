@@ -92,5 +92,56 @@ BOOST_AUTO_TEST_CASE(build_rejects_line_breaks_in_values) {
 	BOOST_CHECK(build_activation_request(f).empty());
 }
 
+// SECURITY: the decoded fields feed a suggested operator `lccgen` command on the key-holding host,
+// so a hostile request must not be able to smuggle spaces / shell metacharacters / '--flags' through
+// parse. build() must likewise refuse to mint such a value.
+BOOST_AUTO_TEST_CASE(parse_rejects_injection_shaped_field_values) {
+	// Craft payloads directly (bypassing build) with an attacker-shaped hwid/feature/project.
+	auto encode = [](const string& payload) {
+		return string("lccareq1.") + license::base64(payload.data(), payload.size(), 0);
+	};
+	ActivationRequestFields out;
+	string error;
+
+	// hwid carrying injected lccgen flags (spaces) — the flagship exploit.
+	const string flag_inject =
+		"project=DEFAULT\nfeature=PREMIUM\nhwid=AABQ= --output-file-name projects/DEFAULT/private_key.rsa\nnonce=1\nissued-at=2\n";
+	BOOST_CHECK(!parse_activation_request(encode(flag_inject), out, error));
+
+	// feature carrying a shell command substitution.
+	const string shell_inject = "project=DEFAULT\nfeature=x$(reboot)\nhwid=AABQ-6/bO-ATs=\nnonce=1\nissued-at=2\n";
+	BOOST_CHECK(!parse_activation_request(encode(shell_inject), out, error));
+
+	// project with a path-traversal '/'.
+	const string path_inject = "project=../../etc\nfeature=PREMIUM\nhwid=AABQ-6/bO-ATs=\nnonce=1\nissued-at=2\n";
+	BOOST_CHECK(!parse_activation_request(encode(path_inject), out, error));
+
+	// A shell metacharacter ';' in the hwid.
+	const string semi_inject = "project=DEFAULT\nfeature=PREMIUM\nhwid=AABQ;rm\nnonce=1\nissued-at=2\n";
+	BOOST_CHECK(!parse_activation_request(encode(semi_inject), out, error));
+}
+
+BOOST_AUTO_TEST_CASE(parse_rejects_empty_required_fields) {
+	auto encode = [](const string& payload) {
+		return string("lccareq1.") + license::base64(payload.data(), payload.size(), 0);
+	};
+	ActivationRequestFields out;
+	string error;
+	const string empties = "project=\nfeature=\nhwid=\nnonce=1\nissued-at=2\n";
+	BOOST_CHECK(!parse_activation_request(encode(empties), out, error));
+}
+
+BOOST_AUTO_TEST_CASE(build_rejects_injection_shaped_field_values) {
+	ActivationRequestFields f = sample();
+	f.hwid = "AABQ= --output-file-name x"; // space -> would enable flag injection downstream
+	BOOST_CHECK(build_activation_request(f).empty());
+	f = sample();
+	f.feature = "x;rm -rf";
+	BOOST_CHECK(build_activation_request(f).empty());
+	f = sample();
+	f.project = ""; // empty
+	BOOST_CHECK(build_activation_request(f).empty());
+}
+
 }  // namespace test
 }  // namespace license
