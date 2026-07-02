@@ -61,7 +61,7 @@ function policy(overrides = {}) {
   return {
     id: "pol_1", project: "DEFAULT", name: "P", type: "subscription", status: "active",
     valid_from_offset_sec: null, duration_sec: null, assertion_ttl_seconds: 300,
-    pool_size: 0, max_active_devices: 1, max_borrow_sec: 0, expiry_strategy: "fixed_window",
+    pool_size: 0, max_active_devices: 1, max_borrow_sec: 0, meter_quota: 0, meter_period_sec: 2592000, expiry_strategy: "fixed_window",
     trial_expiration_basis: "from_issue", trial_duration_sec: 0, trial_one_per_device: 0, trial_require_device_proof: 0,
     notes: "", created_at: NOW, updated_at: NOW, ...overrides,
   };
@@ -73,7 +73,7 @@ test("stampFromPolicy: trial from_issue sets a now+duration window and freezes t
   const { input, capacity, trial } = stampFromPolicy(p, { ...target }, NOW);
   assert.equal(input.valid_until, NOW + 1209600);
   assert.equal(input.status, "active");
-  assert.deepEqual(capacity, { pool_size: 2, max_active_devices: 3, max_borrow_sec: 0 });
+  assert.deepEqual(capacity, { pool_size: 2, max_active_devices: 3, max_borrow_sec: 0, meter_quota: 0, meter_period_sec: 2592000 });
   assert.deepEqual(trial, { is_trial: 1, trial_expiration_basis: "from_issue", trial_duration_sec: 1209600, trial_one_per_device: 1, trial_require_device_proof: 1 });
 });
 
@@ -103,7 +103,7 @@ test("stampFromPolicy: non-trial zeroes the trial state", () => {
 test("createEntitlement + stamp extra writes the window/ttl AND capacity/trial atomically", async () => {
   const db = freshDb();
   const env = { DB: new D1Like(db) };
-  const p = policy({ type: "trial", trial_expiration_basis: "from_issue", trial_duration_sec: 1209600, assertion_ttl_seconds: 600, pool_size: 4, max_active_devices: 2, max_borrow_sec: 86400, trial_one_per_device: 1 });
+  const p = policy({ type: "trial", trial_expiration_basis: "from_issue", trial_duration_sec: 1209600, assertion_ttl_seconds: 600, pool_size: 4, max_active_devices: 2, max_borrow_sec: 86400, trial_one_per_device: 1, meter_quota: 500, meter_period_sec: 3600 });
   const { input, capacity, trial } = stampFromPolicy(p, { ...target, customer_id: "cus_a" }, NOW);
   const extra = buildPolicyStampStatement(env, target, p.id, capacity, trial);
   const result = await createEntitlement(env, input, ctx(), "", undefined, null, [extra]);
@@ -111,11 +111,14 @@ test("createEntitlement + stamp extra writes the window/ttl AND capacity/trial a
   assert.equal(result.data.assertion_ttl_seconds, 600);
   assert.equal(result.data.valid_until, NOW + 1209600);
   // The side-write columns (not in ENTITLEMENT_COLUMNS) read directly:
-  const row = db.prepare("SELECT policy_id, pool_size, max_active_devices, max_borrow_sec, is_trial, trial_expiration_basis, trial_duration_sec, trial_one_per_device, trial_require_device_proof, trial_started_at FROM entitlements WHERE license_fingerprint = ?").get(FP);
+  const row = db.prepare("SELECT policy_id, pool_size, max_active_devices, max_borrow_sec, meter_quota, meter_period_sec, is_trial, trial_expiration_basis, trial_duration_sec, trial_one_per_device, trial_require_device_proof, trial_started_at FROM entitlements WHERE license_fingerprint = ?").get(FP);
   assert.equal(row.policy_id, "pol_1");
   assert.equal(row.pool_size, 4);
   assert.equal(row.max_active_devices, 2);
   assert.equal(row.max_borrow_sec, 86400);
+  // The metering quota rode the stamp from the policy into the entitlement (audit R6.3 completion).
+  assert.equal(row.meter_quota, 500);
+  assert.equal(row.meter_period_sec, 3600);
   assert.equal(row.is_trial, 1);
   assert.equal(row.trial_expiration_basis, "from_issue");
   assert.equal(row.trial_duration_sec, 1209600);

@@ -74,6 +74,10 @@ export function stampFromPolicy(policy, overrides, now) {
     pool_size: overrides.pool_size ?? policy.pool_size,
     max_active_devices: overrides.max_active_devices ?? policy.max_active_devices,
     max_borrow_sec: overrides.max_borrow_sec ?? policy.max_borrow_sec,
+    // Metering quota (audit R6.3): a stamped entitlement inherits the policy's per-period consumption
+    // quota + window, so a "metered" policy makes meterUsage enforce it end-to-end.
+    meter_quota: overrides.meter_quota ?? policy.meter_quota ?? 0,
+    meter_period_sec: overrides.meter_period_sec ?? policy.meter_period_sec ?? 2592000,
   };
 
   const trial = isTrial
@@ -98,6 +102,7 @@ export function stampFromPolicy(policy, overrides, now) {
 export function buildPolicyStampStatement(env, key, policyId, capacity, trial) {
   return env.DB.prepare(
     "UPDATE entitlements SET policy_id = ?, pool_size = ?, max_active_devices = ?, max_borrow_sec = ?, " +
+      "meter_quota = ?, meter_period_sec = ?, " +
       "is_trial = ?, trial_expiration_basis = ?, trial_duration_sec = ?, trial_one_per_device = ?, trial_require_device_proof = ? " +
       "WHERE project = ? AND feature = ? AND license_fingerprint = ?",
   ).bind(
@@ -105,6 +110,8 @@ export function buildPolicyStampStatement(env, key, policyId, capacity, trial) {
     capacity.pool_size,
     capacity.max_active_devices,
     capacity.max_borrow_sec,
+    capacity.meter_quota,
+    capacity.meter_period_sec,
     trial.is_trial,
     trial.trial_expiration_basis,
     trial.trial_duration_sec,

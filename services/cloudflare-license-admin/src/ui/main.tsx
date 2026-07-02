@@ -1386,6 +1386,8 @@ function App(): React.ReactElement {
               <label>Pool size<input type="number" value={policyForm.pool_size} onChange={(event) => setPolicyForm({ ...policyForm, pool_size: Number(event.target.value) })} /></label>
               <label>Max active devices<input type="number" value={policyForm.max_active_devices} onChange={(event) => setPolicyForm({ ...policyForm, max_active_devices: Number(event.target.value) })} /></label>
               <label>Max borrow (sec)<input type="number" value={policyForm.max_borrow_sec} onChange={(event) => setPolicyForm({ ...policyForm, max_borrow_sec: Number(event.target.value) })} /></label>
+              <label>Meter quota (0 = off)<input type="number" value={policyForm.meter_quota} onChange={(event) => setPolicyForm({ ...policyForm, meter_quota: Number(event.target.value) })} /></label>
+              <label>Meter period (sec)<input type="number" value={policyForm.meter_period_sec} onChange={(event) => setPolicyForm({ ...policyForm, meter_period_sec: Number(event.target.value) })} /></label>
               <label>Expiry strategy
                 <select value={policyForm.expiry_strategy} onChange={(event) => setPolicyForm({ ...policyForm, expiry_strategy: event.target.value as Policy["expiry_strategy"] })}>
                   <option value="fixed_window">fixed_window</option>
@@ -1441,6 +1443,7 @@ function App(): React.ReactElement {
                         <span>Expiry {policy.expiry_strategy}</span>
                         <span>Offset {policy.valid_from_offset_sec ?? "-"} / Duration {policy.duration_sec ?? "-"}</span>
                         <span>Pool {policy.pool_size} / Max devices {policy.max_active_devices} / Borrow {policy.max_borrow_sec}s</span>
+                        {policy.meter_quota > 0 && <span>Meter quota {policy.meter_quota} / {policy.meter_period_sec}s</span>}
                         {policy.type === "trial" && (
                           <span>Trial {policy.trial_expiration_basis} {policy.trial_duration_sec}s {policy.trial_one_per_device === 1 ? "one-per-device" : ""} {policy.trial_require_device_proof === 1 ? "proof-required" : ""}</span>
                         )}

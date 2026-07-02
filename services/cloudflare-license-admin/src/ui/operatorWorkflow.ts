@@ -324,6 +324,8 @@ export interface PolicyFormState {
   pool_size: number;
   max_active_devices: number;
   max_borrow_sec: number;
+  meter_quota: number;
+  meter_period_sec: number;
   expiry_strategy: ExpiryStrategy;
   trial_expiration_basis: TrialExpirationBasis;
   trial_duration_sec: number;
@@ -342,6 +344,8 @@ export const emptyPolicyForm: PolicyFormState = {
   pool_size: 0,
   max_active_devices: 1,
   max_borrow_sec: 0,
+  meter_quota: 0,
+  meter_period_sec: 2592000,
   expiry_strategy: "fixed_window",
   trial_expiration_basis: "from_issue",
   trial_duration_sec: 0,
@@ -383,6 +387,8 @@ export function normalizePolicyForm(form: PolicyFormState): PolicyInput {
     pool_size: parseBoundedInteger(form.pool_size, "pool_size", 0, 1_000_000),
     max_active_devices: parseBoundedInteger(form.max_active_devices, "max_active_devices", 0, 1_000_000),
     max_borrow_sec: parseBoundedInteger(form.max_borrow_sec, "max_borrow_sec", 0, MAX_POLICY_DURATION_SECONDS),
+    meter_quota: parseBoundedInteger(form.meter_quota, "meter_quota", 0, 1_000_000_000),
+    meter_period_sec: parseBoundedInteger(form.meter_period_sec, "meter_period_sec", 0, MAX_POLICY_DURATION_SECONDS),
     expiry_strategy: form.expiry_strategy,
     trial_expiration_basis: form.trial_expiration_basis,
     trial_duration_sec: parseBoundedInteger(form.trial_duration_sec, "trial_duration_sec", 0, MAX_POLICY_DURATION_SECONDS),

@@ -415,7 +415,8 @@ CREATE TABLE IF NOT EXISTS entitlement_policies (
   notes                       TEXT NOT NULL DEFAULT '',
   created_at                  INTEGER NOT NULL,
   updated_at                  INTEGER NOT NULL
-);
+  , meter_quota INTEGER NOT NULL DEFAULT 0,
+  meter_period_sec INTEGER NOT NULL DEFAULT 2592000);
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_entitlement_policies_name ON entitlement_policies(project, lower(name));
 

@@ -512,7 +512,9 @@ CREATE TABLE IF NOT EXISTS entitlement_policies (
   trial_require_device_proof  INTEGER NOT NULL DEFAULT 0,
   notes                       TEXT    NOT NULL DEFAULT '',
   created_at                  BIGINT  NOT NULL,
-  updated_at                  BIGINT  NOT NULL
+  updated_at                  BIGINT  NOT NULL,
+  meter_quota                 BIGINT  NOT NULL DEFAULT 0,
+  meter_period_sec            BIGINT  NOT NULL DEFAULT 2592000
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_entitlement_policies_name ON entitlement_policies(project, lower(name));

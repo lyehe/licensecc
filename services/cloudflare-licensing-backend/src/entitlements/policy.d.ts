@@ -19,6 +19,8 @@ export interface Policy {
   pool_size: number;
   max_active_devices: number;
   max_borrow_sec: number;
+  meter_quota: number;
+  meter_period_sec: number;
   expiry_strategy: ExpiryStrategy;
   trial_expiration_basis: TrialExpirationBasis;
   trial_duration_sec: number;
@@ -43,12 +45,16 @@ export interface PolicyStampOverrides {
   pool_size?: number;
   max_active_devices?: number;
   max_borrow_sec?: number;
+  meter_quota?: number;
+  meter_period_sec?: number;
 }
 
 export interface PolicyCapacity {
   pool_size: number;
   max_active_devices: number;
   max_borrow_sec: number;
+  meter_quota: number;
+  meter_period_sec: number;
 }
 
 export interface PolicyTrialState {

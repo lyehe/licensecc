@@ -298,6 +298,8 @@ test("admin UI workflow normalizes the policy editor form", async () => {
     pool_size: 0,
     max_active_devices: 1,
     max_borrow_sec: 0,
+    meter_quota: 0,
+    meter_period_sec: 2592000,
     expiry_strategy: "fixed_window",
     trial_expiration_basis: "from_issue",
     trial_duration_sec: 0,
@@ -317,6 +319,8 @@ test("admin UI workflow normalizes the policy editor form", async () => {
     pool_size: 25,
     max_active_devices: 5,
     max_borrow_sec: 86400,
+    meter_quota: 1000,
+    meter_period_sec: 3600,
     expiry_strategy: "non_expiring",
     trial_expiration_basis: "from_first_activation",
     trial_duration_sec: 1209600,
@@ -326,6 +330,8 @@ test("admin UI workflow normalizes the policy editor form", async () => {
   });
   assert.equal(full.duration_sec, 2592000);
   assert.equal(full.pool_size, 25);
+  assert.equal(full.meter_quota, 1000);
+  assert.equal(full.meter_period_sec, 3600);
   assert.equal(full.expiry_strategy, "non_expiring");
   assert.equal(full.trial_one_per_device, 1);
   assert.equal(full.trial_require_device_proof, 1);

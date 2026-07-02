@@ -397,6 +397,8 @@ function readPolicyColumns(input: Record<string, unknown>): {
   pool_size: number;
   max_active_devices: number;
   max_borrow_sec: number;
+  meter_quota: number;
+  meter_period_sec: number;
   expiry_strategy: ExpiryStrategy;
   trial_expiration_basis: TrialExpirationBasis;
   trial_duration_sec: number;
@@ -409,6 +411,10 @@ function readPolicyColumns(input: Record<string, unknown>): {
   const poolSize = boundedInt(input.pool_size ?? 0, 0, 1_000_000);
   const maxActiveDevices = boundedInt(input.max_active_devices ?? 1, 0, 1_000_000);
   const maxBorrow = boundedInt(input.max_borrow_sec ?? 0, 0, MAX_DURATION_SECONDS);
+  // Metering quota (audit R6.3): 0 = unlimited/count-only; the per-call bound matches metering.mjs's
+  // MAX_METER_UNITS. meter_period_sec is the rolling-window length (0 -> the 30d default at read time).
+  const meterQuota = boundedInt(input.meter_quota ?? 0, 0, 1_000_000_000);
+  const meterPeriodSec = boundedInt(input.meter_period_sec ?? 2592000, 0, MAX_DURATION_SECONDS);
   const expiryStrategy = input.expiry_strategy === undefined ? "fixed_window" : input.expiry_strategy;
   const trialBasis = input.trial_expiration_basis === undefined ? "from_issue" : input.trial_expiration_basis;
   const trialDuration = boundedInt(input.trial_duration_sec ?? 0, 0, MAX_DURATION_SECONDS);
@@ -417,6 +423,7 @@ function readPolicyColumns(input: Record<string, unknown>): {
   if (
     validFromOffset === INVALID || duration === INVALID || assertionTtl === undefined ||
     poolSize === undefined || maxActiveDevices === undefined || maxBorrow === undefined ||
+    meterQuota === undefined || meterPeriodSec === undefined ||
     !EXPIRY_STRATEGIES.includes(expiryStrategy as ExpiryStrategy) ||
     !TRIAL_BASES.includes(trialBasis as TrialExpirationBasis) ||
     trialDuration === undefined || trialOnePerDevice === undefined || trialRequireProof === undefined
@@ -430,6 +437,8 @@ function readPolicyColumns(input: Record<string, unknown>): {
     pool_size: poolSize,
     max_active_devices: maxActiveDevices,
     max_borrow_sec: maxBorrow,
+    meter_quota: meterQuota,
+    meter_period_sec: meterPeriodSec,
     expiry_strategy: expiryStrategy as ExpiryStrategy,
     trial_expiration_basis: trialBasis as TrialExpirationBasis,
     trial_duration_sec: trialDuration,
@@ -483,6 +492,8 @@ function validatePolicyPatch(value: unknown): PolicyPatch | null {
     ["pool_size", 0, 1_000_000],
     ["max_active_devices", 0, 1_000_000],
     ["max_borrow_sec", 0, MAX_DURATION_SECONDS],
+    ["meter_quota", 0, 1_000_000_000],
+    ["meter_period_sec", 0, MAX_DURATION_SECONDS],
     ["trial_duration_sec", 0, MAX_DURATION_SECONDS],
     ["trial_one_per_device", 0, 1],
     ["trial_require_device_proof", 0, 1],
@@ -1477,7 +1488,7 @@ async function globalSearch(request: Request, env: Env, requestIdValue: string):
 
 // The full policy column projection, in storage order — every policy SELECT/RETURNING renders these.
 const POLICY_COLUMNS =
-  "id, project, name, type, status, valid_from_offset_sec, duration_sec, assertion_ttl_seconds, pool_size, max_active_devices, max_borrow_sec, expiry_strategy, trial_expiration_basis, trial_duration_sec, trial_one_per_device, trial_require_device_proof, notes, created_at, updated_at";
+  "id, project, name, type, status, valid_from_offset_sec, duration_sec, assertion_ttl_seconds, pool_size, max_active_devices, max_borrow_sec, expiry_strategy, trial_expiration_basis, trial_duration_sec, trial_one_per_device, trial_require_device_proof, notes, created_at, updated_at, meter_quota, meter_period_sec";
 
 function policyStampOn(env: Env): boolean {
   return env.POLICY_STAMP_MODE === "on";
@@ -1562,15 +1573,15 @@ async function handlePolicyCreate(request: Request, env: Env, actor: Actor, body
   const id = crypto.randomUUID();
   const now = Math.floor(Date.now() / 1000);
   const insert = env.DB.prepare(
-    `INSERT INTO entitlement_policies (id, project, name, type, status, valid_from_offset_sec, duration_sec, assertion_ttl_seconds, pool_size, max_active_devices, max_borrow_sec, expiry_strategy, trial_expiration_basis, trial_duration_sec, trial_one_per_device, trial_require_device_proof, notes, created_at, updated_at)
-     VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING ${POLICY_COLUMNS}`,
+    `INSERT INTO entitlement_policies (id, project, name, type, status, valid_from_offset_sec, duration_sec, assertion_ttl_seconds, pool_size, max_active_devices, max_borrow_sec, expiry_strategy, trial_expiration_basis, trial_duration_sec, trial_one_per_device, trial_require_device_proof, notes, created_at, updated_at, meter_quota, meter_period_sec)
+     VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING ${POLICY_COLUMNS}`,
   ).bind(
     id, input.project, input.name, input.type,
     input.valid_from_offset_sec ?? null, input.duration_sec ?? null, input.assertion_ttl_seconds ?? 300,
     input.pool_size ?? 0, input.max_active_devices ?? 1, input.max_borrow_sec ?? 0,
     input.expiry_strategy ?? "fixed_window", input.trial_expiration_basis ?? "from_issue",
     input.trial_duration_sec ?? 0, input.trial_one_per_device ?? 0, input.trial_require_device_proof ?? 0,
-    input.notes ?? "", now, now,
+    input.notes ?? "", now, now, input.meter_quota ?? 0, input.meter_period_sec ?? 2592000,
   );
   let row: Record<string, unknown> | null;
   try {
@@ -1615,8 +1626,8 @@ async function handlePolicyPatch(request: Request, env: Env, actor: Actor, polic
   const values: unknown[] = [];
   for (const field of [
     "valid_from_offset_sec", "duration_sec", "assertion_ttl_seconds", "pool_size", "max_active_devices",
-    "max_borrow_sec", "expiry_strategy", "trial_expiration_basis", "trial_duration_sec", "trial_one_per_device",
-    "trial_require_device_proof", "notes",
+    "max_borrow_sec", "meter_quota", "meter_period_sec", "expiry_strategy", "trial_expiration_basis",
+    "trial_duration_sec", "trial_one_per_device", "trial_require_device_proof", "notes",
   ] as const) {
     const value = (patch as Record<string, unknown>)[field];
     if (value !== undefined) {

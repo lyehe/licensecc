@@ -542,7 +542,7 @@ test("csv: customers and events also export; events cap-comment shape", async ()
   assert.equal(events.status, 200);
   assert.match(events.headers.get("content-type") ?? "", /text\/csv/);
   const evRows = parseCsv(await events.text());
-  assert.deepEqual(evRows[0], ["id", "project", "feature", "license_fingerprint", "event_type", "status", "revocation_seq", "actor", "actor_type", "source", "request_id", "reason", "created_at"]);
+  assert.deepEqual(evRows[0], ["id", "project", "feature", "license_fingerprint", "event_type", "status", "revocation_seq", "actor", "actor_type", "source", "request_id", "reason", "detail", "created_at"]);
   // The single create event from the seeded entitlement is present.
   assert.ok(evRows.slice(1).some((r) => r[evRows[0].indexOf("event_type")] === "create"));
 });
