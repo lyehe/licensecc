@@ -29,6 +29,7 @@ import {
   deviceTransitionPath,
   disableDeviceConfirm,
   entitlementDevicesPath,
+  entitlementMeterPath,
   customerDetailPath,
   customerTransitionPath,
   customersPath,
@@ -91,6 +92,15 @@ interface ApiEnvelope<T> {
   code: string;
   request_id: string;
   data?: T;
+}
+
+interface MeterStatus {
+  meter_quota: number;
+  meter_period_sec: number;
+  period_start: number;
+  period_end: number;
+  units_consumed: number;
+  server_time: number;
 }
 
 interface EventItem {
@@ -432,6 +442,11 @@ function App(): React.ReactElement {
   // relay-resistance device keys are shown (null = pane closed) + the loaded devices.
   const [deviceEntitlementId, setDeviceEntitlementId] = useState<string | null>(null);
   const [devices, setDevices] = useState<EntitlementDeviceRecord[]>([]);
+
+  // Per-entitlement metering status (audit R6.3 completion): quota + current-period consumption,
+  // read without incrementing it. null = pane closed.
+  const [meterEntitlementId, setMeterEntitlementId] = useState<string | null>(null);
+  const [meterStatus, setMeterStatus] = useState<MeterStatus | null>(null);
 
   // Workstream C — BULK: the ids of the entitlement rows the operator has checked. A bulk-action bar
   // appears when >=1 is selected; clicking a bulk action routes through the typed-confirm modal.
@@ -921,6 +936,27 @@ function App(): React.ReactElement {
     void loadDevices(entitlementId);
   }
 
+  // Metering status (audit R6.3 completion): read the current-period consumption without incrementing.
+  async function loadMeterStatus(entitlementId: string): Promise<void> {
+    const response = await api<MeterStatus>(entitlementMeterPath(entitlementId));
+    if (response.ok && response.data) {
+      setMeterStatus(response.data);
+    } else {
+      setMeterStatus(null);
+      setMessage(`${response.code} (${response.request_id})`);
+    }
+  }
+
+  function toggleMeter(entitlementId: string): void {
+    if (meterEntitlementId === entitlementId) {
+      setMeterEntitlementId(null);
+      setMeterStatus(null);
+      return;
+    }
+    setMeterEntitlementId(entitlementId);
+    void loadMeterStatus(entitlementId);
+  }
+
   async function deviceTransition(device: EntitlementDeviceRecord, action: DeviceAction): Promise<void> {
     if (deviceEntitlementId === null) {
       return;
@@ -1300,6 +1336,7 @@ function App(): React.ReactElement {
                         <button className="danger" disabled={busy || !canRunAction(item.status, "revoke")} onClick={() => requestConfirm({ title: "Revoke entitlement", body: revokeEntitlementConfirm(item), requiresReason: true, run: () => transition(item, "revoke") })}>Revoke</button>
                         <button className="danger" disabled={busy} onClick={() => requestConfirm({ title: "Release seats", body: releaseSeatsConfirm(item), requiresReason: true, run: () => releaseSeats(item) })}>Release seats</button>
                         <button type="button" disabled={busy} aria-expanded={deviceEntitlementId === item.id} onClick={() => toggleDevices(item.id)}>Devices</button>
+                        <button type="button" disabled={busy} aria-expanded={meterEntitlementId === item.id} onClick={() => toggleMeter(item.id)}>Meter</button>
                       </td>
                     </tr>
                     {editingId === item.id && (
@@ -1358,6 +1395,23 @@ function App(): React.ReactElement {
                   </tbody>
                 </table>
                 {devices.length === 0 && <p className="muted">No devices registered for this entitlement.</p>}
+              </section>
+            )}
+
+            {meterEntitlementId !== null && (
+              <section className="deliveriesPane" aria-label="Metering status">
+                <h3>Metering for {shortHash(meterEntitlementId)}
+                  <button type="button" className="linkish" disabled={busy} onClick={() => toggleMeter(meterEntitlementId)}>close</button>
+                </h3>
+                {meterStatus === null ? (
+                  <p className="muted">No metering data.</p>
+                ) : (
+                  <div className="details">
+                    <span>Consumed this period: <strong>{meterStatus.units_consumed}</strong>{meterStatus.meter_quota > 0 ? ` / ${meterStatus.meter_quota}` : " (quota off — count-only)"}</span>
+                    <span>Period: {formatEpoch(meterStatus.period_start)} → {formatEpoch(meterStatus.period_end)} ({meterStatus.meter_period_sec}s)</span>
+                    <span className="muted">Reading this does not increment the counter.</span>
+                  </div>
+                )}
               </section>
             )}
             <label className="reason">Reason<input value={reason} onChange={(event) => setReason(event.target.value)} /></label>

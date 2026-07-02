@@ -453,6 +453,8 @@ test("admin UI workflow builds device list + transition paths with encoding", as
   const dev = `sha256:${"b".repeat(64)}`;
   assert.equal(workflow.entitlementDevicesPath("ent-123"), "/api/admin/entitlements/ent-123/devices");
   assert.equal(workflow.entitlementDevicesPath("ent/x"), "/api/admin/entitlements/ent%2Fx/devices");
+  assert.equal(workflow.entitlementMeterPath("ent-123"), "/api/admin/entitlements/ent-123/meter");
+  assert.equal(workflow.entitlementMeterPath("ent/x"), "/api/admin/entitlements/ent%2Fx/meter");
   assert.equal(
     workflow.deviceTransitionPath("ent-123", dev, "revoke"),
     `/api/admin/entitlements/ent-123/devices/sha256%3A${"b".repeat(64)}/revoke`,

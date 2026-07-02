@@ -2281,6 +2281,42 @@ async function handleDeviceList(env: Env, encodedId: string, requestIdValue: str
   return envelope(requestIdValue, "devices_listed", { items: devices });
 }
 
+// GET /api/admin/entitlements/:id/meter (reader+admin). Reports the entitlement's metering quota +
+// the CURRENT rolling period's units_consumed WITHOUT incrementing it — the review's "a billing
+// counter observable only by incrementing it" gap. Reads the meter columns off entitlements +
+// usage_meters directly (a SEPARATE projection; ENTITLEMENT_COLUMNS and the shared findEntitlement
+// core are deliberately untouched). period_start is derived exactly as the writer (metering.mjs) does.
+async function handleMeterStatus(env: Env, encodedId: string, requestIdValue: string): Promise<Response> {
+  const key = decodeEntitlementId(encodedId);
+  if (key === null) {
+    return envelope(requestIdValue, "invalid_entitlement_id", undefined, 400);
+  }
+  const ent = await env.DB.prepare(
+    "SELECT meter_quota, meter_period_sec FROM entitlements WHERE project = ? AND feature = ? AND license_fingerprint = ? LIMIT 1",
+  )
+    .bind(key.project, key.feature, key.license_fingerprint)
+    .first<{ meter_quota: number; meter_period_sec: number }>();
+  if (ent === null) {
+    return envelope(requestIdValue, "not_found", undefined, 404);
+  }
+  const now = Math.floor(Date.now() / 1000);
+  const periodSec = Number(ent.meter_period_sec) > 0 ? Number(ent.meter_period_sec) : 2592000;
+  const periodStart = Math.floor(now / periodSec) * periodSec;
+  const meter = await env.DB.prepare(
+    "SELECT units_consumed FROM usage_meters WHERE project = ? AND feature = ? AND license_fingerprint = ? AND period_start = ? LIMIT 1",
+  )
+    .bind(key.project, key.feature, key.license_fingerprint, periodStart)
+    .first<{ units_consumed: number }>();
+  return envelope(requestIdValue, "meter_status", {
+    meter_quota: Number(ent.meter_quota),
+    meter_period_sec: periodSec,
+    period_start: periodStart,
+    period_end: periodStart + periodSec,
+    units_consumed: Number(meter?.units_consumed ?? 0),
+    server_time: now,
+  });
+}
+
 const DEVICE_KEY_ID_RE = /^sha256:[0-9a-f]{64}$/;
 
 // POST /api/admin/entitlements/:id/devices/:deviceKeyId/(revoke|disable|reenable) (ADMIN-ONLY; reason
@@ -2412,6 +2448,10 @@ async function handleApi(request: Request, env: Env): Promise<Response> {
   const deviceList = /^\/api\/admin\/entitlements\/([^/]+)\/devices$/.exec(url.pathname);
   if (request.method === "GET" && deviceList !== null) {
     return handleDeviceList(env, deviceList[1] ?? "", id);
+  }
+  const meterStatus = /^\/api\/admin\/entitlements\/([^/]+)\/meter$/.exec(url.pathname);
+  if (request.method === "GET" && meterStatus !== null) {
+    return handleMeterStatus(env, meterStatus[1] ?? "", id);
   }
   const detail = /^\/api\/admin\/entitlements\/([^/]+)$/.exec(url.pathname);
   if (request.method === "GET" && detail !== null) {

@@ -194,6 +194,30 @@ test("an out-of-window entitlement is refused (R6.3)", async () => {
   db.close();
 });
 
+// The read accessor (GET /api/admin/entitlements/:id/meter) exercises exactly this SQL: read the
+// meter columns, derive the current period, then read units_consumed — WITHOUT incrementing it.
+test("the read-accessor SQL reports current-period consumption without incrementing (R6.3)", async () => {
+  const db = freshDb();
+  seed(db, { meter_quota: 100 });
+  const env = { DB: new D1Like(db) };
+  await meterUsage(env, KEY, OFF, 6, NOW);
+
+  const readMeter = () => {
+    const ent = db.prepare("SELECT meter_quota, meter_period_sec FROM entitlements WHERE project=? AND feature=? AND license_fingerprint=?").get("P", "F", FP);
+    const periodSec = ent.meter_period_sec > 0 ? ent.meter_period_sec : 2592000;
+    const periodStart = Math.floor(NOW / periodSec) * periodSec;
+    const row = db.prepare("SELECT units_consumed FROM usage_meters WHERE project=? AND feature=? AND license_fingerprint=? AND period_start=?").get("P", "F", FP, periodStart);
+    return { quota: ent.meter_quota, periodStart, units: row?.units_consumed ?? 0 };
+  };
+
+  const first = readMeter();
+  assert.equal(first.quota, 100);
+  assert.equal(first.units, 6);
+  // Reading again observes the SAME value — the accessor never mutates the counter.
+  assert.equal(readMeter().units, 6);
+  db.close();
+});
+
 test("units is bounded — an absurd value cannot corrupt the int64 counter (R6.3)", async () => {
   const db = freshDb();
   seed(db);

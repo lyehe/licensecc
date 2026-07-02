@@ -843,6 +843,21 @@ const paths: Record<string, Record<string, unknown>> = {
       },
     },
   },
+  "/api/admin/entitlements/{id}/meter": {
+    get: {
+      tags: ["admin:entitlements"],
+      summary: "Read the entitlement's metering quota + current-period consumption (reader+admin, non-mutating)",
+      operationId: "getEntitlementMeter",
+      security: ADMIN_SECURITY,
+      parameters: [idParam],
+      responses: {
+        "200": okResponse("Quota + the CURRENT rolling period's units_consumed, WITHOUT incrementing it.", "#/components/schemas/MeterStatusData", "meter_status"),
+        "400": errorResponse("Malformed entitlement id.", "invalid_entitlement_id"),
+        ...ADMIN_AUTH_ERRORS,
+        "404": errorResponse("No entitlement with that id.", "not_found"),
+      },
+    },
+  },
   "/api/admin/entitlements/{id}/devices/{deviceKeyId}/revoke": {
     post: {
       tags: ["admin:entitlements"],
@@ -1571,6 +1586,18 @@ export const openApiDocument: OpenApiDocument = {
         required: ["items"],
         properties: {
           items: { type: "array", items: { $ref: "#/components/schemas/EntitlementDevice" }, description: "The entitlement's device keys, newest-touched first (max 200)." },
+        },
+      },
+      MeterStatusData: {
+        type: "object",
+        required: ["meter_quota", "meter_period_sec", "period_start", "period_end", "units_consumed", "server_time"],
+        properties: {
+          meter_quota: { type: "integer", description: "Per-period quota (0 = unlimited/count-only)." },
+          meter_period_sec: { type: "integer", description: "Rolling period length in seconds." },
+          period_start: { type: "integer", description: "Unix seconds; start of the current period." },
+          period_end: { type: "integer", description: "Unix seconds; period_start + meter_period_sec." },
+          units_consumed: { type: "integer", description: "Units consumed in the current period (0 if none yet). Reading this does NOT increment it." },
+          server_time: { type: "integer" },
         },
       },
     },

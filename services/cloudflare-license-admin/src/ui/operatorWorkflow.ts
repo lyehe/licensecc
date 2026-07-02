@@ -558,6 +558,12 @@ export function entitlementDevicesPath(entitlementId: string): string {
   return `/api/admin/entitlements/${encodeURIComponent(entitlementId)}/devices`;
 }
 
+// Read-only metering status (quota + current-period units_consumed) — observing consumption without
+// incrementing it (audit R6.3 completion).
+export function entitlementMeterPath(entitlementId: string): string {
+  return `/api/admin/entitlements/${encodeURIComponent(entitlementId)}/meter`;
+}
+
 export type DeviceAction = "revoke" | "disable" | "reenable";
 
 export function deviceTransitionPath(entitlementId: string, deviceKeyId: string, action: DeviceAction): string {
