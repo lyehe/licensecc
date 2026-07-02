@@ -417,6 +417,21 @@ test("admin UI workflow normalizes the webhook create form (mirrors the Worker v
     }),
     /scope_set_project_or_customer_not_both/,
   );
+
+  // Control chars (\n/\r/\0) that the Worker rejects up front must be rejected client-side too
+  // (else a paste with an embedded newline ships and gets a confusing generic 400).
+  assert.throws(
+    () => workflow.normalizeWebhookForm({ ...workflow.emptyWebhookForm, url: "https://x.example.com", description: "line1\nline2" }),
+    /description_invalid/,
+  );
+  assert.throws(
+    () => workflow.normalizeWebhookForm({ ...workflow.emptyWebhookForm, url: "https://x.example.com", scope_project: "a\nb" }),
+    /scope_project_invalid/,
+  );
+  assert.throws(
+    () => workflow.normalizeWebhookForm({ ...workflow.emptyWebhookForm, url: "https://x.example.com", event_types: "a,\nb" }),
+    /event_types_invalid/,
+  );
 });
 
 test("disable-webhook confirm copy echoes the endpoint URL and clarifies queued deliveries", async () => {

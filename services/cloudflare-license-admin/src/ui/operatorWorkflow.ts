@@ -472,9 +472,16 @@ export const emptyWebhookForm: WebhookFormState = {
 // Re-implements the Worker's safeWebhookEventTypes: split on comma, trim, drop empties, reject any
 // token carrying internal whitespace, re-serialize canonically. Throws on an over-long or
 // whitespace-bearing list so the React layer surfaces the message.
+// The Worker rejects any webhook string field containing a raw \n / \r / \0 BEFORE any other parse
+// (safeWebhook* in src/worker/index.ts). Mirror that whole-value control-char guard on the client so
+// the client rejects exactly what the server would, instead of shipping it and getting a generic 400.
+function hasControlChars(value: string): boolean {
+  return value.includes("\n") || value.includes("\r") || value.includes("\0");
+}
+
 function normalizeWebhookEventTypes(value: string): string {
-  if (value.length > MAX_WEBHOOK_EVENT_TYPES_SIZE) {
-    throw new Error("event_types_too_long");
+  if (value.length > MAX_WEBHOOK_EVENT_TYPES_SIZE || hasControlChars(value)) {
+    throw new Error("event_types_invalid");
   }
   const tokens = value
     .split(",")
@@ -488,13 +495,14 @@ function normalizeWebhookEventTypes(value: string): string {
   return tokens.join(",");
 }
 
-// A per-tenant scope value (audit R2.2): "" (global) or a bounded, single-line, comma-free token.
+// A per-tenant scope value (audit R2.2): "" (global) or a bounded, single-line, comma- and
+// control-char-free token (matching the Worker's safeWebhookScope, which also rejects \n/\r/\0).
 function normalizeWebhookScope(value: string, label: string): string {
   const trimmed = value.trim();
   if (trimmed === "") {
     return "";
   }
-  if (trimmed.length > MAX_WEBHOOK_SCOPE_SIZE || trimmed.includes(",")) {
+  if (trimmed.length > MAX_WEBHOOK_SCOPE_SIZE || trimmed.includes(",") || hasControlChars(trimmed)) {
     throw new Error(`${label}_invalid`);
   }
   return trimmed;
@@ -519,8 +527,8 @@ export function normalizeWebhookForm(form: WebhookFormState): WebhookEndpointInp
   if (parsed.protocol !== "https:") {
     throw new Error("url_must_be_https");
   }
-  if (form.description.length > MAX_WEBHOOK_DESCRIPTION_SIZE) {
-    throw new Error("description_too_long");
+  if (form.description.length > MAX_WEBHOOK_DESCRIPTION_SIZE || hasControlChars(form.description)) {
+    throw new Error("description_invalid");
   }
   const scopeProject = normalizeWebhookScope(form.scope_project, "scope_project");
   const scopeCustomer = normalizeWebhookScope(form.scope_customer_id, "scope_customer_id");
