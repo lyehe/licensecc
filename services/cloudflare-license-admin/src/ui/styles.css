@@ -711,3 +711,35 @@ button.searchResult:hover:not(:disabled) .searchResultMeta {
     grid-template-columns: 1fr;
   }
 }
+
+/* Screen-reader-only: visually hidden but exposed to assistive tech (audit R6.5 a11y).
+   Used for <table><caption> labels that need no visual chrome. */
+.srOnly {
+  border: 0;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  padding: 0;
+  position: absolute;
+  white-space: nowrap;
+  width: 1px;
+}
+
+.mono {
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 12px;
+  word-break: break-all;
+}
+
+/* Recent-deliveries pane under the webhook endpoints table (audit R6.5). */
+.deliveriesPane {
+  border-top: 1px solid #e2e2e2;
+  margin-top: 24px;
+  padding-top: 16px;
+}
+
+.deliveriesPane h3 {
+  margin: 0 0 12px;
+}

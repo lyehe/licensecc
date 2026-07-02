@@ -1090,16 +1090,20 @@ export const openApiDocument: OpenApiDocument = {
           description: { type: "string", maxLength: 500 },
           created_at: { type: "integer" },
           updated_at: { type: "integer" },
+          scope_project: { type: ["string", "null"], maxLength: 128, description: "Per-tenant scope (audit R2.2). null/'' = global; matches entitlement/order events. Set one dimension, not both." },
+          scope_customer_id: { type: ["string", "null"], maxLength: 128, description: "Per-tenant scope (audit R2.2). null/'' = global; matches customer events. Set one dimension, not both." },
         },
       },
       WebhookEndpointInput: {
         type: "object",
         required: ["url"],
-        description: "Create body. `url` is required and MUST be https. event_types / description take the column default ('').",
+        description: "Create body. `url` is required and MUST be https. event_types / description / scope_* take the column default ('').",
         properties: {
           url: { type: "string", maxLength: 2048, description: "https URL. A non-https or unparseable URL returns 400 invalid_url." },
           event_types: { type: "string", maxLength: 1024, default: "", description: "CSV event-type filter; '' = all." },
           description: { type: "string", maxLength: 500, default: "" },
+          scope_project: { type: "string", maxLength: 128, default: "", description: "Per-tenant scope (audit R2.2). '' = global. Set one dimension, not both." },
+          scope_customer_id: { type: "string", maxLength: 128, default: "", description: "Per-tenant scope (audit R2.2). '' = global. Set one dimension, not both." },
         },
       },
       WebhookEndpointPatch: {
@@ -1109,6 +1113,8 @@ export const openApiDocument: OpenApiDocument = {
           url: { type: "string", maxLength: 2048, description: "https URL. A non-https URL returns 400 invalid_url." },
           event_types: { type: "string", maxLength: 1024 },
           description: { type: "string", maxLength: 500 },
+          scope_project: { type: "string", maxLength: 128, description: "Per-tenant scope (audit R2.2). '' clears it (global)." },
+          scope_customer_id: { type: "string", maxLength: 128, description: "Per-tenant scope (audit R2.2). '' clears it (global)." },
         },
       },
       WebhookDelivery: {

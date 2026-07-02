@@ -7,6 +7,7 @@ import type {
   PolicyInput,
   PolicyType,
   TrialExpirationBasis,
+  WebhookEndpointInput,
 } from "../shared/api";
 
 export type EntitlementAction = "disable" | "reenable" | "revoke";
@@ -388,6 +389,150 @@ export function normalizePolicyForm(form: PolicyFormState): PolicyInput {
     trial_one_per_device: form.trial_one_per_device ? 1 : 0,
     trial_require_device_proof: form.trial_require_device_proof ? 1 : 0,
     notes: parseNotes(form.notes),
+  };
+}
+
+// ── Webhook endpoints (admin UI, audit R6.5) ─────────────────────────────────
+// Pure helpers for the Webhooks tab: list/detail/transition/redrive path builders, the create form
+// normalizer, and confirm copy. They mirror the policy helpers' shape and, critically, re-implement
+// the Worker's webhook validators (safeWebhookUrl/safeWebhookEventTypes/... in src/worker/index.ts)
+// so the client rejects exactly what the server would — https-only URL, comma-free single-token
+// scopes, whitespace-free event-type tokens. Bounds match the Worker constants.
+
+const MAX_WEBHOOK_URL_SIZE = 2048;
+const MAX_WEBHOOK_EVENT_TYPES_SIZE = 1024;
+const MAX_WEBHOOK_DESCRIPTION_SIZE = 500;
+const MAX_WEBHOOK_SCOPE_SIZE = 128;
+
+export interface WebhookFilter {
+  status: string; // "" | "active" | "disabled"
+}
+
+export function webhooksPath(filter: WebhookFilter): string {
+  const params = new URLSearchParams();
+  if (filter.status !== "") params.set("status", filter.status);
+  return `/api/admin/webhooks${params.size === 0 ? "" : `?${params.toString()}`}`;
+}
+
+export function webhookPath(id: string): string {
+  return `/api/admin/webhooks/${encodeURIComponent(id)}`;
+}
+
+export type WebhookAction = "disable" | "reenable";
+
+export function webhookTransitionPath(id: string, action: WebhookAction): string {
+  return `/api/admin/webhooks/${encodeURIComponent(id)}/${action}`;
+}
+
+export function canRunWebhookAction(status: string, action: WebhookAction): boolean {
+  if (action === "disable") {
+    return status === "active";
+  }
+  return status === "disabled";
+}
+
+export interface WebhookDeliveryFilter {
+  endpoint_id: string; // "" = all endpoints
+  status: string; // "" | "pending" | "delivered" | "failed"
+}
+
+export function webhookDeliveriesPath(filter: WebhookDeliveryFilter): string {
+  const params = new URLSearchParams();
+  if (filter.endpoint_id !== "") params.set("endpoint_id", filter.endpoint_id);
+  if (filter.status !== "") params.set("status", filter.status);
+  return `/api/admin/webhooks/deliveries${params.size === 0 ? "" : `?${params.toString()}`}`;
+}
+
+export function webhookRedrivePath(deliveryId: string): string {
+  return `/api/admin/webhooks/deliveries/${encodeURIComponent(deliveryId)}/redrive`;
+}
+
+// Confirm copy for disabling an endpoint (a meaningful action: it stops NEW deliveries; queued and
+// failed deliveries already in the table are untouched). Pure (unit-tested).
+export function disableWebhookConfirm(endpoint: { url: string }): string {
+  return `Disable webhook endpoint ${endpoint.url}. New events will no longer be delivered to it; queued or failed deliveries already recorded are unaffected.`;
+}
+
+export interface WebhookFormState {
+  url: string;
+  event_types: string; // csv allow-list; "" = all event types
+  description: string;
+  scope_project: string; // "" = global (all projects)
+  scope_customer_id: string; // "" = global (all customers)
+}
+
+export const emptyWebhookForm: WebhookFormState = {
+  url: "",
+  event_types: "",
+  description: "",
+  scope_project: "",
+  scope_customer_id: "",
+};
+
+// Re-implements the Worker's safeWebhookEventTypes: split on comma, trim, drop empties, reject any
+// token carrying internal whitespace, re-serialize canonically. Throws on an over-long or
+// whitespace-bearing list so the React layer surfaces the message.
+function normalizeWebhookEventTypes(value: string): string {
+  if (value.length > MAX_WEBHOOK_EVENT_TYPES_SIZE) {
+    throw new Error("event_types_too_long");
+  }
+  const tokens = value
+    .split(",")
+    .map((token) => token.trim())
+    .filter((token) => token.length > 0);
+  for (const token of tokens) {
+    if (/\s/.test(token)) {
+      throw new Error("event_types_token_has_whitespace");
+    }
+  }
+  return tokens.join(",");
+}
+
+// A per-tenant scope value (audit R2.2): "" (global) or a bounded, single-line, comma-free token.
+function normalizeWebhookScope(value: string, label: string): string {
+  const trimmed = value.trim();
+  if (trimmed === "") {
+    return "";
+  }
+  if (trimmed.length > MAX_WEBHOOK_SCOPE_SIZE || trimmed.includes(",")) {
+    throw new Error(`${label}_invalid`);
+  }
+  return trimmed;
+}
+
+// Normalize the create form into the WebhookEndpointInput body. Throws `<label>_*` for an invalid
+// field so the React layer can surface the message, matching normalizePolicyForm's contract. The URL
+// must be a single https:// URL (the delivery worker never POSTs to plaintext). Scope is advisory-
+// exclusive: setting BOTH project and customer is rejected here (the R2.2 convention is one dimension),
+// though the server would technically accept both.
+export function normalizeWebhookForm(form: WebhookFormState): WebhookEndpointInput {
+  const url = form.url.trim();
+  if (url === "" || url.length > MAX_WEBHOOK_URL_SIZE || /\s/.test(url)) {
+    throw new Error("url_must_be_a_single_https_url");
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new Error("url_must_be_a_single_https_url");
+  }
+  if (parsed.protocol !== "https:") {
+    throw new Error("url_must_be_https");
+  }
+  if (form.description.length > MAX_WEBHOOK_DESCRIPTION_SIZE) {
+    throw new Error("description_too_long");
+  }
+  const scopeProject = normalizeWebhookScope(form.scope_project, "scope_project");
+  const scopeCustomer = normalizeWebhookScope(form.scope_customer_id, "scope_customer_id");
+  if (scopeProject !== "" && scopeCustomer !== "") {
+    throw new Error("scope_set_project_or_customer_not_both");
+  }
+  return {
+    url: parsed.href,
+    event_types: normalizeWebhookEventTypes(form.event_types),
+    description: form.description,
+    scope_project: scopeProject,
+    scope_customer_id: scopeCustomer,
   };
 }
 
