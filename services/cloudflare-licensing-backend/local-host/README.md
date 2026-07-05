@@ -2,7 +2,7 @@
 
 Run the **unmodified** licensecc verifier Worker
 (`services/cloudflare-licensing-backend/src/index.ts`) off Cloudflare, on a
-plain Node process backed by standard SQLite (`better-sqlite3`). **Zero changes
+plain Node process backed by Node's built-in SQLite. **Zero changes
 to the Worker's security code.** The Worker is imported as-is and called via its
 exported `fetch(request, env)`; only the `DB` binding is swapped for a SQLite
 adapter that implements the same `D1DatabaseLike` / `D1PreparedStatementLike`
@@ -12,14 +12,13 @@ surface the Worker expects.
 
 | File | Role |
 |---|---|
-| `db-sqlite.mjs` | `better-sqlite3` adapter implementing `prepare(sql).bind(...).first()/.all()/.run()`. `.first()` returns the row or `null`; a real query error **throws** (so the Worker's try/catch maps it to HTTP 500). Opens with `PRAGMA foreign_keys = ON` and `PRAGMA journal_mode = WAL`. |
-| `migrate.mjs` | Applies the real `../migrations/0001..0008` (in order) to a SQLite file. Idempotent via a `_migrations` ledger. Produces the same final schema the schema-parity contract asserts (`../schema.sql`). |
+| `db-sqlite.mjs` | Node `node:sqlite` adapter implementing `prepare(sql).bind(...).first()/.all()/.run()`, `batch()`, and `withSession()`. `.first()` returns the row or `null`; a real query error **throws** (so the Worker's try/catch maps it to HTTP 500). Opens with `PRAGMA foreign_keys = ON` and `PRAGMA journal_mode = WAL`. |
+| `migrate.mjs` | Applies the real `../migrations/*.sql` to a SQLite file. Idempotent via a `_migrations` ledger. Produces the same final schema the schema-parity contract asserts (`../schema.sql`). |
 | `server.mjs` | `node:http` front-end. Builds a WHATWG `Request` per request, constructs the Worker `Env` (`DB` = the adapter, `VERIFY_RATE_LIMITER` = undefined -> Worker uses its D1 rate-limit fallback, all other vars from `process.env`), imports the compiled Worker's default `{ fetch }`, calls it, and writes the `Response` back. |
 
 ## Prerequisites
 
-- Node 20+ (Node 18/19 also work — `server.mjs` shims `globalThis.crypto` from
-  `node:crypto`). Tested on Node 22.
+- Node 22+ with `--experimental-sqlite`. The package scripts include the flag.
 - The Worker compiled to `../dist/index.js` (the host imports the **compiled**
   Worker, never edits the source).
 - An RSA signing key (PKCS#8 PEM) + key id — the Worker requires these to sign
@@ -31,23 +30,20 @@ All commands are run from the service directory
 (`services/cloudflare-licensing-backend/`).
 
 ```bash
-# 1. Install the SQLite driver (native module; needs a C toolchain or prebuilt).
-npm i better-sqlite3
-
-# 2. Build the Worker (tsc -> dist/index.js). Already wired in package.json.
+# 1. Build the Worker (tsc -> dist/index.js). Already wired in package.json.
 npm run build
 
-# 3. Create + migrate the database.
-node local-host/migrate.mjs app.db
+# 2. Create + migrate the database.
+DB_PATH=app.db npm run db:local:init
 
-# 4. Provide a signing key. Use the project's generator (writes a PKCS#8 RSA-3072 PEM):
+# 3. Provide a signing key. Use the project's generator (writes a PKCS#8 RSA-3072 PEM):
 node scripts/generate-online-key.mjs --out-dir .online-key
 
-# 5. Start the host (ONLINE_SIGNING_KEY_ID is any stable label for local dev).
+# 4. Start the host (ONLINE_SIGNING_KEY_ID is any stable label for local dev).
 PORT=8787 DB_PATH=app.db \
   ONLINE_SIGNING_PRIVATE_KEY_PKCS8_PEM="$(cat .online-key/online_private_key.pkcs8.pem)" \
   ONLINE_SIGNING_KEY_ID="sha256:local-dev-key" \
-  node local-host/server.mjs
+  npm run local:server
 ```
 
 On Windows PowerShell, set the env vars first, then run:
@@ -56,7 +52,7 @@ On Windows PowerShell, set the env vars first, then run:
 $env:PORT="8787"; $env:DB_PATH="app.db"
 $env:ONLINE_SIGNING_PRIVATE_KEY_PKCS8_PEM = Get-Content .online-key/online_private_key.pkcs8.pem -Raw
 $env:ONLINE_SIGNING_KEY_ID = "sha256:local-dev-key"
-node local-host/server.mjs
+npm run local:server
 ```
 
 ## Exposing the host safely
@@ -88,7 +84,7 @@ Seed a row with the existing CLI, or directly:
 #   node scripts/entitlement.mjs ...   (see that script's --help)
 
 # Or seed directly for a smoke test:
-node -e '(async()=>{const {default:D}=await import("better-sqlite3");const db=new D("app.db");const now=Math.floor(Date.now()/1e3);db.prepare("INSERT OR REPLACE INTO entitlements (project,feature,license_fingerprint,device_hash,status,assertion_ttl_seconds,cache_ttl_seconds,revocation_seq,created_at,updated_at,notes) VALUES (?,?,?,?,?,?,?,?,?,?,?)").run("DEFAULT","DEFAULT","a".repeat(64),"","active",300,3600,0,now,now,"");})()'
+node --experimental-sqlite -e 'import("node:sqlite").then(({DatabaseSync})=>{const db=new DatabaseSync("app.db");const now=Math.floor(Date.now()/1e3);db.prepare("INSERT OR REPLACE INTO entitlements (project,feature,license_fingerprint,device_hash,status,assertion_ttl_seconds,cache_ttl_seconds,revocation_seq,created_at,updated_at,notes) VALUES (?,?,?,?,?,?,?,?,?,?,?)").run("DEFAULT","DEFAULT","a".repeat(64),"","active",300,3600,0,now,now,"");db.close();})'
 ```
 
 Then:
@@ -139,8 +135,9 @@ vars) is satisfied here, so the Worker's security logic runs unchanged.
 ## How the adapter maps to the Worker's DB contract
 
 The Worker uses a deliberately tiny DB surface (`src/index.ts` lines 9-17):
-`prepare(sql)` -> chainable `.bind(...)` -> `.first<T>()` (row or `null`) and
-`.run()` (result ignored). The verify path issues exactly four statements — the
+`prepare(sql)` -> chainable `.bind(...)` -> `.first<T>()` (row or `null`),
+`.all<T>()`, `.run()`, transactional `.batch()`, and optional `.withSession()`.
+The verify path issues exactly four statements — the
 `rate_limit_counters` `INSERT ... ON CONFLICT ... RETURNING` upsert and cleanup
 `DELETE`, the `entitlements` SELECT, and the `entitlement_devices` SELECT. The
 adapter honours the load-bearing contract: **`null` for an empty result, a

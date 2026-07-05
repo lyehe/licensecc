@@ -18,7 +18,7 @@ makeEnvelope.nextRequestId = 0;
 function makePortalApiFixture() {
   const VALID_CODE = "80315426";
   let authed = false;
-  const requests = { authRequests: 0, verifies: 0, checkouts: 0, heartbeats: 0, releases: 0, downloads: 0, logouts: 0 };
+  const requests = { authRequests: 0, verifies: 0, checkouts: 0, heartbeats: 0, releases: 0, downloads: 0, logouts: 0, seatActions: [] };
 
   const entitlements = [
     { id: "ent_floating", project: "DEFAULT", feature: "pro", status: "active", license_fingerprint: "a".repeat(64), valid_from: 1_710_000_000, valid_until: null, license_mode: "floating", pool_size: 5, max_active_devices: 1, max_borrow_sec: 0, heartbeat_grace_sec: 900, policy_id: "pol_float" },
@@ -102,6 +102,7 @@ function makePortalApiFixture() {
         return fulfill(400, { ok: false, code: "seat_id_required", request_id: "portal-e2e-seat" });
       }
       requests[`${op}s`] += 1;
+      requests.seatActions.push({ op, body });
       return fulfill(200, makeEnvelope(`${op}_ok`, { seat_id: "seat-e2e", mode: "live" }));
     }
 
@@ -153,13 +154,36 @@ test("customer portal signs in with an 8-digit code and walks every screen witho
 
   // --- My devices/seats: floating seat checkout/heartbeat/release ---
   await page.getByRole("button", { name: "My devices" }).click();
-  await page.getByRole("button", { name: "Start seat" }).first().click();
+  const seatCard = page.locator(".seatCard").filter({ hasText: "pro" }).first();
+  await expect(seatCard.getByRole("button", { name: "Start seat" })).toBeEnabled();
+  await expect(seatCard.getByRole("button", { name: "Refresh" })).toBeDisabled();
+  await expect(seatCard.getByRole("button", { name: "Release" })).toBeDisabled();
+
+  await seatCard.getByRole("button", { name: "Start seat" }).click();
   await expect.poll(() => api.requests.checkouts).toBe(1);
-  await page.getByRole("button", { name: "Refresh" }).first().click();
+  const checkout = api.requests.seatActions.at(-1);
+  expect(checkout).toMatchObject({ op: "checkout", body: { entitlement_id: "ent_floating" } });
+  expect(checkout.body).not.toHaveProperty("seat_id");
+  expect(checkout.body.client_instance_id).toMatch(/^[0-9a-f-]{36}$/);
+  await expect(seatCard.getByRole("button", { name: "Start seat" })).toBeDisabled();
+  await expect(seatCard.getByRole("button", { name: "Refresh" })).toBeEnabled();
+  await expect(seatCard.getByRole("button", { name: "Release" })).toBeEnabled();
+
+  await seatCard.getByRole("button", { name: "Refresh" }).click();
   await expect.poll(() => api.requests.heartbeats).toBe(1);
-  await page.getByRole("button", { name: "Release" }).first().click();
+  const heartbeat = api.requests.seatActions.at(-1);
+  expect(heartbeat).toMatchObject({ op: "heartbeat", body: { entitlement_id: "ent_floating", seat_id: "seat-e2e" } });
+  expect(heartbeat.body.client_instance_id).toBe(checkout.body.client_instance_id);
+
+  await seatCard.getByRole("button", { name: "Release" }).click();
   await expect.poll(() => api.requests.releases).toBe(1);
+  const release = api.requests.seatActions.at(-1);
+  expect(release).toMatchObject({ op: "release", body: { entitlement_id: "ent_floating", seat_id: "seat-e2e" } });
+  expect(release.body.client_instance_id).toBe(checkout.body.client_instance_id);
   await expect(page.getByText(/release_ok/)).toBeVisible();
+  await expect(seatCard.getByRole("button", { name: "Start seat" })).toBeEnabled();
+  await expect(seatCard.getByRole("button", { name: "Refresh" })).toBeDisabled();
+  await expect(seatCard.getByRole("button", { name: "Release" })).toBeDisabled();
 
   // --- Usage ---
   await page.getByRole("button", { name: "Usage" }).click();

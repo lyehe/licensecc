@@ -45,6 +45,127 @@ function makeAdminApiFixture() {
   const catalogPlans = [];
   const catalogPlanFeatures = [];
 
+  function importCounts() {
+    return {
+      features: { created: 0, updated: 0, unchanged: 0 },
+      plans: { created: 0, updated: 0, unchanged: 0 },
+      plan_features: { created: 0, updated: 0, unchanged: 0 },
+    };
+  }
+
+  function nullable(value) {
+    return value === undefined ? null : value;
+  }
+
+  function catalogImportKind(existing, next) {
+    if (existing === undefined) {
+      return "created";
+    }
+    for (const [key, value] of Object.entries(next)) {
+      if (existing[key] !== value) {
+        return "updated";
+      }
+    }
+    return "unchanged";
+  }
+
+  function upsertCatalogFeatureFromManifest(feature, dryRun) {
+    const existing = catalogFeatures.find((item) => item.project === feature.project && item.feature_key === feature.feature_key);
+    const next = {
+      project: feature.project,
+      feature_key: feature.feature_key,
+      name: feature.name,
+      description: feature.description ?? "",
+      category: feature.category ?? "",
+      status: feature.status ?? "active",
+    };
+    const kind = catalogImportKind(existing, next);
+    if (!dryRun && kind !== "unchanged") {
+      now += 1;
+      if (existing === undefined) {
+        catalogFeatures.push({ id: `feat_${feature.feature_key}`, ...next, created_at: now, updated_at: now });
+      } else {
+        Object.assign(existing, next, { updated_at: now });
+      }
+    }
+    return kind;
+  }
+
+  function upsertCatalogPlanFromManifest(plan, dryRun) {
+    const version = plan.version ?? 1;
+    const existing = catalogPlans.find((item) => item.project === plan.project && item.plan_key === plan.plan_key && item.version === version);
+    const next = {
+      project: plan.project,
+      plan_key: plan.plan_key,
+      name: plan.name,
+      description: plan.description ?? "",
+      status: plan.status ?? "active",
+      version,
+    };
+    const kind = catalogImportKind(existing, next);
+    if (!dryRun && kind !== "unchanged") {
+      now += 1;
+      if (existing === undefined) {
+        catalogPlans.push({ id: `plan_${plan.plan_key}`, ...next, created_at: now, updated_at: now });
+      } else {
+        Object.assign(existing, next, { updated_at: now });
+      }
+    }
+    return { kind, plan: existing ?? { id: `plan_${plan.plan_key}`, ...next } };
+  }
+
+  function planFeatureNext(planRow, feature) {
+    const catalogFeature = catalogFeatures.find((item) => item.project === feature.project && item.feature_key === feature.feature_key);
+    return {
+      project: feature.project,
+      plan_id: planRow.id,
+      plan_key: planRow.plan_key,
+      feature_key: feature.feature_key,
+      feature_name: catalogFeature?.name ?? feature.feature_key,
+      feature_inclusion: feature.feature_inclusion ?? "included",
+      addon_key: feature.feature_inclusion === "addon" ? nullable(feature.addon_key) : null,
+      policy_id: nullable(feature.policy_id),
+      status: feature.status ?? "active",
+      display_order: feature.display_order ?? 0,
+      assertion_ttl_seconds: nullable(feature.assertion_ttl_seconds),
+      pool_size: nullable(feature.pool_size),
+      max_active_devices: nullable(feature.max_active_devices),
+      max_borrow_sec: nullable(feature.max_borrow_sec),
+      meter_quota: nullable(feature.meter_quota),
+      meter_period_sec: nullable(feature.meter_period_sec),
+    };
+  }
+
+  function upsertCatalogPlanFeatureFromManifest(planRow, feature, dryRun) {
+    const existing = catalogPlanFeatures.find((item) => item.plan_id === planRow.id && item.feature_key === feature.feature_key);
+    const next = planFeatureNext(planRow, feature);
+    const kind = catalogImportKind(existing, next);
+    if (!dryRun && kind !== "unchanged") {
+      now += 1;
+      if (existing === undefined) {
+        catalogPlanFeatures.push({ ...next, created_at: now, updated_at: now });
+      } else {
+        Object.assign(existing, next, { updated_at: now });
+      }
+    }
+    return kind;
+  }
+
+  function importCatalogManifest(manifest, dryRun) {
+    const counts = importCounts();
+    for (const feature of manifest.features ?? []) {
+      counts.features[upsertCatalogFeatureFromManifest(feature, dryRun)] += 1;
+    }
+    for (const plan of manifest.plans ?? []) {
+      const appliedPlan = upsertCatalogPlanFromManifest(plan, dryRun);
+      counts.plans[appliedPlan.kind] += 1;
+      for (const feature of plan.features ?? []) {
+        counts.plan_features[upsertCatalogPlanFeatureFromManifest(appliedPlan.plan, feature, dryRun)] += 1;
+      }
+    }
+    return counts;
+  }
+
   // A couple of customers so the Customers tab + a global-search customer deep-link have rows.
   const customers = [
     { id: "cus_acme", name: "Acme Corp", email: "ops@acme.test", status: "active", external_ref: "ext_1", created_at: 1_700_000_000, updated_at: 1_700_000_000, entitlement_count: 2, active_entitlement_count: 1 },
@@ -316,12 +437,8 @@ function makeAdminApiFixture() {
     if (method === "POST" && path === "/api/admin/catalog/import") {
       const body = await jsonBody(request);
       const dryRun = url.searchParams.get("dry_run") === "1";
-      requests.catalogImports.push({ dry_run: dryRun, body });
-      const counts = {
-        features: { created: body.features?.length ?? 0, updated: 0, unchanged: 0 },
-        plans: { created: body.plans?.length ?? 0, updated: 0, unchanged: 0 },
-        plan_features: { created: (body.plans ?? []).reduce((sum, plan) => sum + (plan.features?.length ?? 0), 0), updated: 0, unchanged: 0 },
-      };
+      requests.catalogImports.push({ dry_run: dryRun, idempotency_key: request.headers()["idempotency-key"] ?? null, body });
+      const counts = importCatalogManifest(body, dryRun);
       return fulfill(200, makeEnvelope(dryRun ? "catalog_import_previewed" : "catalog_import_applied", counts));
     }
     const catalogPlanActionMatch = /^\/api\/admin\/catalog\/plans\/([^/]+)\/(disable|reenable)$/.exec(path);
@@ -913,6 +1030,37 @@ test("admin UI previews and applies a license plan projection", async ({ page })
   await expect.poll(() => api.requests.catalogImports.length).toBe(1);
   expect(api.requests.catalogImports[0]).toMatchObject({ dry_run: true, body: { format_version: 1, features: [], plans: [] } });
   await expect(page.getByText(/catalog_import_previewed/)).toBeVisible();
+
+  const importedManifest = {
+    format_version: 1,
+    features: [
+      { project: "DEFAULT", feature_key: "analytics", name: "Analytics", description: "Usage analytics", category: "insights", status: "active" },
+    ],
+    plans: [
+      {
+        project: "DEFAULT",
+        plan_key: "growth",
+        name: "Growth",
+        description: "Growth tier",
+        version: 1,
+        status: "active",
+        features: [
+          { project: "DEFAULT", feature_key: "analytics", feature_inclusion: "included", addon_key: null, policy_id: "pol_node", status: "active", display_order: 4, assertion_ttl_seconds: null, pool_size: null, max_active_devices: null, max_borrow_sec: null, meter_quota: null, meter_period_sec: null },
+        ],
+      },
+    ],
+  };
+  await importForm.getByLabel("Manifest JSON").fill(JSON.stringify(importedManifest));
+  await importForm.getByRole("button", { name: "Apply import" }).click();
+  await expect.poll(() => api.requests.catalogImports.length).toBe(2);
+  expect(api.requests.catalogImports[1]).toMatchObject({ dry_run: false, body: importedManifest });
+  expect(api.requests.catalogImports[1].idempotency_key).toMatch(/^[0-9a-f-]{36}$/);
+  await expect(page.getByText(/catalog_import_applied/)).toBeVisible();
+  await expect(page.getByRole("row", { name: /Growth growth/ })).toBeVisible();
+  await expect(page.getByRole("row", { name: /Analytics analytics/ })).toBeVisible();
+  await page.getByRole("row", { name: /Growth growth/ }).getByRole("button", { name: "Use" }).click();
+  await expect(page.getByRole("heading", { name: "Plan features / growth" })).toBeVisible();
+  await expect(page.getByRole("row", { name: /Analytics analytics included - pol_node/ })).toBeVisible();
 
   const form = page.getByRole("form", { name: "Plan projection" });
   await form.getByLabel("License ID").fill("lic_plan");

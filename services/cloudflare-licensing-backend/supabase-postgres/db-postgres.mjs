@@ -33,7 +33,7 @@
 //       the canonical assertion payload (`revocation-seq=${claims.revocationSeq}`,
 //       index.ts:493) and logged -- so a string '0' yields byte-identical signed text.
 //   That "survives by coincidence" is fragile. We remove the fragility by installing an
-//   int8 type parser so BIGINT columns arrive as JS numbers, matching D1/better-sqlite3
+//   int8 type parser so BIGINT columns arrive as JS numbers, matching D1/local SQLite
 //   (which returns INTEGER columns as numbers). All widened columns here hold unix seconds
 //   or small counters/sequences -- comfortably within Number.MAX_SAFE_INTEGER (2^53-1,
 //   year ~285616 in unix seconds) -- so Number is exact and faithful. If a value ever

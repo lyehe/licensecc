@@ -1,14 +1,22 @@
-# Supabase / PostgreSQL port of the licensing backend data layer
+# Supabase / PostgreSQL verify-path adapter
 
-This directory is a **drop-in replacement for the D1 (SQLite) data layer** of the licensing
-Worker (`services/cloudflare-licensing-backend/src/index.ts`). It ports **only the SQL and
-the DB adapter** -- the Worker's security/crypto code (signing, request-proof, claims,
-rate-limit policy) is untouched and continues to call the exact same
-`D1DatabaseLike` / `D1PreparedStatementLike` surface.
+This directory is a **fenced PostgreSQL adapter for the public verifier path only**.
+It is not a full replacement for the D1/SQLite runtime backend.
+
+Supported runtime routes are deliberately allow-listed by `pg-route-guard.mjs`:
+
+- `GET /health`
+- `POST /v1/verify`
+
+Admin, portal, order-ingest, seat, lease, webhook, catalog, and other mutating
+runtime paths remain D1/SQLite-only until the PostgreSQL adapter passes the DB
+conformance suite and the full worker E2E matrix. The Worker's security/crypto
+code (signing, request-proof, claims, rate-limit policy) is still untouched for
+the supported verify path and continues to call the same D1-shaped DB surface.
 
 | File | What it is |
 |---|---|
-| `schema.pg.sql` | Full PostgreSQL schema, faithful 1:1 to the ground-truth `schema.sql` (all 7 tables + every index, CHECK enum, composite PK, and the composite `ON DELETE CASCADE` FK). |
+| `schema.pg.sql` | PostgreSQL schema port of the D1 schema for the verified PostgreSQL paths. |
 | `statements.pg.sql` | The four verify-path Worker statements (group A) plus the admin/CLI statements that carry the SQLite-isms (group B), each annotated with the original SQL it replaces. |
 | `db-postgres.mjs` | A `postgres.js`-backed adapter exposing the **same** `prepare/bind/first/all/run` surface, throwing on error, with one long-lived pool and a BIGINT(int8)->number type parser. |
 
@@ -80,7 +88,7 @@ that by coincidence -- every BIGINT it reads is numerically coerced downstream
 `revocation_seq` is only string-interpolated into the signed canonical payload (so a string
 `'0'` produces byte-identical signed text) -- but relying on that incidental coercion is
 fragile. The adapter therefore installs an **int8 -> JS number type parser** in `createPool`
-so BIGINT columns arrive as numbers, matching D1/`better-sqlite3` (which returns INTEGER
+so BIGINT columns arrive as numbers, matching D1/local SQLite (which returns INTEGER
 columns as numbers). The parser only narrows values that are exactly representable
 (`Number.isSafeInteger`); anything larger keeps its string form rather than truncate, so it
 is strictly safer than the default for this schema and never loses precision. All widened
@@ -186,7 +194,7 @@ rows, and the adapter never swallows errors, so this contract holds.
   existing admin/CLI tooling that treats them as opaque JSON strings (and `prev_json`/
   `next_json` legitimately default to the empty string `''`, which is not valid jsonb).
 - **Migrations:** this port ships a single consolidated `schema.pg.sql` equivalent to the
-  final state of D1 migrations `0001..0008`. If you want incremental Postgres migrations,
+  final state of the D1 migrations. If you want incremental Postgres migrations,
   split it along the same boundaries (the per-table comments name the source migration).
 
 ## Run the verify Worker on Postgres (server.mjs)

@@ -7,7 +7,7 @@
 // It does three things per request:
 //   1. Build a WHATWG `Request` from the incoming node req (method/url/headers/body).
 //   2. Build the Worker `Env`:
-//        - DB                 = the better-sqlite3 D1 adapter (the only D1 binding)
+//        - DB                 = the Node SQLite D1 adapter (the only D1 binding)
 //        - VERIFY_RATE_LIMITER = undefined  -> Worker falls back to its D1-backed
 //                                              rate-limit tiers (checkD1RateLimitTier),
 //                                              which our adapter fully supports.

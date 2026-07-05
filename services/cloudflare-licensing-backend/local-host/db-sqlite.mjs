@@ -1,191 +1,189 @@
-// db-sqlite.mjs
+// Node SQLite adapter for the licensecc D1-shaped DB contract.
 //
-// A standard-SQLite (better-sqlite3) adapter that implements the SAME tiny
-// surface the licensecc Worker expects from its `DB` binding, so the Worker's
-// security code (src/index.ts) runs OFF Cloudflare with ZERO changes.
-//
-// The contract the Worker actually uses (verbatim from src/index.ts, lines 9-17):
-//
-//   export interface D1PreparedStatementLike {
-//     bind(...values: unknown[]): D1PreparedStatementLike;
-//     first<T = unknown>(): Promise<T | null>;
-//     run(): Promise<unknown>;
-//   }
-//   export interface D1DatabaseLike {
-//     prepare(sql: string): D1PreparedStatementLike;
-//   }
-//
-// The verify path issues exactly four statements:
-//   1. INSERT ... ON CONFLICT ... DO UPDATE ... RETURNING request_count   -> .first()
-//   2. DELETE FROM rate_limit_counters WHERE expires_at < ?               -> .run()
-//   3. SELECT ... FROM entitlements ... LIMIT 1                           -> .first()
-//   4. SELECT ... FROM entitlement_devices ... LIMIT 1                    -> .first()
-//
-// Contract notes that are load-bearing for the Worker's try/catch behaviour:
-//   * .first() resolves to the row object, or `null` when there is no row.
-//     `null` is the legitimate "no entitlement / unknown device" outcome and is
-//     NOT an error. (index.ts lines 720-738, 826-849.)
-//   * On a REAL query failure, the promise must REJECT (throw an Error) so the
-//     Worker's catch maps it to HTTP 500 `verification_error`.
-//   * .run() return value is never inspected by the Worker. `.all()` /
-//     `.meta` / `.changes` / `.last_row_id` are NOT read anywhere in index.ts.
-//     We still expose `.all()` and `.meta` (minimal) for completeness so the
-//     same adapter can back the admin/CLI tooling if reused.
-//
-// better-sqlite3 is synchronous; we wrap every result in Promise.resolve(...)
-// to honour the async D1 contract the Worker awaits.
+// This module is Node-only and intentionally lives outside src/ so it is never bundled into
+// Cloudflare Workers. It lets local hosts, scripts, and tests run against a plain SQLite file while
+// preserving the Worker-facing D1 surface: prepare().bind().first/all/run, batch(), and withSession().
 
-import Database from "better-sqlite3";
+import { existsSync, rmSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { DatabaseSync } from "node:sqlite";
+import { fileURLToPath } from "node:url";
 
-class SqlitePreparedStatement {
-  /**
-   * @param {import("better-sqlite3").Database} db
-   * @param {string} sql
-   */
+function normalizeParam(value) {
+  if (value === undefined) return null;
+  if (typeof value === "boolean") return value ? 1 : 0;
+  return value;
+}
+
+function metaFromRun(info) {
+  return {
+    changes: Number(info?.changes ?? 0),
+    last_row_id: Number(info?.lastInsertRowid ?? 0),
+  };
+}
+
+function asError(error) {
+  return error instanceof Error ? error : new Error(String(error));
+}
+
+export class SqlitePreparedStatement {
   constructor(db, sql) {
-    this._db = db;
-    this._sql = sql;
-    this._params = [];
-    // Prepare lazily inside the result methods so that a SQL-compile error
-    // surfaces as a REJECTED promise from .first()/.all()/.run() (matching D1's
-    // throw-on-failure contract) rather than synchronously at .prepare() time.
+    this.db = db;
+    this.sql = sql;
+    this.params = [];
   }
 
-  /**
-   * Chainable bind, exactly like D1. Returns `this` (a D1PreparedStatementLike).
-   * @param  {...unknown} values
-   * @returns {SqlitePreparedStatement}
-   */
   bind(...values) {
-    // D1/SQLite bind positional params. better-sqlite3 rejects `undefined`
-    // bind values; the Worker only ever binds defined scalars to the four
-    // verify statements, but normalize defensively to keep the throw-surface
-    // limited to genuine query failures.
-    this._params = values.map((v) => (v === undefined ? null : v));
-    return this;
+    const next = new SqlitePreparedStatement(this.db, this.sql);
+    next.params = values.map(normalizeParam);
+    return next;
   }
 
-  /** @returns {import("better-sqlite3").Statement} */
-  _statement() {
-    return this._db.prepare(this._sql);
+  statement() {
+    return this.db.prepare(this.sql);
   }
 
-  /**
-   * Resolve to the first row, or null when there is no row.
-   * REJECTS on a real query/compile error.
-   * @template T
-   * @returns {Promise<T | null>}
-   */
-  first() {
+  async first() {
     try {
-      const stmt = this._statement();
-      // The Worker only calls .first() on SELECTs and on the `INSERT ... ON
-      // CONFLICT ... RETURNING request_count` upsert — both DO return data, so
-      // .get() is the right call. better-sqlite3's `reader` flag is true for
-      // SELECT and for RETURNING statements and false for a plain INSERT/DELETE;
-      // we branch on it. As a version-independent safety net, if .get() ever
-      // throws the specific "does not return data" error (a non-returning
-      // statement reached .first()), we fall back to .run() and yield null,
-      // preserving "no row" semantics instead of surfacing a spurious error.
-      if (stmt.reader) {
-        const row = stmt.get(...this._params);
-        return Promise.resolve(row === undefined ? null : row);
-      }
-      try {
-        const row = stmt.get(...this._params);
-        return Promise.resolve(row === undefined ? null : row);
-      } catch (getError) {
-        if (getError instanceof TypeError && /does not return data/i.test(getError.message)) {
-          stmt.run(...this._params);
-          return Promise.resolve(null);
-        }
-        throw getError;
-      }
+      const row = this.statement().get(...this.params);
+      return row === undefined ? null : row;
     } catch (error) {
-      return Promise.reject(error instanceof Error ? error : new Error(String(error)));
+      throw asError(error);
     }
   }
 
-  /**
-   * D1 `.all()` shape: { results, success, meta }. The Worker's verify path
-   * never calls this; provided so the adapter can back other tooling.
-   * REJECTS on a real query error.
-   * @returns {Promise<{ results: unknown[], success: true, meta: { changes: number, last_row_id: number } }>}
-   */
-  all() {
+  async all() {
     try {
-      const stmt = this._statement();
-      if (stmt.reader) {
-        const results = stmt.all(...this._params);
-        return Promise.resolve({
-          results,
-          success: true,
-          meta: { changes: 0, last_row_id: 0 },
-        });
-      }
-      const info = stmt.run(...this._params);
-      return Promise.resolve({
-        results: [],
+      return {
+        results: this.statement().all(...this.params),
         success: true,
-        meta: { changes: info.changes, last_row_id: Number(info.lastInsertRowid) },
-      });
+        meta: { changes: 0, last_row_id: 0 },
+      };
     } catch (error) {
-      return Promise.reject(error instanceof Error ? error : new Error(String(error)));
+      throw asError(error);
     }
   }
 
-  /**
-   * Execute a write. The Worker ignores the return value of .run(); we still
-   * return a D1-shaped object ({ success, meta }) for parity with other tooling.
-   * REJECTS on a real query error.
-   * @returns {Promise<{ success: true, meta: { changes: number, last_row_id: number } }>}
-   */
-  run() {
+  async run() {
     try {
-      const stmt = this._statement();
-      const info = stmt.run(...this._params);
-      return Promise.resolve({
+      return {
         success: true,
-        meta: { changes: info.changes, last_row_id: Number(info.lastInsertRowid) },
-      });
+        meta: metaFromRun(this.statement().run(...this.params)),
+      };
     } catch (error) {
-      return Promise.reject(error instanceof Error ? error : new Error(String(error)));
+      throw asError(error);
     }
   }
 }
 
 export class SqliteD1Adapter {
-  /**
-   * @param {import("better-sqlite3").Database} db an open better-sqlite3 handle
-   */
   constructor(db) {
-    this._db = db;
+    this.db = db;
   }
 
-  /**
-   * @param {string} sql
-   * @returns {SqlitePreparedStatement}
-   */
   prepare(sql) {
-    return new SqlitePreparedStatement(this._db, sql);
+    return new SqlitePreparedStatement(this.db, sql);
+  }
+
+  withSession() {
+    return this;
+  }
+
+  async batch(statements) {
+    const out = [];
+    this.db.exec("BEGIN");
+    try {
+      for (const statement of statements) {
+        out.push(await statement.all());
+      }
+      this.db.exec("COMMIT");
+      return out;
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw asError(error);
+    }
   }
 }
 
-/**
- * Open a better-sqlite3 database file and return both the raw handle and a
- * D1-shaped adapter over it. Sets the PRAGMAs the host relies on.
- *
- * @param {string} path filesystem path to the SQLite database
- * @param {{ readonly?: boolean }} [options]
- * @returns {{ db: import("better-sqlite3").Database, adapter: SqliteD1Adapter }}
- */
+export function listMigrations(migrationsDir) {
+  return readdirSync(migrationsDir)
+    .filter((name) => /^\d+_.*\.sql$/.test(name))
+    .sort();
+}
+
+function ensureLedger(db) {
+  db.exec(
+    "CREATE TABLE IF NOT EXISTS _migrations (" +
+      "name TEXT PRIMARY KEY, " +
+      "applied_at INTEGER NOT NULL" +
+      ")",
+  );
+}
+
+function appliedSet(db) {
+  return new Set(db.prepare("SELECT name FROM _migrations").all().map((row) => row.name));
+}
+
+export function applyMigrations(db, migrationsDir, options = {}) {
+  const now = Math.floor(Date.now() / 1000);
+  const migrations = listMigrations(migrationsDir);
+  const applied = [];
+  const skipped = [];
+
+  db.exec("PRAGMA foreign_keys = OFF");
+  ensureLedger(db);
+  const already = options.force === true ? new Set() : appliedSet(db);
+  const record = db.prepare("INSERT OR REPLACE INTO _migrations (name, applied_at) VALUES (?, ?)");
+
+  try {
+    for (const name of migrations) {
+      if (already.has(name)) {
+        skipped.push(name);
+        continue;
+      }
+      const sql = readFileSync(join(migrationsDir, name), "utf8");
+      db.exec("BEGIN");
+      try {
+        db.exec(sql);
+        record.run(name, now);
+        db.exec("COMMIT");
+      } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
+      }
+      applied.push(name);
+    }
+  } finally {
+    db.exec("PRAGMA foreign_keys = ON");
+  }
+
+  return { applied, skipped };
+}
+
 export function openDatabase(path, options = {}) {
-  const db = new Database(path, { readonly: options.readonly === true });
-  // Enforce the schema's FK relationships (entitlement_devices -> entitlements).
-  db.pragma("foreign_keys = ON");
-  // WAL: concurrent reads + a single writer; matches a small online verifier.
-  db.pragma("journal_mode = WAL");
-  return { db, adapter: new SqliteD1Adapter(db) };
+  const dbPath = path === ":memory:" ? path : resolve(path);
+  if (options.reset === true && dbPath !== ":memory:" && existsSync(dbPath)) {
+    rmSync(dbPath, { force: true });
+  }
+  if (dbPath !== ":memory:") {
+    mkdirSync(dirname(dbPath), { recursive: true });
+  }
+
+  const db = new DatabaseSync(dbPath, { readOnly: options.readonly === true });
+  if (options.readonly !== true) {
+    db.exec("PRAGMA foreign_keys = ON");
+    db.exec("PRAGMA journal_mode = WAL");
+  }
+  return { db, adapter: new SqliteD1Adapter(db), path: dbPath };
+}
+
+export function createLocalSqliteDb(options = {}) {
+  const migrationsDir = options.migrationsDir ?? resolve(dirname(fileURLToPath(import.meta.url)), "..", "migrations");
+  const opened = openDatabase(options.path ?? ":memory:", { reset: options.reset === true, readonly: options.readonly === true });
+  if (options.migrate !== false && options.readonly !== true) {
+    opened.migrations = applyMigrations(opened.db, migrationsDir);
+  }
+  return opened;
 }
 
 export default SqliteD1Adapter;

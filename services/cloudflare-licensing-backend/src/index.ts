@@ -29,6 +29,7 @@ import { handleOrderIngest } from "./fulfillment/order_ingest.mjs";
 import { accountAuth, constantTimeEqual, readBearer } from "./auth/account_auth.mjs";
 import { enqueueAndDeliverWebhooks } from "./webhooks/webhook.mjs";
 import { appendAuditDigest } from "./audit/audit_digest.mjs";
+import type { DbDatabaseLike, DbPreparedStatementLike } from "./db/contract.js";
 // OpenAPI 3.1 doc-of-existing: the spec object + the self-contained /docs page. Served
 // UNAUTHENTICATED and EARLY (before any auth) so the API is self-describing without credentials.
 import { openApiSpec, docsHtml } from "./openapi.js";
@@ -41,23 +42,8 @@ declare const Buffer:
     }
   | undefined;
 
-export interface D1PreparedStatementLike {
-  bind(...values: unknown[]): D1PreparedStatementLike;
-  first<T = unknown>(): Promise<T | null>;
-  all<T = unknown>(): Promise<{ results: T[] }>;
-  run(): Promise<unknown>;
-}
-
-export interface D1DatabaseLike {
-  prepare(sql: string): D1PreparedStatementLike;
-  // F4: D1 Sessions strong read ("first-primary") so an emergency-revoked token is never served
-  // from a stale replica. Feature-detected at runtime (older bindings lack it).
-  withSession?(mode?: string): D1DatabaseLike;
-  // Transactional multi-statement commit. Used by the entitlement-mutation core and (Stage 4) the
-  // lease cap-insert + write-once trial-activation stamp so "lease issued" and "trial clock started"
-  // commit atomically. Real D1 always exposes it; a missing batch() means a degraded/mocked binding.
-  batch?(statements: D1PreparedStatementLike[]): Promise<{ results: unknown[] }[]>;
-}
+export type D1PreparedStatementLike = DbPreparedStatementLike;
+export type D1DatabaseLike = DbDatabaseLike;
 
 // Minimal Workers ExecutionContext surface (we only use waitUntil to keep the throttled
 // last_used_at write + lazy re-pepper off the response path on the hot endpoints).
