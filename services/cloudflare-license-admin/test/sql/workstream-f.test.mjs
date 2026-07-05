@@ -25,6 +25,7 @@ import { exportJWK, generateKeyPair, SignJWT } from "jose";
 
 import worker from "../../dist-worker/worker/index.js";
 import { entitlementId } from "@licensecc/cloudflare-licensing-backend/entitlements/entitlement_mutation";
+import { forceReleaseLiveSeats } from "@licensecc/cloudflare-licensing-backend/lease/seat_reclaim";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const migrationsDir = join(here, "..", "..", "..", "cloudflare-licensing-backend", "migrations");
@@ -376,6 +377,36 @@ test("expiring: cursor pagination over valid_until ASC", async () => {
 });
 
 // ── Force-release ───────────────────────────────────────────────────────────────
+
+test("force-release helper: reclaims live seats and emits balanced reclaim events", async () => {
+  const db = freshDb();
+  const env = devEnv(db);
+  const now = Math.floor(Date.now() / 1000);
+  insertEntitlement(db, FP_A, { now });
+  insertSeat(db, FP_A, "seat_live_2", now + 1200, { now });
+  insertSeat(db, FP_A, "seat_live_1", now + 600, { now });
+  insertSeat(db, FP_A, "seat_dead", now - 60, { now });
+
+  const result = await forceReleaseLiveSeats(
+    env,
+    { project: "DEFAULT", feature: "DEFAULT", license_fingerprint: FP_A },
+    now,
+  );
+  assert.deepEqual(result, { released: 2, seat_ids: ["seat_live_1", "seat_live_2"] });
+  assert.deepEqual(
+    db.prepare("SELECT seat_id FROM seat_checkouts WHERE license_fingerprint=? ORDER BY seat_id").all(FP_A).map((row) => row.seat_id),
+    ["seat_dead"],
+  );
+  assert.deepEqual(
+    db.prepare("SELECT seat_id, event_type, reason FROM usage_events WHERE license_fingerprint=? ORDER BY seat_id")
+      .all(FP_A)
+      .map((row) => ({ seat_id: row.seat_id, event_type: row.event_type, reason: row.reason })),
+    [
+      { seat_id: "seat_live_1", event_type: "reclaim", reason: "force_release" },
+      { seat_id: "seat_live_2", event_type: "reclaim", reason: "force_release" },
+    ],
+  );
+});
 
 test("force-release: reclaims ONLY live seats and writes a 'reclaim' usage_events row per seat", async () => {
   const db = freshDb();

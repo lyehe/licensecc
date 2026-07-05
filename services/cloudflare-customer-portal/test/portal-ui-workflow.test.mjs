@@ -64,6 +64,15 @@ test("portal UI workflow shortens fingerprints like admin", async () => {
   assert.equal(workflow.shortHash("a".repeat(64)), "aaaaaaaa...aaaaaaaa");
 });
 
+test("portal UI workflow copy discloses account-safe auth and activation download", async () => {
+  const workflow = await loadWorkflowModule();
+  assert.match(workflow.LOGIN_CODE_SENT_COPY, /If this email is registered/);
+  assert.doesNotMatch(workflow.LOGIN_CODE_SENT_COPY, /We sent.*to/);
+  assert.equal(workflow.ACTIVATION_DOWNLOAD_ACTION_LABEL, "Activate and download .lic");
+  assert.match(workflow.ACTIVATION_DOWNLOAD_DISCLOSURE, /activates this entitlement/);
+  assert.match(workflow.ACTIVATION_DOWNLOAD_DISCLOSURE, /trial time/);
+});
+
 test("portal UI workflow formats epoch windows and timestamps", async () => {
   const workflow = await loadWorkflowModule();
   assert.equal(workflow.formatEpoch(null), "any");

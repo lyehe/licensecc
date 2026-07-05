@@ -12,6 +12,10 @@
       "types": "./src/entitlements/policy.d.ts",
       "default": "./src/entitlements/policy.mjs"
     },
+    "./catalog/plan_projection": {
+      "types": "./src/catalog/plan_projection.d.ts",
+      "default": "./src/catalog/plan_projection.mjs"
+    },
     "./auth/account_token_issue": {
       "default": "./src/auth/account_token_issue.mjs"
     },
@@ -23,6 +27,10 @@
     },
     "./lease/usage_report": {
       "default": "./src/lease/usage_report.mjs"
+    },
+    "./lease/seat_reclaim": {
+      "types": "./src/lease/seat_reclaim.d.ts",
+      "default": "./src/lease/seat_reclaim.mjs"
     },
     "./webhooks/webhook": {
       "default": "./src/webhooks/webhook.mjs"

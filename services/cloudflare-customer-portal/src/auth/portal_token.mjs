@@ -103,14 +103,15 @@ export async function mintSessionToken(
       scopes,
       "expires-at": String(now + TOKEN_TTL_SEC),
       actor: "portal",
+      "pepper-key-id": active.id,
     },
-    { now, pepperBytes: active.bytes, _idOverride: undefined, "pepper-key-id": active.id },
+    { now, pepperBytes: active.bytes },
   );
 
-  // Execute the two statements. buildIssue's sql is "INSERT...;\nINSERT..." — split and batch so the
-  // guarded token INSERT + its audit row commit together. The token INSERT is guarded (customer must
-  // be active), so a disabled customer mints nothing.
-  const statements = built.sql.split(";\n").map((s) => env.DB.prepare(s));
+  // Execute the first-class statement list so the guarded token INSERT + its audit row commit
+  // together. The token INSERT is guarded (customer must be active), so a disabled customer mints
+  // nothing.
+  const statements = built.statements.map((s) => env.DB.prepare(s));
   if (typeof env.DB.batch === "function") {
     await env.DB.batch(statements);
   } else {

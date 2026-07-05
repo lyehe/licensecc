@@ -21,8 +21,8 @@ function makePortalApiFixture() {
   const requests = { authRequests: 0, verifies: 0, checkouts: 0, heartbeats: 0, releases: 0, downloads: 0, logouts: 0 };
 
   const entitlements = [
-    { project: "DEFAULT", feature: "pro", status: "active", license_fingerprint: "a".repeat(64), valid_from: 1_710_000_000, valid_until: null },
-    { project: "DEFAULT", feature: "team", status: "disabled", license_fingerprint: "b".repeat(64), valid_from: null, valid_until: 1_760_000_000 },
+    { id: "ent_floating", project: "DEFAULT", feature: "pro", status: "active", license_fingerprint: "a".repeat(64), valid_from: 1_710_000_000, valid_until: null, license_mode: "floating", pool_size: 5, max_active_devices: 1, max_borrow_sec: 0, heartbeat_grace_sec: 900, policy_id: "pol_float" },
+    { id: "ent_node", project: "DEFAULT", feature: "solo", status: "active", license_fingerprint: "b".repeat(64), valid_from: null, valid_until: 1_760_000_000, license_mode: "node_locked", pool_size: 0, max_active_devices: 1, max_borrow_sec: 0, heartbeat_grace_sec: 900, policy_id: "pol_node" },
   ];
   const devices = [
     { project: "DEFAULT", feature: "pro", license_fingerprint: "a".repeat(64), device_key_id: "d".repeat(40), created_at: 1_710_000_500 },
@@ -90,29 +90,32 @@ function makePortalApiFixture() {
       return fulfill(200, makeEnvelope("usage", { items: usage.map((item) => ({ ...item })) }));
     }
 
-    // ---- Per-seat actions: body MUST be project + feature ONLY (no fingerprint from the browser) ----
+    // ---- Per-seat actions: body MUST target an entitlement id, never a raw fingerprint. ----
     if (method === "POST" && (path === "/api/portal/checkout" || path === "/api/portal/heartbeat" || path === "/api/portal/release")) {
       const body = await jsonBody(request);
       // Assert the client never supplies the fingerprint (invariant 4: server-resolved).
-      if ("license_fingerprint" in body) {
+      if ("license_fingerprint" in body || body.entitlement_id !== "ent_floating" || typeof body.client_instance_id !== "string" || typeof body.nonce !== "string") {
         return fulfill(400, { ok: false, code: "fingerprint_must_not_be_client_supplied", request_id: "portal-e2e-leak" });
       }
       const op = path.split("/").pop();
+      if ((op === "heartbeat" || op === "release") && body.seat_id !== "seat-e2e") {
+        return fulfill(400, { ok: false, code: "seat_id_required", request_id: "portal-e2e-seat" });
+      }
       requests[`${op}s`] += 1;
-      return fulfill(200, makeEnvelope(`${op}_ok`, { project: body.project, feature: body.feature }));
+      return fulfill(200, makeEnvelope(`${op}_ok`, { seat_id: "seat-e2e", mode: "live" }));
     }
 
     // ---- Download: stream a signed-looking attachment (NOT a private key) ----
     if (method === "POST" && path === "/api/portal/download") {
       requests.downloads += 1;
       const body = await jsonBody(request);
-      if ("license_fingerprint" in body) {
+      if ("license_fingerprint" in body || body.entitlement_id !== "ent_node" || typeof body.device_key_id !== "string" || body.device_key_id === "") {
         return fulfill(400, { ok: false, code: "fingerprint_must_not_be_client_supplied", request_id: "portal-e2e-leak" });
       }
       return route.fulfill({
         status: 200,
         contentType: "application/octet-stream",
-        headers: { "content-disposition": `attachment; filename="${body.project}-${body.feature}.lic"` },
+        headers: { "content-disposition": "attachment; filename=\"DEFAULT-solo.lic\"" },
         body: "[license]\nsigned-license-bytes-not-a-key\n",
       });
     }
@@ -148,11 +151,11 @@ test("customer portal signs in with an 8-digit code and walks every screen witho
   await expect(page.locator(".status.active").first()).toHaveText("active");
   await expect(page.getByText("aaaaaaaa...aaaaaaaa").first()).toBeVisible();
 
-  // --- My devices/seats: per-seat checkout/heartbeat/release ---
+  // --- My devices/seats: floating seat checkout/heartbeat/release ---
   await page.getByRole("button", { name: "My devices" }).click();
-  await page.getByRole("button", { name: "Checkout" }).first().click();
+  await page.getByRole("button", { name: "Start seat" }).first().click();
   await expect.poll(() => api.requests.checkouts).toBe(1);
-  await page.getByRole("button", { name: "Heartbeat" }).first().click();
+  await page.getByRole("button", { name: "Refresh" }).first().click();
   await expect.poll(() => api.requests.heartbeats).toBe(1);
   await page.getByRole("button", { name: "Release" }).first().click();
   await expect.poll(() => api.requests.releases).toBe(1);
@@ -165,10 +168,11 @@ test("customer portal signs in with an 8-digit code and walks every screen witho
 
   // --- Download: triggers a browser download of the streamed attachment ---
   await page.getByRole("button", { name: "Download" }).click();
+  await page.getByLabel("Device key for DEFAULT solo").fill("device-e2e");
   const downloadPromise = page.waitForEvent("download");
-  await page.getByRole("button", { name: "Download .lic" }).first().click();
+  await page.getByRole("button", { name: "Activate and download .lic" }).first().click();
   const download = await downloadPromise;
-  expect(download.suggestedFilename()).toBe("DEFAULT-pro.lic");
+  expect(download.suggestedFilename()).toBe("DEFAULT-solo.lic");
   await expect.poll(() => api.requests.downloads).toBe(1);
 
   // --- Leak guard: the rendered page text must NEVER expose any credential / cross-tenant id. ---

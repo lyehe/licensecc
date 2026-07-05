@@ -11,6 +11,7 @@ export interface EntitlementKey {
 // Canonical home for the entitlement data types. The admin's src/shared/api.ts
 // re-exports these so there is exactly ONE definition shared across packages.
 export type EntitlementStatus = "active" | "disabled" | "revoked";
+export type LicenseMode = "trial" | "node_locked" | "floating";
 
 // A registered relay-resistance device key (table entitlement_devices).
 export type DeviceStatus = "active" | "revoked" | "disabled";
@@ -41,6 +42,24 @@ export interface EntitlementRecord {
   notes: string;
   customer_id: string | null;
   license_id: string | null;
+  policy_id: string | null;
+  is_trial: number;
+  trial_expiration_basis: string | null;
+  trial_duration_sec: number;
+  trial_one_per_device: number;
+  trial_require_device_proof: number;
+  trial_started_at: number | null;
+  trial_device_hash: string | null;
+  max_active_devices: number;
+  lease_seconds: number;
+  rebind_window_sec: number;
+  pool_size: number;
+  heartbeat_grace_sec: number;
+  max_borrow_sec: number;
+  allow_overdraft: number;
+  meter_quota: number;
+  meter_period_sec: number;
+  license_mode: LicenseMode;
   created_at: number;
   updated_at: number;
 }
@@ -140,7 +159,8 @@ export const REVOCATION_SEQ_BUMP: string;
 export function entitlementId(project: string, feature: string, licenseFingerprint: string): string;
 export function decodeEntitlementId(id: string): EntitlementKey | null;
 
-export function withId(row: Omit<EntitlementRecord, "id"> & { cache_ttl_seconds?: number }): EntitlementRecord;
+export function withId(row: Omit<EntitlementRecord, "id" | "license_mode"> & { cache_ttl_seconds?: number }): EntitlementRecord;
+export function effectiveLicenseMode(row: Partial<EntitlementRecord>): LicenseMode;
 export function entitlementSelectSql(where: string): string;
 export function findEntitlement(env: MutationEnv, key: EntitlementKey): Promise<EntitlementRecord | null>;
 
@@ -175,8 +195,8 @@ export function writeEntitlementWithAudit(
   now: number,
   idempotency: IdempotencyCommit | null,
   // Extra statements committed in the SAME batch/transaction as the entitlement
-  // write + audit event (default []). The order-ingest apply path passes its
-  // in-batch order_events processed-mark here so mutation + mark are atomic.
+  // write. They run before audit/idempotency projection so those records and the
+  // returned MutationResult describe the final committed entitlement state.
   extraStatements?: D1PreparedStatementLike[],
 ): Promise<MutationResult<EntitlementRecord>>;
 
@@ -188,8 +208,8 @@ export function createEntitlement(
   eventTypeOverride?: EntitlementEventType,
   idempotency?: IdempotencyCommit | null,
   // Extra statements committed in the SAME atomic batch as the INSERT (default []).
-  // The admin policy-stamp path passes the capacity/trial side-write here so the row +
-  // its frozen policy state commit together; the INSERT SQL is unchanged.
+  // The admin policy-stamp path passes the capacity/trial/provenance write here so
+  // the row + its frozen policy state commit together and the returned payload is final.
   extraStatements?: D1PreparedStatementLike[],
 ): Promise<MutationResult<EntitlementRecord>>;
 

@@ -128,6 +128,17 @@ test("activate issues a verifiable, clamped v201 lease", async () => {
   assert.ok(nodeVerify("RSA-SHA256", Buffer.from(bytes), LEASE_PUBLIC, Buffer.from(sigB64, "base64")));
 });
 
+test("activate rejects oversized JSON bodies without relying on Content-Length", async () => {
+  const env = makeEnv({ entitlement: activeEntitlement() });
+  const res = await worker.fetch(new Request("https://verifier.example/v1/activate", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: "x".repeat(4097),
+  }), env);
+  assert.equal(res.status, 413);
+  assert.equal((await res.json()).code, "body_too_large");
+});
+
 test("non-expiring subscription gets the full lease budget", async () => {
   resetLeaseSigningKeyCacheForTests();
   const env = makeEnv({ entitlement: activeEntitlement({ valid_until: null, lease_seconds: 1000 }) });

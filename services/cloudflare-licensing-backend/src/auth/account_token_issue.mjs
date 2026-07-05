@@ -161,10 +161,11 @@ export async function buildIssue(options, { now = nowEpoch(), pepperBytes, gener
   const token = generated ?? generateAccountToken();
   const id = options._idOverride ?? newTokenId();
   const tokenHmac = await mintTokenHmac(token.raw, pepperKeyId, pepperBytes);
-  const sql = [
+  const statements = [
     insertTokenSqlGuarded({ id, customerId, tokenHmac, pepperKeyId, tokenPrefix: token.token_prefix, name, scopesJson, expiresAt, actor }),
     eventSql({ accountTokenId: id, customerId, eventType: "issue", actor, reason: name }),
-  ].join(";\n");
+  ];
+  const sql = statements.join(";\n");
 
-  return { sql, id, tokenHmac, pepperKeyId, plaintext: token.raw, tokenPrefix: token.token_prefix, customerId, scopesJson, expiresAt };
+  return { sql, statements, id, tokenHmac, pepperKeyId, plaintext: token.raw, tokenPrefix: token.token_prefix, customerId, scopesJson, expiresAt };
 }

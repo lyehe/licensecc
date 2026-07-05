@@ -25,6 +25,24 @@ const NEXT_JSON_KEYS = [
   "notes",
   "customer_id",
   "license_id",
+  "policy_id",
+  "is_trial",
+  "trial_expiration_basis",
+  "trial_duration_sec",
+  "trial_one_per_device",
+  "trial_require_device_proof",
+  "trial_started_at",
+  "trial_device_hash",
+  "max_active_devices",
+  "lease_seconds",
+  "rebind_window_sec",
+  "pool_size",
+  "heartbeat_grace_sec",
+  "max_borrow_sec",
+  "allow_overdraft",
+  "meter_quota",
+  "meter_period_sec",
+  "license_mode",
   "created_at",
   "updated_at",
   "id",
@@ -106,6 +124,36 @@ function keyOf(project, feature, licenseFingerprint) {
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
+}
+
+function effectiveLicenseMode(row) {
+  if (Number(row.is_trial ?? 0) === 1) return "trial";
+  if (Number(row.pool_size ?? 0) > 0) return "floating";
+  return "node_locked";
+}
+
+function entitlementDefaults(overrides = {}) {
+  const row = {
+    policy_id: null,
+    is_trial: 0,
+    trial_expiration_basis: null,
+    trial_duration_sec: 0,
+    trial_one_per_device: 0,
+    trial_require_device_proof: 0,
+    trial_started_at: null,
+    trial_device_hash: null,
+    max_active_devices: 1,
+    lease_seconds: 2592000,
+    rebind_window_sec: 7776000,
+    pool_size: 0,
+    heartbeat_grace_sec: 900,
+    max_borrow_sec: 0,
+    allow_overdraft: 0,
+    meter_quota: 0,
+    meter_period_sec: 2592000,
+    ...overrides,
+  };
+  return { ...row, license_mode: effectiveLicenseMode(row) };
 }
 
 async function accessFixture(t) {
@@ -383,6 +431,7 @@ MockD1.prototype.first = function first(sql, values) {
     const key = keyOf(project, feature, licenseFingerprint);
     const previous = this.entitlements.get(key);
     const row = {
+      ...entitlementDefaults(previous ?? {}),
       project,
       feature,
       license_fingerprint: licenseFingerprint,
@@ -481,6 +530,15 @@ test("dev bearer is accepted only in development", async () => {
   const response = await worker.fetch(authed("/api/admin/summary"), env);
   assert.equal(response.status, 500);
   assert.equal((await json(response)).code, "dev_bearer_forbidden_in_environment");
+});
+
+test("admin worker rejects oversized JSON bodies without relying on Content-Length", async () => {
+  const response = await worker.fetch(authed("/api/admin/entitlements", {
+    method: "POST",
+    body: "x".repeat(8193),
+  }), baseEnv());
+  assert.equal(response.status, 413);
+  assert.equal((await json(response)).code, "body_too_large");
 });
 
 test("cloudflare access jwt admin can read admin summary", async (t) => {

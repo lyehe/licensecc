@@ -72,6 +72,23 @@ function makeDb(state) {
           notes: a[12],
           customer_id: a[13],
           license_id: a[14],
+          policy_id: null,
+          is_trial: 0,
+          trial_expiration_basis: null,
+          trial_duration_sec: 0,
+          trial_one_per_device: 0,
+          trial_require_device_proof: 0,
+          trial_started_at: null,
+          trial_device_hash: null,
+          max_active_devices: 1,
+          lease_seconds: 2592000,
+          rebind_window_sec: 7776000,
+          pool_size: 0,
+          heartbeat_grace_sec: 900,
+          max_borrow_sec: 0,
+          allow_overdraft: 0,
+          meter_quota: 0,
+          meter_period_sec: 2592000,
           created_at: a[15],
           updated_at: a[16],
         };
@@ -148,6 +165,7 @@ test("createEntitlement returns a MutationResult with an id and writes an audit 
   assert.equal(result.data.id, entitlementId("DEFAULT", "DEFAULT", "a".repeat(64)));
   assert.equal(result.data.notes, "hello");
   assert.equal(result.data.status, "active");
+  assert.equal(result.data.license_mode, "node_locked");
   // cache_ttl_seconds must be stripped from the public record by withId().
   assert.equal("cache_ttl_seconds" in result.data, false);
   // Exactly one audit event was written atomically with the row.
@@ -173,10 +191,11 @@ test("setEntitlementCapacity updates only provided columns and preserves the res
   // Only the two valid provided columns were written.
   assert.equal(state.entitlement.max_active_devices, 5);
   assert.equal(state.entitlement.lease_seconds, 1000);
+  assert.equal(result.data.max_active_devices, 5);
   // Unknown key is ignored.
   assert.equal("bogus_column" in state.entitlement, false);
-  // Negative value is ignored (pool_size not written).
-  assert.equal(state.entitlement.pool_size, undefined);
+  // Negative value is ignored (pool_size remains at the migrated default).
+  assert.equal(state.entitlement.pool_size, 0);
   // Untouched body columns are preserved.
   assert.equal(state.entitlement.notes, "keep-me");
   assert.equal(state.entitlement.status, "active");
@@ -216,5 +235,6 @@ test("withId derives the id and strips cache_ttl_seconds", () => {
     status: "active",
   });
   assert.equal(record.id, entitlementId("DEFAULT", "DEFAULT", "a".repeat(64)));
+  assert.equal(record.license_mode, "node_locked");
   assert.equal("cache_ttl_seconds" in record, false);
 });

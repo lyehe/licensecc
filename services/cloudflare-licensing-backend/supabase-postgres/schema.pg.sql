@@ -614,3 +614,112 @@ CREATE TABLE IF NOT EXISTS usage_meters (
 
 CREATE INDEX IF NOT EXISTS idx_usage_meters_entitlement
   ON usage_meters(project, feature, license_fingerprint);
+
+-- =====================================================================================
+-- catalog plans  (migration 0025) -- product catalog projected into concrete entitlements.
+-- =====================================================================================
+CREATE TABLE IF NOT EXISTS catalog_features (
+  id          TEXT   PRIMARY KEY,
+  project     TEXT   NOT NULL,
+  feature_key TEXT   NOT NULL,
+  name        TEXT   NOT NULL,
+  description TEXT   NOT NULL DEFAULT '',
+  category    TEXT   NOT NULL DEFAULT '',
+  status      TEXT   NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled')),
+  created_at  BIGINT NOT NULL,
+  updated_at  BIGINT NOT NULL,
+  UNIQUE (project, feature_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_catalog_features_project_status
+  ON catalog_features(project, status);
+
+CREATE TABLE IF NOT EXISTS catalog_plans (
+  id          TEXT   PRIMARY KEY,
+  project     TEXT   NOT NULL,
+  plan_key    TEXT   NOT NULL,
+  name        TEXT   NOT NULL,
+  status      TEXT   NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled')),
+  version     BIGINT NOT NULL DEFAULT 1,
+  description TEXT   NOT NULL DEFAULT '',
+  created_at  BIGINT NOT NULL,
+  updated_at  BIGINT NOT NULL,
+  UNIQUE (project, plan_key),
+  UNIQUE (project, id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_catalog_plans_project_status
+  ON catalog_plans(project, status);
+
+CREATE TABLE IF NOT EXISTS catalog_plan_features (
+  project               TEXT   NOT NULL,
+  plan_id               TEXT   NOT NULL,
+  feature_key           TEXT   NOT NULL,
+  feature_inclusion     TEXT   NOT NULL DEFAULT 'included' CHECK (feature_inclusion IN ('included', 'addon')),
+  addon_key             TEXT   NULL,
+  policy_id             TEXT   NULL,
+  status                TEXT   NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled')),
+  display_order         BIGINT NOT NULL DEFAULT 0,
+  assertion_ttl_seconds BIGINT NULL,
+  pool_size             BIGINT NULL,
+  max_active_devices    BIGINT NULL,
+  max_borrow_sec        BIGINT NULL,
+  meter_quota           BIGINT NULL,
+  meter_period_sec      BIGINT NULL,
+  created_at            BIGINT NOT NULL,
+  updated_at            BIGINT NOT NULL,
+  PRIMARY KEY (plan_id, feature_key),
+  FOREIGN KEY (project, plan_id) REFERENCES catalog_plans(project, id) ON DELETE CASCADE,
+  FOREIGN KEY (project, feature_key) REFERENCES catalog_features(project, feature_key) ON DELETE CASCADE,
+  FOREIGN KEY (policy_id) REFERENCES entitlement_policies(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_catalog_plan_features_project
+  ON catalog_plan_features(project, plan_id, status);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_catalog_plan_features_addon
+  ON catalog_plan_features(plan_id, addon_key)
+  WHERE addon_key IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS license_plan_assignments (
+  license_id          TEXT   NOT NULL,
+  project             TEXT   NOT NULL,
+  plan_id             TEXT   NOT NULL,
+  license_fingerprint TEXT   NOT NULL,
+  customer_id         TEXT   NULL,
+  status              TEXT   NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled', 'revoked')),
+  support_until       BIGINT NULL,
+  addons_json         TEXT   NOT NULL DEFAULT '[]',
+  created_at          BIGINT NOT NULL,
+  updated_at          BIGINT NOT NULL,
+  PRIMARY KEY (license_id, project),
+  FOREIGN KEY (project, plan_id) REFERENCES catalog_plans(project, id) ON DELETE RESTRICT
+);
+
+CREATE INDEX IF NOT EXISTS idx_license_plan_assignments_customer
+  ON license_plan_assignments(customer_id);
+
+CREATE INDEX IF NOT EXISTS idx_license_plan_assignments_plan
+  ON license_plan_assignments(project, plan_id, status);
+
+CREATE TABLE IF NOT EXISTS catalog_events (
+  id          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  entity_type TEXT   NOT NULL CHECK (entity_type IN ('feature', 'plan', 'plan_feature')),
+  entity_id   TEXT   NOT NULL,
+  project     TEXT   NOT NULL,
+  event_type  TEXT   NOT NULL CHECK (event_type IN ('create', 'update', 'disable', 'reenable')),
+  actor       TEXT   NOT NULL DEFAULT '',
+  actor_type  TEXT   NOT NULL DEFAULT 'unknown' CHECK (actor_type IN ('access', 'dev', 'cli', 'sync', 'system', 'unknown')),
+  source      TEXT   NOT NULL DEFAULT 'admin',
+  reason      TEXT   NOT NULL DEFAULT '',
+  request_id  TEXT   NOT NULL DEFAULT '',
+  prev_json   TEXT   NOT NULL DEFAULT '',
+  next_json   TEXT   NOT NULL DEFAULT '',
+  created_at  BIGINT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_catalog_events_entity
+  ON catalog_events(entity_type, entity_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_catalog_events_project
+  ON catalog_events(project, created_at DESC);

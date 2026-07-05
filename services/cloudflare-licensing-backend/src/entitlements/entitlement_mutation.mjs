@@ -54,7 +54,7 @@ export function decodeEntitlementId(id) {
  *  statements off the same single source of truth without re-coupling the admin
  *  mutators below — keeping the admin write path byte-identical. */
 export const ENTITLEMENT_COLUMNS =
-  "project, feature, license_fingerprint, device_hash, status, assertion_ttl_seconds, cache_ttl_seconds, revocation_seq, valid_from, valid_until, notes, customer_id, license_id, created_at, updated_at";
+  "project, feature, license_fingerprint, device_hash, status, assertion_ttl_seconds, cache_ttl_seconds, revocation_seq, valid_from, valid_until, notes, customer_id, license_id, policy_id, is_trial, trial_expiration_basis, trial_duration_sec, trial_one_per_device, trial_require_device_proof, trial_started_at, trial_device_hash, max_active_devices, lease_seconds, rebind_window_sec, pool_size, heartbeat_grace_sec, max_borrow_sec, allow_overdraft, meter_quota, meter_period_sec, created_at, updated_at";
 
 /** UPDATE assignment that re-derives the revocation_seq floor from the audit log
  *  and bumps it. Security-relevant (monotonic revocation counter) — keep identical
@@ -70,6 +70,16 @@ export const REVOCATION_SEQ_BUMP =
  *  drift from what createEntitlement actually writes. */
 const DEFAULT_ASSERTION_TTL_SECONDS = 300;
 
+export function effectiveLicenseMode(row) {
+  if (Number(row?.is_trial ?? 0) === 1) {
+    return "trial";
+  }
+  if (Number(row?.pool_size ?? 0) > 0) {
+    return "floating";
+  }
+  return "node_locked";
+}
+
 /**
  * Re-attach the derived `id` to a freshly-read/written entitlement row, stripping
  * the internal-only cache_ttl_seconds column from the public shape.
@@ -79,6 +89,7 @@ export function withId(row) {
   delete publicRow.cache_ttl_seconds;
   return {
     ...publicRow,
+    license_mode: effectiveLicenseMode(row),
     id: entitlementId(row.project, row.feature, row.license_fingerprint),
   };
 }
@@ -126,6 +137,24 @@ export function idempotencyFromCurrentStatement(
            'notes', notes,
            'customer_id', customer_id,
            'license_id', license_id,
+           'policy_id', policy_id,
+           'is_trial', is_trial,
+           'trial_expiration_basis', trial_expiration_basis,
+           'trial_duration_sec', trial_duration_sec,
+           'trial_one_per_device', trial_one_per_device,
+           'trial_require_device_proof', trial_require_device_proof,
+           'trial_started_at', trial_started_at,
+           'trial_device_hash', trial_device_hash,
+           'max_active_devices', max_active_devices,
+           'lease_seconds', lease_seconds,
+           'rebind_window_sec', rebind_window_sec,
+           'pool_size', pool_size,
+           'heartbeat_grace_sec', heartbeat_grace_sec,
+           'max_borrow_sec', max_borrow_sec,
+           'allow_overdraft', allow_overdraft,
+           'meter_quota', meter_quota,
+           'meter_period_sec', meter_period_sec,
+           'license_mode', CASE WHEN is_trial = 1 THEN 'trial' WHEN pool_size > 0 THEN 'floating' ELSE 'node_locked' END,
            'created_at', created_at,
            'updated_at', updated_at,
            'id', ?
@@ -174,6 +203,24 @@ export function eventFromCurrentStatement(
          'notes', notes,
          'customer_id', customer_id,
          'license_id', license_id,
+         'policy_id', policy_id,
+         'is_trial', is_trial,
+         'trial_expiration_basis', trial_expiration_basis,
+         'trial_duration_sec', trial_duration_sec,
+         'trial_one_per_device', trial_one_per_device,
+         'trial_require_device_proof', trial_require_device_proof,
+         'trial_started_at', trial_started_at,
+         'trial_device_hash', trial_device_hash,
+         'max_active_devices', max_active_devices,
+         'lease_seconds', lease_seconds,
+         'rebind_window_sec', rebind_window_sec,
+         'pool_size', pool_size,
+         'heartbeat_grace_sec', heartbeat_grace_sec,
+         'max_borrow_sec', max_borrow_sec,
+         'allow_overdraft', allow_overdraft,
+         'meter_quota', meter_quota,
+         'meter_period_sec', meter_period_sec,
+         'license_mode', CASE WHEN is_trial = 1 THEN 'trial' WHEN pool_size > 0 THEN 'floating' ELSE 'node_locked' END,
          'created_at', created_at,
          'updated_at', updated_at,
          'id', ?
@@ -229,27 +276,29 @@ export async function writeEntitlementWithAudit(
   if (env.DB.batch === undefined) {
     throw new Error("write_failed");
   }
-  const statements = [
-    writeStatement,
-    eventFromCurrentStatement(env, ctx, eventType, key, prev, reason, now),
-  ];
+  const statements = [writeStatement];
+  // Extra statements (policy/capacity/trial stamps, device status writes) must run before the audit
+  // and idempotency projections so those records describe the final committed state, not only the
+  // row returned by the first INSERT/UPDATE.
+  for (const extra of extraStatements) {
+    statements.push(extra);
+  }
+  statements.push(eventFromCurrentStatement(env, ctx, eventType, key, prev, reason, now));
   const idempotencyStatement = idempotencyFromCurrentStatement(env, ctx, key, idempotency, now);
   if (idempotencyStatement !== null) {
     statements.push(idempotencyStatement);
-  }
-  // extraStatements (default []) are committed in the SAME transaction as the
-  // entitlement write + audit event. Admin callers never pass any, so their batch
-  // is byte-identical to before; the order-ingest apply path passes its in-batch
-  // `order_events` processed-mark here so the mutation and the mark are atomic
-  // (the exactly-once guarantee). The mark runs AFTER the entitlement write, so the
-  // floor's no-op (a stale re-apply) still marks the event processed.
-  for (const extra of extraStatements) {
-    statements.push(extra);
   }
   const results = await env.DB.batch(statements);
   const saved = batchReturnedRow(results[0]);
   if (saved === null) {
     throw new Error("write_failed");
+  }
+  if (extraStatements.length > 0) {
+    const finalRow = await findEntitlement(env, key);
+    if (finalRow === null) {
+      throw new Error("write_failed");
+    }
+    return { data: finalRow, idempotencyRecorded: idempotencyStatement !== null };
   }
   return { data: withId(saved), idempotencyRecorded: idempotencyStatement !== null };
 }
@@ -300,8 +349,7 @@ export async function createEntitlement(
     now,
     idempotency,
     // Optional extra statements committed in the SAME atomic batch as the INSERT (e.g. the policy
-    // capacity/trial side-write). Default [] keeps every existing caller byte-identical; the INSERT
-    // SQL + ENTITLEMENT_COLUMNS are untouched.
+    // capacity/trial/provenance stamp). Default [] keeps every existing caller byte-identical.
     extraStatements,
   );
 }

@@ -6,11 +6,9 @@
  * The only public function of this module is getAdapterInfos(), other
  * functions are either static or inline.
  *
- * Responsibility of this module is to fill OsAdapterInfo structures, in a
- * predictable way (skip "lo" interfaces,
- * TODO: place physical interfaces in front in a repeatable order: "eth", "wlan","ib"
- * and other interfaces later, first the one with a a specified mac address, then
- * the ones with only an ip.)
+ * Responsibility of this module is to fill OsAdapterInfo structures in a predictable way:
+ * skip loopback interfaces, merge address records by interface name, then use sortAdapterInfos()
+ * for stable physical/virtual and MAC/IP ordering.
  */
 
 #ifndef _GNU_SOURCE
@@ -24,7 +22,7 @@
 #include <linux/if_link.h>
 #include <netpacket/packet.h>
 #include <stdio.h>
-#include <unordered_map>
+#include <map>
 #include <utility>
 #include <string.h>
 #include <memory.h>
@@ -37,6 +35,12 @@ namespace license {
 namespace os {
 using namespace std;
 
+static IFACE_TYPE linuxAdapterType(const string &if_name) {
+	if (if_name.compare(0, 2, "wl") == 0 || if_name.compare(0, 4, "wlan") == 0) {
+		return IFACE_TYPE_WIRELESS;
+	}
+	return IFACE_TYPE_ETHERNET;
+}
 
 /**
  *
@@ -44,7 +48,7 @@ using namespace std;
  * @return FUNC_RET_OK when adapters can be enumerated, otherwise an error code.
  */
 FUNCTION_RETURN getAdapterInfos(vector<OsAdapterInfo> &adapterInfos) {
-	unordered_map<string, OsAdapterInfo> adapterByName;
+	map<string, OsAdapterInfo> adapterByName;
 
 	FUNCTION_RETURN f_return = FUNC_RET_OK;
 	struct ifaddrs *ifaddr, *ifa;
@@ -68,6 +72,7 @@ FUNCTION_RETURN getAdapterInfos(vector<OsAdapterInfo> &adapterInfos) {
 			OsAdapterInfo newAdapter;
 			memset(&newAdapter, 0, sizeof(OsAdapterInfo));
 			mstrlcpy(&newAdapter.description[0], ifa->ifa_name, LCC_ADAPTER_DESCRIPTION_LEN);
+			newAdapter.type = linuxAdapterType(if_name);
 			adapterByName[if_name] = newAdapter;
 		}
 		auto it = adapterByName.find(if_name);
@@ -101,7 +106,6 @@ FUNCTION_RETURN getAdapterInfos(vector<OsAdapterInfo> &adapterInfos) {
 	}
 	freeifaddrs(ifaddr);
 
-	// FIXME sort by eth , enps, wlan
 	if (adapterByName.size() == 0) {
 		f_return = FUNC_RET_NOT_AVAIL;
 	} else {

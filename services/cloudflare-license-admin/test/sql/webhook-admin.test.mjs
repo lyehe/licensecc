@@ -216,6 +216,36 @@ test("webhook: defaults applied for omitted event_types/description", async () =
   assert.equal(created.description, "");
 });
 
+test("webhook: create/patch reject both project and customer scopes", async () => {
+  const db = freshDb();
+  const env = devEnv(db);
+
+  const badCreate = await worker.fetch(devReq("/api/admin/webhooks", {
+    method: "POST",
+    body: JSON.stringify({ url: "https://hooks.example.com/lcc", scope_project: "DEFAULT", scope_customer_id: "cus_1" }),
+  }), env);
+  assert.equal(badCreate.status, 400);
+  assert.equal((await body(badCreate)).code, "invalid_request");
+  assert.equal(db.prepare("SELECT COUNT(*) AS c FROM webhook_endpoints").get().c, 0);
+
+  const ep = await createWebhook(env, { url: "https://hooks.example.com/customer", scope_customer_id: "cus_1" });
+  const badPatch = await worker.fetch(devReq(`/api/admin/webhooks/${ep.id}`, {
+    method: "PATCH",
+    body: JSON.stringify({ scope_project: "DEFAULT" }),
+  }), env);
+  assert.equal(badPatch.status, 400);
+  assert.equal((await body(badPatch)).code, "invalid_request");
+  assert.equal(db.prepare("SELECT scope_project FROM webhook_endpoints WHERE id = ?").get(ep.id).scope_project, null);
+
+  const moved = await (await worker.fetch(devReq(`/api/admin/webhooks/${ep.id}`, {
+    method: "PATCH",
+    body: JSON.stringify({ scope_customer_id: "", scope_project: "DEFAULT" }),
+  }), env)).json();
+  assert.equal(moved.code, "webhook_patched");
+  assert.equal(moved.data.scope_project, "DEFAULT");
+  assert.equal(moved.data.scope_customer_id, null);
+});
+
 test("webhook: a non-https URL is 400 invalid_url and persists nothing", async () => {
   const db = freshDb();
   const env = devEnv(db);

@@ -60,6 +60,13 @@ export function releasePath(): string {
 
 // ---- Formatters / display helpers --------------------------------------------------------------
 
+export const LOGIN_CODE_SENT_COPY = "If this email is registered, we sent an 8-digit code. Enter it below.";
+
+export const ACTIVATION_DOWNLOAD_ACTION_LABEL = "Activate and download .lic";
+
+export const ACTIVATION_DOWNLOAD_DISCLOSURE =
+  "Downloading a license activates this entitlement and can start activation-based trial time.";
+
 // A license_fingerprint is a long hex digest; show a head...tail summary, never the full value in a
 // way that could be mistaken for a credential. Mirrors the admin shortHash contract exactly.
 export function shortHash(value: string): string {

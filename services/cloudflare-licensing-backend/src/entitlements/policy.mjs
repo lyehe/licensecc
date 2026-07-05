@@ -3,9 +3,9 @@
 //
 // A policy is a reusable template. `stampFromPolicy` is a PURE function: policy + operator overrides +
 // now -> the EXISTING EntitlementInput shape (which createEntitlement writes byte-identically) PLUS the
-// capacity + frozen-trial side-state. `buildPolicyStampStatement` produces the single UPDATE that writes
-// that side-state onto the just-inserted row; it rides createEntitlement's `extraStatements` seam so it
-// commits in the SAME atomic batch as the INSERT — the INSERT SQL + ENTITLEMENT_COLUMNS are never touched.
+// capacity + frozen-trial state. `buildPolicyStampStatement` produces the single UPDATE that writes that
+// state onto the just-inserted row; it rides createEntitlement's `extraStatements` seam so it commits in
+// the SAME atomic batch as the INSERT without adding policy-specific branches to the insert statement.
 //
 // Policies are STAMP-TIME templates (frozen): the entitlement copies the defaults at create time and is
 // thereafter its own source of truth; entitlements.policy_id is advisory provenance (no FK, no live-link).
@@ -94,10 +94,9 @@ export function stampFromPolicy(policy, overrides, now) {
 }
 
 /**
- * The atomic capacity + frozen-trial + provenance side-write, applied to the row createEntitlement just
- * inserted. Passed to createEntitlement(..., extraStatements=[this]) so it lands in the SAME batch. Does
- * NOT bump revocation_seq or updated_at (the INSERT already did) — it only sets the side-state columns,
- * none of which are in ENTITLEMENT_COLUMNS.
+ * The atomic capacity + frozen-trial + provenance write, applied to the row createEntitlement just
+ * inserted. Passed to createEntitlement(..., extraStatements=[this]) so it lands in the SAME batch.
+ * Does NOT bump revocation_seq or updated_at; the INSERT already did.
  */
 export function buildPolicyStampStatement(env, key, policyId, capacity, trial) {
   return env.DB.prepare(

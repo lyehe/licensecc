@@ -28,7 +28,22 @@ function makeAdminApiFixture() {
     timeseries: [],
     expiring: [],
     releaseSeats: [],
+    planPreviews: [],
+    planApplies: [],
+    catalogFeatures: [],
+    catalogFeaturePatches: [],
+    catalogFeatureTransitions: [],
+    catalogPlans: [],
+    catalogPlanPatches: [],
+    catalogPlanTransitions: [],
+    catalogPlanExports: [],
+    catalogPlanFeatures: [],
+    catalogPlanFeatureTransitions: [],
+    catalogImports: [],
   };
+  const catalogFeatures = [];
+  const catalogPlans = [];
+  const catalogPlanFeatures = [];
 
   // A couple of customers so the Customers tab + a global-search customer deep-link have rows.
   const customers = [
@@ -218,15 +233,351 @@ function makeAdminApiFixture() {
     if (method === "GET" && path === "/api/admin/entitlements") {
       return fulfill(200, makeEnvelope("entitlements", { items: entitlements.map(publicRecord) }));
     }
-    // The Entitlements tab loads active policies for the optional create-from-policy <select>.
+    // The Entitlements and Plans tabs load active policies for policy selectors.
     if (method === "GET" && path === "/api/admin/policies") {
       return fulfill(200, makeEnvelope("policies_listed", { items: [], next_cursor: null }));
+    }
+    if (method === "GET" && path === "/api/admin/catalog/features") {
+      return fulfill(200, makeEnvelope("catalog_features_listed", { items: catalogFeatures.map((item) => ({ ...item })), next_cursor: null }));
+    }
+    if (method === "POST" && path === "/api/admin/catalog/features") {
+      const body = await jsonBody(request);
+      requests.catalogFeatures.push(body);
+      if (catalogFeatures.some((item) => item.project === body.project && item.feature_key === body.feature_key)) {
+        return fulfill(409, { ok: false, code: "catalog_feature_conflict", request_id: "ui-e2e-feature-conflict" });
+      }
+      now += 1;
+      const row = {
+        id: `feat_${body.feature_key}`,
+        project: body.project,
+        feature_key: body.feature_key,
+        name: body.name,
+        description: body.description ?? "",
+        category: body.category ?? "",
+        status: body.status ?? "active",
+        created_at: now,
+        updated_at: now,
+      };
+      catalogFeatures.push(row);
+      return fulfill(200, makeEnvelope("catalog_feature_created", { ...row }));
+    }
+    const catalogFeatureActionMatch = /^\/api\/admin\/catalog\/features\/([^/]+)\/(disable|reenable)$/.exec(path);
+    if (method === "POST" && catalogFeatureActionMatch !== null) {
+      const id = decodeURIComponent(catalogFeatureActionMatch[1]);
+      const action = catalogFeatureActionMatch[2];
+      const body = await jsonBody(request);
+      requests.catalogFeatureTransitions.push({ id, action, reason: body.reason ?? "" });
+      const row = catalogFeatures.find((item) => item.id === id);
+      if (row === undefined) {
+        return fulfill(404, { ok: false, code: "catalog_feature_not_found", request_id: "ui-e2e-feature-missing" });
+      }
+      now += 1;
+      row.status = action === "disable" ? "disabled" : "active";
+      row.updated_at = now;
+      return fulfill(200, makeEnvelope(`catalog_feature_${action}d`, { ...row }));
+    }
+    const catalogFeatureDetailMatch = /^\/api\/admin\/catalog\/features\/([^/]+)$/.exec(path);
+    if (method === "PATCH" && catalogFeatureDetailMatch !== null) {
+      const id = decodeURIComponent(catalogFeatureDetailMatch[1]);
+      const body = await jsonBody(request);
+      requests.catalogFeaturePatches.push({ id, ...body });
+      const row = catalogFeatures.find((item) => item.id === id);
+      if (row === undefined) {
+        return fulfill(404, { ok: false, code: "catalog_feature_not_found", request_id: "ui-e2e-feature-missing" });
+      }
+      now += 1;
+      Object.assign(row, { ...body, updated_at: now });
+      return fulfill(200, makeEnvelope("catalog_feature_patched", { ...row }));
+    }
+    if (method === "GET" && path === "/api/admin/catalog/plans") {
+      return fulfill(200, makeEnvelope("catalog_plans_listed", { items: catalogPlans.map((item) => ({ ...item })), next_cursor: null }));
+    }
+    if (method === "POST" && path === "/api/admin/catalog/plans") {
+      const body = await jsonBody(request);
+      requests.catalogPlans.push(body);
+      if (catalogPlans.some((item) => item.project === body.project && item.plan_key === body.plan_key && item.version === body.version)) {
+        return fulfill(409, { ok: false, code: "catalog_plan_conflict", request_id: "ui-e2e-plan-conflict" });
+      }
+      now += 1;
+      const row = {
+        id: `plan_${body.plan_key}`,
+        project: body.project,
+        plan_key: body.plan_key,
+        name: body.name,
+        status: body.status ?? "active",
+        version: body.version ?? 1,
+        description: body.description ?? "",
+        created_at: now,
+        updated_at: now,
+      };
+      catalogPlans.push(row);
+      return fulfill(200, makeEnvelope("catalog_plan_created", { ...row }));
+    }
+    if (method === "POST" && path === "/api/admin/catalog/import") {
+      const body = await jsonBody(request);
+      const dryRun = url.searchParams.get("dry_run") === "1";
+      requests.catalogImports.push({ dry_run: dryRun, body });
+      const counts = {
+        features: { created: body.features?.length ?? 0, updated: 0, unchanged: 0 },
+        plans: { created: body.plans?.length ?? 0, updated: 0, unchanged: 0 },
+        plan_features: { created: (body.plans ?? []).reduce((sum, plan) => sum + (plan.features?.length ?? 0), 0), updated: 0, unchanged: 0 },
+      };
+      return fulfill(200, makeEnvelope(dryRun ? "catalog_import_previewed" : "catalog_import_applied", counts));
+    }
+    const catalogPlanActionMatch = /^\/api\/admin\/catalog\/plans\/([^/]+)\/(disable|reenable)$/.exec(path);
+    if (method === "POST" && catalogPlanActionMatch !== null) {
+      const id = decodeURIComponent(catalogPlanActionMatch[1]);
+      const action = catalogPlanActionMatch[2];
+      const body = await jsonBody(request);
+      requests.catalogPlanTransitions.push({ id, action, reason: body.reason ?? "" });
+      const row = catalogPlans.find((item) => item.id === id);
+      if (row === undefined) {
+        return fulfill(404, { ok: false, code: "catalog_plan_not_found", request_id: "ui-e2e-plan-missing" });
+      }
+      now += 1;
+      row.status = action === "disable" ? "disabled" : "active";
+      row.updated_at = now;
+      return fulfill(200, makeEnvelope(`catalog_plan_${action}d`, { ...row }));
+    }
+    const catalogPlanExportMatch = /^\/api\/admin\/catalog\/plans\/([^/]+)\/export$/.exec(path);
+    if (method === "GET" && catalogPlanExportMatch !== null) {
+      const id = decodeURIComponent(catalogPlanExportMatch[1]);
+      requests.catalogPlanExports.push(id);
+      const plan = catalogPlans.find((item) => item.id === id);
+      if (plan === undefined) {
+        return fulfill(404, { ok: false, code: "catalog_plan_not_found", request_id: "ui-e2e-plan-missing" });
+      }
+      const rows = catalogPlanFeatures.filter((item) => item.plan_id === id);
+      const featureKeys = new Set(rows.map((item) => `${item.project}:${item.feature_key}`));
+      const features = catalogFeatures
+        .filter((item) => featureKeys.has(`${item.project}:${item.feature_key}`))
+        .map(({ project, feature_key, name, description, category, status }) => ({ project, feature_key, name, description, category, status }));
+      return fulfill(200, makeEnvelope("catalog_plan_exported", {
+        format_version: 1,
+        features,
+        plans: [{
+          project: plan.project,
+          plan_key: plan.plan_key,
+          name: plan.name,
+          description: plan.description,
+          status: plan.status,
+          version: plan.version,
+          features: rows.map(({ project, feature_key, feature_inclusion, addon_key, policy_id, status, display_order, assertion_ttl_seconds, pool_size, max_active_devices, max_borrow_sec, meter_quota, meter_period_sec }) => ({
+            project,
+            feature_key,
+            feature_inclusion,
+            addon_key,
+            policy_id,
+            status,
+            display_order,
+            assertion_ttl_seconds,
+            pool_size,
+            max_active_devices,
+            max_borrow_sec,
+            meter_quota,
+            meter_period_sec,
+          })),
+        }],
+      }));
+    }
+    const catalogPlanDetailMatch = /^\/api\/admin\/catalog\/plans\/([^/]+)$/.exec(path);
+    if (method === "PATCH" && catalogPlanDetailMatch !== null) {
+      const id = decodeURIComponent(catalogPlanDetailMatch[1]);
+      const body = await jsonBody(request);
+      requests.catalogPlanPatches.push({ id, ...body });
+      const row = catalogPlans.find((item) => item.id === id);
+      if (row === undefined) {
+        return fulfill(404, { ok: false, code: "catalog_plan_not_found", request_id: "ui-e2e-plan-missing" });
+      }
+      now += 1;
+      Object.assign(row, { ...body, updated_at: now });
+      return fulfill(200, makeEnvelope("catalog_plan_patched", { ...row }));
+    }
+    const catalogPlanFeatureActionMatch = /^\/api\/admin\/catalog\/plans\/([^/]+)\/features\/([^/]+)\/(disable|reenable)$/.exec(path);
+    if (method === "POST" && catalogPlanFeatureActionMatch !== null) {
+      const planId = decodeURIComponent(catalogPlanFeatureActionMatch[1]);
+      const featureKey = decodeURIComponent(catalogPlanFeatureActionMatch[2]);
+      const action = catalogPlanFeatureActionMatch[3];
+      const body = await jsonBody(request);
+      requests.catalogPlanFeatureTransitions.push({ plan_id: planId, feature_key: featureKey, action, reason: body.reason ?? "" });
+      const row = catalogPlanFeatures.find((item) => item.plan_id === planId && item.feature_key === featureKey);
+      if (row === undefined) {
+        return fulfill(404, { ok: false, code: "catalog_plan_feature_not_found", request_id: "ui-e2e-plan-feature-missing" });
+      }
+      now += 1;
+      row.status = action === "disable" ? "disabled" : "active";
+      row.updated_at = now;
+      return fulfill(200, makeEnvelope(`catalog_plan_feature_${action}d`, { ...row }));
+    }
+    const catalogPlanFeatureMatch = /^\/api\/admin\/catalog\/plans\/([^/]+)\/features$/.exec(path);
+    if (catalogPlanFeatureMatch !== null) {
+      const planId = decodeURIComponent(catalogPlanFeatureMatch[1]);
+      if (method === "GET") {
+        return fulfill(200, makeEnvelope("catalog_plan_features_listed", {
+          items: catalogPlanFeatures.filter((item) => item.plan_id === planId).map((item) => ({ ...item })),
+        }));
+      }
+      if (method === "POST") {
+        const body = await jsonBody(request);
+        requests.catalogPlanFeatures.push({ plan_id: planId, ...body });
+        const plan = catalogPlans.find((item) => item.id === planId);
+        const feature = catalogFeatures.find((item) => item.project === body.project && item.feature_key === body.feature_key);
+        if (plan === undefined || feature === undefined) {
+          return fulfill(404, { ok: false, code: "catalog_not_found", request_id: "ui-e2e-catalog-missing" });
+        }
+        now += 1;
+        const row = {
+          project: body.project,
+          plan_id: planId,
+          plan_key: plan.plan_key,
+          feature_key: body.feature_key,
+          feature_name: feature.name,
+          feature_inclusion: body.feature_inclusion ?? "included",
+          addon_key: body.feature_inclusion === "addon" ? body.addon_key : null,
+          policy_id: body.policy_id ?? null,
+          status: body.status ?? "active",
+          display_order: body.display_order ?? 0,
+          assertion_ttl_seconds: body.assertion_ttl_seconds ?? null,
+          pool_size: body.pool_size ?? null,
+          max_active_devices: body.max_active_devices ?? null,
+          max_borrow_sec: body.max_borrow_sec ?? null,
+          meter_quota: body.meter_quota ?? null,
+          meter_period_sec: body.meter_period_sec ?? null,
+          created_at: now,
+          updated_at: now,
+        };
+        const existing = catalogPlanFeatures.findIndex((item) => item.plan_id === planId && item.feature_key === row.feature_key);
+        if (existing >= 0) {
+          catalogPlanFeatures[existing] = row;
+        } else {
+          catalogPlanFeatures.push(row);
+        }
+        return fulfill(200, makeEnvelope("catalog_plan_feature_saved", { ...row }));
+      }
+    }
+    function planProjection(body) {
+      const plan = catalogPlans.find((item) => item.id === body.plan_id || item.plan_key === body.plan_key) ?? {
+        id: "plan_pro",
+        project: body.project,
+        plan_key: body.plan_key ?? "pro",
+        name: "Pro",
+        status: "active",
+        version: 1,
+      };
+      const base = {
+        project: body.project,
+        license_fingerprint: body.license_fingerprint,
+        status: "active",
+        valid_from: null,
+        valid_until: body.support_until ?? null,
+        assertion_ttl_seconds: 600,
+        max_borrow_sec: 0,
+        meter_quota: 0,
+        meter_period_sec: 2592000,
+      };
+      const selectedAddons = new Set(body.addons ?? []);
+      const planRows = catalogPlanFeatures
+        .filter((item) => item.plan_id === plan.id && item.status === "active")
+        .filter((item) => item.feature_inclusion === "included" || selectedAddons.has(item.addon_key));
+      const willCreate = planRows.map((row) => {
+        const poolSize = row.pool_size ?? 0;
+        const maxActiveDevices = row.max_active_devices ?? (poolSize > 0 ? poolSize : 1);
+        return {
+          ...base,
+          feature: row.feature_key,
+          policy_id: row.policy_id,
+          source: row.feature_inclusion,
+          addon_key: row.addon_key,
+          license_mode: poolSize > 0 ? "floating" : "node_locked",
+          pool_size: poolSize,
+          max_active_devices: maxActiveDevices,
+          max_borrow_sec: row.max_borrow_sec ?? 0,
+          assertion_ttl_seconds: row.assertion_ttl_seconds ?? base.assertion_ttl_seconds,
+          meter_quota: row.meter_quota ?? base.meter_quota,
+          meter_period_sec: row.meter_period_sec ?? base.meter_period_sec,
+        };
+      });
+      return {
+        plan: { id: plan.id, project: plan.project, plan_key: plan.plan_key, name: plan.name, status: plan.status, version: plan.version },
+        assignment: {
+          project: body.project,
+          license_id: body.license_id,
+          license_fingerprint: body.license_fingerprint,
+          customer_id: body.customer_id ?? null,
+          plan_id: plan.id,
+          plan_key: plan.plan_key,
+          support_until: body.support_until ?? null,
+          addons: body.addons ?? [],
+        },
+        desired: willCreate,
+        will_create: willCreate,
+        will_update: [],
+        will_disable: [],
+        blocked: [],
+        unchanged: [],
+        summary: { create: willCreate.length, update: 0, disable: 0, blocked: 0, unchanged: 0 },
+      };
+    }
+    if (method === "POST" && path === "/api/admin/license-plans/preview") {
+      const body = await jsonBody(request);
+      requests.planPreviews.push(body);
+      return fulfill(200, makeEnvelope("license_plan_projection_previewed", planProjection(body)));
+    }
+    if (method === "POST" && path === "/api/admin/license-plans/apply") {
+      const body = await jsonBody(request);
+      requests.planApplies.push(body);
+      const preview = planProjection(body);
+      const created = preview.will_create.map((item) => {
+        now += 1;
+        const row = {
+          id: `ent-${nextEntitlementId}`,
+          project: item.project,
+          feature: item.feature,
+          license_fingerprint: item.license_fingerprint,
+          device_hash: "",
+          status: "active",
+          assertion_ttl_seconds: item.assertion_ttl_seconds,
+          revocation_seq: 1,
+          valid_from: item.valid_from,
+          valid_until: item.valid_until,
+          notes: body.notes ?? "",
+          customer_id: body.customer_id ?? null,
+          license_id: body.license_id,
+          policy_id: item.policy_id,
+          is_trial: 0,
+          trial_expiration_basis: null,
+          trial_duration_sec: 0,
+          trial_one_per_device: 0,
+          trial_require_device_proof: 0,
+          max_active_devices: item.max_active_devices,
+          lease_seconds: 0,
+          rebind_window_sec: 0,
+          pool_size: item.pool_size,
+          heartbeat_grace_sec: 300,
+          max_borrow_sec: item.max_borrow_sec,
+          allow_overdraft: 0,
+          meter_quota: item.meter_quota,
+          meter_period_sec: item.meter_period_sec,
+          license_mode: item.license_mode,
+          created_at: now,
+          updated_at: now,
+        };
+        nextEntitlementId += 1;
+        entitlements.push(row);
+        addEvent("create", row);
+        return publicRecord(row);
+      });
+      return fulfill(200, makeEnvelope("license_plan_projection_applied", {
+        ...preview,
+        applied: { created, updated: [], disabled: [], assignment: { ...preview.assignment, status: "active" } },
+      }));
     }
     if (method === "POST" && path === "/api/admin/entitlements") {
       requests.creates += 1;
       await new Promise((resolve) => setTimeout(resolve, 100));
       const body = await jsonBody(request);
       now += 1;
+      const floating = body.feature === "float" || (body.pool_size ?? 0) > 0;
       const row = {
         id: `ent-${nextEntitlementId}`,
         project: body.project,
@@ -241,6 +592,22 @@ function makeAdminApiFixture() {
         notes: body.notes ?? "",
         customer_id: body.customer_id ?? null,
         license_id: body.license_id ?? null,
+        policy_id: body.policy_id ?? null,
+        is_trial: 0,
+        trial_expiration_basis: null,
+        trial_duration_sec: 0,
+        trial_one_per_device: 0,
+        trial_require_device_proof: 0,
+        max_active_devices: body.max_active_devices ?? 1,
+        lease_seconds: body.lease_seconds ?? 0,
+        rebind_window_sec: body.rebind_window_sec ?? 0,
+        pool_size: body.pool_size ?? (floating ? 5 : 0),
+        heartbeat_grace_sec: body.heartbeat_grace_sec ?? 300,
+        max_borrow_sec: body.max_borrow_sec ?? 0,
+        allow_overdraft: body.allow_overdraft ?? 0,
+        meter_quota: body.meter_quota ?? 0,
+        meter_period_sec: body.meter_period_sec ?? 2592000,
+        license_mode: floating ? "floating" : "node_locked",
         created_at: now,
         updated_at: now,
       };
@@ -350,6 +717,8 @@ test("admin UI completes entitlement lifecycle and blocks duplicate create submi
 
   await page.locator(".reason").getByLabel("Reason").fill("operator pause");
   await page.getByRole("button", { name: "Disable" }).click();
+  await page.getByRole("dialog").getByLabel(/Reason/).fill("operator pause");
+  await page.getByRole("dialog").getByRole("button", { name: "Confirm" }).click();
   await expect(page.locator(".status.disabled")).toHaveText("disabled");
 
   await page.getByRole("button", { name: "Reenable" }).click();
@@ -360,6 +729,7 @@ test("admin UI completes entitlement lifecycle and blocks duplicate create submi
   await page.getByRole("button", { name: "Revoke" }).click();
   await expect(page.getByRole("dialog")).toBeVisible();
   await expect(page.locator(".status.revoked")).toHaveCount(0); // not revoked until confirmed
+  await page.getByRole("dialog").getByLabel(/Reason/).fill("chargeback");
   await page.getByRole("dialog").getByRole("button", { name: "Confirm" }).click();
   await expect(page.locator(".status.revoked")).toHaveText("revoked");
   await expect(page.getByRole("button", { name: "Edit" })).toBeDisabled();
@@ -433,6 +803,151 @@ test("admin UI runs bulk transitions, global search deep-link, and CSV export", 
   await expect(page.getByText(/exported customers\.csv/)).toBeVisible();
 });
 
+test("admin UI previews and applies a license plan projection", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  await page.route("**/api/admin/**", api.route);
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "Plans" }).click();
+  await expect(page.locator("nav button.active")).toHaveText("Plans");
+
+  const featureForm = page.getByRole("form", { name: "Catalog feature" });
+  await featureForm.getByLabel("Feature key").fill("core");
+  await featureForm.getByLabel("Name").fill("Core");
+  await featureForm.getByRole("button", { name: "Create feature" }).click();
+  await expect.poll(() => api.requests.catalogFeatures.length).toBe(1);
+  await expect(page.getByText(/catalog_feature_created/)).toBeVisible();
+  await featureForm.getByLabel("Feature key").fill("team");
+  await featureForm.getByLabel("Name").fill("Team Seats");
+  await featureForm.getByRole("button", { name: "Create feature" }).click();
+  await expect.poll(() => api.requests.catalogFeatures.length).toBe(2);
+
+  const catalogPlanForm = page.getByRole("form", { name: "Catalog plan" });
+  await catalogPlanForm.getByLabel("Plan key").fill("pro");
+  await catalogPlanForm.getByLabel("Name").fill("Pro");
+  await catalogPlanForm.getByRole("button", { name: "Create plan" }).click();
+  await expect.poll(() => api.requests.catalogPlans.length).toBe(1);
+  await expect(page.getByText(/catalog_plan_created/)).toBeVisible();
+
+  const planFeatureForm = page.getByRole("form", { name: "Plan feature" });
+  await planFeatureForm.getByLabel("Feature key").fill("core");
+  await planFeatureForm.getByLabel("Policy ID").fill("pol_node");
+  await planFeatureForm.getByRole("button", { name: "Save plan feature" }).click();
+  await expect.poll(() => api.requests.catalogPlanFeatures.length).toBe(1);
+  await expect(page.getByText(/catalog_plan_feature_saved/)).toBeVisible();
+
+  await planFeatureForm.getByLabel("Feature key").fill("team");
+  await planFeatureForm.getByLabel("Inclusion").selectOption("addon");
+  await planFeatureForm.getByLabel("Add-on key").fill("team_seats");
+  await planFeatureForm.getByLabel("Policy ID").fill("pol_float");
+  await planFeatureForm.getByLabel("Pool size").fill("6");
+  await planFeatureForm.getByLabel("Max devices").fill("6");
+  await planFeatureForm.getByLabel("Max borrow").fill("172800");
+  await planFeatureForm.getByRole("button", { name: "Save plan feature" }).click();
+  await expect.poll(() => api.requests.catalogPlanFeatures.length).toBe(2);
+  expect(api.requests.catalogPlanFeatures[1]).toMatchObject({
+    plan_id: "plan_pro",
+    feature_key: "team",
+    feature_inclusion: "addon",
+    addon_key: "team_seats",
+    policy_id: "pol_float",
+    pool_size: 6,
+    max_active_devices: 6,
+    max_borrow_sec: 172800,
+  });
+  await expect(page.getByRole("row", { name: /Team Seats team addon team_seats pol_float/ })).toBeVisible();
+  await expect(page.getByRole("cell", { name: "team_seats", exact: true })).toBeVisible();
+
+  await page.getByRole("row", { name: /Core core/ }).getByRole("button", { name: "Edit" }).click();
+  await featureForm.getByLabel("Name").fill("Core Runtime");
+  await featureForm.getByLabel("Category").fill("");
+  await featureForm.getByRole("button", { name: "Update feature" }).click();
+  await expect.poll(() => api.requests.catalogFeaturePatches.length).toBe(1);
+  expect(api.requests.catalogFeaturePatches[0]).toMatchObject({ id: "feat_core", name: "Core Runtime", category: "" });
+  await expect(page.getByText(/catalog_feature_patched/)).toBeVisible();
+
+  const featureRow = page.getByRole("row", { name: /Core Runtime core/ });
+  await featureRow.getByRole("button", { name: "Disable" }).click();
+  await page.getByLabel("Reason (required)").fill("catalog lifecycle test");
+  await page.getByRole("button", { name: "Confirm" }).click();
+  await expect.poll(() => api.requests.catalogFeatureTransitions.length).toBe(1);
+  expect(api.requests.catalogFeatureTransitions[0]).toMatchObject({ id: "feat_core", action: "disable", reason: "catalog lifecycle test" });
+  await expect(page.getByText(/catalog_feature_disabled/)).toBeVisible();
+  await featureRow.getByRole("button", { name: "Reenable" }).click();
+  await expect.poll(() => api.requests.catalogFeatureTransitions.length).toBe(2);
+  expect(api.requests.catalogFeatureTransitions[1]).toMatchObject({ id: "feat_core", action: "reenable" });
+
+  await page.getByRole("row", { name: /Pro pro/ }).getByRole("button", { name: "Edit" }).click();
+  await catalogPlanForm.getByLabel("Name").fill("Pro Annual");
+  await catalogPlanForm.getByLabel("Description").fill("Annual plan");
+  await catalogPlanForm.getByRole("button", { name: "Update plan" }).click();
+  await expect.poll(() => api.requests.catalogPlanPatches.length).toBe(1);
+  expect(api.requests.catalogPlanPatches[0]).toMatchObject({ id: "plan_pro", name: "Pro Annual", description: "Annual plan" });
+  await expect(page.getByText(/catalog_plan_patched/)).toBeVisible();
+
+  const planFeatureRow = page.getByRole("row", { name: /Team Seats team addon team_seats pol_float/ });
+  await planFeatureRow.getByRole("button", { name: "Disable" }).click();
+  await page.getByLabel("Reason (required)").fill("hide add-on");
+  await page.getByRole("button", { name: "Confirm" }).click();
+  await expect.poll(() => api.requests.catalogPlanFeatureTransitions.length).toBe(1);
+  expect(api.requests.catalogPlanFeatureTransitions[0]).toMatchObject({ plan_id: "plan_pro", feature_key: "team", action: "disable", reason: "hide add-on" });
+  await planFeatureRow.getByRole("button", { name: "Reenable" }).click();
+  await expect.poll(() => api.requests.catalogPlanFeatureTransitions.length).toBe(2);
+
+  const planRow = page.getByRole("row", { name: /Pro Annual pro/ });
+  await planRow.getByRole("button", { name: "Disable" }).click();
+  await page.getByLabel("Reason (required)").fill("pause plan");
+  await page.getByRole("button", { name: "Confirm" }).click();
+  await expect.poll(() => api.requests.catalogPlanTransitions.length).toBe(1);
+  expect(api.requests.catalogPlanTransitions[0]).toMatchObject({ id: "plan_pro", action: "disable", reason: "pause plan" });
+  await planRow.getByRole("button", { name: "Reenable" }).click();
+  await expect.poll(() => api.requests.catalogPlanTransitions.length).toBe(2);
+
+  await planRow.getByRole("button", { name: "Export" }).click();
+  await expect.poll(() => api.requests.catalogPlanExports.length).toBe(1);
+  expect(api.requests.catalogPlanExports[0]).toBe("plan_pro");
+
+  const importForm = page.getByRole("form", { name: "Catalog import" });
+  await importForm.getByLabel("Manifest JSON").fill(JSON.stringify({ format_version: 1, features: [], plans: [] }));
+  await importForm.getByRole("button", { name: "Preview import" }).click();
+  await expect.poll(() => api.requests.catalogImports.length).toBe(1);
+  expect(api.requests.catalogImports[0]).toMatchObject({ dry_run: true, body: { format_version: 1, features: [], plans: [] } });
+  await expect(page.getByText(/catalog_import_previewed/)).toBeVisible();
+
+  const form = page.getByRole("form", { name: "Plan projection" });
+  await form.getByLabel("License ID").fill("lic_plan");
+  await form.getByLabel("Fingerprint").fill("c".repeat(64));
+  await form.getByLabel("Customer ID").fill("cus_plan");
+  await form.getByLabel("Plan key").fill("pro");
+  await form.getByLabel("Support until").fill("2026-07-05");
+  await form.getByLabel("Add-ons (csv)").fill("team_seats");
+  await form.getByRole("button", { name: "Preview" }).click();
+
+  await expect.poll(() => api.requests.planPreviews.length).toBe(1);
+  expect(api.requests.planPreviews[0]).toMatchObject({
+    project: "DEFAULT",
+    license_id: "lic_plan",
+    plan_key: "pro",
+    support_until: 1783209600,
+    addons: ["team_seats"],
+  });
+  await expect(page.getByText(/license_plan_projection_previewed/)).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Create" })).toBeVisible();
+  await expect(page.getByRole("cell", { name: "core", exact: true })).toBeVisible();
+  await expect(page.getByRole("cell", { name: "team", exact: true })).toBeVisible();
+  await expect(page.getByText("floating")).toBeVisible();
+
+  await form.getByRole("button", { name: "Apply" }).click();
+  await expect.poll(() => api.requests.planApplies.length).toBe(1);
+  await expect(page.getByText(/license_plan_projection_applied/)).toBeVisible();
+
+  await page.getByRole("button", { name: "Entitlements", exact: true }).click();
+  await expect(page.getByRole("cell", { name: "core", exact: true })).toBeVisible();
+  await expect(page.getByRole("cell", { name: "team", exact: true })).toBeVisible();
+  await expect(page.getByText("Mode floating")).toBeVisible();
+  await expect(page.getByText("License lic_plan").first()).toBeVisible();
+});
+
 test("admin UI renders Workstream F charts, expiring panel, health badge, and force-release", async ({ page }) => {
   const api = makeAdminApiFixture();
   await page.route("**/api/admin/**", api.route);
@@ -442,7 +957,7 @@ test("admin UI renders Workstream F charts, expiring panel, health badge, and fo
   // Seed one entitlement so the health badge + force-release verb have a row to act on.
   await page.getByRole("button", { name: "Entitlements", exact: true }).click();
   const createForm = page.locator("aside form");
-  await createForm.getByLabel("Feature").fill("pro");
+  await createForm.getByLabel("Feature").fill("float");
   await createForm.getByLabel("Fingerprint").fill("a".repeat(64));
   await createForm.getByRole("button", { name: "Save" }).click();
   await expect(page.getByText(/entitlement_saved/)).toBeVisible();
@@ -454,6 +969,7 @@ test("admin UI renders Workstream F charts, expiring panel, health badge, and fo
   await page.locator(".reason").getByLabel("Reason", { exact: true }).fill("dead machine");
   await page.getByRole("button", { name: "Release seats" }).click();
   await expect(page.getByRole("dialog")).toBeVisible();
+  await page.getByRole("dialog").getByLabel(/Reason/).fill("dead machine");
   await page.getByRole("dialog").getByRole("button", { name: "Confirm" }).click();
   await expect.poll(() => api.requests.releaseSeats.length).toBe(1);
   expect(api.requests.releaseSeats[0].reason).toBe("dead machine");

@@ -11,6 +11,13 @@ export type {
   EntitlementDeviceRecord,
 } from "@licensecc/cloudflare-licensing-backend/entitlements/entitlement_mutation";
 
+export type {
+  PlanProjectionApplyResult,
+  PlanProjectionInput,
+  PlanProjectionItem,
+  PlanProjectionPreview,
+} from "@licensecc/cloudflare-licensing-backend/catalog/plan_projection";
+
 import type { EntitlementStatus, EntitlementInput, EntitlementEventType } from "@licensecc/cloudflare-licensing-backend/entitlements/entitlement_mutation";
 
 export interface EntitlementEvent {
@@ -38,6 +45,124 @@ export interface ApiEnvelope<T> {
 
 export interface EntitlementSyncInput extends EntitlementInput {
   reason?: string;
+}
+
+// ── Product catalog plans ────────────────────────────────────────────────────
+// Catalog rows are configuration: feature definitions, commercial plans, and the
+// feature/add-on rows that project a plan into concrete policy-stamped entitlements.
+export type CatalogStatus = "active" | "disabled";
+export type CatalogFeatureInclusion = "included" | "addon";
+
+export interface CatalogFeature {
+  id: string;
+  project: string;
+  feature_key: string;
+  name: string;
+  description: string;
+  category: string;
+  status: CatalogStatus;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface CatalogFeatureInput {
+  project: string;
+  feature_key: string;
+  name: string;
+  description?: string;
+  category?: string;
+  status?: CatalogStatus;
+}
+
+export interface CatalogFeaturePatch {
+  name?: string;
+  description?: string;
+  category?: string;
+}
+
+export interface CatalogPlan {
+  id: string;
+  project: string;
+  plan_key: string;
+  name: string;
+  status: CatalogStatus;
+  version: number;
+  description: string;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface CatalogPlanInput {
+  project: string;
+  plan_key: string;
+  name: string;
+  description?: string;
+  status?: CatalogStatus;
+  version?: number;
+}
+
+export interface CatalogPlanPatch {
+  name?: string;
+  description?: string;
+}
+
+export interface CatalogPlanFeature {
+  project: string;
+  plan_id: string;
+  plan_key: string;
+  feature_key: string;
+  feature_name: string;
+  feature_inclusion: CatalogFeatureInclusion;
+  addon_key: string | null;
+  policy_id: string | null;
+  status: CatalogStatus;
+  display_order: number;
+  assertion_ttl_seconds: number | null;
+  pool_size: number | null;
+  max_active_devices: number | null;
+  max_borrow_sec: number | null;
+  meter_quota: number | null;
+  meter_period_sec: number | null;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface CatalogPlanFeatureInput {
+  project: string;
+  feature_key: string;
+  feature_inclusion?: CatalogFeatureInclusion;
+  addon_key?: string | null;
+  policy_id?: string | null;
+  status?: CatalogStatus;
+  display_order?: number;
+  assertion_ttl_seconds?: number | null;
+  pool_size?: number | null;
+  max_active_devices?: number | null;
+  max_borrow_sec?: number | null;
+  meter_quota?: number | null;
+  meter_period_sec?: number | null;
+}
+
+export interface CatalogPlanImport extends CatalogPlanInput {
+  features?: CatalogPlanFeatureInput[];
+}
+
+export interface CatalogImportManifest {
+  format_version?: 1;
+  features: CatalogFeatureInput[];
+  plans: CatalogPlanImport[];
+}
+
+export interface CatalogImportCounter {
+  created: number;
+  updated: number;
+  unchanged: number;
+}
+
+export interface CatalogImportResult {
+  features: CatalogImportCounter;
+  plans: CatalogImportCounter;
+  plan_features: CatalogImportCounter;
 }
 
 // ── License-policy templates (Stage 3) ───────────────────────────────────────

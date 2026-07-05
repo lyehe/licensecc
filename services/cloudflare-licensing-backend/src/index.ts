@@ -75,6 +75,10 @@ export interface IsolationBinding {
   customerId: string | null;
 }
 
+type AccountOperation = "activate" | "renew" | "checkout" | "heartbeat" | "release" | "report";
+
+const EMERGENCY_ISOLATION: IsolationBinding = { mode: "off", customerId: null };
+
 export interface RateLimitBindingLike {
   limit(input: { key: string }): Promise<{ success: boolean }>;
 }
@@ -266,6 +270,75 @@ function json(body: unknown, status = 200): Response {
       "content-type": "application/json; charset=utf-8",
     },
   });
+}
+
+async function readTextBody(request: Request, maxBytes: number): Promise<{ ok: true; text: string } | { ok: false }> {
+  const contentLength = Number(request.headers.get("content-length") ?? "");
+  if (Number.isFinite(contentLength) && contentLength > maxBytes) {
+    return { ok: false };
+  }
+  if (request.body === null) {
+    return { ok: true, text: "" };
+  }
+
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (value === undefined) continue;
+    size += value.byteLength;
+    if (size > maxBytes) {
+      try {
+        await reader.cancel();
+      } catch {
+        // The response is already determined; cancel errors do not change the rejection.
+      }
+      return { ok: false };
+    }
+    chunks.push(value);
+  }
+
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return { ok: true, text: new TextDecoder().decode(bytes) };
+}
+
+async function readJsonBody(request: Request): Promise<{ ok: true; value: unknown } | { ok: false; code: "body_too_large" | "invalid_request"; status: number }> {
+  const body = await readTextBody(request, MAX_BODY_BYTES);
+  if (!body.ok) {
+    return { ok: false, code: "body_too_large", status: 413 };
+  }
+  try {
+    return { ok: true, value: JSON.parse(body.text) };
+  } catch {
+    return { ok: false, code: "invalid_request", status: 400 };
+  }
+}
+
+async function resolveIsolation(
+  request: Request,
+  env: Env,
+  operation: AccountOperation,
+  project: string,
+  feature: string,
+  now: number,
+  ctx?: ExecutionContextLike,
+  override?: IsolationBinding,
+): Promise<IsolationBinding | { ok: false; code: string; status: number }> {
+  if (override !== undefined) {
+    return override;
+  }
+  const auth = await accountAuth(request, env, operation, project, feature, now, ctx);
+  if (!auth.ok) {
+    return { ok: false, code: auth.code, status: typeof auth.status === "number" ? auth.status : 401 };
+  }
+  return { mode: auth.mode, customerId: auth.customerId };
 }
 
 function parsePositiveInt(value: string | undefined, fallback: number, maximum: number): number {
@@ -1017,20 +1090,15 @@ async function checkDeviceProof(
 
 async function handleVerify(request: Request, env: Env): Promise<Response> {
   const id = requestId(request);
-  const contentLength = Number(request.headers.get("content-length") ?? "0");
-  if (contentLength > MAX_BODY_BYTES) {
-    logEvent("warn", "verify.body_too_large", { request_id: id, content_length: contentLength });
-    return json({ ok: false, code: "body_too_large" }, 413);
-  }
-  const bodyText = await request.text();
-  if (textEncoder.encode(bodyText).byteLength > MAX_BODY_BYTES) {
-    logEvent("warn", "verify.body_too_large", { request_id: id, content_length: bodyText.length });
+  const body = await readTextBody(request, MAX_BODY_BYTES);
+  if (!body.ok) {
+    logEvent("warn", "verify.body_too_large", { request_id: id });
     return json({ ok: false, code: "body_too_large" }, 413);
   }
 
   let parsed: unknown;
   try {
-    parsed = JSON.parse(bodyText);
+    parsed = JSON.parse(body.text);
   } catch {
     logEvent("warn", "verify.invalid_json", { request_id: id });
     return json({ ok: false, code: "invalid_json" }, 400);
@@ -1447,6 +1515,7 @@ async function handleLeaseIssue(
   env: Env,
   operation: "activate" | "renew",
   ctx?: ExecutionContextLike,
+  isolationOverride?: IsolationBinding,
 ): Promise<Response> {
   const now = Math.floor(Date.now() / 1000);
 
@@ -1454,19 +1523,15 @@ async function handleLeaseIssue(
     return json({ ok: false, code: "lease_signing_unavailable" }, 503);
   }
 
-  let body: LeaseIssueBody | null;
-  try {
-    body = parseLeaseBody(await request.json());
-  } catch {
-    body = null;
-  }
+  const rawBody = await readJsonBody(request);
+  if (!rawBody.ok) return json({ ok: false, code: rawBody.code }, rawBody.status);
+  const body = parseLeaseBody(rawBody.value);
   if (body === null) return json({ ok: false, code: "invalid_request" }, 400);
 
   // Per-customer account-token gate (replaces the legacy LEASE_ISSUE_BEARER check). The
   // returned customerId is bound into the mutating cap guard (off => null => legacy SQL path).
-  const auth = await accountAuth(request, env, operation, body.project, body.feature, now, ctx);
-  if (!auth.ok) return json({ ok: false, code: auth.code }, auth.status);
-  const isolation: IsolationBinding = { mode: auth.mode, customerId: auth.customerId };
+  const isolation = await resolveIsolation(request, env, operation, body.project, body.feature, now, ctx, isolationOverride);
+  if ("ok" in isolation) return json({ ok: false, code: isolation.code }, isolation.status);
 
   let row: LeaseEntitlementRow | null;
   try {
@@ -1706,22 +1771,18 @@ function seatSigningUnavailable(env: Env): Response | null {
   return null;
 }
 
-async function handleSeatCheckout(request: Request, env: Env, ctx?: ExecutionContextLike): Promise<Response> {
+async function handleSeatCheckout(request: Request, env: Env, ctx?: ExecutionContextLike, isolationOverride?: IsolationBinding): Promise<Response> {
   const now = Math.floor(Date.now() / 1000);
   const gate = seatSigningUnavailable(env);
   if (gate !== null) return gate;
 
-  let body: SeatRequestBody | null;
-  try {
-    body = parseSeatBody(await request.json(), /*needSeatId=*/ false);
-  } catch {
-    body = null;
-  }
+  const rawBody = await readJsonBody(request);
+  if (!rawBody.ok) return json({ ok: false, code: rawBody.code }, rawBody.status);
+  const body = parseSeatBody(rawBody.value, /*needSeatId=*/ false);
   if (body === null) return json({ ok: false, code: "invalid_request" }, 400);
 
-  const auth = await accountAuth(request, env, "checkout", body.project, body.feature, now, ctx);
-  if (!auth.ok) return json({ ok: false, code: auth.code }, auth.status);
-  const isolation: IsolationBinding = { mode: auth.mode, customerId: auth.customerId };
+  const isolation = await resolveIsolation(request, env, "checkout", body.project, body.feature, now, ctx, isolationOverride);
+  if ("ok" in isolation) return json({ ok: false, code: isolation.code }, isolation.status);
 
   let row: SeatEntitlementRow | null;
   try {
@@ -1861,22 +1922,18 @@ async function handleSeatCheckout(request: Request, env: Env, ctx?: ExecutionCon
   });
 }
 
-async function handleSeatHeartbeat(request: Request, env: Env, ctx?: ExecutionContextLike): Promise<Response> {
+async function handleSeatHeartbeat(request: Request, env: Env, ctx?: ExecutionContextLike, isolationOverride?: IsolationBinding): Promise<Response> {
   const now = Math.floor(Date.now() / 1000);
   const gate = seatSigningUnavailable(env);
   if (gate !== null) return gate;
 
-  let body: SeatRequestBody | null;
-  try {
-    body = parseSeatBody(await request.json(), /*needSeatId=*/ true);
-  } catch {
-    body = null;
-  }
+  const rawBody = await readJsonBody(request);
+  if (!rawBody.ok) return json({ ok: false, code: rawBody.code }, rawBody.status);
+  const body = parseSeatBody(rawBody.value, /*needSeatId=*/ true);
   if (body === null || body.seat_id === undefined) return json({ ok: false, code: "invalid_request" }, 400);
 
-  const auth = await accountAuth(request, env, "heartbeat", body.project, body.feature, now, ctx);
-  if (!auth.ok) return json({ ok: false, code: auth.code }, auth.status);
-  const isolation: IsolationBinding = { mode: auth.mode, customerId: auth.customerId };
+  const isolation = await resolveIsolation(request, env, "heartbeat", body.project, body.feature, now, ctx, isolationOverride);
+  if ("ok" in isolation) return json({ ok: false, code: isolation.code }, isolation.status);
 
   let row: SeatEntitlementRow | null;
   try {
@@ -1919,25 +1976,22 @@ async function handleSeatHeartbeat(request: Request, env: Env, ctx?: ExecutionCo
   return json({
     ok: true,
     assertion,
+    seat_id: body.seat_id,
     server_time: now,
     expires_at: deadline,
     heartbeat_in: Math.max(1, Math.floor(grace / 3)),
   });
 }
 
-async function handleSeatRelease(request: Request, env: Env, ctx?: ExecutionContextLike): Promise<Response> {
+async function handleSeatRelease(request: Request, env: Env, ctx?: ExecutionContextLike, isolationOverride?: IsolationBinding): Promise<Response> {
   const now = Math.floor(Date.now() / 1000);
-  let body: SeatRequestBody | null;
-  try {
-    body = parseSeatBody(await request.json(), /*needSeatId=*/ true);
-  } catch {
-    body = null;
-  }
+  const rawBody = await readJsonBody(request);
+  if (!rawBody.ok) return json({ ok: false, code: rawBody.code }, rawBody.status);
+  const body = parseSeatBody(rawBody.value, /*needSeatId=*/ true);
   if (body === null || body.seat_id === undefined) return json({ ok: false, code: "invalid_request" }, 400);
 
-  const auth = await accountAuth(request, env, "release", body.project, body.feature, now, ctx);
-  if (!auth.ok) return json({ ok: false, code: auth.code }, auth.status);
-  const isolation: IsolationBinding = { mode: auth.mode, customerId: auth.customerId };
+  const isolation = await resolveIsolation(request, env, "release", body.project, body.feature, now, ctx, isolationOverride);
+  if ("ok" in isolation) return json({ ok: false, code: isolation.code }, isolation.status);
 
   let removed: boolean;
   try {
@@ -1985,14 +2039,11 @@ async function handleSeatRelease(request: Request, env: Env, ctx?: ExecutionCont
 // the D1/limiter tiers that protect the UNAUTHENTICATED public /v1/verify path. A flood is therefore
 // bounded to the token holder's own isolated entitlement (self-directed billing drift), consistent
 // with every sibling account-authed route — not the open-abuse surface checkRateLimit exists for.
-async function handleMeter(request: Request, env: Env, ctx?: ExecutionContextLike): Promise<Response> {
+async function handleMeter(request: Request, env: Env, ctx?: ExecutionContextLike, isolationOverride?: IsolationBinding): Promise<Response> {
   const now = Math.floor(Date.now() / 1000);
-  let raw: unknown;
-  try {
-    raw = await request.json();
-  } catch {
-    return json({ ok: false, code: "invalid_request" }, 400);
-  }
+  const rawBody = await readJsonBody(request);
+  if (!rawBody.ok) return json({ ok: false, code: rawBody.code }, rawBody.status);
+  const raw = rawBody.value;
   if (raw === null || typeof raw !== "object") return json({ ok: false, code: "invalid_request" }, 400);
   const value = raw as Record<string, unknown>;
   const project = requireString(value.project);
@@ -2004,9 +2055,8 @@ async function handleMeter(request: Request, env: Env, ctx?: ExecutionContextLik
   // Absent units => a single unit; a present-but-non-numeric units => -1 so meterUsage rejects it.
   const units = value.units === undefined ? 1 : typeof value.units === "number" ? value.units : -1;
 
-  const auth = await accountAuth(request, env, "report", project, feature, now, ctx);
-  if (!auth.ok) return json({ ok: false, code: auth.code }, auth.status);
-  const isolation: IsolationBinding = { mode: auth.mode, customerId: auth.customerId };
+  const isolation = await resolveIsolation(request, env, "report", project, feature, now, ctx, isolationOverride);
+  if ("ok" in isolation) return json({ ok: false, code: isolation.code }, isolation.status);
 
   let result: { ok: boolean; status: number; code?: string; units_consumed?: number; quota?: number; period_start?: number; period_end?: number };
   try {
@@ -2160,7 +2210,7 @@ async function liveSeatsAt(
   }
 }
 
-async function handleUsageReport(request: Request, env: Env, ctx?: ExecutionContextLike): Promise<Response> {
+async function handleUsageReport(request: Request, env: Env, ctx?: ExecutionContextLike, isolationOverride?: IsolationBinding): Promise<Response> {
   const url = new URL(request.url);
   const project = url.searchParams.get("project");
   const feature = url.searchParams.get("feature");
@@ -2168,9 +2218,8 @@ async function handleUsageReport(request: Request, env: Env, ctx?: ExecutionCont
   if (!project || !feature || !fingerprint) return json({ ok: false, code: "invalid_request" }, 400);
 
   const now = Math.floor(Date.now() / 1000);
-  const auth = await accountAuth(request, env, "report", project, feature, now, ctx);
-  if (!auth.ok) return json({ ok: false, code: auth.code }, auth.status);
-  const isolation: IsolationBinding = { mode: auth.mode, customerId: auth.customerId };
+  const isolation = await resolveIsolation(request, env, "report", project, feature, now, ctx, isolationOverride);
+  if ("ok" in isolation) return json({ ok: false, code: isolation.code }, isolation.status);
 
   const fromParam = Number.parseInt(url.searchParams.get("from") ?? "", 10);
   const toParam = Number.parseInt(url.searchParams.get("to") ?? "", 10);
@@ -2211,9 +2260,9 @@ async function handleUsageReport(request: Request, env: Env, ctx?: ExecutionCont
 
 // D10 break-glass dispatcher. Reachable ONLY at /v1/emergency/* (a path the 6 scoped routes can
 // never produce), gated by a constant-time EMERGENCY_OPERATOR_BEARER compare. On a verified match
-// it forces a NON-ISOLATED env (ACCOUNT_TOKEN_MODE=off, no LEASE_ISSUE_BEARER) so the underlying
-// handler runs the legacy SQL path with customerId null — the operator override, not a customer's
-// scoped credential — and logs the use loudly. The bearer is never logged (L10).
+// it passes an explicit non-isolated operator context into the target handler, so no account-token
+// or legacy lease bearer gate is re-run. The override is not a customer's scoped credential and is
+// logged loudly. The bearer is never logged (L10).
 async function handleEmergencyRoute(
   request: Request,
   env: Env,
@@ -2236,26 +2285,23 @@ async function handleEmergencyRoute(
     client_ip: clientIp(request),
   });
 
-  // Force the non-isolated path: off mode (customerId null) and no legacy bearer re-check.
-  const emergencyEnv: Env = { ...env, ACCOUNT_TOKEN_MODE: "off", LEASE_ISSUE_BEARER: "" };
-
   if (request.method === "POST" && (target === "/v1/activate" || target === "/v1/renew")) {
-    return await handleLeaseIssue(request, emergencyEnv, target === "/v1/activate" ? "activate" : "renew", ctx);
+    return await handleLeaseIssue(request, env, target === "/v1/activate" ? "activate" : "renew", ctx, EMERGENCY_ISOLATION);
   }
   if (request.method === "POST" && target === "/v1/checkout") {
-    return await handleSeatCheckout(request, emergencyEnv, ctx);
+    return await handleSeatCheckout(request, env, ctx, EMERGENCY_ISOLATION);
   }
   if (request.method === "POST" && target === "/v1/heartbeat") {
-    return await handleSeatHeartbeat(request, emergencyEnv, ctx);
+    return await handleSeatHeartbeat(request, env, ctx, EMERGENCY_ISOLATION);
   }
   if (request.method === "POST" && target === "/v1/release") {
-    return await handleSeatRelease(request, emergencyEnv, ctx);
+    return await handleSeatRelease(request, env, ctx, EMERGENCY_ISOLATION);
   }
   if (request.method === "POST" && target === "/v1/meter") {
-    return await handleMeter(request, emergencyEnv, ctx);
+    return await handleMeter(request, env, ctx, EMERGENCY_ISOLATION);
   }
   if (request.method === "GET" && target === "/v1/admin/report") {
-    return await handleUsageReport(request, emergencyEnv, ctx);
+    return await handleUsageReport(request, env, ctx, EMERGENCY_ISOLATION);
   }
   return json({ ok: false, code: "not_found" }, 404);
 }

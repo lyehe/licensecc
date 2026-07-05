@@ -21,10 +21,11 @@ using namespace license::os;
 using namespace std;
 
 static OsAdapterInfo make_adapter(const char *description, std::initializer_list<unsigned char> mac,
-								  std::initializer_list<unsigned char> ipv4) {
+								  std::initializer_list<unsigned char> ipv4,
+								  IFACE_TYPE type = IFACE_TYPE_ETHERNET) {
 	OsAdapterInfo adapter = {};
 	license::mstrlcpy(adapter.description, description, sizeof(adapter.description));
-	adapter.type = IFACE_TYPE_ETHERNET;
+	adapter.type = type;
 
 	std::size_t index = 0;
 	for (const unsigned char value : mac) {
@@ -179,6 +180,21 @@ BOOST_AUTO_TEST_CASE(sort_adapter_infos_is_independent_of_input_order) {
 		BOOST_CHECK_EQUAL(forward[i].id, static_cast<int>(i));
 		BOOST_CHECK_EQUAL(reversed[i].id, static_cast<int>(i));
 	}
+}
+
+BOOST_AUTO_TEST_CASE(sort_adapter_infos_prefers_ethernet_before_wireless_when_strength_matches) {
+	std::vector<OsAdapterInfo> adapters = {
+		make_adapter("wlan0", {0x10, 0x20, 0x30, 0x40, 0x50, 0x61}, {}, IFACE_TYPE_WIRELESS),
+		make_adapter("eth0", {0x10, 0x20, 0x30, 0x40, 0x50, 0x60}, {}, IFACE_TYPE_ETHERNET)
+	};
+
+	sortAdapterInfos(adapters);
+
+	BOOST_REQUIRE_EQUAL(adapters.size(), 2U);
+	BOOST_CHECK_EQUAL(std::string(adapters[0].description), "eth0");
+	BOOST_CHECK_EQUAL(std::string(adapters[1].description), "wlan0");
+	BOOST_CHECK_EQUAL(adapters[0].id, 0);
+	BOOST_CHECK_EQUAL(adapters[1].id, 1);
 }
 
 BOOST_AUTO_TEST_CASE(read_network_adapters) {

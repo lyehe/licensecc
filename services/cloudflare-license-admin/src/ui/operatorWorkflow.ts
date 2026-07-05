@@ -1,9 +1,17 @@
 import type {
+  CatalogFeature,
+  CatalogFeatureInput,
+  CatalogFeaturePatch,
+  CatalogPlan,
+  CatalogPlanFeatureInput,
+  CatalogPlanInput,
+  CatalogPlanPatch,
   EntitlementInput,
   EntitlementPatch,
   EntitlementRecord,
   EntitlementStatus,
   ExpiryStrategy,
+  PlanProjectionInput,
   PolicyInput,
   PolicyType,
   TrialExpirationBasis,
@@ -70,6 +78,103 @@ export const emptyEntitlementEditForm: EntitlementEditState = {
   notes: "",
   customer_id: "",
   license_id: "",
+};
+
+export interface PlanProjectionFormState {
+  project: string;
+  license_id: string;
+  license_fingerprint: string;
+  customer_id: string;
+  plan_id: string;
+  plan_key: string;
+  support_until: string;
+  addons: string;
+  notes: string;
+}
+
+export const emptyPlanProjectionForm: PlanProjectionFormState = {
+  project: "DEFAULT",
+  license_id: "",
+  license_fingerprint: "",
+  customer_id: "",
+  plan_id: "",
+  plan_key: "",
+  support_until: "",
+  addons: "",
+  notes: "",
+};
+
+export interface CatalogFilter {
+  project: string;
+  status: string;
+}
+
+export interface CatalogFeatureFormState {
+  project: string;
+  feature_key: string;
+  name: string;
+  description: string;
+  category: string;
+  status: "active" | "disabled";
+}
+
+export const emptyCatalogFeatureForm: CatalogFeatureFormState = {
+  project: "DEFAULT",
+  feature_key: "",
+  name: "",
+  description: "",
+  category: "",
+  status: "active",
+};
+
+export interface CatalogPlanFormState {
+  project: string;
+  plan_key: string;
+  name: string;
+  description: string;
+  status: "active" | "disabled";
+  version: number;
+}
+
+export const emptyCatalogPlanForm: CatalogPlanFormState = {
+  project: "DEFAULT",
+  plan_key: "",
+  name: "",
+  description: "",
+  status: "active",
+  version: 1,
+};
+
+export interface CatalogPlanFeatureFormState {
+  project: string;
+  feature_key: string;
+  feature_inclusion: "included" | "addon";
+  addon_key: string;
+  policy_id: string;
+  status: "active" | "disabled";
+  display_order: number;
+  assertion_ttl_seconds: string;
+  pool_size: string;
+  max_active_devices: string;
+  max_borrow_sec: string;
+  meter_quota: string;
+  meter_period_sec: string;
+}
+
+export const emptyCatalogPlanFeatureForm: CatalogPlanFeatureFormState = {
+  project: "DEFAULT",
+  feature_key: "",
+  feature_inclusion: "included",
+  addon_key: "",
+  policy_id: "",
+  status: "active",
+  display_order: 0,
+  assertion_ttl_seconds: "",
+  pool_size: "",
+  max_active_devices: "",
+  max_borrow_sec: "",
+  meter_quota: "",
+  meter_period_sec: "",
 };
 
 export function shortHash(value: string): string {
@@ -145,6 +250,32 @@ function parseNullableIdentifier(value: string, label: string): string | null {
   return value;
 }
 
+const MAX_CATALOG_PROJECT_SIZE = 127;
+const MAX_CATALOG_FEATURE_SIZE = 15;
+const MAX_CATALOG_NAME_SIZE = 127;
+const MAX_CATALOG_PLAN_KEY_SIZE = 128;
+
+function parseRequiredText(value: string, label: string, maxLength: number): string {
+  if (value.length === 0 || value.length > maxLength || value.includes("\n") || value.includes("\r") || value.includes("\0")) {
+    throw new Error(`${label}_required_or_too_long`);
+  }
+  return value;
+}
+
+function parseOptionalCatalogText(value: string, label: string, maxLength: number): string | undefined {
+  if (value === "") {
+    return undefined;
+  }
+  return parseRequiredText(value, label, maxLength);
+}
+
+function parseCatalogText(value: string, label: string, maxLength: number): string {
+  if (value.length > maxLength || value.includes("\n") || value.includes("\r") || value.includes("\0")) {
+    throw new Error(`${label}_too_long_or_invalid`);
+  }
+  return value;
+}
+
 export function normalizeEntitlementForm(form: EntitlementFormState): EntitlementInput {
   return {
     project: form.project,
@@ -160,13 +291,181 @@ export function normalizeEntitlementForm(form: EntitlementFormState): Entitlemen
   };
 }
 
+export function catalogFeaturesPath(filter: CatalogFilter): string {
+  const params = new URLSearchParams();
+  if (filter.project !== "") params.set("project", filter.project);
+  if (filter.status !== "") params.set("status", filter.status);
+  return `/api/admin/catalog/features${params.size === 0 ? "" : `?${params.toString()}`}`;
+}
+
+export function catalogPlansPath(filter: CatalogFilter): string {
+  const params = new URLSearchParams();
+  if (filter.project !== "") params.set("project", filter.project);
+  if (filter.status !== "") params.set("status", filter.status);
+  return `/api/admin/catalog/plans${params.size === 0 ? "" : `?${params.toString()}`}`;
+}
+
+export function catalogPlanFeaturesPath(planId: string): string {
+  return `/api/admin/catalog/plans/${encodeURIComponent(planId)}/features`;
+}
+
+export function catalogFeaturePath(id: string): string {
+  return `/api/admin/catalog/features/${encodeURIComponent(id)}`;
+}
+
+export function catalogPlanPath(id: string): string {
+  return `/api/admin/catalog/plans/${encodeURIComponent(id)}`;
+}
+
+export type CatalogAction = "disable" | "reenable";
+
+export function catalogFeatureTransitionPath(id: string, action: CatalogAction): string {
+  return `/api/admin/catalog/features/${encodeURIComponent(id)}/${action}`;
+}
+
+export function catalogPlanTransitionPath(id: string, action: CatalogAction): string {
+  return `/api/admin/catalog/plans/${encodeURIComponent(id)}/${action}`;
+}
+
+export function catalogPlanFeatureTransitionPath(planId: string, featureKey: string, action: CatalogAction): string {
+  return `/api/admin/catalog/plans/${encodeURIComponent(planId)}/features/${encodeURIComponent(featureKey)}/${action}`;
+}
+
+export function catalogPlanExportPath(planId: string): string {
+  return `/api/admin/catalog/plans/${encodeURIComponent(planId)}/export`;
+}
+
+export function catalogImportPath(dryRun = false): string {
+  return `/api/admin/catalog/import${dryRun ? "?dry_run=1" : ""}`;
+}
+
+export function canRunCatalogAction(status: string, action: CatalogAction): boolean {
+  return action === "disable" ? status === "active" : status === "disabled";
+}
+
+export function normalizeCatalogFeatureForm(form: CatalogFeatureFormState): CatalogFeatureInput {
+  const body: CatalogFeatureInput = {
+    project: parseRequiredText(form.project, "project", MAX_CATALOG_PROJECT_SIZE),
+    feature_key: parseRequiredText(form.feature_key, "feature_key", MAX_CATALOG_FEATURE_SIZE),
+    name: parseRequiredText(form.name, "name", MAX_CATALOG_NAME_SIZE),
+    status: form.status,
+  };
+  const description = parseNotes(form.description);
+  if (description !== "") body.description = description;
+  const category = parseOptionalCatalogText(form.category, "category", MAX_CATALOG_NAME_SIZE);
+  if (category !== undefined) body.category = category;
+  return body;
+}
+
+export function catalogFeatureFormFromRecord(feature: CatalogFeature): CatalogFeatureFormState {
+  return {
+    project: feature.project,
+    feature_key: feature.feature_key,
+    name: feature.name,
+    description: feature.description,
+    category: feature.category,
+    status: feature.status,
+  };
+}
+
+export function normalizeCatalogFeaturePatch(form: CatalogFeatureFormState): CatalogFeaturePatch {
+  return {
+    name: parseRequiredText(form.name, "name", MAX_CATALOG_NAME_SIZE),
+    description: parseNotes(form.description),
+    category: parseCatalogText(form.category, "category", MAX_CATALOG_NAME_SIZE),
+  };
+}
+
+export function normalizeCatalogPlanForm(form: CatalogPlanFormState): CatalogPlanInput {
+  const body: CatalogPlanInput = {
+    project: parseRequiredText(form.project, "project", MAX_CATALOG_PROJECT_SIZE),
+    plan_key: parseRequiredText(form.plan_key, "plan_key", MAX_CATALOG_PLAN_KEY_SIZE),
+    name: parseRequiredText(form.name, "name", MAX_CATALOG_NAME_SIZE),
+    status: form.status,
+    version: parseBoundedInteger(form.version, "version", 1, 1_000_000),
+  };
+  const description = parseNotes(form.description);
+  if (description !== "") body.description = description;
+  return body;
+}
+
+export function catalogPlanFormFromRecord(plan: CatalogPlan): CatalogPlanFormState {
+  return {
+    project: plan.project,
+    plan_key: plan.plan_key,
+    name: plan.name,
+    description: plan.description,
+    status: plan.status,
+    version: plan.version,
+  };
+}
+
+export function normalizeCatalogPlanPatch(form: CatalogPlanFormState): CatalogPlanPatch {
+  return {
+    name: parseRequiredText(form.name, "name", MAX_CATALOG_NAME_SIZE),
+    description: parseNotes(form.description),
+  };
+}
+
+export function normalizeCatalogPlanFeatureForm(form: CatalogPlanFeatureFormState): CatalogPlanFeatureInput {
+  const body: CatalogPlanFeatureInput = {
+    project: parseRequiredText(form.project, "project", MAX_CATALOG_PROJECT_SIZE),
+    feature_key: parseRequiredText(form.feature_key, "feature_key", MAX_CATALOG_FEATURE_SIZE),
+    feature_inclusion: form.feature_inclusion,
+    policy_id: parseNullableIdentifier(form.policy_id, "policy_id"),
+    status: form.status,
+    display_order: parseBoundedInteger(form.display_order, "display_order", 0, 1_000_000),
+  };
+  if (form.feature_inclusion === "addon") {
+    const addonKey = parseNullableIdentifier(form.addon_key, "addon_key");
+    if (addonKey === null) {
+      throw new Error("addon_key_required");
+    }
+    body.addon_key = addonKey;
+  }
+  body.assertion_ttl_seconds = parseOptionalBoundedInteger(form.assertion_ttl_seconds, "assertion_ttl_seconds", 0, 3600);
+  body.pool_size = parseOptionalBoundedInteger(form.pool_size, "pool_size", 0, 1_000_000);
+  body.max_active_devices = parseOptionalBoundedInteger(form.max_active_devices, "max_active_devices", 0, 1_000_000);
+  body.max_borrow_sec = parseOptionalBoundedInteger(form.max_borrow_sec, "max_borrow_sec", 0, MAX_POLICY_DURATION_SECONDS);
+  body.meter_quota = parseOptionalBoundedInteger(form.meter_quota, "meter_quota", 0, 1_000_000_000);
+  body.meter_period_sec = parseOptionalBoundedInteger(form.meter_period_sec, "meter_period_sec", 0, MAX_POLICY_DURATION_SECONDS);
+  return body;
+}
+
+export function disableCatalogFeatureConfirm(feature: { name: string; feature_key: string; project: string }): string {
+  return `Disable feature "${feature.name}" (${feature.project} / ${feature.feature_key}). New plan projections skip disabled feature definitions until re-enabled.`;
+}
+
+export function disableCatalogPlanConfirm(plan: { name: string; plan_key: string; project: string; version: number }): string {
+  return `Disable plan "${plan.name}" (${plan.project} / ${plan.plan_key} v${plan.version}). New plan projections using this plan are blocked until re-enabled.`;
+}
+
+export function disableCatalogPlanFeatureConfirm(row: { feature_key: string; plan_key: string; feature_inclusion: string }): string {
+  return `Disable ${row.feature_inclusion} row "${row.feature_key}" on plan "${row.plan_key}". New projections skip this row until it is re-enabled.`;
+}
+
 // Build the create body for the "pick a policy then override" flow. When a policy is selected
 // the backend STAMPS from it; we send policy_id PLUS the (override) fields. Empty/unset override
 // fields (date strings -> null, empty identifiers -> null) are still sent — the backend treats a
 // present-but-null override as an explicit value, so we only attach policy_id and let the standard
 // EntitlementInput ride along as overrides. The target tuple (project/feature/fingerprint) is required.
 export function normalizeCreateFromPolicy(form: EntitlementFormState): EntitlementInput & { policy_id: string } {
-  return { ...normalizeEntitlementForm(form), policy_id: form.policy_id };
+  const body: EntitlementInput & { policy_id: string } = {
+    policy_id: form.policy_id,
+    project: form.project,
+    feature: form.feature,
+    license_fingerprint: form.license_fingerprint,
+  };
+  if (form.device_hash !== "") body.device_hash = form.device_hash;
+  if (form.assertion_ttl_seconds !== emptyEntitlementForm.assertion_ttl_seconds) {
+    body.assertion_ttl_seconds = parseBoundedInteger(form.assertion_ttl_seconds, "assertion_ttl_seconds", 1, 3600);
+  }
+  if (form.valid_from !== "") body.valid_from = dateInputToEpoch(form.valid_from, "valid_from");
+  if (form.valid_until !== "") body.valid_until = dateInputToEpoch(form.valid_until, "valid_until");
+  if (form.notes !== "") body.notes = parseNotes(form.notes);
+  if (form.customer_id !== "") body.customer_id = parseNullableIdentifier(form.customer_id, "customer_id");
+  if (form.license_id !== "") body.license_id = parseNullableIdentifier(form.license_id, "license_id");
+  return body;
 }
 
 export function editFormFromEntitlement(item: EntitlementRecord): EntitlementEditState {
@@ -191,6 +490,60 @@ export function normalizeEntitlementPatch(form: EntitlementEditState): Entitleme
     customer_id: parseNullableIdentifier(form.customer_id, "customer_id"),
     license_id: parseNullableIdentifier(form.license_id, "license_id"),
   };
+}
+
+function splitCsvIdentifiers(value: string, label: string): string[] {
+  if (value.trim() === "") {
+    return [];
+  }
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of value.split(",")) {
+    const item = raw.trim();
+    if (item === "") {
+      continue;
+    }
+    const parsed = parseNullableIdentifier(item, label);
+    if (parsed === null) {
+      continue;
+    }
+    if (!seen.has(parsed)) {
+      seen.add(parsed);
+      out.push(parsed);
+    }
+  }
+  return out;
+}
+
+export function normalizePlanProjectionForm(form: PlanProjectionFormState): PlanProjectionInput {
+  const planId = parseNullableIdentifier(form.plan_id, "plan_id");
+  const planKey = parseNullableIdentifier(form.plan_key, "plan_key");
+  if (planId === null && planKey === null) {
+    throw new Error("plan_id_or_plan_key_required");
+  }
+  const body: PlanProjectionInput = {
+    project: form.project,
+    license_id: parseNullableIdentifier(form.license_id, "license_id") ?? "",
+    license_fingerprint: form.license_fingerprint,
+    customer_id: parseNullableIdentifier(form.customer_id, "customer_id"),
+    addons: splitCsvIdentifiers(form.addons, "addon"),
+    notes: parseNotes(form.notes),
+  };
+  if (body.license_id === "") {
+    throw new Error("license_id_required");
+  }
+  if (planId !== null) body.plan_id = planId;
+  if (planKey !== null) body.plan_key = planKey;
+  if (form.support_until !== "") body.support_until = dateInputToEpoch(form.support_until, "support_until");
+  return body;
+}
+
+export function planProjectionPreviewPath(): string {
+  return "/api/admin/license-plans/preview";
+}
+
+export function planProjectionApplyPath(): string {
+  return "/api/admin/license-plans/apply";
 }
 
 export function patchPath(item: Pick<EntitlementRecord, "id">): string {
@@ -375,6 +728,12 @@ const MAX_POLICY_DURATION_SECONDS = 3_153_600_000;
 // load-bearing. Throws `<label>_must_be_*` for an out-of-range numeric field so the React layer can
 // surface the message, matching normalizeEntitlementForm's contract.
 export function normalizePolicyForm(form: PolicyFormState): PolicyInput {
+  if (form.type === "floating" && form.pool_size < 1) {
+    throw new Error("floating_pool_size_must_be_at_least_1");
+  }
+  if (form.type === "node_locked" && form.pool_size !== 0) {
+    throw new Error("node_locked_pool_size_must_be_0");
+  }
   return {
     project: form.project,
     name: form.name,
@@ -516,9 +875,9 @@ function normalizeWebhookScope(value: string, label: string): string {
 
 // Normalize the create form into the WebhookEndpointInput body. Throws `<label>_*` for an invalid
 // field so the React layer can surface the message, matching normalizePolicyForm's contract. The URL
-// must be a single https:// URL (the delivery worker never POSTs to plaintext). Scope is advisory-
-// exclusive: setting BOTH project and customer is rejected here (the R2.2 convention is one dimension),
-// though the server would technically accept both.
+// must be a single https:// URL (the delivery worker never POSTs to plaintext). Scope is exclusive:
+// setting BOTH project and customer is rejected here and by the Worker (the R2.2 convention is one
+// dimension).
 export function normalizeWebhookForm(form: WebhookFormState): WebhookEndpointInput {
   const url = form.url.trim();
   if (url === "" || url.length > MAX_WEBHOOK_URL_SIZE || /\s/.test(url)) {
@@ -617,6 +976,10 @@ export function withCursor(path: string, cursor: string): string {
 // the typed-confirm modal can never fire on the wrong row. Pure (unit-tested).
 export function revokeEntitlementConfirm(item: { project: string; feature: string; license_fingerprint: string }): string {
   return `Revoke the entitlement for ${item.project} / ${item.feature} (fingerprint ${shortHash(item.license_fingerprint)}). This is TERMINAL and cannot be undone.`;
+}
+
+export function disableEntitlementConfirm(item: { project: string; feature: string; license_fingerprint: string }): string {
+  return `Disable the entitlement for ${item.project} / ${item.feature} (fingerprint ${shortHash(item.license_fingerprint)}). Verification and downloads stop until it is re-enabled.`;
 }
 
 export function disableCustomerConfirm(customer: { id: string; name: string }): string {

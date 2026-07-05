@@ -437,7 +437,7 @@ function emergencyLease(op: "activate" | "renew"): Record<string, unknown> {
   return {
     post: {
       tags: ["emergency"],
-      summary: `Break-glass emergency override for lease ${op}. Non-isolated operator path (legacy SQL, ACCOUNT_TOKEN_MODE forced off). Logged at warn.`,
+      summary: `Break-glass emergency override for lease ${op}. Explicit non-isolated operator path. Logged at warn.`,
       operationId: `postEmergency${op[0].toUpperCase()}${op.slice(1)}`,
       security: [{ emergencyBearer: [] }],
       requestBody: jsonBody("#/components/schemas/LeaseRequest"),
@@ -461,7 +461,7 @@ const emergencyCheckoutPath: Record<string, unknown> = {
   post: {
     tags: ["emergency"],
     summary:
-      "Break-glass emergency override for seat checkout. Non-isolated operator path (ACCOUNT_TOKEN_MODE forced off).",
+      "Break-glass emergency override for seat checkout. Explicit non-isolated operator path.",
     operationId: "postEmergencyCheckout",
     security: [{ emergencyBearer: [] }],
     requestBody: jsonBody("#/components/schemas/SeatCheckoutRequest"),
@@ -488,7 +488,7 @@ const emergencyHeartbeatPath: Record<string, unknown> = {
   post: {
     tags: ["emergency"],
     summary:
-      "Break-glass emergency override for seat heartbeat. Non-isolated operator path (ACCOUNT_TOKEN_MODE forced off).",
+      "Break-glass emergency override for seat heartbeat. Explicit non-isolated operator path.",
     operationId: "postEmergencyHeartbeat",
     security: [{ emergencyBearer: [] }],
     requestBody: jsonBody("#/components/schemas/SeatHeartbeatRequest"),
@@ -509,7 +509,7 @@ const emergencyReleasePath: Record<string, unknown> = {
   post: {
     tags: ["emergency"],
     summary:
-      "Break-glass emergency override for seat release. Non-isolated operator path (ACCOUNT_TOKEN_MODE forced off).",
+      "Break-glass emergency override for seat release. Explicit non-isolated operator path.",
     operationId: "postEmergencyRelease",
     security: [{ emergencyBearer: [] }],
     requestBody: jsonBody("#/components/schemas/SeatReleaseRequest"),
@@ -530,7 +530,7 @@ const emergencyMeterPath: Record<string, unknown> = {
   post: {
     tags: ["emergency"],
     summary:
-      "Break-glass emergency override for metered consumption. Non-isolated operator path (ACCOUNT_TOKEN_MODE forced off).",
+      "Break-glass emergency override for metered consumption. Explicit non-isolated operator path.",
     operationId: "postEmergencyMeter",
     security: [{ emergencyBearer: [] }],
     requestBody: jsonBody("#/components/schemas/MeterRequest"),

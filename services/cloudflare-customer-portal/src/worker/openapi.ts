@@ -136,27 +136,26 @@ export const openApiDocument: OpenApiDocument = {
         },
       },
       // Body shared by checkout / heartbeat / release. The fingerprint is NEVER client-supplied; the
-      // handler server-resolves it from the session-owned entitlement (project, feature) tuple.
+      // handler server-resolves it from the session-owned entitlement id.
       LeaseActionRequest: {
         type: "object",
-        required: ["project", "feature"],
+        required: ["entitlement_id", "client_instance_id", "nonce"],
         properties: {
-          project: { type: "string", description: "Project name (server-validated; must be an active entitlement the session customer owns)." },
-          feature: { type: "string", description: "Feature name within the project." },
-          client_instance_id: { type: "string", description: "Optional client-supplied instance id (sanitized, forwarded to backend)." },
-          nonce: { type: "string", description: "Optional client nonce (sanitized, forwarded)." },
-          seat_id: { type: "string", description: "Optional seat id (sanitized, forwarded)." },
-          device_key_id: { type: "string", description: "Optional device key id (sanitized, forwarded)." },
+          entitlement_id: { type: "string", description: "Opaque entitlement id returned by /api/portal/entitlements." },
+          client_instance_id: { type: "string", description: "Client instance id forwarded to backend seat operations." },
+          nonce: { type: "string", description: "Per-action nonce forwarded to backend seat operations." },
+          seat_id: { type: "string", description: "Required for heartbeat and release." },
+          device_key_id: { type: "string", description: "Optional device key id for proof-capable seat operations." },
         },
         additionalProperties: false,
       },
-      // Body for /api/portal/download (project + feature only).
+      // Body for /api/portal/download.
       DownloadRequest: {
         type: "object",
-        required: ["project", "feature"],
+        required: ["entitlement_id", "device_key_id"],
         properties: {
-          project: { type: "string" },
-          feature: { type: "string" },
+          entitlement_id: { type: "string", description: "Opaque entitlement id returned by /api/portal/entitlements." },
+          device_key_id: { type: "string", description: "Device key id required by backend /v1/activate." },
         },
         additionalProperties: false,
       },
@@ -607,23 +606,22 @@ export const openApiDocument: OpenApiDocument = {
       post: {
         tags: ["portal"],
         operationId: "portalCheckout",
-        summary: "Lease checkout. Server-resolves the fingerprint, mints a 120s account token, proxies to backend /v1/checkout.",
+        summary: "Seat checkout. Server-resolves the entitlement id, mints a 120s account token, proxies to backend /v1/checkout.",
         description:
-          "Server-resolves (project, feature) -> fingerprint from the customer's active entitlements " +
+          "Server-resolves entitlement_id -> project/feature/fingerprint from the customer's active entitlements " +
           "(invariant 4). Mints an ephemeral 120s session-scoped account token (never returned to the " +
-          "browser), proxies to the backend, then discards the token. The successful response is the " +
-          "backend's response proxied as-is (envelope shape varies by backend).",
+          "browser), proxies to the backend, then wraps the backend response in a portal envelope.",
         security: [{ sessionCookie: [] }],
         requestBody: LEASE_ACTION_REQUEST,
         responses: {
           "200": {
-            description: "Backend checkout response, proxied as-is (2xx). Body shape is the backend's, not the portal envelope.",
-            content: { "application/json": { schema: { type: "object" } } },
+            description: "Portal envelope with backend checkout response in data.",
+            content: { "application/json": { schema: { $ref: "#/components/schemas/Envelope" } } },
           },
           "400": ERR_INVALID_JSON,
           "401": errorResponse("No / invalid session.", "unauthorized"),
           "403": ERR_CROSS_SITE,
-          "404": errorResponse("project/feature not owned or not active, or fingerprint resolution failed (generic — no existence oracle).", "not_found"),
+          "404": errorResponse("entitlement_id not owned or not active (generic — no existence oracle).", "not_found"),
           "413": ERR_BODY_TOO_LARGE,
           "502": errorResponse("Backend fetch threw.", "backend_unreachable"),
           "503": errorResponse("BACKEND_ORIGIN unset (backend_unconfigured), or ACCOUNT_TOKEN_PEPPERS unset / customer has no entitlements (config_error).", "config_error"),
@@ -634,18 +632,18 @@ export const openApiDocument: OpenApiDocument = {
       post: {
         tags: ["portal"],
         operationId: "portalHeartbeat",
-        summary: "Lease heartbeat (keep-alive). Same server-resolution, minting, and proxying as checkout (backend /v1/heartbeat).",
+        summary: "Seat heartbeat. Same entitlement-id resolution, minting, and response wrapping as checkout.",
         security: [{ sessionCookie: [] }],
         requestBody: LEASE_ACTION_REQUEST,
         responses: {
           "200": {
-            description: "Backend heartbeat response, proxied as-is (2xx).",
-            content: { "application/json": { schema: { type: "object" } } },
+            description: "Portal envelope with backend heartbeat response in data.",
+            content: { "application/json": { schema: { $ref: "#/components/schemas/Envelope" } } },
           },
           "400": ERR_INVALID_JSON,
           "401": errorResponse("No / invalid session.", "unauthorized"),
           "403": ERR_CROSS_SITE,
-          "404": errorResponse("project/feature not owned or not active.", "not_found"),
+          "404": errorResponse("entitlement_id not owned or not active.", "not_found"),
           "413": ERR_BODY_TOO_LARGE,
           "502": errorResponse("Backend fetch threw.", "backend_unreachable"),
           "503": errorResponse("BACKEND_ORIGIN unset (backend_unconfigured) or config_error.", "config_error"),
@@ -656,18 +654,18 @@ export const openApiDocument: OpenApiDocument = {
       post: {
         tags: ["portal"],
         operationId: "portalRelease",
-        summary: "Lease release. Same server-resolution, minting, and proxying as checkout (backend /v1/release).",
+        summary: "Seat release. Same entitlement-id resolution, minting, and response wrapping as checkout.",
         security: [{ sessionCookie: [] }],
         requestBody: LEASE_ACTION_REQUEST,
         responses: {
           "200": {
-            description: "Backend release response, proxied as-is (2xx).",
-            content: { "application/json": { schema: { type: "object" } } },
+            description: "Portal envelope with backend release response in data.",
+            content: { "application/json": { schema: { $ref: "#/components/schemas/Envelope" } } },
           },
           "400": ERR_INVALID_JSON,
           "401": errorResponse("No / invalid session.", "unauthorized"),
           "403": ERR_CROSS_SITE,
-          "404": errorResponse("project/feature not owned or not active.", "not_found"),
+          "404": errorResponse("entitlement_id not owned or not active.", "not_found"),
           "413": ERR_BODY_TOO_LARGE,
           "502": errorResponse("Backend fetch threw.", "backend_unreachable"),
           "503": errorResponse("BACKEND_ORIGIN unset (backend_unconfigured) or config_error.", "config_error"),
@@ -680,8 +678,8 @@ export const openApiDocument: OpenApiDocument = {
         operationId: "portalDownload",
         summary: "Download the signed .lic file (application/octet-stream).",
         description:
-          "Server-resolves the fingerprint, mints a 120s token, proxies to backend /v1/activate, and " +
-          "streams the signed bytes UNCHANGED. Strips upstream Authorization / Set-Cookie so the " +
+          "Server-resolves entitlement_id, mints a 120s token, proxies to backend /v1/activate with " +
+          "device_key_id, then converts the backend JSON lic field to an attachment. Strips upstream Authorization / Set-Cookie so the " +
           "ephemeral bearer never reaches the browser. The portal never parses or signs (invariant 1).",
         security: [{ sessionCookie: [] }],
         requestBody: {

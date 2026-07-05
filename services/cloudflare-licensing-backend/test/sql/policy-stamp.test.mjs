@@ -110,7 +110,17 @@ test("createEntitlement + stamp extra writes the window/ttl AND capacity/trial a
   assert.equal(result.data.revocation_seq, 1);
   assert.equal(result.data.assertion_ttl_seconds, 600);
   assert.equal(result.data.valid_until, NOW + 1209600);
-  // The side-write columns (not in ENTITLEMENT_COLUMNS) read directly:
+  assert.equal(result.data.policy_id, "pol_1");
+  assert.equal(result.data.license_mode, "trial");
+  assert.equal(result.data.pool_size, 4);
+  assert.equal(result.data.max_active_devices, 2);
+  assert.equal(result.data.max_borrow_sec, 86400);
+  assert.equal(result.data.meter_quota, 500);
+  assert.equal(result.data.meter_period_sec, 3600);
+  assert.equal(result.data.is_trial, 1);
+  assert.equal(result.data.trial_expiration_basis, "from_issue");
+  assert.equal(result.data.trial_duration_sec, 1209600);
+  // The stamped columns also persist in storage:
   const row = db.prepare("SELECT policy_id, pool_size, max_active_devices, max_borrow_sec, meter_quota, meter_period_sec, is_trial, trial_expiration_basis, trial_duration_sec, trial_one_per_device, trial_require_device_proof, trial_started_at FROM entitlements WHERE license_fingerprint = ?").get(FP);
   assert.equal(row.policy_id, "pol_1");
   assert.equal(row.pool_size, 4);
@@ -126,6 +136,12 @@ test("createEntitlement + stamp extra writes the window/ttl AND capacity/trial a
   assert.equal(row.trial_started_at, null); // not activated yet
   // Exactly one audit event from the create.
   assert.equal(db.prepare("SELECT COUNT(*) AS c FROM entitlement_events WHERE license_fingerprint = ?").get(FP).c, 1);
+  const next = JSON.parse(db.prepare("SELECT next_json FROM entitlement_events WHERE license_fingerprint = ?").get(FP).next_json);
+  assert.equal(next.policy_id, "pol_1");
+  assert.equal(next.license_mode, "trial");
+  assert.equal(next.pool_size, 4);
+  assert.equal(next.max_active_devices, 2);
+  assert.equal(next.meter_quota, 500);
 });
 
 test("byte-identical guard: createEntitlement with NO extras leaves capacity/trial at column defaults", async () => {

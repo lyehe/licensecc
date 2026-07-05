@@ -55,6 +55,17 @@ function sameSiteHeaders(extra = {}) {
   return { "content-type": "application/json", origin: "https://portal.test", "sec-fetch-site": "same-origin", ...extra };
 }
 
+function entitlementId(project, feature, fingerprint) {
+  return btoa(JSON.stringify([project, feature, fingerprint])).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+async function ownedEntitlementId(env, cookie) {
+  const r = await call(env, "GET", "/api/portal/entitlements", { cookie });
+  assert.equal(r.status, 200);
+  assert.equal(typeof r.body.data.items[0].id, "string");
+  return r.body.data.items[0].id;
+}
+
 async function call(env, method, path, { cookie, body, headers } = {}) {
   const h = sameSiteHeaders(headers);
   if (cookie) h.cookie = cookie;
@@ -84,13 +95,28 @@ function baseFixture(extraEnv = {}) {
 // READS — A sees only A
 // =================================================================================================
 
+test("portal worker rejects oversized JSON bodies without relying on Content-Length", async () => {
+  const { db, env } = baseFixture();
+  const res = await worker.fetch(new Request("https://portal.test/portal/v1/auth/request", {
+    method: "POST",
+    headers: sameSiteHeaders(),
+    body: "x".repeat(8193),
+  }), env, CTX);
+  assert.equal(res.status, 413);
+  assert.equal((await res.json()).code, "body_too_large");
+  db.close();
+});
+
 test("A's /api/portal/entitlements returns ONLY A's entitlements", async () => {
   const { db, env } = baseFixture();
   const cookie = await cookieFor(env, "A");
-  const r = await call(env, "GET", "/api/portal/entitlements", { cookie });
-  assert.equal(r.status, 200);
-  assert.equal(r.body.data.items.length, 1);
-  assert.equal(r.body.data.items[0].project, "DEFAULT");
+    const r = await call(env, "GET", "/api/portal/entitlements", { cookie });
+    assert.equal(r.status, 200);
+    assert.equal(r.body.data.items.length, 1);
+    assert.equal(r.body.data.items[0].project, "DEFAULT");
+    assert.equal(r.body.data.items[0].license_mode, "floating");
+    assert.equal(r.body.data.items[0].pool_size, 5);
+    assert.equal(typeof r.body.data.items[0].id, "string");
   // The response carries no fingerprint/foreign id.
   assert.ok(!JSON.stringify(r.body).includes(FP_B), "B's data never appears in A's response");
   db.close();
@@ -130,8 +156,11 @@ test("A's checkout on A's tuple proxies the SERVER-RESOLVED fingerprint with a r
   const stub = installBackendStub();
   try {
     const cookie = await cookieFor(env, "A");
-    const r = await call(env, "POST", "/api/portal/checkout", { cookie, body: { project: "DEFAULT", feature: "DEFAULT", client_instance_id: "i1", nonce: "e".repeat(64) } });
+    const id = await ownedEntitlementId(env, cookie);
+    const r = await call(env, "POST", "/api/portal/checkout", { cookie, body: { entitlement_id: id, client_instance_id: "i1", nonce: "e".repeat(64) } });
     assert.equal(r.status, 200);
+    assert.equal(r.body.ok, true);
+    assert.equal(r.body.code, "ok");
     assert.equal(stub.calls.length, 1);
     assert.match(stub.calls[0].url, /\/v1\/checkout$/);
     assert.match(stub.calls[0].auth, /^Bearer lcca_/, "a real ephemeral account token is presented");
@@ -165,7 +194,7 @@ test("A -> B: a checkout referencing B's tuple is a GENERIC not_found (no oracle
     // (Here both use DEFAULT/DEFAULT, so the discriminator is the OWNER; we instead seed a B-only
     //  feature to make the cross-owner reference explicit.)
     seedEntitlement(db, { feature: "BONLY", fingerprint: "c".repeat(64), customerId: "B" });
-    const r = await call(env, "POST", "/api/portal/checkout", { cookie, body: { project: "DEFAULT", feature: "BONLY", client_instance_id: "i1" } });
+    const r = await call(env, "POST", "/api/portal/checkout", { cookie, body: { entitlement_id: entitlementId("DEFAULT", "BONLY", "c".repeat(64)), client_instance_id: "i1", nonce: "e".repeat(64) } });
     assert.equal(r.status, 404);
     assert.equal(r.body.code, "not_found", "the SAME generic not_found as an absent tuple (no existence oracle)");
     assert.equal(stub.calls.length, 0, "no proxy for a foreign tuple");
@@ -183,11 +212,12 @@ test("a forged body customer_id is IGNORED; the mint binds the SESSION customer 
   const stub = installBackendStub();
   try {
     const cookie = await cookieFor(env, "A");
+    const id = await ownedEntitlementId(env, cookie);
     // Forge customer_id=B AND license_fingerprint=B's in the body. Both must be ignored: the handler
     // server-resolves A's own fingerprint and the mint takes the session (customer A) ONLY.
     const r = await call(env, "POST", "/api/portal/checkout", {
       cookie,
-      body: { project: "DEFAULT", feature: "DEFAULT", customer_id: "B", license_fingerprint: FP_B, client_instance_id: "i1" },
+      body: { entitlement_id: id, customer_id: "B", license_fingerprint: FP_B, client_instance_id: "i1", nonce: "e".repeat(64) },
     });
     assert.equal(r.status, 200);
     assert.equal(stub.calls[0].body.license_fingerprint, FP_A, "the forged B fingerprint is ignored; A's is used");
@@ -289,10 +319,11 @@ test("download streams the signed .lic and STRIPS the upstream Authorization", a
   const stub = installBackendStub();
   try {
     const cookie = await cookieFor(env, "A");
+    const id = await ownedEntitlementId(env, cookie);
     const req = new Request("https://portal.test/api/portal/download", {
       method: "POST",
       headers: { "content-type": "application/json", cookie, origin: "https://portal.test", "sec-fetch-site": "same-origin" },
-      body: JSON.stringify({ project: "DEFAULT", feature: "DEFAULT" }),
+      body: JSON.stringify({ entitlement_id: id, device_key_id: "device-a" }),
     });
     const res = await worker.fetch(req, env, CTX);
     assert.equal(res.status, 200);
@@ -314,7 +345,7 @@ test("A -> B download referencing B's tuple is a generic not_found (no proxy)", 
   try {
     seedEntitlement(db, { feature: "BONLY", fingerprint: "d".repeat(64), customerId: "B" });
     const cookie = await cookieFor(env, "A");
-    const r = await call(env, "POST", "/api/portal/download", { cookie, body: { project: "DEFAULT", feature: "BONLY" } });
+    const r = await call(env, "POST", "/api/portal/download", { cookie, body: { entitlement_id: entitlementId("DEFAULT", "BONLY", "d".repeat(64)), device_key_id: "device-b" } });
     assert.equal(r.status, 404);
     assert.equal(r.body.code, "not_found");
     assert.equal(stub.calls.length, 0, "no proxy for a foreign tuple");

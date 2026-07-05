@@ -8,8 +8,8 @@
 //     takes the SESSION ONLY; no handler passes a client tuple/customer_id into it.
 //  3. The backend lcca_ never reaches the browser / DB: HttpOnly session cookie + ephemeral 120s mint
 //     used once and discarded.
-//  4. Action/download handlers SERVER-RESOLVE the fingerprint (WHERE customer_id=? AND project=? AND
-//     feature=? AND status='active'); 0 rows -> generic not_found (no existence oracle).
+//  4. Action/download handlers SERVER-RESOLVE the fingerprint from an opaque entitlement id scoped to
+//     the session customer; 0 rows -> generic not_found (no existence oracle).
 //  5. Auth throttling is always-on (portalRateLimit, inside the OTP/redeem modules).
 //  6. The magic-link secret never rides a mutating GET — /portal/v1/auth/magic is a POST interstitial;
 //     the origin for links is PORTAL_PUBLIC_ORIGIN, never the request Host.
@@ -83,6 +83,25 @@ const MAX_BODY_BYTES = 8192;
 const PROJECT_RE = /^[A-Za-z0-9_.:-]{1,127}$/;
 const FEATURE_RE = /^[A-Za-z0-9_.:-]{1,15}$/;
 
+type LicenseMode = "trial" | "node_locked" | "floating";
+
+interface OwnedEntitlement {
+  id: string;
+  project: string;
+  feature: string;
+  license_fingerprint: string;
+  status: string;
+  valid_from: number | null;
+  valid_until: number | null;
+  pool_size: number;
+  max_active_devices: number;
+  max_borrow_sec: number;
+  heartbeat_grace_sec: number;
+  is_trial: number;
+  policy_id: string | null;
+  license_mode: LicenseMode;
+}
+
 function json<T>(body: T, status = 200, headers: HeadersInit = {}): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -98,6 +117,42 @@ function envelope<T>(reqId: string, code: string, data?: T, status = 200, header
   const body: ApiEnvelope<T> = { ok: status >= 200 && status < 300, code, request_id: reqId };
   if (data !== undefined) body.data = data;
   return json(body, status, headers);
+}
+
+function entitlementId(project: string, feature: string, licenseFingerprint: string): string {
+  const raw = JSON.stringify([project, feature, licenseFingerprint]);
+  const bytes = new TextEncoder().encode(raw);
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+function decodeEntitlementId(id: string): { project: string; feature: string; license_fingerprint: string } | null {
+  try {
+    const padded = id.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(id.length / 4) * 4, "=");
+    const bytes = Uint8Array.from(atob(padded), (ch) => ch.charCodeAt(0));
+    const parsed = JSON.parse(new TextDecoder().decode(bytes));
+    if (!Array.isArray(parsed) || parsed.length !== 3) return null;
+    const [project, feature, licenseFingerprint] = parsed;
+    if (typeof project !== "string" || typeof feature !== "string" || typeof licenseFingerprint !== "string") return null;
+    if (!PROJECT_RE.test(project) || !FEATURE_RE.test(feature) || !/^[a-fA-F0-9]{64}$/.test(licenseFingerprint)) return null;
+    return { project, feature, license_fingerprint: licenseFingerprint };
+  } catch {
+    return null;
+  }
+}
+
+function licenseMode(row: { is_trial?: number; pool_size?: number }): LicenseMode {
+  if (Number(row.is_trial ?? 0) === 1) return "trial";
+  return Number(row.pool_size ?? 0) > 0 ? "floating" : "node_locked";
+}
+
+function withPortalEntitlement(row: Omit<OwnedEntitlement, "id" | "license_mode">): OwnedEntitlement {
+  return {
+    ...row,
+    id: entitlementId(row.project, row.feature, row.license_fingerprint),
+    license_mode: licenseMode(row),
+  };
 }
 
 function clientIp(request: Request): string {
@@ -147,11 +202,12 @@ function isCrossSite(request: Request, env: Env): boolean {
 }
 
 async function readJson(request: Request, reqId: string): Promise<Record<string, unknown> | Response> {
-  const text = await request.text();
-  if (new TextEncoder().encode(text).byteLength > MAX_BODY_BYTES) {
+  const body = await readTextBody(request, MAX_BODY_BYTES);
+  if (!body.ok) {
     return envelope(reqId, "body_too_large", undefined, 413);
   }
   try {
+    const text = body.text;
     const parsed = text === "" ? {} : JSON.parse(text);
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
       return envelope(reqId, "invalid_json", undefined, 400);
@@ -160,6 +216,43 @@ async function readJson(request: Request, reqId: string): Promise<Record<string,
   } catch {
     return envelope(reqId, "invalid_json", undefined, 400);
   }
+}
+
+async function readTextBody(request: Request, maxBytes: number): Promise<{ ok: true; text: string } | { ok: false }> {
+  const contentLength = Number(request.headers.get("content-length") ?? "");
+  if (Number.isFinite(contentLength) && contentLength > maxBytes) {
+    return { ok: false };
+  }
+  if (request.body === null) {
+    return { ok: true, text: "" };
+  }
+
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (value === undefined) continue;
+    size += value.byteLength;
+    if (size > maxBytes) {
+      try {
+        await reader.cancel();
+      } catch {
+        // The response is already determined; cancel errors do not change the rejection.
+      }
+      return { ok: false };
+    }
+    chunks.push(value);
+  }
+
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return { ok: true, text: new TextDecoder().decode(bytes) };
 }
 
 function publicOrigin(env: Env): string {
@@ -354,9 +447,10 @@ async function apiMe(session: { customer_id: string }, reqId: string): Promise<R
 
 async function apiEntitlements(env: Env, session: { customer_id: string }, reqId: string): Promise<Response> {
   const rows = await env.DB.prepare(
-    "SELECT project, feature, license_fingerprint, status, valid_from, valid_until FROM entitlements WHERE customer_id = ? ORDER BY project, feature",
-  ).bind(session.customer_id).all();
-  return envelope(reqId, "entitlements", { items: rows.results });
+    "SELECT project, feature, license_fingerprint, status, valid_from, valid_until, pool_size, max_active_devices, max_borrow_sec, heartbeat_grace_sec, is_trial, policy_id " +
+      "FROM entitlements WHERE customer_id = ? ORDER BY project, feature, license_fingerprint",
+  ).bind(session.customer_id).all<Omit<OwnedEntitlement, "id" | "license_mode">>();
+  return envelope(reqId, "entitlements", { items: rows.results.map(withPortalEntitlement) });
 }
 
 async function apiDevices(env: Env, session: { customer_id: string }, reqId: string): Promise<Response> {
@@ -383,19 +477,21 @@ async function apiUsage(env: Env, session: { customer_id: string }, reqId: strin
   return envelope(reqId, "usage", { items: rows.results });
 }
 
-// Server-resolve the fingerprint for an action/download (invariant 4). 0 rows -> null (the caller
-// returns a generic not_found — no existence oracle). The resolution is bound to customer_id.
-async function resolveOwnedFingerprint(
+// Server-resolve the exact entitlement for an action/download (invariant 4). 0 rows -> null (the
+// caller returns a generic not_found — no existence oracle). The resolution is bound to customer_id.
+async function resolveOwnedEntitlement(
   env: Env,
   customerId: string,
-  project: string,
-  feature: string,
-): Promise<string | null> {
-  if (!PROJECT_RE.test(project) || !FEATURE_RE.test(feature)) return null;
+  entitlementIdValue: unknown,
+): Promise<OwnedEntitlement | null> {
+  if (typeof entitlementIdValue !== "string" || entitlementIdValue.length === 0 || entitlementIdValue.length > 512) return null;
+  const key = decodeEntitlementId(entitlementIdValue);
+  if (key === null) return null;
   const row = await env.DB.prepare(
-    "SELECT license_fingerprint FROM entitlements WHERE customer_id = ? AND project = ? AND feature = ? AND status = 'active' LIMIT 1",
-  ).bind(customerId, project, feature).first<{ license_fingerprint: string }>();
-  return row === null || row.license_fingerprint === undefined ? null : row.license_fingerprint;
+    "SELECT project, feature, license_fingerprint, status, valid_from, valid_until, pool_size, max_active_devices, max_borrow_sec, heartbeat_grace_sec, is_trial, policy_id " +
+      "FROM entitlements WHERE customer_id = ? AND project = ? AND feature = ? AND license_fingerprint = ? AND status = 'active' LIMIT 1",
+  ).bind(customerId, key.project, key.feature, key.license_fingerprint).first<Omit<OwnedEntitlement, "id" | "license_mode">>();
+  return row === null ? null : withPortalEntitlement(row);
 }
 
 // Action handler (checkout / heartbeat / release): server-resolve the tuple, mint a per-action token
@@ -411,12 +507,18 @@ async function apiAction(
   if (isCrossSite(request, env)) return envelope(reqId, "cross_site_forbidden", undefined, 403);
   const body = await readJson(request, reqId);
   if (body instanceof Response) return body;
-  const project = typeof body.project === "string" ? body.project : "";
-  const feature = typeof body.feature === "string" ? body.feature : "";
-  const fingerprint = await resolveOwnedFingerprint(env, session.customer_id, project, feature);
+  const entitlement = await resolveOwnedEntitlement(env, session.customer_id, body.entitlement_id);
   // Invariant 4: a wrong/foreign/absent tuple is the SAME generic not_found (no oracle). The client
   // body NEVER supplies the fingerprint — it is server-resolved from the session-bound entitlement.
-  if (fingerprint === null) return envelope(reqId, "not_found", undefined, 404);
+  if (entitlement === null) return envelope(reqId, "not_found", undefined, 404);
+  if (operation === "checkout" && (typeof body.client_instance_id !== "string" || typeof body.nonce !== "string")) {
+    return envelope(reqId, "invalid_request", undefined, 400);
+  }
+  if ((operation === "heartbeat" || operation === "release") && (
+    typeof body.client_instance_id !== "string" || typeof body.nonce !== "string" || typeof body.seat_id !== "string"
+  )) {
+    return envelope(reqId, "invalid_request", undefined, 400);
+  }
 
   // Invariant 2: identity is SESSION-ONLY (session.customer_id). The narrow (project,feature,operation)
   // is the already-owner-verified tuple + the server-controlled operation; the mint re-verifies it
@@ -425,21 +527,36 @@ async function apiAction(
   const minted = await mintSessionToken(env, session, {
     operationClass: "action",
     now,
-    narrow: { project, feature, operation },
+    narrow: { project: entitlement.project, feature: entitlement.feature, operation },
   });
   if (minted.code === "config_error") return envelope(reqId, "config_error", undefined, 503);
   if (!minted.ok) return envelope(reqId, "not_found", undefined, 404);
 
   // Build the backend payload from the SERVER-RESOLVED fingerprint + only the safe client fields.
   const proxyBody: Record<string, unknown> = {
-    project,
-    feature,
-    license_fingerprint: fingerprint,
+    project: entitlement.project,
+    feature: entitlement.feature,
+    license_fingerprint: entitlement.license_fingerprint,
   };
   for (const k of ["client_instance_id", "nonce", "seat_id", "device_key_id"]) {
     if (typeof body[k] === "string") proxyBody[k] = body[k];
   }
-  return proxyBackend(env, `/v1/${operation}`, minted.raw, proxyBody);
+  const upstream = await proxyBackend(env, `/v1/${operation}`, minted.raw, proxyBody);
+  let upstreamBody: Record<string, unknown> = {};
+  try {
+    const parsed = await upstream.json();
+    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+      upstreamBody = parsed as Record<string, unknown>;
+    }
+  } catch {
+    return envelope(reqId, "backend_invalid_response", undefined, 502);
+  }
+  const code = typeof upstreamBody.code === "string"
+    ? upstreamBody.code
+    : upstream.ok
+      ? `${operation}_ok`
+      : `${operation}_failed`;
+  return envelope(reqId, code, upstreamBody, upstream.status);
 }
 
 // Download the signed .lic: server-resolve the tuple, stream the backend's signed bytes UNCHANGED.
@@ -454,16 +571,16 @@ async function apiDownload(
   if (isCrossSite(request, env)) return envelope(reqId, "cross_site_forbidden", undefined, 403);
   const body = await readJson(request, reqId);
   if (body instanceof Response) return body;
-  const project = typeof body.project === "string" ? body.project : "";
-  const feature = typeof body.feature === "string" ? body.feature : "";
-  const fingerprint = await resolveOwnedFingerprint(env, session.customer_id, project, feature);
-  if (fingerprint === null) return envelope(reqId, "not_found", undefined, 404);
+  const entitlement = await resolveOwnedEntitlement(env, session.customer_id, body.entitlement_id);
+  if (entitlement === null) return envelope(reqId, "not_found", undefined, 404);
+  const deviceKeyId = typeof body.device_key_id === "string" ? body.device_key_id : "";
+  if (deviceKeyId === "") return envelope(reqId, "device_key_required", undefined, 400);
 
   // Download performs an activate; scope the token to exactly this owned tuple + "activate" (R2.5).
   const minted = await mintSessionToken(env, session, {
     operationClass: "action",
     now,
-    narrow: { project, feature, operation: "activate" },
+    narrow: { project: entitlement.project, feature: entitlement.feature, operation: "activate" },
   });
   if (minted.code === "config_error") return envelope(reqId, "config_error", undefined, 503);
   if (!minted.ok) return envelope(reqId, "not_found", undefined, 404);
@@ -475,19 +592,35 @@ async function apiDownload(
     upstream = await fetch(`${origin}/v1/activate`, {
       method: "POST",
       headers: { authorization: `Bearer ${minted.raw}`, "content-type": "application/json" },
-      body: JSON.stringify({ project, feature, license_fingerprint: fingerprint }),
+      body: JSON.stringify({
+        project: entitlement.project,
+        feature: entitlement.feature,
+        license_fingerprint: entitlement.license_fingerprint,
+        device_key_id: deviceKeyId,
+      }),
     });
   } catch {
     return envelope(reqId, "backend_unreachable", undefined, 502);
   }
-  // Stream the signed bytes unchanged; STRIP the upstream Authorization (and never forward
-  // Set-Cookie / sensitive headers) so the ephemeral bearer cannot leak back to the browser.
+  let upstreamBody: Record<string, unknown>;
+  try {
+    const parsed = await upstream.json();
+    upstreamBody = typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
+  } catch {
+    return envelope(reqId, "backend_invalid_response", undefined, 502);
+  }
+  if (!upstream.ok || upstreamBody.ok !== true || typeof upstreamBody.lic !== "string") {
+    const code = typeof upstreamBody.code === "string" ? upstreamBody.code : "activate_failed";
+    return envelope(reqId, code, upstreamBody, upstream.status);
+  }
+  // Convert the backend's JSON lease body into an attachment while STRIPPING upstream Authorization
+  // and Set-Cookie so the ephemeral bearer cannot leak back to the browser.
   const headers = new Headers({
-    "content-type": upstream.headers.get("content-type") ?? "application/octet-stream",
-    "content-disposition": `attachment; filename="${project}-${feature}.lic"`,
+    "content-type": "text/plain; charset=utf-8",
+    "content-disposition": `attachment; filename="${entitlement.project}-${entitlement.feature}.lic"`,
     "cache-control": "no-store",
   });
-  return new Response(upstream.body, { status: upstream.status, headers });
+  return new Response(upstreamBody.lic, { status: 200, headers });
 }
 
 async function handleApiPortal(request: Request, env: Env, reqId: string, now: number, pathname: string): Promise<Response> {
@@ -552,4 +685,4 @@ export default {
   },
 };
 
-export const portalInternalsForTests = { isCrossSite, constantTimeEqual, resolveOwnedFingerprint };
+export const portalInternalsForTests = { isCrossSite, constantTimeEqual, entitlementId, decodeEntitlementId, resolveOwnedEntitlement };

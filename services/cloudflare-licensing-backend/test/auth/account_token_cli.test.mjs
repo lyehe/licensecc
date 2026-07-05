@@ -144,6 +144,10 @@ test("issue: SQL is a guarded INSERT...SELECT requiring an active customer + wri
   );
   assert.match(built.sql, /INSERT INTO account_tokens[\s\S]*WHERE EXISTS \(SELECT 1 FROM customers WHERE id = 'cus_A' AND status = 'active'\)/);
   assert.match(built.sql, /INSERT INTO account_token_events[\s\S]*'issue'/);
+  assert.equal(built.statements.length, 2);
+  assert.match(built.statements[0], /INSERT INTO account_tokens/);
+  assert.match(built.statements[1], /INSERT INTO account_token_events/);
+  assert.equal(built.sql, built.statements.join(";\n"));
 });
 
 // ---------------------------------------------------------------------------

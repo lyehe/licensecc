@@ -1,6 +1,8 @@
 import React, { FormEvent, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
+  ACTIVATION_DOWNLOAD_ACTION_LABEL,
+  ACTIVATION_DOWNLOAD_DISCLOSURE,
   authRequestPath,
   authVerifyPath,
   checkoutPath,
@@ -12,6 +14,7 @@ import {
   heartbeatPath,
   isLikelyEmail,
   isValidCode,
+  LOGIN_CODE_SENT_COPY,
   logoutPath,
   mePath,
   normalizeCode,
@@ -34,12 +37,19 @@ interface PortalMe {
 }
 
 interface EntitlementRow {
+  id: string;
   project: string;
   feature: string;
   status: string;
   license_fingerprint?: string;
   valid_from: number | null;
   valid_until: number | null;
+  license_mode: "trial" | "node_locked" | "floating";
+  pool_size: number;
+  max_active_devices: number;
+  max_borrow_sec: number;
+  heartbeat_grace_sec: number;
+  policy_id: string | null;
 }
 
 interface DeviceRow {
@@ -58,6 +68,12 @@ interface UsageRow {
 }
 
 type Tab = "entitlements" | "devices" | "usage" | "download";
+type SeatOperation = "checkout" | "heartbeat" | "release";
+
+interface SeatSession {
+  seat_id: string;
+  client_instance_id: string;
+}
 
 // Invariant 3: ALWAYS credentials:"same-origin" (the HttpOnly session cookie travels automatically),
 // ALWAYS content-type: application/json, and NEVER an Authorization/bearer header — the browser never
@@ -83,6 +99,18 @@ function errorLine(result: ApiEnvelope<unknown>): string {
   return `${result.code} (${result.request_id})`;
 }
 
+function randomHex(byteLength: number): string {
+  const bytes = new Uint8Array(byteLength);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function seatPath(operation: SeatOperation): string {
+  if (operation === "checkout") return checkoutPath();
+  if (operation === "heartbeat") return heartbeatPath();
+  return releasePath();
+}
+
 function App(): React.ReactElement {
   // Auth state machine: anonymous -> "request" (enter email) -> "verify" (enter 8-digit code) ->
   // authed (me resolved). A magic-redeem lands the browser authed at "/" so the first me() succeeds.
@@ -98,6 +126,8 @@ function App(): React.ReactElement {
   const [entitlements, setEntitlements] = useState<EntitlementRow[]>([]);
   const [devices, setDevices] = useState<DeviceRow[]>([]);
   const [usage, setUsage] = useState<UsageRow[]>([]);
+  const [seatSessions, setSeatSessions] = useState<Record<string, SeatSession>>({});
+  const [downloadDeviceKeys, setDownloadDeviceKeys] = useState<Record<string, string>>({});
 
   async function loadMe(): Promise<boolean> {
     const result = await api<PortalMe>(mePath());
@@ -197,6 +227,8 @@ function App(): React.ReactElement {
       setEntitlements([]);
       setDevices([]);
       setUsage([]);
+      setSeatSessions({});
+      setDownloadDeviceKeys({});
       setEmail("");
       setCode("");
       setPhase("request");
@@ -204,31 +236,60 @@ function App(): React.ReactElement {
   }
 
   async function seatAction(
-    item: { project: string; feature: string },
-    path: string,
+    item: EntitlementRow,
+    operation: SeatOperation,
   ): Promise<void> {
     await runOnce(async () => {
-      // Body is ONLY project + feature — the Worker server-resolves the fingerprint (invariant 4).
-      const result = await api(path, {
+      const existing = seatSessions[item.id];
+      if ((operation === "heartbeat" || operation === "release") && existing === undefined) {
+        setMessage("seat_not_checked_out");
+        return;
+      }
+      const clientInstanceId = existing?.client_instance_id ?? crypto.randomUUID();
+      const body: Record<string, string> = {
+        entitlement_id: item.id,
+        client_instance_id: clientInstanceId,
+        nonce: randomHex(32),
+      };
+      if (existing !== undefined) body.seat_id = existing.seat_id;
+      const result = await api<Record<string, unknown>>(seatPath(operation), {
         method: "POST",
-        body: JSON.stringify({ project: item.project, feature: item.feature }),
+        body: JSON.stringify(body),
       });
       setMessage(errorLine(result));
       if (result.ok) {
+        if (operation === "checkout" && typeof result.data?.seat_id === "string") {
+          setSeatSessions((current) => ({
+            ...current,
+            [item.id]: { seat_id: result.data.seat_id as string, client_instance_id: clientInstanceId },
+          }));
+        }
+        if (operation === "release") {
+          setSeatSessions((current) => {
+            const next = { ...current };
+            delete next[item.id];
+            return next;
+          });
+        }
         await refreshData();
       }
     });
   }
 
-  async function download(item: { project: string; feature: string }): Promise<void> {
+  async function download(item: EntitlementRow): Promise<void> {
     await runOnce(async () => {
-      // The Worker streams the signed .lic as an attachment. Body is project+feature only; the
-      // browser never parses or signs — it just saves the bytes. No Authorization header (invariant 3).
+      const deviceKeyId = (downloadDeviceKeys[item.id] ?? "").trim();
+      if (deviceKeyId === "") {
+        setMessage("device_key_required");
+        return;
+      }
+      // The Worker converts the backend JSON `lic` field into an attachment. The browser never holds
+      // a backend bearer; the body carries only the opaque entitlement id plus the activation device.
       const response = await fetch(downloadPath(), {
         method: "POST",
         credentials: "same-origin",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ project: item.project, feature: item.feature }),
+        body: JSON.stringify({ entitlement_id: item.id, device_key_id: deviceKeyId }),
       });
       const contentType = response.headers.get("content-type") ?? "";
       if (!response.ok || contentType.includes("application/json")) {
@@ -294,7 +355,7 @@ function App(): React.ReactElement {
           {phase === "verify" && (
             <form onSubmit={(event) => void submitVerify(event)}>
               <h2>Check your email</h2>
-              <p>We sent an 8-digit code to {email}. Enter it below.</p>
+              <p>{LOGIN_CODE_SENT_COPY}</p>
               <label>
                 8-digit code
                 <input
@@ -316,6 +377,9 @@ function App(): React.ReactElement {
     );
   }
 
+  const floatingEntitlements = entitlements.filter((item) => item.license_mode === "floating");
+  const downloadableEntitlements = entitlements.filter((item) => item.license_mode !== "floating");
+
   return (
     <main>
       <header className="topbar">
@@ -336,12 +400,14 @@ function App(): React.ReactElement {
         <section className="tablePane full">
           <h2>My entitlements</h2>
           <table>
-            <thead><tr><th>Project</th><th>Feature</th><th>Fingerprint</th><th>Status</th><th>Valid</th></tr></thead>
+            <thead><tr><th>Project</th><th>Feature</th><th>Mode</th><th>Capacity</th><th>Fingerprint</th><th>Status</th><th>Valid</th></tr></thead>
             <tbody>
               {entitlements.map((item, index) => (
                 <tr key={`${item.project}/${item.feature}/${index}`}>
                   <td>{item.project}</td>
                   <td>{item.feature}</td>
+                  <td>{item.license_mode}</td>
+                  <td>{item.license_mode === "floating" ? `pool ${item.pool_size}` : `devices ${item.max_active_devices}`}</td>
                   <td><code>{item.license_fingerprint ? shortHash(item.license_fingerprint) : "-"}</code></td>
                   <td><span className={`status ${item.status}`}>{item.status}</span></td>
                   <td>{formatWindow(item.valid_from, item.valid_until)}</td>
@@ -356,7 +422,7 @@ function App(): React.ReactElement {
         <section className="tablePane full">
           <h2>My devices &amp; seats</h2>
           <table>
-            <thead><tr><th>Project</th><th>Feature</th><th>Fingerprint</th><th>Device</th><th>Since</th><th>Seat actions</th></tr></thead>
+            <thead><tr><th>Project</th><th>Feature</th><th>Fingerprint</th><th>Device</th><th>Since</th></tr></thead>
             <tbody>
               {devices.map((item, index) => (
                 <tr key={`${item.device_key_id}/${index}`}>
@@ -365,28 +431,24 @@ function App(): React.ReactElement {
                   <td><code>{shortHash(item.license_fingerprint)}</code></td>
                   <td><code>{shortHash(item.device_key_id)}</code></td>
                   <td>{formatTimestamp(item.created_at)}</td>
-                  <td className="actions">
-                    <button disabled={busy} onClick={() => void seatAction(item, checkoutPath())}>Checkout</button>
-                    <button disabled={busy} onClick={() => void seatAction(item, heartbeatPath())}>Heartbeat</button>
-                    <button disabled={busy} onClick={() => void seatAction(item, releasePath())}>Release</button>
-                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
-          {entitlements.length > 0 && (
+          {floatingEntitlements.length > 0 && (
             <div className="seatGrid">
               <h2>Seats by entitlement</h2>
-              {entitlements.map((item, index) => (
-                <div className="seatCard" key={`seat/${item.project}/${item.feature}/${index}`}>
+              {floatingEntitlements.map((item, index) => (
+                <div className="seatCard" key={`seat/${item.id}/${index}`}>
                   <div>
                     <strong>{item.project}</strong>
                     <span className="muted"> / {item.feature}</span>
+                    <span className="muted"> pool {item.pool_size}</span>
                   </div>
                   <div className="actions">
-                    <button disabled={busy} onClick={() => void seatAction(item, checkoutPath())}>Checkout</button>
-                    <button disabled={busy} onClick={() => void seatAction(item, heartbeatPath())}>Heartbeat</button>
-                    <button disabled={busy} onClick={() => void seatAction(item, releasePath())}>Release</button>
+                    <button disabled={busy || item.status !== "active" || seatSessions[item.id] !== undefined} onClick={() => void seatAction(item, "checkout")}>Start seat</button>
+                    <button disabled={busy || item.status !== "active" || seatSessions[item.id] === undefined} onClick={() => void seatAction(item, "heartbeat")}>Refresh</button>
+                    <button disabled={busy || seatSessions[item.id] === undefined} onClick={() => void seatAction(item, "release")}>Release</button>
                   </div>
                 </div>
               ))}
@@ -425,17 +487,24 @@ function App(): React.ReactElement {
       {activeTab === "download" && (
         <section className="tablePane full">
           <h2>Download licenses</h2>
+          <p className="muted">{ACTIVATION_DOWNLOAD_DISCLOSURE}</p>
           <table>
             <thead><tr><th>Project</th><th>Feature</th><th>Status</th><th>Valid</th><th>License</th></tr></thead>
             <tbody>
-              {entitlements.map((item, index) => (
-                <tr key={`dl/${item.project}/${item.feature}/${index}`}>
+              {downloadableEntitlements.map((item, index) => (
+                <tr key={`dl/${item.id}/${index}`}>
                   <td>{item.project}</td>
                   <td>{item.feature}</td>
                   <td><span className={`status ${item.status}`}>{item.status}</span></td>
                   <td>{formatWindow(item.valid_from, item.valid_until)}</td>
                   <td className="actions">
-                    <button disabled={busy} onClick={() => void download(item)}>Download .lic</button>
+                    <input
+                      aria-label={`Device key for ${item.project} ${item.feature}`}
+                      placeholder="device key id"
+                      value={downloadDeviceKeys[item.id] ?? ""}
+                      onChange={(event) => setDownloadDeviceKeys({ ...downloadDeviceKeys, [item.id]: event.target.value })}
+                    />
+                    <button disabled={busy || item.status !== "active" || (downloadDeviceKeys[item.id] ?? "").trim() === ""} onClick={() => void download(item)}>{ACTIVATION_DOWNLOAD_ACTION_LABEL}</button>
                   </td>
                 </tr>
               ))}
