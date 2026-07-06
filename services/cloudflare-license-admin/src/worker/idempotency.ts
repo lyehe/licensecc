@@ -4,23 +4,10 @@ import type {
   MutationContext,
   MutationResult,
 } from "@licensecc/cloudflare-licensing-backend/entitlements/entitlement_mutation";
+import { envelope, json } from "./responses.js";
 
 interface IdempotencyEnv {
   DB: D1DatabaseLike;
-}
-
-function json<T>(body: T, status = 200, headers: HeadersInit = {}): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: {
-      "content-type": "application/json; charset=utf-8",
-      ...headers,
-    },
-  });
-}
-
-function envelope<T>(requestId: string, code: string, data?: T, status = 200): Response {
-  return json({ ok: status >= 200 && status < 300, code, request_id: requestId, data }, status);
 }
 
 export async function idempotentReplay(env: IdempotencyEnv, scope: string, key: string | null): Promise<Response | null> {

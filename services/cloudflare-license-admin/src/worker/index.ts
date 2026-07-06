@@ -3,6 +3,7 @@ import type { JWTPayload } from "jose";
 import { openApiJson } from "./openapi.js";
 import { docsHtml } from "./docs_page.js";
 import { idempotentReplay, mutationResponse, rememberIdempotency } from "./idempotency.js";
+import { envelope, json } from "./responses.js";
 import type {
   EntitlementInput,
   EntitlementPatch,
@@ -76,20 +77,6 @@ const MAX_BODY_BYTES = 8192;
 // (~100 years in seconds). Keeps validators from accepting absurd or overflow values.
 const MAX_DURATION_SECONDS = 3_153_600_000;
 const jwksCache = new Map<string, ReturnType<typeof createRemoteJWKSet>>();
-
-function json<T>(body: T, status = 200, headers: HeadersInit = {}): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: {
-      "content-type": "application/json; charset=utf-8",
-      ...headers,
-    },
-  });
-}
-
-function envelope<T>(requestId: string, code: string, data?: T, status = 200): Response {
-  return json({ ok: status >= 200 && status < 300, code, request_id: requestId, data }, status);
-}
 
 function requestId(request: Request): string {
   return request.headers.get("cf-ray") ?? crypto.randomUUID();
