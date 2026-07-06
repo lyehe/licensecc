@@ -12,6 +12,8 @@ jobs:
       -  uses: actions/checkout@v4
          with:
             submodules: recursive
+      -  name: Patch vendored license generator
+         run: git -C extern/license-generator apply ../../patches/license-generator-cstdint.patch
       -  name: Install dependencies
          run: |
             sudo apt-get update

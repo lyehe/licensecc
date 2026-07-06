@@ -1,0 +1,11 @@
+diff --git a/src/base_lib/base64.h b/src/base_lib/base64.h
+--- a/src/base_lib/base64.h
++++ b/src/base_lib/base64.h
+@@ -1,6 +1,6 @@
+ #ifndef BASE64_H
+ #define BASE64_H
+-
++#include <cstdint>
+ #include <string>
+ #include <vector>
+ #ifdef __linux__

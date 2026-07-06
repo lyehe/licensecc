@@ -14,11 +14,42 @@ jobs:
       -  uses: actions/checkout@v4
          with:
             submodules: recursive
-      -  name: Install Boost (msvc 14.3 / VS2022)
+      -  name: Patch vendored license generator
          shell: bash
+         run: git -C extern/license-generator apply ../../patches/license-generator-cstdint.patch
+      -  name: Install Boost (msvc 14.3 / VS2022)
+         shell: pwsh
          run: |
-            choco install -y boost-msvc-14.3 --version 1.83.0
-            echo "BOOST_ROOT=C:/local/boost_1_83_0" >> $GITHUB_ENV
+            $boostVersion = "1.84.0"
+            $boostRoot = "C:\local\boost_1_84_0"
+            $installer = Join-Path $env:RUNNER_TEMP "boost_1_84_0-msvc-14.3-64.exe"
+            $url = "https://sourceforge.net/projects/boost/files/boost-binaries/$boostVersion/boost_1_84_0-msvc-14.3-64.exe/download"
+            $expectedSha256 = "b14090362af9730ed9cc125b456a76d981b010060ee30e6d2eb109f8144fa444"
+            $downloadOk = $false
+            for ($attempt = 1; $attempt -le 5; $attempt++) {
+              Remove-Item -LiteralPath $installer -ErrorAction SilentlyContinue
+              curl.exe -L --fail --retry 5 --retry-all-errors --retry-delay 10 -o $installer $url
+              if ($LASTEXITCODE -ne 0) {
+                Write-Warning "Boost download attempt $attempt failed with curl exit code $LASTEXITCODE"
+                Start-Sleep -Seconds (10 * $attempt)
+                continue
+              }
+              $actualSha256 = (Get-FileHash -Algorithm SHA256 $installer).Hash.ToLowerInvariant()
+              if ($actualSha256 -eq $expectedSha256) {
+                $downloadOk = $true
+                break
+              }
+              Write-Warning "Boost download attempt $attempt SHA256 mismatch: $actualSha256"
+              Start-Sleep -Seconds (10 * $attempt)
+            }
+            if (-not $downloadOk) {
+              throw "Boost installer download failed or checksum did not match"
+            }
+            Start-Process -FilePath $installer -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/DIR=$boostRoot" -Wait -NoNewWindow
+            if (-not (Test-Path (Join-Path $boostRoot "boost"))) {
+              throw "Boost install did not create $boostRoot\boost"
+            }
+            "BOOST_ROOT=C:/local/boost_1_84_0" >> $env:GITHUB_ENV
       -  name: Compile
          shell: bash
          run: |
