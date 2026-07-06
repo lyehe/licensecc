@@ -4,7 +4,7 @@
 
 [![Standard](https://img.shields.io/badge/c%2B%2B-17-blue.svg)](https://en.wikipedia.org/wiki/C%2B%2B#Standardization)
 [![unstable](http://badges.github.io/stability-badges/dist/unstable.svg)](http://github.com/badges/stability-badges)
-[![License](https://img.shields.io/badge/License-BSD%203--Clause-blue.svg)](https://opensource.org/licenses/BSD-3-Clause)
+[![License](https://img.shields.io/badge/License-AGPL--3.0--or--later-blue.svg)](https://www.gnu.org/licenses/agpl-3.0.html)
 [![travis](https://travis-ci.org/open-license-manager/licensecc.svg?branch=develop)](https://travis-ci.org/open-license-manager/licensecc)
 [![Github_CI](https://github.com/open-license-manager/licensecc/workflows/Github_CI/badge.svg)](https://github.com/open-license-manager/licensecc/actions)
 [![Codacy Badge](https://app.codacy.com/project/badge/Grade/81a1f6bc15014618934fc5fab4d3c206)](https://www.codacy.com/gh/open-license-manager/licensecc/dashboard?utm_source=github.com&amp;utm_medium=referral&amp;utm_content=open-license-manager/licensecc&amp;utm_campaign=Badge_Grade)
@@ -24,8 +24,7 @@ If you're experiencing problems, or you just need informations you can't find in
 Remember to show your appreciation giving us a <a class="github-button" href="https://github.com/open-license-manager/licensecc" data-icon="octicon-star" aria-label="Star open-license-manager/licensecc on GitHub">star</a> here on GitHub.
 
 ## License
-The project is donated to the community. It comes with freedom of use for everyone, and it always will be. 
-It has a [BSD 3 clauses](https://opensource.org/licenses/BSD-3-Clause) licensing schema, that allows free modification and use in commercial software. 
+Licensecc is licensed under the [GNU Affero General Public License v3.0 or later](https://www.gnu.org/licenses/agpl-3.0.html). See [LICENSE](LICENSE) for the full license text.
 
 ## Project Structure
 The software is made by 4 main sub-components:

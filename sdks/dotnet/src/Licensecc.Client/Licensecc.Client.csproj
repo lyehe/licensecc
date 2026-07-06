@@ -28,7 +28,7 @@
       contract only; binary anti-tamper / hardware fingerprinting stays in the C++ library.
     </Description>
     <PackageTags>licensecc;licensing;rsa;token;verification</PackageTags>
-    <PackageLicenseExpression>BSD-3-Clause</PackageLicenseExpression>
+    <PackageLicenseExpression>AGPL-3.0-or-later</PackageLicenseExpression>
     <RepositoryUrl>https://github.com/open-license-manager/licensecc</RepositoryUrl>
     <!-- R5.2 publish-readiness: project URL, a README that renders on NuGet, and a restore lockfile. -->
     <PackageProjectUrl>https://github.com/open-license-manager/licensecc</PackageProjectUrl>

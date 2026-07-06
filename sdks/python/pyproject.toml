@@ -4,12 +4,12 @@ version = "0.1.0"
 description = "Python client SDK for licensecc: offline verification of lccoa1 online-assertion and lcccfg1 config-attestation tokens, plus a thin HTTP client for the licensing-backend Worker."
 readme = "README.md"
 requires-python = ">=3.9"
-license = { text = "BSD-3-Clause" }
+license = { text = "AGPL-3.0-or-later" }
 authors = [{ name = "licensecc" }]
 keywords = ["licensing", "license", "verification", "rsa", "token", "licensecc"]
 classifiers = [
     "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: BSD License",
+    "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
     "Topic :: Security :: Cryptography",
     "Topic :: Software Development :: Libraries",
 ]
