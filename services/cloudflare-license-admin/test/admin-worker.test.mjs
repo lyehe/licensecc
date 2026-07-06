@@ -1206,6 +1206,9 @@ test("validatePolicyInput honors explicit values and rejects malformed bodies", 
     { project: "P", name: "x", type: "trial", trial_one_per_device: 2 },
     { project: "P", name: "x", type: "trial", pool_size: -1 },
     { project: "P", name: "x", type: "trial", duration_sec: -5 },
+    { project: "P", name: "x", type: "node_locked", pool_size: 1 },
+    { project: "P", name: "x", type: "floating" },
+    { project: "P", name: "x", type: "floating", pool_size: 0 },
   ]) {
     assert.equal(validatePolicyInput(bad), null, `expected null for ${JSON.stringify(bad)}`);
   }

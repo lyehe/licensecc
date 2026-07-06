@@ -260,11 +260,39 @@ test("policy: invalid create bodies are 400 invalid_request", async () => {
     { project: "DEFAULT", name: "x", type: "trial", expiry_strategy: "nope" },
     { project: "DEFAULT", name: "x", type: "trial", trial_one_per_device: 2 },
     { project: "DEFAULT", name: "x\ninjection", type: "trial" }, // newline rejected
+    { project: "DEFAULT", name: "x", type: "node_locked", pool_size: 1 },
+    { project: "DEFAULT", name: "x", type: "floating" },
+    { project: "DEFAULT", name: "x", type: "floating", pool_size: 0 },
   ]) {
     const res = await worker.fetch(devReq("/api/admin/policies", { method: "POST", body: JSON.stringify(bad) }), env);
     assert.equal(res.status, 400, `expected 400 for ${JSON.stringify(bad)}`);
     assert.equal((await body(res)).code, "invalid_request");
   }
+});
+
+test("policy: patch preserves explicit type/capacity invariants", async () => {
+  const db = freshDb();
+  const env = devEnv(db);
+  const node = await createPolicy(env, { project: "DEFAULT", name: "Node", type: "node_locked" });
+  const floating = await createPolicy(env, { project: "DEFAULT", name: "Float", type: "floating", pool_size: 2 });
+
+  const badNodePatch = await worker.fetch(devReq(`/api/admin/policies/${node.id}`, {
+    method: "PATCH",
+    body: JSON.stringify({ pool_size: 1 }),
+  }), env);
+  assert.equal(badNodePatch.status, 400);
+  assert.equal((await body(badNodePatch)).code, "invalid_request");
+
+  const badFloatingPatch = await worker.fetch(devReq(`/api/admin/policies/${floating.id}`, {
+    method: "PATCH",
+    body: JSON.stringify({ pool_size: 0 }),
+  }), env);
+  assert.equal(badFloatingPatch.status, 400);
+  assert.equal((await body(badFloatingPatch)).code, "invalid_request");
+
+  assert.equal(db.prepare("SELECT pool_size FROM entitlement_policies WHERE id=?").get(node.id).pool_size, 0);
+  assert.equal(db.prepare("SELECT pool_size FROM entitlement_policies WHERE id=?").get(floating.id).pool_size, 2);
+  assert.equal(db.prepare("SELECT COUNT(*) AS c FROM policy_events WHERE event_type='update'").get().c, 0);
 });
 
 test("policy: patch updates mutable fields + audits; identity fields are rejected", async () => {

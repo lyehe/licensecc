@@ -777,6 +777,16 @@ const POLICY_TYPES: ReadonlyArray<PolicyType> = ["trial", "node_locked", "floati
 const EXPIRY_STRATEGIES: ReadonlyArray<ExpiryStrategy> = ["fixed_window", "non_expiring"];
 const TRIAL_BASES: ReadonlyArray<TrialExpirationBasis> = ["from_issue", "from_first_activation", "from_first_use"];
 
+function policyTypeCapacityIsValid(type: PolicyType, poolSize: number): boolean {
+  if (type === "node_locked") {
+    return poolSize === 0;
+  }
+  if (type === "floating") {
+    return poolSize > 0;
+  }
+  return true;
+}
+
 // Resolve the per-policy default columns. Each is "undefined -> default; else validate".
 // Returns null on ANY invalid field so the caller emits a single 400 invalid_request.
 function readPolicyColumns(input: Record<string, unknown>): {
@@ -848,7 +858,8 @@ function validatePolicyInput(value: unknown): PolicyInput | null {
   const columns = readPolicyColumns(input);
   if (
     project === null || name === null || !POLICY_TYPES.includes(type as PolicyType) ||
-    notes === null || columns === null
+    notes === null || columns === null ||
+    !policyTypeCapacityIsValid(type as PolicyType, columns.pool_size)
   ) {
     return null;
   }
@@ -3009,6 +3020,10 @@ async function handlePolicyPatch(request: Request, env: Env, actor: Actor, polic
   const existing = await findPolicy(env, policyId);
   if (existing === null) {
     return envelope(requestIdValue, "not_found", undefined, 404);
+  }
+  const nextPoolSize = patch.pool_size ?? Number(existing.pool_size);
+  if (!policyTypeCapacityIsValid(existing.type, nextPoolSize)) {
+    return envelope(requestIdValue, "invalid_request", undefined, 400);
   }
   if (typeof env.DB.batch !== "function") {
     return envelope(requestIdValue, "mutation_failed", undefined, 500);

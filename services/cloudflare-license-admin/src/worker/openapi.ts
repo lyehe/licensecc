@@ -1753,7 +1753,7 @@ export const openApiDocument: OpenApiDocument = {
       PolicyInput: {
         type: "object",
         required: ["project", "name", "type"],
-        description: "Create body. project/name/type required; every other field takes the column default.",
+        description: "Create body. project/name/type required; every other field takes the column default. Explicit node_locked policies require pool_size=0; explicit floating policies require pool_size>0.",
         properties: {
           project: { type: "string", maxLength: 127 },
           name: { type: "string", maxLength: 127, description: "Unique per project (case-insensitive). A duplicate returns 409 policy_name_conflict." },
@@ -1761,7 +1761,7 @@ export const openApiDocument: OpenApiDocument = {
           valid_from_offset_sec: { type: ["integer", "null"], default: null },
           duration_sec: { type: ["integer", "null"], default: null },
           assertion_ttl_seconds: { type: "integer", minimum: 1, maximum: 3600, default: 300 },
-          pool_size: { type: "integer", minimum: 0, default: 0 },
+          pool_size: { type: "integer", minimum: 0, default: 0, description: "Capacity source of truth. node_locked requires 0; floating requires a value greater than 0." },
           max_active_devices: { type: "integer", minimum: 0, default: 1 },
           max_borrow_sec: { type: "integer", minimum: 0, default: 0 },
           meter_quota: { type: "integer", minimum: 0, default: 0, description: "Per-period consumption quota (0 = unlimited/count-only)." },
@@ -1776,12 +1776,12 @@ export const openApiDocument: OpenApiDocument = {
       },
       PolicyPatch: {
         type: "object",
-        description: "All fields optional; only provided fields are updated. project/name/type/status are NOT patchable (status flips only via disable/reenable).",
+        description: "All fields optional; only provided fields are updated. project/name/type/status are NOT patchable (status flips only via disable/reenable). A pool_size patch must preserve the existing policy type's node_locked/floating invariant.",
         properties: {
           valid_from_offset_sec: { type: ["integer", "null"] },
           duration_sec: { type: ["integer", "null"] },
           assertion_ttl_seconds: { type: "integer", minimum: 1, maximum: 3600 },
-          pool_size: { type: "integer", minimum: 0 },
+          pool_size: { type: "integer", minimum: 0, description: "Capacity source of truth. node_locked policies cannot be patched above 0; floating policies cannot be patched to 0." },
           max_active_devices: { type: "integer", minimum: 0 },
           max_borrow_sec: { type: "integer", minimum: 0 },
           meter_quota: { type: "integer", minimum: 0, description: "Per-period consumption quota (0 = unlimited/count-only). A stamped entitlement inherits it." },

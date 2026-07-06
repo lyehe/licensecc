@@ -201,6 +201,7 @@ export interface Policy {
 }
 
 // Create body. project/name/type are required; everything else takes the column default.
+// Explicit node_locked policies require pool_size=0; explicit floating policies require pool_size>0.
 export interface PolicyInput {
   project: string;
   name: string;
@@ -223,6 +224,7 @@ export interface PolicyInput {
 
 // Patch body. project/name/type/status are NOT patchable (name/type are frozen
 // identity; status flips only through disable/reenable). All fields optional.
+// A pool_size patch must preserve the existing policy type's node_locked/floating invariant.
 export interface PolicyPatch {
   valid_from_offset_sec?: number | null;
   duration_sec?: number | null;
