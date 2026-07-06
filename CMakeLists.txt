@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
 
-SET(LICENSECC_SHORT_LICENSE "BSD Software License")
+SET(LICENSECC_SHORT_LICENSE "GNU Affero General Public License v3.0 or later")
 
 SET(CMAKE_DISABLE_SOURCE_CHANGES OFF) #keys are generated in the source tree by default
 SET(CMAKE_DISABLE_IN_SOURCE_BUILD ON)
