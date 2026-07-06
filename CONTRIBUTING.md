@@ -1,82 +1,111 @@
 # Contributing to Licensecc
 
-## Interacting with the team 
+## Getting Help
 
-If you're experiencing issues with the project, due to lack of documentation 
-or you want to ask a question you can reach us on 
-[GitHub Discussions](https://github.com/open-license-manager/licensecc/discussions). 
-Discussions are the preferred way of contact because your questions are useful
-to other people.
+Use [GitHub Discussions](https://github.com/open-license-manager/licensecc/discussions) for questions, integration help, and documentation gaps. Use GitHub issues for reproducible bugs and actionable feature requests.
 
-If you're compiling `licensecc` following the guide and you meet a software issue
-(eg. doesn't compile, it crashes) you can submit an issue. Please try to be very specific about your problem. 
-You can use the guidelines in ["How to Submit A (Good) Bug Report"](#how-to-submit-a-good-bug-report) to structure your question. 
+## Reporting Bugs
 
-### Reporting Bugs
+Before opening a bug report, check whether the issue already exists. If an open issue already describes the problem, add your details there instead of opening a duplicate.
 
-Before creating bug reports, please [check the repository](https://github.com/open-license-manager/licensecc/issues) to see if the problem has already been reported. If it has **and the issue is still open**, add a comment to the existing issue instead of opening a new one. When you are creating a bug report, please [include as many details as possible](#how-to-submit-a-good-bug-report).
+Good bug reports include:
 
-#### How to submit a good Bug Report
+- A clear title.
+- Exact reproduction steps.
+- The expected behavior and actual behavior.
+- The operating system, compiler, CMake version, and whether you are cross-compiling.
+- The CMake command or preset you used.
+- Whether the application is running in a VM, container, or bare-metal environment.
+- A minimal test case or example when possible.
+- Crash logs, stack traces, or `open-license.log` output when relevant.
 
-Bugs are tracked as [GitHub issues](https://guides.github.com/features/issues/). Explain the problem and include additional details to help maintainers reproduce the problem:
+Before reporting a build issue, update your checkout and submodules:
 
--   **Use a clear and descriptive title** for the issue to identify the problem.
--   **Describe the exact steps which reproduce the problem** in as many details as possible. For example, start by explaining how are you using Licensecc.  
--   **Provide specific examples to demonstrate the steps**. Include links to files or GitHub projects, or licenses, which can cause the bug. If you're providing code snippets in the issue, use [Markdown code blocks](https://help.github.com/articles/markdown-basics/#multiple-lines). 
--   **Describe the current behavior and the expected one*** Describe the current result, and the expected behavior.
--   **Provide a unit test to demonstrate the bug**. The best way to report a bug, and to have it fixed **forever** is to design a test to demonstrate it. 
--   **If you're reporting that Licensecc crashed**, include a crash dump and the associated message. 
--   **Label the issue as bug.**
+```console
+git pull
+git submodule update --init --recursive
+```
 
-Provide more context by answering these questions:
+## Suggesting Enhancements
 
--   **Can you reproduce the problem using the example application?**
--   **Can you reliably reproduce the issue?** If not, provide details about how often the problem happens and under which conditions it normally happens.
--   If the problem is related integrating Licensecc with your application, **produce a minimal example to demonstrate it** Does the problem happen only with some license type? Does the problem only happen in Linux/Docker/Windows?
+Open an enhancement issue for feature requests that affect public APIs, license formats, build behavior, SDKs, services, or documented workflows. Larger design changes should include the problem being solved, expected users, compatibility impact, and validation approach.
 
-Include details about your configuration and environment:
+## Code Contributions
 
--   **Update Licensecc to the latest version** If possible try to pull the latest changes from `develop` branch.
--   **What's the name and version of the OS you're using**?
--   **What's the name and version of the compiler you're using**? Are you cross compiling? If you're cross compiling specify the host and the target operating system.
--   **What's are the `cmake` command line you used to generate your build scripts**? 
--   **Are you running Licensecc in a virtual machine/docker?** If so, which VM software are you using and which operating systems and versions are used for the guest?
+For normal work on this public fork, target `main` unless an issue or maintainer says otherwise.
 
-### Suggesting Enhancements or new features
+Before opening a pull request:
 
-If you have an idea about a new feature or a question about an environment support, the simplest way you can reach the team is through the [project forum](https://groups.google.com/forum/#!forum/licensecc).
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/dev-check.ps1
+```
 
-Otherwise you can open an enhancement suggestion in github. Before you do so check [existing enhancement request](https://github.com/open-license-manager/licensecc/issues?utf8=%E2%9C%93&q=is%3Aissue+label%3Aenhancement) to see if the enhancement has already been suggested.
+For service, SDK, database-backend, and portal changes, run the relevant local gates as well:
 
-Please also check for the [current and planned features](https://github.com/open-license-manager/licensecc/wiki/features) in the wiki to see where the project is heading to.
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -SkipCore -IncludeServices -IncludeUi -IncludeSchemaParity
+powershell -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -SkipCore -IncludeE2E
+powershell -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -SkipCore -IncludeSdks
+```
 
-### Code contributions
+The root `package.json` exposes the same service-oriented entry points:
 
-Contributions to `licensecc` will be subject to the following rules:
+```powershell
+npm run check:services
+npm run check:e2e
+npm run lint:services
+```
 
--   small patches eg. documentation changes, small bug fixes can be submitted directly on github, use the description of the patch to shortly explain the content of the patch. 
--   if the patch is not completely trivial please open an issue first and provide a description of what you want to achieve.
--   larger contributions should be discussed first on the [project forum](https://groups.google.com/forum/#!forum/licensecc). 
+If you cannot run that script on your platform, run the equivalent commands:
 
-If you want to contribute we are happy to integrate your code. You can start by looking through the [`good first issue`](https://github.com/open-license-manager/licensecc/issues?utf8=%E2%9C%93&q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22) and [`help-wanted`](https://github.com/open-license-manager/licensecc/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22) issues. 
+```console
+cmake --preset dev-debug
+cmake --build --preset dev-debug
+ctest --preset dev-debug
+```
 
-You can have a look to the project upcoming milestones to see what's going to be implemented soon and what is the project direction. If you decide to contribute on an issue scheduled in the current milestone, comment on the issue first. If the issue is marked as "assigned" there may be already some work done for it. Commenting on the issue will ensure we don't duplicate our work. Also have a look to the branches:  there may be a feature branch corresponding to the issue with some work already done.   
+Manual fallback without presets:
 
-If you have already forked the repository to implement a specific feature, and you want your code to be merged in the main repository please first file an enhancement request as explained in [suggesting enhancements](#suggesting-enhancements-or-new-features). If you found a bug and you want to propose a fix please [report a bug](#reporting-bugs) before.
+```console
+cmake -S . -B build/dev-debug -DCMAKE_BUILD_TYPE=Debug -DLCC_PROJECT_NAME=test
+cmake --build build/dev-debug
+ctest --test-dir build/dev-debug --output-on-failure
+```
 
-We apply a subset of [GitFlow](https://nvie.com/posts/a-successful-git-branching-model) development workflow. Be sure to work against `develop` branch, since `master` is reserved for stable releases, and may be outdated.
- 
-#### General coding rules (for larger contributions)
+## Repository Hygiene
 
-Supposing you already know how to contribute to an open source project on GitHub (if you have doubts you can check this short [guide](https://git-scm.com/book/en/v2/GitHub-Contributing-to-a-Project) ), you're working on an existing issue the code is already committed on your fork.
+Do not commit generated files or local-only state:
 
--   Ensure your feature branch is up to date with the `develop`, eventually merge the latest changes from the `develop` branch. This will help us save time.
--   Reformat the changed code using "clang-format" to keep consistent formatting style. The style we use is in `.clang-format` at the base of the project.
--   Prepare your pull request, in the pull request comment reference the issue the pull request will fix.
--   Check your pull request compiles and passes the GitHub CI checks (the Linux and Windows workflows)
--   In the pull request comment reference the issue you want to fix.
+- `build/`
+- `install/`
+- `.wrangler/`
+- `dist/`
+- `dist-worker/`
+- `node_modules/`
+- local Wrangler configs such as `services/**/wrangler.toml` and `services/**/wrangler.jsonc`
+- service secrets such as `.dev.vars` and `.online-key/`
+- `doc/_build/`
+- `doc/_doxygen/`
+- Python `__pycache__` and `*.pyc`
+- .NET `bin/` and `obj/`
 
-##### Don't
--   Don't reformat the code following your personal likes, it introduce a lot of "noise" and makes very hard to merge. Use the clang-format style provided at the base of the project.
--   Very large pull requests with few comments, no corresponding issue explaining what's it about will probably be rejected.
--   We understand that the project is still in beta stage, however we would like to discuss it with you before we take project changing decision. You can reach us on the [project forum](https://groups.google.com/forum/#!forum/licensecc). 
+Track Wrangler example templates such as `wrangler.example.toml` and `wrangler.example.jsonc`; keep real deployment IDs and secrets local.
+
+The current `main` branch now includes the C++ core plus service, SDK, database-backend, and portal slices. Changes to those areas should keep their local gates green and update docs when commands, workflows, public APIs, or support status change.
+
+## Coding Guidelines
+
+- Keep patches focused and avoid unrelated formatting churn.
+- Use the repository `.clang-format` style for C++ changes.
+- Add or update tests for behavior changes.
+- Prefer source-tree-clean build behavior; generated license project files should live under the build tree by default.
+- Do not change public API, license-file format, or generated token format without documenting compatibility impact.
+
+## Pull Request Checklist
+
+- The PR explains what changed and why.
+- Related issues are linked.
+- Local verification commands are listed.
+- Generated output is not committed.
+- New or changed behavior has tests.
+- Documentation is updated when commands, workflows, public behavior, or support status changes.

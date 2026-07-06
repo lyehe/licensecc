@@ -1,0 +1,31 @@
+{
+  "name": "@licensecc/cloudflare-customer-portal",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build:worker": "tsc -p tsconfig.worker.json",
+    "build:ui": "vite build",
+    "build": "npm run build:worker && npm run build:ui",
+    "test:ui": "npm run build:ui && node --test test/portal-ui-workflow.test.mjs",
+    "test:openapi": "npm run build:worker && node --test test/openapi.test.mjs",
+    "test": "npm run build:worker && node --experimental-sqlite --test test/portal-otp.test.mjs test/portal-session.test.mjs test/portal-ratelimit.test.mjs test/portal-worker.test.mjs && node --test test/openapi.test.mjs test/staging-portal-drill.test.mjs",
+    "test:e2e": "playwright install chromium && playwright test --config playwright.config.mjs",
+    "lint": "node scripts/lint.mjs",
+    "dry-run": "npm run build && npx wrangler deploy --dry-run --config wrangler.example.jsonc",
+    "migrate:local": "npx wrangler d1 migrations apply DB --local --config ../cloudflare-licensing-backend/wrangler.example.toml",
+    "validate:staging-portal": "node scripts/staging-portal-drill.mjs"
+  },
+  "dependencies": {
+    "@licensecc/cloudflare-licensing-backend": "file:../cloudflare-licensing-backend",
+    "@vitejs/plugin-react": "^4.5.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "vite": "^6.3.5"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.60.0",
+    "typescript": "^5.8.3",
+    "wrangler": "^4.18.0"
+  }
+}

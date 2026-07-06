@@ -1,0 +1,14 @@
+purpose=licensecc-online-assertion
+version=1
+alg=rsa-pkcs1-sha256
+key-id=sha256:a8bb3c312c58e5054b7da3ce5806e6039c1f8c7a66e75746436bb3f97bda88e0
+project=DEFAULT
+feature=EXPORT
+license-fingerprint=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+device-hash=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+nonce=cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+status=ok
+issued-at=1000
+expires-at=1300
+cache-until=1600
+revocation-seq=42

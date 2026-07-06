@@ -7,17 +7,17 @@ jobs:
         fail-fast: false
         max-parallel: 1
         matrix:
-          build_type: ["Debug", "Release"]
           os: ["windows-2022"]
-          static: ["true", "false"]
+          preset:
+            - "ci-windows-msvc-debug-dynamic"
+            - "ci-windows-msvc-debug-static"
+            - "ci-windows-msvc-release-dynamic"
+            - "ci-windows-msvc-release-static"
 
       steps:
       -  uses: actions/checkout@v4
          with:
             submodules: recursive
-      -  name: Patch vendored license generator
-         shell: bash
-         run: git -C extern/license-generator apply ../../patches/license-generator-cstdint.patch
       -  name: Cache Boost (msvc 14.3 / VS2022)
          id: cache-boost
          uses: actions/cache@v4
@@ -61,18 +61,9 @@ jobs:
               throw "Boost install missing at $boostRoot"
             }
             "BOOST_ROOT=C:/local/boost_1_84_0" >> $env:GITHUB_ENV
-      -  name: Compile
-         shell: bash
-         run: |
-            cmake -S . -B build -A x64 -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} -DSTATIC_RUNTIME:BOOL=${{ matrix.static }} -DCMAKE_DISABLE_FIND_PACKAGE_OpenSSL=TRUE -DLCC_PROJECT_NAME:STRING=test -DCMAKE_INSTALL_PREFIX=C:/licensecc
-            cmake --build build --target install --config ${{ matrix.build_type }}
-      -  name: Test
-         shell: bash
-         working-directory: build
-         run: ctest -C ${{ matrix.build_type }}
-         env:
-            CTEST_OUTPUT_ON_FAILURE: 1
-            VIRTUAL_ENV: VM
+      -  name: Core check
+         shell: pwsh
+         run: pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -Preset ${{ matrix.preset }}
       -  name: Inspector
          shell: bash
          run: C:/licensecc/bin/test/lccinspector.exe

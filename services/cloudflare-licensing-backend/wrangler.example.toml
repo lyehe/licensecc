@@ -1,0 +1,102 @@
+name = "licensecc-online-verifier"
+main = "src/index.ts"
+compatibility_date = "2026-06-03"
+workers_dev = true
+preview_urls = false
+
+# Cron Trigger: the scheduled() handler reclaims lapsed concurrent seats (so idle entitlements
+# still free seats and keep peak_concurrent accurate without waiting for a later checkout) and
+# enforces retention on the append-only usage_events / lease_issuance logs.
+[triggers]
+crons = ["*/5 * * * *"]
+
+[vars]
+D1_RATE_LIMIT_ENABLED = "0"
+D1_RATE_LIMIT_LIMIT = "20"
+D1_RATE_LIMIT_PERIOD_SECONDS = "60"
+# Request proof-of-possession rollout mode: off, soft, or required.
+# off keeps legacy clients compatible. soft logs missing/invalid/replayed proof but
+# still allows otherwise-valid entitlements. required denies missing/invalid/replayed
+# proof and is the PRODUCTION DEFAULT. Roll out off -> soft (observe) -> required.
+REQUEST_SIGNATURE_MODE = "required"
+REQUEST_SIGNATURE_MAX_SKEW_SECONDS = "300"
+# Device-proof gate for lease /activate-/renew + seat /checkout: off | required.
+# A presented ECDSA device proof is always verified (binds the issuance to a registered,
+# non-exportable key); "required" denies issuance without one -- set it in production to make
+# the hardware lock actually bind (a cloned hw_id alone cannot get a lease/seat).
+DEVICE_PROOF_MODE = "off"
+# --- Slice 1 order-ingest (POST /v1/orders): signed, exactly-once subscription fulfillment ---
+# Mode: required (default; reject unsigned/replayed) | soft (verify + observe, NEVER mutate) |
+# off (dev-only; the endpoint 404s). Roll out off -> soft -> required.
+ORDER_INGEST_MODE = "required"
+# Audience folded into the signed bytes to block cross-environment replay (e.g. prod/staging).
+# MUST be non-empty in required mode (asserted at verify time, fail-closed).
+ORDER_INGEST_AUDIENCE = "prod"
+# Accepted clock skew (seconds) for the signed X-LCC-Timestamp; default 300, hard cap 3600.
+ORDER_MAX_SKEW_SECONDS = "300"
+# --- Slice 2 account tokens (per-customer credentials + account isolation) ---
+# Mode: off (DEFAULT, back-compat — legacy LEASE_ISSUE_BEARER path, NO per-customer isolation;
+# runs shadow-eval logging) | soft (account token required; NULL-owner entitlement allowed+logged,
+# populated cross-account DENIED) | required (full isolation; NULL/mismatch denied).
+# WARNING: the default is `off`, which is FAIL-OPEN (no isolation). PRODUCTION MUST set `required`
+# after the staged cutover: off -> soft (flip when account.shadow_nomatch for active callers is 0)
+# -> required (flip when zero active NULL-owner entitlements remain).
+ACCOUNT_TOKEN_MODE = "required"
+# The pepper id used to MINT new tokens; must be a key in ACCOUNT_TOKEN_PEPPERS (secret below).
+ACCOUNT_TOKEN_ACTIVE_PEPPER_ID = "p1"
+# last_used_at write throttle (seconds); best-effort, never gates auth. Default 300.
+ACCOUNT_TOKEN_LAST_USED_THROTTLE_SEC = "300"
+# Optional D1 limiter tier overrides. Defaults fall back to D1_RATE_LIMIT_*.
+# D1_CLIENT_RATE_LIMIT_LIMIT = "20"
+# D1_CLIENT_RATE_LIMIT_PERIOD_SECONDS = "60"
+# D1_ENTITLEMENT_RATE_LIMIT_LIMIT = "20"
+# D1_ENTITLEMENT_RATE_LIMIT_PERIOD_SECONDS = "60"
+# D1_GLOBAL_RATE_LIMIT_ENABLED = "0"
+# D1_GLOBAL_RATE_LIMIT_LIMIT = "200"
+# D1_GLOBAL_RATE_LIMIT_PERIOD_SECONDS = "60"
+
+[observability]
+enabled = true
+head_sampling_rate = 1
+
+[observability.logs]
+enabled = true
+head_sampling_rate = 1
+invocation_logs = true
+persist = true
+
+[[d1_databases]]
+binding = "DB"
+database_name = "licensecc-online-verifier"
+database_id = "replace-with-d1-database-id"
+migrations_dir = "migrations"
+
+[[ratelimits]]
+name = "VERIFY_RATE_LIMITER"
+namespace_id = "1001"
+simple = { limit = 20, period = 60 }
+
+# Set these as Worker secrets, not plaintext vars:
+# wrangler secret put ONLINE_SIGNING_PRIVATE_KEY_PKCS8_PEM
+# wrangler secret put ONLINE_SIGNING_KEY_ID
+# Order-ingest HMAC key map: a JSON object { "<key_id>": "<base64-secret>" }; each secret
+# decodes to >= 32 bytes. The map is asserted non-empty / well-formed at verify time
+# (fail-closed). Rotate by adding a new key_id before retiring the old.
+# wrangler secret put ORDER_HMAC_SECRETS
+# Account-token peppers: a JSON object { "<pepper_key_id>": "<base64-pepper>" }; each pepper decodes
+# to >= 32 bytes (fail-closed). Tokens are stored as keyed HMAC under a pepper; rotate by adding a
+# new pepper_key_id + flipping ACCOUNT_TOKEN_ACTIVE_PEPPER_ID (old tokens keep validating until drained).
+# wrangler secret put ACCOUNT_TOKEN_PEPPERS
+# Break-glass operator bearer for the SEPARATE /v1/emergency/* route ONLY (never the scoped paths).
+# Unset = closed (the route 404s). Use only for incident recovery; every use is logged at warn.
+# wrangler secret put EMERGENCY_OPERATOR_BEARER
+# Webhook signing key map: a JSON object { "<key_id>": "<base64-secret>" }; each secret decodes to
+# >= 32 bytes (fail-closed; mirrors ORDER_HMAC_SECRETS). The cron-drained webhook dispatcher signs
+# each delivery HMAC-SHA256 over "<t>.<rawjsonbody>" and sends header
+#   Licensecc-Signature: t=<epoch>,keyid=<id>,v1=<hex>
+# Receivers MUST enforce a 5-minute replay window on t. With no usable secret / missing active key the
+# dispatcher logs + SKIPS delivery (never sends unsigned). No per-endpoint secret is stored in D1.
+# wrangler secret put WEBHOOK_SIGNING_SECRETS
+# WEBHOOK_SIGNING_KEY_ID names the active key (a key in WEBHOOK_SIGNING_SECRETS) that signs deliveries.
+# It is a non-secret selector, so it MAY be a [vars] entry; kept here next to its map for clarity.
+# wrangler secret put WEBHOOK_SIGNING_KEY_ID

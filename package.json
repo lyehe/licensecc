@@ -1,0 +1,28 @@
+{
+  "name": "licensecc",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local orchestration scripts for the Licensecc monorepo.",
+  "scripts": {
+    "check": "powershell -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -IncludeServices -IncludeSdks -IncludeSchemaParity",
+    "check:all": "powershell -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -IncludeServices -IncludeSdks -IncludeUi -IncludeE2E -IncludeSchemaParity",
+    "check:core": "powershell -ExecutionPolicy Bypass -File scripts/dev-check.ps1",
+    "check:services": "powershell -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -SkipCore -IncludeServices -IncludeUi -IncludeSchemaParity",
+    "check:e2e": "powershell -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -SkipCore -IncludeE2E",
+    "check:dry-run": "powershell -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -SkipCore -IncludeDryRun",
+    "lint:services": "npm --prefix services/cloudflare-licensing-backend run lint && npm --prefix services/cloudflare-license-admin run lint && npm --prefix services/cloudflare-customer-portal run lint && npm --prefix services/cloudflare-d1-backup run lint",
+    "test:backend": "npm --prefix services/cloudflare-licensing-backend run test && npm --prefix services/cloudflare-licensing-backend run test:sql && npm --prefix services/cloudflare-licensing-backend run test:pg",
+    "test:admin": "npm --prefix services/cloudflare-license-admin run test && npm --prefix services/cloudflare-license-admin run test:sql && npm --prefix services/cloudflare-license-admin run test:ui",
+    "test:portal": "npm --prefix services/cloudflare-customer-portal run test && npm --prefix services/cloudflare-customer-portal run test:ui",
+    "test:backup": "npm --prefix services/cloudflare-d1-backup run test"
+  },
+  "workspaces": [
+    "services/cloudflare-licensing-backend",
+    "services/cloudflare-license-admin",
+    "services/cloudflare-customer-portal",
+    "services/cloudflare-d1-backup"
+  ],
+  "engines": {
+    "node": ">=22"
+  }
+}

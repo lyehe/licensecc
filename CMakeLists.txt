@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
 
 SET(LICENSECC_SHORT_LICENSE "GNU Affero General Public License v3.0 or later")
 
-SET(CMAKE_DISABLE_SOURCE_CHANGES OFF) #keys are generated in the source tree by default
+SET(CMAKE_DISABLE_SOURCE_CHANGES ON)
 SET(CMAKE_DISABLE_IN_SOURCE_BUILD ON)
 
 IF(NOT LCC_PROJECT_NAME)
@@ -11,9 +11,9 @@ IF(NOT LCC_PROJECT_NAME)
 	set(LCC_PROJECT_NAME "DEFAULT" CACHE STRING "Project name (name of the software for which you want to issue a license)") 
 ENDIF(NOT LCC_PROJECT_NAME)
 
-#base folder where projects are stored (/projects)
+# Base folder where generated license projects are stored.
 IF(NOT LCC_PROJECTS_BASE_DIR)
-	set(LCC_PROJECTS_BASE_DIR "${CMAKE_SOURCE_DIR}/projects") 
+	set(LCC_PROJECTS_BASE_DIR "${CMAKE_BINARY_DIR}/projects")
 ENDIF(NOT LCC_PROJECTS_BASE_DIR)
 
 cmake_policy(SET CMP0048 NEW)

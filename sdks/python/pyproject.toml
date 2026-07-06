@@ -1,0 +1,46 @@
+[project]
+name = "licensecc"
+version = "0.1.0"
+description = "Python client SDK for licensecc: offline verification of lccoa1 online-assertion and lcccfg1 config-attestation tokens, plus a thin HTTP client for the licensing-backend Worker."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "AGPL-3.0-or-later" }
+authors = [{ name = "licensecc" }]
+keywords = ["licensing", "license", "verification", "rsa", "token", "licensecc"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
+    "Topic :: Security :: Cryptography",
+    "Topic :: Software Development :: Libraries",
+]
+
+# Zero hard dependencies beyond `cryptography`. The HTTP client uses the
+# standard-library `urllib` so no `requests`/`httpx` is required at runtime.
+dependencies = [
+    "cryptography>=41.0.0",
+]
+
+[project.optional-dependencies]
+# Optional async/ergonomic HTTP transport. Not required: the default HttpClient
+# uses std-lib urllib. Install with `pip install licensecc[httpx]` to opt in.
+httpx = ["httpx>=0.27.0"]
+test = ["pytest>=7.0"]
+
+[project.urls]
+Homepage = "https://github.com/open-license-manager/licensecc"
+Source = "https://github.com/open-license-manager/licensecc"
+Issues = "https://github.com/open-license-manager/licensecc/issues"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/licensecc"]
+
+[dependency-groups]
+dev = ["pytest>=7.0"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

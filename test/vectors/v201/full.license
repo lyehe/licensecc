@@ -1,0 +1,14 @@
+[MY_PRODUCT]
+lic_ver = 201
+canonical-v = 1
+sig-v = 1
+sig-alg = rsa-pkcs1-sha256
+key-id = sha256:9d1797cf21f0341f364b7af016a745580fd36b78b17cd1630d1049879fe9ecf2
+valid-from = 2024-01-02
+valid-to = 2035-12-31
+start-version = 1.2.3
+end-version = 9.9.9
+client-signature = AEBC-Q0RF-Rkc=
+client-signature-source-strength = strong-disk-serial-or-uuid
+extra-data = alpha
+sig = ATBdLvf11ndWBYGBhRqH5kQWcfWfMbdIRZKSg5lfITI21K+00p7VBqiRcATTn5jtzvU4QR0cfCyHlSqA+70YwKbYmUkXb/IBLft+B2g48EU5Lu44sJpNu0YF7oBMXJ+uajg9AApEdJmrtWxwaUKngB2nD0CAtdWq9T0pB/P8d5A=

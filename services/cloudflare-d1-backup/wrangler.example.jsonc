@@ -1,0 +1,38 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "licensecc-d1-backup",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-06-05",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  },
+  "vars": {
+    "ACCOUNT_ID": "replace-with-cloudflare-account-id",
+    "DATABASE_ID": "replace-with-d1-database-id",
+    "DATABASE_NAME": "licensecc-online-verifier",
+    "BACKUP_PREFIX": "d1/licensecc-online-verifier",
+    "BACKUP_RETENTION_DAYS": "90"
+  },
+  "workflows": [
+    {
+      "name": "licensecc-d1-backup",
+      "binding": "D1_BACKUP_WORKFLOW",
+      "class_name": "D1BackupWorkflow"
+    }
+  ],
+  "triggers": {
+    "crons": ["0 3 * * *"]
+  },
+  "r2_buckets": [
+    {
+      "binding": "BACKUP_BUCKET",
+      "bucket_name": "licensecc-d1-backups"
+    }
+  ]
+  // Required secrets:
+  // wrangler secret put D1_REST_API_TOKEN
+  // Optional for POST /backup/run and GET /backup/status/:id:
+  // wrangler secret put BACKUP_TRIGGER_TOKEN
+}

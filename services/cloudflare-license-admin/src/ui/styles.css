@@ -1,0 +1,758 @@
+:root {
+  color: #1b1f23;
+  background: #f6f7f4;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+main {
+  min-height: 100vh;
+}
+
+.topbar {
+  align-items: center;
+  background: #ffffff;
+  border-bottom: 1px solid #d8ddd1;
+  display: flex;
+  justify-content: space-between;
+  padding: 16px 24px;
+}
+
+h1, h2, p {
+  margin: 0;
+}
+
+h1 {
+  font-size: 22px;
+  font-weight: 700;
+}
+
+h2 {
+  font-size: 16px;
+  margin-bottom: 12px;
+}
+
+p {
+  color: #667065;
+  font-size: 13px;
+  margin-top: 4px;
+}
+
+nav {
+  display: flex;
+  gap: 8px;
+}
+
+button {
+  background: #ffffff;
+  border: 1px solid #aeb8a9;
+  border-radius: 6px;
+  color: #1b1f23;
+  cursor: pointer;
+  min-height: 32px;
+  padding: 6px 10px;
+}
+
+button.active,
+button:hover:not(:disabled) {
+  background: #285f52;
+  border-color: #285f52;
+  color: #ffffff;
+}
+
+button:disabled {
+  color: #9ca39a;
+  cursor: not-allowed;
+}
+
+.grid {
+  display: grid;
+  gap: 16px;
+  padding: 24px;
+}
+
+.metrics {
+  grid-template-columns: repeat(4, minmax(140px, 1fr));
+}
+
+.metrics div {
+  background: #ffffff;
+  border: 1px solid #d8ddd1;
+  border-radius: 8px;
+  padding: 18px;
+}
+
+.metrics span {
+  color: #667065;
+  display: block;
+  font-size: 13px;
+}
+
+.metrics strong {
+  display: block;
+  font-size: 30px;
+  margin-top: 8px;
+}
+
+.workspace {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: minmax(280px, 340px) 1fr;
+  padding: 24px;
+}
+
+aside,
+.tablePane {
+  background: #ffffff;
+  border: 1px solid #d8ddd1;
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.tablePane.full {
+  margin: 24px;
+}
+
+.tablePane {
+  overflow-x: auto;
+}
+
+form,
+.filters {
+  display: grid;
+  gap: 10px;
+}
+
+label {
+  color: #485047;
+  display: grid;
+  font-size: 12px;
+  gap: 4px;
+}
+
+input,
+select,
+textarea {
+  border: 1px solid #bac3b6;
+  border-radius: 6px;
+  color: #1b1f23;
+  font: inherit;
+  min-height: 32px;
+  padding: 6px 8px;
+  width: 100%;
+}
+
+textarea {
+  min-height: 72px;
+  resize: vertical;
+}
+
+.filters {
+  grid-template-columns: 1fr 1fr 160px;
+  margin-bottom: 14px;
+}
+
+table {
+  border-collapse: collapse;
+  font-size: 13px;
+  min-width: 980px;
+  width: 100%;
+}
+
+th,
+td {
+  border-bottom: 1px solid #e5e9e0;
+  padding: 9px 8px;
+  text-align: left;
+  vertical-align: middle;
+}
+
+th {
+  color: #59645a;
+  font-weight: 600;
+}
+
+code {
+  font-size: 12px;
+}
+
+.muted {
+  color: #667065;
+}
+
+.status {
+  border-radius: 999px;
+  display: inline-block;
+  min-width: 72px;
+  padding: 3px 8px;
+  text-align: center;
+}
+
+.status.active {
+  background: #dfeee7;
+  color: #285f52;
+}
+
+.status.disabled {
+  background: #f0e9cf;
+  color: #7a5c10;
+}
+
+.status.revoked {
+  background: #efd9d6;
+  color: #8b3028;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.details {
+  color: #485047;
+  display: grid;
+  gap: 3px;
+  line-height: 1.3;
+  max-width: 320px;
+}
+
+.details span {
+  overflow-wrap: anywhere;
+}
+
+.editRow td {
+  background: #f8faf6;
+  padding: 14px 8px;
+}
+
+.editForm {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(4, minmax(150px, 1fr));
+}
+
+.wide {
+  grid-column: 1 / -1;
+}
+
+.reason {
+  margin-top: 14px;
+  max-width: 480px;
+}
+
+.metrics.reportCards {
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  padding: 0;
+}
+
+.selectedRow td {
+  background: #eef3ec;
+}
+
+.staleRow td {
+  background: #fbeeec;
+}
+
+.staleFlag {
+  background: #efd9d6;
+  border-radius: 999px;
+  color: #8b3028;
+  font-size: 11px;
+  font-weight: 600;
+  margin-left: 6px;
+  padding: 2px 6px;
+}
+
+@media (max-width: 920px) {
+  .topbar {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .metrics,
+  .workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .filters {
+    grid-template-columns: 1fr;
+  }
+
+  .editForm {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Trial sub-panel inside the policy editor (only shown when type === 'trial'). */
+.trialPanel {
+  border: 1px solid #d8ddd1;
+  border-radius: 6px;
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 10px 12px 12px;
+}
+
+.trialPanel legend {
+  color: #59645a;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 0 4px;
+}
+
+/* A checkbox + label on one row (policy trial flags), overriding the default stacked label grid. */
+label.checkboxRow {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+label.checkboxRow input {
+  min-height: 0;
+  width: auto;
+}
+
+/* Pagination footer under each list table. */
+.tableFooter {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  padding: 8px 2px 2px;
+}
+
+/* Destructive action buttons (Revoke entitlement, Disable customer, modal Confirm). */
+button.danger {
+  border-color: #c2796f;
+  color: #8b3028;
+}
+
+button.danger:hover:not(:disabled) {
+  background: #8b3028;
+  border-color: #8b3028;
+  color: #ffffff;
+}
+
+/* Typed-confirm modal for irreversible / broad-blast actions. */
+.modalOverlay {
+  align-items: center;
+  background: rgba(27, 31, 35, 0.45);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding: 16px;
+  position: fixed;
+  z-index: 50;
+}
+
+.modal {
+  background: #ffffff;
+  border-radius: 10px;
+  box-shadow: 0 12px 40px rgba(27, 31, 35, 0.25);
+  max-width: 460px;
+  padding: 20px 22px;
+  width: 100%;
+}
+
+.modal.danger {
+  border-top: 4px solid #8b3028;
+}
+
+.modal h2 {
+  margin: 0 0 8px;
+}
+
+.modal p {
+  color: #485047;
+  line-height: 1.4;
+  margin: 0 0 12px;
+}
+
+.modal .actions {
+  justify-content: flex-end;
+  margin-top: 14px;
+}
+
+/* ── Workstream C — global search (header), bulk bar, checkbox column ────────── */
+
+/* Global search lives in the topbar between the title and the nav. The results dropdown is
+   absolutely positioned under the input so it overlays content without reflowing the page. */
+.globalSearch {
+  display: flex;
+  flex: 1;
+  gap: 8px;
+  max-width: 460px;
+  position: relative;
+}
+
+.globalSearch input {
+  flex: 1;
+}
+
+.globalSearch button {
+  white-space: nowrap;
+}
+
+.searchResults {
+  background: #ffffff;
+  border: 1px solid #d8ddd1;
+  border-radius: 8px;
+  box-shadow: 0 12px 40px rgba(27, 31, 35, 0.18);
+  left: 0;
+  max-height: 420px;
+  overflow-y: auto;
+  padding: 10px;
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 40;
+}
+
+.searchResultsHead {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.searchEmpty {
+  margin: 6px 2px;
+}
+
+.searchGroup {
+  margin-bottom: 8px;
+}
+
+.searchGroup h3 {
+  color: #59645a;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  margin: 6px 2px 4px;
+  text-transform: uppercase;
+}
+
+button.searchResult {
+  align-items: baseline;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  text-align: left;
+  width: 100%;
+}
+
+.searchResultLabel {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.searchResultMeta {
+  flex-shrink: 0;
+  font-size: 12px;
+}
+
+button.searchResult:hover:not(:disabled) .searchResultMeta {
+  color: #dfeee7;
+}
+
+/* The bulk-action bar shown above the entitlement grid when >=1 row is checked. */
+.bulkBar {
+  align-items: center;
+  background: #eef3ec;
+  border: 1px solid #cbd6c6;
+  border-radius: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 8px 12px;
+}
+
+.bulkBar span {
+  color: #485047;
+  font-size: 13px;
+  font-weight: 600;
+  margin-right: 4px;
+}
+
+/* The checkbox column (select-all header + per-row) is narrow and centered. */
+.checkCol {
+  text-align: center;
+  width: 36px;
+}
+
+.checkCol input {
+  margin: 0;
+  min-height: 0;
+  width: auto;
+}
+
+.eventsToolbar {
+  grid-template-columns: max-content;
+  justify-content: flex-end;
+}
+
+@media (max-width: 920px) {
+  .globalSearch {
+    max-width: none;
+  }
+}
+
+/* ── Workstream F — inline-SVG charts, expiring-soon, health badge, force-release ──
+   The SVGs carry ONLY geometry + an aria-label (from operatorWorkflow.ts); every colour,
+   stroke, and fill below is owned by CSS so the chart math stays pure and unit-tested. */
+
+.reportsTab {
+  display: grid;
+  gap: 24px;
+  padding: 0 0 24px;
+}
+
+/* Range selectors (last 7d/30d/90d; expiring 7/30/90) — a small inline button group. */
+.rangeSelector {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.rangeSelector button {
+  min-height: 28px;
+  padding: 4px 10px;
+}
+
+.chartPanels {
+  display: grid;
+  gap: 14px;
+  padding: 0 24px;
+}
+
+.chartGrid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: 1fr 1fr;
+}
+
+.chartCard {
+  background: #ffffff;
+  border: 1px solid #d8ddd1;
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+}
+
+.chartCard h3 {
+  color: #485047;
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.chartHint {
+  margin: 0;
+}
+
+/* The SVG fills its card width; the fixed viewBox + preserveAspectRatio="none" lets the geometry
+   stretch to the container. A subtle inner backdrop separates it from the card. */
+.chart {
+  background: #f8faf6;
+  border: 1px solid #e5e9e0;
+  border-radius: 6px;
+  display: block;
+  height: 120px;
+  width: 100%;
+}
+
+.chartEmpty {
+  align-items: center;
+  background: #f8faf6;
+  border: 1px dashed #cbd6c6;
+  border-radius: 6px;
+  display: flex;
+  font-size: 13px;
+  height: 120px;
+  justify-content: center;
+  padding: 12px;
+  text-align: center;
+}
+
+/* Line/area aesthetics — vector-effect keeps the stroke crisp under the non-uniform scale. */
+.chartLine {
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.chartArea {
+  stroke: none;
+}
+
+.checkoutsArea {
+  fill: rgba(40, 95, 82, 0.16);
+}
+
+.checkoutsLine {
+  stroke: #285f52;
+}
+
+.denialsLine {
+  stroke: #8b3028;
+  stroke-dasharray: 4 3;
+}
+
+.denialRateLine {
+  stroke: #7a5c10;
+}
+
+.chartBar {
+  fill: #285f52;
+}
+
+/* Legend chips beneath the line/area chart. */
+.chartLegend {
+  display: flex;
+  gap: 14px;
+}
+
+.legend {
+  align-items: center;
+  color: #485047;
+  display: inline-flex;
+  font-size: 12px;
+  gap: 6px;
+}
+
+.legend::before {
+  border-radius: 2px;
+  content: "";
+  display: inline-block;
+  height: 10px;
+  width: 14px;
+}
+
+.checkoutsLegend::before {
+  background: #285f52;
+}
+
+.denialsLegend::before {
+  background: #8b3028;
+}
+
+.fulfillmentSpark {
+  margin: 0 24px 14px;
+}
+
+/* Expiring-soon panel. */
+.expiringHead {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.expiringSoonRow td {
+  background: #fbf6ec;
+}
+
+.daysLeft {
+  border-radius: 999px;
+  display: inline-block;
+  font-weight: 600;
+  min-width: 36px;
+  padding: 2px 8px;
+  text-align: center;
+}
+
+.daysLeft.urgent {
+  background: #f0e9cf;
+  color: #7a5c10;
+}
+
+/* Entitlement-health badge next to the status pill. Reuses the .status palette
+   (green/amber/red): healthy=green, expiring=amber, expired/suspended=red. */
+.healthBadge {
+  border-radius: 999px;
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 600;
+  margin-left: 6px;
+  padding: 2px 8px;
+  text-transform: capitalize;
+}
+
+.health-healthy {
+  background: #dfeee7;
+  color: #285f52;
+}
+
+.health-expiring {
+  background: #f0e9cf;
+  color: #7a5c10;
+}
+
+.health-expired,
+.health-suspended {
+  background: #efd9d6;
+  color: #8b3028;
+}
+
+@media (max-width: 920px) {
+  .chartGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Screen-reader-only: visually hidden but exposed to assistive tech (audit R6.5 a11y).
+   Used for <table><caption> labels that need no visual chrome. */
+.srOnly {
+  border: 0;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  padding: 0;
+  position: absolute;
+  white-space: nowrap;
+  width: 1px;
+}
+
+.mono {
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 12px;
+  word-break: break-all;
+}
+
+/* Recent-deliveries pane under the webhook endpoints table + the per-entitlement device pane
+   (audit R6.5). */
+.deliveriesPane {
+  border-top: 1px solid #e2e2e2;
+  margin-top: 24px;
+  padding-top: 16px;
+}
+
+.deliveriesPane h3 {
+  margin: 0 0 12px;
+}
+
+/* A button styled as an inline link (e.g. the device pane's "close"). */
+.linkish {
+  background: none;
+  border: 0;
+  color: #2a6f97;
+  cursor: pointer;
+  font-size: 12px;
+  margin-left: 10px;
+  padding: 0;
+  text-decoration: underline;
+}

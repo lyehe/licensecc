@@ -1,0 +1,26 @@
+* text=auto
+
+# Keep command/config surfaces stable across Windows and Linux.
+*.cmake text eol=lf
+*.gitignore text eol=lf
+*.in text eol=lf
+*.json text eol=lf
+*.jsonc text eol=lf
+*.md text eol=lf
+*.mjs text eol=lf
+*.ps1 text eol=lf
+*.py text eol=lf
+*.rst text eol=lf
+*.sh text eol=lf
+*.sql text eol=lf
+*.toml text eol=lf
+*.ts text eol=lf
+*.tsx text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+CMakeLists.txt text eol=lf
+.gitattributes text eol=lf
+.gitignore text eol=lf
+
+# Byte-sensitive cross-language fixtures.
+test/vectors/** text eol=lf

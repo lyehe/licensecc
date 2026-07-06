@@ -7,7 +7,7 @@
 *.so
 *.dylib
 
-#Visual studio files
+# Visual studio files
 .vs
 /out
 
@@ -18,12 +18,15 @@
 /Makefile
 /Testing
 
-# Cmake generated files
+# CMake generated files
 build/*
 !build/.gitkeep 
 install/*
+/build-fuzz-probe/
+/doc/_build/
+/doc/_doxygen/
 
-#eclipse files
+# Eclipse files
 .cproject
 .settings
 .project
@@ -39,3 +42,27 @@ projects/*
 /.venv/
 /Pipfile
 /.pydevproject
+
+# Python generated files
+**/__pycache__/
+**/*.pyc
+
+# JavaScript/Worker generated and local-only files
+/.wrangler/
+/dist/
+**/node_modules/
+**/dist/
+**/dist-worker/
+**/.wrangler/
+**/playwright-report/
+**/test-results/
+**/.dev.vars
+**/.online-key/
+services/**/wrangler.toml
+services/**/wrangler.jsonc
+!services/**/wrangler.example.toml
+!services/**/wrangler.example.jsonc
+
+# .NET generated files
+**/bin/
+**/obj/

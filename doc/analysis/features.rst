@@ -50,7 +50,7 @@ It can handle multiple licenses at the same time. See the wiki page about :ref:`
 Licensed software components/features
 =========================================================
 A licensed software may be composed by many features (functions, components...) each one activable independently. Licensing system tells the licensed software which features are enabled, and which features are disabled. 
-For an example usage see `examples <https://github.com/open-license-manager/examples/tree/develop/program_features>`_ 
+For an example usage see the `examples repository <https://github.com/open-license-manager/examples>`_.
  
 License Management (planned)
 ==================================

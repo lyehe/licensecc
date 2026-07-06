@@ -6,14 +6,12 @@ jobs:
       strategy:
         fail-fast: false
         matrix:
-          build_type: ["Debug", "Release"]
+          preset: ["ci-linux-debug", "ci-linux-release"]
 
       steps:
       -  uses: actions/checkout@v4
          with:
             submodules: recursive
-      -  name: Patch vendored license generator
-         run: git -C extern/license-generator apply ../../patches/license-generator-cstdint.patch
       -  name: Install dependencies
          run: |
             sudo apt-get update
@@ -22,16 +20,8 @@ jobs:
               libboost-iostreams-dev libboost-program-options-dev \
               libboost-system-dev libboost-thread-dev libboost-date-time-dev \
               valgrind
-      -  name: Compile
-         run: |
-            cmake -S . -B build -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} -DLCC_PROJECT_NAME=test -DCMAKE_INSTALL_PREFIX=$PWD/install
-            cmake --build build --target install -j$(nproc)
-      -  name: Test
-         working-directory: build
-         run: ctest --output-on-failure
-         env:
-            CTEST_OUTPUT_ON_FAILURE: 1
-            VIRTUAL_ENV: VM
+      -  name: Core check
+         run: pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -Preset ${{ matrix.preset }}
       -  name: On failure print logs
          if: ${{ failure() }}
          run: cat /tmp/open-license.log || true

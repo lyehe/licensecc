@@ -1,0 +1,19 @@
+{
+  "name": "@licensecc/cloudflare-d1-backup",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test test/*.mjs",
+    "lint": "node scripts/lint.mjs",
+    "dry-run": "npm run build && npx wrangler deploy --dry-run --config wrangler.example.jsonc",
+    "validate:deploy": "node scripts/validate-deploy.mjs",
+    "time-travel": "node scripts/time-travel.mjs",
+    "restore-drill": "node scripts/restore-drill.mjs"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3",
+    "wrangler": "^4.98.0"
+  }
+}

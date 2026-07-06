@@ -50,9 +50,10 @@ if(LCC_LOCATION)
 	if(NOT lccgen_FOUND)
 		find_program(LCC_EXECUTABLE
 		NAMES ${lcc_names} HINTS ${LCC_LOCATION} DOC "lccgen command line client")
-		FIND_PACKAGE_HANDLE_STANDARD_ARGS(lccgen FOUND_VAR LCC_FOUND
+		FIND_PACKAGE_HANDLE_STANDARD_ARGS(lccgen FOUND_VAR lccgen_FOUND
         	                               REQUIRED_VARS LCC_EXECUTABLE 
             	                           FAIL_MESSAGE "Error finding lcc executable. variable LCC_LOCATION non set correctly.")
+		set(LCC_FOUND ${lccgen_FOUND})
     	add_executable(license_generator::lccgen IMPORTED GLOBAL)                                            
 		set_property(TARGET license_generator::lccgen PROPERTY IMPORTED_LOCATION ${LCC_EXECUTABLE})
 	ENDIF(NOT lccgen_FOUND)

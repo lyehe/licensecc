@@ -1,100 +1,176 @@
 # Licensecc
 
-*Copy protection, licensing library and license generator for Windows and Linux.*
+*Copy protection, licensing library, and license generator integration for Windows and Linux.*
 
 [![Standard](https://img.shields.io/badge/c%2B%2B-17-blue.svg)](https://en.wikipedia.org/wiki/C%2B%2B#Standardization)
-[![unstable](http://badges.github.io/stability-badges/dist/unstable.svg)](http://github.com/badges/stability-badges)
 [![License](https://img.shields.io/badge/License-AGPL--3.0--or--later-blue.svg)](https://www.gnu.org/licenses/agpl-3.0.html)
-[![travis](https://travis-ci.org/open-license-manager/licensecc.svg?branch=develop)](https://travis-ci.org/open-license-manager/licensecc)
-[![Github_CI](https://github.com/open-license-manager/licensecc/workflows/Github_CI/badge.svg)](https://github.com/open-license-manager/licensecc/actions)
-[![Codacy Badge](https://app.codacy.com/project/badge/Grade/81a1f6bc15014618934fc5fab4d3c206)](https://www.codacy.com/gh/open-license-manager/licensecc/dashboard?utm_source=github.com&amp;utm_medium=referral&amp;utm_content=open-license-manager/licensecc&amp;utm_campaign=Badge_Grade)
-[![codecov](https://codecov.io/gh/open-license-manager/licensecc/branch/develop/graph/badge.svg?token=vdrBBzX6Rl)](https://codecov.io/gh/open-license-manager/licensecc)
-[![Github Issues](https://img.shields.io/github/issues/open-license-manager/licensecc)](http://github.com/open-license-manager/licensecc/issues)
+[![Linux_CI](https://github.com/lyehe/licensecc/actions/workflows/linux.yml/badge.svg)](https://github.com/lyehe/licensecc/actions/workflows/linux.yml)
+[![Github_CI](https://github.com/lyehe/licensecc/actions/workflows/windows.yml/badge.svg)](https://github.com/lyehe/licensecc/actions/workflows/windows.yml)
 
-Protect the software you develop from unauthorized copies, limit the usage in time, to a specific set of 
-machines, or prevent the usage in  virtualized environments. It is an open source license manager that helps to keep your 
-software closed :smirk: . Among other features if it runs on a "real hardware" it can generate a signature of that hardware and report if the signature doesn't match.
+Licensecc helps applications verify local license files, bind licenses to machine identifiers, and enforce execution limits such as expiration dates and licensed features. The current `main` branch includes the C++ core library, inspector, examples, documentation, tests, service packages, SDKs, and build tooling.
 
-A comprehensive [list of features](http://open-license-manager.github.io/licensecc/analysis/features.html), and their status is available in the project site. 
+The repository is licensed under the [GNU Affero General Public License v3.0 or later](https://www.gnu.org/licenses/agpl-3.0.html). See [LICENSE](LICENSE) for the full license text.
 
-If you're experiencing problems, or you just need informations you can't find in the [documentation](http://open-license-manager.github.io/licensecc)  please contact us on [github discussions](https://github.com/open-license-manager/licensecc/discussions), we'll be happy to help. 
+## Repository Map
 
-Remember to show your appreciation giving us a <a class="github-button" href="https://github.com/open-license-manager/licensecc" data-icon="octicon-star" aria-label="Star open-license-manager/licensecc on GitHub">star</a> here on GitHub.
+- `src/`: C++ implementation.
+- `include/`: public C API headers.
+- `test/`: C++ unit and functional tests.
+- `examples/`: minimal integration examples.
+- `cmake/`: CMake find modules and build helpers.
+- `extern/`: vendored license generator submodule used during configuration.
+- `doc/`: documentation source and architecture notes.
+- `scripts/`: local developer helper scripts.
+- `patches/`: patches applied to vendored dependencies in CI and local checks.
+- `package.json`: root orchestration scripts for service, SDK, schema, and E2E checks.
+- `services/cloudflare-licensing-backend/`: licensing backend service, local SQLite adapter, D1 migrations, and fenced PostgreSQL/Supabase adapter.
+- `services/cloudflare-license-admin/`: operator console Worker and React UI.
+- `services/cloudflare-customer-portal/`: customer portal Worker and React UI.
+- `services/cloudflare-d1-backup/`: D1 backup and restore-drill Worker.
+- `sdks/python/`: Python SDK for token verification and backend HTTP calls.
+- `sdks/dotnet/`: .NET SDK for token verification and backend HTTP calls.
 
-## License
-Licensecc is licensed under the [GNU Affero General Public License v3.0 or later](https://www.gnu.org/licenses/agpl-3.0.html). See [LICENSE](LICENSE) for the full license text.
+Generated project material is written under the CMake build tree by default, not into the source checkout.
 
-## Project Structure
-The software is made by 4 main sub-components:
--   a C++ library with a nice C api, `licensecc` with minimal (or no) external dependencies (the part you have to integrate in your software) that is the project you're currently in.
--   a license debugger `lcc-inspector` to be sent to the final customer when there are licensing problems or for calculating the pc hash before issuing the license.
--   a license generator (github project [lcc-license-generator](https://github.com/open-license-manager/lcc-license-generator)) `lccgen` for customizing the library and generate the licenses.
--   Usage [examples](https://github.com/open-license-manager/examples) to simplify the integration in your project.
- 
-## How to build
-Below an overview of the basic build procedure, you can find detailed instructions for [Linux](http://open-license-manager.github.io/licensecc/development/Build-the-library.html) 
-or [Windows](http://open-license-manager.github.io/licensecc/development/Build-the-library-windows.html) in the project web site. 
+## Prerequisites
 
-### Prerequisites
--   Operating system: Linux(Ubuntu, CentOS), Windows
--   compilers       : GCC (Linux) MINGW (Linux cross compile for Windows), MINGW or MSVC (Windows) 
--   tools           : cmake(>=3.16), git, make/ninja(linux)
--   libs            : Linux requires OpenSSL; Windows depends only on system libraries. Boost is required to **build** the project (it is used by the bundled license generator, which is built during configuration, and by the tests). It is **not linked** into the final `licensecc` library, so your application does not need Boost at runtime.
+- CMake 3.16 or newer for manual builds.
+- CMake 3.21 or newer for `CMakePresets.json`.
+- A C++17 compiler.
+- Git with submodule support.
+- Linux: OpenSSL, Zlib where required by the OpenSSL version, and Boost development packages for the bundled generator/tests.
+- Windows: Visual Studio 2022 or another supported C++ toolchain. Boost is required for tests and for building the bundled license generator during configuration. If Boost is not in a default CMake search path, set `BOOST_ROOT` to the Boost install directory.
 
-For a complete list of dependencies and supported environments see [the project website](http://open-license-manager.github.io/licensecc/development/Dependencies.html)
+Boost is not linked into the final `licensecc` runtime library.
 
-Clone the project. It has submodules, don't forget the `--recursive` option.
-
-```console
-git clone --recursive https://github.com/open-license-manager/licensecc.git
-cd licensecc/build
-```
-
-### build on Linux
+## Clone
 
 ```console
-cmake .. -DCMAKE_INSTALL_PREFIX=../install
-make
-make install
+git clone --recursive https://github.com/lyehe/licensecc.git
+cd licensecc
 ```
 
-### build on Windows (with MSVC 2022)
+If the repository was cloned without submodules:
 
 ```console
-cmake .. -G "Visual Studio 17 2022" -A x64 -DBOOST_ROOT="{Folder where boost is}" -DCMAKE_INSTALL_PREFIX=../install
-cmake --build . --target install --config Release
+git submodule update --init --recursive
 ```
 
-### cross compile with MINGW on Linux
+## Recommended Local Check
+
+On Windows PowerShell:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/dev-check.ps1
+```
+
+That script applies the vendored generator patch temporarily if needed, configures the `dev-debug` preset, builds it, runs CTest, and warns if untracked service/SDK work is present.
+
+The default check expects `extern/license-generator` to match the pinned submodule commit. If you are intentionally testing generator changes, preserve that work and run with `-AllowDirtyGeneratorSubmodule`.
+
+Useful variants:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -Preset dev-release
+powershell -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -Preset ci-windows-msvc
+powershell -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -Preset ci-windows-msvc-release-static
+powershell -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -Preset ci-linux-release
+powershell -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -SkipTests
+powershell -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -SkipCore -IncludeServices -IncludeUi -IncludeSchemaParity
+powershell -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -AllowDirtyGeneratorSubmodule
+powershell -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -IncludeBackend
+powershell -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -IncludeServices
+powershell -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -IncludeUi
+powershell -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -IncludeE2E
+powershell -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -IncludeSchemaParity
+powershell -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -IncludeDryRun
+powershell -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -IncludeSdks
+```
+
+`-IncludeBackend` runs backend lint, the unit suite, SQL/migration suite, and fenced PostgreSQL adapter tests after the core C++ checks.
+`-IncludeServices` runs lint and unit/API tests for the backend, admin portal, customer portal, and D1 backup service.
+`-IncludeUi` adds Vite UI workflow tests for the admin and customer portals.
+`-IncludeE2E` adds the backend flow tests and Playwright browser suites.
+`-IncludeSchemaParity` runs D1 schema and PostgreSQL schema parity checks.
+`-IncludeDryRun` runs each service deployment dry-run against tracked example Wrangler configs.
+`-IncludeSdks` runs the Python and .NET SDK test suites after the core C++ checks.
+
+Equivalent root npm shortcuts are available for common service runs:
+
+```powershell
+npm run check:core
+npm run check:services
+npm run check:e2e
+npm run check:all
+```
+
+## Manual Build
+
+Using presets:
 
 ```console
-x86_64-w64-mingw32.static-cmake .. -DCMAKE_INSTALL_PREFIX=../install
-make
-make install
+cmake --preset dev-debug
+cmake --build --preset dev-debug
+ctest --preset dev-debug
 ```
 
-## How to test
-
-### on Linux
+Manual fallback without presets:
 
 ```console
-make test
+cmake -S . -B build/dev-debug -DCMAKE_BUILD_TYPE=Debug -DLCC_PROJECT_NAME=test -DCMAKE_INSTALL_PREFIX=install/dev-debug
+cmake --build build/dev-debug
+ctest --test-dir build/dev-debug --output-on-failure
 ```
 
-### on Windows (MSVC)
+Windows MSVC CI-style configure:
 
 ```console
-ctest -C Release
+cmake --preset ci-windows-msvc
+cmake --build --preset ci-windows-msvc
+ctest --preset ci-windows-msvc
 ```
 
-## How to use
+The Windows workflow matrix also has explicit `ci-windows-msvc-debug-dynamic`, `ci-windows-msvc-debug-static`, `ci-windows-msvc-release-dynamic`, and `ci-windows-msvc-release-static` presets.
 
-A minimal, self-contained integration example lives in [`examples/minimal`](examples/minimal) (about 20 lines: acquire a license and report failures with `lcc_strerror`/`print_error`). 
-The [examples](https://github.com/open-license-manager/examples) repository shows more ways to integrate `licensecc` into your project.
+Linux CI-style configure:
 
-## How to contribute
+```console
+cmake --preset ci-linux-core
+cmake --build --preset ci-linux-core
+ctest --preset ci-linux-core
+```
 
-The easiest way you can solve your problems or ask help is through the [discussions tab](https://github.com/open-license-manager/licensecc/discussions) above, otherwise if you think there is a problem you can open an issue in the [issue system](https://github.com/open-license-manager/licensecc/issues). 
-Have a look to the [contribution guidelines](CONTRIBUTING.md) before reporting.
-We use [GitFlow](https://datasift.github.io/gitflow/IntroducingGitFlow.html) (or at least a subset of it). 
-Remember to install the gitflow git plugin and use `develop` as default branch for your pull requests. 
+The Linux workflow matrix uses `ci-linux-debug` and `ci-linux-release`; `ci-linux-core` remains a debug compatibility alias.
+
+## Generated License Project Files
+
+By default, generated license project files are placed under:
+
+```text
+build/<preset>/projects/<project-name>
+```
+
+Override `LCC_PROJECTS_BASE_DIR` only when you intentionally need a stable external project directory:
+
+```console
+cmake -S . -B build/custom -DLCC_PROJECT_NAME=my-product -DLCC_PROJECTS_BASE_DIR=/path/to/projects
+```
+
+## Usage
+
+A minimal, self-contained integration example lives in [`examples/minimal`](examples/minimal). It acquires a license and reports failures with `lcc_strerror` and `print_error`.
+
+## Contributing
+
+Use the current active branch policy for this repository. For normal work on this public fork, open pull requests against `main` unless an issue or maintainer says otherwise.
+
+Before opening a pull request:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/dev-check.ps1
+```
+
+Do not commit generated outputs such as `build/`, `install/`, `.wrangler/`, `dist/`, `node_modules/`, `doc/_doxygen/`, Python caches, or .NET `bin/obj` directories.
+Do not commit local Wrangler configs or secrets such as `services/**/wrangler.toml`, `services/**/wrangler.jsonc`, `.dev.vars`, or `.online-key/`; track only the `wrangler.example.*` templates.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for reporting and contribution guidelines.

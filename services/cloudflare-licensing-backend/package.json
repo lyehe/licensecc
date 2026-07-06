@@ -1,0 +1,74 @@
+{
+  "name": "@licensecc/cloudflare-licensing-backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./entitlements/entitlement_mutation": {
+      "types": "./src/entitlements/entitlement_mutation.d.ts",
+      "default": "./src/entitlements/entitlement_mutation.mjs"
+    },
+    "./entitlements/policy": {
+      "types": "./src/entitlements/policy.d.ts",
+      "default": "./src/entitlements/policy.mjs"
+    },
+    "./catalog/plan_projection": {
+      "types": "./src/catalog/plan_projection.d.ts",
+      "default": "./src/catalog/plan_projection.mjs"
+    },
+    "./auth/account_token_issue": {
+      "default": "./src/auth/account_token_issue.mjs"
+    },
+    "./auth/account_token": {
+      "default": "./src/auth/account_token.mjs"
+    },
+    "./auth/account_auth": {
+      "default": "./src/auth/account_auth.mjs"
+    },
+    "./lease/usage_report": {
+      "default": "./src/lease/usage_report.mjs"
+    },
+    "./lease/seat_reclaim": {
+      "types": "./src/lease/seat_reclaim.d.ts",
+      "default": "./src/lease/seat_reclaim.mjs"
+    },
+    "./webhooks/webhook": {
+      "default": "./src/webhooks/webhook.mjs"
+    },
+    "./audit/audit_digest": {
+      "types": "./src/audit/audit_digest.d.ts",
+      "default": "./src/audit/audit_digest.mjs"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test test/*.mjs test/fulfillment/order_event.test.mjs test/fulfillment/order_hmac.test.mjs test/fulfillment/order_ingest_gates.test.mjs test/fulfillment/order_sign.test.mjs test/auth/account_token.test.mjs test/auth/account_token_cli.test.mjs",
+    "test:openapi": "npm run build && node --test test/openapi-spec.test.mjs",
+    "test:sql": "npm run build && node --experimental-sqlite --test test/db/*.mjs test/sql/*.mjs test/fulfillment/order_ingest_exactly_once.test.mjs test/fulfillment/account_isolation.test.mjs",
+    "test:e2e": "npm --prefix ../cloudflare-license-admin run build:worker && npm run build && node --experimental-sqlite --test test/e2e/*.mjs",
+    "test:db": "node --experimental-sqlite --test test/db/*.mjs",
+    "test:pg": "node --test supabase-postgres/translate.test.mjs supabase-postgres/order-apply-pg.test.mjs supabase-postgres/pg-route-guard.test.mjs",
+    "lint": "node scripts/lint.mjs",
+    "schema:parity": "uv run --no-project python scripts/check-schema-parity.py",
+    "schema:parity:pg": "uv run --no-project --with sqlglot python scripts/check-pg-parity.py",
+    "dry-run": "npx wrangler deploy src/index.ts --dry-run --config wrangler.example.toml",
+    "migrate:local": "npx wrangler d1 migrations apply DB --local --config wrangler.example.toml",
+    "migrate:remote": "npx wrangler d1 migrations apply DB --remote --config wrangler.toml",
+    "db:local:init": "node --experimental-sqlite local-host/migrate.mjs",
+    "db:local:reset": "node --experimental-sqlite local-host/migrate.mjs --reset",
+    "local:server": "node --experimental-sqlite local-host/server.mjs",
+    "entitlement": "node scripts/entitlement.mjs",
+    "account-token": "node scripts/account-token.mjs",
+    "device-key": "node scripts/device-key.mjs",
+    "report": "node scripts/report.mjs",
+    "order:sign": "node scripts/order-sign.mjs",
+    "generate-online-key": "node scripts/generate-online-key.mjs",
+    "generate-online-assertion-fixture": "node scripts/generate-online-assertion-fixture.mjs",
+    "validate:remote-cpp": "node scripts/remote-cpp-verify.mjs",
+    "validate:public-verifier": "node scripts/public-verifier-drill.mjs"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3",
+    "wrangler": "^4.18.0"
+  }
+}

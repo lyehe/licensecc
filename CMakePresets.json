@@ -1,0 +1,312 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 21,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "dev-debug",
+      "displayName": "Developer Debug",
+      "description": "Default local debug build with generated license project files under the build tree.",
+      "binaryDir": "${sourceDir}/build/dev-debug",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/install/dev-debug",
+        "LCC_PROJECT_NAME": "test"
+      }
+    },
+    {
+      "name": "dev-release",
+      "displayName": "Developer Release",
+      "description": "Default local release build with generated license project files under the build tree.",
+      "binaryDir": "${sourceDir}/build/dev-release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/install/dev-release",
+        "LCC_PROJECT_NAME": "test"
+      }
+    },
+    {
+      "name": "ci-linux-debug",
+      "displayName": "CI Linux Debug",
+      "description": "Linux CI debug configure shape.",
+      "binaryDir": "${sourceDir}/build/ci-linux-debug",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/install/ci-linux-debug",
+        "LCC_PROJECT_NAME": "test"
+      }
+    },
+    {
+      "name": "ci-linux-release",
+      "displayName": "CI Linux Release",
+      "description": "Linux CI release configure shape.",
+      "binaryDir": "${sourceDir}/build/ci-linux-release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/install/ci-linux-release",
+        "LCC_PROJECT_NAME": "test"
+      }
+    },
+    {
+      "name": "ci-linux-core",
+      "displayName": "CI Linux Core",
+      "description": "Compatibility alias for the Linux CI debug configure shape.",
+      "binaryDir": "${sourceDir}/build/ci-linux-core",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/install/ci-linux-core",
+        "LCC_PROJECT_NAME": "test"
+      }
+    },
+    {
+      "name": "ci-windows-msvc-debug-dynamic",
+      "displayName": "CI Windows MSVC Debug Dynamic",
+      "description": "Windows MSVC CI debug configure shape with dynamic runtime.",
+      "generator": "Visual Studio 17 2022",
+      "architecture": "x64",
+      "binaryDir": "${sourceDir}/build/ci-windows-msvc-debug-dynamic",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_DISABLE_FIND_PACKAGE_OpenSSL": "TRUE",
+        "CMAKE_INSTALL_PREFIX": "C:/licensecc",
+        "LCC_PROJECT_NAME": "test",
+        "STATIC_RUNTIME": "FALSE"
+      }
+    },
+    {
+      "name": "ci-windows-msvc-debug-static",
+      "displayName": "CI Windows MSVC Debug Static",
+      "description": "Windows MSVC CI debug configure shape with static runtime.",
+      "generator": "Visual Studio 17 2022",
+      "architecture": "x64",
+      "binaryDir": "${sourceDir}/build/ci-windows-msvc-debug-static",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_DISABLE_FIND_PACKAGE_OpenSSL": "TRUE",
+        "CMAKE_INSTALL_PREFIX": "C:/licensecc",
+        "LCC_PROJECT_NAME": "test",
+        "STATIC_RUNTIME": "TRUE"
+      }
+    },
+    {
+      "name": "ci-windows-msvc-release-dynamic",
+      "displayName": "CI Windows MSVC Release Dynamic",
+      "description": "Windows MSVC CI release configure shape with dynamic runtime.",
+      "generator": "Visual Studio 17 2022",
+      "architecture": "x64",
+      "binaryDir": "${sourceDir}/build/ci-windows-msvc-release-dynamic",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_DISABLE_FIND_PACKAGE_OpenSSL": "TRUE",
+        "CMAKE_INSTALL_PREFIX": "C:/licensecc",
+        "LCC_PROJECT_NAME": "test",
+        "STATIC_RUNTIME": "FALSE"
+      }
+    },
+    {
+      "name": "ci-windows-msvc-release-static",
+      "displayName": "CI Windows MSVC Release Static",
+      "description": "Windows MSVC CI release configure shape with static runtime.",
+      "generator": "Visual Studio 17 2022",
+      "architecture": "x64",
+      "binaryDir": "${sourceDir}/build/ci-windows-msvc-release-static",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_DISABLE_FIND_PACKAGE_OpenSSL": "TRUE",
+        "CMAKE_INSTALL_PREFIX": "C:/licensecc",
+        "LCC_PROJECT_NAME": "test",
+        "STATIC_RUNTIME": "TRUE"
+      }
+    },
+    {
+      "name": "ci-windows-msvc",
+      "displayName": "CI Windows MSVC",
+      "description": "Compatibility alias for the Windows MSVC debug dynamic configure shape.",
+      "generator": "Visual Studio 17 2022",
+      "architecture": "x64",
+      "binaryDir": "${sourceDir}/build/ci-windows-msvc",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_DISABLE_FIND_PACKAGE_OpenSSL": "TRUE",
+        "CMAKE_INSTALL_PREFIX": "C:/licensecc",
+        "LCC_PROJECT_NAME": "test",
+        "STATIC_RUNTIME": "FALSE"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "dev-debug",
+      "configurePreset": "dev-debug",
+      "configuration": "Debug"
+    },
+    {
+      "name": "dev-release",
+      "configurePreset": "dev-release",
+      "configuration": "Release"
+    },
+    {
+      "name": "ci-linux-debug",
+      "configurePreset": "ci-linux-debug",
+      "configuration": "Debug",
+      "targets": ["install"]
+    },
+    {
+      "name": "ci-linux-release",
+      "configurePreset": "ci-linux-release",
+      "configuration": "Release",
+      "targets": ["install"]
+    },
+    {
+      "name": "ci-linux-core",
+      "configurePreset": "ci-linux-core",
+      "configuration": "Debug",
+      "targets": ["install"]
+    },
+    {
+      "name": "ci-windows-msvc-debug-dynamic",
+      "configurePreset": "ci-windows-msvc-debug-dynamic",
+      "configuration": "Debug",
+      "targets": ["install"]
+    },
+    {
+      "name": "ci-windows-msvc-debug-static",
+      "configurePreset": "ci-windows-msvc-debug-static",
+      "configuration": "Debug",
+      "targets": ["install"]
+    },
+    {
+      "name": "ci-windows-msvc-release-dynamic",
+      "configurePreset": "ci-windows-msvc-release-dynamic",
+      "configuration": "Release",
+      "targets": ["install"]
+    },
+    {
+      "name": "ci-windows-msvc-release-static",
+      "configurePreset": "ci-windows-msvc-release-static",
+      "configuration": "Release",
+      "targets": ["install"]
+    },
+    {
+      "name": "ci-windows-msvc",
+      "configurePreset": "ci-windows-msvc",
+      "configuration": "Debug",
+      "targets": ["install"]
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "dev-debug",
+      "configurePreset": "dev-debug",
+      "configuration": "Debug",
+      "output": {
+        "outputOnFailure": true
+      },
+      "environment": {
+        "VIRTUAL_ENV": "VM"
+      }
+    },
+    {
+      "name": "dev-release",
+      "configurePreset": "dev-release",
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true
+      },
+      "environment": {
+        "VIRTUAL_ENV": "VM"
+      }
+    },
+    {
+      "name": "ci-linux-debug",
+      "configurePreset": "ci-linux-debug",
+      "configuration": "Debug",
+      "output": {
+        "outputOnFailure": true
+      },
+      "environment": {
+        "VIRTUAL_ENV": "VM"
+      }
+    },
+    {
+      "name": "ci-linux-release",
+      "configurePreset": "ci-linux-release",
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true
+      },
+      "environment": {
+        "VIRTUAL_ENV": "VM"
+      }
+    },
+    {
+      "name": "ci-linux-core",
+      "configurePreset": "ci-linux-core",
+      "configuration": "Debug",
+      "output": {
+        "outputOnFailure": true
+      },
+      "environment": {
+        "VIRTUAL_ENV": "VM"
+      }
+    },
+    {
+      "name": "ci-windows-msvc-debug-dynamic",
+      "configurePreset": "ci-windows-msvc-debug-dynamic",
+      "configuration": "Debug",
+      "output": {
+        "outputOnFailure": true
+      },
+      "environment": {
+        "VIRTUAL_ENV": "VM"
+      }
+    },
+    {
+      "name": "ci-windows-msvc-debug-static",
+      "configurePreset": "ci-windows-msvc-debug-static",
+      "configuration": "Debug",
+      "output": {
+        "outputOnFailure": true
+      },
+      "environment": {
+        "VIRTUAL_ENV": "VM"
+      }
+    },
+    {
+      "name": "ci-windows-msvc-release-dynamic",
+      "configurePreset": "ci-windows-msvc-release-dynamic",
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true
+      },
+      "environment": {
+        "VIRTUAL_ENV": "VM"
+      }
+    },
+    {
+      "name": "ci-windows-msvc-release-static",
+      "configurePreset": "ci-windows-msvc-release-static",
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true
+      },
+      "environment": {
+        "VIRTUAL_ENV": "VM"
+      }
+    },
+    {
+      "name": "ci-windows-msvc",
+      "configurePreset": "ci-windows-msvc",
+      "configuration": "Debug",
+      "output": {
+        "outputOnFailure": true
+      },
+      "environment": {
+        "VIRTUAL_ENV": "VM"
+      }
+    }
+  ]
+}
