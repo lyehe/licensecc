@@ -29,6 +29,7 @@ const REQUIRED_TRIGGER_PATHS = [
   "services/cloudflare-license-admin/package.json",
   "services/cloudflare-license-admin/package-lock.json",
   "services/cloudflare-license-admin/playwright.config.mjs",
+  "services/cloudflare-license-admin/scripts/staging-catalog-drill.mjs",
   "services/cloudflare-license-admin/src/ui/main.tsx",
   "services/cloudflare-license-admin/src/ui/operatorWorkflow.ts",
   "services/cloudflare-license-admin/src/ui/styles.css",
@@ -37,7 +38,13 @@ const REQUIRED_TRIGGER_PATHS = [
   "services/cloudflare-license-admin/test/admin-ui-workflow.test.mjs",
   "services/cloudflare-licensing-backend/package.json",
   "services/cloudflare-licensing-backend/scripts/public-verifier-drill.mjs",
+  "services/cloudflare-licensing-backend/test/db/db-conformance.test.mjs",
+  "services/cloudflare-licensing-backend/test/e2e/catalog-admin-projection-flow.test.mjs",
   "services/cloudflare-licensing-backend/test/public-verifier-drill.test.mjs",
+  "services/cloudflare-customer-portal/package.json",
+  "services/cloudflare-customer-portal/package-lock.json",
+  "services/cloudflare-customer-portal/scripts/staging-portal-drill.mjs",
+  "services/cloudflare-customer-portal/test/staging-portal-drill.test.mjs",
   "doc/analysis/remaining-gap-closure-checklist.rst",
   "doc/usage/cloudflare-backups.rst",
   "README.md",
@@ -70,6 +77,7 @@ test("release gates workflow runs script tests and secret scan without productio
   assert.match(text, /services\/cloudflare-license-admin\/test\/admin-ui-workflow\.test\.mjs/);
   assert.match(text, /services\/cloudflare-license-admin\/test\/access-validator\.test\.mjs/);
   assert.match(text, /services\/cloudflare-licensing-backend\/test\/public-verifier-drill\.test\.mjs/);
+  assert.match(text, /services\/cloudflare-customer-portal\/test\/staging-portal-drill\.test\.mjs/);
   assert.match(text, /node scripts\/secret_hygiene_scan\.mjs/);
   assert.match(text, /node scripts\/workspace_hygiene_check\.mjs/);
 });
@@ -93,6 +101,8 @@ test("release gates workflow rejects incomplete evidence in CI", () => {
   assert.match(text, /external_gate_skipped/);
   assert.match(text, /backup_deploy:false/);
   assert.match(text, /public_verifier_abuse:false/);
+  assert.match(text, /staging_catalog:false/);
+  assert.match(text, /customer_portal:false/);
   assert.match(text, /node scripts\/assert_release_ready\.mjs "\$summary" >"\$output" 2>&1/);
   assert.match(text, /repository whitespace check command must match the release-gate contract/);
   assert.match(text, /partial release evidence did not exercise local command-contract validation/);

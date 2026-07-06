@@ -4,6 +4,7 @@ import {
   ACCESS_DRILL_COMMAND_TEMPLATE,
   BACKUP_DEPLOY_COMMAND_REQUIRED_TOKENS,
   BOOLEAN_SUMMARY_KEYS,
+  CUSTOMER_PORTAL_COMMAND_TEMPLATE,
   EXTERNAL_GATE_ENV_NAMES,
   EXTERNAL_GATE_GROUPS,
   EXTERNAL_INPUT_KEYS,
@@ -15,6 +16,7 @@ import {
   REQUIRED_LOCAL_COMMANDS,
   REQUIRED_LOCAL_RESULTS,
   SKIPPED_EXTERNAL_COMMANDS,
+  STAGING_CATALOG_COMMAND_TEMPLATE,
 } from "./release_gate_contract.mjs";
 
 function assertUniqueTrimmedStrings(values, label) {
@@ -41,6 +43,8 @@ test("release gate contract labels are unique and disjoint", () => {
   assert.equal(REQUIRED_EXTERNAL_RESULTS.includes("Cloudflare R2 backup restore staging drill"), true);
   assert.equal(REQUIRED_EXTERNAL_RESULTS.includes("Cloudflare backup deployment staging drill"), true);
   assert.equal(REQUIRED_EXTERNAL_RESULTS.includes("Cloudflare public verifier abuse staging drill"), true);
+  assert.equal(REQUIRED_EXTERNAL_RESULTS.includes("Cloudflare catalog projection staging drill"), true);
+  assert.equal(REQUIRED_EXTERNAL_RESULTS.includes("Cloudflare customer portal staging drill"), true);
 });
 
 test("release gate contract external gate groups are authoritative", () => {
@@ -49,6 +53,8 @@ test("release gate contract external gate groups are authoritative", () => {
     "r2_restore",
     "backup_deploy",
     "public_verifier_abuse",
+    "staging_catalog",
+    "customer_portal",
   ]);
   assert.deepEqual(EXTERNAL_GATE_GROUPS.map((group) => group.label), REQUIRED_EXTERNAL_RESULTS);
   assert.deepEqual(EXTERNAL_GATE_ENV_NAMES, [
@@ -68,6 +74,25 @@ test("release gate contract external gate groups are authoritative", () => {
     "LICENSECC_BACKUP_WORKER_NAME",
     "LICENSECC_BACKUP_WORKFLOW_NAME",
     "LICENSECC_VERIFIER_URL",
+    "LICENSECC_CATALOG_PLAN_ID",
+    "LICENSECC_CATALOG_LICENSE_ID",
+    "LICENSECC_CATALOG_LICENSE_FINGERPRINT",
+    "LICENSECC_CATALOG_PLAN_KEY",
+    "LICENSECC_CATALOG_PROJECT",
+    "LICENSECC_CATALOG_CUSTOMER_ID",
+    "LICENSECC_CATALOG_SUPPORT_UNTIL",
+    "LICENSECC_CATALOG_ADDONS",
+    "LICENSECC_CATALOG_IMPORT_MANIFEST_JSON",
+    "LICENSECC_CATALOG_ALLOW_MUTATION",
+    "LICENSECC_PORTAL_URL",
+    "LICENSECC_PORTAL_EMAIL",
+    "LICENSECC_PORTAL_BOOTSTRAP_BEARER",
+    "LICENSECC_PORTAL_ACCESS_JWT",
+    "LICENSECC_PORTAL_ALLOW_SEAT_MUTATION",
+    "LICENSECC_PORTAL_FLOATING_ENTITLEMENT_ID",
+    "LICENSECC_PORTAL_ALLOW_DOWNLOAD",
+    "LICENSECC_PORTAL_DOWNLOAD_ENTITLEMENT_ID",
+    "LICENSECC_PORTAL_DEVICE_KEY_ID",
   ]);
   for (const group of EXTERNAL_GATE_GROUPS) {
     assert.equal(Array.isArray(group.required), true);
@@ -98,6 +123,8 @@ test("release gate contract summary and external input keys are stable", () => {
     "r2_restore",
     "backup_deploy",
     "public_verifier_abuse",
+    "staging_catalog",
+    "customer_portal",
   ]);
 });
 
@@ -107,6 +134,9 @@ test("release gate contract pins required local command evidence", () => {
   assert.equal(REQUIRED_LOCAL_COMMANDS.get("admin UI build"), "npm --prefix services/cloudflare-license-admin run build:ui");
   assert.equal(REQUIRED_LOCAL_COMMANDS.get("admin UI workflow tests"), "npm --prefix services/cloudflare-license-admin run test:ui");
   assert.equal(REQUIRED_LOCAL_COMMANDS.get("admin UI browser e2e"), "npm --prefix services/cloudflare-license-admin run test:e2e");
+  assert.equal(REQUIRED_LOCAL_COMMANDS.get("customer portal tests"), "npm --prefix services/cloudflare-customer-portal test");
+  assert.equal(REQUIRED_LOCAL_COMMANDS.get("customer portal UI workflow tests"), "npm --prefix services/cloudflare-customer-portal run test:ui");
+  assert.equal(REQUIRED_LOCAL_COMMANDS.get("customer portal browser e2e"), "npm --prefix services/cloudflare-customer-portal run test:e2e");
   assert.equal(REQUIRED_LOCAL_COMMANDS.get("documentation build"), "uv run --no-project python scripts/build_docs.py");
   assert.equal(
     REQUIRED_LOCAL_COMMANDS.get("focused C++ security/API tests"),
@@ -169,6 +199,12 @@ test("release gate contract command templates stay redacted", () => {
   assert.equal(PUBLIC_VERIFIER_ABUSE_COMMAND_TEMPLATE, "node services/cloudflare-licensing-backend/scripts/public-verifier-drill.mjs --url <redacted-verifier-url> --expect-rate-limit --json");
   assert.equal(PUBLIC_VERIFIER_ABUSE_COMMAND_TEMPLATE.includes("https://"), false);
   assert.equal(PUBLIC_VERIFIER_ABUSE_COMMAND_TEMPLATE.includes("<redacted-verifier-url>"), true);
+
+  assert.equal(STAGING_CATALOG_COMMAND_TEMPLATE, "node services/cloudflare-license-admin/scripts/staging-catalog-drill.mjs");
+  assert.equal(STAGING_CATALOG_COMMAND_TEMPLATE.includes("https://"), false);
+
+  assert.equal(CUSTOMER_PORTAL_COMMAND_TEMPLATE, "node services/cloudflare-customer-portal/scripts/staging-portal-drill.mjs");
+  assert.equal(CUSTOMER_PORTAL_COMMAND_TEMPLATE.includes("https://"), false);
 });
 
 test("release gate contract skipped external commands stay generic", () => {
@@ -178,6 +214,8 @@ test("release gate contract skipped external commands stay generic", () => {
     "not run: Cloudflare R2 backup restore staging drill",
     "not run: Cloudflare backup deployment staging drill",
     "not run: Cloudflare public verifier abuse staging drill",
+    "not run: Cloudflare catalog projection staging drill",
+    "not run: Cloudflare customer portal staging drill",
   ]);
   for (const command of SKIPPED_EXTERNAL_COMMANDS.values()) {
     assert.equal(command.includes("https://"), false);

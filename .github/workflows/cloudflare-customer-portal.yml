@@ -1,31 +1,33 @@
-name: Cloudflare_License_Admin
+name: Cloudflare_Customer_Portal
 
 on:
   push:
     paths:
-      - ".github/workflows/cloudflare-license-admin.yml"
-      - "services/cloudflare-license-admin/**"
+      - ".github/workflows/cloudflare-customer-portal.yml"
+      - "services/cloudflare-customer-portal/**"
       - "services/cloudflare-licensing-backend/migrations/**"
+      - "services/cloudflare-licensing-backend/src/auth/**"
+      - "services/cloudflare-licensing-backend/src/lease/**"
       - "services/cloudflare-licensing-backend/src/entitlements/**"
-      - "doc/analysis/license-admin-vite-react*.rst"
   pull_request:
     paths:
-      - ".github/workflows/cloudflare-license-admin.yml"
-      - "services/cloudflare-license-admin/**"
+      - ".github/workflows/cloudflare-customer-portal.yml"
+      - "services/cloudflare-customer-portal/**"
       - "services/cloudflare-licensing-backend/migrations/**"
+      - "services/cloudflare-licensing-backend/src/auth/**"
+      - "services/cloudflare-licensing-backend/src/lease/**"
       - "services/cloudflare-licensing-backend/src/entitlements/**"
-      - "doc/analysis/license-admin-vite-react*.rst"
 
 permissions:
   contents: read
 
 jobs:
-  admin:
+  portal:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     defaults:
       run:
-        working-directory: services/cloudflare-license-admin
+        working-directory: services/cloudflare-customer-portal
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
@@ -33,7 +35,7 @@ jobs:
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: services/cloudflare-license-admin/package-lock.json
+          cache-dependency-path: services/cloudflare-customer-portal/package-lock.json
 
       - name: Install dependencies
         run: npm ci
@@ -48,13 +50,14 @@ jobs:
           pem_marker="${pem_begin} (RSA |EC |DSA |OPENSSH |ENCRYPTED )?${pem_scope} ${pem_kind}|${pem_begin} ${pem_scope} ${pem_kind}"
           cloudflare_token='CLOUDFLARE_API_TOKEN'
           admin_bearer='ADMIN_BEARER'
+          portal_bootstrap='PORTAL_BOOTSTRAP_BEARER'
           jwt_like='[A-Za-z0-9_-]{40,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}'
-          token_marker="${cloudflare_token}=|${admin_bearer}=|${jwt_like}"
-          if grep -R -n -E --exclude-dir=node_modules --exclude-dir=.wrangler --exclude-dir=.online-key "$pem_marker" services/cloudflare-license-admin .github/workflows/cloudflare-license-admin.yml; then
+          token_marker="${cloudflare_token}=|${admin_bearer}=|${portal_bootstrap}=|${jwt_like}"
+          if grep -R -n -E --exclude-dir=node_modules --exclude-dir=.wrangler --exclude-dir=.online-key "$pem_marker" services/cloudflare-customer-portal .github/workflows/cloudflare-customer-portal.yml; then
             echo "PEM key marker found"
             exit 1
           fi
-          if grep -R -n -E --exclude-dir=node_modules --exclude-dir=.wrangler --exclude-dir=.online-key "$token_marker" services/cloudflare-license-admin .github/workflows/cloudflare-license-admin.yml; then
+          if grep -R -n -E --exclude-dir=node_modules --exclude-dir=.wrangler --exclude-dir=.online-key "$token_marker" services/cloudflare-customer-portal .github/workflows/cloudflare-customer-portal.yml; then
             echo "secret-like token found"
             exit 1
           fi
@@ -62,11 +65,8 @@ jobs:
       - name: Lint
         run: npm run lint
 
-      - name: Test
+      - name: Worker tests
         run: npm test
-
-      - name: SQL tests
-        run: npm run test:sql
 
       - name: UI workflow tests
         run: npm run test:ui

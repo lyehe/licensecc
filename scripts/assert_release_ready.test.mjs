@@ -7,6 +7,8 @@ import {
   REQUIRED_LOCAL_COMMANDS,
   REQUIRED_EXTERNAL_RESULTS,
   REQUIRED_LOCAL_RESULTS,
+  CUSTOMER_PORTAL_COMMAND_TEMPLATE,
+  STAGING_CATALOG_COMMAND_TEMPLATE,
   analyzeSummary,
   duplicateResultLabels,
   externalCommandRedactionFailures,
@@ -56,6 +58,12 @@ function passedResult(label) {
   if (label === "Cloudflare public verifier abuse staging drill") {
     command = "node services/cloudflare-licensing-backend/scripts/public-verifier-drill.mjs --url <redacted-verifier-url> --expect-rate-limit --json";
   }
+  if (label === "Cloudflare catalog projection staging drill") {
+    command = STAGING_CATALOG_COMMAND_TEMPLATE;
+  }
+  if (label === "Cloudflare customer portal staging drill") {
+    command = CUSTOMER_PORTAL_COMMAND_TEMPLATE;
+  }
   return {
     label,
     status: 0,
@@ -85,6 +93,8 @@ function productionSummary(overrides = {}) {
       r2_restore: true,
       backup_deploy: true,
       public_verifier_abuse: true,
+      staging_catalog: true,
+      customer_portal: true,
     },
     results: [
       ...REQUIRED_LOCAL_RESULTS.map(passedResult),
@@ -113,6 +123,8 @@ test("release readiness requires public verifier external input evidence", () =>
       r2_restore: true,
       backup_deploy: true,
       public_verifier_abuse: false,
+      staging_catalog: true,
+      customer_portal: true,
     },
   }));
 
@@ -171,17 +183,33 @@ test("release readiness does not require run command templates for skipped exter
       duration_ms: 0,
       reason: "credentials missing",
     },
+    {
+      label: "Cloudflare catalog projection staging drill",
+      command: "not run: Cloudflare catalog projection staging drill",
+      status: "skipped",
+      duration_ms: 0,
+      reason: "credentials missing",
+    },
+    {
+      label: "Cloudflare customer portal staging drill",
+      command: "not run: Cloudflare customer portal staging drill",
+      status: "skipped",
+      duration_ms: 0,
+      reason: "credentials missing",
+    },
   ];
   const analysis = analyzeSummary(productionSummary({
     complete: false,
     production_ready: false,
-    skipped: 4,
+    skipped: 6,
     external_inputs_present: {
       access_admin: false,
       access_non_admin_jwt: false,
       r2_restore: false,
       backup_deploy: false,
       public_verifier_abuse: false,
+      staging_catalog: false,
+      customer_portal: false,
     },
     results,
   }));
@@ -193,10 +221,14 @@ test("release readiness does not require run command templates for skipped exter
   assert.match(analysis.failures.join("\n"), /Cloudflare R2 backup restore staging drill result must not be skipped/);
   assert.match(analysis.failures.join("\n"), /Cloudflare backup deployment staging drill result must not be skipped/);
   assert.match(analysis.failures.join("\n"), /Cloudflare public verifier abuse staging drill result must not be skipped/);
+  assert.match(analysis.failures.join("\n"), /Cloudflare catalog projection staging drill result must not be skipped/);
+  assert.match(analysis.failures.join("\n"), /Cloudflare customer portal staging drill result must not be skipped/);
   assert.doesNotMatch(analysis.failures.join("\n"), /Cloudflare Access admin staging drill must be present with status 0/);
   assert.doesNotMatch(analysis.failures.join("\n"), /Cloudflare R2 backup restore staging drill must be present with status 0/);
   assert.doesNotMatch(analysis.failures.join("\n"), /Cloudflare backup deployment staging drill must be present with status 0/);
   assert.doesNotMatch(analysis.failures.join("\n"), /Cloudflare public verifier abuse staging drill must be present with status 0/);
+  assert.doesNotMatch(analysis.failures.join("\n"), /Cloudflare catalog projection staging drill must be present with status 0/);
+  assert.doesNotMatch(analysis.failures.join("\n"), /Cloudflare customer portal staging drill must be present with status 0/);
 });
 
 test("release readiness rejects skipped external drill commands with staging details", () => {
@@ -230,6 +262,20 @@ test("release readiness rejects skipped external drill commands with staging det
       duration_ms: 0,
       reason: "credentials missing",
     },
+    {
+      label: "Cloudflare catalog projection staging drill",
+      command: "not run: https://admin.example --plan plan_1",
+      status: "skipped",
+      duration_ms: 0,
+      reason: "credentials missing",
+    },
+    {
+      label: "Cloudflare customer portal staging drill",
+      command: "not run: https://portal.example",
+      status: "skipped",
+      duration_ms: 0,
+      reason: "credentials missing",
+    },
   ];
 
   assert.deepEqual(externalCommandRedactionFailures(results), [
@@ -238,6 +284,8 @@ test("release readiness rejects skipped external drill commands with staging det
     "Cloudflare R2 backup restore staging drill skipped command must not include staging details",
     "Cloudflare backup deployment staging drill skipped command must not include staging details",
     "Cloudflare public verifier abuse staging drill skipped command must not include staging details",
+    "Cloudflare catalog projection staging drill skipped command must not include staging details",
+    "Cloudflare customer portal staging drill skipped command must not include staging details",
   ]);
 });
 
@@ -252,6 +300,8 @@ test("release readiness rejects local-only summaries", () => {
       r2_restore: false,
       backup_deploy: false,
       public_verifier_abuse: false,
+      staging_catalog: false,
+      customer_portal: false,
     },
     results: [{ label: "repository whitespace check", status: 0 }],
   }));
@@ -317,6 +367,8 @@ test("release readiness rejects malformed external input evidence shape", () => 
     "external_inputs_present.access_non_admin_jwt must be boolean",
     "external_inputs_present.backup_deploy must be boolean",
     "external_inputs_present.public_verifier_abuse must be boolean",
+    "external_inputs_present.staging_catalog must be boolean",
+    "external_inputs_present.customer_portal must be boolean",
     "external_inputs_present.access_jwt_value is not an allowed key",
   ]);
   assert.equal(analysis.ready, false);
@@ -486,6 +538,14 @@ test("release readiness rejects unredacted external drill command evidence", () 
       ...passedResult("Cloudflare public verifier abuse staging drill"),
       command: "node services/cloudflare-licensing-backend/scripts/public-verifier-drill.mjs --url https://verifier.example.workers.dev --expect-rate-limit --json",
     },
+    {
+      ...passedResult("Cloudflare catalog projection staging drill"),
+      command: "node services/cloudflare-license-admin/scripts/staging-catalog-drill.mjs --url https://admin.example",
+    },
+    {
+      ...passedResult("Cloudflare customer portal staging drill"),
+      command: "node services/cloudflare-customer-portal/scripts/staging-portal-drill.mjs --url https://portal.example",
+    },
   ];
   const analysis = analyzeSummary(productionSummary({ results }));
 
@@ -505,6 +565,10 @@ test("release readiness rejects unredacted external drill command evidence", () 
     "Cloudflare public verifier abuse staging drill command must match the redacted command template",
     "Cloudflare public verifier abuse staging drill command must include <redacted-verifier-url>",
     "Cloudflare public verifier abuse staging drill command must not contain a literal URL",
+    "Cloudflare catalog projection staging drill command must match the redacted command template",
+    "Cloudflare catalog projection staging drill command must not contain a literal URL",
+    "Cloudflare customer portal staging drill command must match the redacted command template",
+    "Cloudflare customer portal staging drill command must not contain a literal URL",
   ]);
   assert.equal(analysis.ready, false);
   assert.match(analysis.failures.join("\n"), /Cloudflare Access admin staging drill command must redact the admin URL/);
@@ -517,6 +581,8 @@ test("release readiness accepts optional redacted restore command placeholders",
     passedResult("Cloudflare Access admin staging drill"),
     passedResult("Cloudflare backup deployment staging drill"),
     passedResult("Cloudflare public verifier abuse staging drill"),
+    passedResult("Cloudflare catalog projection staging drill"),
+    passedResult("Cloudflare customer portal staging drill"),
     {
       ...passedResult("Cloudflare R2 backup restore staging drill"),
       command: [
@@ -545,6 +611,9 @@ test("release readiness rejects redacted restore commands with extra literal arg
     ...REQUIRED_LOCAL_RESULTS.map(passedResult),
     passedResult("Cloudflare Access admin staging drill"),
     passedResult("Cloudflare backup deployment staging drill"),
+    passedResult("Cloudflare public verifier abuse staging drill"),
+    passedResult("Cloudflare catalog projection staging drill"),
+    passedResult("Cloudflare customer portal staging drill"),
     {
       ...passedResult("Cloudflare R2 backup restore staging drill"),
       command: `${passedResult("Cloudflare R2 backup restore staging drill").command} --object-key backup.sql`,
@@ -564,6 +633,9 @@ test("release readiness rejects unknown restored status command values", () => {
     ...REQUIRED_LOCAL_RESULTS.map(passedResult),
     passedResult("Cloudflare Access admin staging drill"),
     passedResult("Cloudflare backup deployment staging drill"),
+    passedResult("Cloudflare public verifier abuse staging drill"),
+    passedResult("Cloudflare catalog projection staging drill"),
+    passedResult("Cloudflare customer portal staging drill"),
     {
       ...passedResult("Cloudflare R2 backup restore staging drill"),
       command: `${passedResult("Cloudflare R2 backup restore staging drill").command} --require-restored-status expired`,

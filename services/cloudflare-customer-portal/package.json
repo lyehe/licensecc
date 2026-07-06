@@ -9,11 +9,12 @@
     "build": "npm run build:worker && npm run build:ui",
     "test:ui": "npm run build:ui && node --test test/portal-ui-workflow.test.mjs",
     "test:openapi": "npm run build:worker && node --test test/openapi.test.mjs",
-    "test": "npm run build:worker && node --experimental-sqlite --test test/portal-otp.test.mjs test/portal-session.test.mjs test/portal-ratelimit.test.mjs test/portal-worker.test.mjs && node --test test/openapi.test.mjs",
+    "test": "npm run build:worker && node --experimental-sqlite --test test/portal-otp.test.mjs test/portal-session.test.mjs test/portal-ratelimit.test.mjs test/portal-worker.test.mjs && node --test test/openapi.test.mjs test/staging-portal-drill.test.mjs",
     "test:e2e": "playwright install chromium && playwright test --config playwright.config.mjs",
     "lint": "node scripts/lint.mjs",
     "dry-run": "npm run build && npx wrangler deploy --dry-run --config wrangler.example.jsonc",
-    "migrate:local": "npx wrangler d1 migrations apply DB --local --config ../cloudflare-licensing-backend/wrangler.example.toml"
+    "migrate:local": "npx wrangler d1 migrations apply DB --local --config ../cloudflare-licensing-backend/wrangler.example.toml",
+    "validate:staging-portal": "node scripts/staging-portal-drill.mjs"
   },
   "dependencies": {
     "@licensecc/cloudflare-licensing-backend": "file:../cloudflare-licensing-backend",

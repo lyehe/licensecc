@@ -4,6 +4,7 @@ import {
   ACCESS_DRILL_COMMAND_TEMPLATE,
   BACKUP_DEPLOY_COMMAND_REQUIRED_TOKENS,
   BOOLEAN_SUMMARY_KEYS,
+  CUSTOMER_PORTAL_COMMAND_TEMPLATE,
   EXTERNAL_INPUT_KEYS,
   PUBLIC_VERIFIER_ABUSE_COMMAND_TEMPLATE,
   R2_RESTORE_COMMAND_OPTIONAL_PLACEHOLDERS,
@@ -13,6 +14,7 @@ import {
   REQUIRED_LOCAL_COMMANDS,
   REQUIRED_LOCAL_RESULTS,
   SKIPPED_EXTERNAL_COMMANDS,
+  STAGING_CATALOG_COMMAND_TEMPLATE,
 } from "./release_gate_contract.mjs";
 
 function usage(exitCode = 2) {
@@ -246,6 +248,36 @@ function externalCommandRedactionFailures(results) {
       }
     }
   }
+  const catalog = resultForLabel(results, "Cloudflare catalog projection staging drill");
+  if (catalog !== undefined && typeof catalog.command === "string") {
+    if (catalog.status === "skipped") {
+      if (catalog.command !== SKIPPED_EXTERNAL_COMMANDS.get("Cloudflare catalog projection staging drill")) {
+        failures.push("Cloudflare catalog projection staging drill skipped command must not include staging details");
+      }
+    } else {
+      if (catalog.command !== STAGING_CATALOG_COMMAND_TEMPLATE) {
+        failures.push("Cloudflare catalog projection staging drill command must match the redacted command template");
+      }
+      if (/https?:\/\//i.test(catalog.command)) {
+        failures.push("Cloudflare catalog projection staging drill command must not contain a literal URL");
+      }
+    }
+  }
+  const portal = resultForLabel(results, "Cloudflare customer portal staging drill");
+  if (portal !== undefined && typeof portal.command === "string") {
+    if (portal.status === "skipped") {
+      if (portal.command !== SKIPPED_EXTERNAL_COMMANDS.get("Cloudflare customer portal staging drill")) {
+        failures.push("Cloudflare customer portal staging drill skipped command must not include staging details");
+      }
+    } else {
+      if (portal.command !== CUSTOMER_PORTAL_COMMAND_TEMPLATE) {
+        failures.push("Cloudflare customer portal staging drill command must match the redacted command template");
+      }
+      if (/https?:\/\//i.test(portal.command)) {
+        failures.push("Cloudflare customer portal staging drill command must not contain a literal URL");
+      }
+    }
+  }
   return failures;
 }
 
@@ -361,6 +393,12 @@ function analyzeSummary(summary) {
   if (summary.external_inputs_present?.public_verifier_abuse !== true) {
     failures.push("external_inputs_present.public_verifier_abuse must be true");
   }
+  if (summary.external_inputs_present?.staging_catalog !== true) {
+    failures.push("external_inputs_present.staging_catalog must be true");
+  }
+  if (summary.external_inputs_present?.customer_portal !== true) {
+    failures.push("external_inputs_present.customer_portal must be true");
+  }
   if (!Array.isArray(summary.results)) {
     failures.push("summary.results must be an array");
   } else {
@@ -427,10 +465,12 @@ export {
   EXTERNAL_INPUT_KEYS,
   ACCESS_DRILL_COMMAND_TEMPLATE,
   BACKUP_DEPLOY_COMMAND_REQUIRED_TOKENS,
+  CUSTOMER_PORTAL_COMMAND_TEMPLATE,
   PUBLIC_VERIFIER_ABUSE_COMMAND_TEMPLATE,
   R2_RESTORE_COMMAND_REQUIRED_TOKENS,
   R2_RESTORE_COMMAND_OPTIONAL_PLACEHOLDERS,
   SKIPPED_EXTERNAL_COMMANDS,
+  STAGING_CATALOG_COMMAND_TEMPLATE,
   analyzeSummary,
   duplicateResultLabels,
   externalInputShapeFailures,

@@ -66,8 +66,14 @@ jobs:
       - name: Test
         run: npm test
 
+      - name: DB conformance tests
+        run: npm run test:db
+
       - name: SQL tests
         run: npm run test:sql
+
+      - name: Worker-boundary E2E tests
+        run: npm run test:e2e
 
       - name: Postgres adapter tests
         run: npm run test:pg

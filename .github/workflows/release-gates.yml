@@ -27,6 +27,7 @@ on:
       - "services/cloudflare-license-admin/package.json"
       - "services/cloudflare-license-admin/package-lock.json"
       - "services/cloudflare-license-admin/playwright.config.mjs"
+      - "services/cloudflare-license-admin/scripts/staging-catalog-drill.mjs"
       - "services/cloudflare-license-admin/src/ui/main.tsx"
       - "services/cloudflare-license-admin/src/ui/operatorWorkflow.ts"
       - "services/cloudflare-license-admin/src/ui/styles.css"
@@ -35,7 +36,13 @@ on:
       - "services/cloudflare-license-admin/test/admin-ui-workflow.test.mjs"
       - "services/cloudflare-licensing-backend/package.json"
       - "services/cloudflare-licensing-backend/scripts/public-verifier-drill.mjs"
+      - "services/cloudflare-licensing-backend/test/db/db-conformance.test.mjs"
+      - "services/cloudflare-licensing-backend/test/e2e/catalog-admin-projection-flow.test.mjs"
       - "services/cloudflare-licensing-backend/test/public-verifier-drill.test.mjs"
+      - "services/cloudflare-customer-portal/package.json"
+      - "services/cloudflare-customer-portal/package-lock.json"
+      - "services/cloudflare-customer-portal/scripts/staging-portal-drill.mjs"
+      - "services/cloudflare-customer-portal/test/staging-portal-drill.test.mjs"
       - "doc/analysis/remaining-gap-closure-checklist.rst"
       - "doc/usage/cloudflare-backups.rst"
       - "README.md"
@@ -65,6 +72,7 @@ on:
       - "services/cloudflare-license-admin/package.json"
       - "services/cloudflare-license-admin/package-lock.json"
       - "services/cloudflare-license-admin/playwright.config.mjs"
+      - "services/cloudflare-license-admin/scripts/staging-catalog-drill.mjs"
       - "services/cloudflare-license-admin/src/ui/main.tsx"
       - "services/cloudflare-license-admin/src/ui/operatorWorkflow.ts"
       - "services/cloudflare-license-admin/src/ui/styles.css"
@@ -73,7 +81,13 @@ on:
       - "services/cloudflare-license-admin/test/admin-ui-workflow.test.mjs"
       - "services/cloudflare-licensing-backend/package.json"
       - "services/cloudflare-licensing-backend/scripts/public-verifier-drill.mjs"
+      - "services/cloudflare-licensing-backend/test/db/db-conformance.test.mjs"
+      - "services/cloudflare-licensing-backend/test/e2e/catalog-admin-projection-flow.test.mjs"
       - "services/cloudflare-licensing-backend/test/public-verifier-drill.test.mjs"
+      - "services/cloudflare-customer-portal/package.json"
+      - "services/cloudflare-customer-portal/package-lock.json"
+      - "services/cloudflare-customer-portal/scripts/staging-portal-drill.mjs"
+      - "services/cloudflare-customer-portal/test/staging-portal-drill.test.mjs"
       - "doc/analysis/remaining-gap-closure-checklist.rst"
       - "doc/usage/cloudflare-backups.rst"
       - "README.md"
@@ -114,7 +128,8 @@ jobs:
             services/cloudflare-d1-backup/test/backup-validate-deploy.test.mjs \
             services/cloudflare-license-admin/test/admin-ui-workflow.test.mjs \
             services/cloudflare-license-admin/test/access-validator.test.mjs \
-            services/cloudflare-licensing-backend/test/public-verifier-drill.test.mjs
+            services/cloudflare-licensing-backend/test/public-verifier-drill.test.mjs \
+            services/cloudflare-customer-portal/test/staging-portal-drill.test.mjs
 
       - name: Secret hygiene scan
         run: node scripts/secret_hygiene_scan.mjs
@@ -146,7 +161,7 @@ jobs:
       - name: Incomplete evidence fails readiness assertion
         run: |
           summary="$RUNNER_TEMP/incomplete-release-evidence.json"
-          node -e "const fs=require('node:fs'); const p=process.env.RUNNER_TEMP + '/incomplete-release-evidence.json'; const s={ok:true,complete:false,production_ready:false,quick:false,full:true,external:true,require_external:true,skipped:1,generated_at:new Date(0).toISOString(),platform:process.platform,node_version:process.version,cwd:process.cwd(),blocking_reasons:[{type:'external_gate_skipped',label:'Cloudflare Access admin staging drill',reason:'credentials missing'}],external_inputs_present:{access_admin:false,access_non_admin_jwt:false,r2_restore:false,backup_deploy:false,public_verifier_abuse:false},results:[{label:'repository whitespace check',status:0,command:'git diff --check',duration_ms:0},{label:'Cloudflare Access admin staging drill',status:'skipped',command:'not run: Cloudflare Access admin staging drill',duration_ms:0,reason:'credentials missing'}]}; fs.writeFileSync(p, JSON.stringify(s, null, 2) + '\n');"
+          node -e "const fs=require('node:fs'); const p=process.env.RUNNER_TEMP + '/incomplete-release-evidence.json'; const s={ok:true,complete:false,production_ready:false,quick:false,full:true,external:true,require_external:true,skipped:1,generated_at:new Date(0).toISOString(),platform:process.platform,node_version:process.version,cwd:process.cwd(),blocking_reasons:[{type:'external_gate_skipped',label:'Cloudflare Access admin staging drill',reason:'credentials missing'}],external_inputs_present:{access_admin:false,access_non_admin_jwt:false,r2_restore:false,backup_deploy:false,public_verifier_abuse:false,staging_catalog:false,customer_portal:false},results:[{label:'repository whitespace check',status:0,command:'git diff --check',duration_ms:0},{label:'Cloudflare Access admin staging drill',status:'skipped',command:'not run: Cloudflare Access admin staging drill',duration_ms:0,reason:'credentials missing'}]}; fs.writeFileSync(p, JSON.stringify(s, null, 2) + '\n');"
           output="$RUNNER_TEMP/incomplete-release-evidence.out"
           if node scripts/assert_release_ready.mjs "$summary" >"$output" 2>&1; then
             echo "partial release evidence was accepted"

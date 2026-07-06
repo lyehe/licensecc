@@ -13,11 +13,32 @@ import {
   BACKUP_DEPLOY_URL_ENV,
   BACKUP_DEPLOY_WORKER_NAME_ENV,
   BACKUP_DEPLOY_WORKFLOW_NAME_ENV,
+  CATALOG_ADDONS_ENV,
+  CATALOG_ALLOW_MUTATION_ENV,
+  CATALOG_CUSTOMER_ID_ENV,
+  CATALOG_IMPORT_MANIFEST_JSON_ENV,
+  CATALOG_LICENSE_FINGERPRINT_ENV,
+  CATALOG_LICENSE_ID_ENV,
+  CATALOG_PLAN_ID_ENV,
+  CATALOG_PLAN_KEY_ENV,
+  CATALOG_PROJECT_ENV,
+  CATALOG_SUPPORT_UNTIL_ENV,
+  CUSTOMER_PORTAL_COMMAND_TEMPLATE,
+  CUSTOMER_PORTAL_GATE_ID,
   EXTERNAL_GATE_ENV_NAMES,
   EXTERNAL_GATE_GROUPS,
   PUBLIC_VERIFIER_ABUSE_COMMAND_TEMPLATE,
   PUBLIC_VERIFIER_ABUSE_GATE_ID,
   PUBLIC_VERIFIER_URL_ENV,
+  PORTAL_ACCESS_JWT_ENV,
+  PORTAL_ALLOW_DOWNLOAD_ENV,
+  PORTAL_ALLOW_SEAT_MUTATION_ENV,
+  PORTAL_BOOTSTRAP_BEARER_ENV,
+  PORTAL_DEVICE_KEY_ID_ENV,
+  PORTAL_DOWNLOAD_ENTITLEMENT_ID_ENV,
+  PORTAL_EMAIL_ENV,
+  PORTAL_FLOATING_ENTITLEMENT_ID_ENV,
+  PORTAL_URL_ENV,
   R2_RESTORE_COMMAND_OPTIONAL_PLACEHOLDERS,
   R2_RESTORE_COMMAND_REQUIRED_TOKENS,
   R2_BACKUP_BUCKET_ENV,
@@ -33,6 +54,8 @@ import {
   REQUIRED_LOCAL_COMMANDS,
   REQUIRED_LOCAL_RESULTS,
   SKIPPED_EXTERNAL_COMMANDS,
+  STAGING_CATALOG_COMMAND_TEMPLATE,
+  STAGING_CATALOG_GATE_ID,
 } from "./release_gate_contract.mjs";
 import {
   analyzeExternalGateEnv,
@@ -119,8 +142,9 @@ function usage(exitCode = 2) {
   node scripts/validate_release_gates.mjs [--quick] [--full] [--external] [--require-external] [--json-out <path>]
 
 Runs deterministic local release gates in conservative parallel chunks. With
---external, also runs staging Access, R2 restore, backup deployment, and public
-verifier abuse drills when their environment variables are present.
+--external, also runs staging Access, R2 restore, backup deployment, public
+verifier abuse, catalog projection, and customer portal drills when their
+environment variables are present.
 With --require-external, a redacted external input preflight runs before local
 gates, and missing or skipped staging drills make the process exit nonzero.
 This option implies --external.
@@ -263,6 +287,8 @@ function externalInputsPresentFromPreflight(preflight) {
     r2_restore: gateReady(R2_RESTORE_GATE_ID),
     backup_deploy: gateReady(BACKUP_DEPLOY_GATE_ID),
     public_verifier_abuse: gateReady(PUBLIC_VERIFIER_ABUSE_GATE_ID),
+    staging_catalog: gateReady(STAGING_CATALOG_GATE_ID),
+    customer_portal: gateReady(CUSTOMER_PORTAL_GATE_ID),
   };
 }
 
@@ -397,6 +423,67 @@ function publicVerifierAbuseCommandForEvidence() {
   return PUBLIC_VERIFIER_ABUSE_COMMAND_TEMPLATE;
 }
 
+function mappedEnvFromEnv(mapping) {
+  const env = {};
+  for (const [target, source] of mapping) {
+    if (envPresent(source)) {
+      env[target] = process.env[source];
+    }
+  }
+  return env;
+}
+
+function stagingCatalogArgsFromEnv() {
+  return [
+    "services/cloudflare-license-admin/scripts/staging-catalog-drill.mjs",
+  ];
+}
+
+function stagingCatalogEnvFromEnv() {
+  return mappedEnvFromEnv([
+    ["STAGING_ADMIN_BASE_URL", ACCESS_ADMIN_URL_ENV],
+    ["STAGING_ACCESS_TOKEN", ACCESS_JWT_ENV],
+    ["STAGING_PLAN_ID", CATALOG_PLAN_ID_ENV],
+    ["STAGING_PLAN_KEY", CATALOG_PLAN_KEY_ENV],
+    ["STAGING_LICENSE_ID", CATALOG_LICENSE_ID_ENV],
+    ["STAGING_LICENSE_FINGERPRINT", CATALOG_LICENSE_FINGERPRINT_ENV],
+    ["STAGING_PROJECT", CATALOG_PROJECT_ENV],
+    ["STAGING_CUSTOMER_ID", CATALOG_CUSTOMER_ID_ENV],
+    ["STAGING_SUPPORT_UNTIL", CATALOG_SUPPORT_UNTIL_ENV],
+    ["STAGING_ADDONS", CATALOG_ADDONS_ENV],
+    ["STAGING_CATALOG_IMPORT_MANIFEST_JSON", CATALOG_IMPORT_MANIFEST_JSON_ENV],
+    ["STAGING_ALLOW_MUTATION", CATALOG_ALLOW_MUTATION_ENV],
+  ]);
+}
+
+function stagingCatalogCommandForEvidence() {
+  return STAGING_CATALOG_COMMAND_TEMPLATE;
+}
+
+function customerPortalArgsFromEnv() {
+  return [
+    "services/cloudflare-customer-portal/scripts/staging-portal-drill.mjs",
+  ];
+}
+
+function customerPortalEnvFromEnv() {
+  return mappedEnvFromEnv([
+    ["STAGING_PORTAL_BASE_URL", PORTAL_URL_ENV],
+    ["STAGING_PORTAL_EMAIL", PORTAL_EMAIL_ENV],
+    ["STAGING_PORTAL_BOOTSTRAP_BEARER", PORTAL_BOOTSTRAP_BEARER_ENV],
+    ["STAGING_PORTAL_ACCESS_JWT", PORTAL_ACCESS_JWT_ENV],
+    ["STAGING_PORTAL_ALLOW_SEAT_MUTATION", PORTAL_ALLOW_SEAT_MUTATION_ENV],
+    ["STAGING_PORTAL_FLOATING_ENTITLEMENT_ID", PORTAL_FLOATING_ENTITLEMENT_ID_ENV],
+    ["STAGING_PORTAL_ALLOW_DOWNLOAD", PORTAL_ALLOW_DOWNLOAD_ENV],
+    ["STAGING_PORTAL_DOWNLOAD_ENTITLEMENT_ID", PORTAL_DOWNLOAD_ENTITLEMENT_ID_ENV],
+    ["STAGING_PORTAL_DEVICE_KEY_ID", PORTAL_DEVICE_KEY_ID_ENV],
+  ]);
+}
+
+function customerPortalCommandForEvidence() {
+  return CUSTOMER_PORTAL_COMMAND_TEMPLATE;
+}
+
 function ctestAvailable(environment = {}) {
   return environment.ctestAvailable ?? existsSync("build/CTestTestfile.cmake");
 }
@@ -431,6 +518,10 @@ function localGates(options, environment = {}) {
     ["npm", ["--prefix", "services/cloudflare-license-admin", "run", "lint"], "admin Worker lint"],
     ["npm", ["--prefix", "services/cloudflare-license-admin", "run", "build:ui"], "admin UI build"],
     ["npm", ["--prefix", "services/cloudflare-license-admin", "run", "test:ui"], "admin UI workflow tests"],
+    ["npm", ["--prefix", "services/cloudflare-customer-portal", "test"], "customer portal tests"],
+    ["npm", ["--prefix", "services/cloudflare-customer-portal", "run", "lint"], "customer portal lint"],
+    ["npm", ["--prefix", "services/cloudflare-customer-portal", "run", "build:ui"], "customer portal UI build"],
+    ["npm", ["--prefix", "services/cloudflare-customer-portal", "run", "test:ui"], "customer portal UI workflow tests"],
     ["npm", ["--prefix", "services/cloudflare-licensing-backend", "test"], "online verifier tests"],
     ["npm", ["--prefix", "services/cloudflare-licensing-backend", "run", "schema:parity"], "online verifier schema parity"],
     ["npm", ["--prefix", "services/cloudflare-licensing-backend", "run", "lint"], "online verifier lint"],
@@ -445,7 +536,9 @@ function localGates(options, environment = {}) {
   if (!options.quick) {
     gates.splice(6, 0, ["npm", ["--prefix", "services/cloudflare-licensing-backend", "run", "test:e2e"], "online verifier/admin local e2e"]);
     gates.splice(15, 0, ["npm", ["--prefix", "services/cloudflare-license-admin", "run", "test:e2e"], "admin UI browser e2e"]);
+    gates.splice(20, 0, ["npm", ["--prefix", "services/cloudflare-customer-portal", "run", "test:e2e"], "customer portal browser e2e"]);
     gates.push(["npm", ["--prefix", "services/cloudflare-license-admin", "run", "dry-run"], "admin Worker dry-run"]);
+    gates.push(["npm", ["--prefix", "services/cloudflare-customer-portal", "run", "dry-run"], "customer portal dry-run"]);
     gates.push(["npm", ["--prefix", "services/cloudflare-licensing-backend", "run", "dry-run"], "online verifier dry-run"]);
     gates.push(["npm", ["--prefix", "services/cloudflare-d1-backup", "run", "dry-run"], "D1 backup dry-run"]);
   }
@@ -478,9 +571,12 @@ const LOCAL_GATE_CHUNK_LABELS = [
   ],
   [
     "online verifier/admin local e2e",
+    "admin UI browser e2e",
+    "customer portal browser e2e",
   ],
   [
     "admin Worker tests",
+    "customer portal tests",
     "online verifier tests",
     "D1 backup tests",
   ],
@@ -488,6 +584,9 @@ const LOCAL_GATE_CHUNK_LABELS = [
     "admin Worker lint",
     "admin UI build",
     "admin UI workflow tests",
+    "customer portal lint",
+    "customer portal UI build",
+    "customer portal UI workflow tests",
     "online verifier schema parity",
     "online verifier lint",
     "D1 backup lint",
@@ -502,6 +601,7 @@ const LOCAL_GATE_CHUNK_LABELS = [
   ],
   [
     "admin Worker dry-run",
+    "customer portal dry-run",
     "online verifier dry-run",
     "D1 backup dry-run",
   ],
@@ -764,6 +864,8 @@ function buildSummary(options, results) {
       r2_restore: externalGateReadyFromEnv(R2_RESTORE_GATE_ID),
       backup_deploy: externalGateReadyFromEnv(BACKUP_DEPLOY_GATE_ID),
       public_verifier_abuse: externalGateReadyFromEnv(PUBLIC_VERIFIER_ABUSE_GATE_ID),
+      staging_catalog: externalGateReadyFromEnv(STAGING_CATALOG_GATE_ID),
+      customer_portal: externalGateReadyFromEnv(CUSTOMER_PORTAL_GATE_ID),
     },
     results,
   };
@@ -878,6 +980,32 @@ async function main() {
         externalGateMissingReason(PUBLIC_VERIFIER_ABUSE_GATE_ID),
       );
     }
+    if (externalGateReadyFromEnv(STAGING_CATALOG_GATE_ID)) {
+      externalRuns.push(run("node", stagingCatalogArgsFromEnv(), externalGateLabel(STAGING_CATALOG_GATE_ID), {
+        env: stagingCatalogEnvFromEnv(),
+        allowedEnv: [],
+        commandForEvidence: stagingCatalogCommandForEvidence(),
+      }));
+    } else {
+      addOptional(
+        results,
+        externalGateLabel(STAGING_CATALOG_GATE_ID),
+        externalGateMissingReason(STAGING_CATALOG_GATE_ID),
+      );
+    }
+    if (externalGateReadyFromEnv(CUSTOMER_PORTAL_GATE_ID)) {
+      externalRuns.push(run("node", customerPortalArgsFromEnv(), externalGateLabel(CUSTOMER_PORTAL_GATE_ID), {
+        env: customerPortalEnvFromEnv(),
+        allowedEnv: [],
+        commandForEvidence: customerPortalCommandForEvidence(),
+      }));
+    } else {
+      addOptional(
+        results,
+        externalGateLabel(CUSTOMER_PORTAL_GATE_ID),
+        externalGateMissingReason(CUSTOMER_PORTAL_GATE_ID),
+      );
+    }
     results.push(...await Promise.all(externalRuns));
   }
 
@@ -905,6 +1033,9 @@ export {
   buildExternalPreflightSummary,
   buildSummary,
   chunkGates,
+  customerPortalArgsFromEnv,
+  customerPortalCommandForEvidence,
+  customerPortalEnvFromEnv,
   duplicateResultLabels,
   envPresent,
   externalGateCredentialEnvNames,
@@ -932,6 +1063,9 @@ export {
   restoreCommandForEvidence,
   restoreRequiredStatusesFromEnv,
   restoreArgsFromEnv,
+  stagingCatalogArgsFromEnv,
+  stagingCatalogCommandForEvidence,
+  stagingCatalogEnvFromEnv,
   shouldFailRun,
 };
 

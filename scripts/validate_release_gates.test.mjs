@@ -15,14 +15,23 @@ import {
   BACKUP_DEPLOY_URL_ENV,
   BACKUP_DEPLOY_WORKER_NAME_ENV,
   BACKUP_DEPLOY_WORKFLOW_NAME_ENV,
+  CATALOG_LICENSE_FINGERPRINT_ENV,
+  CATALOG_LICENSE_ID_ENV,
+  CATALOG_PLAN_ID_ENV,
+  CUSTOMER_PORTAL_GATE_ID,
   PUBLIC_VERIFIER_ABUSE_GATE_ID,
   PUBLIC_VERIFIER_URL_ENV,
+  PORTAL_ACCESS_JWT_ENV,
+  PORTAL_BOOTSTRAP_BEARER_ENV,
+  PORTAL_EMAIL_ENV,
+  PORTAL_URL_ENV,
   R2_BACKUP_BUCKET_ENV,
   R2_BACKUP_OBJECT_KEY_ENV,
   R2_RESTORE_GATE_ID,
   R2_RESTORE_REQUIRE_STATUSES_ENV,
   R2_RESTORE_SCRATCH_D1_ENV,
   REQUIRED_LOCAL_COMMANDS,
+  STAGING_CATALOG_GATE_ID,
 } from "./release_gate_contract.mjs";
 import {
   ACCESS_DRILL_ALLOWED_ENV_NAMES,
@@ -36,6 +45,9 @@ import {
   buildExternalPreflightSummary,
   buildSummary,
   chunkGates,
+  customerPortalArgsFromEnv,
+  customerPortalCommandForEvidence,
+  customerPortalEnvFromEnv,
   duplicateResultLabels,
   externalInputBlockingReasons,
   externalInputsPresentFromPreflight,
@@ -62,6 +74,9 @@ import {
   restoreArgsFromEnv,
   restoreCommandForEvidence,
   restoreRequiredStatusesFromEnv,
+  stagingCatalogArgsFromEnv,
+  stagingCatalogCommandForEvidence,
+  stagingCatalogEnvFromEnv,
   shouldFailRun,
 } from "./validate_release_gates.mjs";
 
@@ -125,6 +140,13 @@ test("release gate local subprocess env strips secret release variables", () => 
     LICENSECC_BACKUP_WORKER_NAME: "licensecc-d1-backup",
     LICENSECC_BACKUP_WORKFLOW_NAME: "licensecc-d1-backup",
     LICENSECC_VERIFIER_URL: "https://verifier.example",
+    LICENSECC_CATALOG_PLAN_ID: "plan_1",
+    LICENSECC_CATALOG_LICENSE_ID: "lic_1",
+    LICENSECC_CATALOG_LICENSE_FINGERPRINT: "a".repeat(64),
+    LICENSECC_PORTAL_URL: "https://portal.example",
+    LICENSECC_PORTAL_EMAIL: "customer@example.com",
+    LICENSECC_PORTAL_BOOTSTRAP_BEARER: "portal-bootstrap-secret",
+    LICENSECC_PORTAL_ACCESS_JWT: "portal-access-jwt",
     CLOUDFLARE_API_TOKEN: "cloudflare-token",
     D1_REST_API_TOKEN: "d1-token",
   });
@@ -144,6 +166,13 @@ test("release gate local subprocess env strips secret release variables", () => 
   assert.equal("LICENSECC_BACKUP_WORKER_NAME" in env, false);
   assert.equal("LICENSECC_BACKUP_WORKFLOW_NAME" in env, false);
   assert.equal("LICENSECC_VERIFIER_URL" in env, false);
+  assert.equal("LICENSECC_CATALOG_PLAN_ID" in env, false);
+  assert.equal("LICENSECC_CATALOG_LICENSE_ID" in env, false);
+  assert.equal("LICENSECC_CATALOG_LICENSE_FINGERPRINT" in env, false);
+  assert.equal("LICENSECC_PORTAL_URL" in env, false);
+  assert.equal("LICENSECC_PORTAL_EMAIL" in env, false);
+  assert.equal("LICENSECC_PORTAL_BOOTSTRAP_BEARER" in env, false);
+  assert.equal("LICENSECC_PORTAL_ACCESS_JWT" in env, false);
   assert.equal("CLOUDFLARE_API_TOKEN" in env, false);
   assert.equal("D1_REST_API_TOKEN" in env, false);
 });
@@ -156,6 +185,10 @@ test("release gate stripped env list includes secrets and non-secret staging ide
   assert.equal(RELEASE_GATE_STRIPPED_ENV_NAMES.includes("LICENSECC_BACKUP_URL"), true);
   assert.equal(RELEASE_GATE_STRIPPED_ENV_NAMES.includes("LICENSECC_BACKUP_WORKER_NAME"), true);
   assert.equal(RELEASE_GATE_STRIPPED_ENV_NAMES.includes("LICENSECC_VERIFIER_URL"), true);
+  assert.equal(RELEASE_GATE_STRIPPED_ENV_NAMES.includes("LICENSECC_CATALOG_PLAN_ID"), true);
+  assert.equal(RELEASE_GATE_STRIPPED_ENV_NAMES.includes("LICENSECC_PORTAL_URL"), true);
+  assert.equal(RELEASE_GATE_STRIPPED_ENV_NAMES.includes("LICENSECC_PORTAL_BOOTSTRAP_BEARER"), true);
+  assert.equal(RELEASE_GATE_STRIPPED_ENV_NAMES.includes("LICENSECC_PORTAL_ACCESS_JWT"), true);
   assert.equal(RELEASE_GATE_STRIPPED_ENV_NAMES.includes("LICENSECC_ACCESS_JWT"), true);
   assert.equal(RELEASE_GATE_STRIPPED_ENV_NAMES.includes("LICENSECC_ACCESS_USE_CLOUDFLARED"), true);
   assert.equal(RELEASE_GATE_STRIPPED_ENV_NAMES.includes("CLOUDFLARE_API_TOKEN"), true);
@@ -186,12 +219,33 @@ test("release gate runner derives external gate metadata from the shared contrac
   assert.deepEqual(externalGateRequiredEnvNames(PUBLIC_VERIFIER_ABUSE_GATE_ID), [
     PUBLIC_VERIFIER_URL_ENV,
   ]);
+  assert.deepEqual(externalGateRequiredEnvNames(STAGING_CATALOG_GATE_ID), [
+    ACCESS_ADMIN_URL_ENV,
+    ACCESS_JWT_ENV,
+    CATALOG_PLAN_ID_ENV,
+    CATALOG_LICENSE_ID_ENV,
+    CATALOG_LICENSE_FINGERPRINT_ENV,
+  ]);
+  assert.deepEqual(externalGateRequiredEnvNames(CUSTOMER_PORTAL_GATE_ID), [
+    PORTAL_URL_ENV,
+    PORTAL_EMAIL_ENV,
+    PORTAL_BOOTSTRAP_BEARER_ENV,
+  ]);
   assert.deepEqual(externalGateSecretEnvNames(BACKUP_DEPLOY_GATE_ID), []);
   assert.deepEqual(externalGateSecretEnvNames(PUBLIC_VERIFIER_ABUSE_GATE_ID), []);
+  assert.deepEqual(externalGateSecretEnvNames(STAGING_CATALOG_GATE_ID), [
+    ACCESS_JWT_ENV,
+  ]);
+  assert.deepEqual(externalGateSecretEnvNames(CUSTOMER_PORTAL_GATE_ID), [
+    PORTAL_BOOTSTRAP_BEARER_ENV,
+    PORTAL_ACCESS_JWT_ENV,
+  ]);
   assert.equal(externalGateLabel(ACCESS_ADMIN_GATE_ID), "Cloudflare Access admin staging drill");
   assert.equal(externalGateLabel(R2_RESTORE_GATE_ID), "Cloudflare R2 backup restore staging drill");
   assert.equal(externalGateLabel(BACKUP_DEPLOY_GATE_ID), "Cloudflare backup deployment staging drill");
   assert.equal(externalGateLabel(PUBLIC_VERIFIER_ABUSE_GATE_ID), "Cloudflare public verifier abuse staging drill");
+  assert.equal(externalGateLabel(STAGING_CATALOG_GATE_ID), "Cloudflare catalog projection staging drill");
+  assert.equal(externalGateLabel(CUSTOMER_PORTAL_GATE_ID), "Cloudflare customer portal staging drill");
   assert.equal(
     externalGateMissingReason(ACCESS_ADMIN_GATE_ID),
     `${ACCESS_ADMIN_URL_ENV} and one of ${ACCESS_JWT_ENV}, ${ACCESS_USE_CLOUDFLARED_ENV} are required`,
@@ -234,11 +288,31 @@ test("release gate runner derives external gate metadata from the shared contrac
     }),
     true,
   );
+  assert.equal(
+    externalGateReadyFromEnv(STAGING_CATALOG_GATE_ID, {
+      [ACCESS_ADMIN_URL_ENV]: "https://admin.example",
+      [ACCESS_JWT_ENV]: "jwt",
+      [CATALOG_PLAN_ID_ENV]: "plan_1",
+      [CATALOG_LICENSE_ID_ENV]: "lic_1",
+      [CATALOG_LICENSE_FINGERPRINT_ENV]: "a".repeat(64),
+    }),
+    true,
+  );
+  assert.equal(
+    externalGateReadyFromEnv(CUSTOMER_PORTAL_GATE_ID, {
+      [PORTAL_URL_ENV]: "https://portal.example",
+      [PORTAL_EMAIL_ENV]: "customer@example.com",
+      [PORTAL_BOOTSTRAP_BEARER_ENV]: "portal-bootstrap-secret",
+    }),
+    true,
+  );
   assert.match(externalVariablesUsage(), new RegExp(ACCESS_ADMIN_URL_ENV));
   assert.match(externalVariablesUsage(), new RegExp(ACCESS_USE_CLOUDFLARED_ENV));
   assert.match(externalVariablesUsage(), new RegExp(`${ACCESS_NON_ADMIN_JWT_ENV}\\s+optional`));
   assert.match(externalVariablesUsage(), new RegExp(BACKUP_DEPLOY_URL_ENV));
   assert.match(externalVariablesUsage(), new RegExp(PUBLIC_VERIFIER_URL_ENV));
+  assert.match(externalVariablesUsage(), new RegExp(CATALOG_PLAN_ID_ENV));
+  assert.match(externalVariablesUsage(), new RegExp(PORTAL_BOOTSTRAP_BEARER_ENV));
 });
 
 test("release gate external subprocess env keeps only allowed secret release variables", () => {
@@ -379,6 +453,82 @@ test("public verifier abuse args keep verifier URL out of evidence", () => {
       delete process.env.LICENSECC_VERIFIER_URL;
     } else {
       process.env.LICENSECC_VERIFIER_URL = originalUrl;
+    }
+  }
+});
+
+test("catalog staging args map release env to scoped drill env and redact evidence", () => {
+  const originals = {
+    LICENSECC_ADMIN_URL: process.env.LICENSECC_ADMIN_URL,
+    LICENSECC_ACCESS_JWT: process.env.LICENSECC_ACCESS_JWT,
+    LICENSECC_CATALOG_PLAN_ID: process.env.LICENSECC_CATALOG_PLAN_ID,
+    LICENSECC_CATALOG_LICENSE_ID: process.env.LICENSECC_CATALOG_LICENSE_ID,
+    LICENSECC_CATALOG_LICENSE_FINGERPRINT: process.env.LICENSECC_CATALOG_LICENSE_FINGERPRINT,
+    LICENSECC_CATALOG_ALLOW_MUTATION: process.env.LICENSECC_CATALOG_ALLOW_MUTATION,
+  };
+  process.env.LICENSECC_ADMIN_URL = "https://admin.example";
+  process.env.LICENSECC_ACCESS_JWT = "access-secret";
+  process.env.LICENSECC_CATALOG_PLAN_ID = "plan_1";
+  process.env.LICENSECC_CATALOG_LICENSE_ID = "lic_1";
+  process.env.LICENSECC_CATALOG_LICENSE_FINGERPRINT = "a".repeat(64);
+  process.env.LICENSECC_CATALOG_ALLOW_MUTATION = "0";
+  try {
+    assert.deepEqual(stagingCatalogArgsFromEnv(), [
+      "services/cloudflare-license-admin/scripts/staging-catalog-drill.mjs",
+    ]);
+    assert.deepEqual(stagingCatalogEnvFromEnv(), {
+      STAGING_ADMIN_BASE_URL: "https://admin.example",
+      STAGING_ACCESS_TOKEN: "access-secret",
+      STAGING_PLAN_ID: "plan_1",
+      STAGING_LICENSE_ID: "lic_1",
+      STAGING_LICENSE_FINGERPRINT: "a".repeat(64),
+      STAGING_ALLOW_MUTATION: "0",
+    });
+    assert.equal(stagingCatalogCommandForEvidence(), "node services/cloudflare-license-admin/scripts/staging-catalog-drill.mjs");
+    assert.equal(stagingCatalogCommandForEvidence().includes("https://admin.example"), false);
+    assert.equal(stagingCatalogCommandForEvidence().includes("access-secret"), false);
+  } finally {
+    for (const [name, value] of Object.entries(originals)) {
+      if (value === undefined) {
+        delete process.env[name];
+      } else {
+        process.env[name] = value;
+      }
+    }
+  }
+});
+
+test("customer portal staging args map release env to scoped drill env and redact evidence", () => {
+  const originals = {
+    LICENSECC_PORTAL_URL: process.env.LICENSECC_PORTAL_URL,
+    LICENSECC_PORTAL_EMAIL: process.env.LICENSECC_PORTAL_EMAIL,
+    LICENSECC_PORTAL_BOOTSTRAP_BEARER: process.env.LICENSECC_PORTAL_BOOTSTRAP_BEARER,
+    LICENSECC_PORTAL_ACCESS_JWT: process.env.LICENSECC_PORTAL_ACCESS_JWT,
+  };
+  process.env.LICENSECC_PORTAL_URL = "https://portal.example";
+  process.env.LICENSECC_PORTAL_EMAIL = "customer@example.com";
+  process.env.LICENSECC_PORTAL_BOOTSTRAP_BEARER = "portal-bootstrap-secret";
+  process.env.LICENSECC_PORTAL_ACCESS_JWT = "portal-access-jwt";
+  try {
+    assert.deepEqual(customerPortalArgsFromEnv(), [
+      "services/cloudflare-customer-portal/scripts/staging-portal-drill.mjs",
+    ]);
+    assert.deepEqual(customerPortalEnvFromEnv(), {
+      STAGING_PORTAL_BASE_URL: "https://portal.example",
+      STAGING_PORTAL_EMAIL: "customer@example.com",
+      STAGING_PORTAL_BOOTSTRAP_BEARER: "portal-bootstrap-secret",
+      STAGING_PORTAL_ACCESS_JWT: "portal-access-jwt",
+    });
+    assert.equal(customerPortalCommandForEvidence(), "node services/cloudflare-customer-portal/scripts/staging-portal-drill.mjs");
+    assert.equal(customerPortalCommandForEvidence().includes("https://portal.example"), false);
+    assert.equal(customerPortalCommandForEvidence().includes("portal-bootstrap-secret"), false);
+  } finally {
+    for (const [name, value] of Object.entries(originals)) {
+      if (value === undefined) {
+        delete process.env[name];
+      } else {
+        process.env[name] = value;
+      }
     }
   }
 });
@@ -695,6 +845,8 @@ test("strict external preflight summary fails before local gates when required i
     r2_restore: false,
     backup_deploy: false,
     public_verifier_abuse: false,
+    staging_catalog: false,
+    customer_portal: false,
   });
   assert.deepEqual(summary.results, [
     {
@@ -711,6 +863,14 @@ test("strict external preflight summary fails before local gates when required i
         "LICENSECC_BACKUP_URL",
         "LICENSECC_BACKUP_WORKER_NAME",
         "LICENSECC_VERIFIER_URL",
+        "LICENSECC_ADMIN_URL",
+        "LICENSECC_ACCESS_JWT",
+        "LICENSECC_CATALOG_PLAN_ID",
+        "LICENSECC_CATALOG_LICENSE_ID",
+        "LICENSECC_CATALOG_LICENSE_FINGERPRINT",
+        "LICENSECC_PORTAL_URL",
+        "LICENSECC_PORTAL_EMAIL",
+        "LICENSECC_PORTAL_BOOTSTRAP_BEARER",
       ],
     },
   ]);
@@ -763,6 +923,54 @@ test("strict external preflight summary fails before local gates when required i
       label: "Cloudflare public verifier abuse staging drill",
       name: "LICENSECC_VERIFIER_URL",
     },
+    {
+      type: "external_input_missing",
+      gate: "staging_catalog",
+      label: "Cloudflare catalog projection staging drill",
+      name: "LICENSECC_ADMIN_URL",
+    },
+    {
+      type: "external_input_missing",
+      gate: "staging_catalog",
+      label: "Cloudflare catalog projection staging drill",
+      name: "LICENSECC_ACCESS_JWT",
+    },
+    {
+      type: "external_input_missing",
+      gate: "staging_catalog",
+      label: "Cloudflare catalog projection staging drill",
+      name: "LICENSECC_CATALOG_PLAN_ID",
+    },
+    {
+      type: "external_input_missing",
+      gate: "staging_catalog",
+      label: "Cloudflare catalog projection staging drill",
+      name: "LICENSECC_CATALOG_LICENSE_ID",
+    },
+    {
+      type: "external_input_missing",
+      gate: "staging_catalog",
+      label: "Cloudflare catalog projection staging drill",
+      name: "LICENSECC_CATALOG_LICENSE_FINGERPRINT",
+    },
+    {
+      type: "external_input_missing",
+      gate: "customer_portal",
+      label: "Cloudflare customer portal staging drill",
+      name: "LICENSECC_PORTAL_URL",
+    },
+    {
+      type: "external_input_missing",
+      gate: "customer_portal",
+      label: "Cloudflare customer portal staging drill",
+      name: "LICENSECC_PORTAL_EMAIL",
+    },
+    {
+      type: "external_input_missing",
+      gate: "customer_portal",
+      label: "Cloudflare customer portal staging drill",
+      name: "LICENSECC_PORTAL_BOOTSTRAP_BEARER",
+    },
   ]);
   assert.equal(shouldFailRun(options, summary), true);
 });
@@ -778,6 +986,12 @@ test("strict external preflight helpers report readiness without leaking secret 
     LICENSECC_BACKUP_URL: "https://backup.example",
     LICENSECC_BACKUP_WORKER_NAME: "licensecc-d1-backup",
     LICENSECC_VERIFIER_URL: "https://verifier.example",
+    LICENSECC_CATALOG_PLAN_ID: "plan_1",
+    LICENSECC_CATALOG_LICENSE_ID: "lic_1",
+    LICENSECC_CATALOG_LICENSE_FINGERPRINT: "a".repeat(64),
+    LICENSECC_PORTAL_URL: "https://portal.example",
+    LICENSECC_PORTAL_EMAIL: "customer@example.com",
+    LICENSECC_PORTAL_BOOTSTRAP_BEARER: "portal-bootstrap-secret",
   });
 
   assert.equal(preflight.ready, true);
@@ -788,9 +1002,12 @@ test("strict external preflight helpers report readiness without leaking secret 
     r2_restore: true,
     backup_deploy: true,
     public_verifier_abuse: true,
+    staging_catalog: true,
+    customer_portal: true,
   });
   assert.equal(JSON.stringify(preflight).includes("secret-token-value"), false);
   assert.equal(JSON.stringify(preflight).includes("optional-secret-token-value"), false);
+  assert.equal(JSON.stringify(preflight).includes("portal-bootstrap-secret"), false);
 });
 
 test("release gate local gates include dry-runs outside quick mode", () => {
@@ -802,8 +1019,14 @@ test("release gate local gates include dry-runs outside quick mode", () => {
   assert.equal(fullLabels.includes("admin UI workflow tests"), true);
   assert.equal(quickLabels.includes("admin UI browser e2e"), false);
   assert.equal(fullLabels.includes("admin UI browser e2e"), true);
+  assert.equal(quickLabels.includes("customer portal tests"), true);
+  assert.equal(quickLabels.includes("customer portal UI workflow tests"), true);
+  assert.equal(quickLabels.includes("customer portal browser e2e"), false);
+  assert.equal(fullLabels.includes("customer portal browser e2e"), true);
   assert.equal(quickLabels.includes("admin Worker dry-run"), false);
   assert.equal(fullLabels.includes("admin Worker dry-run"), true);
+  assert.equal(quickLabels.includes("customer portal dry-run"), false);
+  assert.equal(fullLabels.includes("customer portal dry-run"), true);
   assert.equal(fullLabels.includes("online verifier/admin local e2e"), true);
 });
 
@@ -824,8 +1047,9 @@ test("release gate local gates are grouped into conservative concurrent chunks",
     "secret hygiene scan",
   ]);
   assert.equal(chunkLabels.some((labels) => labels.includes("admin UI browser e2e")), true);
-  assert.equal(chunkLabels.some((labels) => labels.includes("admin Worker tests") && labels.includes("online verifier tests")), true);
-  assert.equal(chunkLabels.some((labels) => labels.includes("admin Worker lint") && labels.includes("admin UI build") && labels.includes("admin UI workflow tests")), true);
+  assert.equal(chunkLabels.some((labels) => labels.includes("customer portal browser e2e")), true);
+  assert.equal(chunkLabels.some((labels) => labels.includes("admin Worker tests") && labels.includes("customer portal tests") && labels.includes("online verifier tests")), true);
+  assert.equal(chunkLabels.some((labels) => labels.includes("admin Worker lint") && labels.includes("admin UI build") && labels.includes("admin UI workflow tests") && labels.includes("customer portal UI workflow tests")), true);
   assert.equal(chunkLabels.findIndex((labels) => labels.includes("full CTest suite")) >
     chunkLabels.findIndex((labels) => labels.includes("focused C++ security/API tests")), true);
 });

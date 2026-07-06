@@ -36,6 +36,25 @@ test("external gate preflight exports every release staging input name", () => {
     "LICENSECC_BACKUP_WORKER_NAME",
     "LICENSECC_BACKUP_WORKFLOW_NAME",
     "LICENSECC_VERIFIER_URL",
+    "LICENSECC_CATALOG_PLAN_ID",
+    "LICENSECC_CATALOG_LICENSE_ID",
+    "LICENSECC_CATALOG_LICENSE_FINGERPRINT",
+    "LICENSECC_CATALOG_PLAN_KEY",
+    "LICENSECC_CATALOG_PROJECT",
+    "LICENSECC_CATALOG_CUSTOMER_ID",
+    "LICENSECC_CATALOG_SUPPORT_UNTIL",
+    "LICENSECC_CATALOG_ADDONS",
+    "LICENSECC_CATALOG_IMPORT_MANIFEST_JSON",
+    "LICENSECC_CATALOG_ALLOW_MUTATION",
+    "LICENSECC_PORTAL_URL",
+    "LICENSECC_PORTAL_EMAIL",
+    "LICENSECC_PORTAL_BOOTSTRAP_BEARER",
+    "LICENSECC_PORTAL_ACCESS_JWT",
+    "LICENSECC_PORTAL_ALLOW_SEAT_MUTATION",
+    "LICENSECC_PORTAL_FLOATING_ENTITLEMENT_ID",
+    "LICENSECC_PORTAL_ALLOW_DOWNLOAD",
+    "LICENSECC_PORTAL_DOWNLOAD_ENTITLEMENT_ID",
+    "LICENSECC_PORTAL_DEVICE_KEY_ID",
   ]);
 });
 
@@ -51,6 +70,14 @@ test("external gate preflight reports missing required inputs without values", (
     "LICENSECC_BACKUP_URL",
     "LICENSECC_BACKUP_WORKER_NAME",
     "LICENSECC_VERIFIER_URL",
+    "LICENSECC_ADMIN_URL",
+    "LICENSECC_ACCESS_JWT",
+    "LICENSECC_CATALOG_PLAN_ID",
+    "LICENSECC_CATALOG_LICENSE_ID",
+    "LICENSECC_CATALOG_LICENSE_FINGERPRINT",
+    "LICENSECC_PORTAL_URL",
+    "LICENSECC_PORTAL_EMAIL",
+    "LICENSECC_PORTAL_BOOTSTRAP_BEARER",
   ]);
   assert.equal(JSON.stringify(result).includes("secret-token-value"), false);
 });
@@ -65,6 +92,12 @@ test("external gate preflight marks ready when required inputs are present", () 
     LICENSECC_BACKUP_URL: "https://backup.example",
     LICENSECC_BACKUP_WORKER_NAME: "licensecc-d1-backup",
     LICENSECC_VERIFIER_URL: "https://verifier.example",
+    LICENSECC_CATALOG_PLAN_ID: "plan_1",
+    LICENSECC_CATALOG_LICENSE_ID: "lic_1",
+    LICENSECC_CATALOG_LICENSE_FINGERPRINT: "a".repeat(64),
+    LICENSECC_PORTAL_URL: "https://portal.example",
+    LICENSECC_PORTAL_EMAIL: "customer@example.com",
+    LICENSECC_PORTAL_BOOTSTRAP_BEARER: "portal-bootstrap-secret",
   });
   assert.equal(result.ready, true);
   assert.deepEqual(result.missing, []);
@@ -83,9 +116,16 @@ test("external gate preflight accepts cached cloudflared token mode", () => {
     LICENSECC_BACKUP_URL: "https://backup.example",
     LICENSECC_BACKUP_WORKER_NAME: "licensecc-d1-backup",
     LICENSECC_VERIFIER_URL: "https://verifier.example",
+    LICENSECC_CATALOG_PLAN_ID: "plan_1",
+    LICENSECC_CATALOG_LICENSE_ID: "lic_1",
+    LICENSECC_CATALOG_LICENSE_FINGERPRINT: "a".repeat(64),
+    LICENSECC_PORTAL_URL: "https://portal.example",
+    LICENSECC_PORTAL_EMAIL: "customer@example.com",
+    LICENSECC_PORTAL_BOOTSTRAP_BEARER: "portal-bootstrap-secret",
   });
-  assert.equal(result.ready, true);
-  assert.deepEqual(result.missing, []);
+  assert.equal(result.gates.find((gate) => gate.id === "access_admin").ready, true);
+  assert.equal(result.gates.find((gate) => gate.id === "staging_catalog").ready, false);
+  assert.deepEqual(result.missing, ["LICENSECC_ACCESS_JWT"]);
 });
 
 test("external gate preflight requires a truthy cloudflared token flag", () => {
@@ -98,6 +138,12 @@ test("external gate preflight requires a truthy cloudflared token flag", () => {
     LICENSECC_BACKUP_URL: "https://backup.example",
     LICENSECC_BACKUP_WORKER_NAME: "licensecc-d1-backup",
     LICENSECC_VERIFIER_URL: "https://verifier.example",
+    LICENSECC_CATALOG_PLAN_ID: "plan_1",
+    LICENSECC_CATALOG_LICENSE_ID: "lic_1",
+    LICENSECC_CATALOG_LICENSE_FINGERPRINT: "a".repeat(64),
+    LICENSECC_PORTAL_URL: "https://portal.example",
+    LICENSECC_PORTAL_EMAIL: "customer@example.com",
+    LICENSECC_PORTAL_BOOTSTRAP_BEARER: "portal-bootstrap-secret",
   });
   assert.equal(result.ready, false);
   assert.equal(result.gates.find((gate) => gate.id === "access_admin").ready, false);
@@ -116,11 +162,24 @@ test("external gate preflight treats optional inputs as non-blocking", () => {
     LICENSECC_BACKUP_WORKER_NAME: "licensecc-d1-backup",
     LICENSECC_BACKUP_WORKFLOW_NAME: "licensecc-d1-backup-workflow",
     LICENSECC_VERIFIER_URL: "https://verifier.example",
+    LICENSECC_CATALOG_PLAN_ID: "plan_1",
+    LICENSECC_CATALOG_LICENSE_ID: "lic_1",
+    LICENSECC_CATALOG_LICENSE_FINGERPRINT: "a".repeat(64),
+    LICENSECC_CATALOG_PLAN_KEY: "pro",
+    LICENSECC_PORTAL_URL: "https://portal.example",
+    LICENSECC_PORTAL_EMAIL: "customer@example.com",
+    LICENSECC_PORTAL_BOOTSTRAP_BEARER: "portal-bootstrap-secret",
+    LICENSECC_PORTAL_ACCESS_JWT: "portal-access-jwt",
   });
   assert.equal(result.ready, true);
   assert.equal(JSON.stringify(result).includes("optional-secret-token-value"), false);
+  assert.equal(JSON.stringify(result).includes("portal-access-jwt"), false);
   const accessGate = result.gates.find((gate) => gate.id === "access_admin");
   assert.equal(accessGate.optional[0].present, true);
   const backupGate = result.gates.find((gate) => gate.id === "backup_deploy");
   assert.equal(backupGate.optional[0].present, true);
+  const catalogGate = result.gates.find((gate) => gate.id === "staging_catalog");
+  assert.equal(catalogGate.optional.find((item) => item.name === "LICENSECC_CATALOG_PLAN_KEY").present, true);
+  const portalGate = result.gates.find((gate) => gate.id === "customer_portal");
+  assert.equal(portalGate.optional.find((item) => item.name === "LICENSECC_PORTAL_ACCESS_JWT").present, true);
 });

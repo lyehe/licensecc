@@ -2295,3 +2295,25 @@ service credentials. ``D1_REST_API_TOKEN`` is required for the Workflow export;
 deployment gate also requires ``LICENSECC_BACKUP_URL`` and
 ``LICENSECC_BACKUP_WORKER_NAME``; ``LICENSECC_BACKUP_WORKFLOW_NAME`` is
 optional when it matches the Worker name.
+
+The catalog projection staging gate additionally requires the staging admin
+URL/token pair plus ``LICENSECC_CATALOG_PLAN_ID``,
+``LICENSECC_CATALOG_LICENSE_ID``, and
+``LICENSECC_CATALOG_LICENSE_FINGERPRINT``. Optional catalog inputs include
+``LICENSECC_CATALOG_PLAN_KEY``, ``LICENSECC_CATALOG_PROJECT``,
+``LICENSECC_CATALOG_CUSTOMER_ID``, ``LICENSECC_CATALOG_SUPPORT_UNTIL``,
+``LICENSECC_CATALOG_ADDONS``,
+``LICENSECC_CATALOG_IMPORT_MANIFEST_JSON``, and
+``LICENSECC_CATALOG_ALLOW_MUTATION``.
+
+The customer portal staging gate requires ``LICENSECC_PORTAL_URL``,
+``LICENSECC_PORTAL_EMAIL``, and
+``LICENSECC_PORTAL_BOOTSTRAP_BEARER``. Optional portal inputs include
+``LICENSECC_PORTAL_ACCESS_JWT`` when bootstrap is Access-gated, plus
+``LICENSECC_PORTAL_ALLOW_SEAT_MUTATION``,
+``LICENSECC_PORTAL_FLOATING_ENTITLEMENT_ID``,
+``LICENSECC_PORTAL_ALLOW_DOWNLOAD``,
+``LICENSECC_PORTAL_DOWNLOAD_ENTITLEMENT_ID``, and
+``LICENSECC_PORTAL_DEVICE_KEY_ID``. The standalone portal drill also supports
+manual session-cookie or OTP-code auth through its ``STAGING_PORTAL_*`` aliases
+for operator-run checks.
