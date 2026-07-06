@@ -5,8 +5,8 @@
 //   (a) every routed path the spec declares has its literal route present in
 //       src/worker/index.ts (path params {id} mapped to the source's :id / regex form);
 //   (b) every routed path the SOURCE declares is present in the spec — derived from a
-//       canonical route list pinned to the inventory, so adding/removing a route in the
-//       Worker without updating the spec (or this list) fails CI.
+//       worker-owned route inventory, so adding/removing a route in the
+//       Worker without updating the spec (or src/worker/routes.ts) fails CI.
 //
 // The two "meta" routes (/openapi.json, /docs) are served directly from the fetch
 // handler (not via the regex/equality router), so they are validated by a dedicated
@@ -18,85 +18,10 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { openApiDocument } from "../dist-worker/worker/openapi.js";
+import { API_ROUTES, ALL_ROUTES, META_ROUTES } from "../dist-worker/worker/routes.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const SOURCE = readFileSync(join(here, "..", "src", "worker", "index.ts"), "utf8");
-
-// ── Canonical route list (derived from the code-reading inventory) ────────────
-// Each entry: { method, path } where `path` uses OpenAPI {id} templating. This is the
-// SINGLE SOURCE OF TRUTH the spec and the Worker source are both checked against.
-const META_ROUTES = [
-  { method: "GET", path: "/openapi.json" },
-  { method: "GET", path: "/docs" },
-];
-
-const API_ROUTES = [
-  { method: "GET", path: "/api/admin/summary" },
-  { method: "GET", path: "/api/admin/report" },
-  { method: "GET", path: "/api/admin/report/timeseries" },
-  { method: "GET", path: "/api/admin/report/expiring" },
-  { method: "GET", path: "/api/admin/audit/verify" },
-  { method: "GET", path: "/api/admin/customers" },
-  { method: "GET", path: "/api/admin/customers/{id}" },
-  { method: "POST", path: "/api/admin/customers/{id}/disable" },
-  { method: "POST", path: "/api/admin/customers/{id}/reenable" },
-  { method: "GET", path: "/api/admin/licenses" },
-  { method: "GET", path: "/api/admin/orders" },
-  { method: "GET", path: "/api/admin/search" },
-  { method: "GET", path: "/api/admin/settings" },
-  { method: "GET", path: "/api/admin/policies" },
-  { method: "POST", path: "/api/admin/policies" },
-  { method: "GET", path: "/api/admin/policies/{id}" },
-  { method: "PATCH", path: "/api/admin/policies/{id}" },
-  { method: "POST", path: "/api/admin/policies/{id}/disable" },
-  { method: "POST", path: "/api/admin/policies/{id}/reenable" },
-  { method: "GET", path: "/api/admin/catalog/features" },
-  { method: "POST", path: "/api/admin/catalog/features" },
-  { method: "GET", path: "/api/admin/catalog/features/{id}" },
-  { method: "PATCH", path: "/api/admin/catalog/features/{id}" },
-  { method: "POST", path: "/api/admin/catalog/features/{id}/disable" },
-  { method: "POST", path: "/api/admin/catalog/features/{id}/reenable" },
-  { method: "GET", path: "/api/admin/catalog/plans" },
-  { method: "POST", path: "/api/admin/catalog/plans" },
-  { method: "POST", path: "/api/admin/catalog/import" },
-  { method: "GET", path: "/api/admin/catalog/plans/{id}" },
-  { method: "PATCH", path: "/api/admin/catalog/plans/{id}" },
-  { method: "POST", path: "/api/admin/catalog/plans/{id}/disable" },
-  { method: "POST", path: "/api/admin/catalog/plans/{id}/reenable" },
-  { method: "GET", path: "/api/admin/catalog/plans/{id}/export" },
-  { method: "GET", path: "/api/admin/catalog/plans/{id}/features" },
-  { method: "POST", path: "/api/admin/catalog/plans/{id}/features" },
-  { method: "POST", path: "/api/admin/catalog/plans/{id}/features/{featureKey}/disable" },
-  { method: "POST", path: "/api/admin/catalog/plans/{id}/features/{featureKey}/reenable" },
-  { method: "POST", path: "/api/admin/license-plans/preview" },
-  { method: "POST", path: "/api/admin/license-plans/apply" },
-  { method: "GET", path: "/api/admin/webhooks" },
-  { method: "POST", path: "/api/admin/webhooks" },
-  { method: "GET", path: "/api/admin/webhooks/deliveries" },
-  { method: "POST", path: "/api/admin/webhooks/deliveries/{id}/redrive" },
-  { method: "GET", path: "/api/admin/webhooks/{id}" },
-  { method: "PATCH", path: "/api/admin/webhooks/{id}" },
-  { method: "POST", path: "/api/admin/webhooks/{id}/disable" },
-  { method: "POST", path: "/api/admin/webhooks/{id}/reenable" },
-  { method: "GET", path: "/api/admin/entitlements" },
-  { method: "POST", path: "/api/admin/entitlements" },
-  { method: "POST", path: "/api/admin/entitlements/batch" },
-  { method: "POST", path: "/api/admin/entitlements/{id}/release-seats" },
-  { method: "GET", path: "/api/admin/entitlements/{id}" },
-  { method: "PATCH", path: "/api/admin/entitlements/{id}" },
-  { method: "POST", path: "/api/admin/entitlements/{id}/disable" },
-  { method: "POST", path: "/api/admin/entitlements/{id}/reenable" },
-  { method: "POST", path: "/api/admin/entitlements/{id}/revoke" },
-  { method: "GET", path: "/api/admin/entitlements/{id}/devices" },
-  { method: "GET", path: "/api/admin/entitlements/{id}/meter" },
-  { method: "POST", path: "/api/admin/entitlements/{id}/devices/{deviceKeyId}/revoke" },
-  { method: "POST", path: "/api/admin/entitlements/{id}/devices/{deviceKeyId}/disable" },
-  { method: "POST", path: "/api/admin/entitlements/{id}/devices/{deviceKeyId}/reenable" },
-  { method: "GET", path: "/api/admin/events" },
-  { method: "POST", path: "/api/sync/entitlements" },
-];
-
-const ALL_ROUTES = [...META_ROUTES, ...API_ROUTES];
 
 // ── Source-presence check ─────────────────────────────────────────────────────
 // Map an OpenAPI path to a predicate that proves it is routed by the Worker source.

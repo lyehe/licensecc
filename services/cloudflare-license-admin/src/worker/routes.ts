@@ -1,0 +1,80 @@
+export type AdminRouteMethod = "GET" | "POST" | "PATCH";
+
+export interface AdminRoute {
+  readonly method: AdminRouteMethod;
+  readonly path: string;
+}
+
+// Canonical admin route inventory. Paths use OpenAPI {param} templating.
+export const META_ROUTES = [
+  { method: "GET", path: "/openapi.json" },
+  { method: "GET", path: "/docs" },
+] as const satisfies readonly AdminRoute[];
+
+export const API_ROUTES = [
+  { method: "GET", path: "/api/admin/summary" },
+  { method: "GET", path: "/api/admin/report" },
+  { method: "GET", path: "/api/admin/report/timeseries" },
+  { method: "GET", path: "/api/admin/report/expiring" },
+  { method: "GET", path: "/api/admin/audit/verify" },
+  { method: "GET", path: "/api/admin/customers" },
+  { method: "GET", path: "/api/admin/customers/{id}" },
+  { method: "POST", path: "/api/admin/customers/{id}/disable" },
+  { method: "POST", path: "/api/admin/customers/{id}/reenable" },
+  { method: "GET", path: "/api/admin/licenses" },
+  { method: "GET", path: "/api/admin/orders" },
+  { method: "GET", path: "/api/admin/search" },
+  { method: "GET", path: "/api/admin/settings" },
+  { method: "GET", path: "/api/admin/policies" },
+  { method: "POST", path: "/api/admin/policies" },
+  { method: "GET", path: "/api/admin/policies/{id}" },
+  { method: "PATCH", path: "/api/admin/policies/{id}" },
+  { method: "POST", path: "/api/admin/policies/{id}/disable" },
+  { method: "POST", path: "/api/admin/policies/{id}/reenable" },
+  { method: "GET", path: "/api/admin/catalog/features" },
+  { method: "POST", path: "/api/admin/catalog/features" },
+  { method: "GET", path: "/api/admin/catalog/features/{id}" },
+  { method: "PATCH", path: "/api/admin/catalog/features/{id}" },
+  { method: "POST", path: "/api/admin/catalog/features/{id}/disable" },
+  { method: "POST", path: "/api/admin/catalog/features/{id}/reenable" },
+  { method: "GET", path: "/api/admin/catalog/plans" },
+  { method: "POST", path: "/api/admin/catalog/plans" },
+  { method: "POST", path: "/api/admin/catalog/import" },
+  { method: "GET", path: "/api/admin/catalog/plans/{id}" },
+  { method: "PATCH", path: "/api/admin/catalog/plans/{id}" },
+  { method: "POST", path: "/api/admin/catalog/plans/{id}/disable" },
+  { method: "POST", path: "/api/admin/catalog/plans/{id}/reenable" },
+  { method: "GET", path: "/api/admin/catalog/plans/{id}/export" },
+  { method: "GET", path: "/api/admin/catalog/plans/{id}/features" },
+  { method: "POST", path: "/api/admin/catalog/plans/{id}/features" },
+  { method: "POST", path: "/api/admin/catalog/plans/{id}/features/{featureKey}/disable" },
+  { method: "POST", path: "/api/admin/catalog/plans/{id}/features/{featureKey}/reenable" },
+  { method: "POST", path: "/api/admin/license-plans/preview" },
+  { method: "POST", path: "/api/admin/license-plans/apply" },
+  { method: "GET", path: "/api/admin/webhooks" },
+  { method: "POST", path: "/api/admin/webhooks" },
+  { method: "GET", path: "/api/admin/webhooks/deliveries" },
+  { method: "POST", path: "/api/admin/webhooks/deliveries/{id}/redrive" },
+  { method: "GET", path: "/api/admin/webhooks/{id}" },
+  { method: "PATCH", path: "/api/admin/webhooks/{id}" },
+  { method: "POST", path: "/api/admin/webhooks/{id}/disable" },
+  { method: "POST", path: "/api/admin/webhooks/{id}/reenable" },
+  { method: "GET", path: "/api/admin/entitlements" },
+  { method: "POST", path: "/api/admin/entitlements" },
+  { method: "POST", path: "/api/admin/entitlements/batch" },
+  { method: "POST", path: "/api/admin/entitlements/{id}/release-seats" },
+  { method: "GET", path: "/api/admin/entitlements/{id}" },
+  { method: "PATCH", path: "/api/admin/entitlements/{id}" },
+  { method: "POST", path: "/api/admin/entitlements/{id}/disable" },
+  { method: "POST", path: "/api/admin/entitlements/{id}/reenable" },
+  { method: "POST", path: "/api/admin/entitlements/{id}/revoke" },
+  { method: "GET", path: "/api/admin/entitlements/{id}/devices" },
+  { method: "GET", path: "/api/admin/entitlements/{id}/meter" },
+  { method: "POST", path: "/api/admin/entitlements/{id}/devices/{deviceKeyId}/revoke" },
+  { method: "POST", path: "/api/admin/entitlements/{id}/devices/{deviceKeyId}/disable" },
+  { method: "POST", path: "/api/admin/entitlements/{id}/devices/{deviceKeyId}/reenable" },
+  { method: "GET", path: "/api/admin/events" },
+  { method: "POST", path: "/api/sync/entitlements" },
+] as const satisfies readonly AdminRoute[];
+
+export const ALL_ROUTES = [...META_ROUTES, ...API_ROUTES] as const;
