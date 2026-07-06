@@ -29,10 +29,26 @@ jobs:
          shell: pwsh
          timeout-minutes: 20
          run: |
+            $boostVersion = "1.84.0"
             $boostRoot = "C:\local\boost_1_84_0"
-            choco install -y boost-msvc-14.3 --version=1.84.0.1 --no-progress
+            $installer = Join-Path $env:RUNNER_TEMP "boost_1_84_0-msvc-14.3-64.exe"
+            $url = "https://archives.boost.io/release/$boostVersion/binaries/boost_1_84_0-msvc-14.3-64.exe"
+            $expectedSha256 = "b14090362af9730ed9cc125b456a76d981b010060ee30e6d2eb109f8144fa444"
+            curl.exe -L --fail --retry 3 --retry-all-errors --retry-delay 10 --connect-timeout 30 --max-time 600 -o $installer $url
             if ($LASTEXITCODE -ne 0) {
-              throw "Chocolatey Boost install failed with exit code $LASTEXITCODE"
+              throw "Boost download failed with curl exit code $LASTEXITCODE"
+            }
+            $actualSha256 = (Get-FileHash -Algorithm SHA256 $installer).Hash.ToLowerInvariant()
+            if ($actualSha256 -ne $expectedSha256) {
+              throw "Boost installer SHA256 mismatch: $actualSha256"
+            }
+            $process = Start-Process -FilePath $installer -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/DIR=$boostRoot" -PassThru -WindowStyle Hidden
+            if (-not $process.WaitForExit(600000)) {
+              Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+              throw "Boost installer timed out"
+            }
+            if ($process.ExitCode -ne 0) {
+              throw "Boost installer failed with exit code $($process.ExitCode)"
             }
             if (-not (Test-Path (Join-Path $boostRoot "boost"))) {
               throw "Boost install did not create $boostRoot\boost"
