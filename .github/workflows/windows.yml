@@ -64,7 +64,7 @@ jobs:
       -  name: Compile
          shell: bash
          run: |
-            cmake -S . -B build -A x64 -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} -DSTATIC_RUNTIME:BOOL=${{ matrix.static }} -DLCC_PROJECT_NAME:STRING=test -DCMAKE_INSTALL_PREFIX=C:/licensecc
+            cmake -S . -B build -A x64 -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} -DSTATIC_RUNTIME:BOOL=${{ matrix.static }} -DCMAKE_DISABLE_FIND_PACKAGE_OpenSSL=TRUE -DLCC_PROJECT_NAME:STRING=test -DCMAKE_INSTALL_PREFIX=C:/licensecc
             cmake --build build --target install --config ${{ matrix.build_type }}
       -  name: Test
          shell: bash
