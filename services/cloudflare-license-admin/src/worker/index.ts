@@ -2,7 +2,13 @@ import { createRemoteJWKSet, jwtVerify } from "jose";
 import type { JWTPayload } from "jose";
 import { openApiJson } from "./openapi.js";
 import { docsHtml } from "./docs_page.js";
-import { idempotentReplay, mutationResponse, rememberIdempotency } from "./idempotency.js";
+import {
+  INVALID_IDEMPOTENCY_KEY,
+  idempotentReplay,
+  mutationResponse,
+  readIdempotencyKey,
+  rememberIdempotency,
+} from "./idempotency.js";
 import { envelope, json } from "./responses.js";
 import type {
   EntitlementInput,
@@ -1216,8 +1222,8 @@ async function handleMutation(request: Request, env: Env, actor: Actor, requestI
     return adminError;
   }
   const url = new URL(request.url);
-  const idempotencyKey = safeString(request.headers.get("idempotency-key"), 128);
-  if (request.headers.has("idempotency-key") && idempotencyKey === null) {
+  const idempotencyKey = readIdempotencyKey(request);
+  if (idempotencyKey === INVALID_IDEMPOTENCY_KEY) {
     return envelope(requestIdValue, "invalid_idempotency_key", undefined, 400);
   }
   const ctx: MutationContext = {
@@ -1291,8 +1297,8 @@ async function handleSync(request: Request, env: Env): Promise<Response> {
   if (auth instanceof Response) {
     return auth;
   }
-  const idempotencyKey = safeString(request.headers.get("idempotency-key"), 128);
-  if (request.headers.has("idempotency-key") && idempotencyKey === null) {
+  const idempotencyKey = readIdempotencyKey(request);
+  if (idempotencyKey === INVALID_IDEMPOTENCY_KEY) {
     return envelope(id, "invalid_idempotency_key", undefined, 400);
   }
   const body = await parseJsonBody(request, id);
@@ -1376,14 +1382,6 @@ async function writeCatalogWithAudit(
   return batchReturnedRow<Record<string, unknown>>(results[0]);
 }
 
-function validIdempotencyKey(request: Request): string | null | typeof INVALID {
-  const idempotencyKey = safeString(request.headers.get("idempotency-key"), 128);
-  if (request.headers.has("idempotency-key") && idempotencyKey === null) {
-    return INVALID;
-  }
-  return idempotencyKey;
-}
-
 function catalogFeatureAudit(
   env: Env,
   id: string,
@@ -1448,10 +1446,11 @@ async function handlePlanProjection(request: Request, env: Env, actor: Actor, re
   if (adminError !== null) {
     return adminError;
   }
-  const idempotencyKey = safeString(request.headers.get("idempotency-key"), 128);
-  if (action === "apply" && request.headers.has("idempotency-key") && idempotencyKey === null) {
+  const parsedIdempotencyKey = readIdempotencyKey(request);
+  if (action === "apply" && parsedIdempotencyKey === INVALID_IDEMPOTENCY_KEY) {
     return envelope(requestIdValue, "invalid_idempotency_key", undefined, 400);
   }
+  const idempotencyKey = parsedIdempotencyKey === INVALID_IDEMPOTENCY_KEY ? null : parsedIdempotencyKey;
   const body = await parseJsonBody(request, requestIdValue);
   if (body instanceof Response) {
     return body;
@@ -1537,8 +1536,8 @@ async function createCatalogFeature(request: Request, env: Env, actor: Actor, re
   if (adminError !== null) {
     return adminError;
   }
-  const idempotencyKey = validIdempotencyKey(request);
-  if (idempotencyKey === INVALID) {
+  const idempotencyKey = readIdempotencyKey(request);
+  if (idempotencyKey === INVALID_IDEMPOTENCY_KEY) {
     return envelope(requestIdValue, "invalid_idempotency_key", undefined, 400);
   }
   const scope = `POST:/api/admin/catalog/features:${actor.subject}`;
@@ -1581,8 +1580,8 @@ async function createCatalogFeature(request: Request, env: Env, actor: Actor, re
 async function patchCatalogFeature(request: Request, env: Env, actor: Actor, featureId: string, requestIdValue: string): Promise<Response> {
   const adminError = requireAdmin(actor, requestIdValue);
   if (adminError !== null) return adminError;
-  const idempotencyKey = validIdempotencyKey(request);
-  if (idempotencyKey === INVALID) return envelope(requestIdValue, "invalid_idempotency_key", undefined, 400);
+  const idempotencyKey = readIdempotencyKey(request);
+  if (idempotencyKey === INVALID_IDEMPOTENCY_KEY) return envelope(requestIdValue, "invalid_idempotency_key", undefined, 400);
   const scope = `PATCH:/api/admin/catalog/features/${featureId}:${actor.subject}`;
   const replay = await idempotentReplay(env, scope, idempotencyKey);
   if (replay !== null) return replay;
@@ -1619,8 +1618,8 @@ async function patchCatalogFeature(request: Request, env: Env, actor: Actor, fea
 async function transitionCatalogFeature(request: Request, env: Env, actor: Actor, featureId: string, action: "disable" | "reenable", requestIdValue: string): Promise<Response> {
   const adminError = requireAdmin(actor, requestIdValue);
   if (adminError !== null) return adminError;
-  const idempotencyKey = validIdempotencyKey(request);
-  if (idempotencyKey === INVALID) return envelope(requestIdValue, "invalid_idempotency_key", undefined, 400);
+  const idempotencyKey = readIdempotencyKey(request);
+  if (idempotencyKey === INVALID_IDEMPOTENCY_KEY) return envelope(requestIdValue, "invalid_idempotency_key", undefined, 400);
   const scope = `POST:/api/admin/catalog/features/${featureId}/${action}:${actor.subject}`;
   const replay = await idempotentReplay(env, scope, idempotencyKey);
   if (replay !== null) return replay;
@@ -1701,8 +1700,8 @@ async function createCatalogPlan(request: Request, env: Env, actor: Actor, reque
   if (adminError !== null) {
     return adminError;
   }
-  const idempotencyKey = validIdempotencyKey(request);
-  if (idempotencyKey === INVALID) {
+  const idempotencyKey = readIdempotencyKey(request);
+  if (idempotencyKey === INVALID_IDEMPOTENCY_KEY) {
     return envelope(requestIdValue, "invalid_idempotency_key", undefined, 400);
   }
   const scope = `POST:/api/admin/catalog/plans:${actor.subject}`;
@@ -1743,8 +1742,8 @@ async function createCatalogPlan(request: Request, env: Env, actor: Actor, reque
 async function patchCatalogPlan(request: Request, env: Env, actor: Actor, planId: string, requestIdValue: string): Promise<Response> {
   const adminError = requireAdmin(actor, requestIdValue);
   if (adminError !== null) return adminError;
-  const idempotencyKey = validIdempotencyKey(request);
-  if (idempotencyKey === INVALID) return envelope(requestIdValue, "invalid_idempotency_key", undefined, 400);
+  const idempotencyKey = readIdempotencyKey(request);
+  if (idempotencyKey === INVALID_IDEMPOTENCY_KEY) return envelope(requestIdValue, "invalid_idempotency_key", undefined, 400);
   const scope = `PATCH:/api/admin/catalog/plans/${planId}:${actor.subject}`;
   const replay = await idempotentReplay(env, scope, idempotencyKey);
   if (replay !== null) return replay;
@@ -1781,8 +1780,8 @@ async function patchCatalogPlan(request: Request, env: Env, actor: Actor, planId
 async function transitionCatalogPlan(request: Request, env: Env, actor: Actor, planId: string, action: "disable" | "reenable", requestIdValue: string): Promise<Response> {
   const adminError = requireAdmin(actor, requestIdValue);
   if (adminError !== null) return adminError;
-  const idempotencyKey = validIdempotencyKey(request);
-  if (idempotencyKey === INVALID) return envelope(requestIdValue, "invalid_idempotency_key", undefined, 400);
+  const idempotencyKey = readIdempotencyKey(request);
+  if (idempotencyKey === INVALID_IDEMPOTENCY_KEY) return envelope(requestIdValue, "invalid_idempotency_key", undefined, 400);
   const scope = `POST:/api/admin/catalog/plans/${planId}/${action}:${actor.subject}`;
   const replay = await idempotentReplay(env, scope, idempotencyKey);
   if (replay !== null) return replay;
@@ -1860,8 +1859,8 @@ async function createCatalogPlanFeature(request: Request, env: Env, actor: Actor
   if (adminError !== null) {
     return adminError;
   }
-  const idempotencyKey = validIdempotencyKey(request);
-  if (idempotencyKey === INVALID) {
+  const idempotencyKey = readIdempotencyKey(request);
+  if (idempotencyKey === INVALID_IDEMPOTENCY_KEY) {
     return envelope(requestIdValue, "invalid_idempotency_key", undefined, 400);
   }
   const scope = `POST:/api/admin/catalog/plans/${planId}/features:${actor.subject}`;
@@ -1966,8 +1965,8 @@ async function createCatalogPlanFeature(request: Request, env: Env, actor: Actor
 async function transitionCatalogPlanFeature(request: Request, env: Env, actor: Actor, planId: string, featureKey: string, action: "disable" | "reenable", requestIdValue: string): Promise<Response> {
   const adminError = requireAdmin(actor, requestIdValue);
   if (adminError !== null) return adminError;
-  const idempotencyKey = validIdempotencyKey(request);
-  if (idempotencyKey === INVALID) return envelope(requestIdValue, "invalid_idempotency_key", undefined, 400);
+  const idempotencyKey = readIdempotencyKey(request);
+  if (idempotencyKey === INVALID_IDEMPOTENCY_KEY) return envelope(requestIdValue, "invalid_idempotency_key", undefined, 400);
   const scope = `POST:/api/admin/catalog/plans/${planId}/features/${featureKey}/${action}:${actor.subject}`;
   const replay = await idempotentReplay(env, scope, idempotencyKey);
   if (replay !== null) return replay;
@@ -2274,8 +2273,8 @@ async function importCatalog(request: Request, env: Env, actor: Actor, requestId
   if (adminError !== null) return adminError;
   const url = new URL(request.url);
   const dryRun = url.searchParams.get("dry_run") === "1" || url.searchParams.get("dry_run") === "true";
-  const idempotencyKey = validIdempotencyKey(request);
-  if (idempotencyKey === INVALID) return envelope(requestIdValue, "invalid_idempotency_key", undefined, 400);
+  const idempotencyKey = readIdempotencyKey(request);
+  if (idempotencyKey === INVALID_IDEMPOTENCY_KEY) return envelope(requestIdValue, "invalid_idempotency_key", undefined, 400);
   const scope = `POST:/api/admin/catalog/import:${actor.subject}`;
   if (!dryRun) {
     const replay = await idempotentReplay(env, scope, idempotencyKey);
@@ -2680,8 +2679,8 @@ async function handleCustomerTransition(
   if (customerId.length === 0 || customerId.length > 128) {
     return envelope(requestIdValue, "invalid_request", undefined, 400);
   }
-  const idempotencyKey = safeString(request.headers.get("idempotency-key"), 128);
-  if (request.headers.has("idempotency-key") && idempotencyKey === null) {
+  const idempotencyKey = readIdempotencyKey(request);
+  if (idempotencyKey === INVALID_IDEMPOTENCY_KEY) {
     return envelope(requestIdValue, "invalid_idempotency_key", undefined, 400);
   }
   const body = await parseJsonBody(request, requestIdValue);
@@ -2750,8 +2749,8 @@ async function handleBatchTransition(request: Request, env: Env, actor: Actor, r
   if (adminError !== null) {
     return adminError;
   }
-  const headerKey = safeString(request.headers.get("idempotency-key"), 128);
-  if (request.headers.has("idempotency-key") && headerKey === null) {
+  const headerKey = readIdempotencyKey(request);
+  if (headerKey === INVALID_IDEMPOTENCY_KEY) {
     return envelope(requestIdValue, "invalid_idempotency_key", undefined, 400);
   }
   const body = await parseJsonBody(request, requestIdValue);
@@ -2950,8 +2949,8 @@ async function handlePolicyCreate(request: Request, env: Env, actor: Actor, body
   if (input === null) {
     return envelope(requestIdValue, "invalid_request", undefined, 400);
   }
-  const idempotencyKey = safeString(request.headers.get("idempotency-key"), 128);
-  if (request.headers.has("idempotency-key") && idempotencyKey === null) {
+  const idempotencyKey = readIdempotencyKey(request);
+  if (idempotencyKey === INVALID_IDEMPOTENCY_KEY) {
     return envelope(requestIdValue, "invalid_idempotency_key", undefined, 400);
   }
   const scope = `POST:/api/admin/policies:${actor.subject}`;
@@ -2998,8 +2997,8 @@ async function handlePolicyPatch(request: Request, env: Env, actor: Actor, polic
   if (patch === null) {
     return envelope(requestIdValue, "invalid_request", undefined, 400);
   }
-  const idempotencyKey = safeString(request.headers.get("idempotency-key"), 128);
-  if (request.headers.has("idempotency-key") && idempotencyKey === null) {
+  const idempotencyKey = readIdempotencyKey(request);
+  if (idempotencyKey === INVALID_IDEMPOTENCY_KEY) {
     return envelope(requestIdValue, "invalid_idempotency_key", undefined, 400);
   }
   const scope = `PATCH:/api/admin/policies/:id:${actor.subject}`;
@@ -3055,8 +3054,8 @@ async function handlePolicyTransition(request: Request, env: Env, actor: Actor, 
   if (action === "disable" && reason === "") {
     return envelope(requestIdValue, "reason_required", undefined, 400);
   }
-  const idempotencyKey = safeString(request.headers.get("idempotency-key"), 128);
-  if (request.headers.has("idempotency-key") && idempotencyKey === null) {
+  const idempotencyKey = readIdempotencyKey(request);
+  if (idempotencyKey === INVALID_IDEMPOTENCY_KEY) {
     return envelope(requestIdValue, "invalid_idempotency_key", undefined, 400);
   }
   const scope = `POST:/api/admin/policies/${action}:${actor.subject}`;
@@ -3222,8 +3221,8 @@ async function handleWebhookCreate(request: Request, env: Env, actor: Actor, bod
   if (input === null) {
     return envelope(requestIdValue, "invalid_request", undefined, 400);
   }
-  const idempotencyKey = safeString(request.headers.get("idempotency-key"), 128);
-  if (request.headers.has("idempotency-key") && idempotencyKey === null) {
+  const idempotencyKey = readIdempotencyKey(request);
+  if (idempotencyKey === INVALID_IDEMPOTENCY_KEY) {
     return envelope(requestIdValue, "invalid_idempotency_key", undefined, 400);
   }
   const scope = `POST:/api/admin/webhooks:${actor.subject}`;
@@ -3270,8 +3269,8 @@ async function handleWebhookPatch(request: Request, env: Env, actor: Actor, endp
   if (patch === null) {
     return envelope(requestIdValue, "invalid_request", undefined, 400);
   }
-  const idempotencyKey = safeString(request.headers.get("idempotency-key"), 128);
-  if (request.headers.has("idempotency-key") && idempotencyKey === null) {
+  const idempotencyKey = readIdempotencyKey(request);
+  if (idempotencyKey === INVALID_IDEMPOTENCY_KEY) {
     return envelope(requestIdValue, "invalid_idempotency_key", undefined, 400);
   }
   const scope = `PATCH:/api/admin/webhooks/:id:${actor.subject}`;
@@ -3328,8 +3327,8 @@ async function handleWebhookPatch(request: Request, env: Env, actor: Actor, endp
 // status). Disabling stops the dispatcher from enqueuing/delivering for this endpoint; it
 // never deletes already-enqueued deliveries (the deliver pass skips a disabled endpoint).
 async function handleWebhookTransition(request: Request, env: Env, actor: Actor, endpointId: string, action: "disable" | "reenable", requestIdValue: string): Promise<Response> {
-  const idempotencyKey = safeString(request.headers.get("idempotency-key"), 128);
-  if (request.headers.has("idempotency-key") && idempotencyKey === null) {
+  const idempotencyKey = readIdempotencyKey(request);
+  if (idempotencyKey === INVALID_IDEMPOTENCY_KEY) {
     return envelope(requestIdValue, "invalid_idempotency_key", undefined, 400);
   }
   const scope = `POST:/api/admin/webhooks/${action}:${actor.subject}`;
@@ -3368,8 +3367,8 @@ async function handleWebhookTransition(request: Request, env: Env, actor: Actor,
 // cron tick re-attempts it. A guarded UPDATE (status = 'failed' in the WHERE) makes this safe
 // and idempotent: a delivery already pending/delivered is a 409, never silently re-queued.
 async function handleWebhookRedrive(request: Request, env: Env, actor: Actor, deliveryId: number, requestIdValue: string): Promise<Response> {
-  const idempotencyKey = safeString(request.headers.get("idempotency-key"), 128);
-  if (request.headers.has("idempotency-key") && idempotencyKey === null) {
+  const idempotencyKey = readIdempotencyKey(request);
+  if (idempotencyKey === INVALID_IDEMPOTENCY_KEY) {
     return envelope(requestIdValue, "invalid_idempotency_key", undefined, 400);
   }
   const scope = `POST:/api/admin/webhooks/deliveries/redrive:${actor.subject}`;
@@ -3604,8 +3603,8 @@ async function handleReleaseSeats(request: Request, env: Env, actor: Actor, enco
   if (key === null) {
     return envelope(requestIdValue, "invalid_entitlement_id", undefined, 400);
   }
-  const idempotencyKey = safeString(request.headers.get("idempotency-key"), 128);
-  if (request.headers.has("idempotency-key") && idempotencyKey === null) {
+  const idempotencyKey = readIdempotencyKey(request);
+  if (idempotencyKey === INVALID_IDEMPOTENCY_KEY) {
     return envelope(requestIdValue, "invalid_idempotency_key", undefined, 400);
   }
   const body = await parseJsonBody(request, requestIdValue);
@@ -3713,8 +3712,8 @@ async function handleDeviceTransition(
   if (!DEVICE_KEY_ID_RE.test(deviceKeyId)) {
     return envelope(requestIdValue, "invalid_device_key_id", undefined, 400);
   }
-  const idempotencyKey = safeString(request.headers.get("idempotency-key"), 128);
-  if (request.headers.has("idempotency-key") && idempotencyKey === null) {
+  const idempotencyKey = readIdempotencyKey(request);
+  if (idempotencyKey === INVALID_IDEMPOTENCY_KEY) {
     return envelope(requestIdValue, "invalid_idempotency_key", undefined, 400);
   }
   const body = await parseJsonBody(request, requestIdValue);

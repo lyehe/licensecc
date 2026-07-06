@@ -10,6 +10,26 @@ interface IdempotencyEnv {
   DB: D1DatabaseLike;
 }
 
+export const INVALID_IDEMPOTENCY_KEY = Symbol("invalid_idempotency_key");
+
+function safeHeaderString(value: unknown, maxLength: number): string | null {
+  if (typeof value !== "string" || value.length === 0 || value.length > maxLength) {
+    return null;
+  }
+  if (value.includes("\n") || value.includes("\r") || value.includes("\0")) {
+    return null;
+  }
+  return value;
+}
+
+export function readIdempotencyKey(request: Request): string | null | typeof INVALID_IDEMPOTENCY_KEY {
+  const idempotencyKey = safeHeaderString(request.headers.get("idempotency-key"), 128);
+  if (request.headers.has("idempotency-key") && idempotencyKey === null) {
+    return INVALID_IDEMPOTENCY_KEY;
+  }
+  return idempotencyKey;
+}
+
 export async function idempotentReplay(env: IdempotencyEnv, scope: string, key: string | null): Promise<Response | null> {
   if (key === null) {
     return null;
