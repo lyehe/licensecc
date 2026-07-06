@@ -17,7 +17,13 @@ IF(NOT LCC_PROJECTS_BASE_DIR)
 ENDIF(NOT LCC_PROJECTS_BASE_DIR)
 
 cmake_policy(SET CMP0048 NEW)
-#cmake_policy(SET CMP0091 NEW)
+if(POLICY CMP0091)
+	cmake_policy(SET CMP0091 NEW)
+endif()
+option(STATIC_RUNTIME "Link statically to the compiler runtime where supported." OFF)
+if(STATIC_RUNTIME)
+	set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+endif()
 project (licensecc 
 			VERSION 2.1.0
 			LANGUAGES CXX)
