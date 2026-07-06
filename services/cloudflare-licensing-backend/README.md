@@ -82,6 +82,11 @@ also supports an optional Cloudflare rate-limit binding named
      --reason "initial entitlement"
    ```
 
+   The sync helper writes the base entitlement projection and is appropriate for
+   simple node-locked access. Floating seats require capacity fields
+   (`pool_size > 0`) and should be created through the admin policy or
+   catalog-plan flows documented in `../cloudflare-license-admin/README.md`.
+
 7. Optional: enroll a device signing key for request proof-of-possession.
    Generate the key on the client/device side, keep the private key in that
    app's platform key store, and register only the generated public SPKI record:

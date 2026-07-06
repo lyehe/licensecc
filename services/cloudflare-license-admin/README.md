@@ -119,6 +119,78 @@ mutation occurred.
 
 Revoked entitlements are terminal for this first admin version.
 
+## License mode setup
+
+`license_mode` is derived from entitlement capacity, not stored as a separate
+operator switch:
+
+- `node_locked`: `pool_size = 0`
+- `floating`: `pool_size > 0`
+- `trial`: `is_trial = 1`
+
+Use policy stamping for normal setup. Enable `POLICY_STAMP_MODE=on`, create a
+policy, then create an entitlement with that `policy_id`. The policy is frozen
+onto the entitlement at stamp time; later policy edits affect new stamps only.
+
+Node-locked policy example:
+
+```json
+{
+  "project": "DEFAULT",
+  "name": "Pro node locked",
+  "type": "node_locked",
+  "pool_size": 0,
+  "max_active_devices": 1,
+  "max_borrow_sec": 0,
+  "assertion_ttl_seconds": 300
+}
+```
+
+Floating policy example:
+
+```json
+{
+  "project": "DEFAULT",
+  "name": "Team floating 5 seats",
+  "type": "floating",
+  "pool_size": 5,
+  "max_active_devices": 5,
+  "max_borrow_sec": 0,
+  "assertion_ttl_seconds": 300
+}
+```
+
+Then stamp an entitlement from either policy:
+
+```json
+{
+  "project": "DEFAULT",
+  "feature": "PRO",
+  "license_fingerprint": "<64 hex fingerprint>",
+  "policy_id": "<policy id>",
+  "customer_id": "cus_123",
+  "license_id": "lic_123",
+  "status": "active"
+}
+```
+
+For catalog-driven tiers, create catalog features and plans, attach each plan
+feature to a policy or set explicit capacity overrides on the plan feature, then
+use `/api/admin/license-plans/preview` and `/api/admin/license-plans/apply`.
+Runtime checks read the stamped entitlement rows, not plan or tier names.
+
+Client behavior differs by mode:
+
+- Node-locked clients use `/v1/activate` and `/v1/renew`; `max_active_devices`
+  controls how many distinct devices can hold a lease in the rebind window.
+- Floating clients use `/v1/checkout`, `/v1/heartbeat`, and `/v1/release`;
+  `pool_size` is the live seat pool, and `max_borrow_sec > 0` enables bounded
+  borrowed/offline seats.
+
+The `/api/sync/entitlements` helper creates the base entitlement projection but
+does not expose seat capacity fields. Use policies, catalog plan projection, or
+the admin API paths that stamp capacity when setting up floating licenses.
+
 ### Break-glass CLI
 
 The shared D1 helper `../cloudflare-licensing-backend/scripts/entitlement.mjs` is an
