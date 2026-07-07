@@ -1,62 +1,96 @@
 # Issue licenses
 
-The easiest way to issue licenses is to enter the project library and create the following project structure:
-The projects folder can be anyware. We created one in `licensecc/projects` for your convenience (and for testing purposes). A default project<sup>1</sup> named `DEFAULT` has been created for you when you configured the project with cmake.
-You can re-configure the project with the `LCC_PROJECT_NAME` cmake variable to create a new project.
- 
+Licensecc supports two issuing paths:
+
+- local/offline license files for the C++ library and inspector;
+- online entitlements managed by the Cloudflare backend/admin service.
+
+Use local license files when a product only needs offline verification. Use online
+entitlements when you need account-bound activation, node-locked leases, floating
+seats, trials, metering, catalog tiers, or customer self-service.
+
+## Local license files
+
+Configure and build the project first. By default, generated project material is
+written under the CMake build tree:
+
+```text
+build/<preset>/projects/<project-name>
 ```
-projects
-└── DEFAULT       #(your project name)
-    ├── include
-    │   └── licensecc
-    │       └── DEFAULT
-    │           ├── licensecc_properties.h
-    │           └── public_key.h
-    ├── licenses
-    │   └── test.lic
+
+The generated project contains the public-key header, private signing key, and a
+`licenses/` directory:
+
+```text
+projects/
+└── DEFAULT
+    ├── include/
+    │   └── licensecc/
+    │       └── DEFAULT/
+    │           ├── licensecc_properties.h
+    │           └── public_key.h
+    ├── licenses/
     └── private_key.rsa
 ```
 
-Place the `lcc` executable in your path (this is the executable needed to issue licenses). This executable is compiled
-together with the library, you should find it somewhere in your build tree or where you installed the library.
+Use `LCC_PROJECT_NAME` to choose another project name, and use
+`LCC_PROJECTS_BASE_DIR` only when you intentionally want a stable project
+directory outside the build tree.
 
-The lines below will create a perpetual unlimited license for your software:
+The license generator executable is built with the project. Put `lcc` on your
+`PATH`, or run it from the build/install tree.
 
+Create a perpetual local license:
+
+```console
+cd build/dev-debug/projects/DEFAULT
+lcc license issue -o licenses/customer.lic
 ```
-cd projects/DEFAULT #(or whatever your project name is) 
-lcc license issue -o licenses/{license-file-name}.lic
+
+Create a license bound to a hardware identifier:
+
+```console
+cd build/dev-debug/projects/DEFAULT
+lcc license issue --client-signature XXXX-XXXX-XXXX -o licenses/customer.lic
 ```
 
-## Licensing software with hardware identifier
+The destination application can print its hardware identifier through your own
+integration code, or you can use `lccinspector` while testing.
 
-To issue a license linked to a specific machine you first need to retrieve an hardware identifier for it.
-This can be done running an executable in the destination machine (usually it is your own software, 
-that calls `licensecc` api and prints out the required identifier).
+Useful options:
 
-If you are just experimenting the library you can compile and use the [examples project]() to print out such hardware signature or
-you can run `lccinspector` in the destination machine.
+| Parameter | Description |
+| --- | --- |
+| `--base64`, `-b` | Encode the license for environment-variable transport. |
+| `--valid-from` | Start date, formatted `YYYY-MM-DD`; defaults to today. |
+| `--valid-to` | Expiration date, formatted `YYYY-MM-DD`; omitted means no expiration. |
+| `--client-signature` | Hardware identifier in `XXXX-XXXX-XXXX` format. |
+| `--output-file-name`, `-o` | License output file path. |
+| `--extra-data` | Application-specific data returned by `acquire_license`. |
+| `--feature-names` | Comma-separated licensed feature names. |
 
-Once you have the hardware identifier you can issue the command:
+Run `lcc license issue --help` for the full option set.
 
-```
-cd projects/DEFAULT #(or whatever your `lcc-project` is) 
-lcc license issue --client-signature XXXX-XXXX-XXXX -o licenses/{license-file-name}.lic
-```
-to create the license file (usually this command is issued in the host machine where you compiled `licensecc`).
+## Online entitlements
 
-## Full set of options
-A good way to start exploring available options is the command: `lcc license issue --help`
+Online entitlements are created through the admin service and stored in the
+licensing backend database. The license mode is derived from stamped entitlement
+capacity:
 
-| Parameter        | Description                                                                                  |
-|------------------|----------------------------------------------------------------------------------------------|
-|base64,b          | the license is encoded for inclusion in environment variables                                |
-|valid-from        | Specify the start of the validity for this license. Format YYYY-MM-DD. If not specified defaults to today. |
-|valid-to          | The expire date for this license. Format YYYY-MM-DD. If not specified the license won't expire |
-|client-signature  | The signature of the hardware where the licensed software will run. It should be in the format XXXX-XXXX-XXXX. If not specified the license won't be linked to a specific pc. |
-|output-file-name  | License output file path.                                                                    |
-|extra-data        | Application specific data. They'll be returned when calling the `acquire_license` method   |
-|feature-names     | Comma separated list of features to license. See `multi-feature` discussion.               |
+- `trial`: `is_trial = 1`
+- `floating`: `pool_size > 0`
+- `node_locked`: `pool_size = 0`
 
-Note:
-<sup>1</sup> a project is a container for the customizations of licensecc. In special way its keys and build parameters. 
-The name should reflect the name of the software you want to add a license to. The project name appears in the license file.
+The normal setup path is:
+
+1. Deploy and migrate the licensing backend.
+2. Deploy the admin Worker.
+3. Enable policy stamping with `POLICY_STAMP_MODE=on`.
+4. Create policy templates for node-locked, floating, trial, or subscription use.
+5. Create entitlements from policies, or project catalog plans to entitlements.
+
+Node-locked clients use `/v1/activate` and `/v1/renew`. Floating clients use
+`/v1/checkout`, `/v1/heartbeat`, and `/v1/release`.
+
+For concrete policy JSON examples and catalog-plan projection commands, see
+`services/cloudflare-license-admin/README.md`.

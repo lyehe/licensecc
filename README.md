@@ -104,6 +104,12 @@ npm run check:e2e
 npm run check:all
 ```
 
+The checked-in GitHub Actions workflows are intentionally core-focused: Linux
+and Windows CMake matrices plus pull-request C/C++ formatting. Service, SDK,
+UI, E2E, schema-parity, and dry-run validation is reproducible through the
+local commands above and the root npm shortcuts; add remote workflow coverage
+only after the matching local command exists and is documented.
+
 ## Manual Build
 
 Using presets:
@@ -159,6 +165,8 @@ cmake -S . -B build/custom -DLCC_PROJECT_NAME=my-product -DLCC_PROJECTS_BASE_DIR
 ## Usage
 
 A minimal, self-contained integration example lives in [`examples/minimal`](examples/minimal). It acquires a license and reports failures with `lcc_strerror` and `print_error`.
+
+For issuing licenses, see [`doc/usage/issue-licenses.md`](doc/usage/issue-licenses.md). Local license files are issued with `lcc`; online node-locked, floating, trial, and tiered entitlements are configured through the backend/admin policy flow documented in [`services/cloudflare-license-admin/README.md`](services/cloudflare-license-admin/README.md).
 
 ## Contributing
 
