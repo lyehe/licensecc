@@ -38,10 +38,16 @@ The verifier **never raises on a bad token** — every rejection is a typed
 
 ## Install
 
+The package is not published to PyPI yet — install it from this repository:
+
 ```console
-# from this directory (uv resolves the cryptography dependency)
-uv run pytest -q
+pip install ./sdks/python            # from the repo root
+pip install './sdks/python[httpx]'   # with the optional httpx transport
 ```
+
+or, with uv in your application: `uv add <path-to-repo>/sdks/python`.
+
+To run this SDK's tests: `uv run pytest -q` from this directory.
 
 Runtime dependency: only [`cryptography`](https://pypi.org/project/cryptography/).
 The HTTP client uses the standard-library `urllib` — no `requests`/`httpx`

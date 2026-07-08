@@ -10,6 +10,13 @@ does not perform HTTP; host applications call this Worker from their own
 `LCC_ONLINE_CHECK` callback and pass returned assertions back to
 `acquire_license_ex()`.
 
+> **Status:** the C++ client entry points referenced in this README
+> (`acquire_license_ex()`, `lcc_acquire_license_decision()`, `LCC_ONLINE_CHECK`)
+> belong to the in-progress online-verification client and are **not yet in the
+> C++ library on `main`**. Until that work lands, consume assertions with the
+> Python/.NET SDKs under `sdks/`, or verify the documented `lccoa1` token format
+> yourself.
+
 The successful hot path is one validated request, rate-limit checks, one D1
 lookup by primary key, one signed assertion, and one JSON response. The Worker
 also supports an optional Cloudflare rate-limit binding named

@@ -22,14 +22,15 @@ dependencies = [
 
 [project.optional-dependencies]
 # Optional async/ergonomic HTTP transport. Not required: the default HttpClient
-# uses std-lib urllib. Install with `pip install licensecc[httpx]` to opt in.
+# uses std-lib urllib. Not on PyPI yet — install from a checkout with
+# `pip install './sdks/python[httpx]'` to opt in.
 httpx = ["httpx>=0.27.0"]
 test = ["pytest>=7.0"]
 
 [project.urls]
-Homepage = "https://github.com/open-license-manager/licensecc"
-Source = "https://github.com/open-license-manager/licensecc"
-Issues = "https://github.com/open-license-manager/licensecc/issues"
+Homepage = "https://github.com/lyehe/licensecc"
+Source = "https://github.com/lyehe/licensecc"
+Issues = "https://github.com/lyehe/licensecc/issues"
 
 [build-system]
 requires = ["hatchling"]

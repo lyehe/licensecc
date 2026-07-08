@@ -2,7 +2,7 @@
 
 ## Getting Help
 
-Use [GitHub Discussions](https://github.com/open-license-manager/licensecc/discussions) for questions, integration help, and documentation gaps. Use GitHub issues for reproducible bugs and actionable feature requests.
+Use [GitHub issues on this repository](https://github.com/lyehe/licensecc/issues) for questions, integration help, documentation gaps, reproducible bugs, and actionable feature requests. (The upstream `open-license-manager` discussions cover the original project, not this fork.)
 
 ## Reporting Bugs
 

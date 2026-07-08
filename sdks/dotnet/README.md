@@ -47,6 +47,17 @@ dotnet test
 The test suite loads the repo's golden vectors from `test/vectors/` (resolved via a build-time
 pinned path with a relative-path fallback) and proves parity with the C++ verifier.
 
+## Use it in your application
+
+The package is not published to NuGet yet — reference the project from a checkout:
+
+```xml
+<ProjectReference Include="<path-to-repo>/sdks/dotnet/src/Licensecc.Client/Licensecc.Client.csproj" />
+```
+
+or produce a local package with `dotnet pack src/Licensecc.Client` and consume it from a
+local NuGet feed.
+
 ## Verifying an online-assertion (`lccoa1`)
 
 ```csharp
@@ -81,7 +92,8 @@ else
 }
 ```
 
-The verifier mirrors `src/library/online_verification/OnlineVerification.cpp` exactly: 3-part envelope,
+The verifier mirrors the C++ online-verification client (in progress; not yet on `main`) exactly,
+with parity pinned by the shared golden vectors: 3-part envelope,
 exact prefix, **canonical standard base64** (url-safe / unpadded / whitespace rejected),
 RSA-PKCS1-SHA256 over the payload bytes against the **key-id-selected** trusted key (unknown key-id →
 reject; key below 3072 bits → reject), the 14 canonical `key=value` lines in fixed order (no missing /

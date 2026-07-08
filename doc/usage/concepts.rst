@@ -42,13 +42,13 @@ and you want to issue licenses separately (licenses of "Foo" incompatible with "
 
 In "Foo" and "Bar" (your original software) be sure to locate and link the right version of `licensecc-static-lib`. Eg. in your "Foo" CmakeLists.txt:
 
-Copy ``Findlicensecc.cmake`` from examples project in your project ``./cmake/`` folder.
-Add the following lines to your ``CmakeLists.txt``
- 
-.. code-block:: 
+Point ``CMAKE_PREFIX_PATH`` at the install prefix of the matching licensecc build
+and add the following line to your ``CMakeLists.txt`` (see
+:ref:`usage/integration:Integrate Licensecc in your application`):
 
-  SET(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake/")
-  find_package(licensecc 2.0.0 REQUIRED COMPONENTS "FooLicensecc")
+.. code-block::
+
+  find_package(licensecc REQUIRED COMPONENTS "FooLicensecc")
 
 
 Features

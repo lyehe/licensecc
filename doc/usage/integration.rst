@@ -2,42 +2,44 @@
 Integrate Licensecc in your application
 #########################################
 
-This short guide explain how to integrate `licensecc` in your application.
+This short guide explains how to integrate `licensecc` in your application.
 
-Working examples are provided in the `examples <https://github.com/open-license-manager/examples>`_ project. 
+A working, standalone example is provided in ``examples/minimal`` in this
+repository — its README walks through the exact commands.
 
 Build System - locate and link the licensecc
 *********************************************
 
-We strongly recommend to use CMake as a build system. 
-If this is the case, the easiest way to compile is to configure LicenseCC as a git submodule of your project.
+We strongly recommend CMake. The supported flow is: build **and install**
+licensecc for your project name, then locate it with ``find_package``.
 
-Then you can copy the cmake module ``Findlicensecc.cmake`` into your cmake modules directory in order to be able to 
-locate the compiled library. 
-
-Adding the following lines to your ``CMakeLists.txt``
+1. Build and install licensecc (see the repository ``README.md`` for
+   prerequisites):
 
 .. code-block:: console
-  
-  find_package(licensecc 2.1.0 REQUIRED)
-  
-will make the external target ``licensecc::licensecc_static`` to be available for linking.
 
-``Findlicensecc.cmake`` takes the following CMake variables as input.
- 
-==================== ====================
-Cmake variable        Description
-==================== ====================
-LICENSECC_LOCATION   | If licensecc was not checked out as a git submodule, in this variable you can provide an hint 
-                     | to locate the library. It may point to the installation folder or the source folder.
-LCC_PROJECT_NAME     | Name of the project (the software where you want to integrate licensecc).  
-                     | Alternatively it is possible to specify a component name in the component section of find_package.
-==================== ====================
+  cmake -S <licensecc> -B lcc-build -DLCC_PROJECT_NAME=myproject -DCMAKE_INSTALL_PREFIX=<prefix>
+  cmake --build lcc-build --target install
 
+2. In your application's ``CMakeLists.txt``:
 
+.. code-block:: console
+
+  find_package(licensecc REQUIRED)
+
+and configure your project with ``-DCMAKE_PREFIX_PATH=<prefix>`` and the same
+``-DLCC_PROJECT_NAME=myproject``. This makes the imported target
+``licensecc::licensecc_static`` available for linking.
+
+.. NOTE::
+  ``LCC_PROJECT_NAME`` selects the license *project* (key pair + generated
+  ``licensecc_properties.h``) the library was built for. It must match between
+  the licensecc build and your application, or ``find_package`` will not find
+  the project component. Alternatively, pass it as a component:
+  ``find_package(licensecc REQUIRED COMPONENTS myproject)``.
 
 Call Licensecc from your code
 *******************************
 The file containing the public api is ``include/licensecc/licensecc.h``. Functions in there are considered stable.
 
-refer to :ref:`public api <api/public_api:Public api>` to understand how to generate an hardware identifer or validate a license.
+Refer to :ref:`public api <api/public_api:Public api>` to understand how to generate a hardware identifier or validate a license.

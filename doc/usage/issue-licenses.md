@@ -37,21 +37,21 @@ Use `LCC_PROJECT_NAME` to choose another project name, and use
 `LCC_PROJECTS_BASE_DIR` only when you intentionally want a stable project
 directory outside the build tree.
 
-The license generator executable is built with the project. Put `lcc` on your
+The license generator executable is built with the project. Put `lccgen` on your
 `PATH`, or run it from the build/install tree.
 
 Create a perpetual local license:
 
 ```console
 cd build/dev-debug/projects/DEFAULT
-lcc license issue -o licenses/customer.lic
+lccgen license issue -o licenses/customer.lic
 ```
 
 Create a license bound to a hardware identifier:
 
 ```console
 cd build/dev-debug/projects/DEFAULT
-lcc license issue --client-signature XXXX-XXXX-XXXX -o licenses/customer.lic
+lccgen license issue --client-signature XXXX-XXXX-XXXX -o licenses/customer.lic
 ```
 
 The destination application can print its hardware identifier through your own
@@ -69,7 +69,7 @@ Useful options:
 | `--extra-data` | Application-specific data returned by `acquire_license`. |
 | `--feature-names` | Comma-separated licensed feature names. |
 
-Run `lcc license issue --help` for the full option set.
+Run `lccgen license issue --help` for the full option set.
 
 ## Online entitlements
 

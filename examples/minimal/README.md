@@ -23,9 +23,9 @@ cmake -S . -B build -DCMAKE_PREFIX_PATH=<prefix> -DLCC_PROJECT_NAME=myproject
 cmake --build build
 ```
 
-`find_package(licensecc REQUIRED)` resolves `licensecc::licensecc_static`. If you
-did not install, point `-DLICENSECC_LOCATION=<licensecc build or source dir>`
-instead of `CMAKE_PREFIX_PATH`.
+`find_package(licensecc REQUIRED)` resolves `licensecc::licensecc_static`. The
+install step is required: the build tree does not ship a package config, so
+`CMAKE_PREFIX_PATH` must point at the install prefix.
 
 ## 3. Run
 
