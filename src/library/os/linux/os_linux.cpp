@@ -288,7 +288,7 @@ static void set_preferred_disks(std::vector<DiskInfo> &diskInfos, std::unordered
 				device_name_s = device_name_s.substr(pos + 1);
 			}
 
-			for (auto disk_info : diskInfos) {
+			for (auto &disk_info : diskInfos) {
 				if (device_name_s == disk_info.device) {
 					disk_info.preferred = true;
 					LOG_DEBUG("Disk %d device %s set as preferred", disk_info.id, disk_info.device);

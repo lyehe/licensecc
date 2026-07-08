@@ -41,6 +41,18 @@ BOOST_AUTO_TEST_CASE(print_error_renders_failures) {
 	BOOST_CHECK_MESSAGE(out.find("some.lic") != string::npos, "includes the reference, got: " + out);
 }
 
+BOOST_AUTO_TEST_CASE(network_license_stubs_link_as_declared) {
+	// confirm_license/release_license are documented "not implemented yet",
+	// but they must link exactly as the header declares them and answer
+	// LICENSE_OK. Regression: confirm_license was defined with a different
+	// signature (LicenseLocation by value), so the declared C symbol never
+	// existed and consumers failed at link time.
+	char feature[] = "default";
+	LicenseLocation location = {LICENSE_PATH};
+	BOOST_CHECK(confirm_license(feature, &location) == LICENSE_OK);
+	BOOST_CHECK(release_license(feature, location) == LICENSE_OK);
+}
+
 BOOST_AUTO_TEST_CASE(print_error_null_safe) {
 	char buffer[LCC_API_ERROR_BUFFER_SIZE];
 	print_error(buffer, nullptr);

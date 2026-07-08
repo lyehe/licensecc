@@ -196,6 +196,8 @@ LCC_EVENT_TYPE acquire_license(const CallerInformations* callerInformation, cons
 	return result;
 }
 
-LCC_EVENT_TYPE confirm_license(char* product, LicenseLocation licenseLocation) { return LICENSE_OK; }
+// Network-license stubs: not implemented yet (see licensecc.h). They must
+// match the header declarations exactly so the extern "C" symbols exist.
+LCC_EVENT_TYPE confirm_license(char* featureName, LicenseLocation* licenseLocation) { return LICENSE_OK; }
 
-LCC_EVENT_TYPE release_license(char* product, LicenseLocation licenseLocation) { return LICENSE_OK; }
+LCC_EVENT_TYPE release_license(char* featureName, LicenseLocation licenseLocation) { return LICENSE_OK; }

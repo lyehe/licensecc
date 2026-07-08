@@ -13,6 +13,11 @@ namespace license {
 
 std::vector<uint8_t> unbase64(const std::string& base64_data);
 std::string base64(const void* binaryData, size_t len, int lineLenght = -1);
+/**
+ * Decode base64 into a string of exactly the decoded bytes.
+ * Returns an empty string when the input can not be decoded.
+ */
+std::string unbase64_to_string(const std::string& base64_data);
 
 }  // namespace license
 

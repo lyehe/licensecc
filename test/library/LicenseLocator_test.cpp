@@ -2,6 +2,7 @@
 #define __STDC_WANT_LIB_EXT1__ 1
 #include <string.h>
 
+#include <algorithm>
 #include <iostream>
 #include <iterator>
 #include <cstdio>
@@ -16,6 +17,7 @@
 #include <licensecc_properties_test.h>
 
 #include "../../src/library/os/os.h"
+#include "../../src/library/base/base64.h"
 #include "../../src/library/base/EventRegistry.h"
 #include "../../src/library/locate/ApplicationFolder.hpp"
 #include "../../src/library/locate/EnvironmentVarLocation.hpp"
@@ -126,6 +128,46 @@ BOOST_AUTO_TEST_CASE(external_definition_not_found) {
 	BOOST_CHECK_MESSAGE(registry.getLastFailure()->event_type == LICENSE_FILE_NOT_FOUND, "Error detected");
 }
 
+/**
+ * LICENSE_ENCODED round-trip: the decoded license must be exactly the bytes
+ * that were encoded. Regression: the decoded buffer was turned into a string
+ * without a length, reading past the end of the buffer.
+ */
+BOOST_AUTO_TEST_CASE(external_definition_encoded_content_roundtrip) {
+	std::ifstream src(MOCK_LICENSE, std::ios::binary);
+	const std::string referenceContent((std::istreambuf_iterator<char>(src)), std::istreambuf_iterator<char>());
+	string encoded = license::base64(referenceContent.data(), referenceContent.size());
+	// the encoder emits newlines; the ENCODED contract (and the b64 format regex) is single-line
+	encoded.erase(std::remove(encoded.begin(), encoded.end(), '\n'), encoded.end());
+	BOOST_REQUIRE_MESSAGE(encoded.size() < LCC_API_MAX_LICENSE_DATA_LENGTH, "mock license fits licenseData");
+
+	license::EventRegistry registry;
+	LicenseLocation licLocation = {LICENSE_ENCODED};
+	std::copy(encoded.begin(), encoded.end(), licLocation.licenseData);
+	ExternalDefinition externalDefinition(&licLocation);
+	vector<string> licenseInfos = externalDefinition.license_locations(registry);
+	BOOST_REQUIRE_EQUAL(1, licenseInfos.size());
+	const string licenseRealContent = externalDefinition.retrieve_license_content(licenseInfos[0]);
+	BOOST_CHECK_MESSAGE(referenceContent == licenseRealContent, "decoded content is exactly the encoded input");
+}
+
+/**
+ * Invalid base64 passed as LICENSE_ENCODED must be rejected gracefully with
+ * empty content. Regression: an empty decode buffer produced
+ * std::string(nullptr), which is undefined behavior.
+ */
+BOOST_AUTO_TEST_CASE(external_definition_encoded_invalid_base64_rejected) {
+	const string invalid("a");  // too short to be base64
+	license::EventRegistry registry;
+	LicenseLocation licLocation = {LICENSE_ENCODED};
+	std::copy(invalid.begin(), invalid.end(), licLocation.licenseData);
+	ExternalDefinition externalDefinition(&licLocation);
+	vector<string> licenseInfos = externalDefinition.license_locations(registry);
+	BOOST_REQUIRE_EQUAL(1, licenseInfos.size());
+	const string licenseRealContent = externalDefinition.retrieve_license_content(licenseInfos[0]);
+	BOOST_CHECK_MESSAGE(licenseRealContent.empty(), "invalid base64 yields empty content, not a crash");
+}
+
 /*****************************************************************************
  * EnvironmentVarLocation tests
  *****************************************************************************/
@@ -193,6 +235,50 @@ BOOST_AUTO_TEST_CASE(environment_var_data) {
 	BOOST_CHECK_MESSAGE(referenceContent.compare(licenseRealContent) == 0,
 						"env-var data content matches what was provided");
 	UNSETENV(LCC_LICENSE_DATA_ENV_VAR);
+}
+
+/**
+ * Base64 license content in LCC_LICENSE_DATA_ENV_VAR must decode back to
+ * exactly the original bytes, and the reported location must reference the
+ * DATA variable. Regression: locations/events named the LOCATION variable,
+ * and the decode built a std::string without a length (buffer over-read).
+ */
+BOOST_AUTO_TEST_CASE(environment_var_data_base64) {
+	std::ifstream src(MOCK_LICENSE, std::ios::binary);
+	const std::string referenceContent((std::istreambuf_iterator<char>(src)), std::istreambuf_iterator<char>());
+	string encoded = license::base64(referenceContent.data(), referenceContent.size());
+	encoded.erase(std::remove(encoded.begin(), encoded.end(), '\n'), encoded.end());
+	SETENV(LCC_LICENSE_DATA_ENV_VAR, encoded.c_str());
+
+	license::EventRegistry registry;
+	EnvironmentVarData envVarDataStrategy;
+	vector<string> licenseInfos = envVarDataStrategy.license_locations(registry);
+	BOOST_CHECK(registry.isGood());
+	BOOST_REQUIRE_EQUAL(1, licenseInfos.size());
+	BOOST_CHECK_MESSAGE(licenseInfos[0] == LCC_LICENSE_DATA_ENV_VAR,
+						"location references the DATA env var, got: " + licenseInfos[0]);
+	const string licenseRealContent = envVarDataStrategy.retrieve_license_content(licenseInfos[0]);
+	BOOST_CHECK_MESSAGE(referenceContent == licenseRealContent, "decoded content is exactly the encoded input");
+	UNSETENV(LCC_LICENSE_DATA_ENV_VAR);
+}
+
+/**
+ * When the DATA variable is not defined, the failure event must name
+ * LCC_LICENSE_DATA_ENV_VAR. Regression: it reported LCC_LICENSE_LOCATION_ENV_VAR,
+ * telling users to fix a variable they never meant to set.
+ */
+BOOST_AUTO_TEST_CASE(environment_var_data_not_defined_names_data_variable) {
+	UNSETENV(LCC_LICENSE_DATA_ENV_VAR);
+	license::EventRegistry registry;
+	EnvironmentVarData envVarDataStrategy;
+	vector<string> licenseInfos = envVarDataStrategy.license_locations(registry);
+	BOOST_CHECK_EQUAL(0, licenseInfos.size());
+	registry.turnWarningsIntoErrors();
+	const AuditEvent *failure = registry.getLastFailure();
+	BOOST_REQUIRE(failure != nullptr);
+	BOOST_CHECK_MESSAGE(failure->event_type == ENVIRONMENT_VARIABLE_NOT_DEFINED, "not-defined event reported");
+	BOOST_CHECK_MESSAGE(string(failure->license_reference) == LCC_LICENSE_DATA_ENV_VAR,
+						"failure references the DATA env var, got: " + string(failure->license_reference));
 }
 
 /**

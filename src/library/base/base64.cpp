@@ -150,4 +150,13 @@ std::vector<uint8_t> unbase64(const std::string& base64_data) {
 	return bin;
 }
 
+std::string unbase64_to_string(const std::string& base64_data) {
+	const std::vector<uint8_t> raw = unbase64(base64_data);
+	if (raw.empty()) {
+		return std::string();
+	}
+	// raw holds exactly the decoded bytes, without a terminator.
+	return std::string(reinterpret_cast<const char*>(raw.data()), raw.size());
+}
+
 }  // namespace license
