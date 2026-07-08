@@ -1,0 +1,44 @@
+name: Services_CI
+on: [push, pull_request]
+jobs:
+  services:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            services/cloudflare-licensing-backend/package-lock.json
+            services/cloudflare-license-admin/package-lock.json
+            services/cloudflare-customer-portal/package-lock.json
+            services/cloudflare-d1-backup/package-lock.json
+      - name: Install dependencies
+        run: |
+          npm ci --prefix services/cloudflare-licensing-backend
+          npm ci --prefix services/cloudflare-license-admin
+          npm ci --prefix services/cloudflare-customer-portal
+          npm ci --prefix services/cloudflare-d1-backup
+      # Mirrors scripts/dev-check.ps1 -IncludeServices (the documented local gate):
+      # lint + unit/API tests + SQL suites per service. UI workflow tests, E2E,
+      # schema parity, and deploy dry-runs remain local-first via dev-check flags.
+      - name: Licensing backend
+        run: |
+          npm --prefix services/cloudflare-licensing-backend run lint
+          npm --prefix services/cloudflare-licensing-backend run test
+          npm --prefix services/cloudflare-licensing-backend run test:sql
+          npm --prefix services/cloudflare-licensing-backend run test:pg
+      - name: License admin console
+        run: |
+          npm --prefix services/cloudflare-license-admin run lint
+          npm --prefix services/cloudflare-license-admin run test
+          npm --prefix services/cloudflare-license-admin run test:sql
+      - name: Customer portal
+        run: |
+          npm --prefix services/cloudflare-customer-portal run lint
+          npm --prefix services/cloudflare-customer-portal run test
+      - name: D1 backup
+        run: |
+          npm --prefix services/cloudflare-d1-backup run lint
+          npm --prefix services/cloudflare-d1-backup run test

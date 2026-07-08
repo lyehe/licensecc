@@ -105,11 +105,13 @@ npm run check:e2e
 npm run check:all
 ```
 
-The checked-in GitHub Actions workflows are intentionally core-focused: Linux
-and Windows CMake matrices plus pull-request C/C++ formatting. Service, SDK,
-UI, E2E, schema-parity, and dry-run validation is reproducible through the
-local commands above and the root npm shortcuts; add remote workflow coverage
-only after the matching local command exists and is documented.
+The checked-in GitHub Actions workflows cover the C++ core (Linux and Windows
+CMake matrices plus pull-request C/C++ formatting) and the services
+(`services.yml`: per-service lint, unit/API tests, and SQL suites — the same
+set as `dev-check.ps1 -IncludeServices`). SDK, UI, E2E, schema-parity, and
+dry-run validation remains local-first through the commands above and the root
+npm shortcuts; add remote workflow coverage only after the matching local
+command exists and is documented.
 
 ## Manual Build
 
