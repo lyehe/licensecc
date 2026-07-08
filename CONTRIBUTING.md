@@ -37,15 +37,15 @@ For normal work on this public fork, target `main` unless an issue or maintainer
 Before opening a pull request:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts/dev-check.ps1
+pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/dev-check.ps1
 ```
 
 For service, SDK, database-backend, and portal changes, run the relevant local gates as well:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -SkipCore -IncludeServices -IncludeUi -IncludeSchemaParity
-powershell -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -SkipCore -IncludeE2E
-powershell -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -SkipCore -IncludeSdks
+pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -SkipCore -IncludeServices -IncludeUi -IncludeSchemaParity
+pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -SkipCore -IncludeE2E
+pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -SkipCore -IncludeSdks
 ```
 
 The root `package.json` exposes the same service-oriented entry points:
@@ -56,13 +56,24 @@ npm run check:e2e
 npm run lint:services
 ```
 
-If you cannot run that script on your platform, run the equivalent commands:
+If you cannot run that script on your platform, run the equivalent commands.
+First apply the vendored-generator patch (required on Linux with GCC ≥ 13;
+harmless elsewhere — dev-check.ps1 normally does this for you and reverts it
+afterwards):
+
+```console
+git -C extern/license-generator apply ../../patches/license-generator-cstdint.patch
+```
+
+Then configure, build, and test:
 
 ```console
 cmake --preset dev-debug
 cmake --build --preset dev-debug
 ctest --preset dev-debug
 ```
+
+To restore the pristine submodule afterwards: `git -C extern/license-generator checkout -- .`
 
 Manual fallback without presets:
 

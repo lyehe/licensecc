@@ -38,6 +38,7 @@ Generated project material is written under the CMake build tree by default, not
 - CMake 3.21 or newer for `CMakePresets.json`.
 - A C++17 compiler.
 - Git with submodule support.
+- PowerShell 7 (`pwsh`) on any platform for `scripts/dev-check.ps1` and the root npm shortcuts (CI uses the same binary; Windows PowerShell 5.1 is not targeted).
 - Linux: OpenSSL, Zlib where required by the OpenSSL version, and Boost development packages for the bundled generator/tests.
 - Windows: Visual Studio 2022 or another supported C++ toolchain. Boost is required for tests and for building the bundled license generator during configuration. If Boost is not in a default CMake search path, set `BOOST_ROOT` to the Boost install directory.
 
@@ -58,10 +59,10 @@ git submodule update --init --recursive
 
 ## Recommended Local Check
 
-On Windows PowerShell:
+With PowerShell 7 (`pwsh`, any platform):
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts/dev-check.ps1
+pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/dev-check.ps1
 ```
 
 That script applies the vendored generator patch temporarily if needed, configures the `dev-debug` preset, builds it, runs CTest, and warns if untracked service/SDK work is present.
@@ -71,20 +72,20 @@ The default check expects `extern/license-generator` to match the pinned submodu
 Useful variants:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -Preset dev-release
-powershell -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -Preset ci-windows-msvc
-powershell -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -Preset ci-windows-msvc-release-static
-powershell -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -Preset ci-linux-release
-powershell -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -SkipTests
-powershell -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -SkipCore -IncludeServices -IncludeUi -IncludeSchemaParity
-powershell -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -AllowDirtyGeneratorSubmodule
-powershell -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -IncludeBackend
-powershell -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -IncludeServices
-powershell -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -IncludeUi
-powershell -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -IncludeE2E
-powershell -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -IncludeSchemaParity
-powershell -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -IncludeDryRun
-powershell -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -IncludeSdks
+pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -Preset dev-release
+pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -Preset ci-windows-msvc
+pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -Preset ci-windows-msvc-release-static
+pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -Preset ci-linux-release
+pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -SkipTests
+pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -SkipCore -IncludeServices -IncludeUi -IncludeSchemaParity
+pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -AllowDirtyGeneratorSubmodule
+pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -IncludeBackend
+pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -IncludeServices
+pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -IncludeUi
+pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -IncludeE2E
+pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -IncludeSchemaParity
+pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -IncludeDryRun
+pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -IncludeSdks
 ```
 
 `-IncludeBackend` runs backend lint, the unit suite, SQL/migration suite, and fenced PostgreSQL adapter tests after the core C++ checks.
@@ -175,7 +176,7 @@ Use the current active branch policy for this repository. For normal work on thi
 Before opening a pull request:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts/dev-check.ps1
+pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/dev-check.ps1
 ```
 
 Do not commit generated outputs such as `build/`, `install/`, `.wrangler/`, `dist/`, `node_modules/`, `doc/_doxygen/`, Python caches, or .NET `bin/obj` directories.
