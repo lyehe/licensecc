@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import {
   ACTIVATION_DOWNLOAD_ACTION_LABEL,
   ACTIVATION_DOWNLOAD_DISCLOSURE,
+  DEVICE_KEY_HELP_COPY,
   authRequestPath,
   authVerifyPath,
   checkoutPath,
@@ -488,6 +489,7 @@ function App(): React.ReactElement {
         <section className="tablePane full">
           <h2>Download licenses</h2>
           <p className="muted">{ACTIVATION_DOWNLOAD_DISCLOSURE}</p>
+          <p className="muted">{DEVICE_KEY_HELP_COPY}</p>
           <table>
             <thead><tr><th>Project</th><th>Feature</th><th>Status</th><th>Valid</th><th>License</th></tr></thead>
             <tbody>

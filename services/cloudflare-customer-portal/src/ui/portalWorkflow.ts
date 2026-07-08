@@ -67,6 +67,9 @@ export const ACTIVATION_DOWNLOAD_ACTION_LABEL = "Activate and download .lic";
 export const ACTIVATION_DOWNLOAD_DISCLOSURE =
   "Downloading a license activates this entitlement and can start activation-based trial time.";
 
+export const DEVICE_KEY_HELP_COPY =
+  "The device key id is shown by the licensed application on the device you are activating; devices that are already registered also list it under the Devices tab.";
+
 // A license_fingerprint is a long hex digest; show a head...tail summary, never the full value in a
 // way that could be mistaken for a credential. Mirrors the admin shortHash contract exactly.
 export function shortHash(value: string): string {

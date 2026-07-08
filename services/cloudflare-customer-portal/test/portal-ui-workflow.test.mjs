@@ -71,6 +71,9 @@ test("portal UI workflow copy discloses account-safe auth and activation downloa
   assert.equal(workflow.ACTIVATION_DOWNLOAD_ACTION_LABEL, "Activate and download .lic");
   assert.match(workflow.ACTIVATION_DOWNLOAD_DISCLOSURE, /activates this entitlement/);
   assert.match(workflow.ACTIVATION_DOWNLOAD_DISCLOSURE, /trial time/);
+  // The download form asks for a raw "device key id"; the UI must say where it comes from.
+  assert.match(workflow.DEVICE_KEY_HELP_COPY, /device key id/i);
+  assert.match(workflow.DEVICE_KEY_HELP_COPY, /Devices/);
 });
 
 test("portal UI workflow formats epoch windows and timestamps", async () => {
