@@ -16,6 +16,30 @@
 const TRIAL_BASES = new Set(["from_issue", "from_first_activation", "from_first_use"]);
 
 /**
+ * The four policy capacity modes, in canonical order. This is the ONE runtime source of the enum
+ * that the admin validators, UI form, OpenAPI spec crosscheck, and SQL CHECK backstops all mirror.
+ */
+export const POLICY_TYPES = /** @type {const} */ (["trial", "node_locked", "floating", "subscription"]);
+
+/**
+ * The capacity-mode invariant, single-sourced. Returns null when (type, poolSize) is valid; else the
+ * violated rule as a stable error-code string:
+ *   node_locked  -> pool_size MUST be 0  (a node-locked policy pins one device, no shared pool)
+ *   floating     -> pool_size MUST be > 0 (a floating policy needs a seat pool to lease from)
+ *   trial/subscription -> unconstrained on pool_size.
+ * Rules mirror admin policy_validation.ts's former policyTypeCapacityIsValid exactly.
+ */
+export function policyCapacityViolation(type, poolSize) {
+  if (type === "node_locked" && poolSize !== 0) {
+    return "node_locked_requires_zero_pool";
+  }
+  if (type === "floating" && !(poolSize > 0)) {
+    return "floating_requires_pool";
+  }
+  return null;
+}
+
+/**
  * Pure stamp. `overrides` MUST carry the target tuple (project, feature, license_fingerprint) and MAY
  * override any default. Returns { input, capacity, trial }:
  *   input    -> EntitlementInput for createEntitlement (status forced 'active' on a fresh stamp)

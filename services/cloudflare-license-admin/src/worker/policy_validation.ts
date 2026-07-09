@@ -6,6 +6,7 @@ import type {
   TrialExpirationBasis,
 } from "../shared/api";
 import { safeString } from "@licensecc/cloudflare-licensing-backend/http/kit";
+import { POLICY_TYPES, policyCapacityViolation } from "@licensecc/cloudflare-licensing-backend/entitlements/policy";
 
 const MAX_PROJECT_SIZE = 127;
 const MAX_NOTES_SIZE = 1000;
@@ -15,7 +16,6 @@ const MAX_NAME_SIZE = 127;
 const MAX_DURATION_SECONDS = 3_153_600_000;
 const INVALID = Symbol("invalid");
 
-const POLICY_TYPES: ReadonlyArray<PolicyType> = ["trial", "node_locked", "floating", "subscription"];
 const EXPIRY_STRATEGIES: ReadonlyArray<ExpiryStrategy> = ["fixed_window", "non_expiring"];
 const TRIAL_BASES: ReadonlyArray<TrialExpirationBasis> = ["from_issue", "from_first_activation", "from_first_use"];
 
@@ -51,14 +51,10 @@ function nullableBoundedInt(value: unknown, min: number, max: number): number | 
   return value;
 }
 
+// Thin re-export of the single-sourced capacity invariant (backend policy.mjs) as the boolean the
+// worker call sites want. The rule itself lives in exactly one place now.
 export function policyTypeCapacityIsValid(type: PolicyType, poolSize: number): boolean {
-  if (type === "node_locked") {
-    return poolSize === 0;
-  }
-  if (type === "floating") {
-    return poolSize > 0;
-  }
-  return true;
+  return policyCapacityViolation(type, poolSize) === null;
 }
 
 // Resolve the per-policy default columns. Each is "undefined -> default; else validate".

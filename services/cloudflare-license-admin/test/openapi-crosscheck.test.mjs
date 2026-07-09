@@ -15,6 +15,24 @@ import { test } from "node:test";
 import { openApiDocument } from "../dist-worker/worker/openapi.js";
 import { API_ROUTES, ALL_ROUTES, META_ROUTES } from "../dist-worker/worker/routes.js";
 import { API_BINDING_KEYS } from "../dist-worker/worker/index.js";
+import { POLICY_TYPES } from "@licensecc/cloudflare-licensing-backend/entitlements/policy";
+
+// Collect every `enum` array in the spec that describes the policy `type` field. The policy-type
+// enum is the only one carrying BOTH "node_locked" and "subscription" (the 3-value license-mode
+// enum trial/floating/node_locked is a distinct concept and deliberately excluded). These
+// hand-written literals must stay deep-equal to the ONE runtime source, POLICY_TYPES, so the spec
+// cannot silently drift from the validators.
+function policyTypeEnums(node, out = []) {
+  if (Array.isArray(node)) {
+    for (const item of node) policyTypeEnums(item, out);
+  } else if (node && typeof node === "object") {
+    if (Array.isArray(node.enum) && node.enum.includes("node_locked") && node.enum.includes("subscription")) {
+      out.push(node.enum);
+    }
+    for (const value of Object.values(node)) policyTypeEnums(value, out);
+  }
+  return out;
+}
 
 const SPEC_METHODS = ["get", "post", "patch", "put", "delete"];
 
@@ -72,6 +90,14 @@ test("meta routes are inventoried and specced but served outside the API binding
     const key = `${r.method} ${r.path}`;
     assert.ok(spec.has(key), `meta route ${key} missing from the spec`);
     assert.ok(!bindings.has(key), `meta route ${key} must NOT be in the API binding table (served from fetch())`);
+  }
+});
+
+test("every policy-type enum in the spec matches the single-sourced POLICY_TYPES", () => {
+  const enums = policyTypeEnums(openApiDocument);
+  assert.ok(enums.length >= 3, `expected the policy type enum in at least 3 spec spots, found ${enums.length}`);
+  for (const e of enums) {
+    assert.deepEqual([...e], [...POLICY_TYPES]);
   }
 });
 

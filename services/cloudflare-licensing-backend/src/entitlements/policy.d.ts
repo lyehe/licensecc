@@ -71,6 +71,11 @@ export interface PolicyStamp {
   trial: PolicyTrialState;
 }
 
+export declare const POLICY_TYPES: readonly ["trial", "node_locked", "floating", "subscription"];
+
+/** null when (type, pool_size) satisfies the capacity-mode invariant; else the violated rule as an error code string. */
+export declare function policyCapacityViolation(type: PolicyType, poolSize: number): string | null;
+
 export function stampFromPolicy(policy: Policy, overrides: PolicyStampOverrides, now: number): PolicyStamp;
 
 export function buildPolicyStampStatement(

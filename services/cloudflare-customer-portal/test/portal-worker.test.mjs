@@ -10,6 +10,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import worker from "../dist-worker/worker/index.js";
+import { policyCapacityViolation } from "@licensecc/cloudflare-licensing-backend/entitlements/policy";
 import {
   freshDb,
   portalEnv,
@@ -471,4 +472,18 @@ test("auth/request returns the SAME ok for a known and unknown email (no enumera
   assert.equal(unknown.status, 200);
   assert.equal(known.body.code, unknown.body.code, "byte-identical code (no enumeration oracle)");
   db.close();
+});
+
+// Documentation pin: the portal's read-only display derivation (pool_size > 0 ? "floating" :
+// "node_locked" in worker index.ts) is the inverse view of the ONE runtime capacity invariant that
+// the admin write path enforces. This asserts they cannot contradict each other so a future change
+// to policyCapacityViolation forces a matching look at the portal derivation.
+test("portal seat-mode display agrees with the single-sourced capacity invariant", () => {
+  const displayMode = (poolSize) => (poolSize > 0 ? "floating" : "node_locked");
+  // A valid floating policy (pool>0) has no violation and displays as floating.
+  assert.equal(policyCapacityViolation("floating", 5), null);
+  assert.equal(displayMode(5), "floating");
+  // A valid node_locked policy (pool=0) has no violation and displays as node_locked.
+  assert.equal(policyCapacityViolation("node_locked", 0), null);
+  assert.equal(displayMode(0), "node_locked");
 });
