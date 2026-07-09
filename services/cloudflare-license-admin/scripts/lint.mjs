@@ -1,35 +1,7 @@
-import { readFileSync, readdirSync, statSync } from "node:fs";
-import { join } from "node:path";
+// Thin wrapper over the shared union secret scanner (repo-root scripts/secret-lint.mjs).
+// Admin previously checked only three env-var-name needles, so a pasted
+// `BEGIN PRIVATE KEY` block slipped through (finding 12). The union base set now
+// enforces the same floor as every other service.
+import { runSecretLint, SIGNING_KEY_NEEDLES } from "../../../scripts/secret-lint.mjs";
 
-const forbidden = [
-  ["ONLINE", "SIGNING", "PRIVATE", "KEY"].join("_"),
-  ["ONLINE", "SIGNING", "PRIVATE", "KEY", "PKCS8", "PEM"].join("_"),
-  ["CLOUDFLARE", "API", "TOKEN"].join("_") + "=",
-];
-
-function* files(root) {
-  for (const entry of readdirSync(root)) {
-    const path = join(root, entry);
-    const stat = statSync(path);
-    if (stat.isDirectory()) {
-      if (["node_modules", "dist", "dist-worker", ".wrangler"].includes(entry)) {
-        continue;
-      }
-      yield* files(path);
-    } else {
-      yield path;
-    }
-  }
-}
-
-for (const file of files(".")) {
-  const content = readFileSync(file, "utf8");
-  for (const needle of forbidden) {
-    if (content.includes(needle)) {
-      console.error(`forbidden admin secret reference in ${file}: ${needle}`);
-      process.exit(1);
-    }
-  }
-}
-
-console.log("lint ok");
+runSecretLint({ root: ".", label: "admin", extraNeedles: SIGNING_KEY_NEEDLES });
