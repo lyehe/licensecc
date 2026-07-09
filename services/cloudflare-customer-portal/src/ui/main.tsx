@@ -25,6 +25,10 @@ import {
   normalizeCode,
   normalizeEmail,
   releasePath,
+  SeatSession,
+  SEATS_KEY,
+  serializeSeatSessions,
+  hydrateSeatSessions,
   shortHash,
   usagePath,
 } from "./portalWorkflow";
@@ -74,11 +78,6 @@ interface UsageRow {
 
 type Tab = "entitlements" | "devices" | "usage" | "download";
 type SeatOperation = "checkout" | "heartbeat" | "release";
-
-interface SeatSession {
-  seat_id: string;
-  client_instance_id: string;
-}
 
 // Invariant 3: ALWAYS credentials:"same-origin" (the HttpOnly session cookie travels automatically),
 // ALWAYS content-type: application/json, and NEVER an Authorization/bearer header — the browser never
@@ -144,6 +143,25 @@ function seatPath(operation: SeatOperation): string {
   return releasePath();
 }
 
+// localStorage is best-effort: reads/writes are wrapped so a disabled/quota-exceeded store (private
+// mode, storage-partitioning) never crashes the SPA — seat persistence just degrades to in-memory.
+// The pure hydrate/serialize helpers live in portalWorkflow.ts; these are the only window touchpoints.
+function readStoredSeats(): string | null {
+  try {
+    return window.localStorage.getItem(SEATS_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredSeats(json: string): void {
+  try {
+    window.localStorage.setItem(SEATS_KEY, json);
+  } catch {
+    // Storage unavailable — persistence is best-effort; the in-memory map is still authoritative.
+  }
+}
+
 function App(): React.ReactElement {
   // Auth state machine: anonymous -> "request" (enter email) -> "verify" (enter 8-digit code) ->
   // authed (me resolved). A magic-redeem lands the browser authed at "/" so the first me() succeeds.
@@ -159,7 +177,23 @@ function App(): React.ReactElement {
   const [entitlements, setEntitlements] = useState<EntitlementRow[]>([]);
   const [devices, setDevices] = useState<DeviceRow[]>([]);
   const [usage, setUsage] = useState<UsageRow[]>([]);
-  const [seatSessions, setSeatSessions] = useState<Record<string, SeatSession>>({});
+  // Hydrate seat sessions from localStorage on mount so a page reload does not orphan a live seat
+  // (finding 16): without this the Release/Refresh buttons disable forever and the seat burns until
+  // heartbeat-grace or an admin force-release. Leases already past their deadline are dropped.
+  const [seatSessions, setSeatSessionsRaw] = useState<Record<string, SeatSession>>(
+    () => hydrateSeatSessions(readStoredSeats(), Math.floor(Date.now() / 1000)),
+  );
+  // Every seat-map mutation rides through this wrapper so the persisted copy stays in lockstep with
+  // state. Release/heartbeat handlers already delete/update entries — they inherit persistence here.
+  const setSeatSessions = (update: React.SetStateAction<Record<string, SeatSession>>): void => {
+    setSeatSessionsRaw((current) => {
+      const next = typeof update === "function"
+        ? (update as (prev: Record<string, SeatSession>) => Record<string, SeatSession>)(current)
+        : update;
+      writeStoredSeats(serializeSeatSessions(next));
+      return next;
+    });
+  };
   const [downloadDeviceKeys, setDownloadDeviceKeys] = useState<Record<string, string>>({});
 
   async function loadMe(): Promise<boolean> {
@@ -290,12 +324,23 @@ function App(): React.ReactElement {
         body: JSON.stringify(body),
       });
       setMessage(resultMessage(result));
+      // The backend checkout/heartbeat body carries `expires_at` (epoch seconds, the lease deadline);
+      // capture it so a post-reload hydrate can drop the entry once the seat is actually stale.
+      const leaseExpiresAt = typeof result.data?.expires_at === "number" ? result.data.expires_at : 0;
       if (result.ok) {
         if (operation === "checkout" && typeof result.data?.seat_id === "string") {
           setSeatSessions((current) => ({
             ...current,
-            [item.id]: { seat_id: result.data.seat_id as string, client_instance_id: clientInstanceId },
+            [item.id]: { seat_id: result.data.seat_id as string, client_instance_id: clientInstanceId, expires_at: leaseExpiresAt },
           }));
+        }
+        if (operation === "heartbeat" && existing !== undefined) {
+          // Refresh the persisted deadline so the extended lease is not pruned on the next reload.
+          setSeatSessions((current) => {
+            const prior = current[item.id];
+            if (prior === undefined) return current;
+            return { ...current, [item.id]: { ...prior, expires_at: leaseExpiresAt } };
+          });
         }
         if (operation === "release") {
           setSeatSessions((current) => {

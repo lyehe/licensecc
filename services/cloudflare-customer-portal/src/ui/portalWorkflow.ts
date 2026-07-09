@@ -135,6 +135,61 @@ export function formatWindow(validFrom: number | null | undefined, validUntil: n
   return `${formatEpoch(validFrom)} to ${formatEpoch(validUntil)}`;
 }
 
+// ---- Floating-seat session persistence ---------------------------------------------------------
+
+// A live floating-seat checkout the SPA holds so Release/Refresh stay enabled. `expires_at` is the
+// lease deadline in epoch seconds (the backend checkout/heartbeat `expires_at`); 0 means unknown and
+// is never treated as expired on hydrate.
+export interface SeatSession {
+  seat_id: string;
+  client_instance_id: string;
+  expires_at: number;
+}
+
+// Versioned localStorage namespace: a shape change becomes a NEW key rather than a silent misread of
+// stale entries. main.tsx reads/writes this key; these helpers stay window-free so they unit-test raw.
+export const SEATS_KEY = "licensecc.portal.seats.v1";
+
+// Serialize the in-memory seat map for localStorage. Pure JSON — no window access.
+export function serializeSeatSessions(sessions: Record<string, SeatSession>): string {
+  return JSON.stringify(sessions);
+}
+
+// Rebuild the seat map from a stored JSON string (or null when the key is absent). Tolerates any
+// garbage (bad JSON, wrong root type, malformed entries) by returning {} — never throws. Entries
+// whose lease already expired (`expires_at > 0 && expires_at <= now`) are DROPPED so their
+// Release/Refresh buttons do not re-enable against a seat the server has already reclaimed.
+export function hydrateSeatSessions(json: string | null | undefined, now: number): Record<string, SeatSession> {
+  if (typeof json !== "string" || json.length === 0) {
+    return {};
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(json);
+  } catch {
+    return {};
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    return {};
+  }
+  const out: Record<string, SeatSession> = {};
+  for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+      continue;
+    }
+    const entry = value as Record<string, unknown>;
+    if (typeof entry.seat_id !== "string" || typeof entry.client_instance_id !== "string") {
+      continue;
+    }
+    const expiresAt = typeof entry.expires_at === "number" && Number.isFinite(entry.expires_at) ? entry.expires_at : 0;
+    if (expiresAt > 0 && expiresAt <= now) {
+      continue;
+    }
+    out[key] = { seat_id: entry.seat_id, client_instance_id: entry.client_instance_id, expires_at: expiresAt };
+  }
+  return out;
+}
+
 // ---- Input validators --------------------------------------------------------------------------
 
 // Normalize an email for the auth request: trim + lowercase. Returns "" for non-strings.

@@ -18,6 +18,11 @@
 //  9. logout bumps account_token_revocations.revocation_seq (kills the in-flight 120s token).
 // 10. Operator bootstrap is break-glass: bearer (constant-time, unset -> 404) + network gate +
 //     always-on RL + 120s + append-only audit.
+//
+// NOTE (seat re-hydration, finding 16): the SPA persists live floating-seat checkouts to localStorage
+// (`licensecc.portal.seats.v1`) so a reload keeps Release/Refresh enabled. A future
+// `GET /api/portal/seats` that re-attaches the browser to the customer's server-side seat_checkouts
+// rows would be the stronger, cross-device fix — not implemented here.
 
 // The auth modules are Worker-safe .mjs (no node:/Buffer). allowJs resolves+emits them; their
 // exports are inferred from JS defaults, which fights the strict worker tsconfig — so we import the

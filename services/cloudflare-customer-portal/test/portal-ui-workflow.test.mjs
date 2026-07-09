@@ -153,3 +153,42 @@ test("portal UI workflow accepts only 8-digit OTP codes", async () => {
   assert.equal(workflow.isValidCode("1234567a"), false); // non-digit
   assert.equal(workflow.isValidCode(""), false);
 });
+
+test("portal UI workflow persists seat sessions across reload", async () => {
+  const workflow = await loadWorkflowModule();
+  const now = 1_000_000;
+
+  // The localStorage key is a stable, versioned namespace so a schema change is a new key, not a
+  // silent misread of stale shapes.
+  assert.equal(workflow.SEATS_KEY, "licensecc.portal.seats.v1");
+
+  // Round-trip: a live lease (expires_at strictly in the future) survives serialize -> hydrate.
+  const live = {
+    "ent-live": { seat_id: "seat-1", client_instance_id: "cid-1", expires_at: now + 3600 },
+  };
+  const json = workflow.serializeSeatSessions(live);
+  assert.deepEqual(workflow.hydrateSeatSessions(json, now), live);
+
+  // Expired lease (expires_at <= now) is dropped so its Release/Refresh buttons don't re-enable
+  // against a seat the server already reclaimed.
+  const mixed = workflow.serializeSeatSessions({
+    "ent-live": { seat_id: "seat-1", client_instance_id: "cid-1", expires_at: now + 10 },
+    "ent-dead": { seat_id: "seat-2", client_instance_id: "cid-2", expires_at: now },
+    "ent-past": { seat_id: "seat-3", client_instance_id: "cid-3", expires_at: now - 1 },
+  });
+  assert.deepEqual(workflow.hydrateSeatSessions(mixed, now), {
+    "ent-live": { seat_id: "seat-1", client_instance_id: "cid-1", expires_at: now + 10 },
+  });
+
+  // Garbage / absent storage tolerated -> empty map (never throws).
+  assert.deepEqual(workflow.hydrateSeatSessions(null, now), {});
+  assert.deepEqual(workflow.hydrateSeatSessions("", now), {});
+  assert.deepEqual(workflow.hydrateSeatSessions("not json", now), {});
+  assert.deepEqual(workflow.hydrateSeatSessions("[1,2,3]", now), {});
+  assert.deepEqual(workflow.hydrateSeatSessions('{"bad":123}', now), {});
+  // Entries missing required string fields are skipped, not partially hydrated.
+  assert.deepEqual(
+    workflow.hydrateSeatSessions('{"ent":{"seat_id":"s","expires_at":2000000}}', now),
+    {},
+  );
+});
