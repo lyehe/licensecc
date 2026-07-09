@@ -1082,6 +1082,78 @@ function catalogPlanFeatureAudit(
   ).bind(entityId, project, eventType, catalogActor(actor), actor.actorType, reason, requestIdValue, prevJson, now, planId, featureKey);
 }
 
+function catalogFeatureInsertStatement(
+  env: Env,
+  id: string,
+  input: CatalogFeatureInput,
+  now: number,
+): ReturnType<D1DatabaseLike["prepare"]> {
+  return env.DB.prepare(
+    `INSERT INTO catalog_features
+        (id, project, feature_key, name, description, category, status, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING ${CATALOG_FEATURE_COLUMNS}`,
+  ).bind(id, input.project, input.feature_key, input.name, input.description, input.category, input.status, now, now);
+}
+
+function catalogPlanInsertStatement(
+  env: Env,
+  id: string,
+  input: CatalogPlanInput,
+  now: number,
+): ReturnType<D1DatabaseLike["prepare"]> {
+  return env.DB.prepare(
+    `INSERT INTO catalog_plans
+        (id, project, plan_key, name, status, version, description, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING ${CATALOG_PLAN_COLUMNS}`,
+  ).bind(id, input.project, input.plan_key, input.name, input.status, input.version, input.description, now, now);
+}
+
+function catalogPlanFeatureUpsertStatement(
+  env: Env,
+  planId: string,
+  input: CatalogPlanFeatureInput,
+  now: number,
+): ReturnType<D1DatabaseLike["prepare"]> {
+  return env.DB.prepare(
+    `INSERT INTO catalog_plan_features
+        (project, plan_id, feature_key, feature_inclusion, addon_key, policy_id, status, display_order,
+         assertion_ttl_seconds, pool_size, max_active_devices, max_borrow_sec, meter_quota, meter_period_sec,
+         created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(plan_id, feature_key) DO UPDATE SET
+         feature_inclusion = excluded.feature_inclusion,
+         addon_key = excluded.addon_key,
+         policy_id = excluded.policy_id,
+         status = excluded.status,
+         display_order = excluded.display_order,
+         assertion_ttl_seconds = excluded.assertion_ttl_seconds,
+         pool_size = excluded.pool_size,
+         max_active_devices = excluded.max_active_devices,
+         max_borrow_sec = excluded.max_borrow_sec,
+         meter_quota = excluded.meter_quota,
+         meter_period_sec = excluded.meter_period_sec,
+         updated_at = excluded.updated_at
+       RETURNING ${CATALOG_PLAN_FEATURE_COLUMNS}`,
+  ).bind(
+    input.project,
+    planId,
+    input.feature_key,
+    input.feature_inclusion,
+    input.addon_key,
+    input.policy_id,
+    input.status,
+    input.display_order,
+    input.assertion_ttl_seconds,
+    input.pool_size,
+    input.max_active_devices,
+    input.max_borrow_sec,
+    input.meter_quota,
+    input.meter_period_sec,
+    now,
+    now,
+  );
+}
+
 async function handlePlanProjection(request: Request, env: Env, actor: Actor, requestIdValue: string, action: "preview" | "apply"): Promise<Response> {
   const adminError = requireAdmin(actor, requestIdValue);
   if (adminError !== null) {
@@ -1187,11 +1259,7 @@ async function createCatalogFeature(request: Request, env: Env, actor: Actor, re
     }
     const now = Math.floor(Date.now() / 1000);
     const id = `feat_${crypto.randomUUID()}`;
-    const insert = env.DB.prepare(
-      `INSERT INTO catalog_features
-        (id, project, feature_key, name, description, category, status, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING ${CATALOG_FEATURE_COLUMNS}`,
-    ).bind(id, input.project, input.feature_key, input.name, input.description, input.category, input.status, now, now);
+    const insert = catalogFeatureInsertStatement(env, id, input, now);
     let row: Record<string, unknown> | null;
     try {
       row = await writeCatalogWithAudit(env, insert, catalogFeatureAudit(env, id, input.project, "create", "", "", actor, requestIdValue, now));
@@ -1335,11 +1403,7 @@ async function createCatalogPlan(request: Request, env: Env, actor: Actor, reque
     }
     const now = Math.floor(Date.now() / 1000);
     const id = `plan_${crypto.randomUUID()}`;
-    const insert = env.DB.prepare(
-      `INSERT INTO catalog_plans
-        (id, project, plan_key, name, status, version, description, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING ${CATALOG_PLAN_COLUMNS}`,
-    ).bind(id, input.project, input.plan_key, input.name, input.status, input.version, input.description, now, now);
+    const insert = catalogPlanInsertStatement(env, id, input, now);
     let row: Record<string, unknown> | null;
     try {
       row = await writeCatalogWithAudit(env, insert, catalogPlanAudit(env, id, input.project, "create", "", "", actor, requestIdValue, now));
@@ -1508,44 +1572,7 @@ async function createCatalogPlanFeature(request: Request, env: Env, actor: Actor
     const existing = await findCatalogPlanFeature(env, planId, input.feature_key);
     const eventType = existing === null ? "create" : "update";
     const now = Math.floor(Date.now() / 1000);
-    const upsert = env.DB.prepare(
-      `INSERT INTO catalog_plan_features
-        (project, plan_id, feature_key, feature_inclusion, addon_key, policy_id, status, display_order,
-         assertion_ttl_seconds, pool_size, max_active_devices, max_borrow_sec, meter_quota, meter_period_sec,
-         created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(plan_id, feature_key) DO UPDATE SET
-         feature_inclusion = excluded.feature_inclusion,
-         addon_key = excluded.addon_key,
-         policy_id = excluded.policy_id,
-         status = excluded.status,
-         display_order = excluded.display_order,
-         assertion_ttl_seconds = excluded.assertion_ttl_seconds,
-         pool_size = excluded.pool_size,
-         max_active_devices = excluded.max_active_devices,
-         max_borrow_sec = excluded.max_borrow_sec,
-         meter_quota = excluded.meter_quota,
-         meter_period_sec = excluded.meter_period_sec,
-         updated_at = excluded.updated_at
-       RETURNING ${CATALOG_PLAN_FEATURE_COLUMNS}`,
-    ).bind(
-      input.project,
-      planId,
-      input.feature_key,
-      input.feature_inclusion,
-      input.addon_key,
-      input.policy_id,
-      input.status,
-      input.display_order,
-      input.assertion_ttl_seconds,
-      input.pool_size,
-      input.max_active_devices,
-      input.max_borrow_sec,
-      input.meter_quota,
-      input.meter_period_sec,
-      now,
-      now,
-    );
+    const upsert = catalogPlanFeatureUpsertStatement(env, planId, input, now);
     try {
       const audit = catalogPlanFeatureAudit(env, planId, input.feature_key, input.project, eventType, existing === null ? "" : JSON.stringify(existing), "", actor, requestIdValue, now);
       const written = await writeCatalogWithAudit(env, upsert, audit);
@@ -1703,11 +1730,7 @@ async function applyCatalogFeatureImport(
   const existing = await findCatalogFeatureByKey(env, input.project, input.feature_key);
   if (existing === null) {
     const id = `feat_${crypto.randomUUID()}`;
-    const insert = env.DB.prepare(
-      `INSERT INTO catalog_features
-        (id, project, feature_key, name, description, category, status, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING ${CATALOG_FEATURE_COLUMNS}`,
-    ).bind(id, input.project, input.feature_key, input.name, input.description, input.category, input.status, now, now);
+    const insert = catalogFeatureInsertStatement(env, id, input, now);
     return {
       kind: "created",
       row: await writeCatalogWithAudit(env, insert, catalogFeatureAudit(env, id, input.project, "create", "", "catalog import", actor, requestIdValue, now)),
@@ -1742,11 +1765,7 @@ async function applyCatalogPlanImport(
   const existing = await findCatalogPlanByKey(env, input.project, input.plan_key, input.version);
   if (existing === null) {
     const id = `plan_${crypto.randomUUID()}`;
-    const insert = env.DB.prepare(
-      `INSERT INTO catalog_plans
-        (id, project, plan_key, name, status, version, description, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING ${CATALOG_PLAN_COLUMNS}`,
-    ).bind(id, input.project, input.plan_key, input.name, input.status, input.version, input.description, now, now);
+    const insert = catalogPlanInsertStatement(env, id, input, now);
     return {
       kind: "created",
       row: await writeCatalogWithAudit(env, insert, catalogPlanAudit(env, id, input.project, "create", "", "catalog import", actor, requestIdValue, now)),
@@ -1783,44 +1802,7 @@ async function applyCatalogPlanFeatureImport(
   if (existing !== null && catalogPlanFeatureMatches(existing, input)) {
     return { kind: "unchanged", row: existing };
   }
-  const upsert = env.DB.prepare(
-    `INSERT INTO catalog_plan_features
-      (project, plan_id, feature_key, feature_inclusion, addon_key, policy_id, status, display_order,
-       assertion_ttl_seconds, pool_size, max_active_devices, max_borrow_sec, meter_quota, meter_period_sec,
-       created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT(plan_id, feature_key) DO UPDATE SET
-       feature_inclusion = excluded.feature_inclusion,
-       addon_key = excluded.addon_key,
-       policy_id = excluded.policy_id,
-       status = excluded.status,
-       display_order = excluded.display_order,
-       assertion_ttl_seconds = excluded.assertion_ttl_seconds,
-       pool_size = excluded.pool_size,
-       max_active_devices = excluded.max_active_devices,
-       max_borrow_sec = excluded.max_borrow_sec,
-       meter_quota = excluded.meter_quota,
-       meter_period_sec = excluded.meter_period_sec,
-       updated_at = excluded.updated_at
-     RETURNING ${CATALOG_PLAN_FEATURE_COLUMNS}`,
-  ).bind(
-    input.project,
-    planId,
-    input.feature_key,
-    input.feature_inclusion,
-    input.addon_key,
-    input.policy_id,
-    input.status,
-    input.display_order,
-    input.assertion_ttl_seconds,
-    input.pool_size,
-    input.max_active_devices,
-    input.max_borrow_sec,
-    input.meter_quota,
-    input.meter_period_sec,
-    now,
-    now,
-  );
+  const upsert = catalogPlanFeatureUpsertStatement(env, planId, input, now);
   const eventType = existing === null ? "create" : catalogEventForStatus(existing.status, input.status);
   return {
     kind: existing === null ? "created" : "updated",
