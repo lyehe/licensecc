@@ -58,6 +58,7 @@
     "test:pg": "node --test supabase-postgres/translate.test.mjs supabase-postgres/order-apply-pg.test.mjs supabase-postgres/pg-route-guard.test.mjs",
     "lint": "node scripts/lint.mjs",
     "schema:parity": "uv run --no-project python scripts/check-schema-parity.py",
+    "schema:write": "uv run --no-project python scripts/check-schema-parity.py --write",
     "schema:parity:pg": "uv run --no-project --with sqlglot python scripts/check-pg-parity.py",
     "dry-run": "npx wrangler deploy src/index.ts --dry-run --config wrangler.example.toml",
     "migrate:local": "npx wrangler d1 migrations apply DB --local --config wrangler.example.toml",
