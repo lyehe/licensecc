@@ -1,94 +1,33 @@
-// Build-time cross-check that PINS the OpenAPI spec to the Worker source so the two
-// cannot silently drift. Zero-dep (node:test + node:fs).
+// Build-time cross-check that PINS three representations of the admin route surface together
+// so they cannot silently drift. Zero-dep (node:test only) and — crucially — it compares
+// COMPILED ARTIFACTS, not the source text of index.ts. That is what unfreezes extraction from
+// the god file: the spec, the canonical inventory, and the live dispatch table must agree, but
+// HOW index.ts is organized internally is no longer pinned by a regex-anchor grep.
 //
-// What it guarantees:
-//   (a) every routed path the spec declares has its literal route present in
-//       src/worker/index.ts (path params {id} mapped to the source's :id / regex form);
-//   (b) every routed path the SOURCE declares is present in the spec — derived from a
-//       worker-owned route inventory, so adding/removing a route in the
-//       Worker without updating the spec (or src/worker/routes.ts) fails CI.
-//
-// The two "meta" routes (/openapi.json, /docs) are served directly from the fetch
-// handler (not via the regex/equality router), so they are validated by a dedicated
-// fetch-handler assertion rather than the API-router scan.
+// Three-way equality asserted below:
+//   openApiDocument.paths (method+path)  ===  ALL_ROUTES (the canonical inventory)
+//   API_ROUTES                           ===  API_BINDING_KEYS (index.ts's live dispatch table)
+// The two META_ROUTES (/openapi.json, /docs) live in the spec + inventory but not in the
+// binding table: they are served straight from fetch() (before auth), not via handleApi.
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { openApiDocument } from "../dist-worker/worker/openapi.js";
 import { API_ROUTES, ALL_ROUTES, META_ROUTES } from "../dist-worker/worker/routes.js";
+import { API_BINDING_KEYS } from "../dist-worker/worker/index.js";
 
-const here = dirname(fileURLToPath(import.meta.url));
-const SOURCE = readFileSync(join(here, "..", "src", "worker", "index.ts"), "utf8");
+const SPEC_METHODS = ["get", "post", "patch", "put", "delete"];
 
-// ── Source-presence check ─────────────────────────────────────────────────────
-// Map an OpenAPI path to a predicate that proves it is routed by the Worker source.
-// Literal paths must appear as `url.pathname === "X"` (or `pathname !== "X"` for sync).
-// Templated paths ({id}) must be covered by one of the source's regexes.
-function literalRouted(path) {
-  return SOURCE.includes(`url.pathname === "${path}"`) || SOURCE.includes(`.pathname !== "${path}"`);
-}
-
-// Hard-anchor each templated route to the EXACT regex LITERAL in the source (compared
-// as a verbatim substring — no escaping games). If the Worker changes one of these
-// routing regexes, the corresponding anchor stops matching and the test fails, which is
-// the point: the spec's {id} routes are pinned to the real source patterns.
-const TEMPLATED_ROUTE_SOURCE = {
-  "/api/admin/customers/{id}": String.raw`/^\/api\/admin\/customers\/([^/]+)$/`,
-  "/api/admin/customers/{id}/disable": String.raw`/^\/api\/admin\/customers\/([^/]+)\/(disable|reenable)$/`,
-  "/api/admin/customers/{id}/reenable": String.raw`/^\/api\/admin\/customers\/([^/]+)\/(disable|reenable)$/`,
-  // The detail GET route AND the disable/reenable/revoke mutations are both covered by
-  // entitlement regexes; the mutation actions live in the combined `(?:\/(disable|reenable|revoke))?` form.
-  "/api/admin/entitlements/{id}": String.raw`/^\/api\/admin\/entitlements\/([^/]+)$/`,
-  // Force-release has its own dedicated regex, matched before the generic mutation dispatch.
-  "/api/admin/entitlements/{id}/release-seats": String.raw`/^\/api\/admin\/entitlements\/([^/]+)\/release-seats$/`,
-  "/api/admin/entitlements/{id}/disable": String.raw`(?:\/(disable|reenable|revoke))?`,
-  "/api/admin/entitlements/{id}/reenable": String.raw`(?:\/(disable|reenable|revoke))?`,
-  "/api/admin/entitlements/{id}/revoke": String.raw`(?:\/(disable|reenable|revoke))?`,
-  // Device list has its own regex; the three device transitions share one revoke|disable|reenable
-  // regex, matched before the generic entitlement mutation dispatch.
-  "/api/admin/entitlements/{id}/devices": String.raw`/^\/api\/admin\/entitlements\/([^/]+)\/devices$/`,
-  "/api/admin/entitlements/{id}/meter": String.raw`/^\/api\/admin\/entitlements\/([^/]+)\/meter$/`,
-  "/api/admin/entitlements/{id}/devices/{deviceKeyId}/revoke": String.raw`/^\/api\/admin\/entitlements\/([^/]+)\/devices\/([^/]+)\/(revoke|disable|reenable)$/`,
-  "/api/admin/entitlements/{id}/devices/{deviceKeyId}/disable": String.raw`/^\/api\/admin\/entitlements\/([^/]+)\/devices\/([^/]+)\/(revoke|disable|reenable)$/`,
-  "/api/admin/entitlements/{id}/devices/{deviceKeyId}/reenable": String.raw`/^\/api\/admin\/entitlements\/([^/]+)\/devices\/([^/]+)\/(revoke|disable|reenable)$/`,
-  // Policy detail GET is its own regex; the PATCH + disable/reenable mutations live in the
-  // combined `(?:\/(disable|reenable))?` form inside handlePolicyMutation.
-  "/api/admin/policies/{id}": String.raw`/^\/api\/admin\/policies\/([^/]+)$/`,
-  "/api/admin/policies/{id}/disable": String.raw`(?:\/(disable|reenable))?`,
-  "/api/admin/policies/{id}/reenable": String.raw`(?:\/(disable|reenable))?`,
-  "/api/admin/catalog/features/{id}": String.raw`/^\/api\/admin\/catalog\/features\/([^/]+)$/`,
-  "/api/admin/catalog/features/{id}/disable": String.raw`/^\/api\/admin\/catalog\/features\/([^/]+)\/(disable|reenable)$/`,
-  "/api/admin/catalog/features/{id}/reenable": String.raw`/^\/api\/admin\/catalog\/features\/([^/]+)\/(disable|reenable)$/`,
-  "/api/admin/catalog/plans/{id}": String.raw`/^\/api\/admin\/catalog\/plans\/([^/]+)$/`,
-  "/api/admin/catalog/plans/{id}/disable": String.raw`/^\/api\/admin\/catalog\/plans\/([^/]+)\/(disable|reenable)$/`,
-  "/api/admin/catalog/plans/{id}/reenable": String.raw`/^\/api\/admin\/catalog\/plans\/([^/]+)\/(disable|reenable)$/`,
-  "/api/admin/catalog/plans/{id}/export": String.raw`/^\/api\/admin\/catalog\/plans\/([^/]+)\/export$/`,
-  "/api/admin/catalog/plans/{id}/features": String.raw`/^\/api\/admin\/catalog\/plans\/([^/]+)\/features$/`,
-  "/api/admin/catalog/plans/{id}/features/{featureKey}/disable": String.raw`/^\/api\/admin\/catalog\/plans\/([^/]+)\/features\/([^/]+)\/(disable|reenable)$/`,
-  "/api/admin/catalog/plans/{id}/features/{featureKey}/reenable": String.raw`/^\/api\/admin\/catalog\/plans\/([^/]+)\/features\/([^/]+)\/(disable|reenable)$/`,
-  // Webhook detail GET is its own regex; PATCH + disable/reenable live in the combined
-  // `(?:\/(disable|reenable))?` form inside handleWebhookMutation. Redrive has its own
-  // numeric-id regex under /deliveries/:id/redrive (matched before the endpoint :id regex).
-  "/api/admin/webhooks/{id}": String.raw`/^\/api\/admin\/webhooks\/([^/]+)(?:\/(disable|reenable))?$/`,
-  "/api/admin/webhooks/{id}/disable": String.raw`(?:\/(disable|reenable))?`,
-  "/api/admin/webhooks/{id}/reenable": String.raw`(?:\/(disable|reenable))?`,
-  "/api/admin/webhooks/deliveries/{id}/redrive": String.raw`/^\/api\/admin\/webhooks\/deliveries\/(\d+)\/redrive$/`,
-};
-
-function routePresentInSource(path) {
-  if (META_ROUTES.some((r) => r.path === path)) {
-    // Served from the fetch handler with an equality check, same as literal API routes.
-    return literalRouted(path);
+function specOperationKeys() {
+  const keys = new Set();
+  for (const [path, item] of Object.entries(openApiDocument.paths)) {
+    for (const method of SPEC_METHODS) {
+      if (item[method]) {
+        keys.add(`${method.toUpperCase()} ${path}`);
+      }
+    }
   }
-  if (path.includes("{id}")) {
-    const anchor = TEMPLATED_ROUTE_SOURCE[path];
-    assert.ok(anchor, `no source anchor configured for templated route ${path}`);
-    return SOURCE.includes(anchor);
-  }
-  return literalRouted(path);
+  return keys;
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -103,68 +42,37 @@ test("spec is OpenAPI 3.1 with the expected envelope schemas", () => {
   }
 });
 
-test("(a) every spec path's literal route is present in the Worker source", () => {
-  for (const path of Object.keys(openApiDocument.paths)) {
-    assert.ok(
-      routePresentInSource(path),
-      `spec declares ${path} but no matching route exists in src/worker/index.ts`,
-    );
+test("spec operations equal the canonical route inventory exactly (no drift either way)", () => {
+  const spec = specOperationKeys();
+  const inventory = new Set(ALL_ROUTES.map((r) => `${r.method} ${r.path}`));
+  for (const key of inventory) {
+    assert.ok(spec.has(key), `canonical route ${key} is missing from the spec`);
+  }
+  for (const key of spec) {
+    assert.ok(inventory.has(key), `spec has un-inventoried operation ${key}`);
   }
 });
 
-test("(b) spec.paths matches the canonical route list exactly (no drift either way)", () => {
-  const specPaths = new Set(Object.keys(openApiDocument.paths));
-  const canonicalPaths = new Set(ALL_ROUTES.map((r) => r.path));
-
-  for (const path of canonicalPaths) {
-    assert.ok(specPaths.has(path), `canonical route ${path} is missing from spec.paths`);
+test("the live binding table equals the API route inventory (dispatcher is the inventory)", () => {
+  const bindings = new Set(API_BINDING_KEYS);
+  const apiInventory = new Set(API_ROUTES.map((r) => `${r.method} ${r.path}`));
+  assert.equal(bindings.size, API_BINDING_KEYS.length, "binding keys must be unique");
+  for (const key of apiInventory) {
+    assert.ok(bindings.has(key), `API route ${key} has no binding in index.ts — dispatcher drifted from the inventory`);
   }
-  for (const path of specPaths) {
-    assert.ok(canonicalPaths.has(path), `spec.paths has ${path} which is not in the canonical route list`);
-  }
-});
-
-test("(b) every canonical METHOD+path is declared as that operation in the spec", () => {
-  for (const { method, path } of ALL_ROUTES) {
-    const item = openApiDocument.paths[path];
-    assert.ok(item, `spec.paths missing ${path}`);
-    assert.ok(item[method.toLowerCase()], `spec.paths[${path}] missing ${method} operation`);
-  }
-  // And no spec operation exists that is not in the canonical list.
-  const canonical = new Set(ALL_ROUTES.map((r) => `${r.method} ${r.path}`));
-  for (const [path, item] of Object.entries(openApiDocument.paths)) {
-    for (const method of ["get", "post", "patch", "put", "delete"]) {
-      if (item[method]) {
-        const key = `${method.toUpperCase()} ${path}`;
-        assert.ok(canonical.has(key), `spec has un-inventoried operation ${key}`);
-      }
-    }
+  for (const key of bindings) {
+    assert.ok(apiInventory.has(key), `index.ts binds ${key} which is not in API_ROUTES`);
   }
 });
 
-test("(b) every canonical API route is reachable in the source router scan", () => {
-  // Cross-check the OTHER direction: each canonical API route must be matched by the
-  // source. (Templated routes are anchored to their exact regex literal above.)
-  for (const { path } of API_ROUTES) {
-    assert.ok(
-      routePresentInSource(path),
-      `canonical route ${path} is not present in src/worker/index.ts — source drifted from the inventory`,
-    );
+test("meta routes are inventoried and specced but served outside the API binding table", () => {
+  const bindings = new Set(API_BINDING_KEYS);
+  const spec = specOperationKeys();
+  for (const r of META_ROUTES) {
+    const key = `${r.method} ${r.path}`;
+    assert.ok(spec.has(key), `meta route ${key} missing from the spec`);
+    assert.ok(!bindings.has(key), `meta route ${key} must NOT be in the API binding table (served from fetch())`);
   }
-});
-
-test("meta routes are served from the fetch handler before auth", () => {
-  // /openapi.json and /docs must be handled in fetch() ahead of the /api/admin/ and
-  // /api/sync/ dispatch, so they are reachable unauthenticated.
-  const fetchBody = SOURCE.slice(SOURCE.indexOf("async fetch("));
-  const openapiIdx = fetchBody.indexOf('url.pathname === "/openapi.json"');
-  const docsIdx = fetchBody.indexOf('url.pathname === "/docs"');
-  const adminIdx = fetchBody.indexOf('url.pathname.startsWith("/api/admin/")');
-  assert.ok(openapiIdx > -1, "/openapi.json not served from fetch()");
-  assert.ok(docsIdx > -1, "/docs not served from fetch()");
-  assert.ok(adminIdx > -1, "admin dispatch not found in fetch()");
-  assert.ok(openapiIdx < adminIdx, "/openapi.json must be handled before the admin dispatch");
-  assert.ok(docsIdx < adminIdx, "/docs must be handled before the admin dispatch");
 });
 
 test("each operation documents 200 plus the auth/error statuses the handler returns", () => {

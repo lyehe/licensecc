@@ -78,3 +78,12 @@ export const API_ROUTES = [
 ] as const satisfies readonly AdminRoute[];
 
 export const ALL_ROUTES = [...META_ROUTES, ...API_ROUTES] as const;
+
+export type AdminRouteKey = `${AdminRouteMethod} ${string}`;
+
+// Compile an OpenAPI-style {param} template into the anchored matcher handleApi dispatches on.
+// Every {param} becomes one `([^/]+)` capture group, in template order.
+export function pathToPattern(template: string): RegExp {
+  const escaped = template.replace(/[.*+?^${}()|[\]\\]/g, (ch) => (ch === "{" || ch === "}" ? ch : `\\${ch}`));
+  return new RegExp(`^${escaped.replace(/\{[^/}]+\}/g, "([^/]+)")}$`);
+}

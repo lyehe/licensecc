@@ -2,6 +2,7 @@ import { createRemoteJWKSet, jwtVerify } from "jose";
 import type { JWTPayload } from "jose";
 import { openApiJson } from "./openapi.js";
 import { docsHtml } from "./docs_page.js";
+import { API_ROUTES, pathToPattern } from "./routes.js";
 import {
   INVALID_IDEMPOTENCY_KEY,
   idempotentReplay,
@@ -3591,182 +3592,145 @@ async function handleDeviceTransition(
     transitionEntitlementDevice(env, key, deviceKeyId, targetStatus, reason, ctx, idempotency));
 }
 
+// GET /api/admin/entitlements/{id} detail lookup, lifted from the old inline branch so the
+// binding table can reference it as a plain handler.
+async function entitlementDetail(env: Env, encodedId: string, requestIdValue: string): Promise<Response> {
+  const key = decodeEntitlementId(encodedId);
+  if (key === null) {
+    return envelope(requestIdValue, "invalid_entitlement_id", undefined, 400);
+  }
+  const row = await findEntitlement(env, key);
+  return row === null ? envelope(requestIdValue, "not_found", undefined, 404) : envelope(requestIdValue, "entitlement", row);
+}
+
+type BoundRun = (
+  request: Request,
+  env: Env,
+  groups: string[],
+  requestIdValue: string,
+  actor: Actor,
+) => Promise<Response>;
+
+// One entry per API_ROUTES key. This table is the single dispatcher: handleApi matches
+// method+path against the canonical inventory (src/worker/routes.ts) and delegates to the
+// existing handler with the captured path params. The generic mutation dispatchers
+// (handleMutation / handlePolicyMutation / handleWebhookMutation) still re-derive their
+// sub-action internally; the table only decides which family a request belongs to. Path
+// params carry the SAME decoding the old regex chain applied (decodeURIComponent for
+// customer/policy/catalog ids; raw for entitlement/device ids whose handlers decode).
+const HANDLERS: Record<string, BoundRun> = {
+  "GET /api/admin/summary": (_r, env, _g, rid) => summary(env, rid),
+  "GET /api/admin/report": (_r, env, _g, rid) => report(env, rid),
+  "GET /api/admin/report/timeseries": (request, env, _g, rid) => reportTimeseries(request, env, rid),
+  "GET /api/admin/report/expiring": (request, env, _g, rid) => reportExpiring(request, env, rid),
+  "GET /api/admin/audit/verify": (_r, env, _g, rid) => auditVerify(env, rid),
+  "GET /api/admin/customers": (request, env, _g, rid) => listCustomers(request, env, rid),
+  "GET /api/admin/customers/{id}": (_r, env, g, rid) => getCustomer(env, decodeURIComponent(g[0] ?? ""), rid),
+  "POST /api/admin/customers/{id}/disable": (request, env, g, rid, actor) => handleCustomerTransition(request, env, actor, decodeURIComponent(g[0] ?? ""), "disable", rid),
+  "POST /api/admin/customers/{id}/reenable": (request, env, g, rid, actor) => handleCustomerTransition(request, env, actor, decodeURIComponent(g[0] ?? ""), "reenable", rid),
+  "GET /api/admin/licenses": (request, env, _g, rid) => listLicenses(request, env, rid),
+  "GET /api/admin/orders": (request, env, _g, rid) => listOrders(request, env, rid),
+  "GET /api/admin/search": (request, env, _g, rid) => globalSearch(request, env, rid),
+  "GET /api/admin/settings": (_r, env, _g, rid) => settings(env, rid),
+  "GET /api/admin/policies": (request, env, _g, rid) => listPolicies(request, env, rid),
+  "POST /api/admin/policies": (request, env, _g, rid, actor) => handlePolicyMutation(request, env, actor, rid),
+  "GET /api/admin/policies/{id}": (_r, env, g, rid) => getPolicy(env, decodeURIComponent(g[0] ?? ""), rid),
+  "PATCH /api/admin/policies/{id}": (request, env, _g, rid, actor) => handlePolicyMutation(request, env, actor, rid),
+  "POST /api/admin/policies/{id}/disable": (request, env, _g, rid, actor) => handlePolicyMutation(request, env, actor, rid),
+  "POST /api/admin/policies/{id}/reenable": (request, env, _g, rid, actor) => handlePolicyMutation(request, env, actor, rid),
+  "GET /api/admin/catalog/features": (request, env, _g, rid) => listCatalogFeatures(request, env, rid),
+  "POST /api/admin/catalog/features": (request, env, _g, rid, actor) => createCatalogFeature(request, env, actor, rid),
+  "GET /api/admin/catalog/features/{id}": (_r, env, g, rid) => getCatalogFeature(env, decodeURIComponent(g[0] ?? ""), rid),
+  "PATCH /api/admin/catalog/features/{id}": (request, env, g, rid, actor) => patchCatalogFeature(request, env, actor, decodeURIComponent(g[0] ?? ""), rid),
+  "POST /api/admin/catalog/features/{id}/disable": (request, env, g, rid, actor) => transitionCatalogFeature(request, env, actor, decodeURIComponent(g[0] ?? ""), "disable", rid),
+  "POST /api/admin/catalog/features/{id}/reenable": (request, env, g, rid, actor) => transitionCatalogFeature(request, env, actor, decodeURIComponent(g[0] ?? ""), "reenable", rid),
+  "GET /api/admin/catalog/plans": (request, env, _g, rid) => listCatalogPlans(request, env, rid),
+  "POST /api/admin/catalog/plans": (request, env, _g, rid, actor) => createCatalogPlan(request, env, actor, rid),
+  "POST /api/admin/catalog/import": (request, env, _g, rid, actor) => importCatalog(request, env, actor, rid),
+  "GET /api/admin/catalog/plans/{id}": (_r, env, g, rid) => getCatalogPlan(env, decodeURIComponent(g[0] ?? ""), rid),
+  "PATCH /api/admin/catalog/plans/{id}": (request, env, g, rid, actor) => patchCatalogPlan(request, env, actor, decodeURIComponent(g[0] ?? ""), rid),
+  "POST /api/admin/catalog/plans/{id}/disable": (request, env, g, rid, actor) => transitionCatalogPlan(request, env, actor, decodeURIComponent(g[0] ?? ""), "disable", rid),
+  "POST /api/admin/catalog/plans/{id}/reenable": (request, env, g, rid, actor) => transitionCatalogPlan(request, env, actor, decodeURIComponent(g[0] ?? ""), "reenable", rid),
+  "GET /api/admin/catalog/plans/{id}/export": (_r, env, g, rid) => exportCatalogPlan(env, decodeURIComponent(g[0] ?? ""), rid),
+  "GET /api/admin/catalog/plans/{id}/features": (request, env, g, rid) => listCatalogPlanFeatures(request, env, decodeURIComponent(g[0] ?? ""), rid),
+  "POST /api/admin/catalog/plans/{id}/features": (request, env, g, rid, actor) => createCatalogPlanFeature(request, env, actor, decodeURIComponent(g[0] ?? ""), rid),
+  "POST /api/admin/catalog/plans/{id}/features/{featureKey}/disable": (request, env, g, rid, actor) => transitionCatalogPlanFeature(request, env, actor, decodeURIComponent(g[0] ?? ""), decodeURIComponent(g[1] ?? ""), "disable", rid),
+  "POST /api/admin/catalog/plans/{id}/features/{featureKey}/reenable": (request, env, g, rid, actor) => transitionCatalogPlanFeature(request, env, actor, decodeURIComponent(g[0] ?? ""), decodeURIComponent(g[1] ?? ""), "reenable", rid),
+  "POST /api/admin/license-plans/preview": (request, env, _g, rid, actor) => handlePlanProjection(request, env, actor, rid, "preview"),
+  "POST /api/admin/license-plans/apply": (request, env, _g, rid, actor) => handlePlanProjection(request, env, actor, rid, "apply"),
+  "GET /api/admin/webhooks": (request, env, _g, rid) => listWebhooks(request, env, rid),
+  "POST /api/admin/webhooks": (request, env, _g, rid, actor) => handleWebhookMutation(request, env, actor, rid),
+  "GET /api/admin/webhooks/deliveries": (request, env, _g, rid) => listWebhookDeliveries(request, env, rid),
+  "POST /api/admin/webhooks/deliveries/{id}/redrive": (request, env, _g, rid, actor) => handleWebhookMutation(request, env, actor, rid),
+  "GET /api/admin/webhooks/{id}": (_r, env, g, rid) => getWebhook(env, decodeURIComponent(g[0] ?? ""), rid),
+  "PATCH /api/admin/webhooks/{id}": (request, env, _g, rid, actor) => handleWebhookMutation(request, env, actor, rid),
+  "POST /api/admin/webhooks/{id}/disable": (request, env, _g, rid, actor) => handleWebhookMutation(request, env, actor, rid),
+  "POST /api/admin/webhooks/{id}/reenable": (request, env, _g, rid, actor) => handleWebhookMutation(request, env, actor, rid),
+  "GET /api/admin/entitlements": (request, env, _g, rid) => listEntitlements(request, env, rid),
+  "POST /api/admin/entitlements": (request, env, _g, rid, actor) => handleMutation(request, env, actor, rid),
+  "POST /api/admin/entitlements/batch": (request, env, _g, rid, actor) => handleBatchTransition(request, env, actor, rid),
+  "POST /api/admin/entitlements/{id}/release-seats": (request, env, g, rid, actor) => handleReleaseSeats(request, env, actor, g[0] ?? "", rid),
+  "GET /api/admin/entitlements/{id}": (_r, env, g, rid) => entitlementDetail(env, g[0] ?? "", rid),
+  "PATCH /api/admin/entitlements/{id}": (request, env, _g, rid, actor) => handleMutation(request, env, actor, rid),
+  "POST /api/admin/entitlements/{id}/disable": (request, env, _g, rid, actor) => handleMutation(request, env, actor, rid),
+  "POST /api/admin/entitlements/{id}/reenable": (request, env, _g, rid, actor) => handleMutation(request, env, actor, rid),
+  "POST /api/admin/entitlements/{id}/revoke": (request, env, _g, rid, actor) => handleMutation(request, env, actor, rid),
+  "GET /api/admin/entitlements/{id}/devices": (_r, env, g, rid) => handleDeviceList(env, g[0] ?? "", rid),
+  "GET /api/admin/entitlements/{id}/meter": (_r, env, g, rid) => handleMeterStatus(env, g[0] ?? "", rid),
+  "POST /api/admin/entitlements/{id}/devices/{deviceKeyId}/revoke": (request, env, g, rid, actor) => handleDeviceTransition(request, env, actor, g[0] ?? "", g[1] ?? "", "revoke", rid),
+  "POST /api/admin/entitlements/{id}/devices/{deviceKeyId}/disable": (request, env, g, rid, actor) => handleDeviceTransition(request, env, actor, g[0] ?? "", g[1] ?? "", "disable", rid),
+  "POST /api/admin/entitlements/{id}/devices/{deviceKeyId}/reenable": (request, env, g, rid, actor) => handleDeviceTransition(request, env, actor, g[0] ?? "", g[1] ?? "", "reenable", rid),
+  "GET /api/admin/events": (request, env, _g, rid) => listEvents(request, env, rid),
+  // Served from the fetch handler via handleSync (its own auth); listed here so the binding
+  // inventory equals the canonical route table. Never dispatched through handleApi's loop
+  // (handleApi only sees /api/admin/ paths).
+  "POST /api/sync/entitlements": (request, env) => handleSync(request, env),
+};
+
+interface Bound {
+  method: string;
+  path: string;
+  pattern: RegExp | null;
+  run: BoundRun;
+}
+
+const BINDINGS: Bound[] = API_ROUTES.map((r) => {
+  const run = HANDLERS[`${r.method} ${r.path}`];
+  if (run === undefined) {
+    throw new Error(`route without handler: ${r.method} ${r.path}`);
+  }
+  return { method: r.method, path: r.path, pattern: r.path.includes("{") ? pathToPattern(r.path) : null, run };
+});
+
+// The canonical dispatch key set: `${method} ${path}` for every bound route. The OpenAPI
+// crosscheck asserts this equals the route inventory AND the spec, so route knowledge lives
+// in exactly one runtime place (routes.ts + this table) instead of a source-text grep.
+export const API_BINDING_KEYS: readonly string[] = Object.keys(HANDLERS);
+
 async function handleApi(request: Request, env: Env): Promise<Response> {
   const id = requestId(request);
   const auth = await authenticate(request, env, id);
   if (auth instanceof Response) {
     return auth;
   }
-  const url = new URL(request.url);
-  if (request.method === "GET" && url.pathname === "/api/admin/summary") {
-    return summary(env, id);
-  }
-  if (request.method === "GET" && url.pathname === "/api/admin/report") {
-    return report(env, id);
-  }
-  if (request.method === "GET" && url.pathname === "/api/admin/report/timeseries") {
-    return reportTimeseries(request, env, id);
-  }
-  if (request.method === "GET" && url.pathname === "/api/admin/report/expiring") {
-    return reportExpiring(request, env, id);
-  }
-  if (request.method === "GET" && url.pathname === "/api/admin/audit/verify") {
-    return auditVerify(env, id);
-  }
-  if (request.method === "GET" && url.pathname === "/api/admin/customers") {
-    return listCustomers(request, env, id);
-  }
-  if (request.method === "GET" && url.pathname === "/api/admin/licenses") {
-    return listLicenses(request, env, id);
-  }
-  if (request.method === "GET" && url.pathname === "/api/admin/orders") {
-    return listOrders(request, env, id);
-  }
-  if (request.method === "GET" && url.pathname === "/api/admin/search") {
-    return globalSearch(request, env, id);
-  }
-  const customerAction = /^\/api\/admin\/customers\/([^/]+)\/(disable|reenable)$/.exec(url.pathname);
-  if (request.method === "POST" && customerAction !== null) {
-    return handleCustomerTransition(request, env, auth, decodeURIComponent(customerAction[1] ?? ""), customerAction[2] as "disable" | "reenable", id);
-  }
-  const customerDetail = /^\/api\/admin\/customers\/([^/]+)$/.exec(url.pathname);
-  if (request.method === "GET" && customerDetail !== null) {
-    return getCustomer(env, decodeURIComponent(customerDetail[1] ?? ""), id);
-  }
-  if (request.method === "GET" && url.pathname === "/api/admin/settings") {
-    return settings(env, id);
-  }
-  if (request.method === "GET" && url.pathname === "/api/admin/policies") {
-    return listPolicies(request, env, id);
-  }
-  const policyDetail = /^\/api\/admin\/policies\/([^/]+)$/.exec(url.pathname);
-  if (request.method === "GET" && policyDetail !== null) {
-    return getPolicy(env, decodeURIComponent(policyDetail[1] ?? ""), id);
-  }
-  if (["POST", "PATCH"].includes(request.method) && url.pathname.startsWith("/api/admin/policies")) {
-    return handlePolicyMutation(request, env, auth, id);
-  }
-  if (request.method === "GET" && url.pathname === "/api/admin/catalog/features") {
-    return listCatalogFeatures(request, env, id);
-  }
-  if (request.method === "POST" && url.pathname === "/api/admin/catalog/features") {
-    return createCatalogFeature(request, env, auth, id);
-  }
-  const catalogFeatureAction = /^\/api\/admin\/catalog\/features\/([^/]+)\/(disable|reenable)$/.exec(url.pathname);
-  if (request.method === "POST" && catalogFeatureAction !== null) {
-    return transitionCatalogFeature(request, env, auth, decodeURIComponent(catalogFeatureAction[1] ?? ""), catalogFeatureAction[2] as "disable" | "reenable", id);
-  }
-  const catalogFeatureDetail = /^\/api\/admin\/catalog\/features\/([^/]+)$/.exec(url.pathname);
-  if (request.method === "GET" && catalogFeatureDetail !== null) {
-    return getCatalogFeature(env, decodeURIComponent(catalogFeatureDetail[1] ?? ""), id);
-  }
-  if (request.method === "PATCH" && catalogFeatureDetail !== null) {
-    return patchCatalogFeature(request, env, auth, decodeURIComponent(catalogFeatureDetail[1] ?? ""), id);
-  }
-  if (request.method === "GET" && url.pathname === "/api/admin/catalog/plans") {
-    return listCatalogPlans(request, env, id);
-  }
-  if (request.method === "POST" && url.pathname === "/api/admin/catalog/plans") {
-    return createCatalogPlan(request, env, auth, id);
-  }
-  if (request.method === "POST" && url.pathname === "/api/admin/catalog/import") {
-    return importCatalog(request, env, auth, id);
-  }
-  const catalogPlanAction = /^\/api\/admin\/catalog\/plans\/([^/]+)\/(disable|reenable)$/.exec(url.pathname);
-  if (request.method === "POST" && catalogPlanAction !== null) {
-    return transitionCatalogPlan(request, env, auth, decodeURIComponent(catalogPlanAction[1] ?? ""), catalogPlanAction[2] as "disable" | "reenable", id);
-  }
-  const catalogPlanExport = /^\/api\/admin\/catalog\/plans\/([^/]+)\/export$/.exec(url.pathname);
-  if (request.method === "GET" && catalogPlanExport !== null) {
-    return exportCatalogPlan(env, decodeURIComponent(catalogPlanExport[1] ?? ""), id);
-  }
-  const catalogPlanFeatureAction = /^\/api\/admin\/catalog\/plans\/([^/]+)\/features\/([^/]+)\/(disable|reenable)$/.exec(url.pathname);
-  if (request.method === "POST" && catalogPlanFeatureAction !== null) {
-    return transitionCatalogPlanFeature(
-      request,
-      env,
-      auth,
-      decodeURIComponent(catalogPlanFeatureAction[1] ?? ""),
-      decodeURIComponent(catalogPlanFeatureAction[2] ?? ""),
-      catalogPlanFeatureAction[3] as "disable" | "reenable",
-      id,
-    );
-  }
-  const catalogPlanFeatures = /^\/api\/admin\/catalog\/plans\/([^/]+)\/features$/.exec(url.pathname);
-  if (request.method === "GET" && catalogPlanFeatures !== null) {
-    return listCatalogPlanFeatures(request, env, decodeURIComponent(catalogPlanFeatures[1] ?? ""), id);
-  }
-  if (request.method === "POST" && catalogPlanFeatures !== null) {
-    return createCatalogPlanFeature(request, env, auth, decodeURIComponent(catalogPlanFeatures[1] ?? ""), id);
-  }
-  const catalogPlanDetail = /^\/api\/admin\/catalog\/plans\/([^/]+)$/.exec(url.pathname);
-  if (request.method === "GET" && catalogPlanDetail !== null) {
-    return getCatalogPlan(env, decodeURIComponent(catalogPlanDetail[1] ?? ""), id);
-  }
-  if (request.method === "PATCH" && catalogPlanDetail !== null) {
-    return patchCatalogPlan(request, env, auth, decodeURIComponent(catalogPlanDetail[1] ?? ""), id);
-  }
-  if (request.method === "POST" && url.pathname === "/api/admin/license-plans/preview") {
-    return handlePlanProjection(request, env, auth, id, "preview");
-  }
-  if (request.method === "POST" && url.pathname === "/api/admin/license-plans/apply") {
-    return handlePlanProjection(request, env, auth, id, "apply");
-  }
-  // ── Webhooks. /deliveries (status view) is matched BEFORE the /webhooks/:id detail so
-  //    "deliveries" can never be read as an endpoint id. Writes go to handleWebhookMutation.
-  if (request.method === "GET" && url.pathname === "/api/admin/webhooks") {
-    return listWebhooks(request, env, id);
-  }
-  if (request.method === "GET" && url.pathname === "/api/admin/webhooks/deliveries") {
-    return listWebhookDeliveries(request, env, id);
-  }
-  const webhookDetail = /^\/api\/admin\/webhooks\/([^/]+)$/.exec(url.pathname);
-  if (request.method === "GET" && webhookDetail !== null && webhookDetail[1] !== "deliveries") {
-    return getWebhook(env, decodeURIComponent(webhookDetail[1] ?? ""), id);
-  }
-  if (["POST", "PATCH"].includes(request.method) && url.pathname.startsWith("/api/admin/webhooks")) {
-    return handleWebhookMutation(request, env, auth, id);
-  }
-  if (request.method === "GET" && url.pathname === "/api/admin/entitlements") {
-    return listEntitlements(request, env, id);
-  }
-  if (request.method === "GET" && url.pathname === "/api/admin/events") {
-    return listEvents(request, env, id);
-  }
-  const deviceList = /^\/api\/admin\/entitlements\/([^/]+)\/devices$/.exec(url.pathname);
-  if (request.method === "GET" && deviceList !== null) {
-    return handleDeviceList(env, deviceList[1] ?? "", id);
-  }
-  const meterStatus = /^\/api\/admin\/entitlements\/([^/]+)\/meter$/.exec(url.pathname);
-  if (request.method === "GET" && meterStatus !== null) {
-    return handleMeterStatus(env, meterStatus[1] ?? "", id);
-  }
-  const detail = /^\/api\/admin\/entitlements\/([^/]+)$/.exec(url.pathname);
-  if (request.method === "GET" && detail !== null) {
-    const key = decodeEntitlementId(detail[1] ?? "");
-    if (key === null) {
-      return envelope(id, "invalid_entitlement_id", undefined, 400);
+  const pathname = new URL(request.url).pathname;
+  // Anchored full-match dispatch off the canonical inventory. BINDINGS preserves API_ROUTES
+  // order, which keeps the few precedence-sensitive pairs correct (e.g. the literal
+  // /webhooks/deliveries route is listed and thus tried before the /webhooks/{id} pattern).
+  for (const b of BINDINGS) {
+    if (b.method !== request.method) {
+      continue;
     }
-    const row = await findEntitlement(env, key);
-    return row === null ? envelope(id, "not_found", undefined, 404) : envelope(id, "entitlement", row);
-  }
-  if (request.method === "POST" && url.pathname === "/api/admin/entitlements/batch") {
-    return handleBatchTransition(request, env, auth, id);
-  }
-  // Force-release lives at /entitlements/:id/release-seats — match it before the generic
-  // entitlement mutation dispatch so the encoded id (which can contain '/') is not misrouted.
-  const releaseSeats = /^\/api\/admin\/entitlements\/([^/]+)\/release-seats$/.exec(url.pathname);
-  if (request.method === "POST" && releaseSeats !== null) {
-    return handleReleaseSeats(request, env, auth, releaseSeats[1] ?? "", id);
-  }
-  // Device transition lives at /entitlements/:id/devices/:deviceKeyId/(revoke|disable|reenable) —
-  // match it before the generic entitlement mutation dispatch (whose regex would otherwise 404 it).
-  const deviceTransition = /^\/api\/admin\/entitlements\/([^/]+)\/devices\/([^/]+)\/(revoke|disable|reenable)$/.exec(url.pathname);
-  if (request.method === "POST" && deviceTransition !== null) {
-    return handleDeviceTransition(request, env, auth, deviceTransition[1] ?? "", deviceTransition[2] ?? "", deviceTransition[3] as "revoke" | "disable" | "reenable", id);
-  }
-  if (["POST", "PATCH"].includes(request.method)) {
-    return handleMutation(request, env, auth, id);
+    if (b.pattern === null) {
+      if (pathname === b.path) {
+        return b.run(request, env, [], id, auth);
+      }
+      continue;
+    }
+    const m = pathname.match(b.pattern);
+    if (m !== null) {
+      return b.run(request, env, m.slice(1), id, auth);
+    }
   }
   return envelope(id, "not_found", undefined, 404);
 }
