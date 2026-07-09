@@ -62,11 +62,4 @@ void _log(const char* format, ...) {
 	va_end(args);
 	free(buffer);
 }
-
-void _shutdown_log() {
-	if (logFile != NULL) {
-		fclose(logFile);
-		logFile = NULL;
-	}
-}
 #endif

@@ -29,7 +29,6 @@ public:
 
 	FullLicenseInfo(const std::string& source, const std::string& product, const std::string& license_signature);
 	std::string printForSign() const;
-	operator LicenseInfo() const;
 };
 
 /**

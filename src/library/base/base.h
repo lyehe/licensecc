@@ -44,13 +44,6 @@ typedef int bool;
 
 typedef enum { FUNC_RET_OK, FUNC_RET_NOT_AVAIL, FUNC_RET_ERROR, FUNC_RET_BUFFER_TOO_SMALL } FUNCTION_RETURN;
 
-#define cmin(a, b)              \
-	({                          \
-		__typeof__(a) _a = (a); \
-		__typeof__(b) _b = (b); \
-		_a < _b ? _a : _b;      \
-	})
-
 #ifdef __cplusplus
 }
 #endif

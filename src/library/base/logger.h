@@ -28,7 +28,6 @@ extern "C" {
 #endif
 
 void _log(const char* format, ...);
-void _shutdown_log();
 
 #ifdef __cplusplus
 }

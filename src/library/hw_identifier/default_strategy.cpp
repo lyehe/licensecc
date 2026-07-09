@@ -58,7 +58,6 @@ FUNCTION_RETURN DefaultStrategy::generate_pc_id(HwIdentifier& pc_id) const {
 std::vector<HwIdentifier> DefaultStrategy::alternative_ids() const {
 	vector<LCC_API_HW_IDENTIFICATION_STRATEGY> strategy_to_try = available_strategies();
 	vector<HwIdentifier> identifiers;
-	FUNCTION_RETURN ret = FUNC_RET_NOT_AVAIL;
 	for (auto it : strategy_to_try) {
 		LCC_API_HW_IDENTIFICATION_STRATEGY strat_to_try = it;
 		unique_ptr<IdentificationStrategy> strategy_ptr = IdentificationStrategy::get_strategy(strat_to_try);

@@ -36,7 +36,6 @@ LCC_EVENT_TYPE HwIdentifierFacade::validate_pc_signature(const std::string& str_
 
 std::string HwIdentifierFacade::generate_user_pc_signature(LCC_API_HW_IDENTIFICATION_STRATEGY strategy) {
 	bool use_env_var = false;
-	vector<LCC_API_HW_IDENTIFICATION_STRATEGY> strategies_to_try;
 	if (strategy == STRATEGY_DEFAULT) {
 		char* env_var_value = getenv(LCC_IDENTIFICATION_STRATEGY_ENV_VAR);
 		if (env_var_value != nullptr && env_var_value[0] != '\0') {
