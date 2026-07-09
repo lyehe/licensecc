@@ -381,7 +381,11 @@ class MockD1 {
       });
       return { meta: { changes: 1 } };
     }
-    if (sql.startsWith("INSERT OR IGNORE INTO mutation_idempotency")) {
+    // The plain replay-cache INSERT now lives in the backend idempotency_store
+    // (`INSERT INTO mutation_idempotency ... ON CONFLICT DO NOTHING`); the atomic
+    // idempotency-from-current-row write in entitlement_mutation.mjs keeps its
+    // `INSERT OR IGNORE ... SELECT` form. Match either shape here.
+    if (sql.includes("INTO mutation_idempotency")) {
       const key = `${values[0]}\u0000${values[1]}`;
       let responseJson = values[2];
       if (sql.includes(" SELECT ")) {

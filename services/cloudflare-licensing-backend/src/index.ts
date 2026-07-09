@@ -28,6 +28,7 @@ import { handleOrderIngest } from "./fulfillment/order_ingest.mjs";
 // Slice 2 account-token isolation (Stage 3): per-customer credential + the per-endpoint gate.
 import { accountAuth, constantTimeEqual, readBearer } from "./auth/account_auth.mjs";
 import { json, readTextBody, requestId, clientIp, safeString } from "./http/kit.mjs";
+import { readIdempotentResponse, writeIdempotentResponse } from "./db/idempotency_store.mjs";
 import { enqueueAndDeliverWebhooks } from "./webhooks/webhook.mjs";
 import { appendAuditDigest } from "./audit/audit_digest.mjs";
 import type { DbDatabaseLike, DbPreparedStatementLike } from "./db/contract.js";
@@ -1399,12 +1400,8 @@ async function getLeaseIdempotent(
 ): Promise<unknown | null> {
   if (requestId === undefined) return null;
   try {
-    const row = await env.DB.prepare(
-      "SELECT response_json FROM mutation_idempotency WHERE scope = ? AND idempotency_key = ? LIMIT 1",
-    )
-      .bind(leaseIdempotencyScope(isolation), requestId)
-      .first<{ response_json: string }>();
-    return row === null ? null : JSON.parse(row.response_json);
+    const raw = await readIdempotentResponse(env.DB, leaseIdempotencyScope(isolation), requestId);
+    return raw === null ? null : JSON.parse(raw);
   } catch {
     return null; // best-effort; a missing idempotency hit just re-issues
   }
@@ -1419,11 +1416,7 @@ async function putLeaseIdempotent(
 ): Promise<void> {
   if (requestId === undefined) return;
   try {
-    await env.DB.prepare(
-      "INSERT INTO mutation_idempotency (scope, idempotency_key, response_json, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(scope, idempotency_key) DO NOTHING",
-    )
-      .bind(leaseIdempotencyScope(isolation), requestId, JSON.stringify(response), now)
-      .run();
+    await writeIdempotentResponse(env.DB, leaseIdempotencyScope(isolation), requestId, JSON.stringify(response), now);
   } catch {
     // best-effort; idempotency is an optimization, not a correctness gate here
   }

@@ -6,6 +6,10 @@ import type {
 } from "@licensecc/cloudflare-licensing-backend/entitlements/entitlement_mutation";
 import { envelope, json } from "./responses.js";
 import { safeString } from "@licensecc/cloudflare-licensing-backend/http/kit";
+import {
+  readIdempotentResponse,
+  writeIdempotentResponse,
+} from "@licensecc/cloudflare-licensing-backend/db/idempotency_store";
 
 interface IdempotencyEnv {
   DB: D1DatabaseLike;
@@ -22,16 +26,11 @@ export function readIdempotencyKey(request: Request): string | null | typeof INV
 }
 
 export async function idempotentReplay(env: IdempotencyEnv, scope: string, key: string | null): Promise<Response | null> {
-  if (key === null) {
+  const raw = await readIdempotentResponse(env.DB, scope, key);
+  if (raw === null) {
     return null;
   }
-  const row = await env.DB.prepare(
-    "SELECT response_json FROM mutation_idempotency WHERE scope = ? AND idempotency_key = ? LIMIT 1",
-  ).bind(scope, key).first<{ response_json: string }>();
-  if (row === null) {
-    return null;
-  }
-  return json(JSON.parse(row.response_json), 200, { "x-idempotent-replay": "1" });
+  return json(JSON.parse(raw), 200, { "x-idempotent-replay": "1" });
 }
 
 export async function rememberIdempotency(
@@ -41,12 +40,7 @@ export async function rememberIdempotency(
   body: unknown,
   now: number,
 ): Promise<void> {
-  if (key === null) {
-    return;
-  }
-  await env.DB.prepare(
-    "INSERT OR IGNORE INTO mutation_idempotency (scope, idempotency_key, response_json, created_at) VALUES (?, ?, ?, ?)",
-  ).bind(scope, key, JSON.stringify(body), now).run();
+  await writeIdempotentResponse(env.DB, scope, key, JSON.stringify(body), now);
 }
 
 export async function mutationResponse<T>(
@@ -54,7 +48,7 @@ export async function mutationResponse<T>(
   env: IdempotencyEnv,
   ctx: MutationContext,
   code: string,
-  fn: (idempotency: IdempotencyCommit | null) => Promise<MutationResult<T> | null>,
+  fn: (idempotency: IdempotencyCommit | null) => Promise<MutationResult<T> | Response | null>,
 ): Promise<Response> {
   const scope = `${request.method}:${new URL(request.url).pathname}:${ctx.actor.subject}`;
   const replay = await idempotentReplay(env, scope, ctx.idempotencyKey);
@@ -66,6 +60,13 @@ export async function mutationResponse<T>(
     const result = await fn(idempotency);
     if (result === null) {
       return envelope(ctx.requestId, "not_found", undefined, 404);
+    }
+    // A handler that discovers a per-resource error mid-mutation (a 4xx/5xx conflict,
+    // not-found, or validation envelope its own error codes describe) returns that
+    // Response directly; it is never cached, matching the pre-mutationResponse ceremony
+    // where only the success path called rememberIdempotency.
+    if (result instanceof Response) {
+      return result;
     }
     const body = { ok: true, code, request_id: ctx.requestId, data: result.data };
     if (!result.idempotencyRecorded) {

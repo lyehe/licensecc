@@ -5,10 +5,8 @@ import { docsHtml } from "./docs_page.js";
 import { API_ROUTES, pathToPattern } from "./routes.js";
 import {
   INVALID_IDEMPOTENCY_KEY,
-  idempotentReplay,
   mutationResponse,
   readIdempotencyKey,
-  rememberIdempotency,
 } from "./idempotency.js";
 import {
   policyTypeCapacityIsValid,
@@ -53,6 +51,7 @@ import type {
   MutationContext,
 } from "@licensecc/cloudflare-licensing-backend/entitlements/entitlement_mutation";
 import { stampFromPolicy, buildPolicyStampStatement } from "@licensecc/cloudflare-licensing-backend/entitlements/policy";
+import { readIdempotentResponse, writeIdempotentResponse } from "@licensecc/cloudflare-licensing-backend/db/idempotency_store";
 import {
   applyPlanProjection,
   previewPlanProjection,
@@ -1100,33 +1099,27 @@ async function handlePlanProjection(request: Request, env: Env, actor: Actor, re
   if (input === null) {
     return envelope(requestIdValue, "invalid_request", undefined, 400);
   }
-  try {
-    if (action === "preview") {
+  if (action === "preview") {
+    try {
       return envelope(requestIdValue, "license_plan_projection_previewed", await previewPlanProjection(env, input));
+    } catch (error) {
+      return planProjectionError(error, requestIdValue);
     }
-    const scope = `${request.method}:${new URL(request.url).pathname}:${actor.subject}`;
-    const replay = await idempotentReplay(env, scope, idempotencyKey);
-    if (replay !== null) {
-      return replay;
-    }
-    const ctx: MutationContext = {
-      actor,
-      requestId: requestIdValue,
-      ip: clientIp(request),
-      idempotencyKey: idempotencyKey ?? null,
-      source: "admin",
-    };
-    const responseBody = {
-      ok: true,
-      code: "license_plan_projection_applied",
-      request_id: requestIdValue,
-      data: await applyPlanProjection(env, input, ctx),
-    };
-    await rememberIdempotency(env, scope, idempotencyKey, responseBody, Math.floor(Date.now() / 1000));
-    return json(responseBody);
-  } catch (error) {
-    return planProjectionError(error, requestIdValue);
   }
+  const ctx: MutationContext = {
+    actor,
+    requestId: requestIdValue,
+    ip: clientIp(request),
+    idempotencyKey,
+    source: "admin",
+  };
+  return mutationResponse(request, env, ctx, "license_plan_projection_applied", async () => {
+    try {
+      return { data: await applyPlanProjection(env, input, ctx), idempotencyRecorded: false };
+    } catch (error) {
+      return planProjectionError(error, requestIdValue);
+    }
+  });
 }
 
 async function listCatalogFeatures(request: Request, env: Env, requestIdValue: string): Promise<Response> {
@@ -1181,41 +1174,37 @@ async function createCatalogFeature(request: Request, env: Env, actor: Actor, re
   if (idempotencyKey === INVALID_IDEMPOTENCY_KEY) {
     return envelope(requestIdValue, "invalid_idempotency_key", undefined, 400);
   }
-  const scope = `POST:/api/admin/catalog/features:${actor.subject}`;
-  const replay = await idempotentReplay(env, scope, idempotencyKey);
-  if (replay !== null) {
-    return replay;
-  }
-  const body = await parseJsonBody(request, requestIdValue);
-  if (body instanceof Response) {
-    return body;
-  }
-  const input = validateCatalogFeatureInput(body);
-  if (input === null) {
-    return envelope(requestIdValue, "invalid_request", undefined, 400);
-  }
-  const now = Math.floor(Date.now() / 1000);
-  const id = `feat_${crypto.randomUUID()}`;
-  const insert = env.DB.prepare(
-    `INSERT INTO catalog_features
-      (id, project, feature_key, name, description, category, status, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING ${CATALOG_FEATURE_COLUMNS}`,
-  ).bind(id, input.project, input.feature_key, input.name, input.description, input.category, input.status, now, now);
-  let row: Record<string, unknown> | null;
-  try {
-    row = await writeCatalogWithAudit(env, insert, catalogFeatureAudit(env, id, input.project, "create", "", "", actor, requestIdValue, now));
-  } catch (error) {
-    if (error instanceof Error && /unique|constraint/i.test(error.message)) {
-      return envelope(requestIdValue, "catalog_feature_conflict", undefined, 409);
+  const ctx: MutationContext = { actor, requestId: requestIdValue, ip: clientIp(request), idempotencyKey, source: "admin" };
+  return mutationResponse(request, env, ctx, "catalog_feature_created", async () => {
+    const body = await parseJsonBody(request, requestIdValue);
+    if (body instanceof Response) {
+      return body;
     }
-    return envelope(requestIdValue, "catalog_mutation_failed", undefined, 500);
-  }
-  if (row === null) {
-    return envelope(requestIdValue, "catalog_mutation_failed", undefined, 500);
-  }
-  const responseBody = { ok: true, code: "catalog_feature_created", request_id: requestIdValue, data: row };
-  await rememberIdempotency(env, scope, idempotencyKey, responseBody, now);
-  return json(responseBody);
+    const input = validateCatalogFeatureInput(body);
+    if (input === null) {
+      return envelope(requestIdValue, "invalid_request", undefined, 400);
+    }
+    const now = Math.floor(Date.now() / 1000);
+    const id = `feat_${crypto.randomUUID()}`;
+    const insert = env.DB.prepare(
+      `INSERT INTO catalog_features
+        (id, project, feature_key, name, description, category, status, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING ${CATALOG_FEATURE_COLUMNS}`,
+    ).bind(id, input.project, input.feature_key, input.name, input.description, input.category, input.status, now, now);
+    let row: Record<string, unknown> | null;
+    try {
+      row = await writeCatalogWithAudit(env, insert, catalogFeatureAudit(env, id, input.project, "create", "", "", actor, requestIdValue, now));
+    } catch (error) {
+      if (error instanceof Error && /unique|constraint/i.test(error.message)) {
+        return envelope(requestIdValue, "catalog_feature_conflict", undefined, 409);
+      }
+      return envelope(requestIdValue, "catalog_mutation_failed", undefined, 500);
+    }
+    if (row === null) {
+      return envelope(requestIdValue, "catalog_mutation_failed", undefined, 500);
+    }
+    return { data: row, idempotencyRecorded: false };
+  });
 }
 
 async function patchCatalogFeature(request: Request, env: Env, actor: Actor, featureId: string, requestIdValue: string): Promise<Response> {
@@ -1223,37 +1212,35 @@ async function patchCatalogFeature(request: Request, env: Env, actor: Actor, fea
   if (adminError !== null) return adminError;
   const idempotencyKey = readIdempotencyKey(request);
   if (idempotencyKey === INVALID_IDEMPOTENCY_KEY) return envelope(requestIdValue, "invalid_idempotency_key", undefined, 400);
-  const scope = `PATCH:/api/admin/catalog/features/${featureId}:${actor.subject}`;
-  const replay = await idempotentReplay(env, scope, idempotencyKey);
-  if (replay !== null) return replay;
-  const body = await parseJsonBody(request, requestIdValue);
-  if (body instanceof Response) return body;
-  const patch = validateCatalogFeaturePatch(body);
-  if (patch === null) return envelope(requestIdValue, "invalid_request", undefined, 400);
-  const existing = await findCatalogFeature(env, featureId);
-  if (existing === null) return envelope(requestIdValue, "catalog_feature_not_found", undefined, 404);
-  const assignments: string[] = [];
-  const values: unknown[] = [];
-  for (const field of ["name", "description", "category"] as const) {
-    if (patch[field] !== undefined) {
-      assignments.push(`${field} = ?`);
-      values.push(patch[field]);
+  const ctx: MutationContext = { actor, requestId: requestIdValue, ip: clientIp(request), idempotencyKey, source: "admin" };
+  return mutationResponse(request, env, ctx, "catalog_feature_patched", async () => {
+    const body = await parseJsonBody(request, requestIdValue);
+    if (body instanceof Response) return body;
+    const patch = validateCatalogFeaturePatch(body);
+    if (patch === null) return envelope(requestIdValue, "invalid_request", undefined, 400);
+    const existing = await findCatalogFeature(env, featureId);
+    if (existing === null) return envelope(requestIdValue, "catalog_feature_not_found", undefined, 404);
+    const assignments: string[] = [];
+    const values: unknown[] = [];
+    for (const field of ["name", "description", "category"] as const) {
+      if (patch[field] !== undefined) {
+        assignments.push(`${field} = ?`);
+        values.push(patch[field]);
+      }
     }
-  }
-  const now = Math.floor(Date.now() / 1000);
-  assignments.push("updated_at = ?");
-  values.push(now, featureId);
-  const update = env.DB.prepare(`UPDATE catalog_features SET ${assignments.join(", ")} WHERE id = ? RETURNING ${CATALOG_FEATURE_COLUMNS}`).bind(...values);
-  let row: Record<string, unknown> | null;
-  try {
-    row = await writeCatalogWithAudit(env, update, catalogFeatureAudit(env, featureId, String(existing.project), "update", JSON.stringify(existing), "", actor, requestIdValue, now));
-  } catch {
-    return envelope(requestIdValue, "catalog_mutation_failed", undefined, 500);
-  }
-  if (row === null) return envelope(requestIdValue, "catalog_feature_not_found", undefined, 404);
-  const responseBody = { ok: true, code: "catalog_feature_patched", request_id: requestIdValue, data: row };
-  await rememberIdempotency(env, scope, idempotencyKey, responseBody, now);
-  return json(responseBody);
+    const now = Math.floor(Date.now() / 1000);
+    assignments.push("updated_at = ?");
+    values.push(now, featureId);
+    const update = env.DB.prepare(`UPDATE catalog_features SET ${assignments.join(", ")} WHERE id = ? RETURNING ${CATALOG_FEATURE_COLUMNS}`).bind(...values);
+    let row: Record<string, unknown> | null;
+    try {
+      row = await writeCatalogWithAudit(env, update, catalogFeatureAudit(env, featureId, String(existing.project), "update", JSON.stringify(existing), "", actor, requestIdValue, now));
+    } catch {
+      return envelope(requestIdValue, "catalog_mutation_failed", undefined, 500);
+    }
+    if (row === null) return envelope(requestIdValue, "catalog_feature_not_found", undefined, 404);
+    return { data: row, idempotencyRecorded: false };
+  });
 }
 
 async function transitionCatalogFeature(request: Request, env: Env, actor: Actor, featureId: string, action: "disable" | "reenable", requestIdValue: string): Promise<Response> {
@@ -1261,36 +1248,34 @@ async function transitionCatalogFeature(request: Request, env: Env, actor: Actor
   if (adminError !== null) return adminError;
   const idempotencyKey = readIdempotencyKey(request);
   if (idempotencyKey === INVALID_IDEMPOTENCY_KEY) return envelope(requestIdValue, "invalid_idempotency_key", undefined, 400);
-  const scope = `POST:/api/admin/catalog/features/${featureId}/${action}:${actor.subject}`;
-  const replay = await idempotentReplay(env, scope, idempotencyKey);
-  if (replay !== null) return replay;
-  const body = await parseJsonBody(request, requestIdValue);
-  if (body instanceof Response) return body;
-  const reason = safeNotes((body as Record<string, unknown>).reason) ?? "";
-  if (action === "disable" && reason === "") {
-    return envelope(requestIdValue, "reason_required", undefined, 400);
-  }
-  const existing = await findCatalogFeature(env, featureId);
-  if (existing === null) return envelope(requestIdValue, "catalog_feature_not_found", undefined, 404);
-  const expected = action === "disable" ? "active" : "disabled";
-  const next = action === "disable" ? "disabled" : "active";
-  if (existing.status !== expected) {
-    return envelope(requestIdValue, "catalog_status_conflict", { status: existing.status }, 409);
-  }
-  const now = Math.floor(Date.now() / 1000);
-  const update = env.DB.prepare(
-    `UPDATE catalog_features SET status = ?, updated_at = ? WHERE id = ? AND status = ? RETURNING ${CATALOG_FEATURE_COLUMNS}`,
-  ).bind(next, now, featureId, expected);
-  let row: Record<string, unknown> | null;
-  try {
-    row = await writeCatalogWithAudit(env, update, catalogFeatureAudit(env, featureId, String(existing.project), action, JSON.stringify(existing), reason, actor, requestIdValue, now));
-  } catch {
-    return envelope(requestIdValue, "catalog_mutation_failed", undefined, 500);
-  }
-  if (row === null) return envelope(requestIdValue, "catalog_status_conflict", undefined, 409);
-  const responseBody = { ok: true, code: `catalog_feature_${action}d`, request_id: requestIdValue, data: row };
-  await rememberIdempotency(env, scope, idempotencyKey, responseBody, now);
-  return json(responseBody);
+  const ctx: MutationContext = { actor, requestId: requestIdValue, ip: clientIp(request), idempotencyKey, source: "admin" };
+  return mutationResponse(request, env, ctx, `catalog_feature_${action}d`, async () => {
+    const body = await parseJsonBody(request, requestIdValue);
+    if (body instanceof Response) return body;
+    const reason = safeNotes((body as Record<string, unknown>).reason) ?? "";
+    if (action === "disable" && reason === "") {
+      return envelope(requestIdValue, "reason_required", undefined, 400);
+    }
+    const existing = await findCatalogFeature(env, featureId);
+    if (existing === null) return envelope(requestIdValue, "catalog_feature_not_found", undefined, 404);
+    const expected = action === "disable" ? "active" : "disabled";
+    const next = action === "disable" ? "disabled" : "active";
+    if (existing.status !== expected) {
+      return envelope(requestIdValue, "catalog_status_conflict", { status: existing.status }, 409);
+    }
+    const now = Math.floor(Date.now() / 1000);
+    const update = env.DB.prepare(
+      `UPDATE catalog_features SET status = ?, updated_at = ? WHERE id = ? AND status = ? RETURNING ${CATALOG_FEATURE_COLUMNS}`,
+    ).bind(next, now, featureId, expected);
+    let row: Record<string, unknown> | null;
+    try {
+      row = await writeCatalogWithAudit(env, update, catalogFeatureAudit(env, featureId, String(existing.project), action, JSON.stringify(existing), reason, actor, requestIdValue, now));
+    } catch {
+      return envelope(requestIdValue, "catalog_mutation_failed", undefined, 500);
+    }
+    if (row === null) return envelope(requestIdValue, "catalog_status_conflict", undefined, 409);
+    return { data: row, idempotencyRecorded: false };
+  });
 }
 
 async function listCatalogPlans(request: Request, env: Env, requestIdValue: string): Promise<Response> {
@@ -1345,39 +1330,35 @@ async function createCatalogPlan(request: Request, env: Env, actor: Actor, reque
   if (idempotencyKey === INVALID_IDEMPOTENCY_KEY) {
     return envelope(requestIdValue, "invalid_idempotency_key", undefined, 400);
   }
-  const scope = `POST:/api/admin/catalog/plans:${actor.subject}`;
-  const replay = await idempotentReplay(env, scope, idempotencyKey);
-  if (replay !== null) {
-    return replay;
-  }
-  const body = await parseJsonBody(request, requestIdValue);
-  if (body instanceof Response) {
-    return body;
-  }
-  const input = validateCatalogPlanInput(body);
-  if (input === null) {
-    return envelope(requestIdValue, "invalid_request", undefined, 400);
-  }
-  const now = Math.floor(Date.now() / 1000);
-  const id = `plan_${crypto.randomUUID()}`;
-  const insert = env.DB.prepare(
-    `INSERT INTO catalog_plans
-      (id, project, plan_key, name, status, version, description, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING ${CATALOG_PLAN_COLUMNS}`,
-  ).bind(id, input.project, input.plan_key, input.name, input.status, input.version, input.description, now, now);
-  let row: Record<string, unknown> | null;
-  try {
-    row = await writeCatalogWithAudit(env, insert, catalogPlanAudit(env, id, input.project, "create", "", "", actor, requestIdValue, now));
-  } catch (error) {
-    if (error instanceof Error && /unique|constraint/i.test(error.message)) {
-      return envelope(requestIdValue, "catalog_plan_conflict", undefined, 409);
+  const ctx: MutationContext = { actor, requestId: requestIdValue, ip: clientIp(request), idempotencyKey, source: "admin" };
+  return mutationResponse(request, env, ctx, "catalog_plan_created", async () => {
+    const body = await parseJsonBody(request, requestIdValue);
+    if (body instanceof Response) {
+      return body;
     }
-    return envelope(requestIdValue, "catalog_mutation_failed", undefined, 500);
-  }
-  if (row === null) return envelope(requestIdValue, "catalog_mutation_failed", undefined, 500);
-  const responseBody = { ok: true, code: "catalog_plan_created", request_id: requestIdValue, data: row };
-  await rememberIdempotency(env, scope, idempotencyKey, responseBody, now);
-  return json(responseBody);
+    const input = validateCatalogPlanInput(body);
+    if (input === null) {
+      return envelope(requestIdValue, "invalid_request", undefined, 400);
+    }
+    const now = Math.floor(Date.now() / 1000);
+    const id = `plan_${crypto.randomUUID()}`;
+    const insert = env.DB.prepare(
+      `INSERT INTO catalog_plans
+        (id, project, plan_key, name, status, version, description, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING ${CATALOG_PLAN_COLUMNS}`,
+    ).bind(id, input.project, input.plan_key, input.name, input.status, input.version, input.description, now, now);
+    let row: Record<string, unknown> | null;
+    try {
+      row = await writeCatalogWithAudit(env, insert, catalogPlanAudit(env, id, input.project, "create", "", "", actor, requestIdValue, now));
+    } catch (error) {
+      if (error instanceof Error && /unique|constraint/i.test(error.message)) {
+        return envelope(requestIdValue, "catalog_plan_conflict", undefined, 409);
+      }
+      return envelope(requestIdValue, "catalog_mutation_failed", undefined, 500);
+    }
+    if (row === null) return envelope(requestIdValue, "catalog_mutation_failed", undefined, 500);
+    return { data: row, idempotencyRecorded: false };
+  });
 }
 
 async function patchCatalogPlan(request: Request, env: Env, actor: Actor, planId: string, requestIdValue: string): Promise<Response> {
@@ -1385,37 +1366,35 @@ async function patchCatalogPlan(request: Request, env: Env, actor: Actor, planId
   if (adminError !== null) return adminError;
   const idempotencyKey = readIdempotencyKey(request);
   if (idempotencyKey === INVALID_IDEMPOTENCY_KEY) return envelope(requestIdValue, "invalid_idempotency_key", undefined, 400);
-  const scope = `PATCH:/api/admin/catalog/plans/${planId}:${actor.subject}`;
-  const replay = await idempotentReplay(env, scope, idempotencyKey);
-  if (replay !== null) return replay;
-  const body = await parseJsonBody(request, requestIdValue);
-  if (body instanceof Response) return body;
-  const patch = validateCatalogPlanPatch(body);
-  if (patch === null) return envelope(requestIdValue, "invalid_request", undefined, 400);
-  const existing = await findCatalogPlan(env, planId);
-  if (existing === null) return envelope(requestIdValue, "catalog_plan_not_found", undefined, 404);
-  const assignments: string[] = [];
-  const values: unknown[] = [];
-  for (const field of ["name", "description"] as const) {
-    if (patch[field] !== undefined) {
-      assignments.push(`${field} = ?`);
-      values.push(patch[field]);
+  const ctx: MutationContext = { actor, requestId: requestIdValue, ip: clientIp(request), idempotencyKey, source: "admin" };
+  return mutationResponse(request, env, ctx, "catalog_plan_patched", async () => {
+    const body = await parseJsonBody(request, requestIdValue);
+    if (body instanceof Response) return body;
+    const patch = validateCatalogPlanPatch(body);
+    if (patch === null) return envelope(requestIdValue, "invalid_request", undefined, 400);
+    const existing = await findCatalogPlan(env, planId);
+    if (existing === null) return envelope(requestIdValue, "catalog_plan_not_found", undefined, 404);
+    const assignments: string[] = [];
+    const values: unknown[] = [];
+    for (const field of ["name", "description"] as const) {
+      if (patch[field] !== undefined) {
+        assignments.push(`${field} = ?`);
+        values.push(patch[field]);
+      }
     }
-  }
-  const now = Math.floor(Date.now() / 1000);
-  assignments.push("updated_at = ?");
-  values.push(now, planId);
-  const update = env.DB.prepare(`UPDATE catalog_plans SET ${assignments.join(", ")} WHERE id = ? RETURNING ${CATALOG_PLAN_COLUMNS}`).bind(...values);
-  let row: Record<string, unknown> | null;
-  try {
-    row = await writeCatalogWithAudit(env, update, catalogPlanAudit(env, planId, String(existing.project), "update", JSON.stringify(existing), "", actor, requestIdValue, now));
-  } catch {
-    return envelope(requestIdValue, "catalog_mutation_failed", undefined, 500);
-  }
-  if (row === null) return envelope(requestIdValue, "catalog_plan_not_found", undefined, 404);
-  const responseBody = { ok: true, code: "catalog_plan_patched", request_id: requestIdValue, data: row };
-  await rememberIdempotency(env, scope, idempotencyKey, responseBody, now);
-  return json(responseBody);
+    const now = Math.floor(Date.now() / 1000);
+    assignments.push("updated_at = ?");
+    values.push(now, planId);
+    const update = env.DB.prepare(`UPDATE catalog_plans SET ${assignments.join(", ")} WHERE id = ? RETURNING ${CATALOG_PLAN_COLUMNS}`).bind(...values);
+    let row: Record<string, unknown> | null;
+    try {
+      row = await writeCatalogWithAudit(env, update, catalogPlanAudit(env, planId, String(existing.project), "update", JSON.stringify(existing), "", actor, requestIdValue, now));
+    } catch {
+      return envelope(requestIdValue, "catalog_mutation_failed", undefined, 500);
+    }
+    if (row === null) return envelope(requestIdValue, "catalog_plan_not_found", undefined, 404);
+    return { data: row, idempotencyRecorded: false };
+  });
 }
 
 async function transitionCatalogPlan(request: Request, env: Env, actor: Actor, planId: string, action: "disable" | "reenable", requestIdValue: string): Promise<Response> {
@@ -1423,34 +1402,32 @@ async function transitionCatalogPlan(request: Request, env: Env, actor: Actor, p
   if (adminError !== null) return adminError;
   const idempotencyKey = readIdempotencyKey(request);
   if (idempotencyKey === INVALID_IDEMPOTENCY_KEY) return envelope(requestIdValue, "invalid_idempotency_key", undefined, 400);
-  const scope = `POST:/api/admin/catalog/plans/${planId}/${action}:${actor.subject}`;
-  const replay = await idempotentReplay(env, scope, idempotencyKey);
-  if (replay !== null) return replay;
-  const body = await parseJsonBody(request, requestIdValue);
-  if (body instanceof Response) return body;
-  const reason = safeNotes((body as Record<string, unknown>).reason) ?? "";
-  if (action === "disable" && reason === "") return envelope(requestIdValue, "reason_required", undefined, 400);
-  const existing = await findCatalogPlan(env, planId);
-  if (existing === null) return envelope(requestIdValue, "catalog_plan_not_found", undefined, 404);
-  const expected = action === "disable" ? "active" : "disabled";
-  const next = action === "disable" ? "disabled" : "active";
-  if (existing.status !== expected) {
-    return envelope(requestIdValue, "catalog_status_conflict", { status: existing.status }, 409);
-  }
-  const now = Math.floor(Date.now() / 1000);
-  const update = env.DB.prepare(
-    `UPDATE catalog_plans SET status = ?, updated_at = ? WHERE id = ? AND status = ? RETURNING ${CATALOG_PLAN_COLUMNS}`,
-  ).bind(next, now, planId, expected);
-  let row: Record<string, unknown> | null;
-  try {
-    row = await writeCatalogWithAudit(env, update, catalogPlanAudit(env, planId, String(existing.project), action, JSON.stringify(existing), reason, actor, requestIdValue, now));
-  } catch {
-    return envelope(requestIdValue, "catalog_mutation_failed", undefined, 500);
-  }
-  if (row === null) return envelope(requestIdValue, "catalog_status_conflict", undefined, 409);
-  const responseBody = { ok: true, code: `catalog_plan_${action}d`, request_id: requestIdValue, data: row };
-  await rememberIdempotency(env, scope, idempotencyKey, responseBody, now);
-  return json(responseBody);
+  const ctx: MutationContext = { actor, requestId: requestIdValue, ip: clientIp(request), idempotencyKey, source: "admin" };
+  return mutationResponse(request, env, ctx, `catalog_plan_${action}d`, async () => {
+    const body = await parseJsonBody(request, requestIdValue);
+    if (body instanceof Response) return body;
+    const reason = safeNotes((body as Record<string, unknown>).reason) ?? "";
+    if (action === "disable" && reason === "") return envelope(requestIdValue, "reason_required", undefined, 400);
+    const existing = await findCatalogPlan(env, planId);
+    if (existing === null) return envelope(requestIdValue, "catalog_plan_not_found", undefined, 404);
+    const expected = action === "disable" ? "active" : "disabled";
+    const next = action === "disable" ? "disabled" : "active";
+    if (existing.status !== expected) {
+      return envelope(requestIdValue, "catalog_status_conflict", { status: existing.status }, 409);
+    }
+    const now = Math.floor(Date.now() / 1000);
+    const update = env.DB.prepare(
+      `UPDATE catalog_plans SET status = ?, updated_at = ? WHERE id = ? AND status = ? RETURNING ${CATALOG_PLAN_COLUMNS}`,
+    ).bind(next, now, planId, expected);
+    let row: Record<string, unknown> | null;
+    try {
+      row = await writeCatalogWithAudit(env, update, catalogPlanAudit(env, planId, String(existing.project), action, JSON.stringify(existing), reason, actor, requestIdValue, now));
+    } catch {
+      return envelope(requestIdValue, "catalog_mutation_failed", undefined, 500);
+    }
+    if (row === null) return envelope(requestIdValue, "catalog_status_conflict", undefined, 409);
+    return { data: row, idempotencyRecorded: false };
+  });
 }
 
 async function listCatalogPlanFeatures(request: Request, env: Env, planId: string, requestIdValue: string): Promise<Response> {
@@ -1504,103 +1481,99 @@ async function createCatalogPlanFeature(request: Request, env: Env, actor: Actor
   if (idempotencyKey === INVALID_IDEMPOTENCY_KEY) {
     return envelope(requestIdValue, "invalid_idempotency_key", undefined, 400);
   }
-  const scope = `POST:/api/admin/catalog/plans/${planId}/features:${actor.subject}`;
-  const replay = await idempotentReplay(env, scope, idempotencyKey);
-  if (replay !== null) {
-    return replay;
-  }
-  const body = await parseJsonBody(request, requestIdValue);
-  if (body instanceof Response) {
-    return body;
-  }
-  const input = validateCatalogPlanFeatureInput(body);
-  if (input === null) {
-    return envelope(requestIdValue, "invalid_request", undefined, 400);
-  }
-  const plan = await env.DB.prepare("SELECT id, project FROM catalog_plans WHERE id = ? LIMIT 1").bind(planId).first<{ id: string; project: string }>();
-  if (plan === null) {
-    return envelope(requestIdValue, "catalog_plan_not_found", undefined, 404);
-  }
-  if (plan.project !== input.project) {
-    return envelope(requestIdValue, "invalid_plan_config", undefined, 409);
-  }
-  const feature = await env.DB.prepare(
-    "SELECT feature_key FROM catalog_features WHERE project = ? AND feature_key = ? LIMIT 1",
-  ).bind(input.project, input.feature_key).first();
-  if (feature === null) {
-    return envelope(requestIdValue, "catalog_feature_not_found", undefined, 404);
-  }
-  if (input.policy_id !== null) {
-    const policy = await env.DB.prepare(
-      "SELECT project, status FROM entitlement_policies WHERE id = ? LIMIT 1",
-    ).bind(input.policy_id).first<{ project: string; status: string }>();
-    if (policy === null) {
-      return envelope(requestIdValue, "policy_not_found", undefined, 404);
+  const ctx: MutationContext = { actor, requestId: requestIdValue, ip: clientIp(request), idempotencyKey, source: "admin" };
+  return mutationResponse(request, env, ctx, "catalog_plan_feature_saved", async () => {
+    const body = await parseJsonBody(request, requestIdValue);
+    if (body instanceof Response) {
+      return body;
     }
-    if (policy.project !== input.project) {
+    const input = validateCatalogPlanFeatureInput(body);
+    if (input === null) {
+      return envelope(requestIdValue, "invalid_request", undefined, 400);
+    }
+    const plan = await env.DB.prepare("SELECT id, project FROM catalog_plans WHERE id = ? LIMIT 1").bind(planId).first<{ id: string; project: string }>();
+    if (plan === null) {
+      return envelope(requestIdValue, "catalog_plan_not_found", undefined, 404);
+    }
+    if (plan.project !== input.project) {
       return envelope(requestIdValue, "invalid_plan_config", undefined, 409);
     }
-    if (policy.status !== "active") {
-      return envelope(requestIdValue, "policy_disabled", undefined, 409);
+    const feature = await env.DB.prepare(
+      "SELECT feature_key FROM catalog_features WHERE project = ? AND feature_key = ? LIMIT 1",
+    ).bind(input.project, input.feature_key).first();
+    if (feature === null) {
+      return envelope(requestIdValue, "catalog_feature_not_found", undefined, 404);
     }
-  }
-  const existing = await findCatalogPlanFeature(env, planId, input.feature_key);
-  const eventType = existing === null ? "create" : "update";
-  const now = Math.floor(Date.now() / 1000);
-  const upsert = env.DB.prepare(
-    `INSERT INTO catalog_plan_features
-      (project, plan_id, feature_key, feature_inclusion, addon_key, policy_id, status, display_order,
-       assertion_ttl_seconds, pool_size, max_active_devices, max_borrow_sec, meter_quota, meter_period_sec,
-       created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT(plan_id, feature_key) DO UPDATE SET
-       feature_inclusion = excluded.feature_inclusion,
-       addon_key = excluded.addon_key,
-       policy_id = excluded.policy_id,
-       status = excluded.status,
-       display_order = excluded.display_order,
-       assertion_ttl_seconds = excluded.assertion_ttl_seconds,
-       pool_size = excluded.pool_size,
-       max_active_devices = excluded.max_active_devices,
-       max_borrow_sec = excluded.max_borrow_sec,
-       meter_quota = excluded.meter_quota,
-       meter_period_sec = excluded.meter_period_sec,
-       updated_at = excluded.updated_at
-     RETURNING ${CATALOG_PLAN_FEATURE_COLUMNS}`,
-  ).bind(
-    input.project,
-    planId,
-    input.feature_key,
-    input.feature_inclusion,
-    input.addon_key,
-    input.policy_id,
-    input.status,
-    input.display_order,
-    input.assertion_ttl_seconds,
-    input.pool_size,
-    input.max_active_devices,
-    input.max_borrow_sec,
-    input.meter_quota,
-    input.meter_period_sec,
-    now,
-    now,
-  );
-  try {
-    const audit = catalogPlanFeatureAudit(env, planId, input.feature_key, input.project, eventType, existing === null ? "" : JSON.stringify(existing), "", actor, requestIdValue, now);
-    const row = await writeCatalogWithAudit(env, upsert, audit);
-    if (row === null) {
+    if (input.policy_id !== null) {
+      const policy = await env.DB.prepare(
+        "SELECT project, status FROM entitlement_policies WHERE id = ? LIMIT 1",
+      ).bind(input.policy_id).first<{ project: string; status: string }>();
+      if (policy === null) {
+        return envelope(requestIdValue, "policy_not_found", undefined, 404);
+      }
+      if (policy.project !== input.project) {
+        return envelope(requestIdValue, "invalid_plan_config", undefined, 409);
+      }
+      if (policy.status !== "active") {
+        return envelope(requestIdValue, "policy_disabled", undefined, 409);
+      }
+    }
+    const existing = await findCatalogPlanFeature(env, planId, input.feature_key);
+    const eventType = existing === null ? "create" : "update";
+    const now = Math.floor(Date.now() / 1000);
+    const upsert = env.DB.prepare(
+      `INSERT INTO catalog_plan_features
+        (project, plan_id, feature_key, feature_inclusion, addon_key, policy_id, status, display_order,
+         assertion_ttl_seconds, pool_size, max_active_devices, max_borrow_sec, meter_quota, meter_period_sec,
+         created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(plan_id, feature_key) DO UPDATE SET
+         feature_inclusion = excluded.feature_inclusion,
+         addon_key = excluded.addon_key,
+         policy_id = excluded.policy_id,
+         status = excluded.status,
+         display_order = excluded.display_order,
+         assertion_ttl_seconds = excluded.assertion_ttl_seconds,
+         pool_size = excluded.pool_size,
+         max_active_devices = excluded.max_active_devices,
+         max_borrow_sec = excluded.max_borrow_sec,
+         meter_quota = excluded.meter_quota,
+         meter_period_sec = excluded.meter_period_sec,
+         updated_at = excluded.updated_at
+       RETURNING ${CATALOG_PLAN_FEATURE_COLUMNS}`,
+    ).bind(
+      input.project,
+      planId,
+      input.feature_key,
+      input.feature_inclusion,
+      input.addon_key,
+      input.policy_id,
+      input.status,
+      input.display_order,
+      input.assertion_ttl_seconds,
+      input.pool_size,
+      input.max_active_devices,
+      input.max_borrow_sec,
+      input.meter_quota,
+      input.meter_period_sec,
+      now,
+      now,
+    );
+    try {
+      const audit = catalogPlanFeatureAudit(env, planId, input.feature_key, input.project, eventType, existing === null ? "" : JSON.stringify(existing), "", actor, requestIdValue, now);
+      const written = await writeCatalogWithAudit(env, upsert, audit);
+      if (written === null) {
+        return envelope(requestIdValue, "catalog_mutation_failed", undefined, 500);
+      }
+    } catch (error) {
+      if (error instanceof Error && /unique|constraint/i.test(error.message)) {
+        return envelope(requestIdValue, "catalog_plan_feature_conflict", undefined, 409);
+      }
       return envelope(requestIdValue, "catalog_mutation_failed", undefined, 500);
     }
-  } catch (error) {
-    if (error instanceof Error && /unique|constraint/i.test(error.message)) {
-      return envelope(requestIdValue, "catalog_plan_feature_conflict", undefined, 409);
-    }
-    return envelope(requestIdValue, "catalog_mutation_failed", undefined, 500);
-  }
-  const row = await getCatalogPlanFeatureView(env, planId, input.feature_key);
-  const responseBody = { ok: true, code: "catalog_plan_feature_saved", request_id: requestIdValue, data: row };
-  await rememberIdempotency(env, scope, idempotencyKey, responseBody, now);
-  return json(responseBody);
+    const row = await getCatalogPlanFeatureView(env, planId, input.feature_key);
+    return { data: row, idempotencyRecorded: false };
+  });
 }
 
 async function transitionCatalogPlanFeature(request: Request, env: Env, actor: Actor, planId: string, featureKey: string, action: "disable" | "reenable", requestIdValue: string): Promise<Response> {
@@ -1608,35 +1581,33 @@ async function transitionCatalogPlanFeature(request: Request, env: Env, actor: A
   if (adminError !== null) return adminError;
   const idempotencyKey = readIdempotencyKey(request);
   if (idempotencyKey === INVALID_IDEMPOTENCY_KEY) return envelope(requestIdValue, "invalid_idempotency_key", undefined, 400);
-  const scope = `POST:/api/admin/catalog/plans/${planId}/features/${featureKey}/${action}:${actor.subject}`;
-  const replay = await idempotentReplay(env, scope, idempotencyKey);
-  if (replay !== null) return replay;
-  const body = await parseJsonBody(request, requestIdValue);
-  if (body instanceof Response) return body;
-  const reason = safeNotes((body as Record<string, unknown>).reason) ?? "";
-  if (action === "disable" && reason === "") return envelope(requestIdValue, "reason_required", undefined, 400);
-  const existing = await findCatalogPlanFeature(env, planId, featureKey);
-  if (existing === null) return envelope(requestIdValue, "catalog_plan_feature_not_found", undefined, 404);
-  const expected = action === "disable" ? "active" : "disabled";
-  const next = action === "disable" ? "disabled" : "active";
-  if (existing.status !== expected) {
-    return envelope(requestIdValue, "catalog_status_conflict", { status: existing.status }, 409);
-  }
-  const now = Math.floor(Date.now() / 1000);
-  const update = env.DB.prepare(
-    `UPDATE catalog_plan_features SET status = ?, updated_at = ? WHERE plan_id = ? AND feature_key = ? AND status = ? RETURNING ${CATALOG_PLAN_FEATURE_COLUMNS}`,
-  ).bind(next, now, planId, featureKey, expected);
-  let base: Record<string, unknown> | null;
-  try {
-    base = await writeCatalogWithAudit(env, update, catalogPlanFeatureAudit(env, planId, featureKey, String(existing.project), action, JSON.stringify(existing), reason, actor, requestIdValue, now));
-  } catch {
-    return envelope(requestIdValue, "catalog_mutation_failed", undefined, 500);
-  }
-  if (base === null) return envelope(requestIdValue, "catalog_status_conflict", undefined, 409);
-  const row = await getCatalogPlanFeatureView(env, planId, featureKey);
-  const responseBody = { ok: true, code: `catalog_plan_feature_${action}d`, request_id: requestIdValue, data: row };
-  await rememberIdempotency(env, scope, idempotencyKey, responseBody, now);
-  return json(responseBody);
+  const ctx: MutationContext = { actor, requestId: requestIdValue, ip: clientIp(request), idempotencyKey, source: "admin" };
+  return mutationResponse(request, env, ctx, `catalog_plan_feature_${action}d`, async () => {
+    const body = await parseJsonBody(request, requestIdValue);
+    if (body instanceof Response) return body;
+    const reason = safeNotes((body as Record<string, unknown>).reason) ?? "";
+    if (action === "disable" && reason === "") return envelope(requestIdValue, "reason_required", undefined, 400);
+    const existing = await findCatalogPlanFeature(env, planId, featureKey);
+    if (existing === null) return envelope(requestIdValue, "catalog_plan_feature_not_found", undefined, 404);
+    const expected = action === "disable" ? "active" : "disabled";
+    const next = action === "disable" ? "disabled" : "active";
+    if (existing.status !== expected) {
+      return envelope(requestIdValue, "catalog_status_conflict", { status: existing.status }, 409);
+    }
+    const now = Math.floor(Date.now() / 1000);
+    const update = env.DB.prepare(
+      `UPDATE catalog_plan_features SET status = ?, updated_at = ? WHERE plan_id = ? AND feature_key = ? AND status = ? RETURNING ${CATALOG_PLAN_FEATURE_COLUMNS}`,
+    ).bind(next, now, planId, featureKey, expected);
+    let base: Record<string, unknown> | null;
+    try {
+      base = await writeCatalogWithAudit(env, update, catalogPlanFeatureAudit(env, planId, featureKey, String(existing.project), action, JSON.stringify(existing), reason, actor, requestIdValue, now));
+    } catch {
+      return envelope(requestIdValue, "catalog_mutation_failed", undefined, 500);
+    }
+    if (base === null) return envelope(requestIdValue, "catalog_status_conflict", undefined, 409);
+    const row = await getCatalogPlanFeatureView(env, planId, featureKey);
+    return { data: row, idempotencyRecorded: false };
+  });
 }
 
 async function findCatalogFeatureByKey(env: Env, project: string, featureKey: string): Promise<Record<string, unknown> | null> {
@@ -1916,11 +1887,6 @@ async function importCatalog(request: Request, env: Env, actor: Actor, requestId
   const dryRun = url.searchParams.get("dry_run") === "1" || url.searchParams.get("dry_run") === "true";
   const idempotencyKey = readIdempotencyKey(request);
   if (idempotencyKey === INVALID_IDEMPOTENCY_KEY) return envelope(requestIdValue, "invalid_idempotency_key", undefined, 400);
-  const scope = `POST:/api/admin/catalog/import:${actor.subject}`;
-  if (!dryRun) {
-    const replay = await idempotentReplay(env, scope, idempotencyKey);
-    if (replay !== null) return replay;
-  }
   const body = await parseJsonBody(request, requestIdValue);
   if (body instanceof Response) return body;
   const input = validateCatalogImportInput(body);
@@ -1930,35 +1896,35 @@ async function importCatalog(request: Request, env: Env, actor: Actor, requestId
   if (dryRun) {
     return envelope(requestIdValue, "catalog_import_previewed", await previewCatalogImport(env, input));
   }
-
-  const result = emptyCatalogImportResult();
-  const now = Math.floor(Date.now() / 1000);
-  try {
-    for (const feature of input.features) {
-      const applied = await applyCatalogFeatureImport(env, feature, actor, requestIdValue, now);
-      if (applied.row === null) return envelope(requestIdValue, "catalog_mutation_failed", undefined, 500);
-      result.features[applied.kind] += 1;
-    }
-    for (const plan of input.plans) {
-      const applied = await applyCatalogPlanImport(env, plan, actor, requestIdValue, now);
-      if (applied.row === null) return envelope(requestIdValue, "catalog_mutation_failed", undefined, 500);
-      result.plans[applied.kind] += 1;
-      const planId = String(applied.row.id);
-      for (const feature of plan.features ?? []) {
-        const featureApplied = await applyCatalogPlanFeatureImport(env, planId, feature, actor, requestIdValue, now);
-        if (featureApplied.row === null) return envelope(requestIdValue, "catalog_mutation_failed", undefined, 500);
-        result.plan_features[featureApplied.kind] += 1;
+  const ctx: MutationContext = { actor, requestId: requestIdValue, ip: clientIp(request), idempotencyKey, source: "admin" };
+  return mutationResponse(request, env, ctx, "catalog_import_applied", async () => {
+    const result = emptyCatalogImportResult();
+    const now = Math.floor(Date.now() / 1000);
+    try {
+      for (const feature of input.features) {
+        const applied = await applyCatalogFeatureImport(env, feature, actor, requestIdValue, now);
+        if (applied.row === null) return envelope(requestIdValue, "catalog_mutation_failed", undefined, 500);
+        result.features[applied.kind] += 1;
       }
+      for (const plan of input.plans) {
+        const applied = await applyCatalogPlanImport(env, plan, actor, requestIdValue, now);
+        if (applied.row === null) return envelope(requestIdValue, "catalog_mutation_failed", undefined, 500);
+        result.plans[applied.kind] += 1;
+        const planId = String(applied.row.id);
+        for (const feature of plan.features ?? []) {
+          const featureApplied = await applyCatalogPlanFeatureImport(env, planId, feature, actor, requestIdValue, now);
+          if (featureApplied.row === null) return envelope(requestIdValue, "catalog_mutation_failed", undefined, 500);
+          result.plan_features[featureApplied.kind] += 1;
+        }
+      }
+    } catch (error) {
+      if (error instanceof Error && /unique|constraint/i.test(error.message)) {
+        return envelope(requestIdValue, "catalog_import_conflict", undefined, 409);
+      }
+      return envelope(requestIdValue, "catalog_mutation_failed", undefined, 500);
     }
-  } catch (error) {
-    if (error instanceof Error && /unique|constraint/i.test(error.message)) {
-      return envelope(requestIdValue, "catalog_import_conflict", undefined, 409);
-    }
-    return envelope(requestIdValue, "catalog_mutation_failed", undefined, 500);
-  }
-  const responseBody = { ok: true, code: "catalog_import_applied", request_id: requestIdValue, data: result };
-  await rememberIdempotency(env, scope, idempotencyKey, responseBody, now);
-  return json(responseBody);
+    return { data: result, idempotencyRecorded: false };
+  });
 }
 
 async function exportCatalogPlan(env: Env, planId: string, requestIdValue: string): Promise<Response> {
@@ -2332,46 +2298,42 @@ async function handleCustomerTransition(
   if (action === "disable" && reason === "") {
     return envelope(requestIdValue, "reason_required", undefined, 400);
   }
-  const scope = `POST:/api/admin/customers/${action}:${actor.subject}`;
-  const replay = await idempotentReplay(env, scope, idempotencyKey);
-  if (replay !== null) {
-    return replay;
-  }
-  const existing = await env.DB.prepare("SELECT status FROM customers WHERE id = ?").bind(customerId).first<{ status: string }>();
-  if (existing === null) {
-    return envelope(requestIdValue, "not_found", undefined, 404);
-  }
-  const expectedPrev = action === "disable" ? "active" : "disabled";
-  const next = action === "disable" ? "disabled" : "active";
-  if (existing.status !== expectedPrev) {
-    return envelope(requestIdValue, "customer_status_conflict", { status: existing.status }, 409);
-  }
-  if (typeof env.DB.batch !== "function") {
-    return envelope(requestIdValue, "mutation_failed", undefined, 500);
-  }
-  const now = Math.floor(Date.now() / 1000);
-  let results: unknown[];
-  try {
-    results = await env.DB.batch([
-      env.DB.prepare(
-        "UPDATE customers SET status = ?, updated_at = ? WHERE id = ? AND status = ? RETURNING id, name, email, status, external_ref, created_at, updated_at",
-      ).bind(next, now, customerId, expectedPrev),
-      env.DB.prepare(
-        `INSERT INTO customer_events (customer_id, event_type, prev_status, next_status, actor, actor_type, source, reason, request_id, created_at)
-         SELECT ?, ?, ?, ?, ?, ?, 'admin', ?, ?, ? WHERE EXISTS (SELECT 1 FROM customers WHERE id = ? AND status = ? AND updated_at = ?)`,
-      ).bind(customerId, action, expectedPrev, next, actor.email, actor.actorType, reason, requestIdValue, now, customerId, next, now),
-    ]);
-  } catch {
-    return envelope(requestIdValue, "mutation_failed", undefined, 500);
-  }
-  const updated = batchReturnedRow<Record<string, unknown>>(results[0]);
-  if (updated === null) {
-    // Lost the guarded race — status changed between the pre-read and the UPDATE.
-    return envelope(requestIdValue, "customer_status_conflict", undefined, 409);
-  }
-  const responseBody = { ok: true, code: `customer_${action}d`, request_id: requestIdValue, data: updated };
-  await rememberIdempotency(env, scope, idempotencyKey, responseBody, now);
-  return json(responseBody);
+  const ctx: MutationContext = { actor, requestId: requestIdValue, ip: clientIp(request), idempotencyKey, source: "admin" };
+  return mutationResponse(request, env, ctx, `customer_${action}d`, async () => {
+    const existing = await env.DB.prepare("SELECT status FROM customers WHERE id = ?").bind(customerId).first<{ status: string }>();
+    if (existing === null) {
+      return envelope(requestIdValue, "not_found", undefined, 404);
+    }
+    const expectedPrev = action === "disable" ? "active" : "disabled";
+    const next = action === "disable" ? "disabled" : "active";
+    if (existing.status !== expectedPrev) {
+      return envelope(requestIdValue, "customer_status_conflict", { status: existing.status }, 409);
+    }
+    if (typeof env.DB.batch !== "function") {
+      return envelope(requestIdValue, "mutation_failed", undefined, 500);
+    }
+    const now = Math.floor(Date.now() / 1000);
+    let results: unknown[];
+    try {
+      results = await env.DB.batch([
+        env.DB.prepare(
+          "UPDATE customers SET status = ?, updated_at = ? WHERE id = ? AND status = ? RETURNING id, name, email, status, external_ref, created_at, updated_at",
+        ).bind(next, now, customerId, expectedPrev),
+        env.DB.prepare(
+          `INSERT INTO customer_events (customer_id, event_type, prev_status, next_status, actor, actor_type, source, reason, request_id, created_at)
+           SELECT ?, ?, ?, ?, ?, ?, 'admin', ?, ?, ? WHERE EXISTS (SELECT 1 FROM customers WHERE id = ? AND status = ? AND updated_at = ?)`,
+        ).bind(customerId, action, expectedPrev, next, actor.email, actor.actorType, reason, requestIdValue, now, customerId, next, now),
+      ]);
+    } catch {
+      return envelope(requestIdValue, "mutation_failed", undefined, 500);
+    }
+    const updated = batchReturnedRow<Record<string, unknown>>(results[0]);
+    if (updated === null) {
+      // Lost the guarded race — status changed between the pre-read and the UPDATE.
+      return envelope(requestIdValue, "customer_status_conflict", undefined, 409);
+    }
+    return { data: updated, idempotencyRecorded: false };
+  });
 }
 
 // ── Bulk entitlement transitions (Workstream C) ──────────────────────────────
@@ -2436,7 +2398,7 @@ async function handleBatchTransition(request: Request, env: Env, actor: Actor, r
       idempotencyKey: rowKey,
       source: "admin",
     };
-    const replay = await idempotentReplay(env, scope, rowKey);
+    const replay = await readIdempotentResponse(env.DB, scope, rowKey);
     if (replay !== null) {
       results.push({ id, ok: true, code: `entitlement_${transition}d` });
       continue;
@@ -2450,7 +2412,7 @@ async function handleBatchTransition(request: Request, env: Env, actor: Actor, r
       }
       if (!result.idempotencyRecorded) {
         const rowBody = { ok: true, code: `entitlement_${transition}d`, request_id: requestIdValue, data: result.data };
-        await rememberIdempotency(env, scope, rowKey, rowBody, Math.floor(Date.now() / 1000));
+        await writeIdempotentResponse(env.DB, scope, rowKey, JSON.stringify(rowBody), Math.floor(Date.now() / 1000));
       }
       results.push({ id, ok: true, code: `entitlement_${transition}d` });
     } catch (error) {
@@ -2594,43 +2556,39 @@ async function handlePolicyCreate(request: Request, env: Env, actor: Actor, body
   if (idempotencyKey === INVALID_IDEMPOTENCY_KEY) {
     return envelope(requestIdValue, "invalid_idempotency_key", undefined, 400);
   }
-  const scope = `POST:/api/admin/policies:${actor.subject}`;
-  const replay = await idempotentReplay(env, scope, idempotencyKey);
-  if (replay !== null) {
-    return replay;
-  }
-  if (typeof env.DB.batch !== "function") {
-    return envelope(requestIdValue, "mutation_failed", undefined, 500);
-  }
-  const id = crypto.randomUUID();
-  const now = Math.floor(Date.now() / 1000);
-  const insert = env.DB.prepare(
-    `INSERT INTO entitlement_policies (id, project, name, type, status, valid_from_offset_sec, duration_sec, assertion_ttl_seconds, pool_size, max_active_devices, max_borrow_sec, expiry_strategy, trial_expiration_basis, trial_duration_sec, trial_one_per_device, trial_require_device_proof, notes, created_at, updated_at, meter_quota, meter_period_sec)
-     VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING ${POLICY_COLUMNS}`,
-  ).bind(
-    id, input.project, input.name, input.type,
-    input.valid_from_offset_sec ?? null, input.duration_sec ?? null, input.assertion_ttl_seconds ?? 300,
-    input.pool_size ?? 0, input.max_active_devices ?? 1, input.max_borrow_sec ?? 0,
-    input.expiry_strategy ?? "fixed_window", input.trial_expiration_basis ?? "from_issue",
-    input.trial_duration_sec ?? 0, input.trial_one_per_device ?? 0, input.trial_require_device_proof ?? 0,
-    input.notes ?? "", now, now, input.meter_quota ?? 0, input.meter_period_sec ?? 2592000,
-  );
-  let row: Record<string, unknown> | null;
-  try {
-    row = await writePolicyWithAudit(env, insert, id, input.project, "create", "", actor, requestIdValue, now);
-  } catch (error) {
-    // The UNIQUE(project, lower(name)) index rejects a duplicate name within a project.
-    if (error instanceof Error && /UNIQUE|constraint/i.test(error.message)) {
-      return envelope(requestIdValue, "policy_name_conflict", undefined, 409);
+  const ctx: MutationContext = { actor, requestId: requestIdValue, ip: clientIp(request), idempotencyKey, source: "admin" };
+  return mutationResponse(request, env, ctx, "policy_created", async () => {
+    if (typeof env.DB.batch !== "function") {
+      return envelope(requestIdValue, "mutation_failed", undefined, 500);
     }
-    return envelope(requestIdValue, "mutation_failed", undefined, 500);
-  }
-  if (row === null) {
-    return envelope(requestIdValue, "mutation_failed", undefined, 500);
-  }
-  const responseBody = { ok: true, code: "policy_created", request_id: requestIdValue, data: row };
-  await rememberIdempotency(env, scope, idempotencyKey, responseBody, now);
-  return json(responseBody);
+    const id = crypto.randomUUID();
+    const now = Math.floor(Date.now() / 1000);
+    const insert = env.DB.prepare(
+      `INSERT INTO entitlement_policies (id, project, name, type, status, valid_from_offset_sec, duration_sec, assertion_ttl_seconds, pool_size, max_active_devices, max_borrow_sec, expiry_strategy, trial_expiration_basis, trial_duration_sec, trial_one_per_device, trial_require_device_proof, notes, created_at, updated_at, meter_quota, meter_period_sec)
+       VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING ${POLICY_COLUMNS}`,
+    ).bind(
+      id, input.project, input.name, input.type,
+      input.valid_from_offset_sec ?? null, input.duration_sec ?? null, input.assertion_ttl_seconds ?? 300,
+      input.pool_size ?? 0, input.max_active_devices ?? 1, input.max_borrow_sec ?? 0,
+      input.expiry_strategy ?? "fixed_window", input.trial_expiration_basis ?? "from_issue",
+      input.trial_duration_sec ?? 0, input.trial_one_per_device ?? 0, input.trial_require_device_proof ?? 0,
+      input.notes ?? "", now, now, input.meter_quota ?? 0, input.meter_period_sec ?? 2592000,
+    );
+    let row: Record<string, unknown> | null;
+    try {
+      row = await writePolicyWithAudit(env, insert, id, input.project, "create", "", actor, requestIdValue, now);
+    } catch (error) {
+      // The UNIQUE(project, lower(name)) index rejects a duplicate name within a project.
+      if (error instanceof Error && /UNIQUE|constraint/i.test(error.message)) {
+        return envelope(requestIdValue, "policy_name_conflict", undefined, 409);
+      }
+      return envelope(requestIdValue, "mutation_failed", undefined, 500);
+    }
+    if (row === null) {
+      return envelope(requestIdValue, "mutation_failed", undefined, 500);
+    }
+    return { data: row, idempotencyRecorded: false };
+  });
 }
 
 async function handlePolicyPatch(request: Request, env: Env, actor: Actor, policyId: string, body: unknown, requestIdValue: string): Promise<Response> {
@@ -2642,53 +2600,49 @@ async function handlePolicyPatch(request: Request, env: Env, actor: Actor, polic
   if (idempotencyKey === INVALID_IDEMPOTENCY_KEY) {
     return envelope(requestIdValue, "invalid_idempotency_key", undefined, 400);
   }
-  const scope = `PATCH:/api/admin/policies/:id:${actor.subject}`;
-  const replay = await idempotentReplay(env, scope, idempotencyKey);
-  if (replay !== null) {
-    return replay;
-  }
-  const existing = await findPolicy(env, policyId);
-  if (existing === null) {
-    return envelope(requestIdValue, "not_found", undefined, 404);
-  }
-  const nextPoolSize = patch.pool_size ?? Number(existing.pool_size);
-  if (!policyTypeCapacityIsValid(existing.type, nextPoolSize)) {
-    return envelope(requestIdValue, "invalid_request", undefined, 400);
-  }
-  if (typeof env.DB.batch !== "function") {
-    return envelope(requestIdValue, "mutation_failed", undefined, 500);
-  }
-  const assignments: string[] = [];
-  const values: unknown[] = [];
-  for (const field of [
-    "valid_from_offset_sec", "duration_sec", "assertion_ttl_seconds", "pool_size", "max_active_devices",
-    "max_borrow_sec", "meter_quota", "meter_period_sec", "expiry_strategy", "trial_expiration_basis",
-    "trial_duration_sec", "trial_one_per_device", "trial_require_device_proof", "notes",
-  ] as const) {
-    const value = (patch as Record<string, unknown>)[field];
-    if (value !== undefined) {
-      assignments.push(`${field} = ?`);
-      values.push(value);
+  const ctx: MutationContext = { actor, requestId: requestIdValue, ip: clientIp(request), idempotencyKey, source: "admin" };
+  return mutationResponse(request, env, ctx, "policy_patched", async () => {
+    const existing = await findPolicy(env, policyId);
+    if (existing === null) {
+      return envelope(requestIdValue, "not_found", undefined, 404);
     }
-  }
-  const now = Math.floor(Date.now() / 1000);
-  assignments.push("updated_at = ?");
-  values.push(now, policyId);
-  const update = env.DB.prepare(
-    `UPDATE entitlement_policies SET ${assignments.join(", ")} WHERE id = ? RETURNING ${POLICY_COLUMNS}`,
-  ).bind(...values);
-  let row: Record<string, unknown> | null;
-  try {
-    row = await writePolicyWithAudit(env, update, policyId, existing.project, "update", "", actor, requestIdValue, now);
-  } catch {
-    return envelope(requestIdValue, "mutation_failed", undefined, 500);
-  }
-  if (row === null) {
-    return envelope(requestIdValue, "not_found", undefined, 404);
-  }
-  const responseBody = { ok: true, code: "policy_patched", request_id: requestIdValue, data: row };
-  await rememberIdempotency(env, scope, idempotencyKey, responseBody, now);
-  return json(responseBody);
+    const nextPoolSize = patch.pool_size ?? Number(existing.pool_size);
+    if (!policyTypeCapacityIsValid(existing.type, nextPoolSize)) {
+      return envelope(requestIdValue, "invalid_request", undefined, 400);
+    }
+    if (typeof env.DB.batch !== "function") {
+      return envelope(requestIdValue, "mutation_failed", undefined, 500);
+    }
+    const assignments: string[] = [];
+    const values: unknown[] = [];
+    for (const field of [
+      "valid_from_offset_sec", "duration_sec", "assertion_ttl_seconds", "pool_size", "max_active_devices",
+      "max_borrow_sec", "meter_quota", "meter_period_sec", "expiry_strategy", "trial_expiration_basis",
+      "trial_duration_sec", "trial_one_per_device", "trial_require_device_proof", "notes",
+    ] as const) {
+      const value = (patch as Record<string, unknown>)[field];
+      if (value !== undefined) {
+        assignments.push(`${field} = ?`);
+        values.push(value);
+      }
+    }
+    const now = Math.floor(Date.now() / 1000);
+    assignments.push("updated_at = ?");
+    values.push(now, policyId);
+    const update = env.DB.prepare(
+      `UPDATE entitlement_policies SET ${assignments.join(", ")} WHERE id = ? RETURNING ${POLICY_COLUMNS}`,
+    ).bind(...values);
+    let row: Record<string, unknown> | null;
+    try {
+      row = await writePolicyWithAudit(env, update, policyId, existing.project, "update", "", actor, requestIdValue, now);
+    } catch {
+      return envelope(requestIdValue, "mutation_failed", undefined, 500);
+    }
+    if (row === null) {
+      return envelope(requestIdValue, "not_found", undefined, 404);
+    }
+    return { data: row, idempotencyRecorded: false };
+  });
 }
 
 // Policy disable/reenable kill-switch: a guarded UPDATE (status flips only from the expected
@@ -2703,40 +2657,36 @@ async function handlePolicyTransition(request: Request, env: Env, actor: Actor, 
   if (idempotencyKey === INVALID_IDEMPOTENCY_KEY) {
     return envelope(requestIdValue, "invalid_idempotency_key", undefined, 400);
   }
-  const scope = `POST:/api/admin/policies/${action}:${actor.subject}`;
-  const replay = await idempotentReplay(env, scope, idempotencyKey);
-  if (replay !== null) {
-    return replay;
-  }
-  const existing = await findPolicy(env, policyId);
-  if (existing === null) {
-    return envelope(requestIdValue, "not_found", undefined, 404);
-  }
-  const expectedPrev = action === "disable" ? "active" : "disabled";
-  const next = action === "disable" ? "disabled" : "active";
-  if (existing.status !== expectedPrev) {
-    return envelope(requestIdValue, "policy_status_conflict", { status: existing.status }, 409);
-  }
-  if (typeof env.DB.batch !== "function") {
-    return envelope(requestIdValue, "mutation_failed", undefined, 500);
-  }
-  const now = Math.floor(Date.now() / 1000);
-  const update = env.DB.prepare(
-    `UPDATE entitlement_policies SET status = ?, updated_at = ? WHERE id = ? AND status = ? RETURNING ${POLICY_COLUMNS}`,
-  ).bind(next, now, policyId, expectedPrev);
-  let row: Record<string, unknown> | null;
-  try {
-    row = await writePolicyWithAudit(env, update, policyId, existing.project, action, reason, actor, requestIdValue, now);
-  } catch {
-    return envelope(requestIdValue, "mutation_failed", undefined, 500);
-  }
-  if (row === null) {
-    // Lost the guarded race — status changed between the pre-read and the UPDATE.
-    return envelope(requestIdValue, "policy_status_conflict", undefined, 409);
-  }
-  const responseBody = { ok: true, code: `policy_${action}d`, request_id: requestIdValue, data: row };
-  await rememberIdempotency(env, scope, idempotencyKey, responseBody, now);
-  return json(responseBody);
+  const ctx: MutationContext = { actor, requestId: requestIdValue, ip: clientIp(request), idempotencyKey, source: "admin" };
+  return mutationResponse(request, env, ctx, `policy_${action}d`, async () => {
+    const existing = await findPolicy(env, policyId);
+    if (existing === null) {
+      return envelope(requestIdValue, "not_found", undefined, 404);
+    }
+    const expectedPrev = action === "disable" ? "active" : "disabled";
+    const next = action === "disable" ? "disabled" : "active";
+    if (existing.status !== expectedPrev) {
+      return envelope(requestIdValue, "policy_status_conflict", { status: existing.status }, 409);
+    }
+    if (typeof env.DB.batch !== "function") {
+      return envelope(requestIdValue, "mutation_failed", undefined, 500);
+    }
+    const now = Math.floor(Date.now() / 1000);
+    const update = env.DB.prepare(
+      `UPDATE entitlement_policies SET status = ?, updated_at = ? WHERE id = ? AND status = ? RETURNING ${POLICY_COLUMNS}`,
+    ).bind(next, now, policyId, expectedPrev);
+    let row: Record<string, unknown> | null;
+    try {
+      row = await writePolicyWithAudit(env, update, policyId, existing.project, action, reason, actor, requestIdValue, now);
+    } catch {
+      return envelope(requestIdValue, "mutation_failed", undefined, 500);
+    }
+    if (row === null) {
+      // Lost the guarded race — status changed between the pre-read and the UPDATE.
+      return envelope(requestIdValue, "policy_status_conflict", undefined, 409);
+    }
+    return { data: row, idempotencyRecorded: false };
+  });
 }
 
 // Dispatch the policy writes (POST create, PATCH :id, POST :id/disable|reenable). All require
@@ -2943,21 +2893,17 @@ async function handleReleaseSeats(request: Request, env: Env, actor: Actor, enco
   if (reason === "") {
     return envelope(requestIdValue, "reason_required", undefined, 400);
   }
-  const scope = `POST:/api/admin/entitlements/release-seats:${actor.subject}`;
-  const replay = await idempotentReplay(env, scope, idempotencyKey);
-  if (replay !== null) {
-    return replay;
-  }
-  const now = Math.floor(Date.now() / 1000);
-  let released: { released: number; seat_ids: string[] };
-  try {
-    released = await forceReleaseLiveSeats(env, key, now);
-  } catch {
-    return envelope(requestIdValue, "mutation_failed", undefined, 500);
-  }
-  const responseBody = { ok: true, code: "seats_released", request_id: requestIdValue, data: released };
-  await rememberIdempotency(env, scope, idempotencyKey, responseBody, now);
-  return json(responseBody);
+  const ctx: MutationContext = { actor, requestId: requestIdValue, ip: clientIp(request), idempotencyKey, source: "admin" };
+  return mutationResponse(request, env, ctx, "seats_released", async () => {
+    const now = Math.floor(Date.now() / 1000);
+    let released: { released: number; seat_ids: string[] };
+    try {
+      released = await forceReleaseLiveSeats(env, key, now);
+    } catch {
+      return envelope(requestIdValue, "mutation_failed", undefined, 500);
+    }
+    return { data: released, idempotencyRecorded: false };
+  });
 }
 
 // GET /api/admin/entitlements/:id/devices (reader+admin). Lists the entitlement's registered

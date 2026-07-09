@@ -323,6 +323,48 @@ test("policy: patch updates mutable fields + audits; identity fields are rejecte
   assert.equal(missing.status, 404);
 });
 
+test("policy: PATCH idempotency scope is per-policy — same key on two policies never replays", async () => {
+  const db = freshDb();
+  const env = devEnv(db);
+  const p1 = await createPolicy(env, { project: "DEFAULT", name: "Scope One", type: "subscription", duration_sec: 100 });
+  const p2 = await createPolicy(env, { project: "DEFAULT", name: "Scope Two", type: "subscription", duration_sec: 200 });
+
+  const r1 = await worker.fetch(devReq(`/api/admin/policies/${p1.id}`, {
+    method: "PATCH",
+    headers: { "idempotency-key": "shared-key" },
+    body: JSON.stringify({ notes: "first" }),
+  }), env);
+  assert.equal(r1.status, 200);
+  const b1 = await body(r1);
+  assert.equal(b1.data.id, p1.id);
+  assert.equal(b1.data.notes, "first");
+
+  // Reusing the SAME Idempotency-Key against a DIFFERENT policy must not replay p1's
+  // cached response. Under a literal `PATCH:/api/admin/policies/:id` scope it did — the
+  // drift bug this task fixes by deriving the scope from the real pathname.
+  const r2 = await worker.fetch(devReq(`/api/admin/policies/${p2.id}`, {
+    method: "PATCH",
+    headers: { "idempotency-key": "shared-key" },
+    body: JSON.stringify({ notes: "second" }),
+  }), env);
+  assert.equal(r2.status, 200);
+  const b2 = await body(r2);
+  assert.equal(b2.data.id, p2.id, "second PATCH must reflect p-2, not replay p-1");
+  assert.equal(b2.data.notes, "second");
+  assert.equal(r2.headers.get("x-idempotent-replay"), null);
+  assert.equal(db.prepare("SELECT notes FROM entitlement_policies WHERE id=?").get(p2.id).notes, "second");
+
+  // And a genuine retry of p1's PATCH (same key, same policy) DOES replay the cache.
+  const r1replay = await worker.fetch(devReq(`/api/admin/policies/${p1.id}`, {
+    method: "PATCH",
+    headers: { "idempotency-key": "shared-key" },
+    body: JSON.stringify({ notes: "ignored-on-replay" }),
+  }), env);
+  assert.equal(r1replay.status, 200);
+  assert.equal(r1replay.headers.get("x-idempotent-replay"), "1");
+  assert.equal((await body(r1replay)).data.notes, "first");
+});
+
 test("policy: disable/reenable is guarded + audited with the reason gate", async () => {
   const db = freshDb();
   const env = devEnv(db);

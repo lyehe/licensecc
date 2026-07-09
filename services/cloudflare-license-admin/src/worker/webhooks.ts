@@ -6,12 +6,11 @@
 // disable/reenable are single-statement RETURNING mutations (idempotent), NOT a write+audit
 // batch (audit "where applicable" — it is not applicable to a config row with no event log).
 
-import { envelope, json } from "./responses.js";
+import { envelope } from "./responses.js";
 import {
   INVALID_IDEMPOTENCY_KEY,
-  idempotentReplay,
+  mutationResponse,
   readIdempotencyKey,
-  rememberIdempotency,
 } from "./idempotency.js";
 import { boundedCursor, parseJsonBody, requireAdmin } from "./index.js";
 import type { Env } from "./index.js";
@@ -20,7 +19,8 @@ import type {
   WebhookEndpointInput,
   WebhookEndpointPatch,
 } from "../shared/api";
-import type { Actor } from "@licensecc/cloudflare-licensing-backend/entitlements/entitlement_mutation";
+import { clientIp } from "@licensecc/cloudflare-licensing-backend/http/kit";
+import type { Actor, MutationContext } from "@licensecc/cloudflare-licensing-backend/entitlements/entitlement_mutation";
 
 // Sentinel distinguishing a present-but-invalid value from an absent one, module-local to the
 // webhook validators (mirrors index.ts's INVALID symbol; compared only within this module).
@@ -271,40 +271,36 @@ async function handleWebhookCreate(request: Request, env: Env, actor: Actor, bod
   if (idempotencyKey === INVALID_IDEMPOTENCY_KEY) {
     return envelope(requestIdValue, "invalid_idempotency_key", undefined, 400);
   }
-  const scope = `POST:/api/admin/webhooks:${actor.subject}`;
-  const replay = await idempotentReplay(env, scope, idempotencyKey);
-  if (replay !== null) {
-    return replay;
-  }
-  const id = crypto.randomUUID();
-  const now = Math.floor(Date.now() / 1000);
-  let row: WebhookEndpoint | null;
-  try {
-    row = await env.DB.prepare(
-      `INSERT INTO webhook_endpoints
-         (id, url, event_types, status, description, created_at, updated_at, scope_project, scope_customer_id)
-       VALUES (?, ?, ?, 'active', ?, ?, ?, ?, ?) RETURNING ${WEBHOOK_ENDPOINT_COLUMNS}`,
-    )
-      .bind(
-        id,
-        input.url,
-        input.event_types ?? "",
-        input.description ?? "",
-        now,
-        now,
-        input.scope_project ? input.scope_project : null,
-        input.scope_customer_id ? input.scope_customer_id : null,
+  const ctx: MutationContext = { actor, requestId: requestIdValue, ip: clientIp(request), idempotencyKey, source: "admin" };
+  return mutationResponse(request, env, ctx, "webhook_created", async () => {
+    const id = crypto.randomUUID();
+    const now = Math.floor(Date.now() / 1000);
+    let row: WebhookEndpoint | null;
+    try {
+      row = await env.DB.prepare(
+        `INSERT INTO webhook_endpoints
+           (id, url, event_types, status, description, created_at, updated_at, scope_project, scope_customer_id)
+         VALUES (?, ?, ?, 'active', ?, ?, ?, ?, ?) RETURNING ${WEBHOOK_ENDPOINT_COLUMNS}`,
       )
-      .first<WebhookEndpoint>();
-  } catch {
-    return envelope(requestIdValue, "mutation_failed", undefined, 500);
-  }
-  if (row === null) {
-    return envelope(requestIdValue, "mutation_failed", undefined, 500);
-  }
-  const responseBody = { ok: true, code: "webhook_created", request_id: requestIdValue, data: row };
-  await rememberIdempotency(env, scope, idempotencyKey, responseBody, now);
-  return json(responseBody);
+        .bind(
+          id,
+          input.url,
+          input.event_types ?? "",
+          input.description ?? "",
+          now,
+          now,
+          input.scope_project ? input.scope_project : null,
+          input.scope_customer_id ? input.scope_customer_id : null,
+        )
+        .first<WebhookEndpoint>();
+    } catch {
+      return envelope(requestIdValue, "mutation_failed", undefined, 500);
+    }
+    if (row === null) {
+      return envelope(requestIdValue, "mutation_failed", undefined, 500);
+    }
+    return { data: row, idempotencyRecorded: false };
+  });
 }
 
 async function handleWebhookPatch(request: Request, env: Env, actor: Actor, endpointId: string, body: unknown, requestIdValue: string): Promise<Response> {
@@ -319,54 +315,50 @@ async function handleWebhookPatch(request: Request, env: Env, actor: Actor, endp
   if (idempotencyKey === INVALID_IDEMPOTENCY_KEY) {
     return envelope(requestIdValue, "invalid_idempotency_key", undefined, 400);
   }
-  const scope = `PATCH:/api/admin/webhooks/:id:${actor.subject}`;
-  const replay = await idempotentReplay(env, scope, idempotencyKey);
-  if (replay !== null) {
-    return replay;
-  }
-  let existing: WebhookEndpoint | null;
-  try {
-    existing = await findWebhookEndpoint(env, endpointId);
-  } catch {
-    return envelope(requestIdValue, "mutation_failed", undefined, 500);
-  }
-  if (existing === null) {
-    return envelope(requestIdValue, "not_found", undefined, 404);
-  }
-  const effectiveScopeProject = patch.scope_project !== undefined ? patch.scope_project : (existing.scope_project ?? "");
-  const effectiveScopeCustomer = patch.scope_customer_id !== undefined ? patch.scope_customer_id : (existing.scope_customer_id ?? "");
-  if (effectiveScopeProject !== "" && effectiveScopeCustomer !== "") {
-    return envelope(requestIdValue, "invalid_request", undefined, 400);
-  }
-  const assignments: string[] = [];
-  const values: unknown[] = [];
-  for (const field of ["url", "event_types", "description", "scope_project", "scope_customer_id"] as const) {
-    const value = (patch as Record<string, unknown>)[field];
-    if (value !== undefined) {
-      // A blank scope value clears the scope back to global (NULL); other fields store their string.
-      const isScope = field === "scope_project" || field === "scope_customer_id";
-      assignments.push(`${field} = ?`);
-      values.push(isScope && value === "" ? null : value);
+  const ctx: MutationContext = { actor, requestId: requestIdValue, ip: clientIp(request), idempotencyKey, source: "admin" };
+  return mutationResponse(request, env, ctx, "webhook_patched", async () => {
+    let existing: WebhookEndpoint | null;
+    try {
+      existing = await findWebhookEndpoint(env, endpointId);
+    } catch {
+      return envelope(requestIdValue, "mutation_failed", undefined, 500);
     }
-  }
-  const now = Math.floor(Date.now() / 1000);
-  // Always bump updated_at (even on an empty patch) so the list ordering reflects the touch.
-  assignments.push("updated_at = ?");
-  values.push(now, endpointId);
-  let row: WebhookEndpoint | null;
-  try {
-    row = await env.DB.prepare(
-      `UPDATE webhook_endpoints SET ${assignments.join(", ")} WHERE id = ? RETURNING ${WEBHOOK_ENDPOINT_COLUMNS}`,
-    ).bind(...values).first<WebhookEndpoint>();
-  } catch {
-    return envelope(requestIdValue, "mutation_failed", undefined, 500);
-  }
-  if (row === null) {
-    return envelope(requestIdValue, "not_found", undefined, 404);
-  }
-  const responseBody = { ok: true, code: "webhook_patched", request_id: requestIdValue, data: row };
-  await rememberIdempotency(env, scope, idempotencyKey, responseBody, now);
-  return json(responseBody);
+    if (existing === null) {
+      return envelope(requestIdValue, "not_found", undefined, 404);
+    }
+    const effectiveScopeProject = patch.scope_project !== undefined ? patch.scope_project : (existing.scope_project ?? "");
+    const effectiveScopeCustomer = patch.scope_customer_id !== undefined ? patch.scope_customer_id : (existing.scope_customer_id ?? "");
+    if (effectiveScopeProject !== "" && effectiveScopeCustomer !== "") {
+      return envelope(requestIdValue, "invalid_request", undefined, 400);
+    }
+    const assignments: string[] = [];
+    const values: unknown[] = [];
+    for (const field of ["url", "event_types", "description", "scope_project", "scope_customer_id"] as const) {
+      const value = (patch as Record<string, unknown>)[field];
+      if (value !== undefined) {
+        // A blank scope value clears the scope back to global (NULL); other fields store their string.
+        const isScope = field === "scope_project" || field === "scope_customer_id";
+        assignments.push(`${field} = ?`);
+        values.push(isScope && value === "" ? null : value);
+      }
+    }
+    const now = Math.floor(Date.now() / 1000);
+    // Always bump updated_at (even on an empty patch) so the list ordering reflects the touch.
+    assignments.push("updated_at = ?");
+    values.push(now, endpointId);
+    let row: WebhookEndpoint | null;
+    try {
+      row = await env.DB.prepare(
+        `UPDATE webhook_endpoints SET ${assignments.join(", ")} WHERE id = ? RETURNING ${WEBHOOK_ENDPOINT_COLUMNS}`,
+      ).bind(...values).first<WebhookEndpoint>();
+    } catch {
+      return envelope(requestIdValue, "mutation_failed", undefined, 500);
+    }
+    if (row === null) {
+      return envelope(requestIdValue, "not_found", undefined, 404);
+    }
+    return { data: row, idempotencyRecorded: false };
+  });
 }
 
 // Disable/reenable kill-switch: a guarded UPDATE (status flips only from the expected prior
@@ -377,36 +369,32 @@ async function handleWebhookTransition(request: Request, env: Env, actor: Actor,
   if (idempotencyKey === INVALID_IDEMPOTENCY_KEY) {
     return envelope(requestIdValue, "invalid_idempotency_key", undefined, 400);
   }
-  const scope = `POST:/api/admin/webhooks/${action}:${actor.subject}`;
-  const replay = await idempotentReplay(env, scope, idempotencyKey);
-  if (replay !== null) {
-    return replay;
-  }
-  const expectedPrev = action === "disable" ? "active" : "disabled";
-  const next = action === "disable" ? "disabled" : "active";
-  const existing = await findWebhookEndpoint(env, endpointId);
-  if (existing === null) {
-    return envelope(requestIdValue, "not_found", undefined, 404);
-  }
-  if (existing.status !== expectedPrev) {
-    return envelope(requestIdValue, "webhook_status_conflict", { status: existing.status }, 409);
-  }
-  const now = Math.floor(Date.now() / 1000);
-  let row: WebhookEndpoint | null;
-  try {
-    row = await env.DB.prepare(
-      `UPDATE webhook_endpoints SET status = ?, updated_at = ? WHERE id = ? AND status = ? RETURNING ${WEBHOOK_ENDPOINT_COLUMNS}`,
-    ).bind(next, now, endpointId, expectedPrev).first<WebhookEndpoint>();
-  } catch {
-    return envelope(requestIdValue, "mutation_failed", undefined, 500);
-  }
-  if (row === null) {
-    // Lost the guarded race — status changed between the pre-read and the UPDATE.
-    return envelope(requestIdValue, "webhook_status_conflict", undefined, 409);
-  }
-  const responseBody = { ok: true, code: `webhook_${action}d`, request_id: requestIdValue, data: row };
-  await rememberIdempotency(env, scope, idempotencyKey, responseBody, now);
-  return json(responseBody);
+  const ctx: MutationContext = { actor, requestId: requestIdValue, ip: clientIp(request), idempotencyKey, source: "admin" };
+  return mutationResponse(request, env, ctx, `webhook_${action}d`, async () => {
+    const expectedPrev = action === "disable" ? "active" : "disabled";
+    const next = action === "disable" ? "disabled" : "active";
+    const existing = await findWebhookEndpoint(env, endpointId);
+    if (existing === null) {
+      return envelope(requestIdValue, "not_found", undefined, 404);
+    }
+    if (existing.status !== expectedPrev) {
+      return envelope(requestIdValue, "webhook_status_conflict", { status: existing.status }, 409);
+    }
+    const now = Math.floor(Date.now() / 1000);
+    let row: WebhookEndpoint | null;
+    try {
+      row = await env.DB.prepare(
+        `UPDATE webhook_endpoints SET status = ?, updated_at = ? WHERE id = ? AND status = ? RETURNING ${WEBHOOK_ENDPOINT_COLUMNS}`,
+      ).bind(next, now, endpointId, expectedPrev).first<WebhookEndpoint>();
+    } catch {
+      return envelope(requestIdValue, "mutation_failed", undefined, 500);
+    }
+    if (row === null) {
+      // Lost the guarded race — status changed between the pre-read and the UPDATE.
+      return envelope(requestIdValue, "webhook_status_conflict", undefined, 409);
+    }
+    return { data: row, idempotencyRecorded: false };
+  });
 }
 
 // Redrive: reset a 'failed' delivery back to 'pending' with next_attempt_at = now so the next
@@ -417,37 +405,33 @@ async function handleWebhookRedrive(request: Request, env: Env, actor: Actor, de
   if (idempotencyKey === INVALID_IDEMPOTENCY_KEY) {
     return envelope(requestIdValue, "invalid_idempotency_key", undefined, 400);
   }
-  const scope = `POST:/api/admin/webhooks/deliveries/redrive:${actor.subject}`;
-  const replay = await idempotentReplay(env, scope, idempotencyKey);
-  if (replay !== null) {
-    return replay;
-  }
-  const existing = await env.DB.prepare(
-    `SELECT ${WEBHOOK_DELIVERY_COLUMNS} FROM webhook_deliveries WHERE id = ? LIMIT 1`,
-  ).bind(deliveryId).first<{ status: string }>();
-  if (existing === null) {
-    return envelope(requestIdValue, "not_found", undefined, 404);
-  }
-  if (existing.status !== "failed") {
-    return envelope(requestIdValue, "webhook_delivery_not_failed", { status: existing.status }, 409);
-  }
-  const now = Math.floor(Date.now() / 1000);
-  let row: Record<string, unknown> | null;
-  try {
-    row = await env.DB.prepare(
-      `UPDATE webhook_deliveries SET status = 'pending', attempts = 0, last_error = '', next_attempt_at = ?
-       WHERE id = ? AND status = 'failed' RETURNING ${WEBHOOK_DELIVERY_COLUMNS}`,
-    ).bind(now, deliveryId).first<Record<string, unknown>>();
-  } catch {
-    return envelope(requestIdValue, "mutation_failed", undefined, 500);
-  }
-  if (row === null) {
-    // Lost the guarded race — status changed between the pre-read and the UPDATE.
-    return envelope(requestIdValue, "webhook_delivery_not_failed", undefined, 409);
-  }
-  const responseBody = { ok: true, code: "webhook_delivery_redriven", request_id: requestIdValue, data: row };
-  await rememberIdempotency(env, scope, idempotencyKey, responseBody, now);
-  return json(responseBody);
+  const ctx: MutationContext = { actor, requestId: requestIdValue, ip: clientIp(request), idempotencyKey, source: "admin" };
+  return mutationResponse(request, env, ctx, "webhook_delivery_redriven", async () => {
+    const existing = await env.DB.prepare(
+      `SELECT ${WEBHOOK_DELIVERY_COLUMNS} FROM webhook_deliveries WHERE id = ? LIMIT 1`,
+    ).bind(deliveryId).first<{ status: string }>();
+    if (existing === null) {
+      return envelope(requestIdValue, "not_found", undefined, 404);
+    }
+    if (existing.status !== "failed") {
+      return envelope(requestIdValue, "webhook_delivery_not_failed", { status: existing.status }, 409);
+    }
+    const now = Math.floor(Date.now() / 1000);
+    let row: Record<string, unknown> | null;
+    try {
+      row = await env.DB.prepare(
+        `UPDATE webhook_deliveries SET status = 'pending', attempts = 0, last_error = '', next_attempt_at = ?
+         WHERE id = ? AND status = 'failed' RETURNING ${WEBHOOK_DELIVERY_COLUMNS}`,
+      ).bind(now, deliveryId).first<Record<string, unknown>>();
+    } catch {
+      return envelope(requestIdValue, "mutation_failed", undefined, 500);
+    }
+    if (row === null) {
+      // Lost the guarded race — status changed between the pre-read and the UPDATE.
+      return envelope(requestIdValue, "webhook_delivery_not_failed", undefined, 409);
+    }
+    return { data: row, idempotencyRecorded: false };
+  });
 }
 
 // Dispatch the webhook writes (POST create, POST deliveries/:id/redrive, PATCH :id,

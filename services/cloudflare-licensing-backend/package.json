@@ -4,6 +4,10 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./db/idempotency_store": {
+      "types": "./src/db/idempotency_store.d.ts",
+      "default": "./src/db/idempotency_store.mjs"
+    },
     "./entitlements/entitlement_mutation": {
       "types": "./src/entitlements/entitlement_mutation.d.ts",
       "default": "./src/entitlements/entitlement_mutation.mjs"
