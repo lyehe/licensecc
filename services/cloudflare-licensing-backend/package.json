@@ -38,6 +38,10 @@
     "./audit/audit_digest": {
       "types": "./src/audit/audit_digest.d.ts",
       "default": "./src/audit/audit_digest.mjs"
+    },
+    "./http/kit": {
+      "types": "./src/http/kit.d.ts",
+      "default": "./src/http/kit.mjs"
     }
   },
   "scripts": {

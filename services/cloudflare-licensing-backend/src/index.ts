@@ -27,6 +27,7 @@ import {
 import { handleOrderIngest } from "./fulfillment/order_ingest.mjs";
 // Slice 2 account-token isolation (Stage 3): per-customer credential + the per-endpoint gate.
 import { accountAuth, constantTimeEqual, readBearer } from "./auth/account_auth.mjs";
+import { json, readTextBody, requestId, clientIp, safeString } from "./http/kit.mjs";
 import { enqueueAndDeliverWebhooks } from "./webhooks/webhook.mjs";
 import { appendAuditDigest } from "./audit/audit_digest.mjs";
 import type { DbDatabaseLike, DbPreparedStatementLike } from "./db/contract.js";
@@ -249,52 +250,6 @@ export function signingKeyImportCountForTests(): number {
   return signingKeyImportCount;
 }
 
-function json(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: {
-      "content-type": "application/json; charset=utf-8",
-    },
-  });
-}
-
-async function readTextBody(request: Request, maxBytes: number): Promise<{ ok: true; text: string } | { ok: false }> {
-  const contentLength = Number(request.headers.get("content-length") ?? "");
-  if (Number.isFinite(contentLength) && contentLength > maxBytes) {
-    return { ok: false };
-  }
-  if (request.body === null) {
-    return { ok: true, text: "" };
-  }
-
-  const reader = request.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    if (value === undefined) continue;
-    size += value.byteLength;
-    if (size > maxBytes) {
-      try {
-        await reader.cancel();
-      } catch {
-        // The response is already determined; cancel errors do not change the rejection.
-      }
-      return { ok: false };
-    }
-    chunks.push(value);
-  }
-
-  const bytes = new Uint8Array(size);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return { ok: true, text: new TextDecoder().decode(bytes) };
-}
-
 async function readJsonBody(request: Request): Promise<{ ok: true; value: unknown } | { ok: false; code: "body_too_large" | "invalid_request"; status: number }> {
   const body = await readTextBody(request, MAX_BODY_BYTES);
   if (!body.ok) {
@@ -342,16 +297,6 @@ function envFlag(value: string | undefined): boolean {
   return value === "1" || value === "true";
 }
 
-function safeString(value: unknown, maxLength: number): string | null {
-  if (typeof value !== "string" || value.length === 0 || value.length > maxLength) {
-    return null;
-  }
-  if (value.includes("\n") || value.includes("\r") || value.includes("=") || value.includes("\0")) {
-    return null;
-  }
-  return value;
-}
-
 function safeBase64(value: unknown, maxLength: number): string | null {
   if (typeof value !== "string" || value.length === 0 || value.length > maxLength || !BASE64.test(value)) {
     return null;
@@ -380,18 +325,6 @@ function shortKeyId(value: string | undefined): string | undefined {
     return `${prefix}${digest.slice(0, 8)}...${digest.slice(-8)}`;
   }
   return "[redacted]";
-}
-
-function requestId(request: Request): string {
-  return request.headers.get("cf-ray") ?? crypto.randomUUID();
-}
-
-function clientIp(request: Request): string {
-  const cfIp = request.headers.get("cf-connecting-ip");
-  if (cfIp !== null && cfIp !== "") {
-    return cfIp;
-  }
-  return "unknown";
 }
 
 function shortHex(value: string | undefined): string | undefined {

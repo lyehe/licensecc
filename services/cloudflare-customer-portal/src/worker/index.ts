@@ -29,6 +29,7 @@ import * as tokenModule from "../auth/portal_token.mjs";
 import * as emailModule from "../auth/portal_email.mjs";
 import type { ApiEnvelope } from "../shared/api";
 import { openApiDocument, DOCS_HTML } from "./openapi.js";
+import { constantTimeEqual, readTextBody, requestId, bearerToken } from "@licensecc/cloudflare-licensing-backend/http/kit";
 
 type AnyFn = (...args: any[]) => any;
 const requestOtp = (otpModule as { requestOtp: AnyFn }).requestOtp;
@@ -109,10 +110,6 @@ function json<T>(body: T, status = 200, headers: HeadersInit = {}): Response {
   });
 }
 
-function requestId(request: Request): string {
-  return request.headers.get("cf-ray") ?? crypto.randomUUID();
-}
-
 function envelope<T>(reqId: string, code: string, data?: T, status = 200, headers: HeadersInit = {}): Response {
   const body: ApiEnvelope<T> = { ok: status >= 200 && status < 300, code, request_id: reqId };
   if (data !== undefined) body.data = data;
@@ -159,34 +156,6 @@ function clientIp(request: Request): string {
   return request.headers.get("cf-connecting-ip") ?? "";
 }
 
-function safeString(value: unknown, maxLength: number): string | null {
-  if (typeof value !== "string" || value.length === 0 || value.length > maxLength) return null;
-  if (value.includes("\n") || value.includes("\r") || value.includes("\0")) return null;
-  return value;
-}
-
-// Constant-time string equality via Web Crypto (HMAC under a random one-time key, then a
-// length-uniform byte compare). Used for the break-glass bootstrap bearer (L9 discipline).
-async function constantTimeEqual(a: string, b: string): Promise<boolean> {
-  if (typeof a !== "string" || typeof b !== "string") return false;
-  const enc = new TextEncoder();
-  const keyBytes = new Uint8Array(32);
-  crypto.getRandomValues(keyBytes);
-  const key = await crypto.subtle.importKey("raw", keyBytes, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
-  const macA = new Uint8Array(await crypto.subtle.sign("HMAC", key, enc.encode(a)));
-  const macB = new Uint8Array(await crypto.subtle.sign("HMAC", key, enc.encode(b)));
-  let diff = 0;
-  for (let i = 0; i < macA.length; i += 1) diff |= (macA[i] ?? 0) ^ (macB[i] ?? 0);
-  return diff === 0;
-}
-
-function bearerToken(request: Request): string | null {
-  const auth = request.headers.get("authorization") ?? "";
-  if (!auth.startsWith("Bearer ")) return null;
-  const raw = auth.slice("Bearer ".length);
-  return raw.length > 0 ? raw : null;
-}
-
 // Cross-site rejection for state-changing POSTs: a same-origin app sends Origin == PORTAL_PUBLIC_ORIGIN
 // (or Sec-Fetch-Site: same-origin). Anything cross-site is rejected (CSRF defense in depth; the
 // session cookie is SameSite=Lax so a cross-site POST would not carry it, but we deny explicitly).
@@ -216,43 +185,6 @@ async function readJson(request: Request, reqId: string): Promise<Record<string,
   } catch {
     return envelope(reqId, "invalid_json", undefined, 400);
   }
-}
-
-async function readTextBody(request: Request, maxBytes: number): Promise<{ ok: true; text: string } | { ok: false }> {
-  const contentLength = Number(request.headers.get("content-length") ?? "");
-  if (Number.isFinite(contentLength) && contentLength > maxBytes) {
-    return { ok: false };
-  }
-  if (request.body === null) {
-    return { ok: true, text: "" };
-  }
-
-  const reader = request.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    if (value === undefined) continue;
-    size += value.byteLength;
-    if (size > maxBytes) {
-      try {
-        await reader.cancel();
-      } catch {
-        // The response is already determined; cancel errors do not change the rejection.
-      }
-      return { ok: false };
-    }
-    chunks.push(value);
-  }
-
-  const bytes = new Uint8Array(size);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return { ok: true, text: new TextDecoder().decode(bytes) };
 }
 
 function publicOrigin(env: Env): string {

@@ -5,6 +5,7 @@ import type {
   PolicyType,
   TrialExpirationBasis,
 } from "../shared/api";
+import { safeString } from "@licensecc/cloudflare-licensing-backend/http/kit";
 
 const MAX_PROJECT_SIZE = 127;
 const MAX_NOTES_SIZE = 1000;
@@ -17,16 +18,6 @@ const INVALID = Symbol("invalid");
 const POLICY_TYPES: ReadonlyArray<PolicyType> = ["trial", "node_locked", "floating", "subscription"];
 const EXPIRY_STRATEGIES: ReadonlyArray<ExpiryStrategy> = ["fixed_window", "non_expiring"];
 const TRIAL_BASES: ReadonlyArray<TrialExpirationBasis> = ["from_issue", "from_first_activation", "from_first_use"];
-
-function safeString(value: unknown, maxLength: number): string | null {
-  if (typeof value !== "string" || value.length === 0 || value.length > maxLength) {
-    return null;
-  }
-  if (value.includes("\n") || value.includes("\r") || value.includes("\0")) {
-    return null;
-  }
-  return value;
-}
 
 function safeNotes(value: unknown): string | null {
   if (typeof value !== "string" || value.length > MAX_NOTES_SIZE) {

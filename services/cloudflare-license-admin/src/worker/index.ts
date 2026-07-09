@@ -60,6 +60,7 @@ import {
 import type { PlanProjectionInput } from "@licensecc/cloudflare-licensing-backend/catalog/plan_projection";
 import { verifyAuditChain } from "@licensecc/cloudflare-licensing-backend/audit/audit_digest";
 import { forceReleaseLiveSeats } from "@licensecc/cloudflare-licensing-backend/lease/seat_reclaim";
+import { constantTimeEqual, readTextBody, requestId, safeString } from "@licensecc/cloudflare-licensing-backend/http/kit";
 
 export interface Env {
   DB: D1DatabaseLike;
@@ -91,10 +92,6 @@ const MAX_DURATION_SECONDS = 3_153_600_000;
 const INVALID = Symbol("invalid");
 const jwksCache = new Map<string, ReturnType<typeof createRemoteJWKSet>>();
 
-function requestId(request: Request): string {
-  return request.headers.get("cf-ray") ?? crypto.randomUUID();
-}
-
 function clientIp(request: Request): string {
   return request.headers.get("cf-connecting-ip") ?? "";
 }
@@ -105,16 +102,6 @@ function envFlag(value: string | undefined): boolean {
 
 function splitCsv(value: string | undefined): Set<string> {
   return new Set((value ?? "").split(",").map((item) => item.trim().toLowerCase()).filter((item) => item !== ""));
-}
-
-function safeString(value: unknown, maxLength: number): string | null {
-  if (typeof value !== "string" || value.length === 0 || value.length > maxLength) {
-    return null;
-  }
-  if (value.includes("\n") || value.includes("\r") || value.includes("\0")) {
-    return null;
-  }
-  return value;
 }
 
 function safeNotes(value: unknown): string | null {
@@ -160,17 +147,6 @@ function nullableEpoch(value: unknown): number | null | undefined {
   return value;
 }
 
-async function timingSafeEqual(a: string, b: string): Promise<boolean> {
-  const encoder = new TextEncoder();
-  const leftDigest = new Uint8Array(await crypto.subtle.digest("SHA-256", encoder.encode(a)));
-  const rightDigest = new Uint8Array(await crypto.subtle.digest("SHA-256", encoder.encode(b)));
-  let diff = a.length === b.length ? 0 : 1;
-  for (let i = 0; i < leftDigest.length; ++i) {
-    diff |= (leftDigest[i] ?? 0) ^ (rightDigest[i] ?? 0);
-  }
-  return diff === 0;
-}
-
 function bearerToken(request: Request): string | null {
   const authorization = request.headers.get("authorization");
   if (authorization === null) {
@@ -208,7 +184,7 @@ async function authenticate(request: Request, env: Env, requestIdValue: string):
     }
     const configured = env.ADMIN_DEV_BEARER;
     const token = bearerToken(request);
-    if (configured !== undefined && token !== null && await timingSafeEqual(token, configured)) {
+    if (configured !== undefined && token !== null && await constantTimeEqual(token, configured)) {
       return { subject: "dev", email: "dev.local", role: "admin", actorType: "dev" };
     }
   }
@@ -247,7 +223,7 @@ async function authenticateSync(request: Request, env: Env, requestIdValue: stri
     return envelope(requestIdValue, "sync_auth_not_configured", undefined, 401);
   }
   const token = bearerToken(request);
-  if (token === null || !await timingSafeEqual(token, env.SYNC_API_TOKEN)) {
+  if (token === null || !await constantTimeEqual(token, env.SYNC_API_TOKEN)) {
     return envelope(requestIdValue, "invalid_sync_token", undefined, 403);
   }
   return { subject: "sync", email: "sync", role: "admin", actorType: "sync" };
@@ -267,43 +243,6 @@ export async function parseJsonBody(request: Request, requestIdValue: string): P
   } catch {
     return envelope(requestIdValue, "invalid_json", undefined, 400);
   }
-}
-
-async function readTextBody(request: Request, maxBytes: number): Promise<{ ok: true; text: string } | { ok: false }> {
-  const contentLength = Number(request.headers.get("content-length") ?? "");
-  if (Number.isFinite(contentLength) && contentLength > maxBytes) {
-    return { ok: false };
-  }
-  if (request.body === null) {
-    return { ok: true, text: "" };
-  }
-
-  const reader = request.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    if (value === undefined) continue;
-    size += value.byteLength;
-    if (size > maxBytes) {
-      try {
-        await reader.cancel();
-      } catch {
-        // The response is already determined; cancel errors do not change the rejection.
-      }
-      return { ok: false };
-    }
-    chunks.push(value);
-  }
-
-  const bytes = new Uint8Array(size);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return { ok: true, text: new TextDecoder().decode(bytes) };
 }
 
 function validateEntitlementInput(value: unknown): EntitlementInput | null {
