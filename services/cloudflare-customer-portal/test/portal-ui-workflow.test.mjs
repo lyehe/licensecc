@@ -54,6 +54,12 @@ test("portal UI workflow exposes the self-serve device-release path + copy", asy
   assert.match(workflow.DEVICE_RELEASE_CONFIRM_COPY, /activate again/);
 });
 
+test("portal UI workflow exposes resend-code action + 10-minute expiry copy", async () => {
+  const workflow = await loadWorkflowModule();
+  assert.match(workflow.RESEND_CODE_ACTION_LABEL, /resend/i);
+  assert.match(workflow.OTP_EXPIRY_COPY, /10 minutes/);
+});
+
 test("portal UI workflow exposes empty-state copy for every tab", async () => {
   const workflow = await loadWorkflowModule();
   assert.match(workflow.NO_ENTITLEMENTS_EMPTY_COPY, /No entitlements yet/);

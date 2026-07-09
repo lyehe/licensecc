@@ -28,7 +28,9 @@ import {
   NO_USAGE_EMPTY_COPY,
   normalizeCode,
   normalizeEmail,
+  OTP_EXPIRY_COPY,
   releasePath,
+  RESEND_CODE_ACTION_LABEL,
   SeatSession,
   SEATS_KEY,
   serializeSeatSessions,
@@ -263,6 +265,21 @@ function App(): React.ReactElement {
     });
   }
 
+  async function resendCode(): Promise<void> {
+    await runOnce(async () => {
+      const normalized = normalizeEmail(email);
+      if (!isLikelyEmail(normalized)) {
+        setMessage(localMessage("invalid_email", false));
+        return;
+      }
+      const result = await api(authRequestPath(), {
+        method: "POST",
+        body: JSON.stringify({ email: normalized }),
+      });
+      setMessage(resultMessage(result));
+    });
+  }
+
   async function submitVerify(event: FormEvent): Promise<void> {
     event.preventDefault();
     await runOnce(async () => {
@@ -448,6 +465,7 @@ function App(): React.ReactElement {
             <form onSubmit={(event) => void submitVerify(event)}>
               <h2>Check your email</h2>
               <p>{LOGIN_CODE_SENT_COPY}</p>
+              <p className="muted">{OTP_EXPIRY_COPY}</p>
               <label>
                 8-digit code
                 <input
@@ -460,6 +478,7 @@ function App(): React.ReactElement {
               </label>
               <div className="actions">
                 <button disabled={busy} type="submit">Verify</button>
+                <button disabled={busy} type="button" onClick={() => void resendCode()}>{RESEND_CODE_ACTION_LABEL}</button>
                 <button disabled={busy} type="button" onClick={() => { setPhase("request"); setMessage(null); }}>Use a different email</button>
               </div>
             </form>
