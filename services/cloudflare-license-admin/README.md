@@ -86,21 +86,102 @@ manual `Authorization: Bearer <local value>` header or Cloudflare Access.
 
 ## API
 
-Read endpoints:
+This list is the complete route inventory and is kept in lockstep with the
+canonical dispatcher table in `src/worker/routes.ts` (`API_ROUTES`). Paths use
+OpenAPI `{param}` templating. `test/openapi-crosscheck.test.mjs` fails if the
+dispatcher, the OpenAPI spec, and this inventory drift apart.
+
+Summary, reporting, and audit:
 
 - `GET /api/admin/summary`
+- `GET /api/admin/report`
+- `GET /api/admin/report/timeseries`
+- `GET /api/admin/report/expiring`
+- `GET /api/admin/audit/verify`
+
+Customers:
+
+- `GET /api/admin/customers`
+- `GET /api/admin/customers/{id}`
+- `POST /api/admin/customers/{id}/disable`
+- `POST /api/admin/customers/{id}/reenable`
+
+Licenses, orders, search, and settings:
+
+- `GET /api/admin/licenses`
+- `GET /api/admin/orders`
+- `GET /api/admin/search`
 - `GET /api/admin/settings`
+
+Policies:
+
+- `GET /api/admin/policies`
+- `POST /api/admin/policies`
+- `GET /api/admin/policies/{id}`
+- `PATCH /api/admin/policies/{id}`
+- `POST /api/admin/policies/{id}/disable`
+- `POST /api/admin/policies/{id}/reenable`
+
+Catalog features:
+
+- `GET /api/admin/catalog/features`
+- `POST /api/admin/catalog/features`
+- `GET /api/admin/catalog/features/{id}`
+- `PATCH /api/admin/catalog/features/{id}`
+- `POST /api/admin/catalog/features/{id}/disable`
+- `POST /api/admin/catalog/features/{id}/reenable`
+
+Catalog plans and import/export:
+
+- `GET /api/admin/catalog/plans`
+- `POST /api/admin/catalog/plans`
+- `POST /api/admin/catalog/import`
+- `GET /api/admin/catalog/plans/{id}`
+- `PATCH /api/admin/catalog/plans/{id}`
+- `POST /api/admin/catalog/plans/{id}/disable`
+- `POST /api/admin/catalog/plans/{id}/reenable`
+- `GET /api/admin/catalog/plans/{id}/export`
+- `GET /api/admin/catalog/plans/{id}/features`
+- `POST /api/admin/catalog/plans/{id}/features`
+- `POST /api/admin/catalog/plans/{id}/features/{featureKey}/disable`
+- `POST /api/admin/catalog/plans/{id}/features/{featureKey}/reenable`
+
+License-plan projection:
+
+- `POST /api/admin/license-plans/preview`
+- `POST /api/admin/license-plans/apply`
+
+Webhooks:
+
+- `GET /api/admin/webhooks`
+- `POST /api/admin/webhooks`
+- `GET /api/admin/webhooks/deliveries`
+- `POST /api/admin/webhooks/deliveries/{id}/redrive`
+- `GET /api/admin/webhooks/{id}`
+- `PATCH /api/admin/webhooks/{id}`
+- `POST /api/admin/webhooks/{id}/disable`
+- `POST /api/admin/webhooks/{id}/reenable`
+
+Entitlements:
+
 - `GET /api/admin/entitlements`
-- `GET /api/admin/entitlements/:id`
-- `GET /api/admin/events`
-
-Mutation endpoints:
-
 - `POST /api/admin/entitlements`
-- `PATCH /api/admin/entitlements/:id`
-- `POST /api/admin/entitlements/:id/disable`
-- `POST /api/admin/entitlements/:id/reenable`
-- `POST /api/admin/entitlements/:id/revoke`
+- `POST /api/admin/entitlements/batch`
+- `POST /api/admin/entitlements/{id}/release-seats`
+- `GET /api/admin/entitlements/{id}`
+- `PATCH /api/admin/entitlements/{id}`
+- `POST /api/admin/entitlements/{id}/disable`
+- `POST /api/admin/entitlements/{id}/reenable`
+- `POST /api/admin/entitlements/{id}/revoke`
+- `GET /api/admin/entitlements/{id}/devices`
+- `GET /api/admin/entitlements/{id}/meter`
+- `POST /api/admin/entitlements/{id}/devices/{deviceKeyId}/revoke`
+- `POST /api/admin/entitlements/{id}/devices/{deviceKeyId}/disable`
+- `POST /api/admin/entitlements/{id}/devices/{deviceKeyId}/reenable`
+
+Events:
+
+- `GET /api/admin/events`
 
 User database sync endpoint:
 
