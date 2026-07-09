@@ -188,6 +188,21 @@ code {
   color: #667065;
 }
 
+/* Live status line (role="status"). Default is the neutral/success treatment; .error flags failures. */
+.statusline {
+  color: #285f52;
+}
+
+.statusline small {
+  color: #9ca39a;
+  font-size: 11px;
+}
+
+.statusline.error {
+  color: #8b3028;
+  font-weight: 600;
+}
+
 .status {
   border-radius: 999px;
   display: inline-block;

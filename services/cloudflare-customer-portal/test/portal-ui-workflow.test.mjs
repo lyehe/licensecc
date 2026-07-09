@@ -54,6 +54,37 @@ test("portal UI workflow exposes the self-serve device-release path + copy", asy
   assert.match(workflow.DEVICE_RELEASE_CONFIRM_COPY, /activate again/);
 });
 
+test("portal UI workflow maps raw result codes to human-readable copy", async () => {
+  const workflow = await loadWorkflowModule();
+  assert.equal(
+    workflow.describeResultCode("pool_exhausted"),
+    "All seats are in use — release one or ask your administrator.",
+  );
+  assert.equal(
+    workflow.describeResultCode("device_limit_exceeded"),
+    "This license's device limit is reached — release a device on the Devices tab.",
+  );
+  assert.equal(
+    workflow.describeResultCode("expired_subscription"),
+    "This subscription has expired — renew it to continue.",
+  );
+  assert.equal(
+    workflow.describeResultCode("invalid_otp"),
+    "That code is wrong or expired — request a new one.",
+  );
+  assert.equal(
+    workflow.describeResultCode("seat_reclaimed"),
+    "Your seat was reclaimed after inactivity — check out again.",
+  );
+  assert.equal(
+    workflow.describeResultCode("rate_limited"),
+    "Too many attempts — wait a moment and try again.",
+  );
+  // An unmapped code returns null so the UI can fall back to showing the raw code.
+  assert.equal(workflow.describeResultCode("some_unknown_code"), null);
+  assert.equal(workflow.describeResultCode(""), null);
+});
+
 test("portal UI workflow builds filtered usage paths", async () => {
   const workflow = await loadWorkflowModule();
   assert.equal(workflow.usagePath(), "/api/portal/usage");

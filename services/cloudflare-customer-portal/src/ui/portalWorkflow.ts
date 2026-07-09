@@ -83,6 +83,25 @@ export const DEVICE_RELEASE_ACTION_LABEL = "Release";
 export const DEVICE_RELEASE_CONFIRM_COPY =
   "Release this device? This frees one device slot; the application on that device will need to activate again.";
 
+// Map a raw server/result code to customer-facing copy. Returns null for any code we do not humanize,
+// so the caller can fall back to showing the raw code (kept visible as small print for support). Codes
+// mirror the backend envelope `code` field; this is the single source of humane portal feedback strings.
+const RESULT_CODE_COPY: Record<string, string> = {
+  pool_exhausted: "All seats are in use — release one or ask your administrator.",
+  device_limit_exceeded: "This license's device limit is reached — release a device on the Devices tab.",
+  expired_subscription: "This subscription has expired — renew it to continue.",
+  invalid_otp: "That code is wrong or expired — request a new one.",
+  seat_reclaimed: "Your seat was reclaimed after inactivity — check out again.",
+  rate_limited: "Too many attempts — wait a moment and try again.",
+};
+
+export function describeResultCode(code: string): string | null {
+  if (typeof code !== "string") {
+    return null;
+  }
+  return RESULT_CODE_COPY[code] ?? null;
+}
+
 // A license_fingerprint is a long hex digest; show a head...tail summary, never the full value in a
 // way that could be mistaken for a credential. Mirrors the admin shortHash contract exactly.
 export function shortHash(value: string): string {

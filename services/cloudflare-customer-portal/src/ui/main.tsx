@@ -6,6 +6,7 @@ import {
   DEVICE_KEY_HELP_COPY,
   DEVICE_RELEASE_ACTION_LABEL,
   DEVICE_RELEASE_CONFIRM_COPY,
+  describeResultCode,
   authRequestPath,
   authVerifyPath,
   checkoutPath,
@@ -98,9 +99,37 @@ async function api<T>(path: string, init?: RequestInit): Promise<ApiEnvelope<T>>
   }
 }
 
-function errorLine(result: ApiEnvelope<unknown>): string {
-  // Render exactly like admin: "code (request_id)".
-  return `${result.code} (${result.request_id})`;
+// A status line carries the raw envelope code + request_id (kept as small print for support and so
+// existing e2e regexes still match the raw code) plus `ok` so success and failure render distinctly.
+interface StatusMessage {
+  code: string;
+  request_id: string;
+  ok: boolean;
+}
+
+function resultMessage(result: ApiEnvelope<unknown>): StatusMessage {
+  return { code: result.code, request_id: result.request_id, ok: result.ok };
+}
+
+// Client-side (pre-network) codes have no request_id; ok gates the visual treatment.
+function localMessage(code: string, ok: boolean): StatusMessage {
+  return { code, request_id: "", ok };
+}
+
+// role="status" makes the polite live region announce every update to assistive tech. The humanized
+// copy leads; the raw code + request_id trails as small print so support can still triage by code.
+function StatusLine({ message, fallback }: { message: StatusMessage | null; fallback: string }): React.ReactElement {
+  if (message === null) {
+    return <p role="status" className="statusline">{fallback}</p>;
+  }
+  const human = describeResultCode(message.code);
+  const detail = message.request_id === "" ? message.code : `${message.code} (${message.request_id})`;
+  return (
+    <p role="status" className={message.ok ? "statusline" : "statusline error"}>
+      {human ?? message.code}
+      <small> {detail}</small>
+    </p>
+  );
 }
 
 function randomHex(byteLength: number): string {
@@ -122,7 +151,7 @@ function App(): React.ReactElement {
   const [me, setMe] = useState<PortalMe | null>(null);
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
-  const [message, setMessage] = useState("");
+  const [message, setMessage] = useState<StatusMessage | null>(null);
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
 
@@ -159,7 +188,7 @@ function App(): React.ReactElement {
     if (deviceResponse.ok && deviceResponse.data) setDevices(deviceResponse.data.items);
     if (usageResponse.ok && usageResponse.data) setUsage(usageResponse.data.items);
     const failed = [entitlementResponse, deviceResponse, usageResponse].find((item) => !item.ok);
-    if (failed) setMessage(errorLine(failed));
+    if (failed) setMessage(resultMessage(failed));
   }
 
   useEffect(() => {
@@ -187,14 +216,14 @@ function App(): React.ReactElement {
     await runOnce(async () => {
       const normalized = normalizeEmail(email);
       if (!isLikelyEmail(normalized)) {
-        setMessage("invalid_email");
+        setMessage(localMessage("invalid_email", false));
         return;
       }
       const result = await api(authRequestPath(), {
         method: "POST",
         body: JSON.stringify({ email: normalized }),
       });
-      setMessage(errorLine(result));
+      setMessage(resultMessage(result));
       if (result.ok) {
         setEmail(normalized);
         setPhase("verify");
@@ -207,14 +236,14 @@ function App(): React.ReactElement {
     await runOnce(async () => {
       const normalized = normalizeCode(code);
       if (!isValidCode(normalized)) {
-        setMessage("invalid_code");
+        setMessage(localMessage("invalid_code", false));
         return;
       }
       const result = await api(authVerifyPath(), {
         method: "POST",
         body: JSON.stringify({ email: normalizeEmail(email), code: normalized }),
       });
-      setMessage(errorLine(result));
+      setMessage(resultMessage(result));
       if (result.ok) {
         // The server set the HttpOnly cookie; me() now succeeds and lands the dashboard.
         setCode("");
@@ -226,7 +255,7 @@ function App(): React.ReactElement {
   async function logout(): Promise<void> {
     await runOnce(async () => {
       const result = await api(logoutPath(), { method: "POST", body: "{}" });
-      setMessage(errorLine(result));
+      setMessage(resultMessage(result));
       setMe(null);
       setEntitlements([]);
       setDevices([]);
@@ -246,7 +275,7 @@ function App(): React.ReactElement {
     await runOnce(async () => {
       const existing = seatSessions[item.id];
       if ((operation === "heartbeat" || operation === "release") && existing === undefined) {
-        setMessage("seat_not_checked_out");
+        setMessage(localMessage("seat_not_checked_out", false));
         return;
       }
       const clientInstanceId = existing?.client_instance_id ?? crypto.randomUUID();
@@ -260,7 +289,7 @@ function App(): React.ReactElement {
         method: "POST",
         body: JSON.stringify(body),
       });
-      setMessage(errorLine(result));
+      setMessage(resultMessage(result));
       if (result.ok) {
         if (operation === "checkout" && typeof result.data?.seat_id === "string") {
           setSeatSessions((current) => ({
@@ -288,7 +317,7 @@ function App(): React.ReactElement {
         method: "POST",
         body: JSON.stringify({ device_key_id: item.device_key_id }),
       });
-      setMessage(errorLine(result));
+      setMessage(resultMessage(result));
       if (result.ok) {
         // The device drops off GET /devices; refresh so the row disappears immediately.
         await refreshData();
@@ -300,7 +329,7 @@ function App(): React.ReactElement {
     await runOnce(async () => {
       const deviceKeyId = (downloadDeviceKeys[item.id] ?? "").trim();
       if (deviceKeyId === "") {
-        setMessage("device_key_required");
+        setMessage(localMessage("device_key_required", false));
         return;
       }
       // The Worker converts the backend JSON `lic` field into an attachment. The browser never holds
@@ -315,9 +344,9 @@ function App(): React.ReactElement {
       if (!response.ok || contentType.includes("application/json")) {
         try {
           const result = (await response.json()) as ApiEnvelope<unknown>;
-          setMessage(errorLine(result));
+          setMessage(resultMessage(result));
         } catch {
-          setMessage(`download_failed (${response.status})`);
+          setMessage(localMessage(`download_failed_${response.status}`, false));
         }
         return;
       }
@@ -330,7 +359,7 @@ function App(): React.ReactElement {
       anchor.click();
       anchor.remove();
       URL.revokeObjectURL(objectUrl);
-      setMessage("download_started");
+      setMessage(localMessage("download_started", true));
     });
   }
 
@@ -353,7 +382,7 @@ function App(): React.ReactElement {
         <header className="topbar">
           <div>
             <h1>licensecc customer portal</h1>
-            <p>{message || "sign in to manage your licenses"}</p>
+            <StatusLine message={message} fallback="sign in to manage your licenses" />
           </div>
         </header>
         <section className="authPane">
@@ -388,7 +417,7 @@ function App(): React.ReactElement {
               </label>
               <div className="actions">
                 <button disabled={busy} type="submit">Verify</button>
-                <button disabled={busy} type="button" onClick={() => { setPhase("request"); setMessage(""); }}>Use a different email</button>
+                <button disabled={busy} type="button" onClick={() => { setPhase("request"); setMessage(null); }}>Use a different email</button>
               </div>
             </form>
           )}
@@ -405,7 +434,7 @@ function App(): React.ReactElement {
       <header className="topbar">
         <div>
           <h1>licensecc customer portal</h1>
-          <p>{message || "ready"}</p>
+          <StatusLine message={message} fallback="ready" />
         </div>
         <nav>
           <button className={activeTab === "entitlements" ? "active" : ""} onClick={() => setActiveTab("entitlements")}>My entitlements</button>
