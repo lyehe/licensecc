@@ -32,14 +32,8 @@ import {
   shortHash,
   usagePath,
 } from "./portalWorkflow";
+import type { ApiEnvelope } from "../shared/api";
 import "./styles.css";
-
-interface ApiEnvelope<T> {
-  ok: boolean;
-  code: string;
-  request_id: string;
-  data?: T;
-}
 
 interface PortalMe {
   customer_id: string;

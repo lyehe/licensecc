@@ -1,6 +1,7 @@
 import React, { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type {
+  ApiEnvelope,
   CatalogFeature,
   CatalogImportManifest,
   CatalogImportResult,
@@ -122,13 +123,6 @@ interface Summary {
     revoked: number;
     disabled: number;
   };
-}
-
-interface ApiEnvelope<T> {
-  ok: boolean;
-  code: string;
-  request_id: string;
-  data?: T;
 }
 
 interface MeterStatus {
