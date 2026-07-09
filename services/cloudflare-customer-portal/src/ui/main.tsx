@@ -4,9 +4,12 @@ import {
   ACTIVATION_DOWNLOAD_ACTION_LABEL,
   ACTIVATION_DOWNLOAD_DISCLOSURE,
   DEVICE_KEY_HELP_COPY,
+  DEVICE_RELEASE_ACTION_LABEL,
+  DEVICE_RELEASE_CONFIRM_COPY,
   authRequestPath,
   authVerifyPath,
   checkoutPath,
+  deviceReleasePath,
   devicesPath,
   downloadPath,
   entitlementsPath,
@@ -277,6 +280,22 @@ function App(): React.ReactElement {
     });
   }
 
+  async function releaseDevice(item: DeviceRow): Promise<void> {
+    // Consequence-stating confirm so a device is never released by reflex (the app on it must re-activate).
+    if (!window.confirm(DEVICE_RELEASE_CONFIRM_COPY)) return;
+    await runOnce(async () => {
+      const result = await api<Record<string, unknown>>(deviceReleasePath(), {
+        method: "POST",
+        body: JSON.stringify({ device_key_id: item.device_key_id }),
+      });
+      setMessage(errorLine(result));
+      if (result.ok) {
+        // The device drops off GET /devices; refresh so the row disappears immediately.
+        await refreshData();
+      }
+    });
+  }
+
   async function download(item: EntitlementRow): Promise<void> {
     await runOnce(async () => {
       const deviceKeyId = (downloadDeviceKeys[item.id] ?? "").trim();
@@ -423,7 +442,7 @@ function App(): React.ReactElement {
         <section className="tablePane full">
           <h2>My devices &amp; seats</h2>
           <table>
-            <thead><tr><th>Project</th><th>Feature</th><th>Fingerprint</th><th>Device</th><th>Since</th></tr></thead>
+            <thead><tr><th>Project</th><th>Feature</th><th>Fingerprint</th><th>Device</th><th>Since</th><th>Actions</th></tr></thead>
             <tbody>
               {devices.map((item, index) => (
                 <tr key={`${item.device_key_id}/${index}`}>
@@ -432,6 +451,9 @@ function App(): React.ReactElement {
                   <td><code>{shortHash(item.license_fingerprint)}</code></td>
                   <td><code>{shortHash(item.device_key_id)}</code></td>
                   <td>{formatTimestamp(item.created_at)}</td>
+                  <td className="actions">
+                    <button disabled={busy} onClick={() => void releaseDevice(item)}>{DEVICE_RELEASE_ACTION_LABEL}</button>
+                  </td>
                 </tr>
               ))}
             </tbody>

@@ -27,6 +27,7 @@ import * as otpModule from "../auth/portal_otp.mjs";
 import * as sessionModule from "../auth/portal_session.mjs";
 import * as tokenModule from "../auth/portal_token.mjs";
 import * as emailModule from "../auth/portal_email.mjs";
+import * as ratelimitModule from "../auth/portal_ratelimit.mjs";
 import type { ApiEnvelope } from "../shared/api";
 import { openApiDocument, DOCS_HTML } from "./openapi.js";
 import { constantTimeEqual, readTextBody, requestId, bearerToken } from "@licensecc/cloudflare-licensing-backend/http/kit";
@@ -43,6 +44,7 @@ const clearSessionCookie = (sessionModule as { clearSessionCookie: () => string 
 const mintSessionToken = (tokenModule as { mintSessionToken: AnyFn }).mintSessionToken;
 const proxyBackend = (tokenModule as { proxyBackend: (env: Env, path: string, token: string, body: unknown) => Promise<Response> }).proxyBackend;
 const sendEmail = (emailModule as { sendEmail: AnyFn }).sendEmail;
+const portalRateLimit = (ratelimitModule as { portalRateLimit: AnyFn }).portalRateLimit;
 
 interface D1Result<T = Record<string, unknown>> {
   results: T[];
@@ -386,15 +388,88 @@ async function apiEntitlements(env: Env, session: { customer_id: string }, reqId
 }
 
 async function apiDevices(env: Env, session: { customer_id: string }, reqId: string): Promise<Response> {
-  // Ownership EXISTS: only devices on entitlements the session customer owns.
+  // Ownership EXISTS: only ACTIVE devices on entitlements the session customer owns. A device the
+  // customer released (self-serve, below) or an admin revoked/disabled flips out of 'active' and so
+  // drops off the customer-facing listing — the Devices tab shows only devices currently holding a slot.
   const rows = await env.DB.prepare(
     "SELECT d.project, d.feature, d.license_fingerprint, d.device_key_id, d.created_at " +
       "FROM entitlement_devices d " +
-      "WHERE EXISTS (SELECT 1 FROM entitlements e WHERE e.project = d.project AND e.feature = d.feature " +
+      "WHERE d.status = 'active' AND EXISTS (SELECT 1 FROM entitlements e WHERE e.project = d.project AND e.feature = d.feature " +
       "AND e.license_fingerprint = d.license_fingerprint AND e.customer_id = ?) " +
       "ORDER BY d.created_at DESC LIMIT 500",
   ).bind(session.customer_id).all();
   return envelope(reqId, "devices", { items: rows.results });
+}
+
+// POST /api/portal/devices/release — SELF-SERVE device deactivation (finding 11). Frees the slot a
+// node-locked/proof-carrying device holds so a customer can swap hardware without escalating. Fully
+// SESSION-SCOPED: the device is resolved through the SAME ownership EXISTS as apiDevices, so a foreign
+// or absent device is the SAME generic not_found (invariant 4 — no existence oracle). The write is an
+// atomic guarded transition mirroring the admin device-revoke: it (1) bumps the entitlement
+// revocation_seq (so the released device is refused by online-verify on its next check), (2) flips the
+// device out of 'active', and (3) appends a 'portal_device_release' audit event carrying the session
+// customer id — all in one D1 batch, so a lost race (already released) yields 409, never a torn write.
+async function apiDeviceRelease(
+  request: Request,
+  env: Env,
+  session: { customer_id: string },
+  reqId: string,
+  now: number,
+): Promise<Response> {
+  if (isCrossSite(request, env)) return envelope(reqId, "cross_site_forbidden", undefined, 403);
+  // Always-on per-session throttle (invariant 5 discipline) so the release surface cannot be hammered.
+  const rl = await portalRateLimit(env, `device_release:cust:${session.customer_id}`, 30, 900, now);
+  if (rl.limited) return envelope(reqId, "rate_limited", undefined, 429);
+  const body = await readJson(request, reqId);
+  if (body instanceof Response) return body;
+  const deviceKeyId = typeof body.device_key_id === "string" ? body.device_key_id : "";
+  if (deviceKeyId === "" || deviceKeyId.length > 512) return envelope(reqId, "invalid_request", undefined, 400);
+
+  // Ownership-scoped pre-read: 0 rows -> generic not_found (foreign/absent are indistinguishable).
+  const device = await env.DB.prepare(
+    "SELECT d.project AS project, d.feature AS feature, d.license_fingerprint AS license_fingerprint, d.status AS status " +
+      "FROM entitlement_devices d " +
+      "WHERE d.device_key_id = ? AND EXISTS (SELECT 1 FROM entitlements e WHERE e.project = d.project AND e.feature = d.feature " +
+      "AND e.license_fingerprint = d.license_fingerprint AND e.customer_id = ?) LIMIT 1",
+  ).bind(deviceKeyId, session.customer_id).first<{ project: string; feature: string; license_fingerprint: string; status: string }>();
+  if (device === null) return envelope(reqId, "not_found", undefined, 404);
+  // Already released/revoked/disabled: nothing to free (guarded-transition convention).
+  if (device.status !== "active") return envelope(reqId, "device_status_conflict", undefined, 409);
+
+  // The atomic write MUST be one transaction: a device flipped without its audit event (or without the
+  // revocation_seq bump) would be a silent, unattributed slot change. Real D1 always exposes batch();
+  // a missing batch() is a degraded/mocked binding — fail closed rather than write un-transactioned.
+  if (env.DB.batch === undefined) return envelope(reqId, "portal_error", undefined, 500);
+  const detail = `portal-device-release ${deviceKeyId}`;
+  // (1) Guarded revocation_seq bump — the WHERE re-asserts the device is STILL active + owner-matched,
+  // so a release/removal landing between the pre-read and here yields 0 rows (RETURNING empty -> 409).
+  const bump = env.DB.prepare(
+    "UPDATE entitlements SET revocation_seq = max(revocation_seq, COALESCE((SELECT MAX(revocation_seq) FROM entitlement_events " +
+      "WHERE project = entitlements.project AND feature = entitlements.feature AND license_fingerprint = entitlements.license_fingerprint), revocation_seq)) + 1, " +
+      "updated_at = ? WHERE project = ? AND feature = ? AND license_fingerprint = ? AND customer_id = ? " +
+      "AND EXISTS (SELECT 1 FROM entitlement_devices d WHERE d.project = entitlements.project AND d.feature = entitlements.feature " +
+      "AND d.license_fingerprint = entitlements.license_fingerprint AND d.device_key_id = ? AND d.status = 'active') RETURNING revocation_seq",
+  ).bind(now, device.project, device.feature, device.license_fingerprint, session.customer_id, deviceKeyId);
+  // (2) Flip the device out of 'active' (guarded on its current status). We reuse 'revoked' — the only
+  // terminal, CHECK-allowed non-active status — so the device is retired and re-activation registers anew.
+  const flip = env.DB.prepare(
+    "UPDATE entitlement_devices SET status = 'revoked', updated_at = ? WHERE project = ? AND feature = ? AND license_fingerprint = ? AND device_key_id = ? AND status = 'active'",
+  ).bind(now, device.project, device.feature, device.license_fingerprint, deviceKeyId);
+  // (3) Append-only audit — actor is the SESSION customer id; source distinguishes it from admin revokes.
+  const audit = env.DB.prepare(
+    "INSERT INTO entitlement_events (project, feature, license_fingerprint, device_hash, event_type, status, revocation_seq, detail, actor, actor_type, source, request_id, ip, reason, created_at) " +
+      "SELECT project, feature, license_fingerprint, '', 'revoke', status, revocation_seq, ?, ?, 'system', 'portal', ?, ?, 'portal_device_release', ? " +
+      "FROM entitlements WHERE project = ? AND feature = ? AND license_fingerprint = ?",
+  ).bind(detail, session.customer_id, reqId, clientIp(request), now, device.project, device.feature, device.license_fingerprint);
+
+  const results = await env.DB.batch([bump, flip, audit]);
+  const first = results[0];
+  const returned = first !== null && typeof first === "object" && "results" in first ? (first as { results: unknown[] }).results : [];
+  if (!Array.isArray(returned) || returned.length === 0) {
+    // Lost race: the device was released/removed between the pre-read and the guarded write.
+    return envelope(reqId, "device_status_conflict", undefined, 409);
+  }
+  return envelope(reqId, "device_released", { device_key_id: deviceKeyId });
 }
 
 async function apiUsage(env: Env, session: { customer_id: string }, reqId: string): Promise<Response> {
@@ -562,6 +637,7 @@ async function handleApiPortal(request: Request, env: Env, reqId: string, now: n
   if (request.method === "GET" && pathname === "/api/portal/me") return apiMe(session, reqId);
   if (request.method === "GET" && pathname === "/api/portal/entitlements") return apiEntitlements(env, session, reqId);
   if (request.method === "GET" && pathname === "/api/portal/devices") return apiDevices(env, session, reqId);
+  if (request.method === "POST" && pathname === "/api/portal/devices/release") return apiDeviceRelease(request, env, session, reqId, now);
   if (request.method === "GET" && pathname === "/api/portal/usage") return apiUsage(env, session, reqId);
   if (request.method === "POST" && pathname === "/api/portal/checkout") return apiAction(request, env, session, reqId, now, "checkout");
   if (request.method === "POST" && pathname === "/api/portal/heartbeat") return apiAction(request, env, session, reqId, now, "heartbeat");

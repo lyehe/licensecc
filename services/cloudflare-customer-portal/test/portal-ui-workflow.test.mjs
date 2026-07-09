@@ -45,6 +45,15 @@ test("portal UI workflow builds session-scoped read + action paths", async () =>
   assert.equal(workflow.releasePath(), "/api/portal/release");
 });
 
+test("portal UI workflow exposes the self-serve device-release path + copy", async () => {
+  const workflow = await loadWorkflowModule();
+  assert.equal(workflow.deviceReleasePath(), "/api/portal/devices/release");
+  assert.equal(workflow.DEVICE_RELEASE_ACTION_LABEL, "Release");
+  // The confirm copy MUST state the consequence so a customer cannot release a device by reflex.
+  assert.match(workflow.DEVICE_RELEASE_CONFIRM_COPY, /frees one device slot/);
+  assert.match(workflow.DEVICE_RELEASE_CONFIRM_COPY, /activate again/);
+});
+
 test("portal UI workflow builds filtered usage paths", async () => {
   const workflow = await loadWorkflowModule();
   assert.equal(workflow.usagePath(), "/api/portal/usage");

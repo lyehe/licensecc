@@ -58,6 +58,12 @@ export function releasePath(): string {
   return "/api/portal/release";
 }
 
+// Self-serve device deactivation (frees the slot a registered device holds). Distinct from the
+// floating-seat releasePath above: this retires a node-locked/proof-carrying DEVICE, not a live seat.
+export function deviceReleasePath(): string {
+  return "/api/portal/devices/release";
+}
+
 // ---- Formatters / display helpers --------------------------------------------------------------
 
 export const LOGIN_CODE_SENT_COPY = "If this email is registered, we sent an 8-digit code. Enter it below.";
@@ -69,6 +75,13 @@ export const ACTIVATION_DOWNLOAD_DISCLOSURE =
 
 export const DEVICE_KEY_HELP_COPY =
   "The device key id is shown by the licensed application on the device you are activating; devices that are already registered also list it under the Devices tab.";
+
+export const DEVICE_RELEASE_ACTION_LABEL = "Release";
+
+// Shown in the confirm before a device release. It MUST state the consequence: the freed slot and the
+// re-activation the application on that device will have to perform.
+export const DEVICE_RELEASE_CONFIRM_COPY =
+  "Release this device? This frees one device slot; the application on that device will need to activate again.";
 
 // A license_fingerprint is a long hex digest; show a head...tail summary, never the full value in a
 // way that could be mistaken for a credential. Mirrors the admin shortHash contract exactly.

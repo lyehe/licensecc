@@ -39,6 +39,7 @@ const CANONICAL_ROUTES = [
   { method: "GET", path: "/api/portal/me", inSpec: true },
   { method: "GET", path: "/api/portal/entitlements", inSpec: true },
   { method: "GET", path: "/api/portal/devices", inSpec: true },
+  { method: "POST", path: "/api/portal/devices/release", inSpec: true },
   { method: "GET", path: "/api/portal/usage", inSpec: true },
   { method: "POST", path: "/api/portal/checkout", inSpec: true },
   { method: "POST", path: "/api/portal/heartbeat", inSpec: true },

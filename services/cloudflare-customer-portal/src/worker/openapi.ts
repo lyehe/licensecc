@@ -558,6 +558,53 @@ export const openApiDocument: OpenApiDocument = {
         },
       },
     },
+    "/api/portal/devices/release": {
+      post: {
+        tags: ["portal"],
+        operationId: "portalDeviceRelease",
+        summary: "Self-serve device deactivation. Frees the slot a registered device holds.",
+        description:
+          "Resolves the device through the SAME ownership EXISTS as the devices listing (invariant 4 — a " +
+          "foreign or absent device is the generic not_found, never a 403 oracle). Atomically bumps the " +
+          "entitlement revocation_seq, flips the device out of 'active', and appends a portal_device_release " +
+          "audit event with the session customer id. Re-releasing an already-released device is a 409.",
+        security: [{ sessionCookie: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["device_key_id"],
+                properties: {
+                  device_key_id: { type: "string", description: "The device key id shown on the Devices tab." },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          "200": {
+            description: "The device was released and no longer appears on the Devices tab.",
+            content: {
+              "application/json": {
+                schema: {
+                  allOf: [{ $ref: "#/components/schemas/Envelope" }],
+                  properties: { code: { const: "device_released" } },
+                },
+              },
+            },
+          },
+          "400": ERR_INVALID_JSON,
+          "401": errorResponse("No / invalid session.", "unauthorized"),
+          "403": ERR_CROSS_SITE,
+          "404": errorResponse("device_key_id not owned or absent (generic — no existence oracle).", "not_found"),
+          "409": errorResponse("The device was already released / not active.", "device_status_conflict"),
+          "413": ERR_BODY_TOO_LARGE,
+          "429": errorResponse("Per-session release rate limit exceeded.", "rate_limited"),
+        },
+      },
+    },
     "/api/portal/usage": {
       get: {
         tags: ["portal"],

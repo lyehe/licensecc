@@ -149,6 +149,75 @@ test("devices + usage are gated by the ownership EXISTS (A sees no B rows)", asy
 });
 
 // =================================================================================================
+// DEVICE RELEASE — self-serve deactivation (ownership-scoped, guarded, audited)
+// =================================================================================================
+
+function seedDevice(db, { project = "DEFAULT", feature = "DEFAULT", fingerprint, deviceKeyId, status = "active" }) {
+  db.prepare(
+    "INSERT INTO entitlement_devices (project, feature, license_fingerprint, device_key_id, public_key_spki_der_base64, status, created_at, updated_at) VALUES (?, ?, ?, ?, 'x', ?, ?, ?)",
+  ).run(project, feature, fingerprint, deviceKeyId, status, NOW, NOW);
+}
+
+test("A releases A's own device -> 200 device_released; it disappears from GET /devices and is audited", async () => {
+  const { db, env } = baseFixture();
+  seedDevice(db, { fingerprint: FP_A, deviceKeyId: "dk_a" });
+  const cookie = await cookieFor(env, "A");
+  // Present before the release.
+  const before = await call(env, "GET", "/api/portal/devices", { cookie });
+  assert.equal(before.body.data.items.length, 1, "A's own device is listed before release");
+  const seqBefore = db.prepare("SELECT revocation_seq FROM entitlements WHERE license_fingerprint = ?").get(FP_A).revocation_seq;
+
+  const rel = await call(env, "POST", "/api/portal/devices/release", { cookie, body: { device_key_id: "dk_a" } });
+  assert.equal(rel.status, 200);
+  assert.equal(rel.body.code, "device_released");
+
+  // Gone from the customer-facing listing.
+  const after = await call(env, "GET", "/api/portal/devices", { cookie });
+  assert.equal(after.body.data.items.length, 0, "the released device no longer appears");
+
+  // The device row is flipped (not deleted) and the entitlement revocation_seq is bumped so the
+  // released device is refused by the online-verify path on its next proof-carrying check.
+  const dev = db.prepare("SELECT status FROM entitlement_devices WHERE device_key_id = 'dk_a'").get();
+  assert.equal(dev.status, "revoked", "the device is flipped away from active, not deleted");
+  const seqAfter = db.prepare("SELECT revocation_seq FROM entitlements WHERE license_fingerprint = ?").get(FP_A).revocation_seq;
+  assert.ok(seqAfter > seqBefore, "releasing bumps the entitlement revocation_seq");
+
+  // An audit event records the release with the SESSION customer id (no client value).
+  const audit = db.prepare("SELECT actor, source, reason, detail FROM entitlement_events WHERE reason = 'portal_device_release'").get();
+  assert.ok(audit, "an audit event row exists for the portal device release");
+  assert.equal(audit.actor, "A", "the audit records the session customer id");
+  assert.equal(audit.source, "portal");
+  assert.match(audit.detail, /dk_a/, "the audit detail names the released device");
+  db.close();
+});
+
+test("A -> B: releasing another customer's device is a generic not_found (no existence oracle)", async () => {
+  const { db, env } = baseFixture();
+  seedDevice(db, { fingerprint: FP_B, deviceKeyId: "dk_b" });
+  const cookie = await cookieFor(env, "A");
+  const rel = await call(env, "POST", "/api/portal/devices/release", { cookie, body: { device_key_id: "dk_b" } });
+  assert.equal(rel.status, 404, "a foreign device is the SAME generic not_found as an absent one (no 403 oracle)");
+  assert.equal(rel.body.code, "not_found");
+  // B's device is untouched (no cross-account write).
+  const dev = db.prepare("SELECT status FROM entitlement_devices WHERE device_key_id = 'dk_b'").get();
+  assert.equal(dev.status, "active", "a foreign device is never mutated");
+  db.close();
+});
+
+test("releasing the same device twice -> the second call is 409 device_status_conflict", async () => {
+  const { db, env } = baseFixture();
+  seedDevice(db, { fingerprint: FP_A, deviceKeyId: "dk_a" });
+  const cookie = await cookieFor(env, "A");
+  const first = await call(env, "POST", "/api/portal/devices/release", { cookie, body: { device_key_id: "dk_a" } });
+  assert.equal(first.status, 200);
+  assert.equal(first.body.code, "device_released");
+  const second = await call(env, "POST", "/api/portal/devices/release", { cookie, body: { device_key_id: "dk_a" } });
+  assert.equal(second.status, 409, "an already-released device cannot be released again (guarded transition)");
+  assert.equal(second.body.code, "device_status_conflict");
+  db.close();
+});
+
+// =================================================================================================
 // ACTIONS — server-resolve the tuple; forged body ignored; no oracle
 // =================================================================================================
 
