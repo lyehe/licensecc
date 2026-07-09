@@ -54,6 +54,15 @@ test("portal UI workflow exposes the self-serve device-release path + copy", asy
   assert.match(workflow.DEVICE_RELEASE_CONFIRM_COPY, /activate again/);
 });
 
+test("portal UI workflow exposes empty-state copy for every tab", async () => {
+  const workflow = await loadWorkflowModule();
+  assert.match(workflow.NO_ENTITLEMENTS_EMPTY_COPY, /No entitlements yet/);
+  assert.match(workflow.NO_ENTITLEMENTS_EMPTY_COPY, /after purchase/);
+  assert.match(workflow.NO_DEVICES_EMPTY_COPY, /No devices/i);
+  assert.match(workflow.NO_USAGE_EMPTY_COPY, /No usage/i);
+  assert.match(workflow.NO_DOWNLOADS_EMPTY_COPY, /No .*licenses|nothing to download/i);
+});
+
 test("portal UI workflow maps raw result codes to human-readable copy", async () => {
   const workflow = await loadWorkflowModule();
   assert.equal(

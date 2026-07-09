@@ -22,6 +22,10 @@ import {
   LOGIN_CODE_SENT_COPY,
   logoutPath,
   mePath,
+  NO_DEVICES_EMPTY_COPY,
+  NO_DOWNLOADS_EMPTY_COPY,
+  NO_ENTITLEMENTS_EMPTY_COPY,
+  NO_USAGE_EMPTY_COPY,
   normalizeCode,
   normalizeEmail,
   releasePath,
@@ -503,6 +507,7 @@ function App(): React.ReactElement {
               ))}
             </tbody>
           </table>
+          {entitlements.length === 0 && <p className="muted">{NO_ENTITLEMENTS_EMPTY_COPY}</p>}
         </section>
       )}
 
@@ -526,6 +531,7 @@ function App(): React.ReactElement {
               ))}
             </tbody>
           </table>
+          {devices.length === 0 && <p className="muted">{NO_DEVICES_EMPTY_COPY}</p>}
           {floatingEntitlements.length > 0 && (
             <div className="seatGrid">
               <h2>Seats by entitlement</h2>
@@ -571,6 +577,7 @@ function App(): React.ReactElement {
                 ))}
               </tbody>
             </table>
+            {usage.length === 0 && <p className="muted">{NO_USAGE_EMPTY_COPY}</p>}
           </section>
         </section>
       )}
@@ -602,6 +609,7 @@ function App(): React.ReactElement {
               ))}
             </tbody>
           </table>
+          {downloadableEntitlements.length === 0 && <p className="muted">{NO_DOWNLOADS_EMPTY_COPY}</p>}
         </section>
       )}
     </main>
