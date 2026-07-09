@@ -217,6 +217,51 @@ test("releasing the same device twice -> the second call is 409 device_status_co
   db.close();
 });
 
+test("the release audit records the FRESHLY-BUMPED revocation_seq, not the stale pre-read value", async () => {
+  const { db, env } = baseFixture();
+  seedDevice(db, { fingerprint: FP_A, deviceKeyId: "dk_a" });
+  const cookie = await cookieFor(env, "A");
+  const rel = await call(env, "POST", "/api/portal/devices/release", { cookie, body: { device_key_id: "dk_a" } });
+  assert.equal(rel.status, 200);
+  const seqAfter = db.prepare("SELECT revocation_seq FROM entitlements WHERE license_fingerprint = ?").get(FP_A).revocation_seq;
+  const audit = db.prepare("SELECT revocation_seq FROM entitlement_events WHERE reason = 'portal_device_release'").get();
+  assert.equal(audit.revocation_seq, seqAfter, "the audit event carries the bumped revocation_seq the release produced");
+  db.close();
+});
+
+test("lost race between the ownership pre-read and the guarded write -> 409 with NO audit row and NO seq bump", async () => {
+  const { db, env } = baseFixture();
+  seedDevice(db, { fingerprint: FP_A, deviceKeyId: "dk_a" });
+  const cookie = await cookieFor(env, "A");
+  const seqBefore = db.prepare("SELECT revocation_seq FROM entitlements WHERE license_fingerprint = ?").get(FP_A).revocation_seq;
+
+  // Simulate a concurrent release landing AFTER apiDeviceRelease's ownership pre-read saw the device
+  // active but BEFORE its guarded batch runs: wrap batch() to flip the device out of 'active' first,
+  // so the guarded bump/flip both match 0 rows (RETURNING empty -> the 409 branch).
+  const realBatch = env.DB.batch.bind(env.DB);
+  let raced = false;
+  env.DB.batch = async (statements) => {
+    if (!raced) {
+      raced = true;
+      db.prepare("UPDATE entitlement_devices SET status = 'revoked' WHERE device_key_id = 'dk_a'").run();
+    }
+    return realBatch(statements);
+  };
+
+  const rel = await call(env, "POST", "/api/portal/devices/release", { cookie, body: { device_key_id: "dk_a" } });
+  assert.equal(rel.status, 409, "a lost race yields the guarded-transition conflict");
+  assert.equal(rel.body.code, "device_status_conflict");
+
+  // The guarded write matched 0 rows, so the release recorded NOTHING: the audit is gated on the
+  // bump succeeding, and the revocation_seq is untouched. A phantom audit row here would misattribute
+  // a slot change that never happened.
+  const auditCount = db.prepare("SELECT COUNT(*) AS n FROM entitlement_events WHERE reason = 'portal_device_release'").get();
+  assert.equal(auditCount.n, 0, "a lost-race 409 emits no audit row");
+  const seqAfter = db.prepare("SELECT revocation_seq FROM entitlements WHERE license_fingerprint = ?").get(FP_A).revocation_seq;
+  assert.equal(seqAfter, seqBefore, "a lost-race 409 does not bump the revocation_seq");
+  db.close();
+});
+
 // =================================================================================================
 // ACTIONS — server-resolve the tuple; forged body ignored; no oracle
 // =================================================================================================

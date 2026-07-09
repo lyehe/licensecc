@@ -406,9 +406,11 @@ async function apiDevices(env: Env, session: { customer_id: string }, reqId: str
 // SESSION-SCOPED: the device is resolved through the SAME ownership EXISTS as apiDevices, so a foreign
 // or absent device is the SAME generic not_found (invariant 4 — no existence oracle). The write is an
 // atomic guarded transition mirroring the admin device-revoke: it (1) bumps the entitlement
-// revocation_seq (so the released device is refused by online-verify on its next check), (2) flips the
-// device out of 'active', and (3) appends a 'portal_device_release' audit event carrying the session
-// customer id — all in one D1 batch, so a lost race (already released) yields 409, never a torn write.
+// revocation_seq (so the released device is refused by online-verify on its next check) and (2) flips
+// the device out of 'active' — BOTH in one guarded D1 batch, so a lost race (already released) matches
+// 0 rows and yields 409, never a torn write. Only AFTER confirming the guarded bump returned a row does
+// it (3) append a 'portal_device_release' audit event carrying the session customer id and the freshly
+// bumped revocation_seq — so a lost-race 409 records nothing (no phantom audit, no stale seq).
 async function apiDeviceRelease(
   request: Request,
   env: Env,
@@ -436,9 +438,9 @@ async function apiDeviceRelease(
   // Already released/revoked/disabled: nothing to free (guarded-transition convention).
   if (device.status !== "active") return envelope(reqId, "device_status_conflict", undefined, 409);
 
-  // The atomic write MUST be one transaction: a device flipped without its audit event (or without the
-  // revocation_seq bump) would be a silent, unattributed slot change. Real D1 always exposes batch();
-  // a missing batch() is a degraded/mocked binding — fail closed rather than write un-transactioned.
+  // The guarded state change MUST be one transaction: bumping revocation_seq without flipping the
+  // device (or vice versa) would be a torn slot change. Real D1 always exposes batch(); a missing
+  // batch() is a degraded/mocked binding — fail closed rather than write un-transactioned.
   if (env.DB.batch === undefined) return envelope(reqId, "portal_error", undefined, 500);
   const detail = `portal-device-release ${deviceKeyId}`;
   // (1) Guarded revocation_seq bump — the WHERE re-asserts the device is STILL active + owner-matched,
@@ -455,20 +457,27 @@ async function apiDeviceRelease(
   const flip = env.DB.prepare(
     "UPDATE entitlement_devices SET status = 'revoked', updated_at = ? WHERE project = ? AND feature = ? AND license_fingerprint = ? AND device_key_id = ? AND status = 'active'",
   ).bind(now, device.project, device.feature, device.license_fingerprint, deviceKeyId);
-  // (3) Append-only audit — actor is the SESSION customer id; source distinguishes it from admin revokes.
-  const audit = env.DB.prepare(
-    "INSERT INTO entitlement_events (project, feature, license_fingerprint, device_hash, event_type, status, revocation_seq, detail, actor, actor_type, source, request_id, ip, reason, created_at) " +
-      "SELECT project, feature, license_fingerprint, '', 'revoke', status, revocation_seq, ?, ?, 'system', 'portal', ?, ?, 'portal_device_release', ? " +
-      "FROM entitlements WHERE project = ? AND feature = ? AND license_fingerprint = ?",
-  ).bind(detail, session.customer_id, reqId, clientIp(request), now, device.project, device.feature, device.license_fingerprint);
 
-  const results = await env.DB.batch([bump, flip, audit]);
+  const results = await env.DB.batch([bump, flip]);
   const first = results[0];
   const returned = first !== null && typeof first === "object" && "results" in first ? (first as { results: unknown[] }).results : [];
   if (!Array.isArray(returned) || returned.length === 0) {
-    // Lost race: the device was released/removed between the pre-read and the guarded write.
+    // Lost race: the device was released/removed between the pre-read and the guarded write. The bump
+    // and flip both matched 0 rows, so NOTHING is recorded — we return before issuing the audit below.
     return envelope(reqId, "device_status_conflict", undefined, 409);
   }
+  // (3) Append-only audit — issued ONLY after the guarded bump returned a row, so a lost-race 409 emits
+  // no phantom row. The recorded revocation_seq is the FRESHLY-BUMPED value from the UPDATE's RETURNING,
+  // never the stale pre-read value. Actor is the SESSION customer id; source distinguishes it from admin.
+  const first0 = returned[0];
+  const bumpedSeq = first0 !== null && typeof first0 === "object" && "revocation_seq" in first0
+    ? (first0 as { revocation_seq: number }).revocation_seq
+    : null;
+  await env.DB.prepare(
+    "INSERT INTO entitlement_events (project, feature, license_fingerprint, device_hash, event_type, status, revocation_seq, detail, actor, actor_type, source, request_id, ip, reason, created_at) " +
+      "SELECT project, feature, license_fingerprint, '', 'revoke', status, ?, ?, ?, 'system', 'portal', ?, ?, 'portal_device_release', ? " +
+      "FROM entitlements WHERE project = ? AND feature = ? AND license_fingerprint = ?",
+  ).bind(bumpedSeq, detail, session.customer_id, reqId, clientIp(request), now, device.project, device.feature, device.license_fingerprint).run();
   return envelope(reqId, "device_released", { device_key_id: deviceKeyId });
 }
 
