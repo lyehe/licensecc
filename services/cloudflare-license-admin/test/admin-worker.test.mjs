@@ -287,29 +287,6 @@ class MockD1 {
       .reduce((max, event) => Math.max(max, event.revocation_seq), 0);
   }
 
-  first(sql, values) {
-    if (sql.startsWith("SELECT COUNT(*) AS count FROM entitlements WHERE status = 'active'")) {
-      return { count: [...this.entitlements.values()].filter((row) => row.status === "active").length };
-    }
-    if (sql.startsWith("SELECT COUNT(*) AS count FROM entitlements WHERE status = 'revoked'")) {
-      return { count: [...this.entitlements.values()].filter((row) => row.status === "revoked").length };
-    }
-    if (sql.startsWith("SELECT COUNT(*) AS count FROM entitlements WHERE status = 'disabled'")) {
-      return { count: [...this.entitlements.values()].filter((row) => row.status === "disabled").length };
-    }
-    if (sql.startsWith("SELECT COUNT(*) AS count FROM entitlements")) {
-      return { count: this.entitlements.size };
-    }
-    if (sql.startsWith("SELECT response_json FROM mutation_idempotency")) {
-      return this.idempotency.get(`${values[0]}\u0000${values[1]}`) ?? null;
-    }
-    if (sql.startsWith("SELECT project, feature, license_fingerprint")) {
-      const row = this.entitlements.get(keyOf(values[0], values[1], values[2]));
-      return row === undefined ? null : clone(row);
-    }
-    throw new Error(`unexpected first SQL: ${sql}`);
-  }
-
   all(sql, values) {
     if (sql.includes("FROM entitlement_events")) {
       return this.events.slice().reverse().slice(0, values[0] ?? 50).map(clone);
@@ -488,10 +465,6 @@ MockD1.prototype.first = function first(sql, values) {
     this.entitlements.set(key, row);
     return clone(row);
   }
-  return Object.getPrototypeOf(MockD1.prototype).first?.call(this, sql, values) ?? MockD1.prototype.__lookupFirst.call(this, sql, values);
-};
-
-MockD1.prototype.__lookupFirst = function lookupFirst(sql, values) {
   if (sql.startsWith("SELECT COUNT(*) AS count FROM entitlements WHERE status = 'active'")) {
     return { count: [...this.entitlements.values()].filter((row) => row.status === "active").length };
   }
