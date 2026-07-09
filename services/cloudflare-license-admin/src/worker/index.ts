@@ -60,6 +60,7 @@ import type { PlanProjectionInput } from "@licensecc/cloudflare-licensing-backen
 import { verifyAuditChain } from "@licensecc/cloudflare-licensing-backend/audit/audit_digest";
 import { forceReleaseLiveSeats } from "@licensecc/cloudflare-licensing-backend/lease/seat_reclaim";
 import { constantTimeEqual, readTextBody, requestId, safeString } from "@licensecc/cloudflare-licensing-backend/http/kit";
+import { transitionWithGuard } from "./transitions.js";
 
 export interface Env {
   DB: D1DatabaseLike;
@@ -103,7 +104,7 @@ function splitCsv(value: string | undefined): Set<string> {
   return new Set((value ?? "").split(",").map((item) => item.trim().toLowerCase()).filter((item) => item !== ""));
 }
 
-function safeNotes(value: unknown): string | null {
+export function safeNotes(value: unknown): string | null {
   if (typeof value !== "string" || value.length > MAX_NOTES_SIZE) {
     return null;
   }
@@ -1248,34 +1249,26 @@ async function transitionCatalogFeature(request: Request, env: Env, actor: Actor
   if (adminError !== null) return adminError;
   const idempotencyKey = readIdempotencyKey(request);
   if (idempotencyKey === INVALID_IDEMPOTENCY_KEY) return envelope(requestIdValue, "invalid_idempotency_key", undefined, 400);
+  const body = await parseJsonBody(request, requestIdValue);
+  if (body instanceof Response) return body;
+  const reason = safeNotes((body as Record<string, unknown>).reason) ?? "";
   const ctx: MutationContext = { actor, requestId: requestIdValue, ip: clientIp(request), idempotencyKey, source: "admin" };
-  return mutationResponse(request, env, ctx, `catalog_feature_${action}d`, async () => {
-    const body = await parseJsonBody(request, requestIdValue);
-    if (body instanceof Response) return body;
-    const reason = safeNotes((body as Record<string, unknown>).reason) ?? "";
-    if (action === "disable" && reason === "") {
-      return envelope(requestIdValue, "reason_required", undefined, 400);
-    }
-    const existing = await findCatalogFeature(env, featureId);
-    if (existing === null) return envelope(requestIdValue, "catalog_feature_not_found", undefined, 404);
-    const expected = action === "disable" ? "active" : "disabled";
-    const next = action === "disable" ? "disabled" : "active";
-    if (existing.status !== expected) {
-      return envelope(requestIdValue, "catalog_status_conflict", { status: existing.status }, 409);
-    }
-    const now = Math.floor(Date.now() / 1000);
-    const update = env.DB.prepare(
-      `UPDATE catalog_features SET status = ?, updated_at = ? WHERE id = ? AND status = ? RETURNING ${CATALOG_FEATURE_COLUMNS}`,
-    ).bind(next, now, featureId, expected);
-    let row: Record<string, unknown> | null;
-    try {
-      row = await writeCatalogWithAudit(env, update, catalogFeatureAudit(env, featureId, String(existing.project), action, JSON.stringify(existing), reason, actor, requestIdValue, now));
-    } catch {
-      return envelope(requestIdValue, "catalog_mutation_failed", undefined, 500);
-    }
-    if (row === null) return envelope(requestIdValue, "catalog_status_conflict", undefined, 409);
-    return { data: row, idempotencyRecorded: false };
-  });
+  return mutationResponse(request, env, ctx, `catalog_feature_${action}d`, () =>
+    transitionWithGuard(env, {
+      table: "catalog_features",
+      columns: CATALOG_FEATURE_COLUMNS,
+      idClause: "id = ?",
+      idValues: [featureId],
+      action,
+      conflictCode: "catalog_status_conflict",
+      notFoundCode: "catalog_feature_not_found",
+      mutationFailedCode: "catalog_mutation_failed",
+      reason,
+      requireReason: true,
+      auditStatement: (existing, _nextStatus, now) =>
+        catalogFeatureAudit(env, featureId, String(existing.project), action, JSON.stringify(existing), reason, actor, requestIdValue, now),
+    }, requestIdValue),
+  );
 }
 
 async function listCatalogPlans(request: Request, env: Env, requestIdValue: string): Promise<Response> {
@@ -1402,32 +1395,26 @@ async function transitionCatalogPlan(request: Request, env: Env, actor: Actor, p
   if (adminError !== null) return adminError;
   const idempotencyKey = readIdempotencyKey(request);
   if (idempotencyKey === INVALID_IDEMPOTENCY_KEY) return envelope(requestIdValue, "invalid_idempotency_key", undefined, 400);
+  const body = await parseJsonBody(request, requestIdValue);
+  if (body instanceof Response) return body;
+  const reason = safeNotes((body as Record<string, unknown>).reason) ?? "";
   const ctx: MutationContext = { actor, requestId: requestIdValue, ip: clientIp(request), idempotencyKey, source: "admin" };
-  return mutationResponse(request, env, ctx, `catalog_plan_${action}d`, async () => {
-    const body = await parseJsonBody(request, requestIdValue);
-    if (body instanceof Response) return body;
-    const reason = safeNotes((body as Record<string, unknown>).reason) ?? "";
-    if (action === "disable" && reason === "") return envelope(requestIdValue, "reason_required", undefined, 400);
-    const existing = await findCatalogPlan(env, planId);
-    if (existing === null) return envelope(requestIdValue, "catalog_plan_not_found", undefined, 404);
-    const expected = action === "disable" ? "active" : "disabled";
-    const next = action === "disable" ? "disabled" : "active";
-    if (existing.status !== expected) {
-      return envelope(requestIdValue, "catalog_status_conflict", { status: existing.status }, 409);
-    }
-    const now = Math.floor(Date.now() / 1000);
-    const update = env.DB.prepare(
-      `UPDATE catalog_plans SET status = ?, updated_at = ? WHERE id = ? AND status = ? RETURNING ${CATALOG_PLAN_COLUMNS}`,
-    ).bind(next, now, planId, expected);
-    let row: Record<string, unknown> | null;
-    try {
-      row = await writeCatalogWithAudit(env, update, catalogPlanAudit(env, planId, String(existing.project), action, JSON.stringify(existing), reason, actor, requestIdValue, now));
-    } catch {
-      return envelope(requestIdValue, "catalog_mutation_failed", undefined, 500);
-    }
-    if (row === null) return envelope(requestIdValue, "catalog_status_conflict", undefined, 409);
-    return { data: row, idempotencyRecorded: false };
-  });
+  return mutationResponse(request, env, ctx, `catalog_plan_${action}d`, () =>
+    transitionWithGuard(env, {
+      table: "catalog_plans",
+      columns: CATALOG_PLAN_COLUMNS,
+      idClause: "id = ?",
+      idValues: [planId],
+      action,
+      conflictCode: "catalog_status_conflict",
+      notFoundCode: "catalog_plan_not_found",
+      mutationFailedCode: "catalog_mutation_failed",
+      reason,
+      requireReason: true,
+      auditStatement: (existing, _nextStatus, now) =>
+        catalogPlanAudit(env, planId, String(existing.project), action, JSON.stringify(existing), reason, actor, requestIdValue, now),
+    }, requestIdValue),
+  );
 }
 
 async function listCatalogPlanFeatures(request: Request, env: Env, planId: string, requestIdValue: string): Promise<Response> {
@@ -1581,30 +1568,27 @@ async function transitionCatalogPlanFeature(request: Request, env: Env, actor: A
   if (adminError !== null) return adminError;
   const idempotencyKey = readIdempotencyKey(request);
   if (idempotencyKey === INVALID_IDEMPOTENCY_KEY) return envelope(requestIdValue, "invalid_idempotency_key", undefined, 400);
+  const body = await parseJsonBody(request, requestIdValue);
+  if (body instanceof Response) return body;
+  const reason = safeNotes((body as Record<string, unknown>).reason) ?? "";
   const ctx: MutationContext = { actor, requestId: requestIdValue, ip: clientIp(request), idempotencyKey, source: "admin" };
   return mutationResponse(request, env, ctx, `catalog_plan_feature_${action}d`, async () => {
-    const body = await parseJsonBody(request, requestIdValue);
-    if (body instanceof Response) return body;
-    const reason = safeNotes((body as Record<string, unknown>).reason) ?? "";
-    if (action === "disable" && reason === "") return envelope(requestIdValue, "reason_required", undefined, 400);
-    const existing = await findCatalogPlanFeature(env, planId, featureKey);
-    if (existing === null) return envelope(requestIdValue, "catalog_plan_feature_not_found", undefined, 404);
-    const expected = action === "disable" ? "active" : "disabled";
-    const next = action === "disable" ? "disabled" : "active";
-    if (existing.status !== expected) {
-      return envelope(requestIdValue, "catalog_status_conflict", { status: existing.status }, 409);
-    }
-    const now = Math.floor(Date.now() / 1000);
-    const update = env.DB.prepare(
-      `UPDATE catalog_plan_features SET status = ?, updated_at = ? WHERE plan_id = ? AND feature_key = ? AND status = ? RETURNING ${CATALOG_PLAN_FEATURE_COLUMNS}`,
-    ).bind(next, now, planId, featureKey, expected);
-    let base: Record<string, unknown> | null;
-    try {
-      base = await writeCatalogWithAudit(env, update, catalogPlanFeatureAudit(env, planId, featureKey, String(existing.project), action, JSON.stringify(existing), reason, actor, requestIdValue, now));
-    } catch {
-      return envelope(requestIdValue, "catalog_mutation_failed", undefined, 500);
-    }
-    if (base === null) return envelope(requestIdValue, "catalog_status_conflict", undefined, 409);
+    const result = await transitionWithGuard(env, {
+      table: "catalog_plan_features",
+      columns: CATALOG_PLAN_FEATURE_COLUMNS,
+      idClause: "plan_id = ? AND feature_key = ?",
+      idValues: [planId, featureKey],
+      action,
+      conflictCode: "catalog_status_conflict",
+      notFoundCode: "catalog_plan_feature_not_found",
+      mutationFailedCode: "catalog_mutation_failed",
+      reason,
+      requireReason: true,
+      auditStatement: (existing, _nextStatus, now) =>
+        catalogPlanFeatureAudit(env, planId, featureKey, String(existing.project), action, JSON.stringify(existing), reason, actor, requestIdValue, now),
+    }, requestIdValue);
+    if (result instanceof Response) return result;
+    // The guarded flip + audit landed; surface the joined VIEW (plan_key + feature_name) as data.
     const row = await getCatalogPlanFeatureView(env, planId, featureKey);
     return { data: row, idempotencyRecorded: false };
   });
@@ -2295,45 +2279,24 @@ async function handleCustomerTransition(
     return body;
   }
   const reason = safeNotes((body as Record<string, unknown>).reason) ?? "";
-  if (action === "disable" && reason === "") {
-    return envelope(requestIdValue, "reason_required", undefined, 400);
-  }
   const ctx: MutationContext = { actor, requestId: requestIdValue, ip: clientIp(request), idempotencyKey, source: "admin" };
-  return mutationResponse(request, env, ctx, `customer_${action}d`, async () => {
-    const existing = await env.DB.prepare("SELECT status FROM customers WHERE id = ?").bind(customerId).first<{ status: string }>();
-    if (existing === null) {
-      return envelope(requestIdValue, "not_found", undefined, 404);
-    }
-    const expectedPrev = action === "disable" ? "active" : "disabled";
-    const next = action === "disable" ? "disabled" : "active";
-    if (existing.status !== expectedPrev) {
-      return envelope(requestIdValue, "customer_status_conflict", { status: existing.status }, 409);
-    }
-    if (typeof env.DB.batch !== "function") {
-      return envelope(requestIdValue, "mutation_failed", undefined, 500);
-    }
-    const now = Math.floor(Date.now() / 1000);
-    let results: unknown[];
-    try {
-      results = await env.DB.batch([
-        env.DB.prepare(
-          "UPDATE customers SET status = ?, updated_at = ? WHERE id = ? AND status = ? RETURNING id, name, email, status, external_ref, created_at, updated_at",
-        ).bind(next, now, customerId, expectedPrev),
+  return mutationResponse(request, env, ctx, `customer_${action}d`, () =>
+    transitionWithGuard(env, {
+      table: "customers",
+      columns: "id, name, email, status, external_ref, created_at, updated_at",
+      idClause: "id = ?",
+      idValues: [customerId],
+      action,
+      conflictCode: "customer_status_conflict",
+      reason,
+      requireReason: true,
+      auditStatement: (existing, nextStatus, now) =>
         env.DB.prepare(
           `INSERT INTO customer_events (customer_id, event_type, prev_status, next_status, actor, actor_type, source, reason, request_id, created_at)
            SELECT ?, ?, ?, ?, ?, ?, 'admin', ?, ?, ? WHERE EXISTS (SELECT 1 FROM customers WHERE id = ? AND status = ? AND updated_at = ?)`,
-        ).bind(customerId, action, expectedPrev, next, actor.email, actor.actorType, reason, requestIdValue, now, customerId, next, now),
-      ]);
-    } catch {
-      return envelope(requestIdValue, "mutation_failed", undefined, 500);
-    }
-    const updated = batchReturnedRow<Record<string, unknown>>(results[0]);
-    if (updated === null) {
-      // Lost the guarded race — status changed between the pre-read and the UPDATE.
-      return envelope(requestIdValue, "customer_status_conflict", undefined, 409);
-    }
-    return { data: updated, idempotencyRecorded: false };
-  });
+        ).bind(customerId, action, String(existing.status), nextStatus, actor.email, actor.actorType, reason, requestIdValue, now, customerId, nextStatus, now),
+    }, requestIdValue),
+  );
 }
 
 // ── Bulk entitlement transitions (Workstream C) ──────────────────────────────
@@ -2524,6 +2487,26 @@ async function getPolicy(env: Env, policyId: string, requestIdValue: string): Pr
 
 // Shared atomic write: INSERT/UPDATE the policy row + INSERT a policy_events audit row in one
 // batch, returning the persisted row. `eventType` is the audit verb; `reason` the audit reason.
+// The policy_events audit INSERT (next_json snapshots the row AFTER the batch's mutation lands).
+// Shared by the create/patch path (writePolicyWithAudit) and the disable/reenable transition
+// (transitionWithGuard's audit callback) so both write the same audit shape.
+function policyEventAudit(
+  env: Env,
+  policyId: string,
+  project: string,
+  eventType: "create" | "update" | "disable" | "reenable",
+  reason: string,
+  actor: Actor,
+  requestIdValue: string,
+  now: number,
+): ReturnType<D1DatabaseLike["prepare"]> {
+  return env.DB.prepare(
+    `INSERT INTO policy_events (policy_id, project, event_type, actor, actor_type, source, reason, request_id, prev_json, next_json, created_at)
+     SELECT ?, ?, ?, ?, ?, 'admin', ?, ?, '', json_object(${POLICY_COLUMNS.split(", ").map((c) => `'${c}', ${c}`).join(", ")}), ?
+     FROM entitlement_policies WHERE id = ?`,
+  ).bind(policyId, project, eventType, actor.email || actor.subject, actor.actorType, reason, requestIdValue, now, policyId);
+}
+
 async function writePolicyWithAudit(
   env: Env,
   policyStatement: ReturnType<D1DatabaseLike["prepare"]>,
@@ -2538,11 +2521,7 @@ async function writePolicyWithAudit(
   if (typeof env.DB.batch !== "function") {
     return null;
   }
-  const auditStatement = env.DB.prepare(
-    `INSERT INTO policy_events (policy_id, project, event_type, actor, actor_type, source, reason, request_id, prev_json, next_json, created_at)
-     SELECT ?, ?, ?, ?, ?, 'admin', ?, ?, '', json_object(${POLICY_COLUMNS.split(", ").map((c) => `'${c}', ${c}`).join(", ")}), ?
-     FROM entitlement_policies WHERE id = ?`,
-  ).bind(policyId, project, eventType, actor.email || actor.subject, actor.actorType, reason, requestIdValue, now, policyId);
+  const auditStatement = policyEventAudit(env, policyId, project, eventType, reason, actor, requestIdValue, now);
   const results = await env.DB.batch([policyStatement, auditStatement]);
   return batchReturnedRow<Record<string, unknown>>(results[0]);
 }
@@ -2650,43 +2629,25 @@ async function handlePolicyPatch(request: Request, env: Env, actor: Actor, polic
 // retro-mutates already-stamped entitlements (those are frozen copies).
 async function handlePolicyTransition(request: Request, env: Env, actor: Actor, policyId: string, action: "disable" | "reenable", body: unknown, requestIdValue: string): Promise<Response> {
   const reason = safeNotes((body as Record<string, unknown>).reason) ?? "";
-  if (action === "disable" && reason === "") {
-    return envelope(requestIdValue, "reason_required", undefined, 400);
-  }
   const idempotencyKey = readIdempotencyKey(request);
   if (idempotencyKey === INVALID_IDEMPOTENCY_KEY) {
     return envelope(requestIdValue, "invalid_idempotency_key", undefined, 400);
   }
   const ctx: MutationContext = { actor, requestId: requestIdValue, ip: clientIp(request), idempotencyKey, source: "admin" };
-  return mutationResponse(request, env, ctx, `policy_${action}d`, async () => {
-    const existing = await findPolicy(env, policyId);
-    if (existing === null) {
-      return envelope(requestIdValue, "not_found", undefined, 404);
-    }
-    const expectedPrev = action === "disable" ? "active" : "disabled";
-    const next = action === "disable" ? "disabled" : "active";
-    if (existing.status !== expectedPrev) {
-      return envelope(requestIdValue, "policy_status_conflict", { status: existing.status }, 409);
-    }
-    if (typeof env.DB.batch !== "function") {
-      return envelope(requestIdValue, "mutation_failed", undefined, 500);
-    }
-    const now = Math.floor(Date.now() / 1000);
-    const update = env.DB.prepare(
-      `UPDATE entitlement_policies SET status = ?, updated_at = ? WHERE id = ? AND status = ? RETURNING ${POLICY_COLUMNS}`,
-    ).bind(next, now, policyId, expectedPrev);
-    let row: Record<string, unknown> | null;
-    try {
-      row = await writePolicyWithAudit(env, update, policyId, existing.project, action, reason, actor, requestIdValue, now);
-    } catch {
-      return envelope(requestIdValue, "mutation_failed", undefined, 500);
-    }
-    if (row === null) {
-      // Lost the guarded race — status changed between the pre-read and the UPDATE.
-      return envelope(requestIdValue, "policy_status_conflict", undefined, 409);
-    }
-    return { data: row, idempotencyRecorded: false };
-  });
+  return mutationResponse(request, env, ctx, `policy_${action}d`, () =>
+    transitionWithGuard(env, {
+      table: "entitlement_policies",
+      columns: POLICY_COLUMNS,
+      idClause: "id = ?",
+      idValues: [policyId],
+      action,
+      conflictCode: "policy_status_conflict",
+      reason,
+      requireReason: true,
+      auditStatement: (existing, _nextStatus, now) =>
+        policyEventAudit(env, policyId, String(existing.project), action, reason, actor, requestIdValue, now),
+    }, requestIdValue),
+  );
 }
 
 // Dispatch the policy writes (POST create, PATCH :id, POST :id/disable|reenable). All require

@@ -1251,10 +1251,11 @@ function App(): React.ReactElement {
       const result = await api<WebhookEndpoint>(webhookTransitionPath(endpoint.id, action), {
         method: "POST",
         headers: { "idempotency-key": crypto.randomUUID() },
-        body: JSON.stringify({}),
+        body: JSON.stringify(action === "disable" ? { reason: currentReason() } : {}),
       });
       setMessage(`${result.code} (${result.request_id})`);
       if (result.ok) {
+        setReason("");
         await refreshWebhooks();
       }
     });
@@ -2239,7 +2240,7 @@ function App(): React.ReactElement {
                     <td>{formatEpoch(endpoint.created_at)}</td>
                     <td className="actions">
                       <button type="button" disabled={busy} onClick={() => showDeliveriesForEndpoint(endpoint.id)}>Deliveries</button>
-                      <button className="danger" disabled={busy || !canRunWebhookAction(endpoint.status, "disable")} onClick={() => requestConfirm({ title: "Disable webhook", body: disableWebhookConfirm(endpoint), requiresReason: false, run: () => webhookTransition(endpoint, "disable") })}>Disable</button>
+                      <button className="danger" disabled={busy || !canRunWebhookAction(endpoint.status, "disable")} onClick={() => requestConfirm({ title: "Disable webhook", body: disableWebhookConfirm(endpoint), requiresReason: true, run: () => webhookTransition(endpoint, "disable") })}>Disable</button>
                       <button disabled={busy || !canRunWebhookAction(endpoint.status, "reenable")} onClick={() => void webhookTransition(endpoint, "reenable")}>Reenable</button>
                     </td>
                   </tr>

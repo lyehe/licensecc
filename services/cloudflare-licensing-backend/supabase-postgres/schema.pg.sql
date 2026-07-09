@@ -584,6 +584,24 @@ CREATE TABLE IF NOT EXISTS webhook_cursor (
   updated_at   BIGINT NOT NULL
 );
 
+-- Append-only audit for the webhook-endpoint kill-switch (migration 0027; mirrors customer_events).
+CREATE TABLE IF NOT EXISTS webhook_events (
+  id          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  endpoint_id TEXT   NOT NULL,
+  event_type  TEXT   NOT NULL CHECK (event_type IN ('disable', 'reenable')),
+  prev_status TEXT   NOT NULL,
+  next_status TEXT   NOT NULL,
+  actor       TEXT   NOT NULL DEFAULT '',
+  actor_type  TEXT   NOT NULL DEFAULT 'unknown' CHECK (actor_type IN ('access', 'dev', 'cli', 'sync', 'system', 'unknown')),
+  source      TEXT   NOT NULL DEFAULT 'admin',
+  reason      TEXT   NOT NULL DEFAULT '',
+  request_id  TEXT   NOT NULL DEFAULT '',
+  created_at  BIGINT NOT NULL,
+  FOREIGN KEY (endpoint_id) REFERENCES webhook_endpoints(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_webhook_events_endpoint ON webhook_events(endpoint_id, created_at DESC);
+
 -- =====================================================================================
 -- audit_digests  (migration 0022) -- tamper-evident hash chain over entitlement_events.
 -- =====================================================================================

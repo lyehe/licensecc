@@ -945,13 +945,13 @@ const paths: Record<string, Record<string, unknown>> = {
       security: ADMIN_SECURITY,
       parameters: [idParam, idempotencyKeyHeader],
       requestBody: {
-        required: false,
-        description: "Empty JSON object accepted; no body fields are read.",
-        content: { "application/json": { schema: { $ref: "#/components/schemas/EmptyBody" } } },
+        required: true,
+        description: "A non-empty audit reason is required; it is recorded in the webhook_events log.",
+        content: { "application/json": { schema: { $ref: "#/components/schemas/ReasonRequiredBody" } } },
       },
       responses: {
         "200": okResponse("Webhook endpoint disabled.", "#/components/schemas/WebhookEndpoint", "webhook_disabled"),
-        "400": errorResponse("Invalid request / json / idempotency key.", "invalid_idempotency_key", "invalid_json", "invalid_request"),
+        "400": errorResponse("Invalid request / json / idempotency key, or missing reason.", "invalid_idempotency_key", "invalid_json", "invalid_request", "reason_required"),
         ...ADMIN_MUTATION_AUTH_ERRORS,
         "404": errorResponse("No webhook endpoint with that id.", "not_found"),
         "409": errorResponse("Endpoint is not in the expected prior status (concurrent change).", "webhook_status_conflict"),

@@ -264,7 +264,7 @@ test("webhook: list filters by status and paginates with a cursor", async () => 
   const b = await createWebhook(env, { url: "https://b.example.com/h" });
   await createWebhook(env, { url: "https://c.example.com/h" });
   // Disable one so the status filter has something to exclude.
-  await worker.fetch(devReq(`/api/admin/webhooks/${a.id}/disable`, { method: "POST", body: "{}" }), env);
+  await worker.fetch(devReq(`/api/admin/webhooks/${a.id}/disable`, { method: "POST", body: JSON.stringify({ reason: "filter setup" }) }), env);
 
   const activeList = await (await worker.fetch(devReq("/api/admin/webhooks?status=active"), env)).json();
   assert.equal(activeList.code, "webhooks_listed");
@@ -342,18 +342,50 @@ test("webhook: disable/reenable guard + 409 on a stale status", async () => {
   const env = devEnv(db);
   const ep = await createWebhook(env, { url: "https://f.example.com/h" });
 
-  const disabled = await (await worker.fetch(devReq(`/api/admin/webhooks/${ep.id}/disable`, { method: "POST", body: "{}" }), env)).json();
+  const disabled = await (await worker.fetch(devReq(`/api/admin/webhooks/${ep.id}/disable`, { method: "POST", body: JSON.stringify({ reason: "guard test" }) }), env)).json();
   assert.equal(disabled.code, "webhook_disabled");
   assert.equal(disabled.data.status, "disabled");
 
   // Disabling an already-disabled endpoint is a 409 (the guarded UPDATE requires status=active).
-  const again = await worker.fetch(devReq(`/api/admin/webhooks/${ep.id}/disable`, { method: "POST", body: "{}" }), env);
+  const again = await worker.fetch(devReq(`/api/admin/webhooks/${ep.id}/disable`, { method: "POST", body: JSON.stringify({ reason: "guard test" }) }), env);
   assert.equal(again.status, 409);
   assert.equal((await body(again)).code, "webhook_status_conflict");
 
   const reenabled = await (await worker.fetch(devReq(`/api/admin/webhooks/${ep.id}/reenable`, { method: "POST", body: "{}" }), env)).json();
   assert.equal(reenabled.code, "webhook_reenabled");
   assert.equal(reenabled.data.status, "active");
+});
+
+test("webhook: disable requires a reason and records it in an audit event", async () => {
+  const db = freshDb();
+  const env = devEnv(db);
+  const ep = await createWebhook(env, { url: "https://audit.example.com/h" });
+
+  // disable with no reason -> 400 reason_required, nothing changes.
+  const noReason = await worker.fetch(devReq(`/api/admin/webhooks/${ep.id}/disable`, { method: "POST", body: "{}" }), env);
+  assert.equal(noReason.status, 400);
+  assert.equal((await body(noReason)).code, "reason_required");
+  assert.equal(db.prepare("SELECT status FROM webhook_endpoints WHERE id = ?").get(ep.id).status, "active");
+  assert.equal(db.prepare("SELECT COUNT(*) AS c FROM webhook_events WHERE endpoint_id = ?").get(ep.id).c, 0);
+
+  // disable WITH a reason -> 200, status flips, and an audit row records the reason (mirrors customer_events).
+  const disabled = await (await worker.fetch(devReq(`/api/admin/webhooks/${ep.id}/disable`, { method: "POST", body: JSON.stringify({ reason: "rotating endpoint" }) }), env)).json();
+  assert.equal(disabled.code, "webhook_disabled");
+  assert.equal(disabled.data.status, "disabled");
+  const event = db.prepare("SELECT * FROM webhook_events WHERE endpoint_id = ? ORDER BY id DESC LIMIT 1").get(ep.id);
+  assert.equal(event.event_type, "disable");
+  assert.equal(event.prev_status, "active");
+  assert.equal(event.next_status, "disabled");
+  assert.equal(event.reason, "rotating endpoint");
+  assert.equal(event.source, "admin");
+
+  // reenable does not require a reason and records its own audit row.
+  const reenabled = await (await worker.fetch(devReq(`/api/admin/webhooks/${ep.id}/reenable`, { method: "POST", body: "{}" }), env)).json();
+  assert.equal(reenabled.code, "webhook_reenabled");
+  assert.equal(db.prepare("SELECT COUNT(*) AS c FROM webhook_events WHERE endpoint_id = ?").get(ep.id).c, 2);
+  const reEvent = db.prepare("SELECT * FROM webhook_events WHERE endpoint_id = ? ORDER BY id DESC LIMIT 1").get(ep.id);
+  assert.equal(reEvent.event_type, "reenable");
+  assert.equal(reEvent.reason, "");
 });
 
 test("webhook deliveries: status view filters by status + endpoint", async () => {

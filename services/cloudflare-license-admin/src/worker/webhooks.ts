@@ -12,8 +12,10 @@ import {
   mutationResponse,
   readIdempotencyKey,
 } from "./idempotency.js";
-import { boundedCursor, parseJsonBody, requireAdmin } from "./index.js";
+import { boundedCursor, parseJsonBody, requireAdmin, safeNotes } from "./index.js";
 import type { Env } from "./index.js";
+import { transitionWithGuard } from "./transitions.js";
+import type { D1PreparedStatementLike } from "@licensecc/cloudflare-licensing-backend/entitlements/entitlement_mutation";
 import type {
   WebhookEndpoint,
   WebhookEndpointInput,
@@ -361,40 +363,52 @@ async function handleWebhookPatch(request: Request, env: Env, actor: Actor, endp
   });
 }
 
-// Disable/reenable kill-switch: a guarded UPDATE (status flips only from the expected prior
-// status). Disabling stops the dispatcher from enqueuing/delivering for this endpoint; it
-// never deletes already-enqueued deliveries (the deliver pass skips a disabled endpoint).
-async function handleWebhookTransition(request: Request, env: Env, actor: Actor, endpointId: string, action: "disable" | "reenable", requestIdValue: string): Promise<Response> {
+// Append-only audit for a webhook kill-switch flip (migration 0027; mirrors customer_events).
+// Batched WITH the guarded UPDATE by transitionWithGuard, so the WHERE EXISTS ... updated_at = ?
+// guard writes the event only when the flip actually landed (never on a lost race / replay).
+function webhookEventAudit(
+  env: Env,
+  endpointId: string,
+  action: "disable" | "reenable",
+  prevStatus: string,
+  nextStatus: string,
+  reason: string,
+  actor: Actor,
+  requestIdValue: string,
+  now: number,
+): D1PreparedStatementLike {
+  return env.DB.prepare(
+    `INSERT INTO webhook_events (endpoint_id, event_type, prev_status, next_status, actor, actor_type, source, reason, request_id, created_at)
+     SELECT ?, ?, ?, ?, ?, ?, 'admin', ?, ?, ? WHERE EXISTS (SELECT 1 FROM webhook_endpoints WHERE id = ? AND status = ? AND updated_at = ?)`,
+  ).bind(endpointId, action, prevStatus, nextStatus, actor.email || actor.subject, actor.actorType, reason, requestIdValue, now, endpointId, nextStatus, now);
+}
+
+// Disable/reenable kill-switch. Disabling is destructive (it stops the dispatcher from
+// enqueuing/delivering for this endpoint; already-enqueued deliveries are untouched), so it
+// REQUIRES an audited reason exactly like the customer/policy/catalog kill-switches. The guard
+// ceremony (pre-read → guarded UPDATE ... RETURNING → lost-race 409 + the atomic audit row)
+// is transitionWithGuard; here we only parse the reason and describe the resource.
+async function handleWebhookTransition(request: Request, env: Env, actor: Actor, endpointId: string, action: "disable" | "reenable", body: unknown, requestIdValue: string): Promise<Response> {
+  const reason = safeNotes((body as Record<string, unknown>).reason) ?? "";
   const idempotencyKey = readIdempotencyKey(request);
   if (idempotencyKey === INVALID_IDEMPOTENCY_KEY) {
     return envelope(requestIdValue, "invalid_idempotency_key", undefined, 400);
   }
   const ctx: MutationContext = { actor, requestId: requestIdValue, ip: clientIp(request), idempotencyKey, source: "admin" };
-  return mutationResponse(request, env, ctx, `webhook_${action}d`, async () => {
-    const expectedPrev = action === "disable" ? "active" : "disabled";
-    const next = action === "disable" ? "disabled" : "active";
-    const existing = await findWebhookEndpoint(env, endpointId);
-    if (existing === null) {
-      return envelope(requestIdValue, "not_found", undefined, 404);
-    }
-    if (existing.status !== expectedPrev) {
-      return envelope(requestIdValue, "webhook_status_conflict", { status: existing.status }, 409);
-    }
-    const now = Math.floor(Date.now() / 1000);
-    let row: WebhookEndpoint | null;
-    try {
-      row = await env.DB.prepare(
-        `UPDATE webhook_endpoints SET status = ?, updated_at = ? WHERE id = ? AND status = ? RETURNING ${WEBHOOK_ENDPOINT_COLUMNS}`,
-      ).bind(next, now, endpointId, expectedPrev).first<WebhookEndpoint>();
-    } catch {
-      return envelope(requestIdValue, "mutation_failed", undefined, 500);
-    }
-    if (row === null) {
-      // Lost the guarded race — status changed between the pre-read and the UPDATE.
-      return envelope(requestIdValue, "webhook_status_conflict", undefined, 409);
-    }
-    return { data: row, idempotencyRecorded: false };
-  });
+  return mutationResponse(request, env, ctx, `webhook_${action}d`, () =>
+    transitionWithGuard(env, {
+      table: "webhook_endpoints",
+      columns: WEBHOOK_ENDPOINT_COLUMNS,
+      idClause: "id = ?",
+      idValues: [endpointId],
+      action,
+      conflictCode: "webhook_status_conflict",
+      reason,
+      requireReason: true,
+      auditStatement: (existing, nextStatus, now) =>
+        webhookEventAudit(env, endpointId, action, String(existing.status), nextStatus, reason, actor, requestIdValue, now),
+    }, requestIdValue),
+  );
 }
 
 // Redrive: reset a 'failed' delivery back to 'pending' with next_attempt_at = now so the next
@@ -469,7 +483,7 @@ export async function handleWebhookMutation(request: Request, env: Env, actor: A
     return handleWebhookPatch(request, env, actor, endpointId, body, requestIdValue);
   }
   if (request.method === "POST" && (action === "disable" || action === "reenable")) {
-    return handleWebhookTransition(request, env, actor, endpointId, action, requestIdValue);
+    return handleWebhookTransition(request, env, actor, endpointId, action, body, requestIdValue);
   }
   return envelope(requestIdValue, "not_found", undefined, 404);
 }
