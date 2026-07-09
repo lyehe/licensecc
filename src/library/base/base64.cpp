@@ -113,9 +113,12 @@ std::vector<uint8_t> unbase64(const std::string& base64_data) {
 	int pad = 0;
 	size_t len = tmp_str.size();
 
-	if (len < 2) {  // 2 accesses below would be OOB.
-		// catch empty string, return NULL as result.
-		puts("ERROR: You passed an invalid base64 string (too short). You get NULL back.");
+	if (len < 4) {
+		// An incomplete quantum (fewer than 4 base64 chars) is not decodable:
+		// the padding probes below read len-1/len-2, and the main loop bound
+		// `len - 4 - pad` would underflow size_t and over-read the buffer.
+		// The FORMAT regex upstream already rejects malformed input; callers
+		// treat an empty vector as "reject", so fail silently (no stdout).
 		return bin;
 	}
 	if (safeAsciiPtr[len - 1] == '=') ++pad;
@@ -124,7 +127,10 @@ std::vector<uint8_t> unbase64(const std::string& base64_data) {
 	size_t flen = 3 * len / 4 - pad;
 	bin.reserve(flen);
 
-	for (charNo = 0; charNo <= len - 4 - pad; charNo += 4) {
+	// Equivalent to `charNo <= len - 4 - pad`, but written as an addition so the
+	// bound never underflows size_t when the only quantum is a padded tail
+	// (e.g. len == 4 with pad > 0), which used to read past the buffer.
+	for (charNo = 0; charNo + 4 + (size_t)pad <= len; charNo += 4) {
 		int A = unb64[safeAsciiPtr[charNo]];
 		int B = unb64[safeAsciiPtr[charNo + 1]];
 		int C = unb64[safeAsciiPtr[charNo + 2]];

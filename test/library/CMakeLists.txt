@@ -85,11 +85,25 @@ target_link_libraries(
  Boost::system
 )
 
+### base64 codec tests
+add_executable(
+ test_base64
+ base64_test.cpp
+ $<TARGET_OBJECTS:base>
+)
+
+target_link_libraries(
+ test_base64
+ Boost::unit_test_framework
+ Boost::system
+)
+
 ADD_TEST(NAME test_license_reader COMMAND test_license_reader)
 ADD_TEST(NAME test_license_locator COMMAND test_license_locator)
 ADD_TEST(NAME test_event_registry COMMAND test_event_registry)
 ADD_TEST(NAME test_license_verifier COMMAND test_license_verifier)
 ADD_TEST(NAME test_public_api COMMAND test_public_api)
+ADD_TEST(NAME test_base64 COMMAND test_base64)
 
 ADD_SUBDIRECTORY(os)
 ADD_SUBDIRECTORY(hw_identifier)
