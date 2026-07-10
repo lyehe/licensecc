@@ -11,6 +11,10 @@ Licensecc helps applications verify local license files, bind licenses to machin
 
 The repository is licensed under the [GNU Affero General Public License v3.0 or later](https://www.gnu.org/licenses/agpl-3.0.html). See [LICENSE](LICENSE) for the full license text.
 
+**Versioning:** no tagged release yet. The C++ library carries the upstream 2.x lineage version
+(`2.1.0` in CMake); the platform packages (services, SDKs, root tooling) are `0.1.0` pre-release and
+versioned independently until the first platform release. See [CHANGELOG.md](CHANGELOG.md).
+
 ## Repository Map
 
 - `src/`: C++ implementation.
