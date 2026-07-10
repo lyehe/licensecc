@@ -34,11 +34,26 @@ jobs:
           npm --prefix services/cloudflare-license-admin run lint
           npm --prefix services/cloudflare-license-admin run test
           npm --prefix services/cloudflare-license-admin run test:sql
+          npm --prefix services/cloudflare-license-admin run test:ui
       - name: Customer portal
         run: |
           npm --prefix services/cloudflare-customer-portal run lint
           npm --prefix services/cloudflare-customer-portal run test
+          npm --prefix services/cloudflare-customer-portal run test:ui
       - name: D1 backup
         run: |
           npm --prefix services/cloudflare-d1-backup run lint
           npm --prefix services/cloudflare-d1-backup run test
+  schema-parity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: astral-sh/setup-uv@v5
+      # Both scripts run via `uv run --no-project` (sqlglot fetched on demand); no npm install needed.
+      - name: D1 and PostgreSQL schema parity
+        run: |
+          npm --prefix services/cloudflare-licensing-backend run schema:parity
+          npm --prefix services/cloudflare-licensing-backend run schema:parity:pg
