@@ -35,6 +35,7 @@ import * as emailModule from "../auth/portal_email.mjs";
 import * as ratelimitModule from "../auth/portal_ratelimit.mjs";
 import type { ApiEnvelope } from "../shared/api";
 import { openApiDocument, DOCS_HTML } from "./openapi.js";
+import { META_ROUTES, PUBLIC_ROUTES, SESSION_ROUTES } from "./routes.js";
 import { constantTimeEqual, readTextBody, requestId, bearerToken } from "@licensecc/cloudflare-licensing-backend/http/kit";
 
 type AnyFn = (...args: any[]) => any;
@@ -644,19 +645,27 @@ async function apiDownload(
   return new Response(upstreamBody.lic, { status: 200, headers });
 }
 
+// Session-scoped dispatch table (built from SESSION_ROUTES): every thunk runs AFTER authSession()
+// has produced a live session. Signatures adapt each existing handler's exact wiring.
+type SessionRow = { customer_id: string; id: string };
+const SESSION_DISPATCH: Record<string, (request: Request, env: Env, session: SessionRow, reqId: string, now: number) => Promise<Response> | Response> = {
+  "GET /api/portal/me": (_request, _env, session, reqId) => apiMe(session, reqId),
+  "GET /api/portal/entitlements": (_request, env, session, reqId) => apiEntitlements(env, session, reqId),
+  "GET /api/portal/devices": (_request, env, session, reqId) => apiDevices(env, session, reqId),
+  "POST /api/portal/devices/release": (request, env, session, reqId, now) => apiDeviceRelease(request, env, session, reqId, now),
+  "GET /api/portal/usage": (_request, env, session, reqId) => apiUsage(env, session, reqId),
+  "POST /api/portal/checkout": (request, env, session, reqId, now) => apiAction(request, env, session, reqId, now, "checkout"),
+  "POST /api/portal/heartbeat": (request, env, session, reqId, now) => apiAction(request, env, session, reqId, now, "heartbeat"),
+  "POST /api/portal/release": (request, env, session, reqId, now) => apiAction(request, env, session, reqId, now, "release"),
+  "POST /api/portal/download": (request, env, session, reqId, now) => apiDownload(request, env, session, reqId, now),
+};
+
 async function handleApiPortal(request: Request, env: Env, reqId: string, now: number, pathname: string): Promise<Response> {
   const session = await authSession(request, env, reqId, now);
   if (session instanceof Response) return session;
 
-  if (request.method === "GET" && pathname === "/api/portal/me") return apiMe(session, reqId);
-  if (request.method === "GET" && pathname === "/api/portal/entitlements") return apiEntitlements(env, session, reqId);
-  if (request.method === "GET" && pathname === "/api/portal/devices") return apiDevices(env, session, reqId);
-  if (request.method === "POST" && pathname === "/api/portal/devices/release") return apiDeviceRelease(request, env, session, reqId, now);
-  if (request.method === "GET" && pathname === "/api/portal/usage") return apiUsage(env, session, reqId);
-  if (request.method === "POST" && pathname === "/api/portal/checkout") return apiAction(request, env, session, reqId, now, "checkout");
-  if (request.method === "POST" && pathname === "/api/portal/heartbeat") return apiAction(request, env, session, reqId, now, "heartbeat");
-  if (request.method === "POST" && pathname === "/api/portal/release") return apiAction(request, env, session, reqId, now, "release");
-  if (request.method === "POST" && pathname === "/api/portal/download") return apiDownload(request, env, session, reqId, now);
+  const route = SESSION_DISPATCH[`${request.method} ${pathname}`];
+  if (route !== undefined) return await route(request, env, session, reqId, now);
   return envelope(reqId, "not_found", undefined, 404);
 }
 
@@ -666,6 +675,46 @@ function health(env: Env, reqId: string): Response {
   return envelope(reqId, required ? "healthy" : "account_token_mode_not_required", { account_token_mode_required: required }, required ? 200 : 503);
 }
 
+// Top-level dispatch table (built from META_ROUTES + PUBLIC_ROUTES). Doc/meta thunks must stay
+// env-free by contract — the openapi crosscheck calls them with an empty env. Auth handlers do
+// their own gating; the /api/portal/ prefix and the SPA fallback stay outside the table.
+const TOP_DISPATCH: Record<string, (request: Request, env: Env, ctx: ExecutionContextLike | undefined, reqId: string, now: number) => Promise<Response> | Response> = {
+  "GET /openapi.json": () => json(openApiDocument, 200, { "cache-control": "no-store" }),
+  "GET /docs": () =>
+    new Response(DOCS_HTML, {
+      status: 200,
+      headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" },
+    }),
+  "GET /health": (_request, env, _ctx, reqId) => health(env, reqId),
+  "POST /portal/v1/auth/request": (request, env, ctx, reqId, now) => handleAuthRequest(request, env, ctx, reqId, now),
+  "POST /portal/v1/auth/verify": (request, env, _ctx, reqId, now) => handleAuthVerify(request, env, reqId, now),
+  "GET /portal/v1/auth/magic": (request, env) => handleMagicInterstitial(request, env),
+  "POST /portal/v1/auth/magic-redeem": (request, env, _ctx, reqId, now) => handleMagicRedeem(request, env, reqId, now),
+  "POST /portal/v1/auth/logout": (request, env, _ctx, reqId, now) => handleLogout(request, env, reqId, now),
+  "POST /portal/v1/admin/bootstrap-otp": (request, env, _ctx, reqId, now) => handleBootstrap(request, env, reqId, now),
+};
+
+// Startup guard: both dispatch tables and the route inventory must agree exactly, in both directions.
+{
+  const top = new Set([...META_ROUTES, ...PUBLIC_ROUTES].map((r) => `${r.method} ${r.path}`));
+  const session = new Set(SESSION_ROUTES.map((r) => `${r.method} ${r.path}`));
+  for (const key of Object.keys(TOP_DISPATCH)) {
+    if (!top.has(key)) throw new Error(`top-level dispatch entry not in route inventory: ${key}`);
+  }
+  for (const key of top) {
+    if (!(key in TOP_DISPATCH)) throw new Error(`route without top-level dispatch entry: ${key}`);
+  }
+  for (const key of Object.keys(SESSION_DISPATCH)) {
+    if (!session.has(key)) throw new Error(`session dispatch entry not in route inventory: ${key}`);
+  }
+  for (const key of session) {
+    if (!(key in SESSION_DISPATCH)) throw new Error(`route without session dispatch entry: ${key}`);
+  }
+}
+
+// Exposed for the openapi crosscheck test: the literal routes this Worker actually serves.
+export const PORTAL_ROUTE_KEYS: readonly string[] = [...Object.keys(TOP_DISPATCH), ...Object.keys(SESSION_DISPATCH)];
+
 export default {
   async fetch(request: Request, env: Env, ctx?: ExecutionContextLike): Promise<Response> {
     const reqId = requestId(request);
@@ -674,27 +723,8 @@ export default {
       const url = new URL(request.url);
       const p = url.pathname;
 
-      // Unauthenticated API documentation (added early, before any auth or route dispatch). Does not
-      // disturb existing routes. /openapi.json serves the spec; /docs serves a self-contained,
-      // dependency-free HTML page that fetches and renders it.
-      if (request.method === "GET" && p === "/openapi.json") {
-        return json(openApiDocument, 200, { "cache-control": "no-store" });
-      }
-      if (request.method === "GET" && p === "/docs") {
-        return new Response(DOCS_HTML, {
-          status: 200,
-          headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" },
-        });
-      }
-
-      if (request.method === "GET" && p === "/health") return health(env, reqId);
-
-      if (p === "/portal/v1/auth/request" && request.method === "POST") return await handleAuthRequest(request, env, ctx, reqId, now);
-      if (p === "/portal/v1/auth/verify" && request.method === "POST") return await handleAuthVerify(request, env, reqId, now);
-      if (p === "/portal/v1/auth/magic" && request.method === "GET") return handleMagicInterstitial(request, env);
-      if (p === "/portal/v1/auth/magic-redeem" && request.method === "POST") return await handleMagicRedeem(request, env, reqId, now);
-      if (p === "/portal/v1/auth/logout" && request.method === "POST") return await handleLogout(request, env, reqId, now);
-      if (p === "/portal/v1/admin/bootstrap-otp" && request.method === "POST") return await handleBootstrap(request, env, reqId, now);
+      const route = TOP_DISPATCH[`${request.method} ${p}`];
+      if (route !== undefined) return await route(request, env, ctx, reqId, now);
 
       if (p.startsWith("/api/portal/")) return await handleApiPortal(request, env, reqId, now, p);
 

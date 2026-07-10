@@ -1,118 +1,50 @@
-// Build-time CROSS-CHECK that PINS the OpenAPI spec to the Worker source so the two cannot silently
-// drift. This is a "doc-of-existing" guard, not a generator: if someone adds/removes a route in
-// src/worker/index.ts (or in the spec) without updating the other, this test fails.
+// Build-time CROSS-CHECK that PINS the OpenAPI spec to the Worker's actual routes so the two cannot
+// silently drift. This is a "doc-of-existing" guard, not a generator. It compares COMPILED artifacts
+// — the route inventory (dist-worker/worker/routes.js, the single source of truth), the dispatch
+// keys the Worker actually serves (dist-worker/worker/index.js PORTAL_ROUTE_KEYS), and the spec —
+// instead of grepping the TypeScript source, so refactoring handler code can never break this test;
+// only a real route/spec divergence can.
 //
-// It asserts three things:
-//   (a) every path in spec.paths has its literal route present in src/worker/index.ts;
-//   (b) every routed path src/worker/index.ts declares is present in spec.paths (via a CANONICAL
-//       route list derived from the route inventory — so an ADDED source route that nobody put in
-//       the spec, or a REMOVED source route still in the spec, fails);
-//   (c) the spec's own set of paths equals that canonical list (keeps the inventory authoritative).
-//
-// Zero-dep node:test. The spec is imported from the compiled worker output (dist-worker), matching
-// the other portal tests which import ../dist-worker/worker/index.js after `npm run build:worker`.
+// Zero-dep node:test. Every portal route is a static literal (no path parameters).
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { openApiDocument } from "../dist-worker/worker/openapi.js";
+import { ALL_ROUTES, META_ROUTES, PUBLIC_ROUTES, SESSION_ROUTES } from "../dist-worker/worker/routes.js";
+import worker, { PORTAL_ROUTE_KEYS } from "../dist-worker/worker/index.js";
 
-const here = dirname(fileURLToPath(import.meta.url));
-const indexSource = readFileSync(join(here, "..", "src", "worker", "index.ts"), "utf8");
+const keyOf = (r) => `${r.method} ${r.path}`;
 
-// The canonical route inventory: { method, path } pairs the Worker is known to serve, derived from
-// the code-reading route inventory. The two doc-serving routes (/openapi.json, /docs) are included
-// because they are now real routes in the fetch handler. This list is the source of truth the test
-// pins BOTH the spec and the source against — keep it in sync with index.ts deliberately.
-const CANONICAL_ROUTES = [
-  { method: "GET", path: "/openapi.json", inSpec: false },
-  { method: "GET", path: "/docs", inSpec: false },
-  { method: "GET", path: "/health", inSpec: true },
-  { method: "POST", path: "/portal/v1/auth/request", inSpec: true },
-  { method: "POST", path: "/portal/v1/auth/verify", inSpec: true },
-  { method: "GET", path: "/portal/v1/auth/magic", inSpec: true },
-  { method: "POST", path: "/portal/v1/auth/magic-redeem", inSpec: true },
-  { method: "POST", path: "/portal/v1/auth/logout", inSpec: true },
-  { method: "POST", path: "/portal/v1/admin/bootstrap-otp", inSpec: true },
-  { method: "GET", path: "/api/portal/me", inSpec: true },
-  { method: "GET", path: "/api/portal/entitlements", inSpec: true },
-  { method: "GET", path: "/api/portal/devices", inSpec: true },
-  { method: "POST", path: "/api/portal/devices/release", inSpec: true },
-  { method: "GET", path: "/api/portal/usage", inSpec: true },
-  { method: "POST", path: "/api/portal/checkout", inSpec: true },
-  { method: "POST", path: "/api/portal/heartbeat", inSpec: true },
-  { method: "POST", path: "/api/portal/release", inSpec: true },
-  { method: "POST", path: "/api/portal/download", inSpec: true },
-];
-
-// Translate an OpenAPI templated path (e.g. /thing/{id}) to a literal the source would contain.
-// This Worker has no path params, but we keep the translation so the guard is correct if any are
-// added later: {id} <-> a :id segment or a literal-with-regex segment.
-function specPathToSourceLiteral(p) {
-  return p.replace(/\{[^/}]+\}/g, ":param");
-}
-
-// Does the worker source literally route this path? The portal dispatches on `p === "<path>"` (or,
-// for /api/portal/*, `p.startsWith("/api/portal/")` plus a `pathname === "<path>"` branch). We treat
-// a route as present if its exact quoted literal appears in a comparison.
-function sourceRoutesPath(source, path) {
-  const literal = specPathToSourceLiteral(path);
-  // Exact-equality dispatch: p === "/x" or pathname === "/x".
-  if (source.includes(`=== "${literal}"`)) return true;
-  if (source.includes(`"${literal}" ===`)) return true;
-  // Prefix dispatch for the /api/portal/* family.
-  if (source.includes(`.startsWith("${literal}")`)) return true;
-  return false;
-}
-
-test("(a) every spec path has its literal route present in index.ts source", () => {
-  const specPaths = Object.keys(openApiDocument.paths);
-  assert.ok(specPaths.length > 0, "spec has no paths");
-  for (const p of specPaths) {
-    assert.ok(
-      sourceRoutesPath(indexSource, p),
-      `spec path ${p} has no matching literal route in src/worker/index.ts (drift: spec lists a route the code does not serve)`,
-    );
+test("route inventory is well-formed (no duplicates, session routes under the prefix root)", () => {
+  const keys = ALL_ROUTES.map(keyOf);
+  assert.equal(new Set(keys).size, keys.length, "duplicate method+path in the inventory");
+  assert.equal(ALL_ROUTES.length, META_ROUTES.length + PUBLIC_ROUTES.length + SESSION_ROUTES.length);
+  for (const r of SESSION_ROUTES) {
+    assert.ok(r.path.startsWith("/api/portal/"), `session route outside the dispatch root: ${r.path}`);
   }
 });
 
-test("(b) every canonical source route is present (source <-> canonical parity)", () => {
-  for (const r of CANONICAL_ROUTES) {
-    assert.ok(
-      sourceRoutesPath(indexSource, r.path),
-      `canonical route ${r.method} ${r.path} is missing from src/worker/index.ts (a route was removed without updating the inventory)`,
-    );
-  }
-  // And: the source must not route a path the canonical list does not know about. We scan for every
-  // `=== "/..."` and `.startsWith("/api/portal/")` literal and require each to be canonical.
-  const literalRe = /(?:===\s*"|"\s*===\s*p\b.*?")(\/[A-Za-z0-9_./:-]*)"/g;
-  const startsWithRe = /\.startsWith\("(\/[A-Za-z0-9_./:-]*)"\)/g;
-  const canonicalLiterals = new Set(CANONICAL_ROUTES.map((r) => specPathToSourceLiteral(r.path)));
-  // /api/portal/ prefix is the dispatch root, not itself a documented route — allow it.
-  canonicalLiterals.add("/api/portal/");
-  const found = new Set();
-  let m;
-  while ((m = literalRe.exec(indexSource)) !== null) found.add(m[1]);
-  while ((m = startsWithRe.exec(indexSource)) !== null) found.add(m[1]);
-  for (const lit of found) {
-    assert.ok(
-      canonicalLiterals.has(lit),
-      `src/worker/index.ts routes ${lit} which is NOT in the canonical route inventory (a route was added without updating the spec/inventory)`,
-    );
-  }
+test("the dispatch tables serve exactly the route inventory (both directions)", () => {
+  assert.deepEqual([...PORTAL_ROUTE_KEYS].sort(), ALL_ROUTES.map(keyOf).sort());
 });
 
-test("(c) spec paths equal the canonical 'inSpec' route set (no spec-only / no missing)", () => {
+test("spec.paths equal the canonical 'inSpec' route set (no spec-only / no missing)", () => {
   const specPaths = new Set(Object.keys(openApiDocument.paths));
-  const expected = new Set(CANONICAL_ROUTES.filter((r) => r.inSpec).map((r) => r.path));
-
+  const expected = new Set(ALL_ROUTES.filter((r) => r.inSpec).map((r) => r.path));
   for (const p of expected) {
     assert.ok(specPaths.has(p), `canonical route ${p} is documented in the inventory but MISSING from spec.paths`);
   }
   for (const p of specPaths) {
     assert.ok(expected.has(p), `spec.paths declares ${p} which is NOT in the canonical inventory (spec drifted ahead of code)`);
+  }
+});
+
+test("each spec path documents exactly the method the inventory declares", () => {
+  const methodByPath = new Map(ALL_ROUTES.filter((r) => r.inSpec).map((r) => [r.path, r.method.toLowerCase()]));
+  for (const [p, ops] of Object.entries(openApiDocument.paths)) {
+    const methods = Object.keys(ops).filter((k) => ["get", "post", "put", "delete", "patch"].includes(k));
+    assert.equal(methods.length, 1, `spec path ${p} should document exactly one method`);
+    assert.equal(methods[0], methodByPath.get(p), `spec path ${p} documents ${methods[0]} but the route is ${methodByPath.get(p)}`);
   }
 });
 
@@ -140,4 +72,16 @@ test("spec is OpenAPI 3.1.0 with the shared envelope/server conventions", () => 
   assert.ok(openApiDocument.components.schemas.Envelope, "Envelope schema missing");
   assert.ok(openApiDocument.components.schemas.ErrorEnvelope, "ErrorEnvelope schema missing");
   assert.ok(openApiDocument.components.securitySchemes.sessionCookie, "sessionCookie security scheme missing");
+});
+
+test("the doc routes are served without credentials or environment (behavioral)", async () => {
+  // The doc handlers must never touch env or auth: they must succeed with an EMPTY env and no
+  // cookies. (The SPA fallback and every other route may require env bindings — not these two.)
+  const spec = await worker.fetch(new Request("http://test/openapi.json"), {});
+  assert.equal(spec.status, 200);
+  const body = await spec.json();
+  assert.equal(body.openapi, "3.1.0");
+  const docs = await worker.fetch(new Request("http://test/docs"), {});
+  assert.equal(docs.status, 200);
+  assert.match(docs.headers.get("content-type") ?? "", /text\/html/);
 });
