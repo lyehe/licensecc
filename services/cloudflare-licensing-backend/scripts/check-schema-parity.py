@@ -56,6 +56,16 @@ def schema_objects(conn: sqlite3.Connection) -> dict[str, str]:
     return {f"{row[0]}:{row[1]}:{row[2]}": normalize_sql(row[3]) for row in rows}
 
 
+def _idempotent(statement: str) -> str:
+    """Restore the IF NOT EXISTS idiom the migrations use: sqlite_schema stores DDL with the clause
+    stripped, but the snapshot's consumers (tests, humans, direct loads) rely on idempotent DDL."""
+    for kind in ("TABLE", "INDEX", "UNIQUE INDEX", "TRIGGER", "VIEW"):
+        prefix = f"CREATE {kind} "
+        if statement.startswith(prefix) and not statement.startswith(f"CREATE {kind} IF NOT EXISTS "):
+            return f"CREATE {kind} IF NOT EXISTS " + statement[len(prefix):]
+    return statement
+
+
 def dump_schema(conn: sqlite3.Connection) -> str:
     """Return a deterministic, dependency-ordered DDL dump of the applied schema."""
     rows = conn.execute(
@@ -68,7 +78,7 @@ def dump_schema(conn: sqlite3.Connection) -> str:
         """,
     ).fetchall()
     ordered = sorted(rows, key=lambda row: (TYPE_ORDER.get(row[0], 99), row[1]))
-    statements = [row[2].strip().rstrip(";") + ";" for row in ordered]
+    statements = [_idempotent(row[2].strip().rstrip(";")) + ";" for row in ordered]
     return GENERATED_HEADER + "\n" + "\n\n".join(statements) + "\n"
 
 
