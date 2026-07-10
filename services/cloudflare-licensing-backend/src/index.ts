@@ -28,6 +28,7 @@ import { handleOrderIngest } from "./fulfillment/order_ingest.mjs";
 // Slice 2 account-token isolation (Stage 3): per-customer credential + the per-endpoint gate.
 import { accountAuth, constantTimeEqual, readBearer } from "./auth/account_auth.mjs";
 import { json, readTextBody, requestId, clientIp, safeString } from "./http/kit.mjs";
+import { META_ROUTES, CLIENT_ROUTES, SCOPED_ROUTES } from "./routes.js";
 import { readIdempotentResponse, writeIdempotentResponse } from "./db/idempotency_store.mjs";
 import { enqueueAndDeliverWebhooks } from "./webhooks/webhook.mjs";
 import { appendAuditDigest } from "./audit/audit_digest.mjs";
@@ -2243,35 +2244,54 @@ function configConsistencyWarnings(env: Env): string[] {
   return warnings;
 }
 
+// Dispatch table built from the canonical route inventory (src/routes.ts). Each thunk preserves the
+// exact wiring the old if/else chain used. Emergency break-glass is NOT in this table — it is a
+// PREFIX gate in fetch() (see handleEmergencyRoute) so it can never collide with a literal route.
+// The doc/meta thunks must stay env-free: the crosscheck test calls them with an empty env.
+const DISPATCH: Record<string, (request: Request, env: Env, ctx?: ExecutionContextLike) => Promise<Response> | Response> = {
+  "GET /openapi.json": () => json(openApiSpec),
+  "GET /docs": () =>
+    new Response(docsHtml, {
+      status: 200,
+      headers: { "content-type": "text/html; charset=utf-8" },
+    }),
+  "GET /health": (_request, env) => {
+    const configWarnings = configConsistencyWarnings(env);
+    return json({
+      ok: true,
+      service: "licensecc-online-verifier",
+      ...(configWarnings.length > 0 ? { config_warnings: configWarnings } : {}),
+    });
+  },
+  "POST /v1/verify": (request, env) => handleVerify(request, env),
+  "POST /v1/orders": (request, env) => handleOrderIngest(request, env),
+  "POST /v1/activate": (request, env, ctx) => handleLeaseIssue(request, env, "activate", ctx),
+  "POST /v1/renew": (request, env, ctx) => handleLeaseIssue(request, env, "renew", ctx),
+  "POST /v1/checkout": (request, env, ctx) => handleSeatCheckout(request, env, ctx),
+  "POST /v1/heartbeat": (request, env, ctx) => handleSeatHeartbeat(request, env, ctx),
+  "POST /v1/release": (request, env, ctx) => handleSeatRelease(request, env, ctx),
+  "POST /v1/meter": (request, env, ctx) => handleMeter(request, env, ctx),
+  "GET /v1/admin/report": (request, env, ctx) => handleUsageReport(request, env, ctx),
+};
+
+// Startup guard: the dispatch table and the inventory must agree exactly, in both directions.
+{
+  const inventory = new Set([...META_ROUTES, ...CLIENT_ROUTES, ...SCOPED_ROUTES].map((r) => `${r.method} ${r.path}`));
+  for (const key of Object.keys(DISPATCH)) {
+    if (!inventory.has(key)) throw new Error(`dispatch entry not in route inventory: ${key}`);
+  }
+  for (const key of inventory) {
+    if (!(key in DISPATCH)) throw new Error(`route without dispatch entry: ${key}`);
+  }
+}
+
+// Exposed for the openapi crosscheck test: the literal routes this Worker actually serves.
+export const BACKEND_ROUTE_KEYS: readonly string[] = Object.keys(DISPATCH);
+
 export default {
   async fetch(request: Request, env: Env, ctx?: ExecutionContextLike): Promise<Response> {
     try {
       const url = new URL(request.url);
-      // OpenAPI doc-of-existing: unauthenticated, served EARLY (before any auth) and without
-      // disturbing the routes below. /openapi.json is the spec; /docs is a self-contained viewer.
-      if (request.method === "GET" && url.pathname === "/openapi.json") {
-        return json(openApiSpec);
-      }
-      if (request.method === "GET" && url.pathname === "/docs") {
-        return new Response(docsHtml, {
-          status: 200,
-          headers: { "content-type": "text/html; charset=utf-8" },
-        });
-      }
-      if (request.method === "GET" && url.pathname === "/health") {
-        const configWarnings = configConsistencyWarnings(env);
-        return json({
-          ok: true,
-          service: "licensecc-online-verifier",
-          ...(configWarnings.length > 0 ? { config_warnings: configWarnings } : {}),
-        });
-      }
-      if (request.method === "POST" && url.pathname === "/v1/verify") {
-        return await handleVerify(request, env);
-      }
-      if (request.method === "POST" && url.pathname === "/v1/orders") {
-        return await handleOrderIngest(request, env);
-      }
       // D10 break-glass: a SEPARATE /v1/emergency/* route gated ONLY by EMERGENCY_OPERATOR_BEARER
       // (constant-time), never reachable from the 6 scoped paths. On match it dispatches the
       // corresponding handler with isolation FORCED off (non-isolated, customerId null) and logs
@@ -2279,23 +2299,9 @@ export default {
       if (url.pathname.startsWith("/v1/emergency/")) {
         return await handleEmergencyRoute(request, env, url, ctx);
       }
-      if (request.method === "POST" && (url.pathname === "/v1/activate" || url.pathname === "/v1/renew")) {
-        return await handleLeaseIssue(request, env, url.pathname === "/v1/activate" ? "activate" : "renew", ctx);
-      }
-      if (request.method === "POST" && url.pathname === "/v1/checkout") {
-        return await handleSeatCheckout(request, env, ctx);
-      }
-      if (request.method === "POST" && url.pathname === "/v1/heartbeat") {
-        return await handleSeatHeartbeat(request, env, ctx);
-      }
-      if (request.method === "POST" && url.pathname === "/v1/release") {
-        return await handleSeatRelease(request, env, ctx);
-      }
-      if (request.method === "POST" && url.pathname === "/v1/meter") {
-        return await handleMeter(request, env, ctx);
-      }
-      if (request.method === "GET" && url.pathname === "/v1/admin/report") {
-        return await handleUsageReport(request, env, ctx);
+      const route = DISPATCH[`${request.method} ${url.pathname}`];
+      if (route !== undefined) {
+        return await route(request, env, ctx);
       }
       return json({ ok: false, code: "not_found" }, 404);
     } catch (error) {
