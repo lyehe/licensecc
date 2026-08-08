@@ -1,5 +1,5 @@
 // Keep the historical test entrypoint stable while route groups own focused coverage.
-import "./worker/core-regressions.test.mjs";
+import "./worker/auth-and-request.test.mjs";
 import "./worker/meta.test.mjs";
 import "./worker/summary-reports.test.mjs";
 import "./worker/customers.test.mjs";
