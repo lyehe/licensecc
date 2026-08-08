@@ -18,10 +18,27 @@ Imported targets
 
 ``license_generator::lccgen``
   The generator command used by the project's public-header build rule.
+
+``license_generator::test_support`` (optional)
+  A generator development-package target that exposes the private signing
+  support required by the C++ generator-coupled tests.  The bundled checkout's
+  legacy ``license_generator_lib`` target is recognized as the same capability.
+
+Result variables
+^^^^^^^^^^^^^^^^
+
+``LCCGEN_TEST_SUPPORT_TARGET``
+  The target to link generator-coupled tests against, or empty when the
+  selected generator provides only its executable.
+
+``LCCGEN_TEST_SUPPORT_AVAILABLE``
+  True when ``LCCGEN_TEST_SUPPORT_TARGET`` is available.
 #]=======================================================================]
 
 set(_lccgen_failure_message
 	"Unable to locate lccgen. Run scripts/bootstrap.ps1 to initialize the pinned generator, or configure with -DLCC_LOCATION=<lccgen executable or installation prefix>.")
+set(LCCGEN_TEST_SUPPORT_TARGET "")
+set(LCCGEN_TEST_SUPPORT_AVAILABLE FALSE)
 
 function(_lccgen_add_imported_target executable_path)
 	if(NOT TARGET license_generator::lccgen)
@@ -78,6 +95,19 @@ else()
 		endif()
 	endif()
 	_lccgen_require_target()
+endif()
+
+# A raw executable is sufficient for production public-header generation, but
+# the C++ signing tests use CryptoHelper from the generator's private library.
+# Keep that capability explicit so CMake never turns a missing target into a
+# late, toolchain-specific bare library link such as license_generator_lib.lib.
+if(TARGET license_generator::test_support)
+	set(LCCGEN_TEST_SUPPORT_TARGET "license_generator::test_support")
+elseif(TARGET license_generator_lib)
+	set(LCCGEN_TEST_SUPPORT_TARGET "license_generator_lib")
+endif()
+if(LCCGEN_TEST_SUPPORT_TARGET)
+	set(LCCGEN_TEST_SUPPORT_AVAILABLE TRUE)
 endif()
 
 unset(_lccgen_explicit_location)

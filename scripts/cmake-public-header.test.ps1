@@ -38,6 +38,26 @@ function Invoke-HeaderCmake {
     }
 }
 
+function Invoke-HeaderCmakeExpectFailure {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Cmake,
+
+        [Parameter(Mandatory = $true)]
+        [string[]]$Arguments,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Name
+    )
+
+    $output = (& $Cmake @Arguments 2>&1 | Out-String)
+    $exitCode = $LASTEXITCODE
+    if ($exitCode -eq 0) {
+        throw "$Name unexpectedly succeeded."
+    }
+    return $output
+}
+
 function New-FixtureGenerator {
     param(
         [Parameter(Mandatory = $true)]
@@ -110,6 +130,7 @@ printf '%s\n' "#define PRODUCT_NAME $project" "#define PUBLIC_KEY {1}" "#define 
 $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $fixtureName = "task2-public-header-" + [guid]::NewGuid().ToString("N")
 $buildRoot = Join-Path $repositoryRoot "build/$fixtureName"
+$testSupportFailureRoot = Join-Path $repositoryRoot "build/$fixtureName-tests-on"
 $temporaryRoot = Join-Path ([System.IO.Path]::GetTempPath()) $fixtureName
 try {
     $buildParent = [System.IO.Path]::GetFullPath((Join-Path $repositoryRoot "build")).TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
@@ -124,6 +145,16 @@ try {
     $projectName = "keyfixture"
     $publicHeader = Join-Path $externalProjects "$projectName/include/licensecc/$projectName/public_key.h"
     $privateKey = Join-Path $externalProjects "$projectName/private_key.rsa"
+
+    $testSupportFailureOutput = Invoke-HeaderCmakeExpectFailure -Cmake $cmake -Name "external executable test-support configure" -Arguments @(
+        "-S", $repositoryRoot,
+        "-B", $testSupportFailureRoot,
+        "-DLCC_LOCATION=$generator",
+        "-DLCC_PROJECT_NAME=$projectName",
+        "-DLCC_PROJECTS_BASE_DIR=$externalProjects",
+        "-DBUILD_TESTING=ON"
+    )
+    Assert-HeaderCondition -Condition ($testSupportFailureOutput -match [regex]::Escape("BUILD_TESTING=ON requires generator test support")) -Message "external executable BUILD_TESTING=ON did not fail with the generator test-support guidance"
 
     Invoke-HeaderCmake -Cmake $cmake -Name "fixture configure" -Arguments @(
         "-S", $repositoryRoot,
@@ -155,6 +186,9 @@ try {
 } finally {
     if (Test-Path -LiteralPath $buildRoot) {
         Remove-Item -LiteralPath $buildRoot -Recurse -Force
+    }
+    if (Test-Path -LiteralPath $testSupportFailureRoot) {
+        Remove-Item -LiteralPath $testSupportFailureRoot -Recurse -Force
     }
     if (Test-Path -LiteralPath $temporaryRoot) {
         Remove-Item -LiteralPath $temporaryRoot -Recurse -Force

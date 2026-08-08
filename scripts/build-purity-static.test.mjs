@@ -34,6 +34,23 @@ test("CMake generator discovery is read-only and has one recovery path", () => {
   assert.match(library, /add_dependencies\(licensecc_static project_public_header\)/);
 });
 
+test("generator test support is explicit before CTest creates test targets", () => {
+  const finder = source("cmake/Findlccgen.cmake");
+  const root = source("CMakeLists.txt");
+  const functionalTests = source("test/functional/CMakeLists.txt");
+  const libraryTests = source("test/library/CMakeLists.txt");
+
+  assert.match(finder, /LCCGEN_TEST_SUPPORT_TARGET/);
+  assert.match(finder, /license_generator::test_support/);
+  assert.match(root, /option\(BUILD_TESTING\s+"Build the testing tree\."\s+ON\)/);
+  assert.match(root, /BUILD_TESTING=ON requires generator test support/);
+
+  for (const tests of [functionalTests, libraryTests]) {
+    assert.doesNotMatch(tests, /\blicense_generator_lib\b/);
+    assert.match(tests, /\$\{LCCGEN_TEST_SUPPORT_TARGET\}/);
+  }
+});
+
 test("developer checks do not edit or invoke Git", () => {
   const devCheck = source("scripts/dev-check.ps1");
 

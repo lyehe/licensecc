@@ -116,7 +116,8 @@ ctest -T memcheck
 |Definition name           |Description|
 |--------------------------|-----------|
 |LCC_PROJECT_NAME=<str>  | This correspond to the name of the project you're generating licenses for. The flag is optional, if you don't specify it the build system will create a project named `DEFAULT` for you |
-|LCC_LOCATION=<path>     | Explicit lccgen executable, installation prefix, or CMake package location. When set, no bundled or PATH fallback is used. |
+|LCC_LOCATION=<path>     | Explicit lccgen executable, installation prefix, or CMake package location. When set, no bundled or PATH fallback is used. A standalone executable is supported for production builds with `BUILD_TESTING=OFF`; the default test build requires the embedded checkout or a compatible generator development package with test support. |
+|BUILD_TESTING=ON/OFF    | Builds the C++ test tree (default `ON` when Boost is available). A raw external `lccgen` executable has no private signing-test library, so configure with `-DBUILD_TESTING=OFF` for that production-only mode. |
 |LCC_PROJECTS_BASE_DIR=<path> | Generated project base. It must be external to the source checkout or under the active build directory; stable external key directories are supported. |
 |CMAKE_BUILD_TYPE=Release| generate a release version of the library (should be used as default)|
 |CMAKE_INSTALL_PREFIX    | folder where to install compiled libraries and headers. (default: /usr/local)               |

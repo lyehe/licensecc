@@ -133,10 +133,20 @@ set(LCC_PROJECT_CONFIG_HEADER "${PROJECT_NAME}/${LCC_PROJECT_NAME}/licensecc_pro
 set(LCC_PROJECT_PUBLIC_KEY_HEADER "${PROJECT_NAME}/${LCC_PROJECT_NAME}/public_key.h")
 
 option(BUILD_BENCHMARKS "Build performance benchmarks (no extra dependencies)" OFF)
+# CTest declares this option later, after Boost discovery.  Define its normal
+# ON default before generator discovery so a raw executable cannot accidentally
+# configure a test tree that will later contain undeclared generator-library
+# links.
+option(BUILD_TESTING "Build the testing tree." ON)
 SET(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake/")
 
 #find lccgen executable or build it.
 find_package(lccgen REQUIRED) 
+
+if(BUILD_TESTING AND NOT LCCGEN_TEST_SUPPORT_AVAILABLE)
+	message(FATAL_ERROR
+		"BUILD_TESTING=ON requires generator test support. The selected lccgen provides only the generator executable. Configure with -DBUILD_TESTING=OFF for a production build, use the embedded generator checkout, or install a compatible generator development package that exports license_generator::test_support.")
+endif()
 
 #In case the build system doesn't support binfmt misc
 IF( ( CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux" ) AND CMAKE_CROSSCOMPILING AND NOT DEFINED CMAKE_CROSSCOMPILING_EMULATOR )

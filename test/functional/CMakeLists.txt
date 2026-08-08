@@ -51,7 +51,7 @@ add_executable( test_signature_verifier
 target_link_libraries(
  test_signature_verifier
  licensecc_static
- license_generator_lib
+ ${LCCGEN_TEST_SUPPORT_TARGET}
  license_generator_snippet
  Boost::unit_test_framework 
  Boost::filesystem
@@ -99,7 +99,7 @@ if(LCC_BUILD_LEASE_RING_TEST)
 	add_executable(test_lease_ring lease_ring_test.cpp)
 	target_link_libraries( test_lease_ring
 	 licensecc_static
-	 license_generator_lib
+	 ${LCCGEN_TEST_SUPPORT_TARGET}
 	 license_generator_snippet
 	 Boost::unit_test_framework
 	 Boost::filesystem

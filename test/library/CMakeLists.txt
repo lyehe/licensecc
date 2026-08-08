@@ -155,7 +155,7 @@ add_executable(
 target_link_libraries(
  test_online_verification
  licensecc_static
- license_generator_lib
+ ${LCCGEN_TEST_SUPPORT_TARGET}
  Boost::unit_test_framework
  Boost::system
 )
@@ -188,7 +188,7 @@ add_executable(
 target_link_libraries(
  test_config_attestation
  licensecc_static
- license_generator_lib
+ ${LCCGEN_TEST_SUPPORT_TARGET}
  Boost::unit_test_framework
  Boost::system
 )
@@ -329,7 +329,7 @@ add_executable(
 target_link_libraries(
  test_config_public_api
  licensecc_static
- license_generator_lib
+ ${LCCGEN_TEST_SUPPORT_TARGET}
  Boost::unit_test_framework
  Boost::system
 )
