@@ -22,6 +22,8 @@
     "write:contract-baselines": "node scripts/canonical-contracts.mjs --write"
   },
   "workspaces": [
+    "packages/licensing-domain",
+    "packages/cloudflare-runtime",
     "services/cloudflare-licensing-backend",
     "services/cloudflare-license-admin",
     "services/cloudflare-customer-portal",

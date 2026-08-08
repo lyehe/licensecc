@@ -2,7 +2,7 @@
 //
 // Usage analytics CLI: query the usage_events log for one entitlement and print peak
 // concurrent usage, denial rate (the upsell signal), and unique devices over a window.
-// The aggregation lives in ../src/lease/usage_report.mjs (shared with the Worker's
+// The aggregation lives in @licensecc/licensing-domain (shared with the Worker's
 // /v1/admin/report and exhaustively unit-tested); this CLI just fetches + formats.
 //
 // Usage:
@@ -11,7 +11,7 @@
 
 import { spawnSync } from "node:child_process";
 
-import { summarizeUsage } from "../src/lease/usage_report.mjs";
+import { summarizeUsage } from "@licensecc/licensing-domain/usage/usage_report";
 
 const SAFE_NAME = /^[A-Za-z0-9_.-]+$/;
 const HEX_64 = /^[0-9a-f]{64}$/;

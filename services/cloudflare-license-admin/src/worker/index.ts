@@ -44,22 +44,23 @@ import {
   listEntitlementDevices,
   syncEntitlement,
   batchReturnedRow,
-} from "@licensecc/cloudflare-licensing-backend/entitlements/entitlement_mutation";
+} from "@licensecc/cloudflare-runtime/d1/entitlement_mutation";
 import type {
   D1DatabaseLike,
   Actor,
   MutationContext,
-} from "@licensecc/cloudflare-licensing-backend/entitlements/entitlement_mutation";
-import { stampFromPolicy, buildPolicyStampStatement } from "@licensecc/cloudflare-licensing-backend/entitlements/policy";
-import { readIdempotentResponse, writeIdempotentResponse } from "@licensecc/cloudflare-licensing-backend/db/idempotency_store";
+} from "@licensecc/cloudflare-runtime/d1/entitlement_mutation";
+import { stampFromPolicy } from "@licensecc/licensing-domain/entitlements/policy";
+import { buildPolicyStampStatement } from "@licensecc/cloudflare-runtime/entitlements/policy_store";
+import { readIdempotentResponse, writeIdempotentResponse } from "@licensecc/cloudflare-runtime/d1/idempotency_store";
 import {
   applyPlanProjection,
   previewPlanProjection,
-} from "@licensecc/cloudflare-licensing-backend/catalog/plan_projection";
-import type { PlanProjectionInput } from "@licensecc/cloudflare-licensing-backend/catalog/plan_projection";
-import { verifyAuditChain } from "@licensecc/cloudflare-licensing-backend/audit/audit_digest";
-import { forceReleaseLiveSeats } from "@licensecc/cloudflare-licensing-backend/lease/seat_reclaim";
-import { constantTimeEqual, readTextBody, requestId, safeString } from "@licensecc/cloudflare-licensing-backend/http/kit";
+} from "@licensecc/cloudflare-runtime/d1/plan_projection";
+import type { PlanProjectionInput } from "@licensecc/licensing-domain/catalog/plan_projection";
+import { verifyAuditChain } from "@licensecc/cloudflare-runtime/d1/audit_digest";
+import { forceReleaseLiveSeats } from "@licensecc/cloudflare-runtime/lease/seat_reclaim";
+import { constantTimeEqual, readTextBody, requestId, safeString } from "@licensecc/cloudflare-runtime/http/kit";
 import { transitionWithGuard } from "./transitions.js";
 
 export interface Env {

@@ -33,7 +33,7 @@ import {
   writeEntitlementWithAudit,
   withId,
   entitlementId,
-} from "../entitlements/entitlement_mutation.mjs";
+} from "@licensecc/cloudflare-runtime/d1/entitlement_mutation";
 
 // 16 KiB raw-body ceiling (blueprint MAX_ORDER_BODY_BYTES). Enforced over the EXACT
 // bytes read once via request.text(); never re-stringify a parsed object.

@@ -19,11 +19,11 @@
 
 import { envelope } from "./responses.js";
 import type { Env } from "./index.js";
-import { batchReturnedRow } from "@licensecc/cloudflare-licensing-backend/entitlements/entitlement_mutation";
+import { batchReturnedRow } from "@licensecc/cloudflare-runtime/d1/entitlement_mutation";
 import type {
   D1PreparedStatementLike,
   MutationResult,
-} from "@licensecc/cloudflare-licensing-backend/entitlements/entitlement_mutation";
+} from "@licensecc/cloudflare-runtime/d1/entitlement_mutation";
 
 export interface TransitionSpec {
   /** Table carrying the `status` column, e.g. "webhook_endpoints". */

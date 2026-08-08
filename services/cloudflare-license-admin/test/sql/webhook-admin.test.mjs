@@ -26,7 +26,7 @@ import { fileURLToPath } from "node:url";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 
 import worker from "../../dist-worker/worker/index.js";
-import { signWebhookBody, verifyWebhookSignature } from "@licensecc/cloudflare-licensing-backend/webhooks/webhook";
+import { signWebhookBody, verifyWebhookSignature } from "@licensecc/cloudflare-runtime/webhooks/webhook";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const migrationsDir = join(here, "..", "..", "..", "cloudflare-licensing-backend", "migrations");

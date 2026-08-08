@@ -6,55 +6,21 @@
 // `token_prefix` is display-only and is NEVER a SQL selector. Auth is a SELECT on the unique
 // `token_hmac` column (a keyed MAC of the secret) — timing-safe, no fetch-by-prefix-then-=== hazard.
 //
-// Reuses the verified fail-closed loader/decoder from order_hmac.mjs (same pepper-map shape).
+// Reuses stateless Worker-safe primitives from @licensecc/cloudflare-runtime.
 //
 // Design: docs/superpowers/plans/2026-06-24-slice2-account-token-blueprint.md (+ Round-2 corrections).
 
-import { loadSecretMap } from "../fulfillment/order_hmac.mjs";
+import { generateAccountToken, hashToken, loadPepperMap } from "@licensecc/cloudflare-runtime/auth/primitives";
 
-// Re-exported so Worker-safe consumers (e.g. the customer portal's OTP/session HMAC-at-rest) can
-// load a versioned pepper map via the SAME fail-closed loader without reaching into order_hmac.mjs.
-export { loadSecretMap };
+export { generateAccountToken, hashToken, loadPepperMap } from "@licensecc/cloudflare-runtime/auth/primitives";
 
 const TOKEN_PREFIX = "lcca_";
-const PREFIX_DISPLAY_LEN = 12;
-const TOKEN_BYTES = 32;            // 256-bit body
 const textEncoder = new TextEncoder();
 
 // F4: per-customer process-local non-decreasing revocation floor. A within-isolate optimization
 // that rejects a replica-stale 'active' row once THIS isolate has seen a higher seq. It does NOT
 // cover cold isolates — the authoritative emergency-revoke guard is the strong read below.
 const revocationFloor = new Map();
-
-function base64FromBytes(bytes) {
-  let binary = "";
-  for (const b of bytes) binary += String.fromCharCode(b);
-  return btoa(binary);
-}
-
-function base64UrlFromBytes(bytes) {
-  return base64FromBytes(bytes).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
-}
-
-/** Generate a fresh opaque token. Returns { raw, token_prefix } — token_prefix is display only. */
-export function generateAccountToken() {
-  const random = new Uint8Array(TOKEN_BYTES);
-  crypto.getRandomValues(random);
-  const raw = TOKEN_PREFIX + base64UrlFromBytes(random);
-  return { raw, token_prefix: raw.slice(0, PREFIX_DISPLAY_LEN) };
-}
-
-/** Keyed HMAC-SHA256 of the raw token bytes under a pepper. Returns base64. */
-export async function hashToken(pepperBytes, rawTokenBytes) {
-  const key = await crypto.subtle.importKey("raw", pepperBytes, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
-  const mac = await crypto.subtle.sign("HMAC", key, rawTokenBytes);
-  return base64FromBytes(new Uint8Array(mac));
-}
-
-/** Load the pepper map (same fail-closed contract as ORDER_HMAC_SECRETS). null = no usable peppers. */
-export function loadPepperMap(env) {
-  return loadSecretMap(env?.ACCOUNT_TOKEN_PEPPERS);
-}
 
 /**
  * Resolve a presented raw token to its active account_token row, or a failure code.

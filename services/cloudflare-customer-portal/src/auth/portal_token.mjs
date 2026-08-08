@@ -16,8 +16,8 @@
 //
 // Worker-safe: no node:/Buffer; imports only the Worker-safe issue builders + the pepper loader.
 
-import { buildIssue } from "@licensecc/cloudflare-licensing-backend/auth/account_token_issue";
-import { loadPepperMap } from "@licensecc/cloudflare-licensing-backend/auth/account_token";
+import { buildIssue } from "@licensecc/cloudflare-runtime/auth/account_token_issue";
+import { loadPepperMap } from "@licensecc/cloudflare-runtime/auth/primitives";
 
 const TOKEN_TTL_SEC = 120;
 const READ_OPERATIONS = ["report"];

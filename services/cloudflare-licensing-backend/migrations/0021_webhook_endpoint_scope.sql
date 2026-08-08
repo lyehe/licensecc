@@ -2,6 +2,7 @@
 -- entitlement/customer/order events (full prev/next row snapshots), so one misconfigured endpoint
 -- URL was a cross-customer data siphon. Add an optional scope: an endpoint scoped to a project (and/or
 -- a customer) receives ONLY events that carry AND match that dimension; NULL (the back-compat default
--- for existing endpoints) = unscoped/global. Enforced in the enqueue pass (src/webhooks/webhook.mjs).
+-- for existing endpoints) = unscoped/global. Enforced in the enqueue pass
+-- (@licensecc/cloudflare-runtime/webhooks/webhook).
 ALTER TABLE webhook_endpoints ADD COLUMN scope_project TEXT;
 ALTER TABLE webhook_endpoints ADD COLUMN scope_customer_id TEXT;

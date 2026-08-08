@@ -15,7 +15,7 @@ import { test } from "node:test";
 import { openApiDocument } from "../dist-worker/worker/openapi.js";
 import { API_ROUTES, ALL_ROUTES, META_ROUTES } from "../dist-worker/worker/routes.js";
 import { API_BINDING_KEYS } from "../dist-worker/worker/index.js";
-import { POLICY_TYPES } from "@licensecc/cloudflare-licensing-backend/entitlements/policy";
+import { POLICY_TYPES } from "@licensecc/licensing-domain/entitlements/policy";
 
 // Collect every `enum` array in the spec that describes the policy `type` field. The policy-type
 // enum is the only one carrying BOTH "node_locked" and "subscription" (the 3-value license-mode

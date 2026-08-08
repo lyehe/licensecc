@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { constantTimeEqual, readTextBody, safeString } from "../src/http/kit.mjs";
+import { constantTimeEqual, readTextBody, safeString } from "@licensecc/cloudflare-runtime/http/kit";
 
 test("constantTimeEqual: equal, unequal, non-string", async () => {
   assert.equal(await constantTimeEqual("abc", "abc"), true);

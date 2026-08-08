@@ -3,7 +3,7 @@
 // Node-side lease signer + CLI for the subscription lease platform (design doc D2).
 // Produces a v201 hardware-bound `.lic` lease signed with the HOT lease key.
 //
-// The parity-critical canonical format lives in ../src/lease/canonical_payload.mjs
+// The parity-critical canonical format lives in @licensecc/licensing-domain.
 // (Worker-safe, shared with the lease Worker). This file adds node:crypto signing
 // and the offline CLI. Cross-language parity against the C++ verifier is guarded by
 // test/lease-sign.test.mjs.
@@ -24,7 +24,7 @@ import {
   utcDateFromEpoch,
   CANONICAL_ORDER,
   SIGNATURE_ALGORITHM,
-} from "../src/lease/canonical_payload.mjs";
+} from "@licensecc/licensing-domain/lease/canonical_payload";
 
 // Re-export the shared format helpers so tooling/tests have one import surface.
 export { buildV201CanonicalPayload, utcDateFromEpoch, CANONICAL_ORDER, SIGNATURE_ALGORITHM };

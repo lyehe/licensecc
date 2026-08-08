@@ -44,7 +44,7 @@ CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_due
 -- Per-source high-water mark of the LAST event id enqueued. The enqueue pass reads events with
 -- id > last_id (bounded) and advances last_id to the max id it enqueued, so each event is offered
 -- to every endpoint exactly once. (For order_events, whose PK is a TEXT event_id, the dispatcher
--- cursors on the implicit monotonic rowid — see src/webhooks/webhook.mjs.)
+-- cursors on the implicit monotonic rowid — see @licensecc/cloudflare-runtime/webhooks/webhook.)
 CREATE TABLE IF NOT EXISTS webhook_cursor (
   event_source TEXT PRIMARY KEY,
   last_id      INTEGER NOT NULL DEFAULT 0,

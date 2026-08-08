@@ -3,7 +3,7 @@ import {
   buildLeaseLicenseText,
   leaseCanonicalFields,
   utcDateFromEpoch,
-} from "./lease/canonical_payload.mjs";
+} from "@licensecc/licensing-domain/lease/canonical_payload";
 import {
   LEASE_ISSUANCE_ATOMIC_SQL,
   SEAT_CHECKOUT_ATOMIC_SQL,
@@ -13,26 +13,26 @@ import {
   seatReleaseSqlOwned,
   SEAT_OVERCAP_RECLAIM_SQL,
 } from "./lease/issuance_sql.mjs";
-import { summarizeUsage } from "./lease/usage_report.mjs";
-import { meterUsage } from "./lease/metering.mjs";
+import { summarizeUsage } from "@licensecc/licensing-domain/usage/usage_report";
+import { meterUsage } from "@licensecc/cloudflare-runtime/lease/metering";
 // Stage 4 server-computed trial timing for /v1/activate: frozen-trial device lock + write-once
 // activation clock, computed off the SAME entitlements row (no join to entitlement_policies).
 import {
   evaluateTrialActivation,
   trialLockKey,
-  buildTrialActivationStamp,
-} from "./lease/trial.mjs";
+} from "@licensecc/licensing-domain/lease/trial";
+import { buildTrialActivationStamp } from "@licensecc/cloudflare-runtime/lease/trial_store";
 // Slice 1 order-ingest (POST /v1/orders): signed, exactly-once subscription fulfillment.
 // order_ingest.mjs is untyped Worker-safe JS (imported as a loose module surface).
 import { handleOrderIngest } from "./fulfillment/order_ingest.mjs";
 // Slice 2 account-token isolation (Stage 3): per-customer credential + the per-endpoint gate.
 import { accountAuth, constantTimeEqual, readBearer } from "./auth/account_auth.mjs";
-import { json, readTextBody, requestId, clientIp, safeString } from "./http/kit.mjs";
+import { json, readTextBody, requestId, clientIp, safeString } from "@licensecc/cloudflare-runtime/http/kit";
 import { META_ROUTES, CLIENT_ROUTES, SCOPED_ROUTES } from "./routes.js";
-import { readIdempotentResponse, writeIdempotentResponse } from "./db/idempotency_store.mjs";
-import { enqueueAndDeliverWebhooks } from "./webhooks/webhook.mjs";
-import { appendAuditDigest } from "./audit/audit_digest.mjs";
-import type { DbDatabaseLike, DbPreparedStatementLike } from "./db/contract.js";
+import { readIdempotentResponse, writeIdempotentResponse } from "@licensecc/cloudflare-runtime/d1/idempotency_store";
+import { enqueueAndDeliverWebhooks } from "@licensecc/cloudflare-runtime/webhooks/webhook";
+import { appendAuditDigest } from "@licensecc/cloudflare-runtime/d1/audit_digest";
+import type { DbDatabaseLike, DbPreparedStatementLike } from "@licensecc/cloudflare-runtime/d1/contract";
 // OpenAPI 3.1 doc-of-existing: the spec object + the self-contained /docs page. Served
 // UNAUTHENTICATED and EARLY (before any auth) so the API is self-describing without credentials.
 import { openApiSpec, docsHtml } from "./openapi.js";
@@ -1985,7 +1985,8 @@ async function handleMeter(request: Request, env: Env, ctx?: ExecutionContextLik
 //
 // An append-only usage_events log (the FlexNet "report log") that the peak-concurrent /
 // denial-rate / adoption analytics aggregate over. Capture is best-effort: analytics must
-// never fail a license operation. The aggregations are pure (src/lease/usage_report.mjs).
+// never fail a license operation. The aggregations are pure
+// (@licensecc/licensing-domain/usage/usage_report).
 
 const USAGE_EVENT_RETENTION_SEC = 90 * 24 * 60 * 60; // reports cover up to 90d; longer => rollups
 const USAGE_REPORT_MAX_ROWS = 100000; // honest cap: beyond this a window report is flagged truncated

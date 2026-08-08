@@ -11,7 +11,7 @@
 //
 // Worker-safe: no node:/Buffer; only Web Crypto + standard globals.
 
-import { loadSecretMap } from "@licensecc/cloudflare-licensing-backend/auth/account_token";
+import { loadSecretMap } from "@licensecc/cloudflare-runtime/auth/secret_map";
 
 const SESSION_PREFIX = "lccp_";
 const SESSION_BYTES = 32;

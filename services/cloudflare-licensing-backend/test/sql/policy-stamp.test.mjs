@@ -15,8 +15,9 @@ import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { createEntitlement } from "../../src/entitlements/entitlement_mutation.mjs";
-import { stampFromPolicy, buildPolicyStampStatement } from "../../src/entitlements/policy.mjs";
+import { createEntitlement } from "@licensecc/cloudflare-runtime/d1/entitlement_mutation";
+import { stampFromPolicy } from "@licensecc/licensing-domain/entitlements/policy";
+import { buildPolicyStampStatement } from "@licensecc/cloudflare-runtime/entitlements/policy_store";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const migrationsDir = join(here, "..", "..", "migrations");

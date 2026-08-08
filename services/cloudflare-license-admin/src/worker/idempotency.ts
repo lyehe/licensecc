@@ -3,13 +3,13 @@ import type {
   IdempotencyCommit,
   MutationContext,
   MutationResult,
-} from "@licensecc/cloudflare-licensing-backend/entitlements/entitlement_mutation";
+} from "@licensecc/cloudflare-runtime/d1/entitlement_mutation";
 import { envelope, json } from "./responses.js";
-import { safeString } from "@licensecc/cloudflare-licensing-backend/http/kit";
+import { safeString } from "@licensecc/cloudflare-runtime/http/kit";
 import {
   readIdempotentResponse,
   writeIdempotentResponse,
-} from "@licensecc/cloudflare-licensing-backend/db/idempotency_store";
+} from "@licensecc/cloudflare-runtime/d1/idempotency_store";
 
 interface IdempotencyEnv {
   DB: D1DatabaseLike;

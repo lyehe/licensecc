@@ -36,7 +36,7 @@ import * as ratelimitModule from "../auth/portal_ratelimit.mjs";
 import type { ApiEnvelope } from "../shared/api";
 import { openApiDocument, DOCS_HTML } from "./openapi.js";
 import { META_ROUTES, PUBLIC_ROUTES, SESSION_ROUTES } from "./routes.js";
-import { constantTimeEqual, readTextBody, requestId, bearerToken } from "@licensecc/cloudflare-licensing-backend/http/kit";
+import { constantTimeEqual, readTextBody, requestId, bearerToken } from "@licensecc/cloudflare-runtime/http/kit";
 
 type AnyFn = (...args: any[]) => any;
 const requestOtp = (otpModule as { requestOtp: AnyFn }).requestOtp;

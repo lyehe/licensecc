@@ -12,7 +12,7 @@ import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { transitionEntitlementDevice, listEntitlementDevices } from "../../src/entitlements/entitlement_mutation.mjs";
+import { transitionEntitlementDevice, listEntitlementDevices } from "@licensecc/cloudflare-runtime/d1/entitlement_mutation";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const migrationsDir = join(here, "..", "..", "migrations");

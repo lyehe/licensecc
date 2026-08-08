@@ -1,0 +1,41 @@
+{
+  "name": "@licensecc/licensing-domain",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./audit/audit_digest": {
+      "types": "./src/audit/audit_digest.d.ts",
+      "default": "./src/audit/audit_digest.mjs"
+    },
+    "./catalog/plan_projection": {
+      "types": "./src/catalog/plan_projection.d.ts",
+      "default": "./src/catalog/plan_projection.mjs"
+    },
+    "./entitlements/contracts": {
+      "types": "./src/entitlements/contracts.d.ts",
+      "default": "./src/entitlements/contracts.mjs"
+    },
+    "./entitlements/policy": {
+      "types": "./src/entitlements/policy.d.ts",
+      "default": "./src/entitlements/policy.mjs"
+    },
+    "./lease/canonical_payload": {
+      "default": "./src/lease/canonical_payload.mjs"
+    },
+    "./lease/trial": {
+      "default": "./src/lease/trial.mjs"
+    },
+    "./usage/usage_report": {
+      "default": "./src/usage/usage_report.mjs"
+    }
+  },
+  "scripts": {
+    "build": "npm run typecheck",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test test/*.test.mjs"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3"
+  }
+}

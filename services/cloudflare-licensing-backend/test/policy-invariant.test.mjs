@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { POLICY_TYPES, policyCapacityViolation } from "../src/entitlements/policy.mjs";
+import { POLICY_TYPES, policyCapacityViolation } from "@licensecc/licensing-domain/entitlements/policy";
 
 test("policy type enum and capacity invariant", () => {
   assert.deepEqual([...POLICY_TYPES], ["trial", "node_locked", "floating", "subscription"]);

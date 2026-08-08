@@ -10,7 +10,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import worker from "../dist-worker/worker/index.js";
-import { policyCapacityViolation } from "@licensecc/cloudflare-licensing-backend/entitlements/policy";
+import { policyCapacityViolation } from "@licensecc/licensing-domain/entitlements/policy";
 import {
   freshDb,
   portalEnv,

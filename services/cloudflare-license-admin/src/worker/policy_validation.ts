@@ -5,8 +5,8 @@ import type {
   PolicyType,
   TrialExpirationBasis,
 } from "../shared/api";
-import { safeString } from "@licensecc/cloudflare-licensing-backend/http/kit";
-import { POLICY_TYPES, policyCapacityViolation } from "@licensecc/cloudflare-licensing-backend/entitlements/policy";
+import { safeString } from "@licensecc/cloudflare-runtime/http/kit";
+import { POLICY_TYPES, policyCapacityViolation } from "@licensecc/licensing-domain/entitlements/policy";
 
 const MAX_PROJECT_SIZE = 127;
 const MAX_NOTES_SIZE = 1000;

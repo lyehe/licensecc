@@ -3,50 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "exports": {
-    "./db/idempotency_store": {
-      "types": "./src/db/idempotency_store.d.ts",
-      "default": "./src/db/idempotency_store.mjs"
-    },
-    "./entitlements/entitlement_mutation": {
-      "types": "./src/entitlements/entitlement_mutation.d.ts",
-      "default": "./src/entitlements/entitlement_mutation.mjs"
-    },
-    "./entitlements/policy": {
-      "types": "./src/entitlements/policy.d.ts",
-      "default": "./src/entitlements/policy.mjs"
-    },
-    "./catalog/plan_projection": {
-      "types": "./src/catalog/plan_projection.d.ts",
-      "default": "./src/catalog/plan_projection.mjs"
-    },
-    "./auth/account_token_issue": {
-      "default": "./src/auth/account_token_issue.mjs"
-    },
-    "./auth/account_token": {
-      "default": "./src/auth/account_token.mjs"
-    },
-    "./auth/account_auth": {
-      "default": "./src/auth/account_auth.mjs"
-    },
-    "./lease/usage_report": {
-      "default": "./src/lease/usage_report.mjs"
-    },
-    "./lease/seat_reclaim": {
-      "types": "./src/lease/seat_reclaim.d.ts",
-      "default": "./src/lease/seat_reclaim.mjs"
-    },
-    "./webhooks/webhook": {
-      "default": "./src/webhooks/webhook.mjs"
-    },
-    "./audit/audit_digest": {
-      "types": "./src/audit/audit_digest.d.ts",
-      "default": "./src/audit/audit_digest.mjs"
-    },
-    "./http/kit": {
-      "types": "./src/http/kit.d.ts",
-      "default": "./src/http/kit.mjs"
-    }
+  "dependencies": {
+    "@licensecc/cloudflare-runtime": "file:../../packages/cloudflare-runtime",
+    "@licensecc/licensing-domain": "file:../../packages/licensing-domain"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",

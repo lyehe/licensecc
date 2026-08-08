@@ -3,7 +3,8 @@
 -- a hash-chained digest: a cron segment covers new events (id > the last cursor) and stores
 -- digest = sha256(prev_digest + canonical(events)). Altering or deleting a covered event changes its
 -- segment digest, which breaks the chain from that point on -- detectable by replaying the events
--- (verifyAuditChain in src/audit/audit_digest.mjs). The digests are cheap, append-only, and READ the
+-- (verifyAuditChain in @licensecc/cloudflare-runtime/d1/audit_digest). The
+-- digests are cheap, append-only, and READ the
 -- event log only; no mutator/event-write path changes.
 CREATE TABLE IF NOT EXISTS audit_digests (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,

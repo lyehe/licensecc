@@ -23,6 +23,9 @@
 // Design: docs/superpowers/plans/2026-06-24-slice2-account-token-blueprint.md (Round-2 F1-F6).
 
 import { resolveAccountToken, tokenAllows, touchLastUsed } from "./account_token.mjs";
+import { constantTimeEqual } from "@licensecc/cloudflare-runtime/auth/primitives";
+
+export { constantTimeEqual } from "@licensecc/cloudflare-runtime/auth/primitives";
 
 const DEFAULT_LAST_USED_THROTTLE_SEC = 300;
 
@@ -49,26 +52,6 @@ export function readBearer(request) {
   if (!auth.startsWith("Bearer ")) return null;
   const raw = auth.slice("Bearer ".length);
   return raw.length > 0 ? raw : null;
-}
-
-/**
- * Constant-time string equality via Web Crypto (HMAC over each side under a random one-time
- * key, then crypto.subtle.timingSafeEqual on the MACs when available, else a length-safe
- * digest compare). Used for the legacy off-mode bearer compare (L9) so a raw `!==` cannot
- * leak via timing.
- */
-export async function constantTimeEqual(a, b) {
-  if (typeof a !== "string" || typeof b !== "string") return false;
-  const enc = new TextEncoder();
-  const keyBytes = new Uint8Array(32);
-  crypto.getRandomValues(keyBytes);
-  const key = await crypto.subtle.importKey("raw", keyBytes, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
-  const macA = new Uint8Array(await crypto.subtle.sign("HMAC", key, enc.encode(a)));
-  const macB = new Uint8Array(await crypto.subtle.sign("HMAC", key, enc.encode(b)));
-  // Both MACs are 32 bytes regardless of input length, so the compare itself is length-uniform.
-  let diff = 0;
-  for (let i = 0; i < macA.length; i += 1) diff |= macA[i] ^ macB[i];
-  return diff === 0;
 }
 
 // HTTP code -> { status } mapping for resolver/scope failures. Kept here so the handler stays

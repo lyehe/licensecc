@@ -9,16 +9,16 @@ export type {
   EntitlementPatch,
   DeviceStatus,
   EntitlementDeviceRecord,
-} from "@licensecc/cloudflare-licensing-backend/entitlements/entitlement_mutation";
+} from "@licensecc/licensing-domain/entitlements/contracts";
 
 export type {
   PlanProjectionApplyResult,
   PlanProjectionInput,
   PlanProjectionItem,
   PlanProjectionPreview,
-} from "@licensecc/cloudflare-licensing-backend/catalog/plan_projection";
+} from "@licensecc/licensing-domain/catalog/plan_projection";
 
-import type { EntitlementStatus, EntitlementInput, EntitlementEventType } from "@licensecc/cloudflare-licensing-backend/entitlements/entitlement_mutation";
+import type { EntitlementStatus, EntitlementInput, EntitlementEventType } from "@licensecc/licensing-domain/entitlements/contracts";
 
 export interface EntitlementEvent {
   id: number;

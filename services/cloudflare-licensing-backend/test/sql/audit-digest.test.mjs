@@ -11,7 +11,7 @@ import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { appendAuditDigest, verifyAuditChain } from "../../src/audit/audit_digest.mjs";
+import { appendAuditDigest, verifyAuditChain } from "@licensecc/cloudflare-runtime/d1/audit_digest";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const migrationsDir = join(here, "..", "..", "migrations");

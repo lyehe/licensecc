@@ -20,7 +20,7 @@
 //
 // Worker-safe: no node:/Buffer; only Web Crypto + standard globals.
 
-import { loadSecretMap } from "@licensecc/cloudflare-licensing-backend/auth/account_token";
+import { loadSecretMap } from "@licensecc/cloudflare-runtime/auth/secret_map";
 import { portalRateLimit } from "./portal_ratelimit.mjs";
 
 const OTP_TTL_SEC = 600; // 10 minutes (blueprint (a)).

@@ -10,7 +10,7 @@ import {
   setEntitlementCapacity,
   withId,
   entitlementId,
-} from "../src/entitlements/entitlement_mutation.mjs";
+} from "@licensecc/cloudflare-runtime/d1/entitlement_mutation";
 
 // Minimal mock-D1 mirroring the prepare/bind/first/run/batch shape used by the
 // real binding (see test/lease-worker.test.mjs). It keeps a single entitlements

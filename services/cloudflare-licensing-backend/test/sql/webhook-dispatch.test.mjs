@@ -25,7 +25,7 @@ import {
   enqueueAndDeliverWebhooks,
   verifyWebhookSignature,
   WEBHOOK_MAX_ATTEMPTS,
-} from "../../src/webhooks/webhook.mjs";
+} from "@licensecc/cloudflare-runtime/webhooks/webhook";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const migrationsDir = join(here, "..", "..", "migrations");

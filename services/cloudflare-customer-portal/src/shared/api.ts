@@ -3,7 +3,7 @@
 export type {
   EntitlementStatus,
   EntitlementRecord,
-} from "@licensecc/cloudflare-licensing-backend/entitlements/entitlement_mutation";
+} from "@licensecc/licensing-domain/entitlements/contracts";
 
 export interface ApiEnvelope<T> {
   ok: boolean;

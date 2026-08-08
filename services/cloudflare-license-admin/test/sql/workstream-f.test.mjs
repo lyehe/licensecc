@@ -24,8 +24,8 @@ import { fileURLToPath } from "node:url";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 
 import worker from "../../dist-worker/worker/index.js";
-import { entitlementId } from "@licensecc/cloudflare-licensing-backend/entitlements/entitlement_mutation";
-import { forceReleaseLiveSeats } from "@licensecc/cloudflare-licensing-backend/lease/seat_reclaim";
+import { entitlementId } from "@licensecc/licensing-domain/entitlements/contracts";
+import { forceReleaseLiveSeats } from "@licensecc/cloudflare-runtime/lease/seat_reclaim";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const migrationsDir = join(here, "..", "..", "..", "cloudflare-licensing-backend", "migrations");

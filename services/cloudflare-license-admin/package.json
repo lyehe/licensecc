@@ -21,7 +21,8 @@
     "validate:staging-catalog": "node scripts/staging-catalog-drill.mjs"
   },
   "dependencies": {
-    "@licensecc/cloudflare-licensing-backend": "file:../cloudflare-licensing-backend",
+    "@licensecc/cloudflare-runtime": "file:../../packages/cloudflare-runtime",
+    "@licensecc/licensing-domain": "file:../../packages/licensing-domain",
     "@vitejs/plugin-react": "4.7.0",
     "jose": "5.10.0",
     "react": "19.2.7",

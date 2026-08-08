@@ -15,14 +15,14 @@ import {
 import { boundedCursor, parseJsonBody, requireAdmin, safeNotes } from "./index.js";
 import type { Env } from "./index.js";
 import { transitionWithGuard } from "./transitions.js";
-import type { D1PreparedStatementLike } from "@licensecc/cloudflare-licensing-backend/entitlements/entitlement_mutation";
+import type { D1PreparedStatementLike } from "@licensecc/cloudflare-runtime/d1/entitlement_mutation";
 import type {
   WebhookEndpoint,
   WebhookEndpointInput,
   WebhookEndpointPatch,
 } from "../shared/api";
-import { clientIp } from "@licensecc/cloudflare-licensing-backend/http/kit";
-import type { Actor, MutationContext } from "@licensecc/cloudflare-licensing-backend/entitlements/entitlement_mutation";
+import { clientIp } from "@licensecc/cloudflare-runtime/http/kit";
+import type { Actor, MutationContext } from "@licensecc/cloudflare-runtime/d1/entitlement_mutation";
 
 // Sentinel distinguishing a present-but-invalid value from an absent one, module-local to the
 // webhook validators (mirrors index.ts's INVALID symbol; compared only within this module).

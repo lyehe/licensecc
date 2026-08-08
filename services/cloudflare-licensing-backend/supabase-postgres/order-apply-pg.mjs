@@ -30,7 +30,7 @@
 // Test bar: order-apply-pg.test.mjs (pure shape + mock-pg transaction, hermetic) and
 // order-apply-smoke-real-pg.mjs (real PG16, gated on DATABASE_URL).
 
-import { ENTITLEMENT_COLUMNS, withId, entitlementId } from "../src/entitlements/entitlement_mutation.mjs";
+import { ENTITLEMENT_COLUMNS, withId, entitlementId } from "@licensecc/cloudflare-runtime/d1/entitlement_mutation";
 
 const ORDER_CTX_SOURCE = "sync";
 const ORDER_ACTOR_TYPE = "sync";

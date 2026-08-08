@@ -21,11 +21,14 @@
 // Design: docs/superpowers/plans/2026-06-24-slice1-order-ingest-blueprint.md
 
 const SIGNED_PREFIX = "POST\n/v1/orders\n";
-const MIN_SECRET_BYTES = 32;
 const DEFAULT_MAX_SKEW_SECONDS = 300;
 const MAX_SKEW_CAP_SECONDS = 3600;
 
 const textEncoder = new TextEncoder();
+
+import { bytesFromBase64, loadSecretMap, lookupSecret } from "@licensecc/cloudflare-runtime/auth/secret_map";
+
+export { bytesFromBase64, loadSecretMap, lookupSecret } from "@licensecc/cloudflare-runtime/auth/secret_map";
 
 /**
  * The canonical bytes the order-ingest HMAC is computed over. Exported so the
@@ -34,87 +37,6 @@ const textEncoder = new TextEncoder();
  */
 export function canonicalOrderSignedText(audience, timestamp, bodyText) {
   return SIGNED_PREFIX + audience + "\n" + String(timestamp) + "\n" + bodyText;
-}
-
-/**
- * Worker-safe base64 -> bytes. atob is present in Workers and modern node; we never
- * reach for Buffer here so the module bundles identically everywhere. Throws on
- * malformed base64 (callers treat a throw as a hard failure / bad secret).
- */
-export function bytesFromBase64(value) {
-  // atob is lenient about some inputs; the secret/sig length checks downstream are
-  // what actually gate correctness, so we only need a faithful decode here.
-  const binary = atob(value);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i += 1) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  return bytes;
-}
-
-/**
- * Parse env.ORDER_HMAC_SECRETS (a JSON object { key_id: base64-secret }) into a
- * null-prototype map of key_id -> decoded-secret-bytes. Fail-closed: returns null
- * on any malformed JSON, non-object, empty map, non-string value, undecodable
- * secret, or a secret shorter than 32 bytes. A null return means "no usable keys"
- * and the caller must reject every request.
- */
-export function loadSecretMap(rawJson) {
-  if (typeof rawJson !== "string" || rawJson.length === 0) {
-    return null;
-  }
-  let parsed;
-  try {
-    parsed = JSON.parse(rawJson);
-  } catch {
-    return null;
-  }
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-    return null;
-  }
-  const map = Object.create(null);
-  let count = 0;
-  for (const keyId of Object.keys(parsed)) {
-    // Never let a "__proto__"/"constructor" payload key poison the lookup map; the
-    // null prototype + own-key iteration here keeps those as ordinary data keys.
-    const value = parsed[keyId];
-    if (typeof value !== "string" || value.length === 0) {
-      return null;
-    }
-    let secretBytes;
-    try {
-      secretBytes = bytesFromBase64(value);
-    } catch {
-      return null;
-    }
-    if (secretBytes.length < MIN_SECRET_BYTES) {
-      return null;
-    }
-    map[keyId] = secretBytes;
-    count += 1;
-  }
-  if (count === 0) {
-    return null;
-  }
-  return map;
-}
-
-/**
- * Own-property, typeof-guarded lookup. Never walks the prototype chain, so a
- * key_id of "__proto__"/"constructor"/"hasOwnProperty" can only ever hit a real
- * data entry (or miss), never a forged function/object off Object.prototype.
- */
-export function lookupSecret(map, keyId) {
-  if (!Object.prototype.hasOwnProperty.call(map, keyId)) {
-    return null;
-  }
-  const value = map[keyId];
-  // map values are Uint8Array; typeof-string guard is belt-and-suspenders against
-  // a prototype-pollution shaped value sneaking in.
-  if (typeof value === "string") {
-    return null;
-  }
-  return value instanceof Uint8Array ? value : null;
 }
 
 /**

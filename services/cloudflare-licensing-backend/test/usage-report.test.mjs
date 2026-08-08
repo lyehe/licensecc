@@ -1,11 +1,11 @@
-// Unit tests for the usage analytics aggregations (src/lease/usage_report.mjs). The
+// Unit tests for the usage analytics aggregations (@licensecc/licensing-domain/usage/usage_report). The
 // peak-concurrent sweep line is the bug-prone core (interval overlap, equal-timestamp
 // handoffs, baseline, still-open seats, unbalanced windows), so it is exercised hard here.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { computePeakConcurrent, summarizeUsage } from "../src/lease/usage_report.mjs";
+import { computePeakConcurrent, summarizeUsage } from "@licensecc/licensing-domain/usage/usage_report";
 
 const co = (ts) => ({ ts, type: "checkout" });
 const end = (ts) => ({ ts, type: "end" });

@@ -11,7 +11,7 @@ import { test } from "node:test";
 import {
   ENTITLEMENT_COLUMNS,
   withId,
-} from "../src/entitlements/entitlement_mutation.mjs";
+} from "@licensecc/cloudflare-runtime/d1/entitlement_mutation";
 import {
   pgAcceptBatch,
   pgCreateStatement,

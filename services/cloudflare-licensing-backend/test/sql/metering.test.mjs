@@ -12,8 +12,8 @@ import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { meterUsage } from "../../src/lease/metering.mjs";
-import { setEntitlementCapacity } from "../../src/entitlements/entitlement_mutation.mjs";
+import { meterUsage } from "@licensecc/cloudflare-runtime/lease/metering";
+import { setEntitlementCapacity } from "@licensecc/cloudflare-runtime/d1/entitlement_mutation";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const migrationsDir = join(here, "..", "..", "migrations");

@@ -16,11 +16,11 @@ import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const migrationsDir = join(here, "..", "..", "..", "cloudflare-licensing-backend", "migrations");
-// eventFromCurrentStatement moved into the shared @licensecc/cloudflare-licensing-backend
+// eventFromCurrentStatement moved into the shared @licensecc/cloudflare-runtime
 // entitlement_mutation core (T2 extraction); read the json_object expression from there, not
 // from src/worker/index.ts (which no longer contains it). Mirrors the drift-guard in
 // admin-worker.test.mjs so both point at the single canonical source.
-const mutationSource = fileURLToPath(import.meta.resolve("@licensecc/cloudflare-licensing-backend/entitlements/entitlement_mutation"));
+const mutationSource = fileURLToPath(import.meta.resolve("@licensecc/cloudflare-runtime/d1/entitlement_mutation"));
 
 // The audit payload contract: the exact keys the production json_object emits (+ no others).
 const NEXT_JSON_KEYS = [

@@ -1,0 +1,69 @@
+{
+  "name": "@licensecc/cloudflare-runtime",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./d1/audit_digest": {
+      "types": "./src/d1/audit_digest.d.ts",
+      "default": "./src/d1/audit_digest.mjs"
+    },
+    "./auth/account_token_issue": {
+      "default": "./src/auth/account_token_issue.mjs"
+    },
+    "./auth/primitives": {
+      "default": "./src/auth/primitives.mjs"
+    },
+    "./auth/secret_map": {
+      "default": "./src/auth/secret_map.mjs"
+    },
+    "./d1/plan_projection": {
+      "types": "./src/d1/plan_projection.d.ts",
+      "default": "./src/d1/plan_projection.mjs"
+    },
+    "./d1/contract": {
+      "types": "./src/d1/contract.d.ts",
+      "default": "./src/d1/contract.mjs"
+    },
+    "./d1/entitlement_mutation": {
+      "types": "./src/d1/entitlement_mutation.d.ts",
+      "default": "./src/d1/entitlement_mutation.mjs"
+    },
+    "./d1/idempotency_store": {
+      "types": "./src/d1/idempotency_store.d.ts",
+      "default": "./src/d1/idempotency_store.mjs"
+    },
+    "./entitlements/policy_store": {
+      "types": "./src/entitlements/policy_store.d.ts",
+      "default": "./src/entitlements/policy_store.mjs"
+    },
+    "./http/kit": {
+      "types": "./src/http/kit.d.ts",
+      "default": "./src/http/kit.mjs"
+    },
+    "./lease/metering": {
+      "default": "./src/lease/metering.mjs"
+    },
+    "./lease/seat_reclaim": {
+      "types": "./src/lease/seat_reclaim.d.ts",
+      "default": "./src/lease/seat_reclaim.mjs"
+    },
+    "./lease/trial_store": {
+      "default": "./src/lease/trial_store.mjs"
+    },
+    "./webhooks/webhook": {
+      "default": "./src/webhooks/webhook.mjs"
+    }
+  },
+  "dependencies": {
+    "@licensecc/licensing-domain": "file:../licensing-domain"
+  },
+  "scripts": {
+    "build": "npm run typecheck",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test test/*.test.mjs"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3"
+  }
+}

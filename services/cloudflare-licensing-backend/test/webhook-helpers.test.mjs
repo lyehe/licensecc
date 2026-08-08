@@ -13,7 +13,7 @@ import {
   signWebhookBody,
   verifyWebhookSignature,
   WEBHOOK_REPLAY_WINDOW_SECONDS,
-} from "../src/webhooks/webhook.mjs";
+} from "@licensecc/cloudflare-runtime/webhooks/webhook";
 
 // A 32-byte base64 secret (24 raw bytes is < 32 and would be rejected; use 32 bytes).
 const SECRET_B64 = Buffer.alloc(32, 7).toString("base64");

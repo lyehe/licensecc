@@ -14,35 +14,11 @@ function debtKey(from, specifier) {
 }
 
 /**
- * These are deliberately duplicated as a closed inventory.  The JSON allowlist
- * and the current production imports must agree, so a new service-to-service
- * edge cannot become silently allowed by changing only one file.
+ * Task 4 completes with no documented service-to-service edges. The empty inventory
+ * remains explicit so fixture tests can prove that an allowance must be justified
+ * rather than accidentally reintroduced.
  */
-export const CURRENT_BACKEND_DEBT_KEYS = Object.freeze([
-  debtKey("services/cloudflare-license-admin/src/shared/api.ts", "@licensecc/cloudflare-licensing-backend/catalog/plan_projection"),
-  debtKey("services/cloudflare-license-admin/src/shared/api.ts", "@licensecc/cloudflare-licensing-backend/entitlements/entitlement_mutation"),
-  debtKey("services/cloudflare-license-admin/src/worker/idempotency.ts", "@licensecc/cloudflare-licensing-backend/db/idempotency_store"),
-  debtKey("services/cloudflare-license-admin/src/worker/idempotency.ts", "@licensecc/cloudflare-licensing-backend/entitlements/entitlement_mutation"),
-  debtKey("services/cloudflare-license-admin/src/worker/idempotency.ts", "@licensecc/cloudflare-licensing-backend/http/kit"),
-  debtKey("services/cloudflare-license-admin/src/worker/index.ts", "@licensecc/cloudflare-licensing-backend/audit/audit_digest"),
-  debtKey("services/cloudflare-license-admin/src/worker/index.ts", "@licensecc/cloudflare-licensing-backend/catalog/plan_projection"),
-  debtKey("services/cloudflare-license-admin/src/worker/index.ts", "@licensecc/cloudflare-licensing-backend/db/idempotency_store"),
-  debtKey("services/cloudflare-license-admin/src/worker/index.ts", "@licensecc/cloudflare-licensing-backend/entitlements/entitlement_mutation"),
-  debtKey("services/cloudflare-license-admin/src/worker/index.ts", "@licensecc/cloudflare-licensing-backend/entitlements/policy"),
-  debtKey("services/cloudflare-license-admin/src/worker/index.ts", "@licensecc/cloudflare-licensing-backend/http/kit"),
-  debtKey("services/cloudflare-license-admin/src/worker/index.ts", "@licensecc/cloudflare-licensing-backend/lease/seat_reclaim"),
-  debtKey("services/cloudflare-license-admin/src/worker/policy_validation.ts", "@licensecc/cloudflare-licensing-backend/entitlements/policy"),
-  debtKey("services/cloudflare-license-admin/src/worker/policy_validation.ts", "@licensecc/cloudflare-licensing-backend/http/kit"),
-  debtKey("services/cloudflare-license-admin/src/worker/transitions.ts", "@licensecc/cloudflare-licensing-backend/entitlements/entitlement_mutation"),
-  debtKey("services/cloudflare-license-admin/src/worker/webhooks.ts", "@licensecc/cloudflare-licensing-backend/entitlements/entitlement_mutation"),
-  debtKey("services/cloudflare-license-admin/src/worker/webhooks.ts", "@licensecc/cloudflare-licensing-backend/http/kit"),
-  debtKey("services/cloudflare-customer-portal/src/auth/portal_otp.mjs", "@licensecc/cloudflare-licensing-backend/auth/account_token"),
-  debtKey("services/cloudflare-customer-portal/src/auth/portal_session.mjs", "@licensecc/cloudflare-licensing-backend/auth/account_token"),
-  debtKey("services/cloudflare-customer-portal/src/auth/portal_token.mjs", "@licensecc/cloudflare-licensing-backend/auth/account_token"),
-  debtKey("services/cloudflare-customer-portal/src/auth/portal_token.mjs", "@licensecc/cloudflare-licensing-backend/auth/account_token_issue"),
-  debtKey("services/cloudflare-customer-portal/src/shared/api.ts", "@licensecc/cloudflare-licensing-backend/entitlements/entitlement_mutation"),
-  debtKey("services/cloudflare-customer-portal/src/worker/index.ts", "@licensecc/cloudflare-licensing-backend/http/kit"),
-].sort());
+export const CURRENT_SERVICE_DEBT_KEYS = Object.freeze([]);
 
 export function normalizeRepoPath(value) {
   const slashPath = String(value).replace(/\\/g, "/");
@@ -351,8 +327,8 @@ function validateHygieneAllowances(config, errors, now) {
 }
 
 function matchesCurrentDebtInventory(config, allowances, errors) {
-  if (config.assertCurrentBackendDebt !== true) return;
-  const current = new Set(CURRENT_BACKEND_DEBT_KEYS);
+  if (config.assertCurrentServiceDebt !== true) return;
+  const current = new Set(CURRENT_SERVICE_DEBT_KEYS);
   const actual = new Set(allowances.keys());
   const missing = [...current].filter((key) => !actual.has(key));
   const unexpected = [...actual].filter((key) => !current.has(key));
@@ -363,7 +339,7 @@ function matchesCurrentDebtInventory(config, allowances, errors) {
       unexpected.length ? `unexpected ${unexpected.length}` : "",
       wrongRemovalTask.length ? `wrong removeBy ${wrongRemovalTask.length}` : "",
     ].filter(Boolean).join(", ");
-    errors.push(makeError("ARCH_DEBT_INVENTORY_DRIFT", "scripts/architecture-boundaries.json", `Current backend debt inventory must exactly match the 23 reviewed entries (${details}).`, "setup"));
+    errors.push(makeError("ARCH_DEBT_INVENTORY_DRIFT", "scripts/architecture-boundaries.json", `Current service debt inventory must exactly match the reviewed entries (${details}).`, "setup"));
   }
 }
 

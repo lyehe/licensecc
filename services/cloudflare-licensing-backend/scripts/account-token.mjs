@@ -29,7 +29,7 @@ import {
   validatedName,
   validatedScopes,
   validatedText,
-} from "../src/auth/account_token_issue.mjs";
+} from "@licensecc/cloudflare-runtime/auth/account_token_issue";
 import { bytesFromBase64 } from "../src/fulfillment/order_hmac.mjs";
 
 // Re-exported so the existing CLI unit tests can import buildIssue / insertTokenSqlGuarded from
@@ -112,7 +112,7 @@ function validatedOverlap(value) {
 // ---------------------------------------------------------------------------
 // SQL helpers (mirror entitlement.mjs — single-quote escaping; CLI stamps cli/cli).
 // sqlString / sqlNullableString / eventSql / buildIssue / insertTokenSqlGuarded are imported from
-// ../src/auth/account_token_issue.mjs (the Worker-safe pure issue builders).
+// @licensecc/cloudflare-runtime/auth/account_token_issue (the Worker-safe pure issue builders).
 // ---------------------------------------------------------------------------
 
 // Bump (or create) the per-customer revocation floor. revoke / revoke-customer / merge call this so
@@ -145,7 +145,7 @@ async function mintTokenHmac(rawToken, pepperKeyId, pepperBytes) {
   return hashToken(pepperBytes, textEncoder.encode(rawToken));
 }
 
-// buildIssue + insertTokenSqlGuarded now live in ../src/auth/account_token_issue.mjs (Worker-safe)
+// buildIssue + insertTokenSqlGuarded now live in cloudflare-runtime (Worker-safe)
 // and are imported above; re-exported from this module so the CLI tests' import sites are unchanged.
 
 /**

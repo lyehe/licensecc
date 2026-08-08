@@ -10,7 +10,7 @@ import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { summarizeUsage } from "../../src/lease/usage_report.mjs";
+import { summarizeUsage } from "@licensecc/licensing-domain/usage/usage_report";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const migrationsDir = join(here, "..", "..", "migrations");

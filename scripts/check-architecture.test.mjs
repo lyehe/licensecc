@@ -2,18 +2,16 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  CURRENT_BACKEND_DEBT_KEYS,
+  CURRENT_SERVICE_DEBT_KEYS,
   evaluateArchitecture,
   normalizeRepoPath,
   parseModuleSpecifiers,
 } from "./check-architecture.mjs";
 
-const BACKEND = "@licensecc/cloudflare-licensing-backend";
-
 function config(overrides = {}) {
   return {
     version: 1,
-    assertCurrentBackendDebt: false,
+    assertCurrentServiceDebt: false,
     serviceImportAllowances: [],
     hygieneAllowances: [],
     ...overrides,
@@ -353,8 +351,27 @@ test("hygiene debt also fails when it is expired or unused", () => {
   assert.deepEqual(errorCodes(unused), ["ARCH_UNUSED_HYGIENE_ALLOWANCE"]);
 });
 
-test("documents the exact 23 current backend debt edges", () => {
-  assert.equal(CURRENT_BACKEND_DEBT_KEYS.length, 23);
-  assert.equal(new Set(CURRENT_BACKEND_DEBT_KEYS).size, 23);
-  assert.ok(CURRENT_BACKEND_DEBT_KEYS.every((key) => key.includes(BACKEND)));
+test("documents no service-to-service debt after shared-package extraction", () => {
+  assert.equal(CURRENT_SERVICE_DEBT_KEYS.length, 0);
+});
+
+test("the completed inventory rejects a newly added service allowance", () => {
+  const result = fixture({
+    sourceFiles: [["services/admin/src/main.ts", 'import "@fixture/backend/api";']],
+    manifests: [
+      serviceManifest("admin", { "@fixture/backend": "file:../backend" }),
+      serviceManifest("backend", {}, { "./api": "./src/api.ts" }),
+    ],
+    checkerConfig: config({
+      assertCurrentServiceDebt: true,
+      serviceImportAllowances: [{
+        from: "services/admin/src/main.ts",
+        specifier: "@fixture/backend/api",
+        reason: "A deliberately unreviewed fixture edge.",
+        removeBy: "org/04-shared-packages",
+      }],
+    }),
+  });
+  assert.equal(result.exitCode, 2);
+  assert.deepEqual(errorCodes(result), ["ARCH_DEBT_INVENTORY_DRIFT"]);
 });
