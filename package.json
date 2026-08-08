@@ -15,7 +15,11 @@
     "test:admin": "npm --prefix services/cloudflare-license-admin run test && npm --prefix services/cloudflare-license-admin run test:sql && npm --prefix services/cloudflare-license-admin run test:ui",
     "test:portal": "npm --prefix services/cloudflare-customer-portal run test && npm --prefix services/cloudflare-customer-portal run test:ui",
     "test:backup": "npm --prefix services/cloudflare-d1-backup run test",
-    "test:lint": "node --test scripts/secret-lint.test.mjs"
+    "test:lint": "node --test scripts/secret-lint.test.mjs",
+    "check:architecture": "node scripts/check-architecture.mjs",
+    "test:architecture": "node --test scripts/check-architecture.test.mjs",
+    "test:contracts": "node --test test/contracts/canonical-contracts.test.mjs && node scripts/canonical-contracts.mjs",
+    "write:contract-baselines": "node scripts/canonical-contracts.mjs --write"
   },
   "workspaces": [
     "services/cloudflare-licensing-backend",

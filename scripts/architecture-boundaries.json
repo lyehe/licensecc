@@ -1,0 +1,152 @@
+{
+  "version": 1,
+  "assertCurrentBackendDebt": true,
+  "serviceImportAllowances": [
+    {
+      "from": "services/cloudflare-license-admin/src/shared/api.ts",
+      "specifier": "@licensecc/cloudflare-licensing-backend/catalog/plan_projection",
+      "reason": "Admin API contract shares the backend plan projection until Task 4 extracts licensing-domain/catalog.",
+      "removeBy": "org/04-shared-packages"
+    },
+    {
+      "from": "services/cloudflare-license-admin/src/shared/api.ts",
+      "specifier": "@licensecc/cloudflare-licensing-backend/entitlements/entitlement_mutation",
+      "reason": "Admin API contract shares entitlement DTOs until Task 4 extracts licensing-domain/entitlements.",
+      "removeBy": "org/04-shared-packages"
+    },
+    {
+      "from": "services/cloudflare-license-admin/src/worker/idempotency.ts",
+      "specifier": "@licensecc/cloudflare-licensing-backend/db/idempotency_store",
+      "reason": "Admin idempotency adapter temporarily uses the backend D1 idempotency store before Task 4 extracts cloudflare-runtime/d1.",
+      "removeBy": "org/04-shared-packages"
+    },
+    {
+      "from": "services/cloudflare-license-admin/src/worker/idempotency.ts",
+      "specifier": "@licensecc/cloudflare-licensing-backend/entitlements/entitlement_mutation",
+      "reason": "Admin idempotency response types temporarily use backend entitlement mutations before Task 4 extraction.",
+      "removeBy": "org/04-shared-packages"
+    },
+    {
+      "from": "services/cloudflare-license-admin/src/worker/idempotency.ts",
+      "specifier": "@licensecc/cloudflare-licensing-backend/http/kit",
+      "reason": "Admin idempotency validation temporarily uses backend HTTP helpers before Task 4 extracts cloudflare-runtime/http.",
+      "removeBy": "org/04-shared-packages"
+    },
+    {
+      "from": "services/cloudflare-license-admin/src/worker/index.ts",
+      "specifier": "@licensecc/cloudflare-licensing-backend/audit/audit_digest",
+      "reason": "Admin audit verification temporarily uses the backend digest implementation before Task 4 extracts licensing-domain/audit.",
+      "removeBy": "org/04-shared-packages"
+    },
+    {
+      "from": "services/cloudflare-license-admin/src/worker/index.ts",
+      "specifier": "@licensecc/cloudflare-licensing-backend/catalog/plan_projection",
+      "reason": "Admin route composition temporarily uses backend plan projection types before Task 4 extraction.",
+      "removeBy": "org/04-shared-packages"
+    },
+    {
+      "from": "services/cloudflare-license-admin/src/worker/index.ts",
+      "specifier": "@licensecc/cloudflare-licensing-backend/db/idempotency_store",
+      "reason": "Admin route composition temporarily uses the backend idempotency store before Task 4 extraction.",
+      "removeBy": "org/04-shared-packages"
+    },
+    {
+      "from": "services/cloudflare-license-admin/src/worker/index.ts",
+      "specifier": "@licensecc/cloudflare-licensing-backend/entitlements/entitlement_mutation",
+      "reason": "Admin route composition temporarily uses backend entitlement mutations before Task 4 extraction.",
+      "removeBy": "org/04-shared-packages"
+    },
+    {
+      "from": "services/cloudflare-license-admin/src/worker/index.ts",
+      "specifier": "@licensecc/cloudflare-licensing-backend/entitlements/policy",
+      "reason": "Admin policy stamping temporarily uses backend policy rules before Task 4 extracts licensing-domain/entitlements.",
+      "removeBy": "org/04-shared-packages"
+    },
+    {
+      "from": "services/cloudflare-license-admin/src/worker/index.ts",
+      "specifier": "@licensecc/cloudflare-licensing-backend/http/kit",
+      "reason": "Admin request validation temporarily uses backend HTTP helpers before Task 4 extracts cloudflare-runtime/http.",
+      "removeBy": "org/04-shared-packages"
+    },
+    {
+      "from": "services/cloudflare-license-admin/src/worker/index.ts",
+      "specifier": "@licensecc/cloudflare-licensing-backend/lease/seat_reclaim",
+      "reason": "Admin operational seat release temporarily uses backend lease mechanics before Task 4 extracts cloudflare-runtime/lease.",
+      "removeBy": "org/04-shared-packages"
+    },
+    {
+      "from": "services/cloudflare-license-admin/src/worker/policy_validation.ts",
+      "specifier": "@licensecc/cloudflare-licensing-backend/entitlements/policy",
+      "reason": "Admin policy validation temporarily uses backend policy rules before Task 4 extraction.",
+      "removeBy": "org/04-shared-packages"
+    },
+    {
+      "from": "services/cloudflare-license-admin/src/worker/policy_validation.ts",
+      "specifier": "@licensecc/cloudflare-licensing-backend/http/kit",
+      "reason": "Admin policy validation temporarily uses backend input helpers before Task 4 extraction.",
+      "removeBy": "org/04-shared-packages"
+    },
+    {
+      "from": "services/cloudflare-license-admin/src/worker/transitions.ts",
+      "specifier": "@licensecc/cloudflare-licensing-backend/entitlements/entitlement_mutation",
+      "reason": "Admin transition persistence temporarily uses backend entitlement mutation helpers before Task 4 extraction.",
+      "removeBy": "org/04-shared-packages"
+    },
+    {
+      "from": "services/cloudflare-license-admin/src/worker/webhooks.ts",
+      "specifier": "@licensecc/cloudflare-licensing-backend/entitlements/entitlement_mutation",
+      "reason": "Admin webhook mutation types temporarily use backend entitlement helpers before Task 4 extraction.",
+      "removeBy": "org/04-shared-packages"
+    },
+    {
+      "from": "services/cloudflare-license-admin/src/worker/webhooks.ts",
+      "specifier": "@licensecc/cloudflare-licensing-backend/http/kit",
+      "reason": "Admin webhook client IP parsing temporarily uses backend HTTP helpers before Task 4 extraction.",
+      "removeBy": "org/04-shared-packages"
+    },
+    {
+      "from": "services/cloudflare-customer-portal/src/auth/portal_otp.mjs",
+      "specifier": "@licensecc/cloudflare-licensing-backend/auth/account_token",
+      "reason": "Portal OTP authentication temporarily uses backend account token primitives before Task 4 extracts cloudflare-runtime/auth.",
+      "removeBy": "org/04-shared-packages"
+    },
+    {
+      "from": "services/cloudflare-customer-portal/src/auth/portal_session.mjs",
+      "specifier": "@licensecc/cloudflare-licensing-backend/auth/account_token",
+      "reason": "Portal session authentication temporarily uses backend account token primitives before Task 4 extraction.",
+      "removeBy": "org/04-shared-packages"
+    },
+    {
+      "from": "services/cloudflare-customer-portal/src/auth/portal_token.mjs",
+      "specifier": "@licensecc/cloudflare-licensing-backend/auth/account_token",
+      "reason": "Portal token validation temporarily uses backend account token primitives before Task 4 extraction.",
+      "removeBy": "org/04-shared-packages"
+    },
+    {
+      "from": "services/cloudflare-customer-portal/src/auth/portal_token.mjs",
+      "specifier": "@licensecc/cloudflare-licensing-backend/auth/account_token_issue",
+      "reason": "Portal token issuance temporarily uses backend token issuance before Task 4 extracts cloudflare-runtime/auth.",
+      "removeBy": "org/04-shared-packages"
+    },
+    {
+      "from": "services/cloudflare-customer-portal/src/shared/api.ts",
+      "specifier": "@licensecc/cloudflare-licensing-backend/entitlements/entitlement_mutation",
+      "reason": "Portal API contract temporarily uses backend entitlement DTOs before Task 4 extraction.",
+      "removeBy": "org/04-shared-packages"
+    },
+    {
+      "from": "services/cloudflare-customer-portal/src/worker/index.ts",
+      "specifier": "@licensecc/cloudflare-licensing-backend/http/kit",
+      "reason": "Portal Worker request parsing temporarily uses backend HTTP helpers before Task 4 extracts cloudflare-runtime/http.",
+      "removeBy": "org/04-shared-packages"
+    }
+  ],
+  "hygieneAllowances": [
+    {
+      "path": "pyvenv.cfg",
+      "reason": "Temporary root Python environment marker retained only until source-tree-purity work lands.",
+      "owner": "org/02-build-purity",
+      "removeBy": "org/02-build-purity"
+    }
+  ]
+}

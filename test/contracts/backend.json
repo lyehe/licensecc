@@ -1,0 +1,3292 @@
+{
+  "allCanonicalRoutes": [
+    {
+      "method": "GET",
+      "path": "/openapi.json"
+    },
+    {
+      "method": "GET",
+      "path": "/docs"
+    },
+    {
+      "method": "GET",
+      "path": "/health"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/verify"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/orders"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/activate"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/renew"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/checkout"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/heartbeat"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/release"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/meter"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/admin/report"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/emergency/v1/activate"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/emergency/v1/renew"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/emergency/v1/checkout"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/emergency/v1/heartbeat"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/emergency/v1/release"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/emergency/v1/meter"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/emergency/v1/admin/report"
+    }
+  ],
+  "BACKEND_ROUTE_KEYS": [
+    "GET /openapi.json",
+    "GET /docs",
+    "GET /health",
+    "POST /v1/verify",
+    "POST /v1/orders",
+    "POST /v1/activate",
+    "POST /v1/renew",
+    "POST /v1/checkout",
+    "POST /v1/heartbeat",
+    "POST /v1/release",
+    "POST /v1/meter",
+    "GET /v1/admin/report"
+  ],
+  "openApiOperationCount": 19,
+  "openApiSpec": {
+    "components": {
+      "schemas": {
+        "ErrorEnvelope": {
+          "additionalProperties": true,
+          "properties": {
+            "code": {
+              "description": "Machine-readable error code.",
+              "type": "string"
+            },
+            "ok": {
+              "enum": [
+                false
+              ],
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "ok",
+            "code"
+          ],
+          "type": "object"
+        },
+        "HealthSuccess": {
+          "properties": {
+            "ok": {
+              "enum": [
+                true
+              ],
+              "type": "boolean"
+            },
+            "service": {
+              "enum": [
+                "licensecc-online-verifier"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "ok",
+            "service"
+          ],
+          "type": "object"
+        },
+        "LeaseRequest": {
+          "additionalProperties": true,
+          "properties": {
+            "client_signature_source_strength": {
+              "type": "integer"
+            },
+            "device_key_id": {
+              "description": "sha256:<64-hex>.",
+              "type": "string"
+            },
+            "end_version": {
+              "type": "integer"
+            },
+            "feature": {
+              "type": "string"
+            },
+            "hw_id": {
+              "type": "string"
+            },
+            "license_fingerprint": {
+              "type": "string"
+            },
+            "nonce": {
+              "description": "Required when a request proof is present.",
+              "type": "string"
+            },
+            "project": {
+              "type": "string"
+            },
+            "request_id": {
+              "description": "Idempotency key.",
+              "type": "string"
+            },
+            "request_signature": {
+              "description": "Base64.",
+              "type": "string"
+            },
+            "request_signature_algorithm": {
+              "enum": [
+                "ecdsa-p256-sha256"
+              ],
+              "type": "string"
+            },
+            "request_signature_version": {
+              "enum": [
+                1
+              ],
+              "type": "integer"
+            },
+            "request_timestamp": {
+              "description": "Unix seconds.",
+              "type": "integer"
+            },
+            "start_version": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "project",
+            "feature",
+            "license_fingerprint",
+            "device_key_id"
+          ],
+          "type": "object"
+        },
+        "LeaseSuccess": {
+          "properties": {
+            "lic": {
+              "description": "v201 signed lease text.",
+              "type": "string"
+            },
+            "ok": {
+              "enum": [
+                true
+              ],
+              "type": "boolean"
+            },
+            "renew_by": {
+              "description": "Unix seconds.",
+              "type": "integer"
+            },
+            "server_time": {
+              "type": "integer"
+            },
+            "trial": {
+              "description": "Present (true) only for trial entitlements.",
+              "enum": [
+                true
+              ],
+              "type": "boolean"
+            },
+            "trial_expires_at_epoch": {
+              "description": "Unix seconds. Server-computed trial deadline, clamped to valid_until. Omitted when the trial has no finite deadline.",
+              "type": "integer"
+            },
+            "valid_to_epoch": {
+              "description": "Unix seconds (hard offline expiry).",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "ok",
+            "lic",
+            "server_time",
+            "renew_by",
+            "valid_to_epoch"
+          ],
+          "type": "object"
+        },
+        "MeterRequest": {
+          "additionalProperties": true,
+          "properties": {
+            "feature": {
+              "type": "string"
+            },
+            "license_fingerprint": {
+              "type": "string"
+            },
+            "project": {
+              "type": "string"
+            },
+            "units": {
+              "description": "Positive integer; defaults to 1 when omitted.",
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "project",
+            "feature",
+            "license_fingerprint"
+          ],
+          "type": "object"
+        },
+        "MeterSuccess": {
+          "properties": {
+            "ok": {
+              "type": "boolean"
+            },
+            "period_end": {
+              "description": "Unix seconds; period_start + meter_period_sec.",
+              "type": "integer"
+            },
+            "period_start": {
+              "description": "Unix seconds; start of the current rolling period.",
+              "type": "integer"
+            },
+            "quota": {
+              "description": "meter_quota (0 = unlimited / count-only).",
+              "type": "integer"
+            },
+            "server_time": {
+              "type": "integer"
+            },
+            "units_consumed": {
+              "description": "Cumulative units for the current period after this call.",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "ok",
+            "server_time",
+            "units_consumed",
+            "quota",
+            "period_start",
+            "period_end"
+          ],
+          "type": "object"
+        },
+        "OrderRequest": {
+          "additionalProperties": true,
+          "description": "Signed subscription order event (body <= 16384 bytes), normalized/validated per order_event.mjs.",
+          "properties": {
+            "customer": {
+              "properties": {
+                "email": {
+                  "type": "string"
+                },
+                "external_ref": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "event_id": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "feature": {
+              "type": "string"
+            },
+            "intent": {
+              "enum": [
+                "subscription.active",
+                "subscription.canceled",
+                "subscription.failed",
+                "subscription.paused",
+                "subscription.pending",
+                "subscription.unpaused",
+                "quantity.changed",
+                "subscription.paid",
+                "subscription.past_due",
+                "subscription.unpaid"
+              ],
+              "type": "string"
+            },
+            "license_fingerprint": {
+              "description": "Optional; auto-derived if omitted.",
+              "type": "string"
+            },
+            "license_id": {
+              "type": "string"
+            },
+            "order_epoch": {
+              "type": "integer"
+            },
+            "project": {
+              "type": "string"
+            },
+            "quantity": {
+              "properties": {
+                "allow_overdraft": {
+                  "type": "integer"
+                },
+                "heartbeat_grace_sec": {
+                  "type": "integer"
+                },
+                "lease_seconds": {
+                  "type": "integer"
+                },
+                "max_active_devices": {
+                  "type": "integer"
+                },
+                "max_borrow_sec": {
+                  "type": "integer"
+                },
+                "pool_size": {
+                  "type": "integer"
+                },
+                "rebind_window_sec": {
+                  "type": "integer"
+                }
+              },
+              "type": "object"
+            },
+            "seq": {
+              "type": "integer"
+            },
+            "subscription_id": {
+              "type": "string"
+            },
+            "ts": {
+              "description": "Unix seconds.",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "subscription_id",
+            "project",
+            "feature",
+            "intent",
+            "event_id",
+            "ts"
+          ],
+          "type": "object"
+        },
+        "OrderResult": {
+          "additionalProperties": true,
+          "properties": {
+            "code": {
+              "enum": [
+                "applied",
+                "superseded",
+                "no_entitlement",
+                "stale_ignored",
+                "observed",
+                "cached"
+              ],
+              "type": "string"
+            },
+            "entitlement": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "fingerprint_origin": {
+              "type": "string"
+            },
+            "license_fingerprint": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "ok": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "ok",
+            "code"
+          ],
+          "type": "object"
+        },
+        "ReleaseSuccess": {
+          "properties": {
+            "ok": {
+              "enum": [
+                true
+              ],
+              "type": "boolean"
+            },
+            "server_time": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "ok",
+            "server_time"
+          ],
+          "type": "object"
+        },
+        "ReportSuccess": {
+          "properties": {
+            "denial_rate_per_day": {
+              "type": "number"
+            },
+            "denials": {
+              "type": "integer"
+            },
+            "feature": {
+              "type": "string"
+            },
+            "from": {
+              "description": "Unix seconds.",
+              "type": "integer"
+            },
+            "ok": {
+              "enum": [
+                true
+              ],
+              "type": "boolean"
+            },
+            "peak_concurrent": {
+              "type": "integer"
+            },
+            "peak_concurrent_at": {
+              "description": "Unix seconds.",
+              "type": "integer"
+            },
+            "project": {
+              "type": "string"
+            },
+            "server_time": {
+              "type": "integer"
+            },
+            "to": {
+              "description": "Unix seconds.",
+              "type": "integer"
+            },
+            "truncated": {
+              "description": "True if > 100000 rows in the window.",
+              "type": "boolean"
+            },
+            "unique_devices": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "ok",
+            "project",
+            "feature",
+            "from",
+            "to",
+            "server_time",
+            "truncated",
+            "peak_concurrent",
+            "unique_devices",
+            "denials",
+            "peak_concurrent_at",
+            "denial_rate_per_day"
+          ],
+          "type": "object"
+        },
+        "RequestProofFields": {
+          "description": "Optional flat ECDSA request-proof fields. Present together or omitted; when present all must validate.",
+          "properties": {
+            "device_key_id": {
+              "description": "sha256:<64-hex> device key id.",
+              "type": "string"
+            },
+            "request_signature": {
+              "description": "Base64, <= 512 chars.",
+              "type": "string"
+            },
+            "request_signature_algorithm": {
+              "enum": [
+                "ecdsa-p256-sha256"
+              ],
+              "type": "string"
+            },
+            "request_signature_version": {
+              "enum": [
+                1
+              ],
+              "type": "integer"
+            },
+            "request_timestamp": {
+              "description": "Unix seconds.",
+              "type": "integer"
+            }
+          },
+          "type": "object"
+        },
+        "SeatCheckoutRequest": {
+          "additionalProperties": true,
+          "properties": {
+            "borrow_seconds": {
+              "description": "Positive; returns mode=borrowed.",
+              "minimum": 1,
+              "type": "integer"
+            },
+            "client_instance_id": {
+              "type": "string"
+            },
+            "device_key_id": {
+              "description": "sha256:<64-hex> (optional).",
+              "type": "string"
+            },
+            "feature": {
+              "type": "string"
+            },
+            "license_fingerprint": {
+              "type": "string"
+            },
+            "nonce": {
+              "type": "string"
+            },
+            "project": {
+              "type": "string"
+            },
+            "request_signature": {
+              "description": "Base64.",
+              "type": "string"
+            },
+            "request_signature_algorithm": {
+              "enum": [
+                "ecdsa-p256-sha256"
+              ],
+              "type": "string"
+            },
+            "request_signature_version": {
+              "enum": [
+                1
+              ],
+              "type": "integer"
+            },
+            "request_timestamp": {
+              "type": "integer"
+            },
+            "seat_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "project",
+            "feature",
+            "license_fingerprint",
+            "client_instance_id",
+            "nonce"
+          ],
+          "type": "object"
+        },
+        "SeatCheckoutSuccess": {
+          "properties": {
+            "assertion": {
+              "description": "lccoa1 token.",
+              "type": "string"
+            },
+            "expires_at": {
+              "description": "Unix seconds.",
+              "type": "integer"
+            },
+            "heartbeat_in": {
+              "description": "Seconds until next heartbeat.",
+              "type": "integer"
+            },
+            "mode": {
+              "enum": [
+                "live",
+                "borrowed"
+              ],
+              "type": "string"
+            },
+            "ok": {
+              "enum": [
+                true
+              ],
+              "type": "boolean"
+            },
+            "seat_id": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "server_time": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "ok",
+            "assertion",
+            "seat_id",
+            "mode",
+            "server_time",
+            "expires_at",
+            "heartbeat_in"
+          ],
+          "type": "object"
+        },
+        "SeatHeartbeatRequest": {
+          "additionalProperties": true,
+          "properties": {
+            "client_instance_id": {
+              "type": "string"
+            },
+            "device_key_id": {
+              "description": "sha256:<64-hex> (optional).",
+              "type": "string"
+            },
+            "feature": {
+              "type": "string"
+            },
+            "license_fingerprint": {
+              "type": "string"
+            },
+            "nonce": {
+              "type": "string"
+            },
+            "project": {
+              "type": "string"
+            },
+            "request_signature": {
+              "description": "Base64.",
+              "type": "string"
+            },
+            "request_signature_algorithm": {
+              "enum": [
+                "ecdsa-p256-sha256"
+              ],
+              "type": "string"
+            },
+            "request_signature_version": {
+              "enum": [
+                1
+              ],
+              "type": "integer"
+            },
+            "request_timestamp": {
+              "type": "integer"
+            },
+            "seat_id": {
+              "description": "REQUIRED.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "project",
+            "feature",
+            "license_fingerprint",
+            "client_instance_id",
+            "nonce",
+            "seat_id"
+          ],
+          "type": "object"
+        },
+        "SeatReleaseRequest": {
+          "additionalProperties": true,
+          "properties": {
+            "client_instance_id": {
+              "type": "string"
+            },
+            "device_key_id": {
+              "description": "Optional.",
+              "type": "string"
+            },
+            "feature": {
+              "type": "string"
+            },
+            "license_fingerprint": {
+              "type": "string"
+            },
+            "nonce": {
+              "type": "string"
+            },
+            "project": {
+              "type": "string"
+            },
+            "request_signature": {
+              "description": "Base64 (optional).",
+              "type": "string"
+            },
+            "request_signature_algorithm": {
+              "enum": [
+                "ecdsa-p256-sha256"
+              ],
+              "type": "string"
+            },
+            "request_signature_version": {
+              "enum": [
+                1
+              ],
+              "type": "integer"
+            },
+            "request_timestamp": {
+              "type": "integer"
+            },
+            "seat_id": {
+              "description": "REQUIRED.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "project",
+            "feature",
+            "license_fingerprint",
+            "client_instance_id",
+            "nonce",
+            "seat_id"
+          ],
+          "type": "object"
+        },
+        "SeatSuccess": {
+          "properties": {
+            "assertion": {
+              "description": "lccoa1 token.",
+              "type": "string"
+            },
+            "expires_at": {
+              "type": "integer"
+            },
+            "heartbeat_in": {
+              "type": "integer"
+            },
+            "ok": {
+              "enum": [
+                true
+              ],
+              "type": "boolean"
+            },
+            "server_time": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "ok",
+            "assertion",
+            "server_time",
+            "expires_at",
+            "heartbeat_in"
+          ],
+          "type": "object"
+        },
+        "VerifyRequest": {
+          "properties": {
+            "client_hardening": {
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "client_version": {
+              "maxLength": 64,
+              "type": "string"
+            },
+            "device_hash": {
+              "description": "64-hex or empty.",
+              "type": "string"
+            },
+            "device_key_id": {
+              "description": "sha256:<64-hex> (request proof).",
+              "type": "string"
+            },
+            "feature": {
+              "maxLength": 15,
+              "type": "string"
+            },
+            "license_fingerprint": {
+              "description": "64-hex.",
+              "type": "string"
+            },
+            "nonce": {
+              "description": "64-hex.",
+              "type": "string"
+            },
+            "project": {
+              "maxLength": 127,
+              "type": "string"
+            },
+            "request_signature": {
+              "description": "Base64, <= 512 chars (request proof).",
+              "type": "string"
+            },
+            "request_signature_algorithm": {
+              "enum": [
+                "ecdsa-p256-sha256"
+              ],
+              "type": "string"
+            },
+            "request_signature_version": {
+              "enum": [
+                1
+              ],
+              "type": "integer"
+            },
+            "request_timestamp": {
+              "description": "Unix seconds (request proof).",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "project",
+            "feature",
+            "license_fingerprint",
+            "nonce"
+          ],
+          "type": "object"
+        },
+        "VerifySuccess": {
+          "additionalProperties": true,
+          "properties": {
+            "assertion": {
+              "description": "lccoa1 token (present when ok:true).",
+              "type": "string"
+            },
+            "code": {
+              "enum": [
+                "entitlement_ok",
+                "entitlement_denied"
+              ],
+              "type": "string"
+            },
+            "ok": {
+              "type": "boolean"
+            },
+            "server_time": {
+              "description": "Unix seconds.",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "ok",
+            "code",
+            "server_time"
+          ],
+          "type": "object"
+        }
+      },
+      "securitySchemes": {
+        "accountToken": {
+          "bearerFormat": "lcca_<opaque>",
+          "description": "Per-customer account token (Authorization: Bearer lcca_...), scoped by projects/features/operations. Resolved by timing-safe HMAC under a pepper; never stored plaintext.",
+          "scheme": "bearer",
+          "type": "http"
+        },
+        "emergencyBearer": {
+          "description": "EMERGENCY_OPERATOR_BEARER, compared constant-time. Gates /v1/emergency/* only; unset/empty => 404, mismatch => 401. Never logged.",
+          "scheme": "bearer",
+          "type": "http"
+        },
+        "leaseBearer": {
+          "description": "Legacy LEASE_ISSUE_BEARER (off mode only), compared constant-time. When unset the endpoint is open in off mode.",
+          "scheme": "bearer",
+          "type": "http"
+        },
+        "orderHmac": {
+          "description": "HMAC-SHA256 over the raw request body keyed by ORDER_HMAC_SECRETS[key_id], with a bounded timestamp (ORDER_MAX_SKEW_SECONDS) and ORDER_INGEST_AUDIENCE folded into the signed bytes.",
+          "in": "header",
+          "name": "Order-Signature",
+          "type": "apiKey"
+        },
+        "requestProof": {
+          "description": "No transport auth. /v1/verify is unauthenticated; an OPTIONAL ECDSA-P256-SHA256 request proof is supplied via the JSON body fields (request_signature_version/device_key_id/request_timestamp/request_signature_algorithm/request_signature) and validated server-side per REQUEST_SIGNATURE_MODE.",
+          "in": "header",
+          "name": "x-no-auth",
+          "type": "apiKey"
+        }
+      }
+    },
+    "info": {
+      "description": "Cloudflare Worker that issues signed online assertions (lccoa1) and hardware-bound v201 leases / floating seats, ingests signed subscription orders, and reports usage. All responses use a FLAT { ok, code, ... } envelope. This spec documents the routes the Worker's fetch handler dispatches.",
+      "title": "licensecc online verifier / licensing-backend",
+      "version": "0.1.0"
+    },
+    "openapi": "3.1.0",
+    "paths": {
+      "/docs": {
+        "get": {
+          "operationId": "getDocs",
+          "responses": {
+            "200": {
+              "content": {
+                "text/html": {
+                  "schema": {
+                    "type": "string"
+                  }
+                }
+              },
+              "description": "An HTML page that fetches /openapi.json and renders a grouped endpoint list."
+            }
+          },
+          "security": [],
+          "summary": "Self-contained HTML API documentation viewer.",
+          "tags": [
+            "meta"
+          ]
+        }
+      },
+      "/health": {
+        "get": {
+          "operationId": "getHealth",
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "ok": {
+                      "value": {
+                        "ok": true,
+                        "service": "licensecc-online-verifier"
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/HealthSuccess"
+                  }
+                }
+              },
+              "description": "Service healthy."
+            }
+          },
+          "security": [],
+          "summary": "Health check.",
+          "tags": [
+            "meta"
+          ]
+        }
+      },
+      "/openapi.json": {
+        "get": {
+          "operationId": "getOpenApiJson",
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "type": "object"
+                  }
+                }
+              },
+              "description": "The OpenAPI specification as JSON."
+            }
+          },
+          "security": [],
+          "summary": "This OpenAPI 3.1 document.",
+          "tags": [
+            "meta"
+          ]
+        }
+      },
+      "/v1/activate": {
+        "post": {
+          "description": "Authenticated by an account token (Authorization: Bearer lcca_..., scoped to project+feature+activate) or the legacy LEASE_ISSUE_BEARER (off mode only). Optional ECDSA device proof binds the lease to a registered device key; device-rebind cap (max_active_devices) enforced atomically. Idempotent on request_id.",
+          "operationId": "postActivate",
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LeaseRequest"
+                }
+              }
+            },
+            "required": true
+          },
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/LeaseSuccess"
+                  }
+                }
+              },
+              "description": "Signed v201 lease issued."
+            },
+            "400": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "invalid_request": {
+                      "value": {
+                        "code": "invalid_request",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "invalid_request: malformed JSON or missing required fields."
+            },
+            "401": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "unauthorized": {
+                      "value": {
+                        "code": "unauthorized",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "Unauthorized. off mode: LEASE_ISSUE_BEARER mismatch. soft/required mode: token missing, malformed, unknown, revoked, or expired. token_revoked: status!=active or revocation floor exceeded. token_expired: expires_at <= now."
+            },
+            "403": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "no_active_entitlement": {
+                      "value": {
+                        "code": "no_active_entitlement",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "forbidden_scope (token cannot activate on project:feature), no_active_entitlement, expired_subscription, device_proof_required, device_proof_invalid, device_limit_exceeded, trial_device_proof_required (trial requires a verified device proof and none was presented), or trial_device_locked (trial is one-per-device and this device differs from the device that started the trial)."
+            },
+            "500": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "lease_signing_error": {
+                      "value": {
+                        "code": "lease_signing_error",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "lease_signing_error: crypto signing failed."
+            },
+            "503": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "verification_error": {
+                      "value": {
+                        "code": "verification_error",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "config_error (ACCOUNT_TOKEN_PEPPERS / LEASE_SIGNING_PRIVATE_KEY_PKCS8_PEM unavailable) or verification_error (D1 errors)."
+            }
+          },
+          "security": [
+            {
+              "accountToken": []
+            },
+            {
+              "leaseBearer": []
+            }
+          ],
+          "summary": "Hardware-bound sliding-window lease issuance (v201).",
+          "tags": [
+            "lease"
+          ]
+        }
+      },
+      "/v1/admin/report": {
+        "get": {
+          "description": "Authenticated by an account token (scoped to project+feature+report) or legacy LEASE_ISSUE_BEARER (off mode only). Aggregates peak_concurrent, unique_devices, denials, and rates.",
+          "operationId": "getAdminReport",
+          "parameters": [
+            {
+              "in": "query",
+              "name": "project",
+              "required": true,
+              "schema": {
+                "type": "string"
+              }
+            },
+            {
+              "in": "query",
+              "name": "feature",
+              "required": true,
+              "schema": {
+                "type": "string"
+              }
+            },
+            {
+              "in": "query",
+              "name": "license_fingerprint",
+              "required": true,
+              "schema": {
+                "type": "string"
+              }
+            },
+            {
+              "description": "Unix seconds; default 0.",
+              "in": "query",
+              "name": "from",
+              "required": false,
+              "schema": {
+                "default": 0,
+                "type": "integer"
+              }
+            },
+            {
+              "description": "Unix seconds; default now.",
+              "in": "query",
+              "name": "to",
+              "required": false,
+              "schema": {
+                "type": "integer"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/ReportSuccess"
+                  }
+                }
+              },
+              "description": "Usage/analytics summary over the requested window."
+            },
+            "400": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "invalid_request": {
+                      "value": {
+                        "code": "invalid_request",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "invalid_request: missing project, feature, or license_fingerprint query params."
+            },
+            "401": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "unauthorized": {
+                      "value": {
+                        "code": "unauthorized",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "Unauthorized. off mode: LEASE_ISSUE_BEARER mismatch. soft/required mode: token missing, malformed, unknown, revoked, or expired. token_revoked: status!=active or revocation floor exceeded. token_expired: expires_at <= now."
+            },
+            "403": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "forbidden_scope": {
+                      "value": {
+                        "code": "forbidden_scope",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "forbidden_scope: token scopes do not allow report on project:feature."
+            },
+            "503": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "verification_error": {
+                      "value": {
+                        "code": "verification_error",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "config_error (ACCOUNT_TOKEN_PEPPERS absent/unparseable in soft/required mode) or verification_error (D1 errors)."
+            }
+          },
+          "security": [
+            {
+              "accountToken": []
+            },
+            {
+              "leaseBearer": []
+            }
+          ],
+          "summary": "Generate a usage/analytics report from the usage_events log over a time window. truncated flag set if > 100000 rows. Scoped to the authenticated customer in soft/required modes.",
+          "tags": [
+            "report"
+          ]
+        }
+      },
+      "/v1/checkout": {
+        "post": {
+          "description": "Authenticated by an account token (scoped to project+feature+checkout) or legacy LEASE_ISSUE_BEARER (off mode only). Optional ECDSA device proof binds the seat. Lazily reclaims lapsed seats on the hot path.",
+          "operationId": "postCheckout",
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeatCheckoutRequest"
+                }
+              }
+            },
+            "required": true
+          },
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/SeatCheckoutSuccess"
+                  }
+                }
+              },
+              "description": "Seat reserved (mode live or borrowed)."
+            },
+            "400": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "invalid_request": {
+                      "value": {
+                        "code": "invalid_request",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "invalid_request: malformed JSON or missing required fields."
+            },
+            "401": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "unauthorized": {
+                      "value": {
+                        "code": "unauthorized",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "Unauthorized. off mode: LEASE_ISSUE_BEARER mismatch. soft/required mode: token missing, malformed, unknown, revoked, or expired. token_revoked: status!=active or revocation floor exceeded. token_expired: expires_at <= now."
+            },
+            "403": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "floating_disabled": {
+                      "value": {
+                        "code": "floating_disabled",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "forbidden_scope, no_active_entitlement, floating_disabled (pool_size <= 0), device_proof_required, device_proof_invalid, or borrowing_disabled (borrow_seconds present but max_borrow_sec <= 0)."
+            },
+            "409": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "pool_exhausted": {
+                      "value": {
+                        "code": "pool_exhausted",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "pool_exhausted: concurrent seat count at/above pool_size + allow_overdraft."
+            },
+            "500": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "seat_signing_error": {
+                      "value": {
+                        "code": "seat_signing_error",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "seat_signing_error: crypto signing failed."
+            },
+            "503": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "verification_error": {
+                      "value": {
+                        "code": "verification_error",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "config_error (ACCOUNT_TOKEN_PEPPERS / ONLINE_SIGNING_PRIVATE_KEY_PKCS8_PEM unavailable) or verification_error (D1 errors)."
+            }
+          },
+          "security": [
+            {
+              "accountToken": []
+            },
+            {
+              "leaseBearer": []
+            }
+          ],
+          "summary": "Concurrent/floating seat checkout. Returns a short-TTL lccoa1 assertion. Live (heartbeat-gated) or borrowed (offline grace). Pool cap enforced atomically.",
+          "tags": [
+            "seat"
+          ]
+        }
+      },
+      "/v1/emergency/v1/activate": {
+        "post": {
+          "operationId": "postEmergencyActivate",
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LeaseRequest"
+                }
+              }
+            },
+            "required": true
+          },
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/LeaseSuccess"
+                  }
+                }
+              },
+              "description": "Signed v201 lease issued."
+            },
+            "400": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "invalid_request": {
+                      "value": {
+                        "code": "invalid_request",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "invalid_request: malformed JSON or missing required fields."
+            },
+            "401": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "unauthorized": {
+                      "value": {
+                        "code": "unauthorized",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "unauthorized: operator bearer mismatch."
+            },
+            "403": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "no_active_entitlement": {
+                      "value": {
+                        "code": "no_active_entitlement",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "no_active_entitlement, expired_subscription, device_proof_required, device_proof_invalid, device_limit_exceeded, trial_device_proof_required, or trial_device_locked."
+            },
+            "404": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "not_found": {
+                      "value": {
+                        "code": "not_found",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "not_found: EMERGENCY_OPERATOR_BEARER unset/empty (the route does not exist)."
+            },
+            "500": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "lease_signing_error": {
+                      "value": {
+                        "code": "lease_signing_error",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "lease_signing_error: crypto signing failed."
+            },
+            "503": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "verification_error": {
+                      "value": {
+                        "code": "verification_error",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "verification_error or lease_signing_unavailable."
+            }
+          },
+          "security": [
+            {
+              "emergencyBearer": []
+            }
+          ],
+          "summary": "Break-glass emergency override for lease activate. Explicit non-isolated operator path. Logged at warn.",
+          "tags": [
+            "emergency"
+          ]
+        }
+      },
+      "/v1/emergency/v1/admin/report": {
+        "get": {
+          "operationId": "getEmergencyAdminReport",
+          "parameters": [
+            {
+              "in": "query",
+              "name": "project",
+              "required": true,
+              "schema": {
+                "type": "string"
+              }
+            },
+            {
+              "in": "query",
+              "name": "feature",
+              "required": true,
+              "schema": {
+                "type": "string"
+              }
+            },
+            {
+              "in": "query",
+              "name": "license_fingerprint",
+              "required": true,
+              "schema": {
+                "type": "string"
+              }
+            },
+            {
+              "in": "query",
+              "name": "from",
+              "required": false,
+              "schema": {
+                "default": 0,
+                "type": "integer"
+              }
+            },
+            {
+              "in": "query",
+              "name": "to",
+              "required": false,
+              "schema": {
+                "type": "integer"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/ReportSuccess"
+                  }
+                }
+              },
+              "description": "Usage/analytics summary over the requested window."
+            },
+            "400": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "invalid_request": {
+                      "value": {
+                        "code": "invalid_request",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "invalid_request: missing query params."
+            },
+            "401": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "unauthorized": {
+                      "value": {
+                        "code": "unauthorized",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "unauthorized: operator bearer mismatch."
+            },
+            "404": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "not_found": {
+                      "value": {
+                        "code": "not_found",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "not_found: EMERGENCY_OPERATOR_BEARER unset/empty (the route does not exist)."
+            },
+            "503": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "verification_error": {
+                      "value": {
+                        "code": "verification_error",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "verification_error."
+            }
+          },
+          "security": [
+            {
+              "emergencyBearer": []
+            }
+          ],
+          "summary": "Break-glass emergency override for usage report. Non-isolated operator path, full access to all entitlements.",
+          "tags": [
+            "emergency"
+          ]
+        }
+      },
+      "/v1/emergency/v1/checkout": {
+        "post": {
+          "operationId": "postEmergencyCheckout",
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeatCheckoutRequest"
+                }
+              }
+            },
+            "required": true
+          },
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/SeatCheckoutSuccess"
+                  }
+                }
+              },
+              "description": "Seat reserved (mode live or borrowed)."
+            },
+            "400": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "invalid_request": {
+                      "value": {
+                        "code": "invalid_request",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "invalid_request: malformed JSON or missing required fields."
+            },
+            "401": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "unauthorized": {
+                      "value": {
+                        "code": "unauthorized",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "unauthorized: operator bearer mismatch."
+            },
+            "403": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "no_active_entitlement": {
+                      "value": {
+                        "code": "no_active_entitlement",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "no_active_entitlement, floating_disabled, device_proof_required, device_proof_invalid, or borrowing_disabled."
+            },
+            "404": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "not_found": {
+                      "value": {
+                        "code": "not_found",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "not_found: EMERGENCY_OPERATOR_BEARER unset/empty (the route does not exist)."
+            },
+            "409": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "pool_exhausted": {
+                      "value": {
+                        "code": "pool_exhausted",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "pool_exhausted: concurrent seat count at/above pool_size + allow_overdraft."
+            },
+            "500": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "seat_signing_error": {
+                      "value": {
+                        "code": "seat_signing_error",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "seat_signing_error: crypto signing failed."
+            },
+            "503": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "verification_error": {
+                      "value": {
+                        "code": "verification_error",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "verification_error or seat_signing_unavailable."
+            }
+          },
+          "security": [
+            {
+              "emergencyBearer": []
+            }
+          ],
+          "summary": "Break-glass emergency override for seat checkout. Explicit non-isolated operator path.",
+          "tags": [
+            "emergency"
+          ]
+        }
+      },
+      "/v1/emergency/v1/heartbeat": {
+        "post": {
+          "operationId": "postEmergencyHeartbeat",
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeatHeartbeatRequest"
+                }
+              }
+            },
+            "required": true
+          },
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/SeatSuccess"
+                  }
+                }
+              },
+              "description": "Seat checked out / heartbeat refreshed. Returns a short-TTL lccoa1 assertion."
+            },
+            "400": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "invalid_request": {
+                      "value": {
+                        "code": "invalid_request",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "invalid_request: missing seat_id."
+            },
+            "401": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "unauthorized": {
+                      "value": {
+                        "code": "unauthorized",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "unauthorized: operator bearer mismatch."
+            },
+            "403": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "no_active_entitlement": {
+                      "value": {
+                        "code": "no_active_entitlement",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "no_active_entitlement."
+            },
+            "404": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "not_found": {
+                      "value": {
+                        "code": "not_found",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "not_found: EMERGENCY_OPERATOR_BEARER unset/empty (the route does not exist)."
+            },
+            "410": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "seat_reclaimed": {
+                      "value": {
+                        "code": "seat_reclaimed",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "seat_reclaimed: seat not found, revoked, or heartbeat deadline expired."
+            },
+            "500": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "seat_signing_error": {
+                      "value": {
+                        "code": "seat_signing_error",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "seat_signing_error: crypto signing failed."
+            },
+            "503": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "verification_error": {
+                      "value": {
+                        "code": "verification_error",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "verification_error or seat_signing_unavailable."
+            }
+          },
+          "security": [
+            {
+              "emergencyBearer": []
+            }
+          ],
+          "summary": "Break-glass emergency override for seat heartbeat. Explicit non-isolated operator path.",
+          "tags": [
+            "emergency"
+          ]
+        }
+      },
+      "/v1/emergency/v1/meter": {
+        "post": {
+          "operationId": "postEmergencyMeter",
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeterRequest"
+                }
+              }
+            },
+            "required": true
+          },
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/MeterSuccess"
+                  }
+                }
+              },
+              "description": "Units recorded for the current period."
+            },
+            "400": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "invalid_request": {
+                      "value": {
+                        "code": "invalid_request",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "invalid_request or invalid_units."
+            },
+            "401": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "unauthorized": {
+                      "value": {
+                        "code": "unauthorized",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "unauthorized: operator bearer mismatch."
+            },
+            "403": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "no_active_entitlement": {
+                      "value": {
+                        "code": "no_active_entitlement",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "no_active_entitlement."
+            },
+            "404": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "not_found": {
+                      "value": {
+                        "code": "not_found",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "not_found: EMERGENCY_OPERATOR_BEARER unset/empty (the route does not exist)."
+            },
+            "429": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "quota_exceeded": {
+                      "value": {
+                        "code": "quota_exceeded",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "quota_exceeded."
+            },
+            "503": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "verification_error": {
+                      "value": {
+                        "code": "verification_error",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "verification_error."
+            }
+          },
+          "security": [
+            {
+              "emergencyBearer": []
+            }
+          ],
+          "summary": "Break-glass emergency override for metered consumption. Explicit non-isolated operator path.",
+          "tags": [
+            "emergency"
+          ]
+        }
+      },
+      "/v1/emergency/v1/release": {
+        "post": {
+          "operationId": "postEmergencyRelease",
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeatReleaseRequest"
+                }
+              }
+            },
+            "required": true
+          },
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/ReleaseSuccess"
+                  }
+                }
+              },
+              "description": "Seat released (idempotent)."
+            },
+            "400": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "invalid_request": {
+                      "value": {
+                        "code": "invalid_request",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "invalid_request: missing seat_id."
+            },
+            "401": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "unauthorized": {
+                      "value": {
+                        "code": "unauthorized",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "unauthorized: operator bearer mismatch."
+            },
+            "404": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "not_found": {
+                      "value": {
+                        "code": "not_found",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "not_found: EMERGENCY_OPERATOR_BEARER unset/empty (the route does not exist)."
+            },
+            "503": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "verification_error": {
+                      "value": {
+                        "code": "verification_error",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "verification_error."
+            }
+          },
+          "security": [
+            {
+              "emergencyBearer": []
+            }
+          ],
+          "summary": "Break-glass emergency override for seat release. Explicit non-isolated operator path.",
+          "tags": [
+            "emergency"
+          ]
+        }
+      },
+      "/v1/emergency/v1/renew": {
+        "post": {
+          "operationId": "postEmergencyRenew",
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LeaseRequest"
+                }
+              }
+            },
+            "required": true
+          },
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/LeaseSuccess"
+                  }
+                }
+              },
+              "description": "Signed v201 lease issued."
+            },
+            "400": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "invalid_request": {
+                      "value": {
+                        "code": "invalid_request",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "invalid_request: malformed JSON or missing required fields."
+            },
+            "401": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "unauthorized": {
+                      "value": {
+                        "code": "unauthorized",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "unauthorized: operator bearer mismatch."
+            },
+            "403": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "no_active_entitlement": {
+                      "value": {
+                        "code": "no_active_entitlement",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "no_active_entitlement, expired_subscription, device_proof_required, device_proof_invalid, device_limit_exceeded, trial_device_proof_required, or trial_device_locked."
+            },
+            "404": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "not_found": {
+                      "value": {
+                        "code": "not_found",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "not_found: EMERGENCY_OPERATOR_BEARER unset/empty (the route does not exist)."
+            },
+            "500": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "lease_signing_error": {
+                      "value": {
+                        "code": "lease_signing_error",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "lease_signing_error: crypto signing failed."
+            },
+            "503": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "verification_error": {
+                      "value": {
+                        "code": "verification_error",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "verification_error or lease_signing_unavailable."
+            }
+          },
+          "security": [
+            {
+              "emergencyBearer": []
+            }
+          ],
+          "summary": "Break-glass emergency override for lease renew. Explicit non-isolated operator path. Logged at warn.",
+          "tags": [
+            "emergency"
+          ]
+        }
+      },
+      "/v1/heartbeat": {
+        "post": {
+          "description": "Authenticated by an account token (scoped to project+feature+heartbeat) or legacy LEASE_ISSUE_BEARER (off mode only). seat_id is REQUIRED.",
+          "operationId": "postHeartbeat",
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeatHeartbeatRequest"
+                }
+              }
+            },
+            "required": true
+          },
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/SeatSuccess"
+                  }
+                }
+              },
+              "description": "Seat checked out / heartbeat refreshed. Returns a short-TTL lccoa1 assertion."
+            },
+            "400": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "invalid_request": {
+                      "value": {
+                        "code": "invalid_request",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "invalid_request: malformed JSON, missing seat_id, or other required fields."
+            },
+            "401": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "unauthorized": {
+                      "value": {
+                        "code": "unauthorized",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "Unauthorized. off mode: LEASE_ISSUE_BEARER mismatch. soft/required mode: token missing, malformed, unknown, revoked, or expired. token_revoked: status!=active or revocation floor exceeded. token_expired: expires_at <= now."
+            },
+            "403": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "no_active_entitlement": {
+                      "value": {
+                        "code": "no_active_entitlement",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "forbidden_scope or no_active_entitlement (not found, status!=active, or outside validity window)."
+            },
+            "410": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "seat_reclaimed": {
+                      "value": {
+                        "code": "seat_reclaimed",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "seat_reclaimed: seat not found, revoked, or heartbeat deadline expired."
+            },
+            "500": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "seat_signing_error": {
+                      "value": {
+                        "code": "seat_signing_error",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "seat_signing_error: crypto signing failed."
+            },
+            "503": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "verification_error": {
+                      "value": {
+                        "code": "verification_error",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "config_error (ACCOUNT_TOKEN_PEPPERS / ONLINE_SIGNING_PRIVATE_KEY_PKCS8_PEM unavailable) or verification_error (D1 errors)."
+            }
+          },
+          "security": [
+            {
+              "accountToken": []
+            },
+            {
+              "leaseBearer": []
+            }
+          ],
+          "summary": "Renew a live seat's heartbeat deadline within the entitlement's valid_until window. Returns an updated assertion. Fails if the seat was reclaimed.",
+          "tags": [
+            "seat"
+          ]
+        }
+      },
+      "/v1/meter": {
+        "post": {
+          "description": "Authenticated by an account token (scoped to project+feature+report) or legacy LEASE_ISSUE_BEARER (off mode only). units defaults to 1. A rejected over-quota increment records nothing (the counter never crosses the quota).",
+          "operationId": "postMeter",
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeterRequest"
+                }
+              }
+            },
+            "required": true
+          },
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/MeterSuccess"
+                  }
+                }
+              },
+              "description": "Units recorded for the current period."
+            },
+            "400": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "invalid_request": {
+                      "value": {
+                        "code": "invalid_request",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "invalid_request (missing project/feature/license_fingerprint) or invalid_units (units not a positive integer)."
+            },
+            "401": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "unauthorized": {
+                      "value": {
+                        "code": "unauthorized",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "Unauthorized. off mode: LEASE_ISSUE_BEARER mismatch. soft/required mode: token missing, malformed, unknown, revoked, or expired. token_revoked: status!=active or revocation floor exceeded. token_expired: expires_at <= now."
+            },
+            "403": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "no_active_entitlement": {
+                      "value": {
+                        "code": "no_active_entitlement",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "forbidden_scope (token scopes disallow report on project:feature) or no_active_entitlement."
+            },
+            "429": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "quota_exceeded": {
+                      "value": {
+                        "code": "quota_exceeded",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "quota_exceeded: meter_quota > 0 and the increment would exceed it (nothing recorded)."
+            },
+            "503": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "verification_error": {
+                      "value": {
+                        "code": "verification_error",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "config_error (ACCOUNT_TOKEN_PEPPERS absent/unparseable in soft/required mode) or verification_error (D1 errors)."
+            }
+          },
+          "security": [
+            {
+              "accountToken": []
+            },
+            {
+              "leaseBearer": []
+            }
+          ],
+          "summary": "Report metered consumption against an entitlement for the current rolling period. Enforces meter_quota (429 quota_exceeded) only when the entitlement's meter_quota > 0; the default 0 counts only. Ownership-scoped in soft/required modes.",
+          "tags": [
+            "report"
+          ]
+        }
+      },
+      "/v1/orders": {
+        "post": {
+          "description": "Authenticated by the Order-Signature header: HMAC-SHA256 over the raw body keyed by ORDER_HMAC_SECRETS[key_id], with a bounded timestamp (ORDER_MAX_SKEW_SECONDS) and the ORDER_INGEST_AUDIENCE folded into the signed bytes. Body must be <= 16384 bytes. Replay of a processed event_id with a matching payload digest returns HTTP 200 ok:false code:cached.",
+          "operationId": "postOrders",
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrderRequest"
+                }
+              }
+            },
+            "required": true
+          },
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/OrderResult"
+                  }
+                }
+              },
+              "description": "Applied/observed (ok:true, code: applied|superseded|no_entitlement|stale_ignored|observed) OR a replay of a processed/superseded/rejected event with matching digest (ok:false, code:cached)."
+            },
+            "400": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "invalid_order": {
+                      "value": {
+                        "code": "invalid_order",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "invalid_order: malformed JSON, invalid normalize result, or Step 5 redrive failure."
+            },
+            "401": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "bad_signature": {
+                      "value": {
+                        "code": "bad_signature",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "Auth failure: config_error (ORDER_HMAC_SECRETS absent/empty/unparseable), unknown_key_id, stale_timestamp, bad_signature, or replayed (nonce already consumed)."
+            },
+            "404": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "not_found": {
+                      "value": {
+                        "code": "not_found",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "not_found: ORDER_INGEST_MODE=off."
+            },
+            "409": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "event_id_conflict": {
+                      "value": {
+                        "code": "event_id_conflict",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "Conflict: event_id_conflict (same event_id, different digest), fingerprint_owned (fingerprint belongs to a different subscription), or entitlement_revoked (targets a revoked terminal entitlement)."
+            },
+            "413": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "payload_too_large": {
+                      "value": {
+                        "code": "payload_too_large",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "payload_too_large: Content-Length over 16384 or utf-8 encoded body over 16384 bytes."
+            },
+            "503": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "write_failed": {
+                      "value": {
+                        "code": "write_failed",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "write_failed: DB batch unavailable, DB errors, or order_ingest_nonces store unavailable."
+            }
+          },
+          "security": [
+            {
+              "orderHmac": []
+            }
+          ],
+          "summary": "Exactly-once subscription order fulfillment. HMAC-SHA256 signed, fingerprint-deduplicated, monotonic epoch/seq floor. Modes: off (404), soft (observe-only), required (mutate).",
+          "tags": [
+            "fulfillment"
+          ]
+        }
+      },
+      "/v1/release": {
+        "post": {
+          "description": "Authenticated by an account token (scoped to project+feature+release) or legacy LEASE_ISSUE_BEARER (off mode only). seat_id is REQUIRED.",
+          "operationId": "postRelease",
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeatReleaseRequest"
+                }
+              }
+            },
+            "required": true
+          },
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/ReleaseSuccess"
+                  }
+                }
+              },
+              "description": "Seat released (idempotent)."
+            },
+            "400": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "invalid_request": {
+                      "value": {
+                        "code": "invalid_request",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "invalid_request: malformed JSON, missing seat_id, or other required fields."
+            },
+            "401": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "unauthorized": {
+                      "value": {
+                        "code": "unauthorized",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "Unauthorized. off mode: LEASE_ISSUE_BEARER mismatch. soft/required mode: token missing, malformed, unknown, revoked, or expired. token_revoked: status!=active or revocation floor exceeded. token_expired: expires_at <= now."
+            },
+            "403": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "forbidden_scope": {
+                      "value": {
+                        "code": "forbidden_scope",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "forbidden_scope: token scopes do not allow release on project:feature."
+            },
+            "503": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "verification_error": {
+                      "value": {
+                        "code": "verification_error",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "config_error (ACCOUNT_TOKEN_PEPPERS absent/unparseable in soft/required mode) or verification_error (D1 errors)."
+            }
+          },
+          "security": [
+            {
+              "accountToken": []
+            },
+            {
+              "leaseBearer": []
+            }
+          ],
+          "summary": "Release a seat (mark heartbeat_deadline expired, record usage event). Idempotent: ok:true even if already reclaimed. Ownership-scoped in soft/required modes.",
+          "tags": [
+            "seat"
+          ]
+        }
+      },
+      "/v1/renew": {
+        "post": {
+          "description": "Authenticated by an account token (Authorization: Bearer lcca_..., scoped to project+feature+renew) or the legacy LEASE_ISSUE_BEARER (off mode only). Optional ECDSA device proof binds the lease to a registered device key; device-rebind cap (max_active_devices) enforced atomically. Idempotent on request_id.",
+          "operationId": "postRenew",
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LeaseRequest"
+                }
+              }
+            },
+            "required": true
+          },
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/LeaseSuccess"
+                  }
+                }
+              },
+              "description": "Signed v201 lease issued."
+            },
+            "400": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "invalid_request": {
+                      "value": {
+                        "code": "invalid_request",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "invalid_request: malformed JSON or missing required fields."
+            },
+            "401": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "unauthorized": {
+                      "value": {
+                        "code": "unauthorized",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "Unauthorized. off mode: LEASE_ISSUE_BEARER mismatch. soft/required mode: token missing, malformed, unknown, revoked, or expired. token_revoked: status!=active or revocation floor exceeded. token_expired: expires_at <= now."
+            },
+            "403": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "no_active_entitlement": {
+                      "value": {
+                        "code": "no_active_entitlement",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "forbidden_scope (token cannot renew on project:feature), no_active_entitlement, expired_subscription, device_proof_required, device_proof_invalid, device_limit_exceeded, trial_device_proof_required (trial requires a verified device proof and none was presented), or trial_device_locked (trial is one-per-device and this device differs from the device that started the trial)."
+            },
+            "500": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "lease_signing_error": {
+                      "value": {
+                        "code": "lease_signing_error",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "lease_signing_error: crypto signing failed."
+            },
+            "503": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "verification_error": {
+                      "value": {
+                        "code": "verification_error",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "config_error (ACCOUNT_TOKEN_PEPPERS / LEASE_SIGNING_PRIVATE_KEY_PKCS8_PEM unavailable) or verification_error (D1 errors)."
+            }
+          },
+          "security": [
+            {
+              "accountToken": []
+            },
+            {
+              "leaseBearer": []
+            }
+          ],
+          "summary": "Hardware-bound lease renewal (v201). Same auth/validation/issuance as /v1/activate on an existing lease.",
+          "tags": [
+            "lease"
+          ]
+        }
+      },
+      "/v1/verify": {
+        "post": {
+          "description": "No account auth: the client presents a license fingerprint (and optionally an ECDSA request proof) and receives a signed lccoa1 assertion or a denial validated client-side by the C++ SDK. Request-signature mode (off/soft/required) governs proof acceptance. Body must be <= 4096 bytes.",
+          "operationId": "postVerify",
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VerifyRequest"
+                }
+              }
+            },
+            "required": true
+          },
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/VerifySuccess"
+                  }
+                }
+              },
+              "description": "Assertion issued (ok:true, code:entitlement_ok) OR a soft denial (ok:false, code:entitlement_denied) -- both are HTTP 200."
+            },
+            "400": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "invalid_request": {
+                      "value": {
+                        "code": "invalid_request",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "body_too_large (actual body over 4096 bytes), invalid_json (malformed JSON), or invalid_request (field validation failed)."
+            },
+            "401": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "request_proof_invalid": {
+                      "value": {
+                        "code": "request_proof_invalid",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "request_proof_required (required mode, proof missing), request_proof_stale (timestamp outside skew window), or request_proof_invalid (device unknown/disabled, invalid signature, malformed key, or replayed nonce)."
+            },
+            "403": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "entitlement_denied": {
+                      "value": {
+                        "code": "entitlement_denied",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "entitlement_denied: not found, revoked, disabled, device mismatch, outside validity window, or rate limited."
+            },
+            "413": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "body_too_large": {
+                      "value": {
+                        "code": "body_too_large",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "body_too_large: Content-Length over 4096 bytes."
+            },
+            "429": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "rate_limited": {
+                      "value": {
+                        "code": "rate_limited",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "rate_limited. source: cloudflare-client | d1-client | d1-entitlement | d1-global."
+            },
+            "500": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "verification_error": {
+                      "value": {
+                        "code": "verification_error",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "verification_error: D1 lookup failed, signing failed, or proof-nonce store unavailable."
+            }
+          },
+          "security": [
+            {
+              "requestProof": []
+            }
+          ],
+          "summary": "Client-facing online license verification with optional ECDSA device proof. Rate-limited per client IP and per entitlement. Returns a signed RSA lccoa1 assertion or a denial.",
+          "tags": [
+            "client"
+          ]
+        }
+      }
+    },
+    "servers": [
+      {
+        "url": "/"
+      }
+    ],
+    "tags": [
+      {
+        "description": "Health and documentation.",
+        "name": "meta"
+      },
+      {
+        "description": "Unauthenticated client-facing online verification.",
+        "name": "client"
+      },
+      {
+        "description": "HMAC-signed subscription order ingest.",
+        "name": "fulfillment"
+      },
+      {
+        "description": "Account-token-scoped hardware-bound lease issuance (v201).",
+        "name": "lease"
+      },
+      {
+        "description": "Account-token-scoped floating/concurrent seat lifecycle.",
+        "name": "seat"
+      },
+      {
+        "description": "Account-token-scoped usage analytics.",
+        "name": "report"
+      },
+      {
+        "description": "Break-glass operator overrides gated by EMERGENCY_OPERATOR_BEARER.",
+        "name": "emergency"
+      }
+    ]
+  },
+  "routeCount": 19,
+  "routeKeyCount": 12,
+  "service": "cloudflare-licensing-backend"
+}

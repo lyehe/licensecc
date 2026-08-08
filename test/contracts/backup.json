@@ -1,0 +1,18 @@
+{
+  "compiledEntry": "services/cloudflare-d1-backup/dist/index.js",
+  "defaultHandlerMethods": [
+    "fetch",
+    "scheduled"
+  ],
+  "namedExports": [
+    "D1BackupWorkflow",
+    "default"
+  ],
+  "service": "cloudflare-d1-backup",
+  "workflow": {
+    "export": "D1BackupWorkflow",
+    "prototypeMethods": [
+      "run"
+    ]
+  }
+}

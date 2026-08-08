@@ -1,0 +1,2513 @@
+{
+  "ALL_ROUTES": [
+    {
+      "inSpec": false,
+      "method": "GET",
+      "path": "/openapi.json"
+    },
+    {
+      "inSpec": false,
+      "method": "GET",
+      "path": "/docs"
+    },
+    {
+      "inSpec": true,
+      "method": "GET",
+      "path": "/health"
+    },
+    {
+      "inSpec": true,
+      "method": "POST",
+      "path": "/portal/v1/auth/request"
+    },
+    {
+      "inSpec": true,
+      "method": "POST",
+      "path": "/portal/v1/auth/verify"
+    },
+    {
+      "inSpec": true,
+      "method": "GET",
+      "path": "/portal/v1/auth/magic"
+    },
+    {
+      "inSpec": true,
+      "method": "POST",
+      "path": "/portal/v1/auth/magic-redeem"
+    },
+    {
+      "inSpec": true,
+      "method": "POST",
+      "path": "/portal/v1/auth/logout"
+    },
+    {
+      "inSpec": true,
+      "method": "POST",
+      "path": "/portal/v1/admin/bootstrap-otp"
+    },
+    {
+      "inSpec": true,
+      "method": "GET",
+      "path": "/api/portal/me"
+    },
+    {
+      "inSpec": true,
+      "method": "GET",
+      "path": "/api/portal/entitlements"
+    },
+    {
+      "inSpec": true,
+      "method": "GET",
+      "path": "/api/portal/devices"
+    },
+    {
+      "inSpec": true,
+      "method": "POST",
+      "path": "/api/portal/devices/release"
+    },
+    {
+      "inSpec": true,
+      "method": "GET",
+      "path": "/api/portal/usage"
+    },
+    {
+      "inSpec": true,
+      "method": "POST",
+      "path": "/api/portal/checkout"
+    },
+    {
+      "inSpec": true,
+      "method": "POST",
+      "path": "/api/portal/heartbeat"
+    },
+    {
+      "inSpec": true,
+      "method": "POST",
+      "path": "/api/portal/release"
+    },
+    {
+      "inSpec": true,
+      "method": "POST",
+      "path": "/api/portal/download"
+    }
+  ],
+  "openApiDocument": {
+    "components": {
+      "schemas": {
+        "DownloadRequest": {
+          "additionalProperties": false,
+          "properties": {
+            "device_key_id": {
+              "description": "Device key id required by backend /v1/activate.",
+              "type": "string"
+            },
+            "entitlement_id": {
+              "description": "Opaque entitlement id returned by /api/portal/entitlements.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "entitlement_id",
+            "device_key_id"
+          ],
+          "type": "object"
+        },
+        "Envelope": {
+          "properties": {
+            "code": {
+              "description": "Machine-readable result code for this response.",
+              "type": "string"
+            },
+            "data": {
+              "description": "Endpoint-specific payload (omitted when the handler returns no data)."
+            },
+            "ok": {
+              "type": "boolean"
+            },
+            "request_id": {
+              "description": "cf-ray if present, else a generated UUID.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "ok",
+            "code",
+            "request_id"
+          ],
+          "type": "object"
+        },
+        "ErrorEnvelope": {
+          "properties": {
+            "code": {
+              "description": "Machine-readable error code.",
+              "type": "string"
+            },
+            "ok": {
+              "const": false
+            },
+            "request_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "ok",
+            "code",
+            "request_id"
+          ],
+          "type": "object"
+        },
+        "LeaseActionRequest": {
+          "additionalProperties": false,
+          "properties": {
+            "client_instance_id": {
+              "description": "Client instance id forwarded to backend seat operations.",
+              "type": "string"
+            },
+            "device_key_id": {
+              "description": "Optional device key id for proof-capable seat operations.",
+              "type": "string"
+            },
+            "entitlement_id": {
+              "description": "Opaque entitlement id returned by /api/portal/entitlements.",
+              "type": "string"
+            },
+            "nonce": {
+              "description": "Per-action nonce forwarded to backend seat operations.",
+              "type": "string"
+            },
+            "seat_id": {
+              "description": "Required for heartbeat and release.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "entitlement_id",
+            "client_instance_id",
+            "nonce"
+          ],
+          "type": "object"
+        }
+      },
+      "securitySchemes": {
+        "bootstrapBearer": {
+          "description": "Operator break-glass bearer (PORTAL_BOOTSTRAP_BEARER), constant-time compared. When the secret is unset the route returns 404 (no existence oracle). Optionally also requires a Cloudflare Access JWT in the cf-access-jwt-assertion header when PORTAL_BOOTSTRAP_REQUIRE_ACCESS=1.",
+          "scheme": "bearer",
+          "type": "http"
+        },
+        "cfAccess": {
+          "description": "Cloudflare Access JWT. Required on /portal/v1/admin/bootstrap-otp only when PORTAL_BOOTSTRAP_REQUIRE_ACCESS=1; the audit row records cf-access-authenticated-user-email.",
+          "in": "header",
+          "name": "cf-access-jwt-assertion",
+          "type": "apiKey"
+        },
+        "sessionCookie": {
+          "description": "Opaque DB-backed session token (HMAC at rest, never a JWT). HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=86400 (24h). Single-use revocation semantics; logout marks the row revoked and bumps the per-customer account-token revocation floor.",
+          "in": "cookie",
+          "name": "lccp_session",
+          "type": "apiKey"
+        }
+      }
+    },
+    "info": {
+      "description": "Self-serve customer portal: email-OTP / magic-link sign-in, read-only session-scoped entitlement/device/usage views, and per-action seat operations (checkout/heartbeat/release/download) proxied to the licensing backend via an ephemeral, session-scoped account token. Every authenticated route binds the session-derived customer_id; no client-supplied customer_id or fingerprint reaches a mutation chokepoint. This document describes the routes the Worker actually serves and is pinned to the source by a build-time cross-check test.",
+      "title": "licensecc Customer Portal Worker",
+      "version": "0.1.0"
+    },
+    "openapi": "3.1.0",
+    "paths": {
+      "/api/portal/checkout": {
+        "post": {
+          "description": "Server-resolves entitlement_id -> project/feature/fingerprint from the customer's active entitlements (invariant 4). Mints an ephemeral 120s session-scoped account token (never returned to the browser), proxies to the backend, then wraps the backend response in a portal envelope.",
+          "operationId": "portalCheckout",
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LeaseActionRequest"
+                }
+              }
+            },
+            "required": true
+          },
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/Envelope"
+                  }
+                }
+              },
+              "description": "Portal envelope with backend checkout response in data."
+            },
+            "400": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "invalid_json"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Body was not a JSON object."
+            },
+            "401": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "unauthorized"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "No / invalid session."
+            },
+            "403": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "cross_site_forbidden"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Cross-site request rejected (Sec-Fetch-Site not same-origin, or Origin does not match PORTAL_PUBLIC_ORIGIN)."
+            },
+            "404": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "not_found"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "entitlement_id not owned or not active (generic — no existence oracle)."
+            },
+            "413": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "body_too_large"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Request body exceeded 8192 bytes."
+            },
+            "502": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "backend_unreachable"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Backend fetch threw."
+            },
+            "503": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "config_error"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "BACKEND_ORIGIN unset (backend_unconfigured), or ACCOUNT_TOKEN_PEPPERS unset / customer has no entitlements (config_error)."
+            }
+          },
+          "security": [
+            {
+              "sessionCookie": []
+            }
+          ],
+          "summary": "Seat checkout. Server-resolves the entitlement id, mints a 120s account token, proxies to backend /v1/checkout.",
+          "tags": [
+            "portal"
+          ]
+        }
+      },
+      "/api/portal/devices": {
+        "get": {
+          "description": "Ordered by created_at DESC. A device is visible only if it belongs to an entitlement the session customer owns.",
+          "operationId": "portalDevices",
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/Envelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "devices"
+                      },
+                      "data": {
+                        "properties": {
+                          "items": {
+                            "items": {
+                              "properties": {
+                                "created_at": {
+                                  "type": "integer"
+                                },
+                                "device_key_id": {
+                                  "type": "string"
+                                },
+                                "feature": {
+                                  "type": "string"
+                                },
+                                "license_fingerprint": {
+                                  "type": "string"
+                                },
+                                "project": {
+                                  "type": "string"
+                                }
+                              },
+                              "type": "object"
+                            },
+                            "type": "array"
+                          }
+                        },
+                        "required": [
+                          "items"
+                        ],
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "The customer's devices."
+            },
+            "401": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "unauthorized"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "No / invalid / expired / revoked session."
+            },
+            "503": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "config_error"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "PORTAL_SESSION_PEPPERS unset."
+            }
+          },
+          "security": [
+            {
+              "sessionCookie": []
+            }
+          ],
+          "summary": "List the customer's devices (max 500) on owned entitlements.",
+          "tags": [
+            "portal"
+          ]
+        }
+      },
+      "/api/portal/devices/release": {
+        "post": {
+          "description": "Resolves the device through the SAME ownership EXISTS as the devices listing (invariant 4 — a foreign or absent device is the generic not_found, never a 403 oracle). Atomically bumps the entitlement revocation_seq, flips the device out of 'active', and appends a portal_device_release audit event with the session customer id. Re-releasing an already-released device is a 409.",
+          "operationId": "portalDeviceRelease",
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "device_key_id": {
+                      "description": "The device key id shown on the Devices tab.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "device_key_id"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "required": true
+          },
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/Envelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "device_released"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "The device was released and no longer appears on the Devices tab."
+            },
+            "400": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "invalid_json"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Body was not a JSON object."
+            },
+            "401": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "unauthorized"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "No / invalid session."
+            },
+            "403": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "cross_site_forbidden"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Cross-site request rejected (Sec-Fetch-Site not same-origin, or Origin does not match PORTAL_PUBLIC_ORIGIN)."
+            },
+            "404": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "not_found"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "device_key_id not owned or absent (generic — no existence oracle)."
+            },
+            "409": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "device_status_conflict"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "The device was already released / not active."
+            },
+            "413": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "body_too_large"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Request body exceeded 8192 bytes."
+            },
+            "429": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "rate_limited"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Per-session release rate limit exceeded."
+            }
+          },
+          "security": [
+            {
+              "sessionCookie": []
+            }
+          ],
+          "summary": "Self-serve device deactivation. Frees the slot a registered device holds.",
+          "tags": [
+            "portal"
+          ]
+        }
+      },
+      "/api/portal/download": {
+        "post": {
+          "description": "Server-resolves entitlement_id, mints a 120s token, proxies to backend /v1/activate with device_key_id, then converts the backend JSON lic field to an attachment. Strips upstream Authorization / Set-Cookie so the ephemeral bearer never reaches the browser. The portal never parses or signs (invariant 1).",
+          "operationId": "portalDownload",
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DownloadRequest"
+                }
+              }
+            },
+            "required": true
+          },
+          "responses": {
+            "200": {
+              "content": {
+                "application/octet-stream": {
+                  "schema": {
+                    "format": "binary",
+                    "type": "string"
+                  }
+                }
+              },
+              "description": "Signed .lic file streamed from the backend.",
+              "headers": {
+                "Cache-Control": {
+                  "description": "no-store",
+                  "schema": {
+                    "type": "string"
+                  }
+                },
+                "Content-Disposition": {
+                  "description": "attachment; filename=\"project-feature.lic\"",
+                  "schema": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "400": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "invalid_json"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Body was not a JSON object."
+            },
+            "401": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "unauthorized"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "No / invalid session."
+            },
+            "403": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "cross_site_forbidden"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Cross-site request rejected (Sec-Fetch-Site not same-origin, or Origin does not match PORTAL_PUBLIC_ORIGIN)."
+            },
+            "404": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "not_found"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "project/feature not owned or not active, or fingerprint unresolvable."
+            },
+            "413": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "body_too_large"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Request body exceeded 8192 bytes."
+            },
+            "502": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "backend_unreachable"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Backend /v1/activate fetch threw."
+            },
+            "503": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "config_error"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "BACKEND_ORIGIN unset (backend_unconfigured), or ACCOUNT_TOKEN_PEPPERS unset / customer has no entitlements (config_error)."
+            }
+          },
+          "security": [
+            {
+              "sessionCookie": []
+            }
+          ],
+          "summary": "Download the signed .lic file (application/octet-stream).",
+          "tags": [
+            "portal"
+          ]
+        }
+      },
+      "/api/portal/entitlements": {
+        "get": {
+          "description": "Ordered by project, feature.",
+          "operationId": "portalEntitlements",
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/Envelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "entitlements"
+                      },
+                      "data": {
+                        "properties": {
+                          "items": {
+                            "items": {
+                              "properties": {
+                                "feature": {
+                                  "type": "string"
+                                },
+                                "license_fingerprint": {
+                                  "type": "string"
+                                },
+                                "project": {
+                                  "type": "string"
+                                },
+                                "status": {
+                                  "type": "string"
+                                },
+                                "valid_from": {
+                                  "type": [
+                                    "integer",
+                                    "null"
+                                  ]
+                                },
+                                "valid_until": {
+                                  "type": [
+                                    "integer",
+                                    "null"
+                                  ]
+                                }
+                              },
+                              "type": "object"
+                            },
+                            "type": "array"
+                          }
+                        },
+                        "required": [
+                          "items"
+                        ],
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "The customer's entitlements."
+            },
+            "401": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "unauthorized"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "No / invalid / expired / revoked session."
+            },
+            "503": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "config_error"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "PORTAL_SESSION_PEPPERS unset."
+            }
+          },
+          "security": [
+            {
+              "sessionCookie": []
+            }
+          ],
+          "summary": "List the customer's entitlements (read-only, customer_id bound).",
+          "tags": [
+            "portal"
+          ]
+        }
+      },
+      "/api/portal/heartbeat": {
+        "post": {
+          "operationId": "portalHeartbeat",
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LeaseActionRequest"
+                }
+              }
+            },
+            "required": true
+          },
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/Envelope"
+                  }
+                }
+              },
+              "description": "Portal envelope with backend heartbeat response in data."
+            },
+            "400": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "invalid_json"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Body was not a JSON object."
+            },
+            "401": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "unauthorized"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "No / invalid session."
+            },
+            "403": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "cross_site_forbidden"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Cross-site request rejected (Sec-Fetch-Site not same-origin, or Origin does not match PORTAL_PUBLIC_ORIGIN)."
+            },
+            "404": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "not_found"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "entitlement_id not owned or not active."
+            },
+            "413": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "body_too_large"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Request body exceeded 8192 bytes."
+            },
+            "502": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "backend_unreachable"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Backend fetch threw."
+            },
+            "503": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "config_error"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "BACKEND_ORIGIN unset (backend_unconfigured) or config_error."
+            }
+          },
+          "security": [
+            {
+              "sessionCookie": []
+            }
+          ],
+          "summary": "Seat heartbeat. Same entitlement-id resolution, minting, and response wrapping as checkout.",
+          "tags": [
+            "portal"
+          ]
+        }
+      },
+      "/api/portal/me": {
+        "get": {
+          "operationId": "portalMe",
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/Envelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "me"
+                      },
+                      "data": {
+                        "properties": {
+                          "customer_id": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "customer_id"
+                        ],
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "The session-scoped identity."
+            },
+            "401": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "unauthorized"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "No / invalid / expired / revoked session."
+            },
+            "503": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "config_error"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "PORTAL_SESSION_PEPPERS unset."
+            }
+          },
+          "security": [
+            {
+              "sessionCookie": []
+            }
+          ],
+          "summary": "Return the authenticated customer_id from the session.",
+          "tags": [
+            "portal"
+          ]
+        }
+      },
+      "/api/portal/release": {
+        "post": {
+          "operationId": "portalRelease",
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LeaseActionRequest"
+                }
+              }
+            },
+            "required": true
+          },
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/Envelope"
+                  }
+                }
+              },
+              "description": "Portal envelope with backend release response in data."
+            },
+            "400": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "invalid_json"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Body was not a JSON object."
+            },
+            "401": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "unauthorized"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "No / invalid session."
+            },
+            "403": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "cross_site_forbidden"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Cross-site request rejected (Sec-Fetch-Site not same-origin, or Origin does not match PORTAL_PUBLIC_ORIGIN)."
+            },
+            "404": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "not_found"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "entitlement_id not owned or not active."
+            },
+            "413": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "body_too_large"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Request body exceeded 8192 bytes."
+            },
+            "502": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "backend_unreachable"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Backend fetch threw."
+            },
+            "503": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "config_error"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "BACKEND_ORIGIN unset (backend_unconfigured) or config_error."
+            }
+          },
+          "security": [
+            {
+              "sessionCookie": []
+            }
+          ],
+          "summary": "Seat release. Same entitlement-id resolution, minting, and response wrapping as checkout.",
+          "tags": [
+            "portal"
+          ]
+        }
+      },
+      "/api/portal/usage": {
+        "get": {
+          "description": "Grouped and counted; an event is included only if it belongs to an entitlement the customer owns.",
+          "operationId": "portalUsage",
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/Envelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "usage"
+                      },
+                      "data": {
+                        "properties": {
+                          "items": {
+                            "items": {
+                              "properties": {
+                                "count": {
+                                  "type": "integer"
+                                },
+                                "event_type": {
+                                  "type": "string"
+                                },
+                                "feature": {
+                                  "type": "string"
+                                },
+                                "project": {
+                                  "type": "string"
+                                }
+                              },
+                              "type": "object"
+                            },
+                            "type": "array"
+                          }
+                        },
+                        "required": [
+                          "items"
+                        ],
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Aggregated usage counts."
+            },
+            "401": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "unauthorized"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "No / invalid / expired / revoked session."
+            },
+            "503": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "config_error"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "PORTAL_SESSION_PEPPERS unset."
+            }
+          },
+          "security": [
+            {
+              "sessionCookie": []
+            }
+          ],
+          "summary": "Aggregate usage events by (project, feature, event_type) for owned entitlements.",
+          "tags": [
+            "portal"
+          ]
+        }
+      },
+      "/health": {
+        "get": {
+          "description": "Invariant 7: the portal is only healthy when the backend enforces full account isolation.",
+          "operationId": "health",
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/Envelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "healthy"
+                      },
+                      "data": {
+                        "properties": {
+                          "account_token_mode_required": {
+                            "const": true
+                          }
+                        },
+                        "required": [
+                          "account_token_mode_required"
+                        ],
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Healthy (ACCOUNT_TOKEN_MODE=required)."
+            },
+            "503": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "account_token_mode_not_required"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "ACCOUNT_TOKEN_MODE != \"required\" — the portal is not healthy because backend account isolation is not enforced."
+            }
+          },
+          "security": [],
+          "summary": "Health check. 200 only if ACCOUNT_TOKEN_MODE=required (backend account isolation enforced).",
+          "tags": [
+            "ops"
+          ]
+        }
+      },
+      "/portal/v1/admin/bootstrap-otp": {
+        "post": {
+          "description": "The ONLY path that returns a secret. Gated by a constant-time bearer (PORTAL_BOOTSTRAP_BEARER; unset -> 404, no existence oracle), an optional Cloudflare Access network gate (PORTAL_BOOTSTRAP_REQUIRE_ACCESS=1), always-on rate limiting, and an append-only audit row. For an unknown email the secret is null (no enumeration).",
+          "operationId": "adminBootstrapOtp",
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "email": {
+                      "format": "email",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "email"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "required": true
+          },
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/Envelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "bootstrap_otp"
+                      },
+                      "data": {
+                        "properties": {
+                          "secret": {
+                            "description": "The OTP secret, or null for an unknown email.",
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "secret"
+                        ],
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "OTP issued; secret returned once (null for an unknown email)."
+            },
+            "400": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "invalid_request"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Body was not a JSON object (invalid_json) or email empty after trim/lower (invalid_request)."
+            },
+            "401": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "unauthorized"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Bearer missing or wrong (constant-time comparison)."
+            },
+            "403": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "access_required"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Cloudflare Access required (PORTAL_BOOTSTRAP_REQUIRE_ACCESS=1 and cf-access-jwt-assertion missing) — access_required; or cross_site_forbidden."
+            },
+            "404": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "not_found"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "PORTAL_BOOTSTRAP_BEARER unset — the route does not exist (no existence oracle)."
+            },
+            "413": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "body_too_large"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Request body exceeded 8192 bytes."
+            },
+            "429": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "rate_limited"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Rate limited (per-email 5/900s + per-IP 30/900s via requestOtp)."
+            },
+            "503": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "config_error"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "PORTAL_OTP_PEPPERS unset."
+            }
+          },
+          "security": [
+            {
+              "bootstrapBearer": []
+            },
+            {
+              "bootstrapBearer": [],
+              "cfAccess": []
+            }
+          ],
+          "summary": "Operator break-glass: issue an OTP and return the secret directly (never emailed).",
+          "tags": [
+            "admin"
+          ]
+        }
+      },
+      "/portal/v1/auth/logout": {
+        "post": {
+          "description": "No auth required (the session is optional — logout is idempotent). Marks the session row revoked and bumps account_token_revocations.revocation_seq to kill any in-flight 120s account token (invariant 9). Always clears the cookie (Max-Age=0).",
+          "operationId": "authLogout",
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/Envelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "logged_out"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Logged out. Clears the lccp_session cookie.",
+              "headers": {
+                "Set-Cookie": {
+                  "description": "lccp_session=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0",
+                  "schema": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "400": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "invalid_json"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Body was not a JSON object (when Content-Type: application/json)."
+            },
+            "403": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "cross_site_forbidden"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Cross-site request rejected (Sec-Fetch-Site not same-origin, or Origin does not match PORTAL_PUBLIC_ORIGIN)."
+            },
+            "413": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "body_too_large"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Request body exceeded 8192 bytes."
+            },
+            "503": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "config_error"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "PORTAL_SESSION_PEPPERS unset."
+            }
+          },
+          "security": [
+            {
+              "sessionCookie": []
+            },
+            {}
+          ],
+          "summary": "Revoke the session and clear the cookie (idempotent).",
+          "tags": [
+            "auth"
+          ]
+        }
+      },
+      "/portal/v1/auth/magic": {
+        "get": {
+          "description": "The magic-link secret arrives in ?token=<secret> but is NEVER consumed on this GET (prevents referer/prefetch leaks — invariant 6). Returns an auto-submitting HTML form, not JSON. Headers: referrer-policy: no-referrer; cache-control: no-store.",
+          "operationId": "authMagicInterstitial",
+          "parameters": [
+            {
+              "description": "Magic-link secret (base64url, 32 bytes). Echoed into a hidden form field on this origin only; never consumed here.",
+              "in": "query",
+              "name": "token",
+              "required": true,
+              "schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "content": {
+                "text/html": {
+                  "schema": {
+                    "type": "string"
+                  }
+                }
+              },
+              "description": "Auto-submitting interstitial HTML."
+            }
+          },
+          "security": [],
+          "summary": "Magic-link interstitial (HTML). Renders a self-submitting form that POSTs the token to /magic-redeem.",
+          "tags": [
+            "auth"
+          ]
+        }
+      },
+      "/portal/v1/auth/magic-redeem": {
+        "post": {
+          "description": "Accepts the token either as JSON { token } or as application/x-www-form-urlencoded token=<secret> (posted by the interstitial form). Email-independent; single-use via an atomic UPDATE. On success sets the lccp_session cookie.",
+          "operationId": "authMagicRedeem",
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "token": {
+                      "description": "Magic-link secret (base64url, 32 bytes).",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "token"
+                  ],
+                  "type": "object"
+                }
+              },
+              "application/x-www-form-urlencoded": {
+                "schema": {
+                  "properties": {
+                    "token": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "token"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "required": true
+          },
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/Envelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "signed_in"
+                      },
+                      "data": {
+                        "properties": {
+                          "customer_id": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "customer_id"
+                        ],
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Signed in. Sets the lccp_session cookie.",
+              "headers": {
+                "Set-Cookie": {
+                  "description": "lccp_session=<opaque>; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=86400",
+                  "schema": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "400": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "invalid_json"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Body was not a JSON object."
+            },
+            "401": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "invalid_otp"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Invalid OTP (wrong/consumed/expired/over-cap secret), or unauthorized config_error from redeemOtp."
+            },
+            "403": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "cross_site_forbidden"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Cross-site request rejected (Sec-Fetch-Site not same-origin, or Origin does not match PORTAL_PUBLIC_ORIGIN)."
+            },
+            "413": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "body_too_large"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Request body exceeded 8192 bytes."
+            },
+            "429": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "rate_limited"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Rate limited (per-IP verify 30/900s)."
+            },
+            "503": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "config_error"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "PORTAL_OTP_PEPPERS or PORTAL_SESSION_PEPPERS unset."
+            }
+          },
+          "security": [],
+          "summary": "Redeem a magic-link token and mint an opaque session.",
+          "tags": [
+            "auth"
+          ]
+        }
+      },
+      "/portal/v1/auth/request": {
+        "post": {
+          "description": "Always returns ok (no customer enumeration). Schedules the email via ctx.waitUntil when configured. The secret is NEVER returned on this path (only via the operator bootstrap). Always-on rate limiting (per-email 5/900s + per-IP 30/900s, fail-closed).",
+          "operationId": "authRequestOtp",
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "email": {
+                      "format": "email",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "email"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "required": true
+          },
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/Envelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "otp_requested"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "OTP requested (or a no-op for an unknown email — identical shape)."
+            },
+            "400": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "invalid_json"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Body was not a JSON object."
+            },
+            "403": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "cross_site_forbidden"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Cross-site request rejected (Sec-Fetch-Site not same-origin, or Origin does not match PORTAL_PUBLIC_ORIGIN)."
+            },
+            "413": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "body_too_large"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Request body exceeded 8192 bytes."
+            },
+            "429": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "rate_limited"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Rate limited (per-email 5/900s + per-IP 30/900s, fail-closed)."
+            },
+            "503": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "config_error"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "PORTAL_OTP_PEPPERS unset."
+            }
+          },
+          "security": [],
+          "summary": "Request an OTP (numeric code + magic link) for an email.",
+          "tags": [
+            "auth"
+          ]
+        }
+      },
+      "/portal/v1/auth/verify": {
+        "post": {
+          "description": "Email-bound: a wrong code and an unknown OTP are byte-identical (invalid_otp, no oracle on the reason). Single-use atomic claim (consumed_at). On success sets the lccp_session cookie.",
+          "operationId": "authVerifyOtp",
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "code": {
+                      "description": "8-digit numeric code.",
+                      "type": "string"
+                    },
+                    "email": {
+                      "format": "email",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "email",
+                    "code"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "required": true
+          },
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/Envelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "signed_in"
+                      },
+                      "data": {
+                        "properties": {
+                          "customer_id": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "customer_id"
+                        ],
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Signed in. Sets the lccp_session cookie.",
+              "headers": {
+                "Set-Cookie": {
+                  "description": "lccp_session=<opaque>; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=86400",
+                  "schema": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "400": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "invalid_json"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Body was not a JSON object."
+            },
+            "401": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "invalid_otp"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Invalid OTP (wrong/consumed/expired/over-cap code), or unauthorized config_error from redeemOtp. Byte-identical for all failure reasons."
+            },
+            "403": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "cross_site_forbidden"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Cross-site request rejected (Sec-Fetch-Site not same-origin, or Origin does not match PORTAL_PUBLIC_ORIGIN)."
+            },
+            "413": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "body_too_large"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Request body exceeded 8192 bytes."
+            },
+            "429": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "rate_limited"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Rate limited (per-IP verify 30/900s)."
+            },
+            "503": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "config_error"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "PORTAL_OTP_PEPPERS or PORTAL_SESSION_PEPPERS unset."
+            }
+          },
+          "security": [],
+          "summary": "Redeem an 8-digit numeric code + email and mint an opaque session.",
+          "tags": [
+            "auth"
+          ]
+        }
+      }
+    },
+    "servers": [
+      {
+        "url": "/"
+      }
+    ],
+    "tags": [
+      {
+        "description": "Public sign-in / sign-out (email OTP + magic link). No session required.",
+        "name": "auth"
+      },
+      {
+        "description": "Operator break-glass OTP issuance (bearer-gated; unset -> 404).",
+        "name": "admin"
+      },
+      {
+        "description": "Session-scoped customer data + per-action seat operations. Requires the lccp_session cookie.",
+        "name": "portal"
+      },
+      {
+        "description": "Health / operational endpoints.",
+        "name": "ops"
+      }
+    ]
+  },
+  "openApiOperationCount": 16,
+  "PORTAL_ROUTE_KEYS": [
+    "GET /openapi.json",
+    "GET /docs",
+    "GET /health",
+    "POST /portal/v1/auth/request",
+    "POST /portal/v1/auth/verify",
+    "GET /portal/v1/auth/magic",
+    "POST /portal/v1/auth/magic-redeem",
+    "POST /portal/v1/auth/logout",
+    "POST /portal/v1/admin/bootstrap-otp",
+    "GET /api/portal/me",
+    "GET /api/portal/entitlements",
+    "GET /api/portal/devices",
+    "POST /api/portal/devices/release",
+    "GET /api/portal/usage",
+    "POST /api/portal/checkout",
+    "POST /api/portal/heartbeat",
+    "POST /api/portal/release",
+    "POST /api/portal/download"
+  ],
+  "routeCount": 18,
+  "routeKeyCount": 18,
+  "service": "cloudflare-customer-portal"
+}
