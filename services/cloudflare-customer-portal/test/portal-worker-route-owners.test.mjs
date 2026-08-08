@@ -56,7 +56,7 @@ test("every META/PUBLIC/SESSION route has one explicit direct group-test owner",
 
 test("module-worker entrypoint has exactly one app edge", () => {
   const source = readFileSync(new URL("../src/worker/index.ts", import.meta.url), "utf8");
-  assert.match(source, /export \{ default, PORTAL_ROUTE_KEYS, portalInternalsForTests \} from ["']\.\/app\.js["'];/);
-  assert.match(source, /export type \{ Env \} from ["']\.\/app\.js["'];/);
+  assert.equal((source.match(/from ["']\.\/app\.js["'];/g) ?? []).length, 1);
+  assert.match(source, /export \{ default, PORTAL_ROUTE_KEYS, portalInternalsForTests, type Env \} from ["']\.\/app\.js["'];/);
   assert.doesNotMatch(source, /from ["']\.\/env\.js["']/);
 });
