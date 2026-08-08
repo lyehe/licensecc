@@ -9,16 +9,22 @@ reads and mutates D1 rows.
 
 ## Local validation
 
+Install dependencies once from the repository root; the root `package-lock.json`
+is authoritative for every Worker workspace:
+
 ```sh
-npm ci
-npm run lint
-npm test
-npm run test:ui
-npm run test:e2e
-npm run build
-npm run dry-run
-npm run migrate:local
+npx --yes npm@10.9.8 ci
+npm run lint --workspace @licensecc/cloudflare-license-admin
+npm run test --workspace @licensecc/cloudflare-license-admin
+npm run test:ui --workspace @licensecc/cloudflare-license-admin
+npm run test:e2e --workspace @licensecc/cloudflare-license-admin
+npm run build --workspace @licensecc/cloudflare-license-admin
+npm run dry-run --workspace @licensecc/cloudflare-license-admin
+npm run migrate:local --workspace @licensecc/cloudflare-license-admin
 ```
+
+After the root install, the same `npm run <script>` commands also work from
+this service directory; do not create a package-local lockfile.
 
 `npm run migrate:local` applies the shared verifier migrations from
 `../cloudflare-licensing-backend/migrations` because the admin service and public

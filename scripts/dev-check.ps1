@@ -39,6 +39,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
+$requiredNpmVersion = "10.9.8"
 
 function Invoke-Step {
     param(
@@ -87,9 +88,21 @@ function Ensure-NpmPackage {
         throw "$Name package.json not found at $RelativePath"
     }
 
-    if (-not (Test-Path (Join-Path $packageDir "node_modules"))) {
-        Invoke-Step "Install $Name dependencies" {
-            npm --prefix $packageDir ci
+    $rootLock = Join-Path $repoRoot "package-lock.json"
+    if (-not (Test-Path $rootLock)) {
+        throw "Root package-lock.json not found; run npm ci from the repository root."
+    }
+
+    $actualNpmVersion = (& npm --version 2>$null).Trim()
+    $npmExitCode = $LASTEXITCODE
+    if ($npmExitCode -ne 0 -or $actualNpmVersion -ne $requiredNpmVersion) {
+        throw "npm $requiredNpmVersion is required for the root workspace; found '$actualNpmVersion'. Install it globally with 'npm install --global npm@$requiredNpmVersion' and retry."
+    }
+
+    $rootInstallMarker = Join-Path $repoRoot "node_modules/.package-lock.json"
+    if (-not (Test-Path $rootInstallMarker)) {
+        Invoke-Step "Install root workspace dependencies" {
+            npm ci
         }
     }
 
@@ -108,8 +121,14 @@ function Invoke-NpmScript {
         [string]$Script
     )
 
+    $manifestPath = Join-Path $PackageDir "package.json"
+    $workspaceName = (Get-Content -Raw $manifestPath | ConvertFrom-Json).name
+    if ([string]::IsNullOrWhiteSpace($workspaceName)) {
+        throw "Workspace package name is missing from $manifestPath"
+    }
+
     Invoke-Step "$Name $Script" {
-        npm --prefix $PackageDir run $Script
+        npm run $Script --workspace $workspaceName
     }
 }
 

@@ -7,13 +7,19 @@ stores SQL dumps plus metadata manifests in R2.
 
 ## Local validation
 
+Install dependencies once from the repository root; the root `package-lock.json`
+is authoritative for every Worker workspace:
+
 ```sh
-npm ci
-npm run lint
-npm test
-npm run build
-npm run dry-run
+npx --yes npm@10.9.8 ci
+npm run lint --workspace @licensecc/cloudflare-d1-backup
+npm run test --workspace @licensecc/cloudflare-d1-backup
+npm run build --workspace @licensecc/cloudflare-d1-backup
+npm run dry-run --workspace @licensecc/cloudflare-d1-backup
 ```
+
+After the root install, the same `npm run <script>` commands also work from
+this service directory; do not create a package-local lockfile.
 
 After deploying to staging, validate the deployed Worker and Workflow without
 printing secret values:

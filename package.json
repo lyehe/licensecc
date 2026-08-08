@@ -10,11 +10,11 @@
     "check:services": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -SkipCore -IncludeServices -IncludeUi -IncludeSchemaParity",
     "check:e2e": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -SkipCore -IncludeE2E",
     "check:dry-run": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -SkipCore -IncludeDryRun",
-    "lint:services": "npm --prefix services/cloudflare-licensing-backend run lint && npm --prefix services/cloudflare-license-admin run lint && npm --prefix services/cloudflare-customer-portal run lint && npm --prefix services/cloudflare-d1-backup run lint",
-    "test:backend": "npm --prefix services/cloudflare-licensing-backend run test && npm --prefix services/cloudflare-licensing-backend run test:sql && npm --prefix services/cloudflare-licensing-backend run test:pg",
-    "test:admin": "npm --prefix services/cloudflare-license-admin run test && npm --prefix services/cloudflare-license-admin run test:sql && npm --prefix services/cloudflare-license-admin run test:ui",
-    "test:portal": "npm --prefix services/cloudflare-customer-portal run test && npm --prefix services/cloudflare-customer-portal run test:ui",
-    "test:backup": "npm --prefix services/cloudflare-d1-backup run test",
+    "lint:services": "npm run lint --workspace @licensecc/cloudflare-licensing-backend && npm run lint --workspace @licensecc/cloudflare-license-admin && npm run lint --workspace @licensecc/cloudflare-customer-portal && npm run lint --workspace @licensecc/cloudflare-d1-backup",
+    "test:backend": "npm run test --workspace @licensecc/cloudflare-licensing-backend && npm run test:sql --workspace @licensecc/cloudflare-licensing-backend && npm run test:pg --workspace @licensecc/cloudflare-licensing-backend",
+    "test:admin": "npm run test --workspace @licensecc/cloudflare-license-admin && npm run test:sql --workspace @licensecc/cloudflare-license-admin && npm run test:ui --workspace @licensecc/cloudflare-license-admin",
+    "test:portal": "npm run test --workspace @licensecc/cloudflare-customer-portal && npm run test:ui --workspace @licensecc/cloudflare-customer-portal",
+    "test:backup": "npm run test --workspace @licensecc/cloudflare-d1-backup",
     "test:lint": "node --test scripts/secret-lint.test.mjs",
     "check:architecture": "node scripts/check-architecture.mjs",
     "test:architecture": "node --test scripts/check-architecture.test.mjs",
@@ -28,6 +28,8 @@
     "services/cloudflare-d1-backup"
   ],
   "engines": {
-    "node": ">=22"
-  }
+    "node": ">=22",
+    "npm": "10.9.8"
+  },
+  "packageManager": "npm@10.9.8"
 }

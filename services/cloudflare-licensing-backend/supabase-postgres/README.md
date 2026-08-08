@@ -132,7 +132,7 @@ psql "$DATABASE_URL" -c '\dt'
 ### 3. Install the adapter dependency
 
 ```bash
-npm install postgres
+npx --yes npm@10.9.8 install --no-save --package-lock=false postgres
 ```
 
 ### 4. Wire the adapter into the Worker / host
@@ -211,7 +211,7 @@ statements to PostgreSQL at `prepare()` time:
   it, which is why the Worker uses it.
 
 ```bash
-npm install postgres                                          # adapter runtime dep
+npx --yes npm@10.9.8 install --no-save --package-lock=false postgres  # adapter runtime dep
 npm run build                                                 # tsc -> dist/index.js
 psql "$DATABASE_URL" -f supabase-postgres/schema.pg.sql       # apply the schema
 node scripts/generate-online-key.mjs --out-dir .online-key    # signing key (.online-key is gitignored)
@@ -226,7 +226,7 @@ DATABASE_URL=postgresql://user:pass@host:5432/db \
 **Verified 2026-06-16 on PostgreSQL 16 (Docker):** the compiled Worker served a genuine signed
 `lccoa1.` assertion for a seeded entitlement (`verify.ok`) and `entitlement_denied` (200, not
 500) for a miss — full parity with the SQLite host. `smoke-worker-sql.mjs` re-runs the
-data-layer proof (7/7) against any Postgres: `npm i postgres && node smoke-worker-sql.mjs`.
+data-layer proof (7/7) against any Postgres: `npx --yes npm@10.9.8 install --no-save --package-lock=false postgres && node smoke-worker-sql.mjs`.
 
 ## Exposing the host safely
 
@@ -289,7 +289,7 @@ device-list    --fingerprint <64-hex> [--project] [--feature]
 ### Run it
 
 ```bash
-npm install postgres                       # the adapter's only runtime dep
+npx --yes npm@10.9.8 install --no-save --package-lock=false postgres  # the adapter's only runtime dep
 export DATABASE_URL='postgresql://postgres.<ref>:<pw>@aws-0-<region>.pooler.supabase.com:6543/postgres'
 psql "$DATABASE_URL" -f schema.pg.sql       # one-time: apply the schema
 
@@ -328,7 +328,7 @@ on a single connection -- the same all-or-nothing guarantee.
 ### The pg-mem test
 
 ```bash
-npm install --no-save pg-mem          # in-memory Postgres, no server needed
+npx --yes npm@10.9.8 install --no-save --package-lock=false pg-mem  # in-memory Postgres, no server needed
 node --test supabase-postgres/entitlement-pg.test.mjs
 ```
 
@@ -380,7 +380,7 @@ faithfully -- the `pg-sql.mjs` output is never changed, only what is handed to `
   1→2→…→6 monotonic), the conditional `WHERE entitlements.status != 'revoked'` guard (reenable on
   a revoked row = `rowCount 0`, zero audit events), and `pgcrypto`'s `gen_random_bytes`. The
   correlated `entitlements.<col>` reference resolves natively — no rewrite needed off `pg-mem`.
-  Re-run it against your own instance: `npm i pg && DATABASE_URL=… node smoke-real-pg.mjs`
+  Re-run it against your own instance: `npx --yes npm@10.9.8 install --no-save --package-lock=false pg && DATABASE_URL=… node smoke-real-pg.mjs`
   (after `schema.pg.sql` is applied).
 - The CLI uses **`postgres.js`** (a wire-protocol client), which `pg-mem` cannot serve. The
   `pg-mem` suite therefore exercises the SQL and the row effects, not a live `entitlement-pg.mjs`
@@ -388,4 +388,4 @@ faithfully -- the `pg-sql.mjs` output is never changed, only what is handed to `
   (the transaction pooler on `:6543` with `prepare: false`, per the adapter notes above).
 - Validation and usage errors do **not** require `postgres` to be installed: `entitlement-pg.mjs`
   imports the adapter **lazily** (only once a validated command needs a connection), so a bad
-  command exits `2` even before `npm install postgres`.
+  command exits `2` even before the optional adapter install.

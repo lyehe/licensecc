@@ -30,7 +30,8 @@ also supports an optional Cloudflare rate-limit binding named
 > and hardcoded client URLs are not orphaned. After moving to this path you must
 > re-create / reinstall the gitignored working files at the new location:
 > `wrangler.toml`, `.dev.vars`, `.online-key/`, `node_modules/`, and
-> `.wrangler/`. Run `npm ci` from this directory to reinstall dependencies.
+> `.wrangler/`. Run `npx --yes npm@10.9.8 ci` from the repository root; the root
+> `package-lock.json` is authoritative for every Worker workspace.
 
 ## Setup
 
@@ -127,12 +128,15 @@ also supports an optional Cloudflare rate-limit binding named
 8. Deploy:
 
    ```console
-   npm ci
-   npm test
-   npm run lint
-   npm run schema:parity
+   npx --yes npm@10.9.8 ci
+   npm run test --workspace @licensecc/cloudflare-licensing-backend
+   npm run lint --workspace @licensecc/cloudflare-licensing-backend
+   npm run schema:parity --workspace @licensecc/cloudflare-licensing-backend
    npx wrangler deploy
    ```
+
+   After the root install, the same `npm run <script>` commands also work from
+   this service directory; do not create a package-local lockfile.
 
 9. Validate a remote Worker-signed assertion with the C++ verifier test against
    a staging/test D1 database:

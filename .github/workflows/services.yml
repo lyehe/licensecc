@@ -9,17 +9,13 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: |
-            services/cloudflare-licensing-backend/package-lock.json
-            services/cloudflare-license-admin/package-lock.json
-            services/cloudflare-customer-portal/package-lock.json
-            services/cloudflare-d1-backup/package-lock.json
-      - name: Install dependencies
+          cache-dependency-path: package-lock.json
+      - name: Select npm 10.9.8
         run: |
-          npm ci --prefix services/cloudflare-licensing-backend
-          npm ci --prefix services/cloudflare-license-admin
-          npm ci --prefix services/cloudflare-customer-portal
-          npm ci --prefix services/cloudflare-d1-backup
+          npm install --global npm@10.9.8 --no-audit --no-fund
+          test "$(npm --version)" = "10.9.8"
+      - name: Install dependencies
+        run: npm ci
       # Mirrors scripts/dev-check.ps1 -IncludeServices (the documented local gate):
       # lint + unit/API tests + SQL suites per service. UI workflow tests, E2E,
       # schema parity, and deploy dry-runs remain local-first via dev-check flags.
