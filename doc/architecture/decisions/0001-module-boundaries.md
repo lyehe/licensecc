@@ -32,13 +32,18 @@ public ABI and does not become an implementation dependency of Worker packages.
 Placement rules are:
 
 1. `packages/licensing-domain` contains portable policy, entitlement values and
-   transitions, catalog projections/types, shared API contracts, and pure audit
-   or usage logic. It has no Worker `Env`, D1 binding, service, secret, or route
-   ownership dependency.
-2. `packages/cloudflare-runtime` contains reusable Cloudflare/Web-standard
-   mechanics such as HTTP helpers, account-token primitives, D1 adapters,
-   idempotency, webhook delivery mechanics, and seat-reclaim adapters. It may
-   depend on `licensing-domain`, but never on a service.
+   transitions, catalog DTOs and pure classification rules, shared API
+   contracts, and pure audit logic. D1-backed catalog projection and
+   single-service usage reporting stay with their owning deployable. The domain
+   package has no Worker `Env`, D1 binding, service, secret, or route ownership
+   dependency.
+2. `packages/cloudflare-runtime` contains Cloudflare/Web-standard mechanics
+   reused by at least two deployables, such as HTTP helpers, account-token
+   primitives, D1 contracts/adapters, and idempotency. A single-consumer
+   adapter remains service-local: the current seat-reclaim implementation is
+   admin-owned and webhook delivery is backend-owned. Only an independently
+   shared protocol primitive may move. The runtime package may depend on
+   `licensing-domain`, but never on a service.
 3. Each `services/*` deployable owns its Worker composition root, bindings,
    routes, service-specific authorization/use cases, migrations, static UI, and
    deployment configuration. A deployable never imports another deployable.
