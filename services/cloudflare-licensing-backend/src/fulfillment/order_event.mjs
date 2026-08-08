@@ -12,14 +12,14 @@
 // Design: docs/superpowers/plans/2026-06-24-slice1-order-ingest-blueprint.md
 
 // --- Self-contained validators ----------------------------------------------
-// Deliberately defined here (not imported from src/index.ts, whose copies are
+// Deliberately defined here (not imported from src/routes/verify.ts, whose copies are
 // un-exported TypeScript internals) so this module is import-free and bundles
 // standalone. Kept consistent IN SPIRIT with the repo's existing safeString /
 // safeUnixSeconds / isNonNegativeInteger so order-ingest cannot drift from the
 // rest of the backend's notion of a "safe" id or timestamp.
 
 // Mirrors the C++ ABI buffer limits LCC_API_ONLINE_PROJECT_SIZE (127) and
-// LCC_API_FEATURE_NAME_SIZE (15); keep in sync with src/index.ts.
+// LCC_API_FEATURE_NAME_SIZE (15); keep in sync with src/routes/verify.ts.
 const MAX_PROJECT_SIZE = 127;
 const MAX_FEATURE_SIZE = 15;
 const MAX_ID_SIZE = 255;
@@ -53,7 +53,7 @@ const KNOWN_INTENTS = new Set([
 ]);
 
 /**
- * A bounded, single-line, separator-free string id (matches src/index.ts safeString
+ * A bounded, single-line, separator-free string id (matches src/routes/verify.ts safeString
  * in spirit: rejects the INI/HTTP-injection bytes that could escape a signed line).
  * Returns the string or null.
  */
@@ -69,7 +69,7 @@ export function safeString(value, maxLength) {
 
 /**
  * A non-negative, safe integer unix-seconds timestamp, or null. Matches
- * src/index.ts safeUnixSeconds.
+ * src/routes/verify.ts safeUnixSeconds.
  */
 export function safeUnixSeconds(value) {
   if (typeof value !== "number" || !Number.isInteger(value) || value < 0 || value > Number.MAX_SAFE_INTEGER) {

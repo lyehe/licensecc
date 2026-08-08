@@ -155,7 +155,7 @@ function signerScopeViolation(scopes, keyId, order) {
 
 /**
  * Spend the (key_id, event_id) replay nonce. Mirrors consumeRequestProofNonce in
- * index.ts: INSERT ... ON CONFLICT DO NOTHING RETURNING; a null return is a replay;
+ * routes/verify.ts: INSERT ... ON CONFLICT DO NOTHING RETURNING; a null return is a replay;
  * a DB error is fail-closed (503). TTL = 2*maxSkew so the row outlives the accepted
  * skew window on either side of the signed timestamp.
  */

@@ -1,5 +1,5 @@
 // Canonical route inventory for the licensing-backend Worker — the single source of truth the
-// dispatch table in index.ts is built from and the OpenAPI crosscheck compares against. Every route
+// dispatch table in app.ts is built from and the OpenAPI crosscheck compares against. Every route
 // is a static literal (no path parameters). Emergency break-glass re-serves the scoped routes under
 // EMERGENCY_PREFIX via a prefix gate in fetch(); compose the full set with allCanonicalRoutes().
 

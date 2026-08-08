@@ -1,9 +1,9 @@
 // OpenAPI 3.1 "doc-of-existing" for the licensecc online verifier / licensing-backend Worker.
 //
 // This spec is authored to FAITHFULLY describe the routes the Worker's fetch handler dispatches in
-// src/index.ts -- it is documentation OF the shipped code, not a contract the code is generated
+// src/app.ts -- it is documentation OF the shipped code, not a contract the code is generated
 // from. A zero-dep cross-check test (test/openapi-spec.test.mjs) PINS this spec to the source so a
-// route added/removed in index.ts without a matching spec edit fails CI.
+// route added/removed in app.ts without a matching spec edit fails CI.
 //
 // Envelope: every client-facing response is the FLAT shape { ok: boolean, code?: string, ...fields }.
 // Success bodies set ok:true; errors set ok:false with a `code` string and the documented HTTP

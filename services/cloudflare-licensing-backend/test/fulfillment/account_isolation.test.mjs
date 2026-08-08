@@ -1,6 +1,6 @@
 // Slice 2 — account-token isolation integration matrix (Stage 3).
 //
-// Drives the REAL Worker fetch() handler (src/index.ts default export) over an in-memory
+// Drives the REAL Worker fetch() handler (src/app.ts, re-exported by src/index.ts) over an in-memory
 // SQLite built from the shared migrations/*.sql, wrapped in a D1-like adapter. Nothing about
 // the isolation SQL is mocked: every assertion reads back the entitlement-owned mutation that
 // the worker's owned/non-owned SQL produced. The account_tokens are seeded with token_hmac
@@ -32,7 +32,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const migrationsDir = join(here, "..", "..", "migrations");
 
 // --- D1-like adapter over node:sqlite ----------------------------------------
-// Mirrors the Cloudflare D1 surface index.ts uses: prepare(sql).bind(...).first()/all()/run(),
+// Mirrors the Cloudflare D1 surface the route handlers use: prepare(sql).bind(...).first()/all()/run(),
 // a transactional batch([...]), and the feature-detected withSession("first-primary") (returns
 // self — a single in-process DB has no replica, so the strong read is the same DB).
 

@@ -1,7 +1,7 @@
 // Build-time CROSS-CHECK that PINS the OpenAPI spec to the Worker's actual routes so the doc cannot
 // silently drift. Zero-dep (node:test). It compares three COMPILED artifacts — the route inventory
 // (dist/routes.js, the single source of truth), the dispatch table keys the Worker actually serves
-// (dist/index.js BACKEND_ROUTE_KEYS), and the spec (dist/openapi.js) — instead of grepping the
+// (dist/app.js BACKEND_ROUTE_KEYS), and the spec (dist/openapi.js) — instead of grepping the
 // TypeScript source, so moving/refactoring handler code can never break this test; only a real
 // route/spec divergence can.
 //
@@ -13,7 +13,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { openApiSpec } from "../dist/openapi.js";
 import { META_ROUTES, CLIENT_ROUTES, SCOPED_ROUTES, EMERGENCY_PREFIX, allCanonicalRoutes } from "../dist/routes.js";
-import worker, { BACKEND_ROUTE_KEYS } from "../dist/index.js";
+import worker from "../dist/index.js";
+import { BACKEND_ROUTE_KEYS } from "../dist/app.js";
 
 const keyOf = (r) => `${r.method} ${r.path}`;
 const DISPATCHED_INVENTORY = [...META_ROUTES, ...CLIENT_ROUTES, ...SCOPED_ROUTES];

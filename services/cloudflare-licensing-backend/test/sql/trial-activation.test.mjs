@@ -24,7 +24,9 @@ import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import worker, { canonicalRequestProofPayloadForTests, resetLeaseSigningKeyCacheForTests } from "../../dist/index.js";
+import worker from "../../dist/index.js";
+import { canonicalRequestProofPayloadForTests } from "../../dist/routes/verify.js";
+import { resetLeaseSigningKeyCacheForTests } from "../../dist/routes/leases.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const migrationsDir = join(here, "..", "..", "migrations");

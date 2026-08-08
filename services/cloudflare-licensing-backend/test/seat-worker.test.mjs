@@ -7,7 +7,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { generateKeyPairSync, createPublicKey, verify as nodeVerify } from "node:crypto";
-import worker, { resetSigningKeyCacheForTests } from "../dist/index.js";
+import worker from "../dist/index.js";
+import { resetSigningKeyCacheForTests } from "../dist/routes/verify.js";
 
 function bytesToPem(bytes, label) {
   const b64 = Buffer.from(bytes).toString("base64").match(/.{1,64}/g).join("\n");
