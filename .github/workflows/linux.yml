@@ -20,8 +20,10 @@ jobs:
               libboost-iostreams-dev libboost-program-options-dev \
               libboost-system-dev libboost-thread-dev libboost-date-time-dev \
               valgrind
-      -  name: Core check
-         run: pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -Preset ${{ matrix.preset }}
+      -  name: Bootstrap preflight
+         run: pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/bootstrap.ps1 -CheckOnly
+      -  name: Core build purity
+         run: pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/check-build-purity.ps1 -Preset ${{ matrix.preset }}
       -  name: On failure print logs
          if: ${{ failure() }}
          run: cat /tmp/open-license.log || true

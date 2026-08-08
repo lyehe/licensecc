@@ -1,86 +1,85 @@
-# Distributed under the OSI-approved BSD 3-Clause License.  
-
 #[=======================================================================[.rst:
-#Findlcc
-#-------
-#
-#Find or build the lcc executable.
-#
-#Imported Targets
-#^^^^^^^^^^^^^^^^
-#
-#This module provides the following imported targets, if found:
-#
-#``license_generator::lccgen``
-#  The lccgen executable
-#
-#If lcc is not found this module will try to download it as a submodule
-#Git must be installed.
-#
-#Input variables
-#^^^^^^^^^^^^^^^^
-#
-#``LCC_LOCATION`` Hint for locating the lcc executable
-#
-#Result Variables
-#^^^^^^^^^^^^^^^^
-#
-#This will define the following variables:
-#
-#``LCC_FOUND``
-#  True if the system has the Foo library.
-#``lcc_VERSION``
-#
-#Cache Variables
-#^^^^^^^^^^^^^^^
-#
-#The following cache variables will also be set:
-#
-#``LCC_EXECUTABLE``
-#  Path to the lcc executable.
-#
+Findlccgen
+----------
+
+Resolve the lccgen executable without changing the source checkout.  This
+module deliberately does not initialize or update the bundled source tree:
+that is the explicit responsibility of ``scripts/bootstrap.ps1``.
+
+Input variables
+^^^^^^^^^^^^^^^
+
+``LCC_LOCATION``
+  An explicit lccgen executable, installation prefix, or directory containing
+  its CMake package configuration.  When supplied, no other location is used.
+
+Imported targets
+^^^^^^^^^^^^^^^^
+
+``license_generator::lccgen``
+  The generator command used by the project's public-header build rule.
 #]=======================================================================]
 
-set(lcc_names lccgen lccgen.exe)
-set (failure_messge "Error finding lcc executable.")
-find_package(PkgConfig)
+set(_lccgen_failure_message
+	"Unable to locate lccgen. Run scripts/bootstrap.ps1 to initialize the pinned generator, or configure with -DLCC_LOCATION=<lccgen executable or installation prefix>.")
+
+function(_lccgen_add_imported_target executable_path)
+	if(NOT TARGET license_generator::lccgen)
+		add_executable(license_generator::lccgen IMPORTED GLOBAL)
+		set_property(TARGET license_generator::lccgen PROPERTY IMPORTED_LOCATION "${executable_path}")
+	endif()
+endfunction()
+
+function(_lccgen_require_target)
+	if(NOT TARGET license_generator::lccgen)
+		message(FATAL_ERROR "${_lccgen_failure_message}")
+	endif()
+	set(lccgen_FOUND TRUE PARENT_SCOPE)
+	set(LCC_FOUND TRUE PARENT_SCOPE)
+endfunction()
 
 if(LCC_LOCATION)
-	find_package(lccgen HINTS ${LCC_LOCATION} CONFIG) #try to find it without looping on this module
-	if(NOT lccgen_FOUND)
-		find_program(LCC_EXECUTABLE
-		NAMES ${lcc_names} HINTS ${LCC_LOCATION} DOC "lccgen command line client")
-		FIND_PACKAGE_HANDLE_STANDARD_ARGS(lccgen FOUND_VAR lccgen_FOUND
-        	                               REQUIRED_VARS LCC_EXECUTABLE 
-            	                           FAIL_MESSAGE "Error finding lcc executable. variable LCC_LOCATION non set correctly.")
-		set(LCC_FOUND ${lccgen_FOUND})
-    	add_executable(license_generator::lccgen IMPORTED GLOBAL)                                            
-		set_property(TARGET license_generator::lccgen PROPERTY IMPORTED_LOCATION ${LCC_EXECUTABLE})
-	ENDIF(NOT lccgen_FOUND)
-ELSE(LCC_LOCATION)
-	find_package(lccgen HINTS ${CMAKE_BINARY_DIR} CONFIG) #try to find it without looping on this module
-
-	IF(NOT lccgen_FOUND) 	
-		find_package(Git QUIET)
-		if(GIT_FOUND AND EXISTS "${PROJECT_SOURCE_DIR}/.git")
-		    # Update submodules as needed
-		    option(GIT_SUBMODULE "Check submodules during build" ON)
-		    if(GIT_SUBMODULE)
-		        message(STATUS "Submodule update")
-		        execute_process(COMMAND ${GIT_EXECUTABLE} submodule update --init --recursive
-		                        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-		                        RESULT_VARIABLE GIT_SUBMOD_RESULT)
-		        if(NOT GIT_SUBMOD_RESULT EQUAL "0")
-		            set(failure_messge  "git submodule update --init failed with ${GIT_SUBMOD_RESULT}, please checkout submodules")
-		        endif()
-		    endif()
+	get_filename_component(_lccgen_explicit_location "${LCC_LOCATION}" ABSOLUTE)
+	if(IS_DIRECTORY "${_lccgen_explicit_location}")
+		# CONFIG mode prevents this module from recursively finding itself.
+		find_package(lccgen CONFIG QUIET NO_DEFAULT_PATH
+			PATHS "${_lccgen_explicit_location}"
+			PATH_SUFFIXES "cmake" "lib/cmake/lccgen")
+		if(NOT TARGET license_generator::lccgen)
+			unset(_lccgen_explicit_program CACHE)
+			find_program(_lccgen_explicit_program
+				NAMES lccgen lccgen.exe
+				NO_DEFAULT_PATH
+				HINTS "${_lccgen_explicit_location}"
+				PATH_SUFFIXES "bin")
+			if(_lccgen_explicit_program)
+				_lccgen_add_imported_target("${_lccgen_explicit_program}")
+			endif()
 		endif()
-		if(NOT EXISTS "${PROJECT_SOURCE_DIR}/extern/license-generator/CMakeLists.txt")
-		    set(failure_messge  "All the options to find lcc executable failed. And i can't compile one from source GIT_SUBMODULE was turned off or failed. Please update submodules and try again.")
+	elseif(EXISTS "${_lccgen_explicit_location}")
+		_lccgen_add_imported_target("${_lccgen_explicit_location}")
+	endif()
+	_lccgen_require_target()
+else()
+	if(EXISTS "${CMAKE_SOURCE_DIR}/extern/license-generator/CMakeLists.txt")
+		add_subdirectory(
+			"${CMAKE_SOURCE_DIR}/extern/license-generator"
+			"${CMAKE_BINARY_DIR}/extern/license-generator")
+	else()
+		# A configured installation is a valid alternative when no pinned source
+		# checkout is present.  CONFIG mode prevents recursive module lookup.
+		find_package(lccgen CONFIG QUIET)
+		if(NOT TARGET license_generator::lccgen)
+			unset(_lccgen_installed_program CACHE)
+			find_program(_lccgen_installed_program NAMES lccgen lccgen.exe)
+			if(_lccgen_installed_program)
+				_lccgen_add_imported_target("${_lccgen_installed_program}")
+			endif()
 		endif()
-		add_subdirectory("${PROJECT_SOURCE_DIR}/extern/license-generator")
-		set(lccgen_FOUND TRUE)
-	ENDIF(NOT lccgen_FOUND)
-ENDIF(LCC_LOCATION)
+	endif()
+	_lccgen_require_target()
+endif()
 
-
+unset(_lccgen_explicit_location)
+unset(_lccgen_explicit_program)
+unset(_lccgen_installed_program)

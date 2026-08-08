@@ -73,6 +73,58 @@ set(PROJECT_DESCRIPTION "Copy protection and licensing library")
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# Generated project material is build output. An explicit external base is
+# supported for stable keys. A normal build tree is also allowed when it is
+# nested below the source checkout, but it may not equal or contain that
+# checkout; only source-contained project paths outside the active binary tree
+# are forbidden.
+get_filename_component(_lcc_source_dir_real "${CMAKE_SOURCE_DIR}" REALPATH)
+get_filename_component(_lcc_binary_dir_real "${CMAKE_BINARY_DIR}" REALPATH)
+get_filename_component(_lcc_projects_dir_real "${LCC_PROJECTS_BASE_DIR}" REALPATH)
+file(TO_CMAKE_PATH "${_lcc_source_dir_real}" _lcc_source_dir_real)
+file(TO_CMAKE_PATH "${_lcc_binary_dir_real}" _lcc_binary_dir_real)
+file(TO_CMAKE_PATH "${_lcc_projects_dir_real}" _lcc_projects_dir_real)
+function(_lcc_path_is_within candidate_path parent_path result_variable)
+	set(_lcc_candidate_for_compare "${candidate_path}")
+	set(_lcc_parent_for_compare "${parent_path}")
+	if(WIN32)
+		string(TOLOWER "${_lcc_candidate_for_compare}" _lcc_candidate_for_compare)
+		string(TOLOWER "${_lcc_parent_for_compare}" _lcc_parent_for_compare)
+	endif()
+	string(LENGTH "${_lcc_parent_for_compare}" _lcc_parent_length)
+	string(LENGTH "${_lcc_candidate_for_compare}" _lcc_candidate_length)
+	set(_lcc_within FALSE)
+	if(_lcc_candidate_length GREATER_EQUAL _lcc_parent_length)
+		string(SUBSTRING "${_lcc_candidate_for_compare}" 0 ${_lcc_parent_length} _lcc_candidate_prefix)
+		if(_lcc_candidate_prefix STREQUAL "${_lcc_parent_for_compare}")
+			if(_lcc_candidate_length EQUAL _lcc_parent_length)
+				set(_lcc_within TRUE)
+			else()
+				string(SUBSTRING "${_lcc_candidate_for_compare}" ${_lcc_parent_length} 1 _lcc_boundary_character)
+				if(_lcc_boundary_character STREQUAL "/")
+					set(_lcc_within TRUE)
+				endif()
+			endif()
+		endif()
+	endif()
+	set(${result_variable} ${_lcc_within} PARENT_SCOPE)
+endfunction()
+_lcc_path_is_within("${_lcc_source_dir_real}" "${_lcc_binary_dir_real}" _lcc_source_inside_binary)
+if(_lcc_source_inside_binary)
+	message(FATAL_ERROR "CMAKE_BINARY_DIR must resolve outside and must not contain the source tree: ${CMAKE_BINARY_DIR}")
+endif()
+_lcc_path_is_within("${_lcc_projects_dir_real}" "${_lcc_source_dir_real}" _lcc_projects_inside_source)
+_lcc_path_is_within("${_lcc_projects_dir_real}" "${_lcc_binary_dir_real}" _lcc_projects_inside_binary)
+if(_lcc_projects_inside_source AND NOT _lcc_projects_inside_binary)
+	message(FATAL_ERROR "LCC_PROJECTS_BASE_DIR must resolve outside the source tree or within the active binary tree: ${LCC_PROJECTS_BASE_DIR}")
+endif()
+unset(_lcc_source_dir_real)
+unset(_lcc_binary_dir_real)
+unset(_lcc_projects_dir_real)
+unset(_lcc_source_inside_binary)
+unset(_lcc_projects_inside_source)
+unset(_lcc_projects_inside_binary)
+
 # The reconciled online/v201 modules use project-scoped generated headers.
 # Keep the generated metadata under the build tree while preserving the legacy
 # include shape consumed by existing C and C++ callers.
@@ -165,7 +217,10 @@ endif(UNIX)
 #load the current project from files or find it from environment variables or create a default one
 set(LCC_INCLUDE_DIR "${LCC_PROJECT_INCLUDE_ROOT}/${PROJECT_NAME}/${LCC_PROJECT_NAME}" )
 set(LCC_PROJECT_PUBLIC_KEY "${LCC_INCLUDE_DIR}/public_key.h" )
-set(LCC_PROJECT_PRIVATE_KEY "${LCC_PROJECTS_BASE_DIR}/${LCC_PROJECT_NAME}/private_key.rsa" )
+# Test helpers consume this location to sign fixture licenses. It is deliberately
+# not a custom-command output, byproduct, or install input.
+set(LCC_PROJECT_PRIVATE_KEY "${LCC_PROJECTS_BASE_DIR}/${LCC_PROJECT_NAME}/private_key.rsa")
+file(MAKE_DIRECTORY "${LCC_INCLUDE_DIR}")
 
 # The authoritative main template deliberately remains byte-compatible with
 # older generated projects.  The reconciled v201 issuer additionally needs
@@ -196,11 +251,14 @@ add_compile_definitions(
 	"LCC_PROJECT_CONFIG_HEADER=\"${LCC_PROJECT_CONFIG_HEADER}\""
 	"LCC_PROJECT_PUBLIC_KEY_HEADER=\"${LCC_PROJECT_PUBLIC_KEY_HEADER}\"")
 
-add_custom_target(project_initialize
-  COMMAND license_generator::lccgen project initialize -t "${LCC_PROJECT_TEMPLATE_DIR}" -n "${LCC_PROJECT_NAME}" -p "${LCC_PROJECTS_BASE_DIR}"
-  COMMENT "generating ${LCC_PROJECT_PUBLIC_KEY} and ${LCC_PROJECT_PRIVATE_KEY} if they don't already exist"
-  USES_TERMINAL
-)
+add_custom_command(
+	OUTPUT "${LCC_PROJECT_PUBLIC_KEY}"
+	COMMAND "${CMAKE_COMMAND}" -E make_directory "${LCC_INCLUDE_DIR}"
+	COMMAND license_generator::lccgen project initialize -t "${LCC_PROJECT_TEMPLATE_DIR}" -n "${LCC_PROJECT_NAME}" -p "${LCC_PROJECTS_BASE_DIR}"
+	DEPENDS license_generator::lccgen "${LCC_PROJECT_TEMPLATE_DIR}/public_key.inja"
+	COMMENT "Generating ${LCC_PROJECT_PUBLIC_KEY}"
+	VERBATIM)
+add_custom_target(project_public_header DEPENDS "${LCC_PROJECT_PUBLIC_KEY}")
 
 include_directories( ${LCC_PROJECT_INCLUDE_ROOT} ${LCC_INCLUDE_DIR} "${CMAKE_CURRENT_SOURCE_DIR}/include" )
 
@@ -279,7 +337,9 @@ IF(Doxygen_FOUND AND Sphinx_FOUND)
 ELSE(Doxygen_FOUND AND Sphinx_FOUND)
 	message(STATUS "Doxygen or Sphynx not found, not generating docs.")
 ENDIF(Doxygen_FOUND AND Sphinx_FOUND)
-install(DIRECTORY ${LCC_INCLUDE_DIR} DESTINATION include/${PROJECT_NAME})
+file(TO_CMAKE_PATH "${LCC_INCLUDE_DIR}" _lcc_include_dir_for_install)
+install(DIRECTORY "${_lcc_include_dir_for_install}" DESTINATION include/${PROJECT_NAME})
+unset(_lcc_include_dir_for_install)
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/ DESTINATION include)
 install(FILES src/cmake/licensecc-config.cmake DESTINATION ${pkg_config_dest})
 

@@ -40,6 +40,7 @@ projects/*
 **/CMakeFiles
 /CMakeSettings.json
 /.venv/
+/pyvenv.cfg
 /Pipfile
 /.pydevproject
 

@@ -61,12 +61,15 @@ jobs:
               throw "Boost install missing at $boostRoot"
             }
             "BOOST_ROOT=C:/local/boost_1_84_0" >> $env:GITHUB_ENV
-      -  name: Core check
+      -  name: Bootstrap preflight
          shell: pwsh
-         run: pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -Preset ${{ matrix.preset }}
+         run: pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/bootstrap.ps1 -CheckOnly
+      -  name: Core build purity
+         shell: pwsh
+         run: pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/check-build-purity.ps1 -Preset ${{ matrix.preset }}
       -  name: Inspector
          shell: bash
-         run: C:/licensecc/bin/test/lccinspector.exe
+         run: ./build/${{ matrix.preset }}/install/bin/test/lccinspector.exe
       -  name: On failure print logs
          if: ${{ failure() }}
          shell: pwsh

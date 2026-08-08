@@ -39,7 +39,6 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
-$generatorPatchApplied = $false
 
 function Invoke-Step {
     param(
@@ -54,24 +53,6 @@ function Invoke-Step {
     & $Command
     if ($LASTEXITCODE -ne 0) {
         throw "$Name failed with exit code $LASTEXITCODE"
-    }
-}
-
-function Test-NativeCommand {
-    param(
-        [Parameter(Mandatory = $true)]
-        [scriptblock]$Command
-    )
-
-    $previousErrorActionPreference = $ErrorActionPreference
-    $ErrorActionPreference = "SilentlyContinue"
-    try {
-        & $Command *> $null
-        return $LASTEXITCODE -eq 0
-    } catch {
-        return $false
-    } finally {
-        $ErrorActionPreference = $previousErrorActionPreference
     }
 }
 
@@ -135,71 +116,12 @@ function Invoke-NpmScript {
 Push-Location $repoRoot
 try {
     if (-not $SkipCore) {
-        if (-not (Test-Path "extern/license-generator/CMakeLists.txt")) {
-            throw "Missing extern/license-generator. Run: git submodule update --init --recursive"
+        if ($AllowDirtyGeneratorSubmodule) {
+            Write-Host "==> -AllowDirtyGeneratorSubmodule is retained for compatibility; the core checker preserves its initial source snapshot."
         }
-
-        if (-not (Test-Path "patches/license-generator-cstdint.patch")) {
-            throw "Missing patches/license-generator-cstdint.patch"
-        }
-
-        $generatorStatus = git -C extern/license-generator status --short --untracked-files=normal
-        if ($LASTEXITCODE -ne 0) {
-            throw "Could not inspect extern/license-generator status"
-        }
-        if ($generatorStatus -and -not $AllowDirtyGeneratorSubmodule) {
-            Write-Host "extern/license-generator has local modifications. Preserve, commit, or clean that submodule before running the default dev check."
-            Write-Host "Use -AllowDirtyGeneratorSubmodule only when intentionally testing generator WIP."
-            $generatorStatus | ForEach-Object { Write-Host "  $_" }
-            exit 1
-        }
-
-        if ($env:OS -eq "Windows_NT") {
-            $boostCandidates = @(
-                $env:BOOST_ROOT,
-                "C:\local\boost_1_84_0",
-                "C:\local\boost"
-            ) | Where-Object { $_ -and (Test-Path (Join-Path $_ "boost")) }
-
-            if (-not $boostCandidates) {
-                Write-Warning "Boost was not found in BOOST_ROOT, C:\local\boost_1_84_0, or C:\local\boost. Configure may fail until Boost is installed or BOOST_ROOT is set."
-            }
-        }
-
-        $patchPath = "../../patches/license-generator-cstdint.patch"
-        $patchAlreadyApplied = Test-NativeCommand {
-            git -C extern/license-generator apply --reverse --check $patchPath
-        }
-
-        if ($patchAlreadyApplied) {
-            Write-Host "==> Vendored license-generator patch already applied"
-        } else {
-            $patchCanApply = Test-NativeCommand {
-                git -C extern/license-generator apply --check $patchPath
-            }
-
-            if (-not $patchCanApply) {
-                throw "Vendored license-generator patch can neither apply nor reverse cleanly"
-            }
-
-            Invoke-Step "Apply vendored license-generator patch" {
-                git -C extern/license-generator apply $patchPath
-            }
-            $generatorPatchApplied = $true
-        }
-
-        Invoke-Step "Configure $Preset" {
-            cmake --preset $Preset
-        }
-
-        Invoke-Step "Build $Preset" {
-            cmake --build --preset $Preset
-        }
-
-        if (-not $SkipTests) {
-            Invoke-Step "Test $Preset" {
-                ctest --preset $Preset --no-tests=error
-            }
+        $purityScript = Join-Path $PSScriptRoot "check-build-purity.ps1"
+        Invoke-Step "Core build purity $Preset" {
+            & $purityScript -Preset $Preset -SkipTests:$SkipTests
         }
     } elseif (-not $SkipTests) {
         Write-Host "==> Skip core CMake configure/build/test"
@@ -330,24 +252,6 @@ try {
         }
     }
 
-    $status = git status --short
-    if ($LASTEXITCODE -ne 0) {
-        throw "git status failed with exit code $LASTEXITCODE"
-    }
-
-    $sourceLikeUntracked = $status | Where-Object { $_ -match "^\?\? (sdks/|services/)" }
-    if ($sourceLikeUntracked) {
-        Write-Warning "Untracked service/SDK source-like directories are present. Preserve or merge them intentionally before cleanup."
-        $sourceLikeUntracked | ForEach-Object { Write-Warning $_ }
-    }
 } finally {
-    if ($generatorPatchApplied) {
-        Write-Host "==> Revert temporary vendored license-generator patch"
-        git -C extern/license-generator apply --reverse $patchPath
-        if ($LASTEXITCODE -ne 0) {
-            Write-Warning "Could not reverse temporary vendored generator patch. Inspect extern/license-generator."
-        }
-    }
-
     Pop-Location
 }

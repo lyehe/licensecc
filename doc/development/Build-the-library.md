@@ -91,16 +91,19 @@ git clone --recursive https://github.com/open-license-manager/licensecc.git
 
 ### Configure:
 
-```console
-cd licensecc/build
-cmake .. -DCMAKE_INSTALL_PREFIX=../install
+Use PowerShell 7 to inspect or initialize the pinned generator checkout. Configure/build commands themselves never run source-control operations.
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/bootstrap.ps1 -CheckOnly
+pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/check-build-purity.ps1 -Preset dev-debug
 ```
 
-### Compile and test:
+### Manual compile and test:
 
 ```console
-make
-make install
+cmake -S . -B build/dev-debug -DCMAKE_BUILD_TYPE=Debug -DLCC_PROJECT_NAME=test -DCMAKE_INSTALL_PREFIX=build/dev-debug/install
+cmake --build build/dev-debug
+ctest --test-dir build/dev-debug --output-on-failure
 ```
 
 ```console
@@ -113,7 +116,8 @@ ctest -T memcheck
 |Definition name           |Description|
 |--------------------------|-----------|
 |LCC_PROJECT_NAME=<str>  | This correspond to the name of the project you're generating licenses for. The flag is optional, if you don't specify it the build system will create a project named `DEFAULT` for you |
-|LCC_LOCATION=<path>     | In case you download the license generator separately this is the folder where it was installed or where his lcc-config.cmake can be found |
+|LCC_LOCATION=<path>     | Explicit lccgen executable, installation prefix, or CMake package location. When set, no bundled or PATH fallback is used. |
+|LCC_PROJECTS_BASE_DIR=<path> | Generated project base. It must be external to the source checkout or under the active build directory; stable external key directories are supported. |
 |CMAKE_BUILD_TYPE=Release| generate a release version of the library (should be used as default)|
 |CMAKE_INSTALL_PREFIX    | folder where to install compiled libraries and headers. (default: /usr/local)               |
 |BOOST_ROOT              | Folder where boost was installed (optional: if you installed boost using system package manager this should not be necessary) |
@@ -168,6 +172,8 @@ pip install wheel
 pip install -r requirements.txt
 
 ```
+
+Use `.venv/` for local Python environments. The legacy root `pyvenv.cfg` marker is intentionally ignored and must not be committed.
 
 Build the docs:
 

@@ -22,10 +22,10 @@ versioned independently until the first platform release. See [CHANGELOG.md](CHA
 - `test/`: C++ unit and functional tests.
 - `examples/`: minimal integration examples.
 - `cmake/`: CMake find modules and build helpers.
-- `extern/`: vendored license generator submodule used during configuration.
+- `extern/`: pinned license-generator submodule; `scripts/bootstrap.ps1` is the only workflow that initializes it.
 - `doc/`: documentation source and architecture notes.
 - `scripts/`: local developer helper scripts.
-- `patches/`: patches applied to vendored dependencies in CI and local checks.
+- `patches/`: reviewed transition patches; build and check commands never apply them to vendored source.
 - `package.json`: root orchestration scripts for service, SDK, schema, and E2E checks.
 - `services/cloudflare-licensing-backend/`: licensing backend service, local SQLite adapter, D1 migrations, and fenced PostgreSQL/Supabase adapter.
 - `services/cloudflare-license-admin/`: operator console Worker and React UI.
@@ -42,7 +42,7 @@ Generated project material is written under the CMake build tree by default, not
 - CMake 3.21 or newer for `CMakePresets.json`.
 - A C++17 compiler.
 - Git with submodule support.
-- PowerShell 7 (`pwsh`) on any platform for `scripts/dev-check.ps1` and the root npm shortcuts (CI uses the same binary; Windows PowerShell 5.1 is not targeted).
+- PowerShell 7 (`pwsh`) on any platform for bootstrap, build-purity checks, `scripts/dev-check.ps1`, and the root npm shortcuts (CI uses the same binary; Windows PowerShell 5.1 is not targeted).
 - Linux: OpenSSL, Zlib where required by the OpenSSL version, and Boost development packages for the bundled generator/tests.
 - Windows: Visual Studio 2022 or another supported C++ toolchain. Boost is required for tests and for building the bundled license generator during configuration. If Boost is not in a default CMake search path, set `BOOST_ROOT` to the Boost install directory.
 
@@ -55,23 +55,26 @@ git clone --recursive https://github.com/lyehe/licensecc.git
 cd licensecc
 ```
 
-If the repository was cloned without submodules:
+If the repository was cloned without submodules, initialize the pinned checkout explicitly:
 
-```console
-git submodule update --init --recursive
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/bootstrap.ps1
 ```
 
 ## Recommended Local Check
 
-With PowerShell 7 (`pwsh`, any platform):
+With PowerShell 7 (`pwsh`, any platform), first inspect bootstrap state and then run the source-purity gate:
 
 ```powershell
-pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/dev-check.ps1
+pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/bootstrap.ps1 -CheckOnly
+pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/check-build-purity.ps1 -Preset dev-debug
 ```
 
-That script applies the vendored generator patch temporarily if needed, configures the `dev-debug` preset, builds it, runs CTest, and warns if untracked service/SDK work is present.
+The purity gate snapshots the source tree before configure/build/CTest and fails if any tracked, untracked, generator, `projects/`, or `install/` fingerprint changes. It tolerates pre-existing local work only when it is byte-identical after the check. Configure, build, and test never initialize submodules or edit vendored source.
 
-The default check expects `extern/license-generator` to match the pinned submodule commit. If you are intentionally testing generator changes, preserve that work and run with `-AllowDirtyGeneratorSubmodule`.
+`scripts/dev-check.ps1` remains a convenience entry point and delegates its C++ core phase to the same purity gate. Its `-AllowDirtyGeneratorSubmodule` switch is retained for compatibility; it does not authorize vendor edits.
+
+`patches/license-generator-cstdint.patch` remains tracked only as a transition record while the reviewed generator candidate and gitlink are pending. It is not applied by any runtime workflow; remove it in the same reviewed change that accepts that candidate and updates the gitlink.
 
 Useful variants:
 
@@ -131,7 +134,7 @@ ctest --preset dev-debug
 Manual fallback without presets:
 
 ```console
-cmake -S . -B build/dev-debug -DCMAKE_BUILD_TYPE=Debug -DLCC_PROJECT_NAME=test -DCMAKE_INSTALL_PREFIX=install/dev-debug
+cmake -S . -B build/dev-debug -DCMAKE_BUILD_TYPE=Debug -DLCC_PROJECT_NAME=test -DCMAKE_INSTALL_PREFIX=build/dev-debug/install
 cmake --build build/dev-debug
 ctest --test-dir build/dev-debug --output-on-failure
 ```
@@ -164,7 +167,7 @@ By default, generated license project files are placed under:
 build/<preset>/projects/<project-name>
 ```
 
-Override `LCC_PROJECTS_BASE_DIR` only when you intentionally need a stable external project directory:
+Override `LCC_PROJECTS_BASE_DIR` only when you intentionally need a stable external project directory. It may be outside the checkout or inside the active binary tree; source-tree paths outside that binary tree are rejected.
 
 ```console
 cmake -S . -B build/custom -DLCC_PROJECT_NAME=my-product -DLCC_PROJECTS_BASE_DIR=/path/to/projects
@@ -186,7 +189,7 @@ Before opening a pull request:
 pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/dev-check.ps1
 ```
 
-Do not commit generated outputs such as `build/`, `install/`, `.wrangler/`, `dist/`, `node_modules/`, `doc/_doxygen/`, Python caches, or .NET `bin/obj` directories.
+Do not commit generated outputs such as `build/`, `install/`, `.wrangler/`, `dist/`, `node_modules/`, `doc/_doxygen/`, Python caches, or .NET `bin/obj` directories. Create local Python environments as `.venv/`; the legacy root `pyvenv.cfg` marker is ignored.
 Do not commit local Wrangler configs or secrets such as `services/**/wrangler.toml`, `services/**/wrangler.jsonc`, `.dev.vars`, or `.online-key/`; track only the `wrangler.example.*` templates.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for reporting and contribution guidelines.

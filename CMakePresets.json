@@ -13,7 +13,7 @@
       "binaryDir": "${sourceDir}/build/dev-debug",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
-        "CMAKE_INSTALL_PREFIX": "${sourceDir}/install/dev-debug",
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/build/dev-debug/install",
         "LCC_PROJECT_NAME": "test"
       }
     },
@@ -24,7 +24,7 @@
       "binaryDir": "${sourceDir}/build/dev-release",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
-        "CMAKE_INSTALL_PREFIX": "${sourceDir}/install/dev-release",
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/build/dev-release/install",
         "LCC_PROJECT_NAME": "test"
       }
     },
@@ -35,7 +35,7 @@
       "binaryDir": "${sourceDir}/build/ci-linux-debug",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
-        "CMAKE_INSTALL_PREFIX": "${sourceDir}/install/ci-linux-debug",
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/build/ci-linux-debug/install",
         "LCC_PROJECT_NAME": "test"
       }
     },
@@ -46,7 +46,7 @@
       "binaryDir": "${sourceDir}/build/ci-linux-release",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
-        "CMAKE_INSTALL_PREFIX": "${sourceDir}/install/ci-linux-release",
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/build/ci-linux-release/install",
         "LCC_PROJECT_NAME": "test"
       }
     },
@@ -57,7 +57,7 @@
       "binaryDir": "${sourceDir}/build/ci-linux-core",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
-        "CMAKE_INSTALL_PREFIX": "${sourceDir}/install/ci-linux-core",
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/build/ci-linux-core/install",
         "LCC_PROJECT_NAME": "test"
       }
     },
@@ -71,7 +71,7 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
         "CMAKE_DISABLE_FIND_PACKAGE_OpenSSL": "TRUE",
-        "CMAKE_INSTALL_PREFIX": "C:/licensecc",
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/build/ci-windows-msvc-debug-dynamic/install",
         "LCC_PROJECT_NAME": "test",
         "STATIC_RUNTIME": "FALSE"
       }
@@ -86,7 +86,7 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
         "CMAKE_DISABLE_FIND_PACKAGE_OpenSSL": "TRUE",
-        "CMAKE_INSTALL_PREFIX": "C:/licensecc",
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/build/ci-windows-msvc-debug-static/install",
         "LCC_PROJECT_NAME": "test",
         "STATIC_RUNTIME": "TRUE"
       }
@@ -101,7 +101,7 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
         "CMAKE_DISABLE_FIND_PACKAGE_OpenSSL": "TRUE",
-        "CMAKE_INSTALL_PREFIX": "C:/licensecc",
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/build/ci-windows-msvc-release-dynamic/install",
         "LCC_PROJECT_NAME": "test",
         "STATIC_RUNTIME": "FALSE"
       }
@@ -116,7 +116,7 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
         "CMAKE_DISABLE_FIND_PACKAGE_OpenSSL": "TRUE",
-        "CMAKE_INSTALL_PREFIX": "C:/licensecc",
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/build/ci-windows-msvc-release-static/install",
         "LCC_PROJECT_NAME": "test",
         "STATIC_RUNTIME": "TRUE"
       }
@@ -131,7 +131,7 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
         "CMAKE_DISABLE_FIND_PACKAGE_OpenSSL": "TRUE",
-        "CMAKE_INSTALL_PREFIX": "C:/licensecc",
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/build/ci-windows-msvc/install",
         "LCC_PROJECT_NAME": "test",
         "STATIC_RUNTIME": "FALSE"
       }

@@ -10,7 +10,7 @@ add_subdirectory("hw_identifier")
 
 foreach(_lcc_generated_metadata_target IN ITEMS signed_token base anti_tamper online_verification config_attestation activation os locate hw_identifier)
     if(TARGET ${_lcc_generated_metadata_target})
-        add_dependencies(${_lcc_generated_metadata_target} project_initialize)
+        add_dependencies(${_lcc_generated_metadata_target} project_public_header)
     endif()
 endforeach()
 
@@ -29,6 +29,7 @@ ADD_LIBRARY(licensecc_static STATIC
     $<TARGET_OBJECTS:config_attestation>
     $<TARGET_OBJECTS:activation>
 )
+add_dependencies(licensecc_static project_public_header)
 
 if(CODE_COVERAGE AND UNIX)
 	  if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.13)

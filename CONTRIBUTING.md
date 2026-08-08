@@ -19,11 +19,10 @@ Good bug reports include:
 - A minimal test case or example when possible.
 - Crash logs, stack traces, or `open-license.log` output when relevant.
 
-Before reporting a build issue, update your checkout and submodules:
+Before reporting a build issue, inspect the pinned generator checkout:
 
-```console
-git pull
-git submodule update --init --recursive
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/bootstrap.ps1 -CheckOnly
 ```
 
 ## Suggesting Enhancements
@@ -37,7 +36,8 @@ For normal work on this public fork, target `main` unless an issue or maintainer
 Before opening a pull request:
 
 ```powershell
-pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/dev-check.ps1
+pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/bootstrap.ps1 -CheckOnly
+pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/check-build-purity.ps1 -Preset dev-debug
 ```
 
 For service, SDK, database-backend, and portal changes, run the relevant local gates as well:
@@ -56,16 +56,7 @@ npm run check:e2e
 npm run lint:services
 ```
 
-If you cannot run that script on your platform, run the equivalent commands.
-First apply the vendored-generator patch (required on Linux with GCC ≥ 13;
-harmless elsewhere — dev-check.ps1 normally does this for you and reverts it
-afterwards):
-
-```console
-git -C extern/license-generator apply ../../patches/license-generator-cstdint.patch
-```
-
-Then configure, build, and test:
+If you cannot run that script on your platform, use the equivalent non-mutating configure, build, and test commands:
 
 ```console
 cmake --preset dev-debug
@@ -73,12 +64,14 @@ cmake --build --preset dev-debug
 ctest --preset dev-debug
 ```
 
-To restore the pristine submodule afterwards: `git -C extern/license-generator checkout -- .`
+Do not repair, reset, or patch the generator checkout from a build command. Use `scripts/bootstrap.ps1` only after preserving any local generator work.
+
+The tracked generator compatibility patch is transitional and must be removed only with its reviewed replacement generator revision and gitlink update.
 
 Manual fallback without presets:
 
 ```console
-cmake -S . -B build/dev-debug -DCMAKE_BUILD_TYPE=Debug -DLCC_PROJECT_NAME=test
+cmake -S . -B build/dev-debug -DCMAKE_BUILD_TYPE=Debug -DLCC_PROJECT_NAME=test -DCMAKE_INSTALL_PREFIX=build/dev-debug/install
 cmake --build build/dev-debug
 ctest --test-dir build/dev-debug --output-on-failure
 ```
@@ -89,6 +82,7 @@ Do not commit generated files or local-only state:
 
 - `build/`
 - `install/`
+- `.venv/`
 - `.wrangler/`
 - `dist/`
 - `dist-worker/`
