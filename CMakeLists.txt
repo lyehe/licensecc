@@ -5,6 +5,24 @@ SET(LICENSECC_SHORT_LICENSE "GNU Affero General Public License v3.0 or later")
 SET(CMAKE_DISABLE_SOURCE_CHANGES ON)
 SET(CMAKE_DISABLE_IN_SOURCE_BUILD ON)
 
+# Task 0 source-baseline guard: public declarations must never survive a merge
+# that drops the real online/v201 implementation objects. Keep this list in
+# source control, not under the build tree, so configure fails before it can
+# create a misleading partial library.
+set(LCC_REQUIRED_ONLINE_V201_SOURCES
+	"include/licensecc/licensecc.h"
+	"src/library/online_verification/OnlineVerification.cpp"
+	"src/library/signed_token/SignedToken.cpp"
+	"src/library/base/v201_canonical_payload.cpp"
+	"src/library/activation/ActivationRequest.cpp")
+foreach(_lcc_required_online_v201_source IN LISTS LCC_REQUIRED_ONLINE_V201_SOURCES)
+	if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${_lcc_required_online_v201_source}")
+		message(FATAL_ERROR
+			"licensecc online/v201 source baseline is incomplete: missing ${_lcc_required_online_v201_source}")
+	endif()
+endforeach()
+unset(_lcc_required_online_v201_source)
+
 IF(NOT LCC_PROJECT_NAME)
 	message(STATUS "You should define a variable LCC_PROJECT_NAME containing the name of the software you want to add a license to."
 		"A mock project named DEFAULT has been added for you.")
@@ -15,6 +33,29 @@ ENDIF(NOT LCC_PROJECT_NAME)
 IF(NOT LCC_PROJECTS_BASE_DIR)
 	set(LCC_PROJECTS_BASE_DIR "${CMAKE_BINARY_DIR}/projects")
 ENDIF(NOT LCC_PROJECTS_BASE_DIR)
+
+set(LCC_SUPPORTED_LICENSE_FORMAT_MIN 200 CACHE STRING
+	"Minimum license file format version supported by this runtime package.")
+set(LCC_SUPPORTED_LICENSE_FORMAT_MAX 201 CACHE STRING
+	"Maximum license file format version supported by this runtime package.")
+if(NOT DEFINED LCC_PROJECT_MAGIC_NUM OR "${LCC_PROJECT_MAGIC_NUM}" STREQUAL "")
+	set(LCC_PROJECT_MAGIC_NUM 0 CACHE STRING "Project magic number embedded in generated project metadata")
+endif()
+set(LCC_ONLINE_ASSERTION_PUBLIC_KEY_RECORDS "" CACHE STRING
+	"Optional C++ expressions for trusted online assertion public keys.")
+set(LCC_ONLINE_ASSERTION_RETIRED_KEY_IDS "" CACHE STRING
+	"Optional C string literals for retired online assertion key ids.")
+set(LCC_CONFIG_ATTESTATION_PUBLIC_KEY_RECORDS "" CACHE STRING
+	"Optional C++ expressions for trusted config-attestation public keys.")
+set(LCC_CONFIG_ATTESTATION_RETIRED_KEY_IDS "" CACHE STRING
+	"Optional C string literals for retired config-attestation key ids.")
+set(LCC_ADDITIONAL_PUBLIC_KEY_RECORDS "" CACHE STRING
+	"Optional C++ expressions for additional project verification-ring public keys.")
+set(LCC_RETIRED_PUBLIC_KEY_IDS "" CACHE STRING
+	"Optional C string literals for retired project verification-ring key ids.")
+option(LCC_BUILD_LEASE_RING_TEST
+	"Configure the optional lease-ring golden test; requires its external generator helper." OFF)
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/LeaseRing.cmake")
 
 cmake_policy(SET CMP0048 NEW)
 if(POLICY CMP0091)
@@ -31,6 +72,13 @@ set(PROJECT_DESCRIPTION "Copy protection and licensing library")
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# The reconciled online/v201 modules use project-scoped generated headers.
+# Keep the generated metadata under the build tree while preserving the legacy
+# include shape consumed by existing C and C++ callers.
+set(LCC_PROJECT_INCLUDE_ROOT "${LCC_PROJECTS_BASE_DIR}/${LCC_PROJECT_NAME}/include")
+set(LCC_PROJECT_CONFIG_HEADER "${PROJECT_NAME}/${LCC_PROJECT_NAME}/licensecc_properties.h")
+set(LCC_PROJECT_PUBLIC_KEY_HEADER "${PROJECT_NAME}/${LCC_PROJECT_NAME}/public_key.h")
 
 option(BUILD_BENCHMARKS "Build performance benchmarks (no extra dependencies)" OFF)
 SET(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake/")
@@ -115,17 +163,46 @@ endif(UNIX)
 
 #initialize project
 #load the current project from files or find it from environment variables or create a default one
-set(LCC_INCLUDE_DIR "${LCC_PROJECTS_BASE_DIR}/${LCC_PROJECT_NAME}/include/${PROJECT_NAME}/${LCC_PROJECT_NAME}" )
+set(LCC_INCLUDE_DIR "${LCC_PROJECT_INCLUDE_ROOT}/${PROJECT_NAME}/${LCC_PROJECT_NAME}" )
 set(LCC_PROJECT_PUBLIC_KEY "${LCC_INCLUDE_DIR}/public_key.h" )
 set(LCC_PROJECT_PRIVATE_KEY "${LCC_PROJECTS_BASE_DIR}/${LCC_PROJECT_NAME}/private_key.rsa" )
 
+# The authoritative main template deliberately remains byte-compatible with
+# older generated projects.  The reconciled v201 issuer additionally needs
+# key identity metadata, so create a build-tree overlay for lccgen rather than
+# editing that source template or any existing generated project header.
+set(LCC_PROJECT_TEMPLATE_DIR "${CMAKE_BINARY_DIR}/generated-project-templates")
+file(MAKE_DIRECTORY "${LCC_PROJECT_TEMPLATE_DIR}")
+configure_file("${PROJECT_SOURCE_DIR}/src/templates/public_key.inja"
+	"${LCC_PROJECT_TEMPLATE_DIR}/public_key.inja" COPYONLY)
+file(APPEND "${LCC_PROJECT_TEMPLATE_DIR}/public_key.inja"
+	"\n#ifndef LCC_PUBLIC_KEY_ALGORITHM\n"
+	"#define LCC_PUBLIC_KEY_ALGORITHM \"{{ public_key_algorithm }}\"\n"
+	"#endif\n"
+	"#ifndef LCC_PUBLIC_KEY_BITS\n"
+	"#define LCC_PUBLIC_KEY_BITS {{ public_key_bits }}\n"
+	"#endif\n"
+	"#ifndef LCC_PUBLIC_KEY_SHA256\n"
+	"#define LCC_PUBLIC_KEY_SHA256 \"{{ public_key_sha256 }}\"\n"
+	"#endif\n"
+	"#ifndef LCC_PUBLIC_KEY_ID\n"
+	"#define LCC_PUBLIC_KEY_ID \"sha256:{{ public_key_sha256 }}\"\n"
+	"#endif\n"
+	"#ifndef LCC_SIGNATURE_ALGORITHM\n"
+	"#define LCC_SIGNATURE_ALGORITHM \"{{ signature_algorithm }}\"\n"
+	"#endif\n")
+
+add_compile_definitions(
+	"LCC_PROJECT_CONFIG_HEADER=\"${LCC_PROJECT_CONFIG_HEADER}\""
+	"LCC_PROJECT_PUBLIC_KEY_HEADER=\"${LCC_PROJECT_PUBLIC_KEY_HEADER}\"")
+
 add_custom_target(project_initialize
-  COMMAND license_generator::lccgen project initialize -t "${PROJECT_SOURCE_DIR}/src/templates" -n "${LCC_PROJECT_NAME}" -p "${LCC_PROJECTS_BASE_DIR}"
+  COMMAND license_generator::lccgen project initialize -t "${LCC_PROJECT_TEMPLATE_DIR}" -n "${LCC_PROJECT_NAME}" -p "${LCC_PROJECTS_BASE_DIR}"
   COMMENT "generating ${LCC_PROJECT_PUBLIC_KEY} and ${LCC_PROJECT_PRIVATE_KEY} if they don't already exist"
   USES_TERMINAL
 )
 
-include_directories( ${LCC_INCLUDE_DIR} "${CMAKE_CURRENT_SOURCE_DIR}/include" )
+include_directories( ${LCC_PROJECT_INCLUDE_ROOT} ${LCC_INCLUDE_DIR} "${CMAKE_CURRENT_SOURCE_DIR}/include" )
 
 message( STATUS "CXX compiler        : " ${CMAKE_CXX_COMPILER})
 message( STATUS "CXX compiler flags  : " ${CMAKE_CXX_FLAGS})
@@ -209,5 +286,3 @@ install(FILES src/cmake/licensecc-config.cmake DESTINATION ${pkg_config_dest})
 include(CMakePackageConfigHelpers)
 write_basic_package_version_file(${CMAKE_BINARY_DIR}/licensecc-config-version.cmake COMPATIBILITY SameMajorVersion)
 install(FILES ${CMAKE_BINARY_DIR}/licensecc-config-version.cmake DESTINATION ${pkg_config_dest})
-
-

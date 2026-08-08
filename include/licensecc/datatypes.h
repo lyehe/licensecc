@@ -15,19 +15,21 @@ extern "C" {
 #include <stdbool.h>
 #endif
 
-#ifdef __unix__
-#define DllExport
-#ifndef MAX_PATH
-#define MAX_PATH 1024
-#endif
-#else
-#include <windows.h>
+#if defined(_WIN32)
 #define DllExport __declspec(dllexport)
+#define LCC_API_PATH_SIZE 260
+#else
+#define DllExport
+#define LCC_API_PATH_SIZE 1024
 #endif
 
 // Generated per-project at configure time by lccgen into
 // projects/<LCC_PROJECT_NAME>/include/...; it is not checked into the repository.
-#include <licensecc_properties.h>
+// Consumers should get this definition from the licensecc CMake target.
+#ifndef LCC_PROJECT_CONFIG_HEADER
+#error "LCC_PROJECT_CONFIG_HEADER is not defined. Link against licensecc::licensecc_static or define the project-scoped generated properties header."
+#endif
+#include LCC_PROJECT_CONFIG_HEADER
 
 typedef enum {
 	LICENSE_OK = 0,  // OK
@@ -40,6 +42,17 @@ typedef enum {
 	PRODUCT_EXPIRED = 7,    //!< PRODUCT_EXPIRED
 	LICENSE_CORRUPTED = 8,  // License signature didn't match with current license
 	IDENTIFIERS_MISMATCH = 9,  // Calculated identifier and the one provided in license didn't match
+	LICENSE_TAMPER_DETECTED = 10,  // Runtime tamper signal detected
+	LICENSE_ONLINE_REQUIRED = 11,  // Online verification is required but not available
+	LICENSE_ONLINE_VERIFICATION_FAILED = 12,  // Online entitlement verification failed
+	LICENSE_ONLINE_ASSERTION_INVALID = 13,  // Online assertion was malformed, expired, or not authentic
+	LICENSE_ONLINE_CACHE_EXPIRED = 14,  // Reserved for future persistent-cache APIs
+
+	LICENSE_CONFIG_TOKEN_INVALID = 15,     // config token envelope, signature, or metadata invalid
+	LICENSE_CONFIG_BINDING_MISMATCH = 16,  // config token not bound to this project/feature/license/device
+	LICENSE_CONFIG_HASH_MISMATCH = 17,     // config bytes do not match the signed config-hash
+	LICENSE_CONFIG_EXPIRED = 18,           // config token outside its issued/expires window
+	LICENSE_CONFIG_ROLLBACK = 19,          // config-seq below the accepted minimum
 
 	LICENSE_SPECIFIED = 100,  // license location was specified
 	LICENSE_FOUND = 101,  // License file has been found or license data has been located
@@ -54,13 +67,311 @@ typedef enum {
 
 typedef enum { SVRT_INFO, SVRT_WARN, SVRT_ERROR } LCC_SEVERITY;
 
+typedef enum {
+	LCC_TAMPER_DISABLED = 0,
+	LCC_TAMPER_ENFORCE = 2
+} LCC_TAMPER_POLICY;
+
+#define LCC_TAMPER_FLAG_NONE 0u
+#define LCC_TAMPER_FLAG_STRICT_SOURCE_SHADOWING 0x00000001u
+#define LCC_ONLINE_FLAG_NONE 0u
+/**
+ * Online-request purpose bits, carried in ::LccOnlineRequest.flags (and set by
+ * the library through ::LicenseCheckOptions.online_flags). They tell the host
+ * ::LCC_ONLINE_CHECK callback which lifecycle operation this request is, so it
+ * can POST to the matching endpoint and thread the seat/session id it owns:
+ *   - neither bit set  -> initial verify  (host POSTs /v1/verify)
+ *   - PURPOSE_HEARTBEAT -> confirm/keepalive (host POSTs /v1/heartbeat)
+ *   - PURPOSE_RELEASE   -> seat release    (host POSTs /v1/release)
+ * The two bits are mutually exclusive; the library never sets both. Hosts that
+ * predate these bits (treating flags as opaque and always hitting /v1/verify)
+ * keep working for the verify path. The library owns neither the transport nor
+ * the seat id; the host carries the seat id returned by /v1/checkout.
+ */
+#define LCC_ONLINE_FLAG_PURPOSE_HEARTBEAT 0x00000001u
+#define LCC_ONLINE_FLAG_PURPOSE_RELEASE 0x00000002u
+/**
+ * Client hardening posture bits sent to the online verifier as telemetry.
+ * These bits describe which local client-side policies were configured for the
+ * current request. They are not cryptographic proof that the host is clean.
+ */
+#define LCC_CLIENT_HARDENING_NONE 0u
+#define LCC_CLIENT_HARDENING_TAMPER_ENFORCE 0x00000001u
+#define LCC_CLIENT_HARDENING_HOST_INTEGRITY 0x00000002u
+#define LCC_CLIENT_HARDENING_SOURCE_SHADOWING 0x00000004u
+#define LCC_CLIENT_HARDENING_ONLINE_REQUIRED 0x00000008u
+#define LCC_API_ONLINE_PROJECT_SIZE 127u
+#define LCC_API_ONLINE_NONCE_SIZE 64u
+#define LCC_API_ONLINE_LICENSE_FINGERPRINT_SIZE 64u
+#define LCC_API_ONLINE_DEVICE_HASH_SIZE 64u
+#define LCC_API_ONLINE_ASSERTION_SIZE 4096u
+#define LCC_ONLINE_REQUEST_VERSION 2u
+#define LCC_ONLINE_DEFAULT_TIMEOUT_MS 3000u
+#define LCC_ONLINE_MAX_TIMEOUT_MS 30000u
+#define LCC_LICENSE_CHECK_OPTIONS_VERSION 2u
+#define LCC_LICENSE_DECISION_OPTIONS_VERSION 1u
+#define LCC_LICENSE_DECISION_VERSION 1u
+#define LCC_API_CONFIG_ID_SIZE 64u
+#define LCC_CONFIG_INPUT_VERSION 1u
+#define LCC_CONFIG_VERIFY_OPTIONS_VERSION 2u
+#define LCC_CONFIG_DECISION_VERSION 2u
+
+/**
+ * Host-supplied runtime integrity probe.
+ *
+ * Return true when no local tamper signal is detected. Return false to report a
+ * best-effort tamper signal; `detail_out`, when provided, should receive a
+ * short non-sensitive reason. The callback runs in the customer-controlled host
+ * process, so it is advisory and tamper-resistant, not tamper-proof.
+ */
+typedef bool (*LCC_HOST_INTEGRITY_CHECK)(void* user_data, char* detail_out, size_t detail_out_size);
+
+typedef enum {
+	LCC_ONLINE_DISABLED = 0,
+	LCC_ONLINE_REQUIRE = 2
+} LCC_ONLINE_POLICY;
+
+typedef enum {
+	LCC_ONLINE_CB_OK = 0,
+	LCC_ONLINE_CB_TRANSPORT_UNAVAILABLE = 1,
+	LCC_ONLINE_CB_TIMEOUT = 2,
+	LCC_ONLINE_CB_BUFFER_TOO_SMALL = 3,
+	LCC_ONLINE_CB_HOST_DECLINED = 4,
+	LCC_ONLINE_CB_MALFORMED_RESPONSE = 5
+} LCC_ONLINE_CALLBACK_STATUS;
+
+typedef struct LccOnlineRequest {
+	uint32_t size;
+	uint32_t version;
+	char project[LCC_API_ONLINE_PROJECT_SIZE + 1];
+	char feature[LCC_API_FEATURE_NAME_SIZE + 1];
+	char license_fingerprint[LCC_API_ONLINE_LICENSE_FINGERPRINT_SIZE + 1];
+	char device_hash[LCC_API_ONLINE_DEVICE_HASH_SIZE + 1];
+	char nonce[LCC_API_ONLINE_NONCE_SIZE + 1];
+	LCC_ONLINE_POLICY policy;
+	uint32_t flags;
+	uint32_t timeout_ms;
+	uint32_t client_hardening;  // bitset of LCC_CLIENT_HARDENING_*; client configuration posture, telemetry only
+} LccOnlineRequest;
+
+/**
+ * Host-supplied online verifier transport callback.
+ *
+ * The callback receives the nonce-bound request and must write a signed online
+ * assertion envelope to `assertion_out`. If the provided buffer is too small,
+ * set `*assertion_out_size` to the required size and return
+ * ::LCC_ONLINE_CB_BUFFER_TOO_SMALL. Transport failures may be retried by host
+ * code; entitlement denials and malformed responses should fail closed.
+ */
+typedef LCC_ONLINE_CALLBACK_STATUS (*LCC_ONLINE_CHECK)(void* user_data, const LccOnlineRequest* request,
+													   char* assertion_out, size_t* assertion_out_size);
+
+typedef struct LicenseCheckOptions {
+	uint32_t size;
+	uint32_t version;
+	LCC_TAMPER_POLICY tamper_policy;
+	uint32_t tamper_flags;
+	LCC_HOST_INTEGRITY_CHECK host_integrity_check;
+	void* host_integrity_user_data;
+	LCC_ONLINE_POLICY online_policy;
+	uint32_t online_flags;
+	uint32_t online_timeout_ms;
+	LCC_ONLINE_CHECK online_check;
+	void* online_user_data;
+	char online_device_hash[LCC_API_ONLINE_DEVICE_HASH_SIZE + 1];
+} LicenseCheckOptions;
+
+typedef enum {
+	LCC_LICENSE_DECISION_DENY = 0,
+	LCC_LICENSE_DECISION_ALLOW = 1
+} LCC_LICENSE_DECISION;
+
+typedef struct LccRevocationFloorRecord {
+	/** Structure size, set by ::lcc_init_revocation_floor_record. */
+	uint32_t size;
+	/** Structure version, set to ::LCC_LICENSE_DECISION_VERSION. */
+	uint32_t version;
+	/** Project bound to the accepted online assertion. */
+	char project[LCC_API_ONLINE_PROJECT_SIZE + 1];
+	/** Feature bound to the accepted online assertion. */
+	char feature[LCC_API_FEATURE_NAME_SIZE + 1];
+	/** Hex fingerprint of the local license signature. */
+	char license_fingerprint[LCC_API_ONLINE_LICENSE_FINGERPRINT_SIZE + 1];
+	/** Monotonic server-issued revocation sequence. */
+	uint64_t revocation_seq;
+} LccRevocationFloorRecord;
+
+/**
+ * Loads the persisted revocation floor for the exact key in `key`.
+ *
+ * Return true and write the strongest stored revocation sequence to
+ * `revocation_seq_out`. A missing record should normally return true with zero;
+ * storage read failures should return false so the decision wrapper fails
+ * closed.
+ */
+typedef bool (*LCC_REVOCATION_FLOOR_LOAD)(void* user_data, const LccRevocationFloorRecord* key,
+										  uint64_t* revocation_seq_out);
+/**
+ * Stores the accepted revocation floor.
+ *
+ * Hosts should persist the maximum seen `revocation_seq` for the exact
+ * project/feature/license fingerprint. Return false on storage failure so the
+ * decision wrapper fails closed.
+ */
+typedef bool (*LCC_REVOCATION_FLOOR_STORE)(void* user_data, const LccRevocationFloorRecord* record);
+
+typedef struct LccLicenseDecisionOptions {
+	uint32_t size;
+	uint32_t version;
+	LCC_ONLINE_CHECK online_check;
+	void* online_user_data;
+	LCC_HOST_INTEGRITY_CHECK host_integrity_check;
+	void* host_integrity_user_data;
+	LCC_REVOCATION_FLOOR_LOAD revocation_floor_load;
+	LCC_REVOCATION_FLOOR_STORE revocation_floor_store;
+	void* revocation_floor_user_data;
+	uint32_t online_timeout_ms;
+	uint32_t reserved;
+	char online_device_hash[LCC_API_ONLINE_DEVICE_HASH_SIZE + 1];
+} LccLicenseDecisionOptions;
+
+typedef struct LccLicenseDecision {
+	/** Structure size, set by ::lcc_init_license_decision. */
+	uint32_t size;
+	/** Structure version, set to ::LCC_LICENSE_DECISION_VERSION. */
+	uint32_t version;
+	/** Allow only when this is ::LCC_LICENSE_DECISION_ALLOW and event_type is ::LICENSE_OK. */
+	LCC_LICENSE_DECISION decision;
+	/** Final event code returned by ::lcc_acquire_license_decision. */
+	LCC_EVENT_TYPE event_type;
+	/** True when required online verification accepted a signed assertion. */
+	bool online_verified;
+	/** True when the persisted revocation floor loaded successfully. */
+	bool revocation_floor_loaded;
+	/** True when the accepted revocation floor was stored successfully. */
+	bool revocation_floor_stored;
+	/** True when the secure decision wrapper configured tamper enforcement. */
+	bool tamper_enforced;
+	uint32_t reserved;
+	/** Last loaded or accepted revocation floor record. */
+	LccRevocationFloorRecord revocation_floor;
+} LccLicenseDecision;
+
+/**
+ * Input to ::lcc_verify_config. `token` is the NUL-terminated "lcccfg1...."
+ * envelope. `config_bytes`/`config_len` are the EXACT bytes the application will
+ * consume; the verifier hashes them and compares to the signed config-hash, so
+ * the application must load the exact bytes that were signed (no re-serialize,
+ * no added BOM or trailing whitespace). `device_hash` is optional (empty = not
+ * device-bound).
+ */
+typedef struct LccConfigInput {
+	uint32_t size;
+	uint32_t version;
+	const char* token;
+	const uint8_t* config_bytes;
+	size_t config_len;
+	char device_hash[LCC_API_ONLINE_DEVICE_HASH_SIZE + 1];
+} LccConfigInput;
+
+/**
+ * Durable per-config-id rollback floor record. The key is
+ * (project, feature, license_fingerprint, config_id); the value is the strongest
+ * accepted `config_seq`. Mirrors ::LccRevocationFloorRecord for config tokens.
+ */
+typedef struct LccConfigSeqFloorRecord {
+	/** Structure size, set by ::lcc_init_config_seq_floor_record. */
+	uint32_t size;
+	/** Structure version. Intentionally shares ::LCC_CONFIG_DECISION_VERSION: the floor record is
+	 * versioned in lockstep with the config decision ABI it is returned alongside. */
+	uint32_t version;
+	/** Project bound to the verified config token. */
+	char project[LCC_API_ONLINE_PROJECT_SIZE + 1];
+	/** Feature bound to the verified config token. */
+	char feature[LCC_API_FEATURE_NAME_SIZE + 1];
+	/** Hex fingerprint of the local license signature. */
+	char license_fingerprint[LCC_API_ONLINE_LICENSE_FINGERPRINT_SIZE + 1];
+	/** Config id bound to the verified config token. */
+	char config_id[LCC_API_CONFIG_ID_SIZE + 1];
+	/** Monotonic config sequence accepted for this config id. */
+	uint64_t config_seq;
+} LccConfigSeqFloorRecord;
+
+/**
+ * Loads the persisted config-seq floor for the exact key in `key`.
+ *
+ * Return true and write the strongest stored config sequence to
+ * `config_seq_out`. A missing record should normally return true with zero;
+ * storage read failures should return false so verification fails closed.
+ */
+typedef bool (*LCC_CONFIG_SEQ_FLOOR_LOAD)(void* user_data, const LccConfigSeqFloorRecord* key,
+										  uint64_t* config_seq_out);
+/**
+ * Stores the accepted config-seq floor.
+ *
+ * Hosts should persist the maximum seen `config_seq` for the exact
+ * project/feature/license-fingerprint/config-id. Return false on storage failure
+ * so verification fails closed.
+ */
+typedef bool (*LCC_CONFIG_SEQ_FLOOR_STORE)(void* user_data, const LccConfigSeqFloorRecord* record);
+
+/**
+ * Options for ::lcc_verify_config. `now_override` of 0 uses the system clock.
+ * `min_config_seq` is a caller-supplied rollback floor (0 = none).
+ * `config_seq_floor_load`/`config_seq_floor_store` are an optional durable
+ * per-config-id rollback floor: both must be set together (or both null). When
+ * set, verification loads the persisted floor for the verified
+ * (project, feature, license-fingerprint, config-id), denies a config-seq below
+ * max(min_config_seq, loaded) with ::LICENSE_CONFIG_ROLLBACK, and stores the
+ * accepted maximum. Any load/store failure fails closed.
+ */
+typedef struct LccConfigVerifyOptions {
+	uint32_t size;
+	uint32_t version;
+	uint64_t now_override;
+	uint64_t min_config_seq;
+	LCC_CONFIG_SEQ_FLOOR_LOAD config_seq_floor_load;
+	LCC_CONFIG_SEQ_FLOOR_STORE config_seq_floor_store;
+	void* config_seq_floor_user_data;
+	uint32_t reserved;
+} LccConfigVerifyOptions;
+
+/**
+ * Output of ::lcc_verify_config. Honor the config only when `decision` is
+ * ::LCC_LICENSE_DECISION_ALLOW and `event_type` is ::LICENSE_OK.
+ */
+typedef struct LccConfigDecision {
+	uint32_t size;
+	uint32_t version;
+	LCC_LICENSE_DECISION decision;
+	LCC_EVENT_TYPE event_type;
+	char config_id[LCC_API_CONFIG_ID_SIZE + 1];
+	uint64_t config_seq;
+	bool bound_to_license;
+	/**
+	 * Reflects only that a non-empty device_hash was supplied in ::LccConfigInput
+	 * and matched the token's bound device_hash. It is NOT proof of device
+	 * possession or attestation: device_hash is caller-supplied input. For
+	 * cryptographic device binding use the online verifier's request-proof
+	 * (ECDSA device key) path, not this flag.
+	 */
+	bool bound_to_device;
+	/** True when the persisted config-seq floor loaded successfully. */
+	bool config_seq_floor_loaded;
+	/** True when the accepted config-seq floor was stored successfully. */
+	bool config_seq_floor_stored;
+	uint32_t reserved;
+	/** Last loaded or accepted config-seq floor record. */
+	LccConfigSeqFloorRecord config_seq_floor;
+} LccConfigDecision;
+
 typedef struct {
 	LCC_SEVERITY severity;
 	LCC_EVENT_TYPE event_type;
 	/**
 	 * License file name or location where the license is stored.
 	 */
-	char license_reference[MAX_PATH];
+	char license_reference[LCC_API_PATH_SIZE];
 	char param2[LCC_API_AUDIT_EVENT_PARAM2 + 1];
 } AuditEvent;
 
@@ -97,8 +408,10 @@ typedef struct {
  */
 typedef struct {
 	/**
-	 *  software version in format xxxx[.xxxx.xxxx]
-	 *  NOT IMPLEMENTED pass '\0'
+	 * Software version in format xxxx[.xxxx.xxxx].
+	 * Required when a license uses start-version or end-version limits.
+	 * If such a license is checked without a caller version, or with a malformed
+	 * caller version, verification fails closed with PRODUCT_NOT_LICENSED.
 	 */
 	char version[LCC_API_VERSION_LENGTH + 1];
 	/**
@@ -115,7 +428,8 @@ typedef struct {
 	char feature_name[LCC_API_FEATURE_NAME_SIZE + 1];
 	/**
 	 * this number passed in by the application must correspond to the magic number used when compiling the library.
-	 * See cmake parameter -DLCC_PROJECT_MAGIC_NUM and licensecc_properties.h macro VERIFY_MAGIC
+	 * See cmake parameter -DLCC_PROJECT_MAGIC_NUM and generated licensecc_properties.h macros
+	 * LCC_PROJECT_MAGIC_NUM and LCC_VERIFY_MAGIC.
 	 */
 	unsigned int magic;
 } CallerInformations;

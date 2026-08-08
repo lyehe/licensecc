@@ -15,14 +15,14 @@
 namespace license {
 namespace locate {
 
-bool LocatorFactory::find_license_near_moduleb = FIND_LICENSE_NEAR_MODULE;
-bool LocatorFactory::find_license_with_env_varb = FIND_LICENSE_WITH_ENV_VAR;
+std::atomic_bool LocatorFactory::find_license_near_moduleb{FIND_LICENSE_NEAR_MODULE};
+std::atomic_bool LocatorFactory::find_license_with_env_varb{FIND_LICENSE_WITH_ENV_VAR};
 FUNCTION_RETURN LocatorFactory::get_active_strategies(std::vector<std::unique_ptr<LocatorStrategy>> &strategies,
 													  const LicenseLocation *locationHint) {
-	if (find_license_near_moduleb) {
+	if (find_license_near_moduleb.load(std::memory_order_relaxed)) {
 		strategies.push_back(std::unique_ptr<LocatorStrategy>(new ApplicationFolder()));
 	}
-	if (find_license_with_env_varb) {
+	if (find_license_with_env_varb.load(std::memory_order_relaxed)) {
 		strategies.push_back(std::unique_ptr<LocatorStrategy>(new EnvironmentVarLocation()));
 		strategies.push_back(std::unique_ptr<LocatorStrategy>(new EnvironmentVarData()));
 	}

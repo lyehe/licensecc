@@ -14,7 +14,13 @@
 #include <windows.h>
 #endif
 
+#include <mutex>
+
 static FILE *logFile = NULL;
+// Serializes lazy logFile init and the writes so a multi-threaded host calling the
+// public API (LOG_* fire on error paths) cannot race on the FILE* or interleave
+// vfprintf output.
+static std::mutex log_mutex;
 
 static void timenow(char * buffer) {
 	time_t rawtime;
@@ -32,20 +38,27 @@ static void getLogFname(char* logpath) {
 	if (folder == nullptr) {
 		folder = "/tmp";
 	}
-	strncpy(logpath, folder, MAX_PATH);
-	strncat(logpath, "/open-license.log", MAX_PATH - strlen(logpath));
+	// snprintf always NUL-terminates and never writes past MAX_PATH, avoiding the
+	// strncpy-non-termination + strncat off-by-one that an over-long TMPDIR triggers.
+	snprintf(logpath, MAX_PATH, "%s/open-license.log", folder);
 #else
 	const int plen = GetTempPath(MAX_PATH, logpath);
-	if(plen == 0) {
+	if (plen == 0) {
 		fprintf(stderr, "Error getting temporary directory path");
+		logpath[0] = '\0';
 	}
-	strncat(logpath, "open-license.log", MAX_PATH - strlen(logpath));
+	// strncat always appends a NUL, so the count must leave room for it.
+	const size_t used = strlen(logpath);
+	if (used < MAX_PATH - 1) {
+		strncat(logpath, "open-license.log", MAX_PATH - 1 - used);
+	}
 #endif
 }
 
 void _log(const char* format, ...) {
 	va_list args;
 	char * buffer;
+	std::lock_guard<std::mutex> guard(log_mutex);
 	if (logFile == NULL) {
 		char logpath[MAX_PATH];
 		getLogFname(logpath);
@@ -62,4 +75,5 @@ void _log(const char* format, ...) {
 	va_end(args);
 	free(buffer);
 }
+
 #endif

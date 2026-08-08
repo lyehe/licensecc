@@ -13,8 +13,8 @@
  * @{
  */
  
-#ifndef BUILD_PROPERTIES_H_
-#define BUILD_PROPERTIES_H_
+#ifndef LCC_LICENSECC_PROPERTIES_H_
+#define LCC_LICENSECC_PROPERTIES_H_
 
  
 /**
@@ -27,6 +27,8 @@
  */
 
 #define LCC_PROJECT_NAME "@LCC_PROJECT_NAME@"
+#define LCC_SUPPORTED_LICENSE_FORMAT_MIN @LCC_SUPPORTED_LICENSE_FORMAT_MIN@
+#define LCC_SUPPORTED_LICENSE_FORMAT_MAX @LCC_SUPPORTED_LICENSE_FORMAT_MAX@
 
 //License retrieval configuration
 #define FIND_LICENSE_NEAR_MODULE true
@@ -58,7 +60,8 @@
 /**
 This definition allows to specify a custom expression to verify the magic number passed in by the api.
 */
-#define LCC_VERIFY_MAGIC (lic_info.m_magic == @LCC_PROJECT_MAGIC_NUM@)
+#define LCC_PROJECT_MAGIC_NUM @LCC_PROJECT_MAGIC_NUM@
+#define LCC_VERIFY_MAGIC (lic_info.m_magic == LCC_PROJECT_MAGIC_NUM)
 
 /**
  *
@@ -67,6 +70,15 @@ This definition allows to specify a custom expression to verify the magic number
  * defined in `LCC_IDENTIFICATION_STRATEGY` enum.
  */
 #define LCC_IDENTIFICATION_STRATEGY_ENV_VAR "IDENTIFICATION_STRATEGY"
+
+/**
+ * Runtime policy for weak hardware bindings. The generator rejects these
+ * binding modes by default; the verifier also rejects signed licenses
+ * containing them unless the project explicitly opts in here.
+ */
+#define LCC_ALLOW_RUNTIME_IP_BINDING false
+#define LCC_ALLOW_RUNTIME_ENV_SELECTED_BINDING false
+#define LCC_ALLOW_WEAK_DISK_LABEL_BINDING false
 
 /**
  * \enum LCC_API_HW_IDENTIFICATION_STRATEGY
@@ -117,7 +129,7 @@ enum LCC_API_HW_IDENTIFICATION_STRATEGY {
 /**
  * List the strategies used when no virtual envrionment is detected
  */
-#define LCC_BARE_TO_METAL_STRATEGIES { STRATEGY_DISK, STRATEGY_HOST_NAME, STRATEGY_NONE }
+#define LCC_BARE_TO_METAL_STRATEGIES { STRATEGY_DISK, STRATEGY_NONE }
 /**
  * List the strategies used when the software is executing in a virtual machine
  */

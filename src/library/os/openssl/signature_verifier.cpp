@@ -15,6 +15,7 @@
 //#endif
 
 #include <cstdint>
+#include <mutex>
 #include <vector>
 
 #include <public_key.h>
@@ -36,22 +37,30 @@ static void free_resources(EVP_PKEY* pkey, EVP_MD_CTX* mdctx) {
 }
 
 static void initialize() {
-	static int initialized = 0;
-	if (initialized == 0) {
-		initialized = 1;
+	// Thread-safe one-time OpenSSL global init. The legacy ERR_load_*/add_all_algorithms
+	// calls are not re-entrant and the old non-atomic flag raced on the first concurrent
+	// verify.
+	static std::once_flag init_flag;
+	std::call_once(init_flag, []() {
 		ERR_load_ERR_strings();
 		ERR_load_crypto_strings();
 		OpenSSL_add_all_algorithms();
-	}
+	});
 }
 
-FUNCTION_RETURN verify_signature(const std::string& stringToVerify, const std::string& signatureB64) {
+static FUNCTION_RETURN verify_signature_bytes(const std::vector<uint8_t>& payload,
+											  const std::vector<uint8_t>& signature,
+											  const std::vector<uint8_t>& public_key_der) {
 	EVP_MD_CTX* mdctx = NULL;
-	const unsigned char pubKey[] = PUBLIC_KEY;
+	if (public_key_der.empty()) {
+		LOG_ERROR("No public key selected");
+		return FUNC_RET_ERROR;
+	}
+	const std::vector<uint8_t>& selected_public_key = public_key_der;
 	int func_ret = 0;
 	initialize();
 
-	BIO* bio = BIO_new_mem_buf((void*)(pubKey), sizeof(pubKey));
+	BIO* bio = BIO_new_mem_buf((void*)selected_public_key.data(), selected_public_key.size());
 	RSA* rsa = d2i_RSAPublicKey_bio(bio, NULL);
 	BIO_free(bio);
 	if (rsa == NULL) {
@@ -69,10 +78,6 @@ FUNCTION_RETURN verify_signature(const std::string& stringToVerify, const std::s
 
 	// RSA* rsa = EVP_PKEY_get1_RSA( key );
 	// RSA * pubKey = d2i_RSA_PUBKEY(NULL, <der encoded byte stream pointer>, <num bytes>);
-	// Decode the signature with the project's own base64 decoder so the buffer is
-	// sized to the actual key length (a fixed buffer overflowed for >=4096 bit keys).
-	const std::vector<uint8_t> signature = unbase64(signatureB64);
-
 	/* Create the Message Digest Context */
 	if (!(mdctx = EVP_MD_CTX_create())) {
 		free_resources(pkey, mdctx);
@@ -85,7 +90,7 @@ FUNCTION_RETURN verify_signature(const std::string& stringToVerify, const std::s
 		return FUNC_RET_ERROR;
 	}
 
-	func_ret = EVP_DigestVerifyUpdate(mdctx, (const void*)stringToVerify.c_str(), stringToVerify.size());
+	func_ret = EVP_DigestVerifyUpdate(mdctx, (const void*)payload.data(), payload.size());
 	if (1 != func_ret) {
 		LOG_ERROR("Error verifying digest %d", func_ret);
 		free_resources(pkey, mdctx);
@@ -100,6 +105,35 @@ FUNCTION_RETURN verify_signature(const std::string& stringToVerify, const std::s
 
 	free_resources(pkey, mdctx);
 	return result;
+}
+
+FUNCTION_RETURN verify_signature(const SignatureVerificationRequest& request) {
+	if (!signature_request_allowed(request)) {
+		LOG_ERROR("Signature request rejected by policy");
+		return FUNC_RET_ERROR;
+	}
+	std::vector<uint8_t> selected_public_key_der;
+	if (!signature_select_public_key_der(request, selected_public_key_der)) {
+		LOG_ERROR("No matching public key for signature request");
+		return FUNC_RET_ERROR;
+	}
+	return verify_signature_bytes(request.payload, request.signature, selected_public_key_der);
+}
+
+FUNCTION_RETURN verify_signature(const std::string& stringToVerify, const std::string& signatureB64) {
+	const std::vector<uint8_t> signature = unbase64(signatureB64);
+	if (signature.empty()) {
+		LOG_ERROR("Error decoding signature");
+		return FUNC_RET_ERROR;
+	}
+	SignatureVerificationRequest request;
+	request.payload.assign(stringToVerify.begin(), stringToVerify.end());
+	request.signature = signature;
+	request.declared_algorithm = LCC_SIGNATURE_ALGORITHM_RSA_PKCS1_SHA256;
+	request.key_id = embedded_public_key_id();
+	request.license_version = 200;
+	request.policy = legacy_v200_signature_policy();
+	return verify_signature(request);
 }
 }  // namespace os
 } /* namespace license */

@@ -26,3 +26,6 @@ target_link_libraries( test_hw_identifier_facade
 
 ADD_TEST(NAME test_hw_identifier COMMAND test_hw_identifier)
 ADD_TEST(NAME test_hw_identifier_facade COMMAND test_hw_identifier_facade)
+
+set_tests_properties(test_hw_identifier PROPERTIES LABELS "security;hardware")
+set_tests_properties(test_hw_identifier_facade PROPERTIES LABELS "security;hardware;public_api")

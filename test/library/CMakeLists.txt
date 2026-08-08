@@ -26,6 +26,7 @@ ELSE(WIN32)
 	)
 
 	ADD_TEST(NAME test_os_linux COMMAND test_os_linux)
+	set_tests_properties(test_os_linux PROPERTIES LABELS "security;platform;hardware")
 ENDIF(WIN32)
 
 ### LicenseLocator tests
@@ -39,6 +40,45 @@ target_link_libraries(
  licensecc_static
  Boost::unit_test_framework 
  Boost::filesystem
+ Boost::system
+)
+
+### Base64 decoder tests
+add_executable(
+ test_base64
+ base64_test.cpp
+)
+
+target_link_libraries(
+ test_base64
+ licensecc_static
+ Boost::unit_test_framework
+ Boost::system
+)
+
+### Offline activation-request codec tests
+add_executable(
+ test_activation_request
+ activation_request_test.cpp
+)
+
+target_link_libraries(
+ test_activation_request
+ licensecc_static
+ Boost::unit_test_framework
+ Boost::system
+)
+
+### v201 canonical payload tests
+add_executable(
+ test_v201_canonical_payload
+ v201_canonical_payload_test.cpp
+)
+
+target_link_libraries(
+ test_v201_canonical_payload
+ licensecc_static
+ Boost::unit_test_framework
  Boost::system
 )
 
@@ -85,25 +125,221 @@ target_link_libraries(
  Boost::system
 )
 
-### base64 codec tests
+# Inject the CMake project version (unquoted) so the public header LCC_VERSION_*
+# macros cannot silently drift from project(... VERSION ...). The version test in
+# public_api_test.cpp stringifies and compares it, failing the build on drift.
+target_compile_definitions(
+ test_public_api
+ PRIVATE LCC_EXPECTED_PROJECT_VERSION=${PROJECT_VERSION}
+)
+
+### Anti-tamper API and integration tests
 add_executable(
- test_base64
- base64_test.cpp
- $<TARGET_OBJECTS:base>
+ test_anti_tamper
+ anti_tamper_test.cpp
 )
 
 target_link_libraries(
- test_base64
+ test_anti_tamper
+ licensecc_static
+ Boost::unit_test_framework
+ Boost::system
+)
+
+### Online verification API, assertion, and integration tests
+add_executable(
+ test_online_verification
+ online_verification_test.cpp
+)
+
+target_link_libraries(
+ test_online_verification
+ licensecc_static
+ license_generator_lib
+ Boost::unit_test_framework
+ Boost::system
+)
+
+### Online callback transport failover helper tests
+add_executable(
+ test_online_callback_failover
+ online_callback_failover_test.cpp
+)
+
+target_include_directories(
+ test_online_callback_failover
+ PRIVATE
+ ${CMAKE_SOURCE_DIR}/examples/online_callback
+)
+
+target_link_libraries(
+ test_online_callback_failover
+ licensecc_static
+ Boost::unit_test_framework
+ Boost::system
+)
+
+### Config attestation verification tests
+add_executable(
+ test_config_attestation
+ config_attestation_test.cpp
+)
+
+target_link_libraries(
+ test_config_attestation
+ licensecc_static
+ license_generator_lib
+ Boost::unit_test_framework
+ Boost::system
+)
+
+### Clock floor (offline rollback protection) unit tests. Header-only; no library link.
+add_executable(
+ test_clock_floor
+ clock_floor_test.cpp
+)
+
+target_link_libraries(
+ test_clock_floor
+ Boost::unit_test_framework
+ Boost::system
+)
+
+### Lease client decision logic (state machine + durable-write gate). Header-only.
+add_executable(
+ test_lease_client
+ lease_client_test.cpp
+)
+
+target_link_libraries(
+ test_lease_client
+ Boost::unit_test_framework
+ Boost::system
+)
+
+### Floating (concurrent-seat) client decision logic. Header-only.
+add_executable(
+ test_seat_client
+ seat_client_test.cpp
+)
+
+target_link_libraries(
+ test_seat_client
  Boost::unit_test_framework
  Boost::system
 )
 
 ADD_TEST(NAME test_license_reader COMMAND test_license_reader)
 ADD_TEST(NAME test_license_locator COMMAND test_license_locator)
+ADD_TEST(NAME test_base64 COMMAND test_base64)
+ADD_TEST(NAME test_activation_request COMMAND test_activation_request)
+ADD_TEST(NAME test_v201_canonical_payload COMMAND test_v201_canonical_payload)
 ADD_TEST(NAME test_event_registry COMMAND test_event_registry)
 ADD_TEST(NAME test_license_verifier COMMAND test_license_verifier)
 ADD_TEST(NAME test_public_api COMMAND test_public_api)
-ADD_TEST(NAME test_base64 COMMAND test_base64)
+ADD_TEST(NAME test_anti_tamper COMMAND test_anti_tamper)
+ADD_TEST(NAME test_online_verification COMMAND test_online_verification)
+ADD_TEST(NAME test_online_callback_failover COMMAND test_online_callback_failover)
+ADD_TEST(NAME test_config_attestation COMMAND test_config_attestation)
+ADD_TEST(NAME test_clock_floor COMMAND test_clock_floor)
+ADD_TEST(NAME test_lease_client COMMAND test_lease_client)
+ADD_TEST(NAME test_seat_client COMMAND test_seat_client)
+
+set_tests_properties(
+ test_license_reader
+ PROPERTIES LABELS "security;parser"
+)
+
+set_tests_properties(
+ test_clock_floor
+ PROPERTIES LABELS "security;verifier"
+)
+
+set_tests_properties(
+ test_lease_client
+ PROPERTIES LABELS "security;public_api"
+)
+
+set_tests_properties(
+ test_seat_client
+ PROPERTIES LABELS "security;public_api"
+)
+
+set_tests_properties(
+ test_license_locator
+ PROPERTIES LABELS "security;parser;base64;public_api"
+)
+
+set_tests_properties(
+ test_base64
+ PROPERTIES LABELS "security;base64"
+)
+
+set_tests_properties(
+ test_activation_request
+ PROPERTIES LABELS "security;activation;base64"
+)
+
+set_tests_properties(
+ test_v201_canonical_payload
+ PROPERTIES LABELS "security;validation;v201"
+)
+
+set_tests_properties(
+ test_event_registry
+ PROPERTIES LABELS "security;validation"
+)
+
+set_tests_properties(
+ test_license_verifier
+ PROPERTIES LABELS "security;verifier"
+)
+
+set_tests_properties(
+ test_public_api
+ PROPERTIES LABELS "security;public_api"
+)
+
+set_tests_properties(
+ test_anti_tamper
+ PROPERTIES LABELS "security;public_api;anti_tamper"
+)
+
+set_tests_properties(
+ test_online_verification
+ PROPERTIES LABELS "security;public_api;online"
+)
+
+set_tests_properties(
+ test_online_callback_failover
+ PROPERTIES LABELS "security;public_api;online"
+)
+
+set_tests_properties(
+ test_config_attestation
+ PROPERTIES LABELS "security;config_attestation"
+)
+
+### Config public API tests
+add_executable(
+ test_config_public_api
+ config_public_api_test.cpp
+)
+
+target_link_libraries(
+ test_config_public_api
+ licensecc_static
+ license_generator_lib
+ Boost::unit_test_framework
+ Boost::system
+)
+
+ADD_TEST(NAME test_config_public_api COMMAND test_config_public_api)
+
+set_tests_properties(
+ test_config_public_api
+ PROPERTIES LABELS "security;public_api;config_attestation"
+)
 
 ADD_SUBDIRECTORY(os)
 ADD_SUBDIRECTORY(hw_identifier)

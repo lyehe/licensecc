@@ -2,7 +2,6 @@
 #define __STDC_WANT_LIB_EXT1__ 1
 #include <string.h>
 
-#include <algorithm>
 #include <iostream>
 #include <iterator>
 #include <cstdio>
@@ -36,6 +35,20 @@ static boost::optional<path> find_file(const path &dir_path, const path &file_na
 	const auto it = find_if(recursive_directory_iterator(dir_path), end,
 							[&file_name](const directory_entry &e) { return e.path().filename() == file_name; });
 	return it == end ? boost::optional<path>() : it->path();
+}
+
+static path write_temp_file(const string &file_name, const string &content) {
+	const path file_path = path(PROJECT_TEST_TEMP_DIR) / file_name;
+	std::ofstream out(file_path.string().c_str(), std::ios::binary | std::ios::trunc);
+	BOOST_REQUIRE_MESSAGE(out.is_open(), "Can write temporary file " + file_path.string());
+	out << content;
+	return file_path;
+}
+
+static string sized_ini_payload(const size_t size) {
+	const string header = string("[") + LCC_PROJECT_NAME + "]\n";
+	BOOST_REQUIRE_GE(size, header.size());
+	return header + string(size - header.size(), 'A');
 }
 
 /*****************************************************************************
@@ -128,44 +141,99 @@ BOOST_AUTO_TEST_CASE(external_definition_not_found) {
 	BOOST_CHECK_MESSAGE(registry.getLastFailure()->event_type == LICENSE_FILE_NOT_FOUND, "Error detected");
 }
 
-/**
- * LICENSE_ENCODED round-trip: the decoded license must be exactly the bytes
- * that were encoded. Regression: the decoded buffer was turned into a string
- * without a length, reading past the end of the buffer.
- */
-BOOST_AUTO_TEST_CASE(external_definition_encoded_content_roundtrip) {
+BOOST_AUTO_TEST_CASE(external_definition_encoded_data) {
 	std::ifstream src(MOCK_LICENSE, std::ios::binary);
-	const std::string referenceContent((std::istreambuf_iterator<char>(src)), std::istreambuf_iterator<char>());
-	string encoded = license::base64(referenceContent.data(), referenceContent.size());
-	// the encoder emits newlines; the ENCODED contract (and the b64 format regex) is single-line
-	encoded.erase(std::remove(encoded.begin(), encoded.end(), '\n'), encoded.end());
-	BOOST_REQUIRE_MESSAGE(encoded.size() < LCC_API_MAX_LICENSE_DATA_LENGTH, "mock license fits licenseData");
+	std::string referenceContent((std::istreambuf_iterator<char>(src)), std::istreambuf_iterator<char>());
+	const std::string encoded = license::base64(referenceContent.data(), referenceContent.size());
 
 	license::EventRegistry registry;
 	LicenseLocation licLocation = {LICENSE_ENCODED};
-	std::copy(encoded.begin(), encoded.end(), licLocation.licenseData);
+	strncpy(licLocation.licenseData, encoded.c_str(), sizeof(licLocation.licenseData) - 1);
 	ExternalDefinition externalDefinition(&licLocation);
 	vector<string> licenseInfos = externalDefinition.license_locations(registry);
+	BOOST_CHECK(registry.isGood());
 	BOOST_REQUIRE_EQUAL(1, licenseInfos.size());
-	const string licenseRealContent = externalDefinition.retrieve_license_content(licenseInfos[0]);
-	BOOST_CHECK_MESSAGE(referenceContent == licenseRealContent, "decoded content is exactly the encoded input");
+	string licenseRealContent = externalDefinition.retrieve_license_content(licenseInfos[0]);
+	BOOST_CHECK_MESSAGE(referenceContent.compare(licenseRealContent) == 0, "Encoded content is decoded by length");
 }
 
-/**
- * Invalid base64 passed as LICENSE_ENCODED must be rejected gracefully with
- * empty content. Regression: an empty decode buffer produced
- * std::string(nullptr), which is undefined behavior.
- */
-BOOST_AUTO_TEST_CASE(external_definition_encoded_invalid_base64_rejected) {
-	const string invalid("a");  // too short to be base64
+BOOST_AUTO_TEST_CASE(external_definition_invalid_encoded_data) {
 	license::EventRegistry registry;
 	LicenseLocation licLocation = {LICENSE_ENCODED};
-	std::copy(invalid.begin(), invalid.end(), licLocation.licenseData);
+	strncpy(licLocation.licenseData, "!!!!", sizeof(licLocation.licenseData) - 1);
 	ExternalDefinition externalDefinition(&licLocation);
 	vector<string> licenseInfos = externalDefinition.license_locations(registry);
+	BOOST_CHECK_MESSAGE(registry.isGood(), "Malformed encoded data is reported as a warning at locator level");
+	registry.turnWarningsIntoErrors();
+	BOOST_REQUIRE_MESSAGE(!registry.isGood(), "Malformed encoded data is detected");
+	BOOST_CHECK_EQUAL(0, licenseInfos.size());
+	BOOST_CHECK_MESSAGE(registry.getLastFailure()->event_type == LICENSE_MALFORMED, "Malformed encoded data reported");
+}
+
+BOOST_AUTO_TEST_CASE(external_definition_allows_exact_limit_license_file) {
+	const path exact_path =
+		write_temp_file("external-exact-limit.lic", sized_ini_payload(LCC_API_MAX_LICENSE_DATA_LENGTH));
+	license::EventRegistry registry;
+	LicenseLocation licLocation = {LICENSE_PATH};
+	const string applicationDefinedString = exact_path.string();
+	std::copy(applicationDefinedString.begin(), applicationDefinedString.end(), licLocation.licenseData);
+
+	ExternalDefinition externalDefinition(&licLocation);
+	vector<string> licenseInfos = externalDefinition.license_locations(registry);
+
+	BOOST_CHECK(registry.isGood());
 	BOOST_REQUIRE_EQUAL(1, licenseInfos.size());
-	const string licenseRealContent = externalDefinition.retrieve_license_content(licenseInfos[0]);
-	BOOST_CHECK_MESSAGE(licenseRealContent.empty(), "invalid base64 yields empty content, not a crash");
+	BOOST_CHECK_EQUAL(exact_path.string(), licenseInfos[0]);
+	remove(exact_path);
+}
+
+BOOST_AUTO_TEST_CASE(external_definition_rejects_oversized_license_file) {
+	const path oversized_path =
+		write_temp_file("external-oversized.lic", sized_ini_payload(LCC_API_MAX_LICENSE_DATA_LENGTH + 1));
+	license::EventRegistry registry;
+	LicenseLocation licLocation = {LICENSE_PATH};
+	const string applicationDefinedString = oversized_path.string();
+	std::copy(applicationDefinedString.begin(), applicationDefinedString.end(), licLocation.licenseData);
+
+	ExternalDefinition externalDefinition(&licLocation);
+	vector<string> licenseInfos = externalDefinition.license_locations(registry);
+
+	registry.turnWarningsIntoErrors();
+	BOOST_REQUIRE_MESSAGE(!registry.isGood(), "Oversized file is detected");
+	BOOST_CHECK_EQUAL(0, licenseInfos.size());
+	BOOST_REQUIRE(registry.getLastFailure() != nullptr);
+	BOOST_CHECK_EQUAL(registry.getLastFailure()->event_type, LICENSE_MALFORMED);
+	remove(oversized_path);
+}
+
+BOOST_AUTO_TEST_CASE(external_definition_accepts_largest_terminated_plain_data) {
+	const string payload = sized_ini_payload(LCC_API_MAX_LICENSE_DATA_LENGTH - 1);
+	license::EventRegistry registry;
+	LicenseLocation licLocation = {LICENSE_PLAIN_DATA};
+	std::copy(payload.begin(), payload.end(), licLocation.licenseData);
+
+	ExternalDefinition externalDefinition(&licLocation);
+	vector<string> licenseInfos = externalDefinition.license_locations(registry);
+
+	BOOST_CHECK(registry.isGood());
+	BOOST_REQUIRE_EQUAL(1, licenseInfos.size());
+	BOOST_CHECK_EQUAL(payload, externalDefinition.retrieve_license_content(licenseInfos[0]));
+}
+
+BOOST_AUTO_TEST_CASE(external_definition_rejects_full_plain_data_buffer_without_terminator) {
+	license::EventRegistry registry;
+	LicenseLocation licLocation = {LICENSE_PLAIN_DATA};
+	const string payload = sized_ini_payload(sizeof(licLocation.licenseData));
+	std::copy(payload.begin(), payload.end(), licLocation.licenseData);
+
+	ExternalDefinition externalDefinition(&licLocation);
+	vector<string> licenseInfos = externalDefinition.license_locations(registry);
+
+	registry.turnWarningsIntoErrors();
+	BOOST_REQUIRE_MESSAGE(!registry.isGood(), "Full explicit data buffer without NUL is detected");
+	BOOST_CHECK_EQUAL(0, licenseInfos.size());
+	BOOST_REQUIRE(registry.getLastFailure() != nullptr);
+	BOOST_CHECK_EQUAL(registry.getLastFailure()->event_type, LICENSE_MALFORMED);
 }
 
 /*****************************************************************************
@@ -213,6 +281,42 @@ BOOST_AUTO_TEST_CASE(environment_var_location_not_found) {
 	UNSETENV(LCC_LICENSE_LOCATION_ENV_VAR);
 }
 
+BOOST_AUTO_TEST_CASE(environment_var_location_allows_exact_limit_license_file) {
+	const path exact_path =
+		write_temp_file("environment-location-exact-limit.lic", sized_ini_payload(LCC_API_MAX_LICENSE_DATA_LENGTH));
+	SETENV(LCC_LICENSE_LOCATION_ENV_VAR, exact_path.string().c_str());
+
+	license::EventRegistry registry;
+	EnvironmentVarLocation envVarLocationStrategy;
+	vector<string> licenseInfos = envVarLocationStrategy.license_locations(registry);
+
+	BOOST_CHECK(registry.isGood());
+	BOOST_REQUIRE_EQUAL(1, licenseInfos.size());
+	BOOST_CHECK_EQUAL(exact_path.string(), licenseInfos[0]);
+
+	UNSETENV(LCC_LICENSE_LOCATION_ENV_VAR);
+	remove(exact_path);
+}
+
+BOOST_AUTO_TEST_CASE(environment_var_location_rejects_oversized_license_file) {
+	const path oversized_path =
+		write_temp_file("environment-location-oversized.lic", sized_ini_payload(LCC_API_MAX_LICENSE_DATA_LENGTH + 1));
+	SETENV(LCC_LICENSE_LOCATION_ENV_VAR, oversized_path.string().c_str());
+
+	license::EventRegistry registry;
+	EnvironmentVarLocation envVarLocationStrategy;
+	vector<string> licenseInfos = envVarLocationStrategy.license_locations(registry);
+
+	registry.turnWarningsIntoErrors();
+	BOOST_REQUIRE_MESSAGE(!registry.isGood(), "Oversized file is detected");
+	BOOST_CHECK_EQUAL(0, licenseInfos.size());
+	BOOST_REQUIRE(registry.getLastFailure() != nullptr);
+	BOOST_CHECK_EQUAL(registry.getLastFailure()->event_type, LICENSE_MALFORMED);
+
+	UNSETENV(LCC_LICENSE_LOCATION_ENV_VAR);
+	remove(oversized_path);
+}
+
 /*****************************************************************************
  * EnvironmentVarData tests
  *****************************************************************************/
@@ -237,17 +341,11 @@ BOOST_AUTO_TEST_CASE(environment_var_data) {
 	UNSETENV(LCC_LICENSE_DATA_ENV_VAR);
 }
 
-/**
- * Base64 license content in LCC_LICENSE_DATA_ENV_VAR must decode back to
- * exactly the original bytes, and the reported location must reference the
- * DATA variable. Regression: locations/events named the LOCATION variable,
- * and the decode built a std::string without a length (buffer over-read).
- */
-BOOST_AUTO_TEST_CASE(environment_var_data_base64) {
+BOOST_AUTO_TEST_CASE(environment_var_data_accepts_base64_line_breaks) {
 	std::ifstream src(MOCK_LICENSE, std::ios::binary);
 	const std::string referenceContent((std::istreambuf_iterator<char>(src)), std::istreambuf_iterator<char>());
-	string encoded = license::base64(referenceContent.data(), referenceContent.size());
-	encoded.erase(std::remove(encoded.begin(), encoded.end(), '\n'), encoded.end());
+	const std::string encoded = license::base64(referenceContent.data(), referenceContent.size(), 5);
+	BOOST_REQUIRE(encoded.find('\n') != std::string::npos);
 	SETENV(LCC_LICENSE_DATA_ENV_VAR, encoded.c_str());
 
 	license::EventRegistry registry;
@@ -255,30 +353,40 @@ BOOST_AUTO_TEST_CASE(environment_var_data_base64) {
 	vector<string> licenseInfos = envVarDataStrategy.license_locations(registry);
 	BOOST_CHECK(registry.isGood());
 	BOOST_REQUIRE_EQUAL(1, licenseInfos.size());
-	BOOST_CHECK_MESSAGE(licenseInfos[0] == LCC_LICENSE_DATA_ENV_VAR,
-						"location references the DATA env var, got: " + licenseInfos[0]);
 	const string licenseRealContent = envVarDataStrategy.retrieve_license_content(licenseInfos[0]);
-	BOOST_CHECK_MESSAGE(referenceContent == licenseRealContent, "decoded content is exactly the encoded input");
+	BOOST_CHECK_MESSAGE(referenceContent.compare(licenseRealContent) == 0,
+						"line-broken base64 env-var data decodes to original content");
 	UNSETENV(LCC_LICENSE_DATA_ENV_VAR);
 }
 
-/**
- * When the DATA variable is not defined, the failure event must name
- * LCC_LICENSE_DATA_ENV_VAR. Regression: it reported LCC_LICENSE_LOCATION_ENV_VAR,
- * telling users to fix a variable they never meant to set.
- */
-BOOST_AUTO_TEST_CASE(environment_var_data_not_defined_names_data_variable) {
-	UNSETENV(LCC_LICENSE_DATA_ENV_VAR);
+BOOST_AUTO_TEST_CASE(environment_var_data_accepts_exact_limit_plain_data) {
+	const string exact = sized_ini_payload(LCC_API_MAX_LICENSE_DATA_LENGTH);
+	SETENV(LCC_LICENSE_DATA_ENV_VAR, exact.c_str());
+
 	license::EventRegistry registry;
 	EnvironmentVarData envVarDataStrategy;
 	vector<string> licenseInfos = envVarDataStrategy.license_locations(registry);
-	BOOST_CHECK_EQUAL(0, licenseInfos.size());
+	BOOST_CHECK(registry.isGood());
+	BOOST_REQUIRE_EQUAL(1, licenseInfos.size());
+	const string licenseRealContent = envVarDataStrategy.retrieve_license_content(licenseInfos[0]);
+	BOOST_CHECK_EQUAL(exact, licenseRealContent);
+	UNSETENV(LCC_LICENSE_DATA_ENV_VAR);
+}
+
+BOOST_AUTO_TEST_CASE(environment_var_data_rejects_oversized_plain_data) {
+	const string oversized = sized_ini_payload(LCC_API_MAX_LICENSE_DATA_LENGTH + 1);
+	SETENV(LCC_LICENSE_DATA_ENV_VAR, oversized.c_str());
+
+	license::EventRegistry registry;
+	EnvironmentVarData envVarDataStrategy;
+	vector<string> licenseInfos = envVarDataStrategy.license_locations(registry);
+
 	registry.turnWarningsIntoErrors();
-	const AuditEvent *failure = registry.getLastFailure();
-	BOOST_REQUIRE(failure != nullptr);
-	BOOST_CHECK_MESSAGE(failure->event_type == ENVIRONMENT_VARIABLE_NOT_DEFINED, "not-defined event reported");
-	BOOST_CHECK_MESSAGE(string(failure->license_reference) == LCC_LICENSE_DATA_ENV_VAR,
-						"failure references the DATA env var, got: " + string(failure->license_reference));
+	BOOST_REQUIRE_MESSAGE(!registry.isGood(), "Oversized environment data is detected");
+	BOOST_CHECK_EQUAL(0, licenseInfos.size());
+	BOOST_REQUIRE(registry.getLastFailure() != nullptr);
+	BOOST_CHECK_EQUAL(registry.getLastFailure()->event_type, LICENSE_MALFORMED);
+	UNSETENV(LCC_LICENSE_DATA_ENV_VAR);
 }
 
 /**

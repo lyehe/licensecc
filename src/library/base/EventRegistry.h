@@ -52,8 +52,11 @@ public:
 	 * @return NULL if no failures are found.
 	 */
 	const AuditEvent *getLastFailure() const;
+	const AuditEvent *getLastEventOfType(LCC_EVENT_TYPE event_type) const;
 	void addEvent(LCC_EVENT_TYPE event, const std::string &licenseLocationId);
 	void addEvent(LCC_EVENT_TYPE event, const char *licenseLocationId = nullptr, const char *info = nullptr);
+	void addEventWithSeverity(LCC_SEVERITY severity, LCC_EVENT_TYPE event, const char *licenseLocationId = nullptr,
+							  const char *info = nullptr);
 	void exportLastEvents(AuditEvent *auditEvents, int nlogs);
 	std::string to_string() const;
 };

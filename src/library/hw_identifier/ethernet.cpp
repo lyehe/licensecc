@@ -32,14 +32,11 @@ static FUNCTION_RETURN generate_ethernet_pc_id(vector<array<uint8_t, HW_IDENTIFI
 	}
 
 	for (auto &it : adapters) {
-		unsigned int k, data_len;
+		std::size_t k;
+		const std::size_t data_len =
+				use_ip ? sizeof(os::OsAdapterInfo::ipv4_address) : sizeof(os::OsAdapterInfo::mac_address);
 		array<uint8_t, HW_IDENTIFIER_PROPRIETARY_DATA> identifier = {};
-		data_len = use_ip ? sizeof(os::OsAdapterInfo::ipv4_address) : sizeof(os::OsAdapterInfo::mac_address);
-		bool all_zero = true;
-		for (k = 0; k < data_len && all_zero;k++) {
-			all_zero = all_zero && ((use_ip ? it.ipv4_address[k] : it.mac_address[k]) == 0);
-		}
-		if (all_zero) {
+		if (!os::adapter_has_nonzero_identity(it, use_ip)) {
 			continue;
 		}
 		for (k = 1; k < HW_IDENTIFIER_PROPRIETARY_DATA; k++) {
