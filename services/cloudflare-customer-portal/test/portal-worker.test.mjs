@@ -3,3 +3,4 @@ import "./portal-worker-public.test.mjs";
 import "./portal-worker-auth.test.mjs";
 import "./portal-worker-session.test.mjs";
 import "./portal-worker-self-service.test.mjs";
+import "./portal-worker-route-owners.test.mjs";

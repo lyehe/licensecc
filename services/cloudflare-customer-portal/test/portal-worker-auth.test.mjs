@@ -1,18 +1,16 @@
 import { test } from "node:test";
 import { assert, worker, mintSession, codeFromSecretBytes, requestOtp, redeemOtp, policyCapacityViolation, FP_A, FP_B, installBackendStub, cookieFor, sameSiteHeaders, entitlementId, ownedEntitlementId, call, baseFixture, seedDevice, seedEntitlement, CTX, NOW } from "./portal-worker-fixtures.mjs";
 
-test("/health is unhealthy (503) when ACCOUNT_TOKEN_MODE != required (invariant 7)", async () => {
-  const { db, env } = baseFixture({ ACCOUNT_TOKEN_MODE: "soft" });
-  const r = await call(env, "GET", "/health", {});
-  assert.equal(r.status, 503);
-  assert.equal(r.body.data.account_token_mode_required, false);
-
-  const { db: db2, env: env2 } = baseFixture();
-  const ok = await call(env2, "GET", "/health", {});
-  assert.equal(ok.status, 200);
-  assert.equal(ok.body.code, "healthy");
+test("auth/request rejects oversized JSON bodies without relying on Content-Length", async () => {
+  const { db, env } = baseFixture();
+  const res = await worker.fetch(new Request("https://portal.test/portal/v1/auth/request", {
+    method: "POST",
+    headers: sameSiteHeaders(),
+    body: "x".repeat(8193),
+  }), env, CTX);
+  assert.equal(res.status, 413);
+  assert.equal((await res.json()).code, "body_too_large");
   db.close();
-  db2.close();
 });
 
 test("bootstrap-otp: 404 when the bearer is unset (no existence oracle)", async () => {
@@ -105,3 +103,37 @@ test("auth/request returns the SAME ok for a known and unknown email (no enumera
   assert.equal(known.body.code, unknown.body.code, "byte-identical code (no enumeration oracle)");
   db.close();
 });
+
+test("auth magic GET renders a POST interstitial without consuming the secret", async () => {
+  const { db, env } = baseFixture();
+  const res = await worker.fetch(new Request("https://portal.test/portal/v1/auth/magic?token=secret_value"), env, CTX);
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get("referrer-policy") ?? "", /no-referrer/);
+  const html = await res.text();
+  assert.match(html, /method="POST"/);
+  assert.match(html, /\/portal\/v1\/auth\/magic-redeem/);
+  assert.match(html, /value="secret_value"/);
+  db.close();
+});
+
+test("auth magic redeem enforces CSRF and returns invalid-token status", async () => {
+  const { db, env } = baseFixture();
+  const crossSite = await call(env, "POST", "/portal/v1/auth/magic-redeem", {
+    body: { token: "bad" },
+    headers: { origin: "https://evil.test", "sec-fetch-site": "cross-site" },
+  });
+  assert.equal(crossSite.status, 403);
+  assert.equal(crossSite.body.code, "cross_site_forbidden");
+  const invalid = await call(env, "POST", "/portal/v1/auth/magic-redeem", { body: { token: "bad" } });
+  assert.equal(invalid.status, 401);
+  assert.equal(invalid.body.code, "invalid_otp");
+  db.close();
+});
+
+export const DIRECT_ROUTE_TESTS = Object.freeze([
+  "POST /portal/v1/auth/request",
+  "POST /portal/v1/auth/verify",
+  "GET /portal/v1/auth/magic",
+  "POST /portal/v1/auth/magic-redeem",
+  "POST /portal/v1/admin/bootstrap-otp",
+]);

@@ -1,16 +1,5 @@
 import { test } from "node:test";
 import { assert, worker, mintSession, codeFromSecretBytes, requestOtp, redeemOtp, policyCapacityViolation, FP_A, FP_B, installBackendStub, cookieFor, sameSiteHeaders, entitlementId, ownedEntitlementId, call, baseFixture, seedDevice, seedEntitlement, CTX, NOW } from "./portal-worker-fixtures.mjs";
-test("portal worker rejects oversized JSON bodies without relying on Content-Length", async () => {
-  const { db, env } = baseFixture();
-  const res = await worker.fetch(new Request("https://portal.test/portal/v1/auth/request", {
-    method: "POST",
-    headers: sameSiteHeaders(),
-    body: "x".repeat(8193),
-  }), env, CTX);
-  assert.equal(res.status, 413);
-  assert.equal((await res.json()).code, "body_too_large");
-  db.close();
-});
 
 test("A's /api/portal/entitlements returns ONLY A's entitlements", async () => {
   const { db, env } = baseFixture();
@@ -260,3 +249,79 @@ test("HARD: mintSessionToken's call site passes ONLY the session (no body/reques
   assert.ok(!/options\.(customer|customer_id|license_fingerprint|tuple)/.test(tokenSrc), "the mint never reads a client tuple/customer field");
   void mintSessionToken;
 });
+
+// =================================================================================================
+// DOWNLOAD streams the signed bytes + strips upstream auth
+// =================================================================================================
+
+test("download streams the signed .lic and STRIPS the upstream Authorization", async () => {
+  const { db, env } = baseFixture();
+  const stub = installBackendStub();
+  try {
+    const cookie = await cookieFor(env, "A");
+    const id = await ownedEntitlementId(env, cookie);
+    const req = new Request("https://portal.test/api/portal/download", {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie, origin: "https://portal.test", "sec-fetch-site": "same-origin" },
+      body: JSON.stringify({ entitlement_id: id, device_key_id: "device-a" }),
+    });
+    const res = await worker.fetch(req, env, CTX);
+    assert.equal(res.status, 200);
+    assert.match(res.headers.get("content-disposition") ?? "", /attachment/);
+    assert.equal(res.headers.get("authorization"), null, "the upstream bearer never reaches the browser");
+    const text = await res.text();
+    assert.match(text, /SIGNED-LIC-BYTES/, "the signed bytes pass through unchanged");
+    assert.equal(stub.calls[0].body.license_fingerprint, FP_A, "the server-resolved fingerprint is used");
+    db.close();
+  } finally {
+    stub.restore();
+  }
+});
+
+test("A -> B download referencing B's tuple is a generic not_found (no proxy)", async () => {
+  const { db, env } = baseFixture();
+  const stub = installBackendStub();
+  try {
+    seedEntitlement(db, { feature: "BONLY", fingerprint: "d".repeat(64), customerId: "B" });
+    const cookie = await cookieFor(env, "A");
+    const r = await call(env, "POST", "/api/portal/download", { cookie, body: { entitlement_id: entitlementId("DEFAULT", "BONLY", "d".repeat(64)), device_key_id: "device-b" } });
+    assert.equal(r.status, 404);
+    assert.equal(r.body.code, "not_found");
+    assert.equal(stub.calls.length, 0, "no proxy for a foreign tuple");
+    db.close();
+  } finally {
+    stub.restore();
+  }
+});
+
+test("heartbeat and release routes enforce session auth and request validation", async () => {
+  const { db, env } = baseFixture();
+  const cookie = await cookieFor(env, "A");
+  const id = await ownedEntitlementId(env, cookie);
+  const heartbeat = await call(env, "POST", "/api/portal/heartbeat", { cookie, body: { entitlement_id: id } });
+  assert.equal(heartbeat.status, 400);
+  assert.equal(heartbeat.body.code, "invalid_request");
+  const release = await call(env, "POST", "/api/portal/release", { cookie, body: { entitlement_id: id } });
+  assert.equal(release.status, 400);
+  assert.equal(release.body.code, "invalid_request");
+  const crossSite = await call(env, "POST", "/api/portal/heartbeat", {
+    cookie,
+    body: {},
+    headers: { origin: "https://evil.test", "sec-fetch-site": "cross-site" },
+  });
+  assert.equal(crossSite.status, 403);
+  assert.equal(crossSite.body.code, "cross_site_forbidden");
+  db.close();
+});
+
+export const DIRECT_ROUTE_TESTS = Object.freeze([
+  "GET /api/portal/me",
+  "GET /api/portal/entitlements",
+  "GET /api/portal/devices",
+  "POST /api/portal/devices/release",
+  "GET /api/portal/usage",
+  "POST /api/portal/checkout",
+  "POST /api/portal/heartbeat",
+  "POST /api/portal/release",
+  "POST /api/portal/download",
+]);

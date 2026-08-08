@@ -9,6 +9,8 @@ import { envelope } from "./support.js";
 import type { Env, ExecutionContextLike, TopRoute } from "./env.js";
 import { isCrossSite, constantTimeEqual, decodeEntitlementId, entitlementId } from "./support.js";
 
+export type { Env } from "./env.js";
+
 function health(env: Env, reqId: string): Response {
   // Invariant 7: the portal is only healthy if the backend enforces full account isolation.
   const required = env.ACCOUNT_TOKEN_MODE === "required";

@@ -55,51 +55,6 @@ test("logout revokes the session AND bumps account_token_revocations.revocation_
 });
 
 // =================================================================================================
-// DOWNLOAD streams the signed bytes + strips upstream auth
-// =================================================================================================
-
-test("download streams the signed .lic and STRIPS the upstream Authorization", async () => {
-  const { db, env } = baseFixture();
-  const stub = installBackendStub();
-  try {
-    const cookie = await cookieFor(env, "A");
-    const id = await ownedEntitlementId(env, cookie);
-    const req = new Request("https://portal.test/api/portal/download", {
-      method: "POST",
-      headers: { "content-type": "application/json", cookie, origin: "https://portal.test", "sec-fetch-site": "same-origin" },
-      body: JSON.stringify({ entitlement_id: id, device_key_id: "device-a" }),
-    });
-    const res = await worker.fetch(req, env, CTX);
-    assert.equal(res.status, 200);
-    assert.match(res.headers.get("content-disposition") ?? "", /attachment/);
-    // The response must NOT carry the upstream Authorization (the ephemeral bearer is stripped).
-    assert.equal(res.headers.get("authorization"), null, "the upstream bearer never reaches the browser");
-    const text = await res.text();
-    assert.match(text, /SIGNED-LIC-BYTES/, "the signed bytes pass through unchanged");
-    assert.equal(stub.calls[0].body.license_fingerprint, FP_A, "the server-resolved fingerprint is used");
-    db.close();
-  } finally {
-    stub.restore();
-  }
-});
-
-test("A -> B download referencing B's tuple is a generic not_found (no proxy)", async () => {
-  const { db, env } = baseFixture();
-  const stub = installBackendStub();
-  try {
-    seedEntitlement(db, { feature: "BONLY", fingerprint: "d".repeat(64), customerId: "B" });
-    const cookie = await cookieFor(env, "A");
-    const r = await call(env, "POST", "/api/portal/download", { cookie, body: { entitlement_id: entitlementId("DEFAULT", "BONLY", "d".repeat(64)), device_key_id: "device-b" } });
-    assert.equal(r.status, 404);
-    assert.equal(r.body.code, "not_found");
-    assert.equal(stub.calls.length, 0, "no proxy for a foreign tuple");
-    db.close();
-  } finally {
-    stub.restore();
-  }
-});
-
-// =================================================================================================
 // CONFIG GATES — pepper-unset 503; /health mode!=required; bootstrap break-glass
 // =================================================================================================
 
@@ -111,3 +66,7 @@ test("pepper-unset (session) -> 503 config_error on a protected route", async ()
   assert.equal(r.body.code, "config_error");
   db.close();
 });
+
+export const DIRECT_ROUTE_TESTS = Object.freeze([
+  "POST /portal/v1/auth/logout",
+]);
