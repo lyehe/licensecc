@@ -141,12 +141,5 @@
       "removeBy": "org/04-shared-packages"
     }
   ],
-  "hygieneAllowances": [
-    {
-      "path": "pyvenv.cfg",
-      "reason": "Temporary root Python environment marker retained only until source-tree-purity work lands.",
-      "owner": "org/02-build-purity",
-      "removeBy": "org/02-build-purity"
-    }
-  ]
+  "hygieneAllowances": []
 }

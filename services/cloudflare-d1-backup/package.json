@@ -13,7 +13,7 @@
     "restore-drill": "node scripts/restore-drill.mjs"
   },
   "devDependencies": {
-    "typescript": "^5.8.3",
-    "wrangler": "^4.98.0"
+    "typescript": "5.9.3",
+    "wrangler": "4.98.0"
   }
 }

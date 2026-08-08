@@ -168,11 +168,17 @@ export function assertNoDuplicateOpenApiObjectKeys(source, fileName, typescript)
   }
 }
 
-export async function loadTypeScript(repoRoot) {
-  const candidates = DEPLOYABLES
+export function resolveTypeScriptCompilerPath(repoRoot) {
+  const rootCompilerPath = path.join(repoRoot, "node_modules", "typescript", "lib", "typescript.js");
+  const serviceCompilerPaths = DEPLOYABLES
     .map((deployable) => path.join(repoRoot, deployable.directory, "node_modules", "typescript", "lib", "typescript.js"));
-  const compilerPath = candidates.find(existsSync);
-  if (!compilerPath) throw new Error("Cannot find a workspace TypeScript compiler required for compiled OpenAPI duplicate-key checks.");
+  const compilerPath = [rootCompilerPath, ...serviceCompilerPaths].find(existsSync);
+  if (!compilerPath) throw new Error("Cannot find the root workspace TypeScript compiler (or a service-local fallback) required for compiled OpenAPI duplicate-key checks.");
+  return compilerPath;
+}
+
+export async function loadTypeScript(repoRoot) {
+  const compilerPath = resolveTypeScriptCompilerPath(repoRoot);
   const module = await import(pathToFileURL(compilerPath).href);
   return module.default ?? module;
 }

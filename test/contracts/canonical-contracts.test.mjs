@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
@@ -10,6 +11,7 @@ import {
   canonicalize,
   findDuplicateOpenApiObjectKeys,
   loadTypeScript,
+  resolveTypeScriptCompilerPath,
   validateOpenApiDocument,
   validateRouteInventory,
 } from "../../scripts/canonical-contracts.mjs";
@@ -54,6 +56,12 @@ test("component-entry validation rejects duplicate keys before assembly", () => 
     () => assertNoDuplicateEntries([["Policy", {}], ["Policy", {}]], "fixture components.schemas"),
     /duplicate component key/i,
   );
+});
+
+test("compiled OpenAPI checks resolve TypeScript from the authoritative root workspace install", () => {
+  const rootCompilerPath = path.join(REPOSITORY_ROOT, "node_modules", "typescript", "lib", "typescript.js");
+  assert.ok(existsSync(rootCompilerPath), "root workspace TypeScript must be installed before contract checks");
+  assert.equal(resolveTypeScriptCompilerPath(REPOSITORY_ROOT), rootCompilerPath);
 });
 
 test("compiled OpenAPI source detects duplicate component and path-method literals before JavaScript overwrites them", async () => {

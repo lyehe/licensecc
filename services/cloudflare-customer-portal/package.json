@@ -18,14 +18,14 @@
   },
   "dependencies": {
     "@licensecc/cloudflare-licensing-backend": "file:../cloudflare-licensing-backend",
-    "@vitejs/plugin-react": "^4.5.0",
-    "react": "^19.1.0",
-    "react-dom": "^19.1.0",
-    "vite": "^6.3.5"
+    "@vitejs/plugin-react": "4.7.0",
+    "react": "19.2.7",
+    "react-dom": "19.2.7",
+    "vite": "6.4.3"
   },
   "devDependencies": {
-    "@playwright/test": "^1.60.0",
-    "typescript": "^5.8.3",
-    "wrangler": "^4.18.0"
+    "@playwright/test": "1.61.1",
+    "typescript": "5.9.3",
+    "wrangler": "4.104.0"
   }
 }
