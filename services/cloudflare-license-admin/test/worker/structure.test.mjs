@@ -27,6 +27,23 @@ test("entrypoint, app, and registry contain no context SQL or transitions", () =
   }
 });
 
+test("entrypoint has one module-worker edge and the adapter contains no business implementation", () => {
+  const entrypoint = source("index.ts");
+  const entrypointEdges = [...entrypoint.matchAll(/\bfrom\s+["']([^"']+)["']/g)].map((match) => match[1]);
+  assert.deepEqual(entrypointEdges, ["./module-worker.js"]);
+
+  const adapter = source("module-worker.ts");
+  assert.match(adapter, /import\s+\{\s*adminApp\s*\}\s+from\s+["']\.\/app\.js["']/);
+  assert.match(adapter, /import\s+\{\s*API_BINDING_KEYS,\s*adminInternalsForTests\s*\}\s+from\s+["']\.\/operations\.js["']/);
+  assert.match(adapter, /import\s+type\s+\{\s*Env\s*\}\s+from\s+["']\.\/env\.js["']/);
+  assert.match(adapter, /export\s+\{\s*adminApp,\s*API_BINDING_KEYS,\s*adminInternalsForTests\s*\}/);
+  assert.match(adapter, /export\s+type\s+\{\s*Env\s*\}/);
+  assert.match(adapter, /export\s+default\s+adminApp/);
+  assert.doesNotMatch(adapter, /\b(?:SELECT|INSERT|UPDATE|DELETE)\b/);
+  assert.doesNotMatch(adapter, /transitionWithGuard|transitionEntitlement|forceReleaseLiveSeats/);
+  assert.doesNotMatch(adapter, /\b(?:async\s+function|function\s+\w+|=>)\b/);
+});
+
 test("every bounded context has a local operation implementation", () => {
   for (const group of [
     "summary-reports",
