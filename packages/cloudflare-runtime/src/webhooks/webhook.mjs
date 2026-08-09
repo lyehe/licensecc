@@ -539,6 +539,7 @@ async function deliverOne(env, delivery, secretsMap, keyId, now, logEvent) {
         "Licensecc-Event-Source": String(delivery.event_source),
       },
       body,
+      redirect: "manual",
       signal: controller.signal,
     });
     statusCode = typeof resp.status === "number" ? resp.status : 0;

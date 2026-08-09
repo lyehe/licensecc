@@ -68,7 +68,7 @@ function makeEnvironment(overrides = {}) {
   return { env: { ...SIGNING_ENV, ...overrides.env, DB: db }, state };
 }
 
-function streamedResponse(chunks, { status = 500, keepOpen = false, error } = {}) {
+function streamedResponse(chunks, { status = 500, keepOpen = false, error, headers = new Headers() } = {}) {
   const encoder = new TextEncoder();
   let index = 0;
   let reads = 0;
@@ -112,6 +112,7 @@ function streamedResponse(chunks, { status = 500, keepOpen = false, error } = {}
   };
   return {
     status,
+    headers,
     body,
     async text() {
       textCalls += 1;
@@ -150,9 +151,13 @@ function streamedResponse(chunks, { status = 500, keepOpen = false, error } = {}
 }
 
 async function deliverWith(fetchResult, overrides = {}) {
+  return deliverWithFetcher(async () => fetchResult, overrides);
+}
+
+async function deliverWithFetcher(fetcher, overrides = {}) {
   const { env, state } = makeEnvironment(overrides);
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = async () => fetchResult;
+  globalThis.fetch = fetcher;
   try {
     await deliverWebhooks(env, 200, () => {});
   } finally {
@@ -160,6 +165,39 @@ async function deliverWith(fetchResult, overrides = {}) {
   }
   return state;
 }
+
+test("redirect responses are handled manually without forwarding signed requests", async () => {
+  const redirectStatuses = [301, 302, 303, 307, 308];
+  const crossOrigin = "https://attacker.example/steal";
+
+  for (const status of redirectStatuses) {
+    const calls = [];
+    const response = streamedResponse(
+      ["x".repeat(WEBHOOK_ERROR_BODY_MAX_BYTES + 1)],
+      { status, keepOpen: true, headers: new Headers({ Location: crossOrigin }) },
+    );
+    const state = await deliverWithFetcher(async (url, init) => {
+      calls.push({ url, init });
+      return response;
+    });
+
+    assert.equal(response.headers.get("location"), crossOrigin);
+    assert.equal(calls.length, 1, `redirect ${status} must not issue a second request`);
+    assert.equal(calls[0].url, "https://hook.test/ep1");
+    assert.equal(calls[0].init.redirect, "manual");
+    assert.equal(calls[0].init.method, "POST");
+    assert.equal(calls[0].init.body, '{"ok":true}');
+    assert.equal(calls[0].init.headers["Licensecc-Webhook-Id"], "17");
+    assert.equal(calls[0].init.headers["Licensecc-Event-Source"], "customer");
+    assert.match(calls[0].init.headers["Licensecc-Signature"], /^t=200,keyid=k1,v1=[0-9a-f]{64}$/);
+    assert.equal(response.reads, 1);
+    assert.equal(response.cancelled, true);
+    assert.equal(state.status, "pending");
+    assert.equal(state.attempts, 1);
+    assert.equal(state.last_status, status);
+    assert.equal(state.last_error, "x".repeat(256));
+  }
+});
 
 test("non-2xx diagnostic at the byte cap preserves the 256-character shape", async () => {
   const response = streamedResponse(["x".repeat(WEBHOOK_ERROR_BODY_MAX_BYTES)]);
