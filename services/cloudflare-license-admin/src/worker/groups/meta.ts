@@ -1,5 +1,5 @@
 import { docsHtml } from "../docs_page.js";
-import { openApiJson } from "../openapi.js";
+import { openApiJson } from "../openapi/document.js";
 import type { RouteDescriptor } from "../route-descriptor.js";
 
 export const metaRoutes: readonly RouteDescriptor[] = [

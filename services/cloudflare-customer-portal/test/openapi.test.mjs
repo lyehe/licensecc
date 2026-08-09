@@ -9,11 +9,46 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { openApiDocument } from "../dist-worker/worker/openapi.js";
+import { assembleComponents, assemblePaths, assertUniqueOperationIds } from "../dist-worker/worker/openapi/assemble.js";
+import { openApiDocument } from "../dist-worker/worker/openapi/document.js";
 import { ALL_ROUTES, META_ROUTES, PUBLIC_ROUTES, SESSION_ROUTES } from "../dist-worker/worker/routes.js";
 import worker, { PORTAL_ROUTE_KEYS } from "../dist-worker/worker/index.js";
 
 const keyOf = (r) => `${r.method} ${r.path}`;
+
+test("OpenAPI assembly rejects collisions without mutating portal fragments", () => {
+  const getFragment = { label: "get", entries: [["/shared", { get: { operationId: "getShared" } }]] };
+  const postFragment = { label: "post", entries: [["/shared", { post: { operationId: "postShared" } }]] };
+  const before = structuredClone(getFragment);
+  const paths = assemblePaths(getFragment, postFragment);
+  assert.deepEqual(Object.keys(paths["/shared"]), ["get", "post"]);
+  assert.deepEqual(getFragment, before, "assembly must not mutate input fragments");
+  assert.throws(
+    () => assemblePaths(getFragment, { label: "duplicate", entries: [["/shared", { get: {} }]] }),
+    /Duplicate OpenAPI path item field "get"/,
+  );
+  assert.throws(
+    () => assemblePaths({ label: "parameters-a", entries: [["/shared", { parameters: [] }]] }, { label: "parameters-b", entries: [["/shared", { parameters: [] }]] }),
+    /Duplicate OpenAPI path item field "parameters"/,
+  );
+  assert.throws(
+    () => assertUniqueOperationIds(assemblePaths(getFragment, { label: "duplicate-operation", entries: [["/other", { post: { operationId: "getShared" } }]] })),
+    /Duplicate OpenAPI operationId "getShared"/,
+  );
+  const schemaComponents = { label: "schemas", namespaces: [["schemas", [["Shared", { type: "object" }]]]] };
+  const schemaComponentsBefore = structuredClone(schemaComponents);
+  const components = assembleComponents(
+    schemaComponents,
+    { label: "security", namespaces: [["securitySchemes", [["Shared", { type: "http" }]]]] },
+  );
+  assert.ok(components.schemas.Shared);
+  assert.ok(components.securitySchemes.Shared);
+  assert.deepEqual(schemaComponents, schemaComponentsBefore, "component assembly must not mutate input fragments");
+  assert.throws(
+    () => assembleComponents({ label: "schemas-a", namespaces: [["schemas", [["Shared", {}]]]] }, { label: "schemas-b", namespaces: [["schemas", [["Shared", {}]]]] }),
+    /Duplicate OpenAPI component key "Shared" in schemas/,
+  );
+});
 
 test("route inventory is well-formed (no duplicates, session routes under the prefix root)", () => {
   const keys = ALL_ROUTES.map(keyOf);
@@ -36,6 +71,13 @@ test("spec.paths equal the canonical 'inSpec' route set (no spec-only / no missi
   }
   for (const p of specPaths) {
     assert.ok(expected.has(p), `spec.paths declares ${p} which is NOT in the canonical inventory (spec drifted ahead of code)`);
+  }
+});
+
+test("self-describing meta routes stay served but intentionally outside the document", () => {
+  for (const route of META_ROUTES) {
+    assert.equal(route.inSpec, false, `${route.path} must keep its explicit inSpec:false exception`);
+    assert.equal(openApiDocument.paths[route.path], undefined, `${route.path} must not be self-documented`);
   }
 });
 
@@ -62,6 +104,22 @@ test("each spec operation has the required documentation fields", () => {
       }
     }
   }
+});
+
+test("operation identifiers and route-class auth declarations stay exact", () => {
+  assertUniqueOperationIds(openApiDocument.paths);
+  for (const route of PUBLIC_ROUTES) {
+    if (route.path === "/portal/v1/auth/logout" || route.path === "/portal/v1/admin/bootstrap-otp") continue;
+    const operation = openApiDocument.paths[route.path]?.[route.method.toLowerCase()];
+    if (!operation) continue;
+    assert.deepEqual(operation.security, [], `${route.path} must remain public`);
+  }
+  for (const route of SESSION_ROUTES) {
+    const operation = openApiDocument.paths[route.path][route.method.toLowerCase()];
+    assert.deepEqual(operation.security, [{ sessionCookie: [] }], `${route.path} must remain session-scoped`);
+  }
+  assert.deepEqual(openApiDocument.paths["/portal/v1/auth/logout"].post.security, [{ sessionCookie: [] }, {}]);
+  assert.deepEqual(openApiDocument.paths["/portal/v1/admin/bootstrap-otp"].post.security, [{ bootstrapBearer: [] }, { bootstrapBearer: [], cfAccess: [] }]);
 });
 
 test("spec is OpenAPI 3.1.0 with the shared envelope/server conventions", () => {

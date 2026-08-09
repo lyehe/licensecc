@@ -8,6 +8,36 @@ const SOURCE_EXTENSIONS = Object.freeze([".ts", ".tsx", ".mts", ".cts", ".js", "
 const SOURCE_FILE_PATTERN = /^(?:services|packages)\/[^/]+\/src\/.+\.(?:[cm]?[jt]sx?|jsx)$/i;
 const TASK4 = "org/04-shared-packages";
 const TASK2 = "org/02-build-purity";
+const COMPOSITION_ROOTS = Object.freeze({
+  backend: {
+    entry: "services/cloudflare-licensing-backend/src/index.ts",
+    entryImports: ["./app.js"],
+    app: "services/cloudflare-licensing-backend/src/app.ts",
+    appImports: ["./env.js", "./maintenance/**", "./observability/**", "./routes.js", "./routes/**"],
+  },
+  admin: {
+    entry: "services/cloudflare-license-admin/src/worker/index.ts",
+    entryImports: ["./module-worker.js"],
+    adapter: "services/cloudflare-license-admin/src/worker/module-worker.ts",
+    adapterImports: ["./app.js", "./operations.js", "./env.js"],
+    app: "services/cloudflare-license-admin/src/worker/app.ts",
+    appImports: ["./auth.js", "./context.js", "./dispatch.js", "./env.js", "./response.js"],
+  },
+  portal: {
+    entry: "services/cloudflare-customer-portal/src/worker/index.ts",
+    entryImports: ["./app.js"],
+    app: "services/cloudflare-customer-portal/src/worker/app.ts",
+    appImports: ["./env.js", "./support.js", "./routes.js", "./routes/**"],
+  },
+  adminUi: {
+    mount: "services/cloudflare-license-admin/src/ui/main.tsx",
+    mountImports: ["./app/App"],
+    app: "services/cloudflare-license-admin/src/ui/app/App.tsx",
+    appImports: ["./types", "../features/**", "../shared/**", "../styles.css"],
+    appForbiddenTargets: ["services/cloudflare-license-admin/src/ui/shared/api.ts"],
+    appForbiddenSuffixes: ["/workflow.ts"],
+  },
+});
 
 function debtKey(from, specifier) {
   return `${normalizeRepoPath(from)}\u0000${specifier}`;
@@ -471,14 +501,103 @@ function buildWorkspaces(manifests, errors) {
   return { byRoot, byName };
 }
 
+function stableJson(value) {
+  if (Array.isArray(value)) return value.map(stableJson);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(Object.keys(value).sort((left, right) => left.localeCompare(right)).map((key) => [key, stableJson(value[key])]));
+}
+
+function validateCompositionRoots(config, errors) {
+  if (JSON.stringify(stableJson(config.compositionRoots)) !== JSON.stringify(stableJson(COMPOSITION_ROOTS))) {
+    errors.push(makeError(
+      "ARCH_MALFORMED_COMPOSITION_ROOTS",
+      "scripts/architecture-boundaries.json",
+      "compositionRoots must exactly declare the reviewed backend, admin, portal, and adminUi composition boundaries; broad or omitted exceptions are forbidden.",
+      "setup",
+    ));
+    return undefined;
+  }
+  return COMPOSITION_ROOTS;
+}
+
+function normalizedSpecifier(value) {
+  return String(value).replace(/\\/g, "/");
+}
+
+function matchesCompositionImport(specifier, patterns) {
+  const normalized = normalizedSpecifier(specifier);
+  return patterns.some((pattern) => {
+    if (pattern.endsWith("/**")) return normalized.startsWith(pattern.slice(0, -2));
+    return normalized === pattern;
+  });
+}
+
+function isRelativeSpecifier(specifier) {
+  const normalized = normalizedSpecifier(specifier);
+  return normalized.startsWith(".") || normalized.startsWith("/");
+}
+
+function firstFetchCall(source) {
+  const tokens = tokenise(source);
+  return tokens.find((token, index) => token.kind === "word" && token.value === "fetch" && tokens[index + 1]?.value === "(");
+}
+
+function evaluateCompositionRoots(productionFiles, allResolvablePaths, compositionRoots, errors) {
+  if (!compositionRoots) return;
+  const byPath = new Map(productionFiles.map((entry) => [entry.path, entry]));
+
+  const enforceImports = (pathName, allowedImports, code, label) => {
+    const entry = byPath.get(pathName);
+    if (!entry) return;
+    for (const moduleImport of parseModuleSpecifiers(entry.source)) {
+      if (!isRelativeSpecifier(moduleImport.specifier)) continue;
+      if (!matchesCompositionImport(moduleImport.specifier, allowedImports)) {
+        errors.push(importError(code, pathName, moduleImport, `${label} may import only its reviewed composition dependencies.`));
+      }
+    }
+  };
+
+  for (const [serviceName, service] of Object.entries(compositionRoots)) {
+    if (serviceName === "adminUi") continue;
+    enforceImports(service.entry, service.entryImports, "ARCH_COMPOSITION_ENTRY_IMPORT", `${serviceName} Worker entrypoint`);
+    if (service.adapter) {
+      enforceImports(service.adapter, service.adapterImports, "ARCH_COMPOSITION_ADAPTER_IMPORT", `${serviceName} module-worker adapter`);
+    }
+    enforceImports(service.app, service.appImports, "ARCH_COMPOSITION_APP_IMPORT", `${serviceName} Worker app composition root`);
+  }
+
+  const ui = compositionRoots.adminUi;
+  enforceImports(ui.mount, ui.mountImports, "ARCH_UI_MOUNT_IMPORT", "Admin UI mount root");
+  enforceImports(ui.app, ui.appImports, "ARCH_UI_APP_IMPORT", "Admin UI app composition root");
+
+  const app = byPath.get(ui.app);
+  if (!app) return;
+  for (const moduleImport of parseModuleSpecifiers(app.source)) {
+    if (!isRelativeSpecifier(moduleImport.specifier)) continue;
+    const target = normalizedSpecifier(moduleImport.specifier).startsWith("/")
+      ? undefined
+      : relativeImportTarget(ui.app, moduleImport.specifier, allResolvablePaths);
+    if (!target) continue;
+    const forbiddenTarget = ui.appForbiddenTargets.includes(target);
+    const forbiddenSuffix = ui.appForbiddenSuffixes.some((suffix) => target.endsWith(suffix));
+    if (forbiddenTarget || forbiddenSuffix) {
+      errors.push(importError("ARCH_UI_APP_API_IMPORT", ui.app, moduleImport, "Admin UI app composition may not import API-client or feature-workflow modules directly."));
+    }
+  }
+  const fetchCall = firstFetchCall(app.source);
+  if (fetchCall) {
+    errors.push(makeError("ARCH_UI_APP_DIRECT_FETCH", ui.app, "Admin UI app composition may not invoke fetch directly; network work belongs to feature/shared API modules.", "policy", { line: fetchCall.line }));
+  }
+}
+
 /**
  * Pure checker core. Production code supplies only tracked source/path data;
  * fixture tests pass an in-memory equivalent to prove each policy branch.
  */
 export function evaluateArchitecture({ sourceFiles = [], manifests = [], trackedPaths = [], config, now = new Date() } = {}) {
   const errors = [];
-  if (!config || typeof config !== "object" || config.version !== 1) {
-    errors.push(makeError("ARCH_MALFORMED_CONFIG", "scripts/architecture-boundaries.json", "Expected version: 1 architecture-boundaries configuration.", "setup"));
+  if (!config || typeof config !== "object" || config.version !== 2) {
+    errors.push(makeError("ARCH_MALFORMED_CONFIG", "scripts/architecture-boundaries.json", "Expected version: 2 architecture-boundaries configuration.", "setup"));
     const sortedErrors = sortErrors(errors);
     return { errors: sortedErrors, diagnostics: sortedErrors.map(formatDiagnostic), exitCode: 2 };
   }
@@ -486,6 +605,7 @@ export function evaluateArchitecture({ sourceFiles = [], manifests = [], tracked
   const validNow = now instanceof Date && !Number.isNaN(now.getTime()) ? now : new Date();
   const allowances = validateServiceAllowances(config, errors, validNow);
   const hygieneAllowances = validateHygieneAllowances(config, errors, validNow);
+  const compositionRoots = validateCompositionRoots(config, errors);
   matchesCurrentDebtInventory(config, allowances, errors);
   const { byRoot: workspaceByRoot, byName: workspaceByName } = buildWorkspaces(manifests, errors);
 
@@ -497,6 +617,8 @@ export function evaluateArchitecture({ sourceFiles = [], manifests = [], tracked
     ...trackedPaths.map(normalizeRepoPath),
     ...productionFiles.map((entry) => entry.path),
   ]);
+
+  evaluateCompositionRoots(productionFiles, allResolvablePaths, compositionRoots, errors);
 
   for (const { path: from, source } of productionFiles) {
     const importerRoot = workspaceRootFor(from);

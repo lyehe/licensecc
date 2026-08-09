@@ -12,7 +12,8 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { openApiDocument } from "../dist-worker/worker/openapi.js";
+import { assembleComponents, assemblePaths, assertUniqueOperationIds } from "../dist-worker/worker/openapi/assemble.js";
+import { openApiDocument } from "../dist-worker/worker/openapi/document.js";
 import { API_ROUTES, ALL_ROUTES, META_ROUTES } from "../dist-worker/worker/routes.js";
 import { API_BINDING_KEYS } from "../dist-worker/worker/index.js";
 import { POLICY_TYPES } from "@licensecc/licensing-domain/entitlements/policy";
@@ -35,6 +36,40 @@ function policyTypeEnums(node, out = []) {
 }
 
 const SPEC_METHODS = ["get", "post", "patch", "put", "delete"];
+
+test("OpenAPI assembly rejects collisions while allowing legitimate multi-method paths", () => {
+  const getFragment = { label: "get", entries: [["/shared", { get: { operationId: "getShared" } }]] };
+  const postFragment = { label: "post", entries: [["/shared", { post: { operationId: "postShared" } }]] };
+  const before = structuredClone(getFragment);
+  const paths = assemblePaths(getFragment, postFragment);
+  assert.deepEqual(Object.keys(paths["/shared"]), ["get", "post"]);
+  assert.deepEqual(getFragment, before, "assembly must not mutate input fragments");
+  assert.throws(
+    () => assemblePaths(getFragment, { label: "duplicate", entries: [["/shared", { get: {} }]] }),
+    /Duplicate OpenAPI path item field "get"/,
+  );
+  assert.throws(
+    () => assemblePaths({ label: "parameters-1", entries: [["/shared", { parameters: [] }]] }, { label: "parameters-2", entries: [["/shared", { parameters: [] }]] }),
+    /Duplicate OpenAPI path item field "parameters"/,
+  );
+  assert.throws(
+    () => assertUniqueOperationIds(assemblePaths(getFragment, { label: "duplicate-operation", entries: [["/other", { post: { operationId: "getShared" } }]] })),
+    /Duplicate OpenAPI operationId "getShared"/,
+  );
+  const schemaComponents = { label: "schemas", namespaces: [["schemas", [["Shared", { type: "object" }]]]] };
+  const schemaComponentsBefore = structuredClone(schemaComponents);
+  const components = assembleComponents(
+    schemaComponents,
+    { label: "security", namespaces: [["securitySchemes", [["Shared", { type: "http" }]]]] },
+  );
+  assert.ok(components.schemas.Shared);
+  assert.ok(components.securitySchemes.Shared);
+  assert.deepEqual(schemaComponents, schemaComponentsBefore, "component assembly must not mutate input fragments");
+  assert.throws(
+    () => assembleComponents({ label: "schemas-a", namespaces: [["schemas", [["Shared", {}]]]] }, { label: "schemas-b", namespaces: [["schemas", [["Shared", {}]]]] }),
+    /Duplicate OpenAPI component key "Shared" in schemas/,
+  );
+});
 
 function specOperationKeys() {
   const keys = new Set();
@@ -115,4 +150,22 @@ test("each operation documents 200 plus the auth/error statuses the handler retu
       }
     }
   }
+});
+
+test("operation identifiers and auth declarations are unique and match route ownership", () => {
+  assertUniqueOperationIds(openApiDocument.paths);
+  assert.deepEqual(openApiDocument.security, [{ cloudflareAccess: [] }, { devBearer: [] }]);
+  for (const [path, item] of Object.entries(openApiDocument.paths)) {
+    for (const method of SPEC_METHODS) {
+      const operation = item[method];
+      if (!operation) continue;
+      assert.equal(typeof operation.operationId, "string", `${method.toUpperCase()} ${path} is missing operationId`);
+    }
+  }
+  for (const route of META_ROUTES) {
+    const operation = openApiDocument.paths[route.path][route.method.toLowerCase()];
+    assert.deepEqual(operation.security, [], `${route.path} must remain public`);
+  }
+  const sync = openApiDocument.paths["/api/sync/entitlements"].post;
+  assert.deepEqual(sync.security, [{ syncBearer: [] }]);
 });

@@ -10,10 +10,53 @@ import {
 
 function config(overrides = {}) {
   return {
-    version: 1,
+    version: 2,
     assertCurrentServiceDebt: false,
     serviceImportAllowances: [],
     hygieneAllowances: [],
+    compositionRoots: COMPOSITION_ROOTS,
+    ...overrides,
+  };
+}
+
+const COMPOSITION_ROOTS = {
+  backend: {
+    entry: "services/cloudflare-licensing-backend/src/index.ts",
+    entryImports: ["./app.js"],
+    app: "services/cloudflare-licensing-backend/src/app.ts",
+    appImports: ["./env.js", "./maintenance/**", "./observability/**", "./routes.js", "./routes/**"],
+  },
+  admin: {
+    entry: "services/cloudflare-license-admin/src/worker/index.ts",
+    entryImports: ["./module-worker.js"],
+    adapter: "services/cloudflare-license-admin/src/worker/module-worker.ts",
+    adapterImports: ["./app.js", "./operations.js", "./env.js"],
+    app: "services/cloudflare-license-admin/src/worker/app.ts",
+    appImports: ["./auth.js", "./context.js", "./dispatch.js", "./env.js", "./response.js"],
+  },
+  portal: {
+    entry: "services/cloudflare-customer-portal/src/worker/index.ts",
+    entryImports: ["./app.js"],
+    app: "services/cloudflare-customer-portal/src/worker/app.ts",
+    appImports: ["./env.js", "./support.js", "./routes.js", "./routes/**"],
+  },
+  adminUi: {
+    mount: "services/cloudflare-license-admin/src/ui/main.tsx",
+    mountImports: ["./app/App"],
+    app: "services/cloudflare-license-admin/src/ui/app/App.tsx",
+    appImports: ["./types", "../features/**", "../shared/**", "../styles.css"],
+    appForbiddenTargets: ["services/cloudflare-license-admin/src/ui/shared/api.ts"],
+    appForbiddenSuffixes: ["/workflow.ts"],
+  },
+};
+
+function compositionConfig(overrides = {}) {
+  return {
+    version: 2,
+    assertCurrentServiceDebt: false,
+    serviceImportAllowances: [],
+    hygieneAllowances: [],
+    compositionRoots: COMPOSITION_ROOTS,
     ...overrides,
   };
 }
@@ -374,4 +417,112 @@ test("the completed inventory rejects a newly added service allowance", () => {
   });
   assert.equal(result.exitCode, 2);
   assert.deepEqual(errorCodes(result), ["ARCH_DEBT_INVENTORY_DRIFT"]);
+});
+
+test("composition roots reject extra entry and direct implementation edges", () => {
+  const valid = fixture({
+    sourceFiles: [
+      ["services/cloudflare-licensing-backend/src/index.ts", 'export { default } from "./app.js";'],
+      ["services/cloudflare-licensing-backend/src/app.ts", 'import "./env.js"; import "./routes/meta.js";'],
+      ["services/cloudflare-licensing-backend/src/env.ts", "export const env = true;"],
+      ["services/cloudflare-licensing-backend/src/routes/meta.ts", "export const meta = true;"],
+    ],
+    manifests: [serviceManifest("cloudflare-licensing-backend")],
+    checkerConfig: compositionConfig(),
+  });
+  assert.equal(valid.exitCode, 0, valid.diagnostics.join("\n"));
+
+  const extraEntry = fixture({
+    sourceFiles: [
+      ["services/cloudflare-licensing-backend/src/index.ts", 'export { default } from "./app.js"; export { operation } from "./operations.js";'],
+      ["services/cloudflare-licensing-backend/src/app.ts", "export default {};"],
+      ["services/cloudflare-licensing-backend/src/operations.ts", "export const operation = true;"],
+    ],
+    manifests: [serviceManifest("cloudflare-licensing-backend")],
+    checkerConfig: compositionConfig(),
+  });
+  assert.equal(extraEntry.exitCode, 1);
+  assert.deepEqual(errorCodes(extraEntry), ["ARCH_COMPOSITION_ENTRY_IMPORT"]);
+
+  const directDb = fixture({
+    sourceFiles: [
+      ["services/cloudflare-licensing-backend/src/index.ts", 'export { default } from "./app.js";'],
+      ["services/cloudflare-licensing-backend/src/app.ts", 'import "./db/client.js";'],
+      ["services/cloudflare-licensing-backend/src/db/client.ts", "export const db = true;"],
+    ],
+    manifests: [serviceManifest("cloudflare-licensing-backend")],
+    checkerConfig: compositionConfig(),
+  });
+  assert.equal(directDb.exitCode, 1);
+  assert.deepEqual(errorCodes(directDb), ["ARCH_COMPOSITION_APP_IMPORT"]);
+});
+
+test("composition roots resolve Windows .js-to-TypeScript edges and protect Worker/UI seams", () => {
+  const windowsPositive = fixture({
+    sourceFiles: [
+      ["services\\cloudflare-licensing-backend\\src\\index.ts", 'export { default } from ".\\\\app.js";'],
+      ["services/cloudflare-licensing-backend/src/app.ts", 'import ".\\\\env.js"; import ".\\\\routes\\\\meta.js";'],
+      ["services/cloudflare-licensing-backend/src/env.ts", "export const env = true;"],
+      ["services/cloudflare-licensing-backend/src/routes/meta.ts", "export const meta = true;"],
+    ],
+    manifests: [serviceManifest("cloudflare-licensing-backend")],
+    checkerConfig: compositionConfig(),
+  });
+  assert.equal(windowsPositive.exitCode, 0, windowsPositive.diagnostics.join("\n"));
+
+  const adminEntry = fixture({
+    sourceFiles: [
+      ["services/cloudflare-license-admin/src/worker/index.ts", 'export { default } from "./module-worker.js"; export type { Env } from "./env.js";'],
+      ["services/cloudflare-license-admin/src/worker/module-worker.ts", "export default {};"],
+      ["services/cloudflare-license-admin/src/worker/env.ts", "export type Env = {};"],
+    ],
+    manifests: [serviceManifest("cloudflare-license-admin")],
+    checkerConfig: compositionConfig(),
+  });
+  assert.equal(adminEntry.exitCode, 1);
+  assert.deepEqual(errorCodes(adminEntry), ["ARCH_COMPOSITION_ENTRY_IMPORT"]);
+
+  const adminApp = fixture({
+    sourceFiles: [
+      ["services/cloudflare-license-admin/src/worker/app.ts", 'import "./operations.js";'],
+      ["services/cloudflare-license-admin/src/worker/operations.ts", "export const operation = true;"],
+    ],
+    manifests: [serviceManifest("cloudflare-license-admin")],
+    checkerConfig: compositionConfig(),
+  });
+  assert.equal(adminApp.exitCode, 1);
+  assert.deepEqual(errorCodes(adminApp), ["ARCH_COMPOSITION_APP_IMPORT"]);
+
+  const portalApp = fixture({
+    sourceFiles: [
+      ["services/cloudflare-customer-portal/src/worker/app.ts", 'import "./auth/session.js";'],
+      ["services/cloudflare-customer-portal/src/worker/auth/session.ts", "export const session = true;"],
+    ],
+    manifests: [serviceManifest("cloudflare-customer-portal")],
+    checkerConfig: compositionConfig(),
+  });
+  assert.equal(portalApp.exitCode, 1);
+  assert.deepEqual(errorCodes(portalApp), ["ARCH_COMPOSITION_APP_IMPORT"]);
+
+  const uiMount = fixture({
+    sourceFiles: [
+      ["services/cloudflare-license-admin/src/ui/main.tsx", 'import "./features/catalog/Catalog";'],
+      ["services/cloudflare-license-admin/src/ui/features/catalog/Catalog.tsx", "export const Catalog = true;"],
+    ],
+    manifests: [serviceManifest("cloudflare-license-admin")],
+    checkerConfig: compositionConfig(),
+  });
+  assert.equal(uiMount.exitCode, 1);
+  assert.deepEqual(errorCodes(uiMount), ["ARCH_UI_MOUNT_IMPORT"]);
+
+  const uiApp = fixture({
+    sourceFiles: [
+      ["services/cloudflare-license-admin/src/ui/app/App.tsx", 'import "../shared/api.js"; fetch("/api/admin/summary");'],
+      ["services/cloudflare-license-admin/src/ui/shared/api.ts", "export const api = true;"],
+    ],
+    manifests: [serviceManifest("cloudflare-license-admin")],
+    checkerConfig: compositionConfig(),
+  });
+  assert.equal(uiApp.exitCode, 1);
+  assert.deepEqual(errorCodes(uiApp), ["ARCH_UI_APP_API_IMPORT", "ARCH_UI_APP_DIRECT_FETCH"]);
 });

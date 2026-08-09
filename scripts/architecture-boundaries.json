@@ -1,6 +1,36 @@
 {
-  "version": 1,
+  "version": 2,
   "assertCurrentServiceDebt": true,
   "serviceImportAllowances": [],
-  "hygieneAllowances": []
+  "hygieneAllowances": [],
+  "compositionRoots": {
+    "backend": {
+      "entry": "services/cloudflare-licensing-backend/src/index.ts",
+      "entryImports": ["./app.js"],
+      "app": "services/cloudflare-licensing-backend/src/app.ts",
+      "appImports": ["./env.js", "./maintenance/**", "./observability/**", "./routes.js", "./routes/**"]
+    },
+    "admin": {
+      "entry": "services/cloudflare-license-admin/src/worker/index.ts",
+      "entryImports": ["./module-worker.js"],
+      "adapter": "services/cloudflare-license-admin/src/worker/module-worker.ts",
+      "adapterImports": ["./app.js", "./operations.js", "./env.js"],
+      "app": "services/cloudflare-license-admin/src/worker/app.ts",
+      "appImports": ["./auth.js", "./context.js", "./dispatch.js", "./env.js", "./response.js"]
+    },
+    "portal": {
+      "entry": "services/cloudflare-customer-portal/src/worker/index.ts",
+      "entryImports": ["./app.js"],
+      "app": "services/cloudflare-customer-portal/src/worker/app.ts",
+      "appImports": ["./env.js", "./support.js", "./routes.js", "./routes/**"]
+    },
+    "adminUi": {
+      "mount": "services/cloudflare-license-admin/src/ui/main.tsx",
+      "mountImports": ["./app/App"],
+      "app": "services/cloudflare-license-admin/src/ui/app/App.tsx",
+      "appImports": ["./types", "../features/**", "../shared/**", "../styles.css"],
+      "appForbiddenTargets": ["services/cloudflare-license-admin/src/ui/shared/api.ts"],
+      "appForbiddenSuffixes": ["/workflow.ts"]
+    }
+  }
 }

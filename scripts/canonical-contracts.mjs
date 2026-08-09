@@ -185,9 +185,9 @@ export async function loadTypeScript(repoRoot) {
 
 async function assertCompiledOpenApiSources(repoRoot, compiler) {
   const files = [
-    ["cloudflare-licensing-backend", path.join(repoRoot, "services", "cloudflare-licensing-backend", "dist", "openapi.js")],
-    ["cloudflare-license-admin", path.join(repoRoot, "services", "cloudflare-license-admin", "dist-worker", "worker", "openapi.js")],
-    ["cloudflare-customer-portal", path.join(repoRoot, "services", "cloudflare-customer-portal", "dist-worker", "worker", "openapi.js")],
+    ["cloudflare-licensing-backend", path.join(repoRoot, "services", "cloudflare-licensing-backend", "dist", "openapi", "document.js")],
+    ["cloudflare-license-admin", path.join(repoRoot, "services", "cloudflare-license-admin", "dist-worker", "worker", "openapi", "document.js")],
+    ["cloudflare-customer-portal", path.join(repoRoot, "services", "cloudflare-customer-portal", "dist-worker", "worker", "openapi", "document.js")],
   ];
   for (const [service, filePath] of files) {
     if (!existsSync(filePath)) throw new Error(`Compiled OpenAPI module is missing: ${path.relative(repoRoot, filePath)}.`);
@@ -379,13 +379,13 @@ async function captureContracts(repoRoot) {
   const [backendRoutes, backendWorker, backendOpenApi, adminRoutes, adminWorker, adminOpenApi, portalRoutes, portalWorker, portalOpenApi] = await Promise.all([
     importCompiled(path.join(backendRoot, "routes.js")),
     importCompiled(path.join(backendRoot, "index.js")),
-    importCompiled(path.join(backendRoot, "openapi.js")),
+    importCompiled(path.join(backendRoot, "openapi", "document.js")),
     importCompiled(path.join(adminRoot, "routes.js")),
     importCompiled(path.join(adminRoot, "index.js")),
-    importCompiled(path.join(adminRoot, "openapi.js")),
+    importCompiled(path.join(adminRoot, "openapi", "document.js")),
     importCompiled(path.join(portalRoot, "routes.js")),
     importCompiled(path.join(portalRoot, "index.js")),
-    importCompiled(path.join(portalRoot, "openapi.js")),
+    importCompiled(path.join(portalRoot, "openapi", "document.js")),
   ]);
 
   return {

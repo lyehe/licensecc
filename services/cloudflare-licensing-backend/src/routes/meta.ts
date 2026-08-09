@@ -1,7 +1,8 @@
 import { json } from "@licensecc/cloudflare-runtime/http/kit";
 import type { Env } from "../env.js";
 import { configConsistencyWarnings } from "../observability/index.js";
-import { docsHtml, openApiSpec } from "../openapi.js";
+import { docsHtml } from "../docs_page.js";
+import { openApiSpec } from "../openapi/document.js";
 
 export function handleOpenApi(): Response {
   return json(openApiSpec);

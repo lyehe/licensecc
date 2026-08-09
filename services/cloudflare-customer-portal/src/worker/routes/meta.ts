@@ -1,6 +1,7 @@
 // Environment-free documentation routes.
 
-import { DOCS_HTML, openApiDocument } from "../openapi.js";
+import { DOCS_HTML } from "../docs_page.js";
+import { openApiDocument } from "../openapi/document.js";
 import { json } from "../support.js";
 
 export const META_DISPATCH = {

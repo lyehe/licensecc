@@ -1,7 +1,7 @@
 // Build-time CROSS-CHECK that PINS the OpenAPI spec to the Worker's actual routes so the doc cannot
 // silently drift. Zero-dep (node:test). It compares three COMPILED artifacts — the route inventory
 // (dist/routes.js, the single source of truth), the dispatch table keys the Worker actually serves
-// (dist/app.js BACKEND_ROUTE_KEYS), and the spec (dist/openapi.js) — instead of grepping the
+// (dist/app.js BACKEND_ROUTE_KEYS), and the spec (dist/openapi/document.js) — instead of grepping the
 // TypeScript source, so moving/refactoring handler code can never break this test; only a real
 // route/spec divergence can.
 //
@@ -11,7 +11,8 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { openApiSpec } from "../dist/openapi.js";
+import { assembleComponents, assemblePaths, assertUniqueOperationIds } from "../dist/openapi/assemble.js";
+import { openApiSpec } from "../dist/openapi/document.js";
 import { META_ROUTES, CLIENT_ROUTES, SCOPED_ROUTES, EMERGENCY_PREFIX, allCanonicalRoutes } from "../dist/routes.js";
 import worker from "../dist/index.js";
 import { BACKEND_ROUTE_KEYS } from "../dist/app.js";
@@ -20,6 +21,47 @@ const keyOf = (r) => `${r.method} ${r.path}`;
 const DISPATCHED_INVENTORY = [...META_ROUTES, ...CLIENT_ROUTES, ...SCOPED_ROUTES];
 const CANONICAL = allCanonicalRoutes();
 const CANONICAL_PATHS = new Set(CANONICAL.map((r) => r.path));
+
+test("OpenAPI assembly rejects collisions without mutating its fragments", () => {
+  const initialPaths = {
+    label: "initial",
+    entries: [["/shared", { get: { operationId: "getShared" } }]],
+  };
+  const postPaths = {
+    label: "post",
+    entries: [["/shared", { post: { operationId: "postShared" } }]],
+  };
+  const initialPathsBefore = structuredClone(initialPaths);
+  const assembled = assemblePaths(initialPaths, postPaths);
+  assert.deepEqual(Object.keys(assembled["/shared"]), ["get", "post"]);
+  assert.deepEqual(initialPaths, initialPathsBefore, "assembly must not mutate input fragments");
+  assert.throws(
+    () => assemblePaths(initialPaths, { label: "duplicate-method", entries: [["/shared", { get: {} }]] }),
+    /Duplicate OpenAPI path item field "get"/,
+  );
+  assert.throws(
+    () => assemblePaths(initialPaths, { label: "duplicate-path-field", entries: [["/shared", { parameters: [] }]] }, { label: "duplicate-path-field-2", entries: [["/shared", { parameters: [] }]] }),
+    /Duplicate OpenAPI path item field "parameters"/,
+  );
+  assert.throws(
+    () => assertUniqueOperationIds(assemblePaths(initialPaths, { label: "duplicate-operation", entries: [["/other", { post: { operationId: "getShared" } }]] })),
+    /Duplicate OpenAPI operationId "getShared"/,
+  );
+
+  const schemaComponents = { label: "schemas", namespaces: [["schemas", [["Shared", { type: "object" }]]]] };
+  const schemaComponentsBefore = structuredClone(schemaComponents);
+  const components = assembleComponents(
+    schemaComponents,
+    { label: "security", namespaces: [["securitySchemes", [["Shared", { type: "http" }]]]] },
+  );
+  assert.ok(components.schemas.Shared);
+  assert.ok(components.securitySchemes.Shared, "the same key is valid in a different namespace");
+  assert.deepEqual(schemaComponents, schemaComponentsBefore, "component assembly must not mutate input fragments");
+  assert.throws(
+    () => assembleComponents({ label: "schemas", namespaces: [["schemas", [["Shared", {}]]]] }, { label: "schemas-duplicate", namespaces: [["schemas", [["Shared", {}]]]] }),
+    /Duplicate OpenAPI component key "Shared" in schemas/,
+  );
+});
 
 test("the dispatch table serves exactly the literal route inventory", () => {
   // Emergency composites are served via the prefix gate, not the literal table, so the table must
@@ -62,6 +104,40 @@ test("spec is OpenAPI 3.1 with a root server and reusable error envelope", () =>
   assert.equal(openApiSpec.openapi, "3.1.0");
   assert.deepEqual(openApiSpec.servers, [{ url: "/" }]);
   assert.ok(openApiSpec.components.schemas.ErrorEnvelope, "ErrorEnvelope schema must exist");
+});
+
+test("every documented operation has unique identity, expected auth, and a response", () => {
+  assertUniqueOperationIds(openApiSpec.paths);
+  const expectedSecurity = new Map([
+    ["/openapi.json", []],
+    ["/docs", []],
+    ["/health", []],
+    ["/v1/verify", [{ requestProof: [] }]],
+    ["/v1/orders", [{ orderHmac: [] }]],
+    ["/v1/activate", [{ accountToken: [] }, { leaseBearer: [] }]],
+    ["/v1/renew", [{ accountToken: [] }, { leaseBearer: [] }]],
+    ["/v1/checkout", [{ accountToken: [] }, { leaseBearer: [] }]],
+    ["/v1/heartbeat", [{ accountToken: [] }, { leaseBearer: [] }]],
+    ["/v1/release", [{ accountToken: [] }, { leaseBearer: [] }]],
+    ["/v1/meter", [{ accountToken: [] }, { leaseBearer: [] }]],
+    ["/v1/admin/report", [{ accountToken: [] }, { leaseBearer: [] }]],
+    ["/v1/emergency/v1/activate", [{ emergencyBearer: [] }]],
+    ["/v1/emergency/v1/renew", [{ emergencyBearer: [] }]],
+    ["/v1/emergency/v1/checkout", [{ emergencyBearer: [] }]],
+    ["/v1/emergency/v1/heartbeat", [{ emergencyBearer: [] }]],
+    ["/v1/emergency/v1/release", [{ emergencyBearer: [] }]],
+    ["/v1/emergency/v1/meter", [{ emergencyBearer: [] }]],
+    ["/v1/emergency/v1/admin/report", [{ emergencyBearer: [] }]],
+  ]);
+  for (const [path, item] of Object.entries(openApiSpec.paths)) {
+    const [operation] = Object.values(item);
+    assert.equal(typeof operation.operationId, "string", `${path} is missing operationId`);
+    assert.deepEqual(operation.security, expectedSecurity.get(path), `${path} auth declaration drifted`);
+    assert.ok(operation.responses && Object.keys(operation.responses).length > 0, `${path} has no documented response`);
+    for (const [status, response] of Object.entries(operation.responses)) {
+      assert.equal(typeof response.description, "string", `${path} ${status} is missing a response description`);
+    }
+  }
 });
 
 test("the doc routes are served without credentials or environment (behavioral)", async () => {
