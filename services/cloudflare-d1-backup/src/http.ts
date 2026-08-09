@@ -20,6 +20,8 @@ export interface BackupHttpEnv extends BackupEnvLike {
   D1_BACKUP_WORKFLOW: WorkflowBindingLike<BackupTriggerParams>;
 }
 
+const MAX_MANUAL_BODY_BYTES = 1024;
+
 function json(value: unknown, status = 200): Response {
   return new Response(JSON.stringify(value), {
     status,
@@ -52,15 +54,49 @@ export function workflowInstanceId(kind: "manual" | "scheduled", nowMs: number):
   return `${kind}-${timestamp}-${crypto.randomUUID().slice(0, 8)}`;
 }
 
+async function readBoundedBody(request: Request): Promise<Uint8Array> {
+  const contentLength = Number(request.headers.get("content-length") ?? "");
+  if (Number.isFinite(contentLength) && contentLength > MAX_MANUAL_BODY_BYTES) {
+    throw new Error("request_too_large");
+  }
+  if (request.body === null) {
+    return new Uint8Array(0);
+  }
+
+  const reader = request.body.getReader();
+  const bytes = new Uint8Array(MAX_MANUAL_BODY_BYTES);
+  let size = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) {
+        return bytes.subarray(0, size);
+      }
+      if (value === undefined) {
+        continue;
+      }
+      if (size + value.byteLength > MAX_MANUAL_BODY_BYTES) {
+        try {
+          await reader.cancel("request_too_large");
+        } catch {
+          // The request is already rejected; cancellation errors do not change the response.
+        }
+        throw new Error("request_too_large");
+      }
+      bytes.set(value, size);
+      size += value.byteLength;
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
 async function manualParams(request: Request): Promise<BackupTriggerParams> {
   if (request.headers.get("content-type")?.includes("application/json") !== true) {
     return { trigger: "manual" };
   }
-  const contentLength = Number(request.headers.get("content-length") ?? "0");
-  if (contentLength > 1024) {
-    throw new Error("request_too_large");
-  }
-  const value: unknown = await request.json();
+  const body = await readBoundedBody(request);
+  const value: unknown = JSON.parse(new TextDecoder().decode(body));
   if (typeof value !== "object" || value === null) {
     return { trigger: "manual" };
   }
