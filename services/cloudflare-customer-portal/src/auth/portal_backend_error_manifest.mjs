@@ -37,7 +37,7 @@ export const BACKEND_PROXY_ERROR_MANIFEST = Object.freeze({
     "403": ["floating_disabled", "forbidden_scope", "no_active_entitlement", "device_proof_required", "device_proof_invalid", "borrowing_disabled"],
     "409": ["pool_exhausted"],
     "500": ["seat_signing_error", "verification_error"],
-    "503": ["verification_error", "config_error"],
+    "503": ["verification_error", "config_error", "seat_signing_unavailable"],
   }),
   heartbeat: freezeStatuses({
     "400": ["invalid_request"],
@@ -45,7 +45,7 @@ export const BACKEND_PROXY_ERROR_MANIFEST = Object.freeze({
     "403": ["no_active_entitlement", "forbidden_scope"],
     "410": ["seat_reclaimed"],
     "500": ["seat_signing_error", "verification_error"],
-    "503": ["verification_error", "config_error"],
+    "503": ["verification_error", "config_error", "seat_signing_unavailable"],
   }),
   release: freezeStatuses({
     "400": ["invalid_request"],
@@ -59,7 +59,7 @@ export const BACKEND_PROXY_ERROR_MANIFEST = Object.freeze({
     "401": ["unauthorized", "token_revoked", "token_expired"],
     "403": ["no_active_entitlement", "forbidden_scope", "expired_subscription", "device_proof_required", "device_proof_invalid", "device_limit_exceeded", "trial_device_proof_required", "trial_device_locked"],
     "500": ["lease_signing_error", "verification_error"],
-    "503": ["verification_error", "config_error"],
+    "503": ["verification_error", "config_error", "lease_signing_unavailable"],
   }),
 });
 

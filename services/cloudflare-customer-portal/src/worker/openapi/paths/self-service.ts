@@ -12,6 +12,14 @@ const BACKEND_PROXY_CONFIGURATION_ERRORS = errorResponse(
   "BACKEND_ORIGIN is absent or invalid (backend_unconfigured), portal token minting is misconfigured (config_error), or the backend returns config_error/verification_error.",
   ["backend_unconfigured", "config_error", "verification_error"],
 );
+const BACKEND_PROXY_SEAT_CONFIGURATION_ERRORS = errorResponse(
+  "BACKEND_ORIGIN is absent or invalid (backend_unconfigured), portal token minting is misconfigured (config_error), or the backend cannot sign a seat assertion (seat_signing_unavailable) / verify its request.",
+  ["backend_unconfigured", "config_error", "verification_error", "seat_signing_unavailable"],
+);
+const BACKEND_PROXY_LEASE_CONFIGURATION_ERRORS = errorResponse(
+  "BACKEND_ORIGIN is absent or invalid (backend_unconfigured), portal token minting is misconfigured (config_error), or the backend cannot sign a lease (lease_signing_unavailable) / verify its request.",
+  ["backend_unconfigured", "config_error", "verification_error", "lease_signing_unavailable"],
+);
 
 export const selfServicePaths: LabeledPathFragment = {
   label: "self-service",
@@ -250,7 +258,7 @@ export const selfServicePaths: LabeledPathFragment = {
           "413": ERR_BODY_TOO_LARGE,
           "500": errorResponse("The portal failed unexpectedly, or backend checkout failed to sign/verify the seat response.", ["portal_error", "seat_signing_error", "verification_error"]),
           "502": BACKEND_PROXY_TRANSPORT_ERRORS,
-          "503": BACKEND_PROXY_CONFIGURATION_ERRORS,
+          "503": BACKEND_PROXY_SEAT_CONFIGURATION_ERRORS,
         },
       },
     }],
@@ -274,7 +282,7 @@ export const selfServicePaths: LabeledPathFragment = {
           "413": ERR_BODY_TOO_LARGE,
           "500": errorResponse("The portal failed unexpectedly, or backend heartbeat failed to sign/verify the seat response.", ["portal_error", "seat_signing_error", "verification_error"]),
           "502": BACKEND_PROXY_TRANSPORT_ERRORS,
-          "503": BACKEND_PROXY_CONFIGURATION_ERRORS,
+          "503": BACKEND_PROXY_SEAT_CONFIGURATION_ERRORS,
         },
       },
     }],
@@ -331,7 +339,7 @@ export const selfServicePaths: LabeledPathFragment = {
           "413": ERR_BODY_TOO_LARGE,
           "500": errorResponse("The portal failed unexpectedly, or backend activate failed to sign/verify the lease response.", ["portal_error", "lease_signing_error", "verification_error"]),
           "502": errorResponse("Backend /v1/activate was unreachable or returned invalid JSON.", ["backend_unreachable", "backend_invalid_response"]),
-          "503": BACKEND_PROXY_CONFIGURATION_ERRORS,
+          "503": BACKEND_PROXY_LEASE_CONFIGURATION_ERRORS,
         },
       },
     }],

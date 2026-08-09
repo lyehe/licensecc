@@ -428,14 +428,15 @@
                         "enum": [
                           "backend_unconfigured",
                           "config_error",
-                          "verification_error"
+                          "verification_error",
+                          "seat_signing_unavailable"
                         ]
                       }
                     }
                   }
                 }
               },
-              "description": "BACKEND_ORIGIN is absent or invalid (backend_unconfigured), portal token minting is misconfigured (config_error), or the backend returns config_error/verification_error."
+              "description": "BACKEND_ORIGIN is absent or invalid (backend_unconfigured), portal token minting is misconfigured (config_error), or the backend cannot sign a seat assertion (seat_signing_unavailable) / verify its request."
             }
           },
           "security": [
@@ -973,14 +974,15 @@
                         "enum": [
                           "backend_unconfigured",
                           "config_error",
-                          "verification_error"
+                          "verification_error",
+                          "lease_signing_unavailable"
                         ]
                       }
                     }
                   }
                 }
               },
-              "description": "BACKEND_ORIGIN is absent or invalid (backend_unconfigured), portal token minting is misconfigured (config_error), or the backend returns config_error/verification_error."
+              "description": "BACKEND_ORIGIN is absent or invalid (backend_unconfigured), portal token minting is misconfigured (config_error), or the backend cannot sign a lease (lease_signing_unavailable) / verify its request."
             }
           },
           "security": [
@@ -1316,14 +1318,15 @@
                         "enum": [
                           "backend_unconfigured",
                           "config_error",
-                          "verification_error"
+                          "verification_error",
+                          "seat_signing_unavailable"
                         ]
                       }
                     }
                   }
                 }
               },
-              "description": "BACKEND_ORIGIN is absent or invalid (backend_unconfigured), portal token minting is misconfigured (config_error), or the backend returns config_error/verification_error."
+              "description": "BACKEND_ORIGIN is absent or invalid (backend_unconfigured), portal token minting is misconfigured (config_error), or the backend cannot sign a seat assertion (seat_signing_unavailable) / verify its request."
             }
           },
           "security": [

@@ -109,6 +109,10 @@ export const proxiedBackendOperations = Object.freeze([
     name: "checkout",
     portalPath: "/api/portal/checkout",
     backendPath: "/v1/checkout",
+    // Older reviewed backend canonicals documented the signing-unavailable response on the
+    // corresponding emergency operation first; newer canonicals list it on both. Keep the portal
+    // matrix derived from both reviewed route contracts rather than inventing a code locally.
+    backendErrorPaths: Object.freeze(["/v1/checkout", "/v1/emergency/v1/checkout"]),
     requestBody: (entitlementId) => ({ entitlement_id: entitlementId, client_instance_id: "i1", nonce: "e".repeat(64) }),
     localErrorCodes: freezeErrorCodes({
       "400": ["invalid_json"],
@@ -123,6 +127,7 @@ export const proxiedBackendOperations = Object.freeze([
     name: "heartbeat",
     portalPath: "/api/portal/heartbeat",
     backendPath: "/v1/heartbeat",
+    backendErrorPaths: Object.freeze(["/v1/heartbeat", "/v1/emergency/v1/heartbeat"]),
     requestBody: (entitlementId) => ({
       entitlement_id: entitlementId,
       client_instance_id: "i1",
@@ -142,6 +147,7 @@ export const proxiedBackendOperations = Object.freeze([
     name: "release",
     portalPath: "/api/portal/release",
     backendPath: "/v1/release",
+    backendErrorPaths: Object.freeze(["/v1/release"]),
     requestBody: (entitlementId) => ({
       entitlement_id: entitlementId,
       client_instance_id: "i1",
@@ -161,6 +167,7 @@ export const proxiedBackendOperations = Object.freeze([
     name: "download",
     portalPath: "/api/portal/download",
     backendPath: "/v1/activate",
+    backendErrorPaths: Object.freeze(["/v1/activate", "/v1/emergency/v1/activate"]),
     requestBody: (entitlementId) => ({ entitlement_id: entitlementId, device_key_id: "dk_a" }),
     localErrorCodes: freezeErrorCodes({
       "400": ["invalid_json", "device_key_required"],
@@ -173,9 +180,14 @@ export const proxiedBackendOperations = Object.freeze([
   }),
 ]);
 
+function canonicalOperationErrorCodes(operation, status) {
+  return unique((operation.backendErrorPaths ?? [operation.backendPath])
+    .flatMap((backendPath) => canonicalBackendErrorCodes(backendPath, status)));
+}
+
 export function expectedProxyErrorCodes(operation, status) {
   return unique([
-    ...canonicalBackendErrorCodes(operation.backendPath, status),
+    ...canonicalOperationErrorCodes(operation, status),
     ...(String(status) === "500" ? BACKEND_TOP_LEVEL_500_CODES : []),
     ...(operation.localErrorCodes[String(status)] ?? []),
   ]);
@@ -183,7 +195,7 @@ export function expectedProxyErrorCodes(operation, status) {
 
 export function backendStubCases(operation) {
   return BACKEND_STUB_STATUSES.flatMap((status) => unique([
-    ...canonicalBackendErrorCodes(operation.backendPath, status),
+    ...canonicalOperationErrorCodes(operation, status),
     ...(status === "500" ? BACKEND_TOP_LEVEL_500_CODES : []),
   ]).map((code) => ({ status: Number(status), code })));
 }
@@ -192,7 +204,7 @@ export function canonicalBackendErrorManifest(operation) {
   return Object.fromEntries(
     BACKEND_STUB_STATUSES.flatMap((status) => {
       const codes = unique([
-        ...canonicalBackendErrorCodes(operation.backendPath, status),
+        ...canonicalOperationErrorCodes(operation, status),
         ...(status === "500" ? BACKEND_TOP_LEVEL_500_CODES : []),
       ]);
       return codes.length === 0 ? [] : [[status, codes]];
