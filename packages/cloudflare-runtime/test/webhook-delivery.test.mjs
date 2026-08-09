@@ -68,10 +68,14 @@ function makeEnvironment(overrides = {}) {
   return { env: { ...SIGNING_ENV, ...overrides.env, DB: db }, state };
 }
 
-function streamedResponse(chunks, { status = 500, keepOpen = false, error, headers = new Headers() } = {}) {
+function streamedResponse(
+  chunks,
+  { status = 500, keepOpen = false, error, cancelError, headers = new Headers() } = {},
+) {
   const encoder = new TextEncoder();
   let index = 0;
   let reads = 0;
+  let cancelAttempts = 0;
   let cancelled = false;
   let cancelReason;
   let textCalls = 0;
@@ -94,6 +98,11 @@ function streamedResponse(chunks, { status = 500, keepOpen = false, error, heade
     },
   });
   const body = {
+    cancel(reason) {
+      cancelAttempts += 1;
+      if (cancelError !== undefined) throw cancelError;
+      return stream.cancel(reason);
+    },
     getReader() {
       const reader = stream.getReader();
       return {
@@ -137,6 +146,9 @@ function streamedResponse(chunks, { status = 500, keepOpen = false, error, heade
     },
     get reads() {
       return reads;
+    },
+    get cancelAttempts() {
+      return cancelAttempts;
     },
     get cancelled() {
       return cancelled;
@@ -265,12 +277,44 @@ test("fetch errors retain timeout/retry behavior", async () => {
   assert.match(state.last_error, /network down|aborted/);
 });
 
-test("successful responses are delivered without reading a response body", async () => {
+test("successful responses cancel an endless body before committing delivery", async () => {
   const response = streamedResponse([], { status: 204, keepOpen: true });
-  const state = await deliverWith(response);
+  const calls = [];
+  const state = await deliverWithFetcher(async (url, init) => {
+    calls.push({ url, init });
+    return response;
+  });
 
+  assert.equal(calls.length, 1);
   assert.equal(state.status, "delivered");
   assert.equal(state.last_status, 204);
+  assert.equal(state.attempts, 1);
+  assert.equal(state.next_attempt_at, 0);
+  assert.equal(state.last_error, "");
   assert.equal(response.reads, 0);
+  assert.equal(response.cancelAttempts, 1);
+  assert.equal(response.cancelled, true);
+});
+
+test("successful responses remain delivered when body cancellation throws", async () => {
+  const response = streamedResponse([], {
+    status: 200,
+    keepOpen: true,
+    cancelError: new Error("body cancel failed"),
+  });
+  const calls = [];
+  const state = await deliverWithFetcher(async (url, init) => {
+    calls.push({ url, init });
+    return response;
+  });
+
+  assert.equal(calls.length, 1);
+  assert.equal(state.status, "delivered");
+  assert.equal(state.last_status, 200);
+  assert.equal(state.attempts, 1);
+  assert.equal(state.next_attempt_at, 0);
+  assert.equal(state.last_error, "");
+  assert.equal(response.reads, 0);
+  assert.equal(response.cancelAttempts, 1);
   assert.equal(response.cancelled, false);
 });

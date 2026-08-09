@@ -551,6 +551,15 @@ async function deliverOne(env, delivery, secretsMap, keyId, now, logEvent) {
       } catch {
         errText = "";
       }
+    } else {
+      // A successful response body is intentionally unread; cancel it before recording delivery so
+      // an endless/slow response cannot keep the subrequest open. Cancellation is best-effort and
+      // must not turn an already-successful webhook into a retry.
+      try {
+        await resp.body?.cancel();
+      } catch {
+        // The delivery already succeeded; a body cancellation failure is non-fatal.
+      }
     }
   } catch (error) {
     // Network error, abort/timeout, DNS, etc. -> a retryable failure.
