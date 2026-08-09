@@ -37,6 +37,10 @@ const BACKOFF_SCHEDULE_SECONDS = [30, 120, 600, 3600, 21600]; // 30s, 2m, 10m, 1
 export const WEBHOOK_ENQUEUE_BATCH = 500;
 export const WEBHOOK_DELIVER_BATCH = 50;
 const DELIVER_TIMEOUT_MS = 5000;
+// Error diagnostics are deliberately much smaller than the request body limits: a remote endpoint
+// must not be able to make every retry buffer an unbounded response just because it returned non-2xx.
+export const WEBHOOK_ERROR_BODY_MAX_BYTES = 1024;
+const WEBHOOK_ERROR_TEXT_MAX_CHARS = 256;
 
 // ---------------------------------------------------------------------------------------------
 // Event-source descriptors. The three READ-ONLY audit tables, the monotonic integer the cursor
@@ -296,6 +300,56 @@ export function nextBackoff(attempts) {
   return BACKOFF_SCHEDULE_SECONDS[BACKOFF_SCHEDULE_SECONDS.length - 1];
 }
 
+/**
+ * Read only a bounded UTF-8 diagnostic from a non-2xx response. Once the byte cap is reached the
+ * remaining body is cancelled so a streaming endpoint cannot make a retry consume unbounded data.
+ * TextDecoder's non-fatal UTF-8 mode gives malformed or truncated sequences deterministic U+FFFD
+ * replacement characters, matching Response#text() for ordinary response bodies.
+ */
+export async function readWebhookErrorBody(response) {
+  const body = response?.body;
+  if (body === null || body === undefined || typeof body.getReader !== "function") return "";
+
+  let reader;
+  try {
+    reader = body.getReader();
+  } catch {
+    return "";
+  }
+
+  const bytes = new Uint8Array(WEBHOOK_ERROR_BODY_MAX_BYTES);
+  let size = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value === undefined || value.byteLength === 0) continue;
+
+      const remaining = WEBHOOK_ERROR_BODY_MAX_BYTES - size;
+      if (value.byteLength >= remaining) {
+        bytes.set(value.subarray(0, remaining), size);
+        size += remaining;
+        try {
+          await reader.cancel("webhook_error_body_cap");
+        } catch {
+          // The diagnostic is already bounded; a cancellation failure must not alter delivery retry.
+        }
+        break;
+      }
+      bytes.set(value, size);
+      size += value.byteLength;
+    }
+  } catch {
+    return "";
+  } finally {
+    reader.releaseLock();
+  }
+
+  return new TextDecoder("utf-8", { fatal: false })
+    .decode(bytes.subarray(0, size))
+    .slice(0, WEBHOOK_ERROR_TEXT_MAX_CHARS);
+}
+
 // -------------------------------------------------------------------------------------------------
 // ENQUEUE + DELIVER (D1 I/O) — called ONLY from scheduled(). Best-effort: every DB/fetch error is
 // swallowed so a webhook problem can never break the cron sweep that runs alongside it.
@@ -492,7 +546,7 @@ async function deliverOne(env, delivery, secretsMap, keyId, now, logEvent) {
     if (!ok) {
       // Read a short error snippet best-effort; never let a body read failure crash the tick.
       try {
-        errText = (await resp.text()).slice(0, 256);
+        errText = await readWebhookErrorBody(resp);
       } catch {
         errText = "";
       }
