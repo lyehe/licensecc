@@ -25,6 +25,110 @@ const setSessionCookie = (sessionModule as { setSessionCookie: (raw: string) => 
 const clearSessionCookie = (sessionModule as { clearSessionCookie: () => string }).clearSessionCookie;
 const sendEmail = (emailModule as { sendEmail: AnyFn }).sendEmail;
 
+const MAGIC_REDEEM_MAX_BODY_BYTES = 8192;
+const HEX = /^[0-9A-Fa-f]{2}$/;
+const formTextEncoder = new TextEncoder();
+
+type BoundedBody =
+  | { ok: true; bytes: Uint8Array }
+  | { ok: false; code: "body_too_large" | "read_error" };
+
+async function readBoundedBody(request: Request): Promise<BoundedBody> {
+  const declaredLength = Number(request.headers.get("content-length") ?? "");
+  if (Number.isFinite(declaredLength) && declaredLength > MAGIC_REDEEM_MAX_BODY_BYTES) {
+    return { ok: false, code: "body_too_large" };
+  }
+  if (request.body === null) return { ok: true, bytes: new Uint8Array(0) };
+
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    for (;;) {
+      let result: ReadableStreamReadResult<Uint8Array>;
+      try {
+        result = await reader.read();
+      } catch {
+        try {
+          await reader.cancel();
+        } catch {
+          // The body is already invalid; a cancellation failure must not change the envelope.
+        }
+        return { ok: false, code: "read_error" };
+      }
+      if (result.done) break;
+      const value = result.value;
+      if (value === undefined) continue;
+      if (size + value.byteLength > MAGIC_REDEEM_MAX_BODY_BYTES) {
+        try {
+          await reader.cancel();
+        } catch {
+          // The body is already too large; a cancellation failure must not change the response.
+        }
+        return { ok: false, code: "body_too_large" };
+      }
+      chunks.push(value);
+      size += value.byteLength;
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return { ok: true, bytes };
+}
+
+function decodeFormComponent(value: string): string | null {
+  const bytes: number[] = [];
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index];
+    if (character === "%") {
+      const escape = value.slice(index + 1, index + 3);
+      if (!HEX.test(escape)) return null;
+      bytes.push(Number.parseInt(escape, 16));
+      index += 2;
+      continue;
+    }
+    const source = character === "+" ? " " : character;
+    const encoded = formTextEncoder.encode(source);
+    for (const byte of encoded) bytes.push(byte);
+  }
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(new Uint8Array(bytes));
+  } catch {
+    return null;
+  }
+}
+
+function parseFormToken(bytes: Uint8Array): { ok: true; token: string } | { ok: false } {
+  let text: string;
+  try {
+    text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    return { ok: false };
+  }
+
+  let token = "";
+  let foundToken = false;
+  for (const field of text.split("&")) {
+    if (field === "") continue;
+    const separator = field.indexOf("=");
+    const key = decodeFormComponent(separator < 0 ? field : field.slice(0, separator));
+    const value = decodeFormComponent(separator < 0 ? "" : field.slice(separator + 1));
+    if (key === null || value === null) return { ok: false };
+    if (key === "token" && !foundToken) {
+      token = value;
+      foundToken = true;
+    }
+  }
+  return { ok: true, token };
+}
+
 // Resolve the verified session (the ONLY identity source). Returns the session object or a 401/503
 // envelope the caller returns directly.
 export async function authSession(request: Request, env: Env, reqId: string, now: number): Promise<{ customer_id: string; id: string } | Response> {
@@ -112,19 +216,27 @@ function handleMagicInterstitial(request: Request, env: Env): Response {
 
 async function handleMagicRedeem(request: Request, env: Env, reqId: string, now: number): Promise<Response> {
   if (isCrossSite(request, env)) return envelope(reqId, "cross_site_forbidden", undefined, 403);
-  // The interstitial form posts application/x-www-form-urlencoded; also accept JSON.
-  let token = "";
-  const contentType = request.headers.get("content-type") ?? "";
-  if (contentType.includes("application/json")) {
+  const mediaType = (request.headers.get("content-type") ?? "").split(";", 1)[0]?.trim().toLowerCase() ?? "";
+  if (mediaType === "application/json" || mediaType.endsWith("+json")) {
     const body = await readJson(request, reqId);
     if (body instanceof Response) return body;
-    token = typeof body.token === "string" ? body.token : "";
-  } else {
-    const form = await request.formData();
-    const value = form.get("token");
-    token = typeof value === "string" ? value : "";
+    return redeemAndMintSession(env, request, reqId, now, {
+      secret: typeof body.token === "string" ? body.token : "",
+    });
   }
-  return redeemAndMintSession(env, request, reqId, now, { secret: token });
+  if (mediaType !== "application/x-www-form-urlencoded") {
+    return envelope(reqId, "unsupported_media_type", undefined, 415);
+  }
+
+  const body = await readBoundedBody(request);
+  if (!body.ok) {
+    return body.code === "body_too_large"
+      ? envelope(reqId, "body_too_large", undefined, 413)
+      : envelope(reqId, "invalid_request", undefined, 400);
+  }
+  const parsed = parseFormToken(body.bytes);
+  if (!parsed.ok) return envelope(reqId, "invalid_request", undefined, 400);
+  return redeemAndMintSession(env, request, reqId, now, { secret: parsed.token });
 }
 
 async function handleLogout(request: Request, env: Env, reqId: string, now: number): Promise<Response> {

@@ -1,6 +1,66 @@
 import { test } from "node:test";
 import { assert, worker, mintSession, codeFromSecretBytes, requestOtp, redeemOtp, policyCapacityViolation, FP_A, FP_B, installBackendStub, cookieFor, sameSiteHeaders, entitlementId, ownedEntitlementId, call, baseFixture, seedDevice, seedEntitlement, CTX, NOW } from "./portal-worker-fixtures.mjs";
 
+const textEncoder = new TextEncoder();
+
+function streamingMagicRequest(chunks, { contentType = "application/x-www-form-urlencoded", contentLength } = {}) {
+  const state = { pulls: 0, cancelled: false, cancelReason: undefined };
+  let index = 0;
+  const body = new ReadableStream({
+    pull(controller) {
+      state.pulls += 1;
+      const chunk = chunks[index++];
+      if (chunk === undefined) {
+        controller.close();
+        return;
+      }
+      controller.enqueue(typeof chunk === "string" ? textEncoder.encode(chunk) : chunk);
+    },
+    cancel(reason) {
+      state.cancelled = true;
+      state.cancelReason = reason;
+    },
+  });
+  const headers = sameSiteHeaders({ "content-type": contentType });
+  if (contentLength !== undefined) headers["content-length"] = String(contentLength);
+  const request = new Request("https://portal.test/portal/v1/auth/magic-redeem", {
+    method: "POST",
+    headers,
+    body,
+    duplex: "half",
+  });
+  return { request, state };
+}
+
+async function magicResponse(env, request) {
+  const res = await worker.fetch(request, env, CTX);
+  return { status: res.status, body: await res.json(), res };
+}
+
+function unreadMagicRequest({ contentType, contentLength }) {
+  const state = { readerRequested: false };
+  const headers = new Headers(sameSiteHeaders({ "content-type": contentType }));
+  if (contentLength !== undefined) headers.set("content-length", String(contentLength));
+  return {
+    state,
+    request: {
+      url: "https://portal.test/portal/v1/auth/magic-redeem",
+      method: "POST",
+      headers,
+      body: {
+        getReader() {
+          state.readerRequested = true;
+          throw new Error("body must not be read");
+        },
+      },
+    },
+  };
+}
+
+function otpRow(db) {
+  return db.prepare("SELECT consumed_at, attempt_count FROM portal_otp WHERE customer_id = 'A' ORDER BY created_at DESC LIMIT 1").get() ?? null;
+}
+
 test("auth/request rejects oversized JSON bodies without relying on Content-Length", async () => {
   const { db, env } = baseFixture();
   const res = await worker.fetch(new Request("https://portal.test/portal/v1/auth/request", {
@@ -127,6 +187,126 @@ test("auth magic redeem enforces CSRF and returns invalid-token status", async (
   const invalid = await call(env, "POST", "/portal/v1/auth/magic-redeem", { body: { token: "bad" } });
   assert.equal(invalid.status, 401);
   assert.equal(invalid.body.code, "invalid_otp");
+  db.close();
+});
+
+test("auth magic redeem accepts a bounded form at exactly 8192 bytes across chunk splits", async () => {
+  const { db, env } = baseFixture();
+  const prefix = "token=bad&padding=";
+  const body = prefix + "x".repeat(8192 - prefix.length);
+  const { request, state } = streamingMagicRequest([
+    body.slice(0, 1),
+    body.slice(1, 4097),
+    body.slice(4097),
+  ]);
+  const result = await magicResponse(env, request);
+  assert.equal(result.status, 401);
+  assert.equal(result.body.code, "invalid_otp");
+  assert.equal(state.cancelled, false, "an exactly-boundary form must not be cancelled");
+  assert.ok(state.pulls >= 3, "the bounded reader must consume split chunks through the exact boundary");
+  db.close();
+});
+
+test("auth magic redeem rejects a declared oversized body before reading it", async () => {
+  const { db, env } = baseFixture();
+  const { request, state } = unreadMagicRequest({ contentType: "application/x-www-form-urlencoded", contentLength: 8193 });
+  const result = await magicResponse(env, request);
+  assert.equal(result.status, 413);
+  assert.equal(result.body.code, "body_too_large");
+  assert.equal(state.readerRequested, false, "declared oversize is rejected before the body is read");
+  db.close();
+});
+
+test("auth magic redeem enforces the actual byte cap with missing and lying Content-Length", async () => {
+  const { db, env } = baseFixture();
+  const prefix = "token=bad&padding=";
+  const body = prefix + "x".repeat(8193 - prefix.length);
+  for (const contentLength of [undefined, 1]) {
+    const { request, state } = streamingMagicRequest([
+      body.slice(0, 4096),
+      body.slice(4096, 8192),
+      body.slice(8192),
+    ], { contentLength });
+    const result = await magicResponse(env, request);
+    assert.equal(result.status, 413, contentLength === undefined ? "missing length" : "lying length");
+    assert.equal(result.body.code, "body_too_large");
+    assert.equal(state.cancelled, true, "overflow must cancel the request reader");
+  }
+  db.close();
+});
+
+test("auth magic redeem parses fatal UTF-8 and malformed forms before OTP side effects", async () => {
+  const { db, env } = baseFixture();
+  await requestOtp(env, { email: "a@x.com", clientIp: "seed", returnSecret: true, now: NOW });
+  const before = otpRow(db);
+  const invalidUtf8 = new Uint8Array([...textEncoder.encode("token="), 0xff]);
+  const cases = [
+    invalidUtf8,
+    "token=%ZZ",
+    "token=%FF",
+  ];
+  for (const body of cases) {
+    const { request } = streamingMagicRequest([body]);
+    const result = await magicResponse(env, request);
+    assert.equal(result.status, 400);
+    assert.equal(result.body.code, "invalid_request");
+    assert.deepEqual(otpRow(db), before, "invalid bounded form input must not redeem or rate-limit an OTP");
+  }
+  db.close();
+});
+
+test("auth magic redeem rejects unsupported media types without consuming the body", async () => {
+  const { db, env } = baseFixture();
+  const { request, state } = unreadMagicRequest({
+    contentType: "multipart/form-data; boundary=boundary",
+  });
+  const result = await magicResponse(env, request);
+  assert.equal(result.status, 415);
+  assert.equal(result.body.code, "unsupported_media_type");
+  assert.equal(state.readerRequested, false);
+  db.close();
+});
+
+test("auth magic redeem cancels and envelopes a request-stream read error", async () => {
+  const { db, env } = baseFixture();
+  let cancelled = false;
+  const body = {
+    getReader() {
+      return {
+        async read() {
+          throw new Error("stream failed");
+        },
+        async cancel() {
+          cancelled = true;
+        },
+        releaseLock() {},
+      };
+    },
+  };
+  const request = {
+    url: "https://portal.test/portal/v1/auth/magic-redeem",
+    method: "POST",
+    headers: new Headers(sameSiteHeaders({ "content-type": "application/x-www-form-urlencoded" })),
+    body,
+  };
+  const result = await magicResponse(env, request);
+  assert.equal(result.status, 400);
+  assert.equal(result.body.code, "invalid_request");
+  assert.equal(cancelled, true, "a failed read must cancel the reader");
+  db.close();
+});
+
+test("auth magic redeem preserves token redemption semantics for a valid bounded form", async () => {
+  const { db, env } = baseFixture();
+  const issued = await requestOtp(env, { email: "a@x.com", clientIp: "seed", returnSecret: true, now: NOW });
+  assert.equal(issued.ok, true);
+  const { request } = streamingMagicRequest([`token=${encodeURIComponent(issued.secret)}`]);
+  const result = await magicResponse(env, request);
+  assert.equal(result.status, 200);
+  assert.equal(result.body.code, "signed_in");
+  assert.equal(result.body.data.customer_id, "A");
+  assert.match(result.res.headers.get("set-cookie") ?? "", /lccp_session=lccp_/);
+  assert.notEqual(otpRow(db)?.consumed_at, null);
   db.close();
 });
 

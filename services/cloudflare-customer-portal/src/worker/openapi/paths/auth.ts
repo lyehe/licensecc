@@ -1,6 +1,9 @@
 import type { LabeledPathFragment } from "../assemble.js";
 import { ERR_BODY_TOO_LARGE, ERR_CROSS_SITE, ERR_INVALID_JSON, errorResponse, LEASE_ACTION_REQUEST } from "../components.js";
 
+const ERR_INVALID_MAGIC_BODY = errorResponse("Body was not valid JSON or application/x-www-form-urlencoded.", ["invalid_json", "invalid_request"]);
+const ERR_UNSUPPORTED_MEDIA_TYPE = errorResponse("Content-Type must be application/json or application/x-www-form-urlencoded.", "unsupported_media_type");
+
 export const authPaths: LabeledPathFragment = {
   label: "auth",
   entries: [
@@ -133,8 +136,9 @@ export const authPaths: LabeledPathFragment = {
         summary: "Redeem a magic-link token and mint an opaque session.",
         description:
           "Accepts the token either as JSON { token } or as application/x-www-form-urlencoded " +
-          "token=<secret> (posted by the interstitial form). Email-independent; single-use via an " +
-          "atomic UPDATE. On success sets the lccp_session cookie.",
+          "token=<secret> (posted by the interstitial form). The request body is capped at 8192 " +
+          "bytes before parsing; multipart and other media types are rejected. Email-independent; " +
+          "single-use via an atomic UPDATE. On success sets the lccp_session cookie.",
         security: [],
         requestBody: {
 
@@ -178,10 +182,11 @@ export const authPaths: LabeledPathFragment = {
               },
             },
           },
-          "400": ERR_INVALID_JSON,
+          "400": ERR_INVALID_MAGIC_BODY,
           "401": errorResponse("Invalid OTP (wrong/consumed/expired/over-cap secret), or unauthorized config_error from redeemOtp.", "invalid_otp"),
           "403": ERR_CROSS_SITE,
           "413": ERR_BODY_TOO_LARGE,
+          "415": ERR_UNSUPPORTED_MEDIA_TYPE,
           "429": errorResponse("Rate limited (per-IP verify 30/900s).", "rate_limited"),
           "503": errorResponse("PORTAL_OTP_PEPPERS or PORTAL_SESSION_PEPPERS unset.", "config_error"),
         },

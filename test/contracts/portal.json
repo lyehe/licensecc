@@ -2158,7 +2158,7 @@
       },
       "/portal/v1/auth/magic-redeem": {
         "post": {
-          "description": "Accepts the token either as JSON { token } or as application/x-www-form-urlencoded token=<secret> (posted by the interstitial form). Email-independent; single-use via an atomic UPDATE. On success sets the lccp_session cookie.",
+          "description": "Accepts the token either as JSON { token } or as application/x-www-form-urlencoded token=<secret> (posted by the interstitial form). The request body is capped at 8192 bytes before parsing; multipart and other media types are rejected. Email-independent; single-use via an atomic UPDATE. On success sets the lccp_session cookie.",
           "operationId": "authMagicRedeem",
           "requestBody": {
             "content": {
@@ -2243,13 +2243,16 @@
                     ],
                     "properties": {
                       "code": {
-                        "const": "invalid_json"
+                        "enum": [
+                          "invalid_json",
+                          "invalid_request"
+                        ]
                       }
                     }
                   }
                 }
               },
-              "description": "Body was not a JSON object."
+              "description": "Body was not valid JSON or application/x-www-form-urlencoded."
             },
             "401": {
               "content": {
@@ -2307,6 +2310,25 @@
                 }
               },
               "description": "Request body exceeded 8192 bytes."
+            },
+            "415": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "unsupported_media_type"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Content-Type must be application/json or application/x-www-form-urlencoded."
             },
             "429": {
               "content": {
