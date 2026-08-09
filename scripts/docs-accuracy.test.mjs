@@ -28,15 +28,18 @@ test("backend documentation tracks the accepted C++ online API", () => {
   assert.match(backendReadme, /does not\s+claim TPM support/i);
 });
 
-test("organization evidence names only the final unpublished generator candidate", () => {
+test("organization evidence tracks the current unpublished candidate", () => {
   const report = source("docs/implementation/a-level-organization-report.md");
 
-  assert.match(report, /f969e5f40bae55d61a98c208d6198b75cfb86fb3/);
+  assert.match(report, /final reviewed generator candidate `dbe2601f9bc0f55a386a14140d4b722b53348df6` remains unpublished\/unpinned/i);
   assert.match(report, /unpublished\/unpinned/i);
   assert.match(report, /superproject gitlink `0227a3e`/i);
   assert.match(report, /protected (?:WIP|nested revision) `dbbaed0`/i);
   assert.match(report, /conditional on maintainer approval and publication\/pinning/i);
-  assert.doesNotMatch(report, /4a716a5(?:93748d205a67dabf789c6fb39da9a975e)?/i);
+  assert.doesNotMatch(
+    report,
+    /(?:reviewed generator candidate|embedded final reviewed candidate)[^\n]*`(?:f969e5f40bae55d61a98c208d6198b75cfb86fb3|4a716a5(?:93748d205a67dabf789c6fb39da9a975e)?)`/i,
+  );
 });
 
 test("admin browser instructions and the PR gate keep docs checks honest", () => {
