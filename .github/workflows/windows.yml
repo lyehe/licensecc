@@ -19,12 +19,12 @@ jobs:
             - "ci-windows-msvc-release-static"
 
       steps:
-      -  uses: actions/checkout@v4
+      -  uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
          with:
             submodules: recursive
       -  name: Cache Boost (msvc 14.3 / VS2022)
          id: cache-boost
-         uses: actions/cache@v4
+         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
          with:
             path: C:\local\boost_1_84_0
             key: boost-msvc-14.3-1.84.0.1-windows-2022

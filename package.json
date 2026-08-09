@@ -16,6 +16,7 @@
     "test:scan:secrets": "node --test scripts/secret-lint.test.mjs",
     "test:docs-accuracy": "node --test scripts/docs-accuracy.test.mjs",
     "test:wrangler-pins": "node --test scripts/wrangler-pin-consistency.test.mjs",
+    "test:workflow-pins": "node --test scripts/workflow-action-pins.test.mjs",
     "lint": "eslint \"packages/*/src/**/*.{js,mjs,ts,tsx}\" \"services/cloudflare-licensing-backend/src/**/*.{js,mjs,ts,tsx}\" \"services/cloudflare-license-admin/src/**/*.{js,mjs,ts,tsx}\" \"services/cloudflare-customer-portal/src/**/*.{js,mjs,ts,tsx}\" \"services/cloudflare-d1-backup/src/**/*.{js,mjs,ts,tsx}\" \"scripts/**/*.{js,mjs,ts,tsx}\" --max-warnings 0",
     "lint:services": "npm run lint --workspace @licensecc/cloudflare-licensing-backend && npm run lint --workspace @licensecc/cloudflare-license-admin && npm run lint --workspace @licensecc/cloudflare-customer-portal && npm run lint --workspace @licensecc/cloudflare-d1-backup",
     "typecheck": "node scripts/check-typecheck-coverage.mjs && npm run typecheck --workspace @licensecc/licensing-domain && npm run typecheck --workspace @licensecc/cloudflare-runtime && npm run typecheck --workspace @licensecc/cloudflare-licensing-backend && npm run typecheck --workspace @licensecc/cloudflare-license-admin && npm run typecheck --workspace @licensecc/cloudflare-customer-portal && npm run typecheck --workspace @licensecc/cloudflare-d1-backup",
@@ -32,7 +33,7 @@
     "test:architecture": "node --test scripts/check-architecture.test.mjs",
     "test:contracts": "node --test test/contracts/canonical-contracts.test.mjs && node scripts/canonical-contracts.mjs",
     "write:contract-baselines": "node scripts/canonical-contracts.mjs --write",
-    "check:pr": "npm run scan:secrets && npm run test:scan:secrets && npm run test:docs-accuracy && npm run test:wrangler-pins && npm run lint && npm run typecheck && npm run check:architecture && npm run test:architecture && npm run test:contracts && npm run test:services"
+    "check:pr": "npm run scan:secrets && npm run test:scan:secrets && npm run test:docs-accuracy && npm run test:wrangler-pins && npm run test:workflow-pins && npm run lint && npm run typecheck && npm run check:architecture && npm run test:architecture && npm run test:contracts && npm run test:services"
   },
   "workspaces": [
     "packages/licensing-domain",
