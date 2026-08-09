@@ -12,7 +12,7 @@ about a remote run.
 This report covers Task 11 at base
 `9b7bdef4dbf2e6cc97f676617fbdb4f01ba7dda3` on branch
 `org/11-architecture-evidence`. The reviewed generator candidate is
-`dbe2601f9bc0f55a386a14140d4b722b53348df6`, but it is unpublished and
+`74996a7d345df7b9a7cb46a08d423cb738217ed1`, but it is unpublished and
 unpinned: the superproject gitlink is `0227a3e` and the protected WIP nested
 revision is `dbbaed0`. Promotion remains conditional on maintainer approval
 and publication/pinning. The protected nested generator worktree is outside
@@ -34,7 +34,7 @@ not accepted into the superproject.
 | Task 0 | `456f701270bf75040992c8e1bd0136fde8792fa2` |
 | Task 1 | `d36c62f1c8f63ba6d2c58ae88bc95d489663aac8`, `2a8bf1854038e9b1c6fd3faaa30ed8ad61a8df58` |
 | Task 2 | `21ef71b41ace61ef2e4caff1386915309f0dd8e9`; follow-up `83365aa7ca2fe4398d873e6cabfa57addff7df1a` (source `04ed6ee`) |
-| Task 3 | Superproject `be6e551`, `8e5de1864006b85e5c4bf3e8057c333de449b08a`; final reviewed generator candidate `dbe2601f9bc0f55a386a14140d4b722b53348df6` remains unpublished/unpinned (superproject gitlink `0227a3e`, protected WIP `dbbaed0`). Promotion is conditional on maintainer approval and publication/pinning. |
+| Task 3 | Superproject `be6e551`, `8e5de1864006b85e5c4bf3e8057c333de449b08a`; final reviewed generator candidate `74996a7d345df7b9a7cb46a08d423cb738217ed1` remains unpublished/unpinned (superproject gitlink `0227a3e`, protected WIP `dbbaed0`). Promotion is conditional on maintainer approval and publication/pinning. |
 | Task 4 | `15e7af553c167fcb1a2c94383d3e570a17ebab3b` |
 | Task 5 | Integrated `dea865f` (source `5aab455`) |
 | Task 6 | Integrated `142f453`, `c3dab95`, `10c64d6` |
@@ -139,7 +139,7 @@ tables**. No contract or schema file was changed by this documentation packet.
 | Browser E2E | Backend **2**, admin **5**, portal **1** tests passed in the accepted Task 10 evidence. |
 | Credential-free deploy checks | All four Worker dry-runs green. |
 | Core Windows Task 0 | Full CTest **34/34** passed. |
-| Isolated generator-candidate superproject check | Disposable short-path worktree at superproject `c306807614495027864b5bd8b809008df66671e4` with nested final reviewed candidate `dbe2601f9bc0f55a386a14140d4b722b53348df6`: embedded Debug configure/build and full CTest **37/37** passed. Logs: `build/fd-candidate/evidence/{identity,configure-debug,build-debug,ctest-debug}.log`. The published superproject remains at gitlink `0227a3e` while protected WIP is `dbbaed0`; candidate publication/pinning is conditional on maintainer approval. |
+| Isolated generator-candidate superproject check | Disposable short-path worktree at superproject `c306807614495027864b5bd8b809008df66671e4` with nested final reviewed candidate `74996a7d345df7b9a7cb46a08d423cb738217ed1`: embedded Debug configure/build and full CTest **37/37** passed. Logs: `build/fd-candidate-749/evidence/{identity,configure-debug,build-debug,ctest-debug}.log`. The published superproject remains at gitlink `0227a3e` while protected WIP is `dbbaed0`; candidate publication/pinning is conditional on maintainer approval. |
 | Ubuntu native CMake | **Blocked/not-run**: the available WSL environment had no `cmake` executable; no tool installation was performed. |
 | Strict raw Sphinx | Green locally using the pinned raw Sphinx command after the authored-page updates. |
 | `npm run check:docs` | **Blocked/not-run to completion** on this host because `doxygen` is unavailable; the command fails closed before consuming stale XML. |
@@ -207,7 +207,7 @@ breakdown was not collected, so no severity is inferred here.
 ## Unresolved risks and exit gate
 
 1. Final reviewed generator candidate
-   `dbe2601f9bc0f55a386a14140d4b722b53348df6` is not a published/pinned
+   `74996a7d345df7b9a7cb46a08d423cb738217ed1` is not a published/pinned
    submodule revision: the superproject gitlink is `0227a3e` and the protected
    WIP nested revision is `dbbaed0`. Publication/pinning remains conditional on
    maintainer approval; the protected nested worktree remains untouched.

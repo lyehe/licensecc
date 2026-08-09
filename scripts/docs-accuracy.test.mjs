@@ -31,14 +31,14 @@ test("backend documentation tracks the accepted C++ online API", () => {
 test("organization evidence tracks the current unpublished candidate", () => {
   const report = source("docs/implementation/a-level-organization-report.md");
 
-  assert.match(report, /final reviewed generator candidate `dbe2601f9bc0f55a386a14140d4b722b53348df6` remains unpublished\/unpinned/i);
+  assert.match(report, /final reviewed generator candidate `74996a7d345df7b9a7cb46a08d423cb738217ed1` remains unpublished\/unpinned/i);
   assert.match(report, /unpublished\/unpinned/i);
   assert.match(report, /superproject gitlink `0227a3e`/i);
   assert.match(report, /protected (?:WIP|nested revision) `dbbaed0`/i);
   assert.match(report, /conditional on maintainer approval and publication\/pinning/i);
   assert.doesNotMatch(
     report,
-    /(?:reviewed generator candidate|embedded final reviewed candidate)[^\n]*`(?:f969e5f40bae55d61a98c208d6198b75cfb86fb3|4a716a5(?:93748d205a67dabf789c6fb39da9a975e)?)`/i,
+    /(?:reviewed generator candidate|embedded final reviewed candidate)[^\n]*`(?:f969e5f40bae55d61a98c208d6198b75cfb86fb3|dbe2601f9bc0f55a386a14140d4b722b53348df6|4a716a5(?:93748d205a67dabf789c6fb39da9a975e)?)`/i,
   );
 });
 
