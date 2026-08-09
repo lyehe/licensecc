@@ -1,6 +1,7 @@
 import React, { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { EntitlementDeviceRecord, EntitlementRecord, Policy } from "../../../shared/api";
+import { ENTITLEMENT_BATCH_MAX_IDS } from "../../../shared/api";
 import type { NavigationIntent } from "../../app/types";
 import { api } from "../../shared/api";
 import { HealthBadge } from "../../shared/charts";
@@ -10,6 +11,7 @@ import { formatEpoch, shortHash } from "../../shared/format";
 import { downloadCsv, loadMore } from "../../shared/pagination";
 import {
   batchBody,
+  boundedBatchSelection,
   batchPath,
   canEditEntitlement,
   canRunAction,
@@ -21,6 +23,7 @@ import {
   editFormFromEntitlement,
   emptyEntitlementEditForm,
   emptyEntitlementForm,
+  entitlementBatchSelectionNotice,
   entitlementsPath,
   entitlementDevicesPath,
   entitlementMeterPath,
@@ -257,6 +260,10 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled }: 
   }
 
   function toggleSelected(id: string): void {
+    if (!selectedIds.has(id) && selectedIds.size >= ENTITLEMENT_BATCH_MAX_IDS) {
+      setMessage(entitlementBatchSelectionNotice);
+      return;
+    }
     setSelectedIds((previous) => {
       const next = new Set(previous);
       if (next.has(id)) next.delete(id);
@@ -265,9 +272,13 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled }: 
     });
   }
 
-  const allSelected = entitlements.length > 0 && entitlements.every((item) => selectedIds.has(item.id));
+  const selectableLoadedIds = boundedBatchSelection(entitlements.map((item) => item.id));
+  const allSelected = selectableLoadedIds.length > 0 && selectableLoadedIds.every((id) => selectedIds.has(id));
   function toggleSelectAll(): void {
-    setSelectedIds(allSelected ? new Set() : new Set(entitlements.map((item) => item.id)));
+    if (!allSelected && entitlements.length > ENTITLEMENT_BATCH_MAX_IDS) {
+      setMessage(`Selected the first ${ENTITLEMENT_BATCH_MAX_IDS} loaded entitlements. ${entitlementBatchSelectionNotice}`);
+    }
+    setSelectedIds(allSelected ? new Set() : new Set(selectableLoadedIds));
   }
 
   function bulkConfirmBody(action: EntitlementAction): string {
@@ -280,6 +291,10 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled }: 
   async function runBatch(action: EntitlementAction): Promise<void> {
     const ids = [...selectedIds];
     if (ids.length === 0) return;
+    if (ids.length > ENTITLEMENT_BATCH_MAX_IDS) {
+      setMessage(entitlementBatchSelectionNotice);
+      return;
+    }
     await runMutation(async () => {
       const result = await api<{ results: Array<{ id: string; ok: boolean; code: string }> }>(batchPath(), {
         method: "POST",
@@ -312,9 +327,9 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled }: 
       </aside>
       <section className="tablePane">
         <div className="filters"><input placeholder="project" value={filter.project} onChange={(event) => setFilter({ ...filter, project: event.target.value })} /><input placeholder="feature" value={filter.feature} onChange={(event) => setFilter({ ...filter, feature: event.target.value })} /><select value={filter.status} onChange={(event) => setFilter({ ...filter, status: event.target.value })}><option value="">all</option><option value="active">active</option><option value="disabled">disabled</option><option value="revoked">revoked</option></select><button type="button" disabled={busy} onClick={() => void downloadCsv(entitlementsUrl, "entitlements.csv", runMutation, setMessage)}>Export CSV</button></div>
-        {selectedIds.size > 0 && <div className="bulkBar"><span>{selectedIds.size} selected</span><button type="button" disabled={busy} onClick={() => requestConfirm({ title: "Disable selected entitlements", body: bulkConfirmBody("disable"), requiresReason: true, run: () => runBatch("disable") })}>Disable</button><button type="button" disabled={busy} onClick={() => void runBatch("reenable")}>Reenable</button><button type="button" className="danger" disabled={busy} onClick={() => requestConfirm({ title: "Revoke selected entitlements", body: bulkConfirmBody("revoke"), requiresReason: true, run: () => runBatch("revoke") })}>Revoke selected</button><button type="button" disabled={busy} onClick={() => setSelectedIds(new Set())}>Clear</button></div>}
-        <table><thead><tr><th className="checkCol"><input type="checkbox" aria-label="Select all loaded rows" checked={allSelected} onChange={toggleSelectAll} /></th><th>Project</th><th>Feature</th><th>Fingerprint</th><th>Details</th><th>Status</th><th>Seq</th><th>Actions</th></tr></thead><tbody>{entitlements.map((item) => <React.Fragment key={item.id}>
-          <tr><td className="checkCol"><input type="checkbox" aria-label={`Select ${item.project}/${item.feature}`} checked={selectedIds.has(item.id)} onChange={() => toggleSelected(item.id)} /></td><td>{item.project}</td><td>{item.feature}</td><td><code>{shortHash(item.license_fingerprint)}</code></td><td><div className="details"><span>TTL {item.assertion_ttl_seconds}s</span><span>Valid {item.valid_from ?? "any"} to {item.valid_until ?? "any"}</span><span>Customer {item.customer_id ?? "-"}</span><span>License {item.license_id ?? "-"}</span><span>Mode {item.license_mode}</span><span>Pool {item.pool_size} / Max devices {item.max_active_devices} / Borrow {item.max_borrow_sec}s</span>{item.policy_id !== null && <span>Policy {item.policy_id}</span>}{item.notes !== "" && <span>Notes {item.notes}</span>}</div></td><td><span className={`status ${item.status}`}>{item.status}</span><HealthBadge status={item.status} validUntil={item.valid_until} now={nowSeconds} /></td><td>{item.revocation_seq}</td><td className="actions"><button disabled={busy || !canEditEntitlement(item.status)} onClick={() => beginEdit(item)}>Edit</button><button className="danger" disabled={busy || !canRunAction(item.status, "disable")} onClick={() => requestConfirm({ title: "Disable entitlement", body: disableEntitlementConfirm(item), requiresReason: true, run: () => transition(item, "disable") })}>Disable</button><button disabled={busy || !canRunAction(item.status, "reenable")} onClick={() => void transition(item, "reenable")}>Reenable</button><button className="danger" disabled={busy || !canRunAction(item.status, "revoke")} onClick={() => requestConfirm({ title: "Revoke entitlement", body: revokeEntitlementConfirm(item), requiresReason: true, run: () => transition(item, "revoke") })}>Revoke</button><button className="danger" disabled={busy || item.license_mode !== "floating" || item.status !== "active"} onClick={() => requestConfirm({ title: "Release seats", body: releaseSeatsConfirm(item), requiresReason: true, run: () => releaseSeats(item) })}>Release seats</button><button type="button" disabled={busy} aria-expanded={deviceEntitlementId === item.id} onClick={() => toggleDevices(item.id)}>Devices</button><button type="button" disabled={busy} aria-expanded={meterEntitlementId === item.id} onClick={() => toggleMeter(item.id)}>Meter</button></td></tr>
+        {selectedIds.size > 0 && <div className="bulkBar"><span>{selectedIds.size} selected (maximum {ENTITLEMENT_BATCH_MAX_IDS} per batch)</span><button type="button" disabled={busy} onClick={() => requestConfirm({ title: "Disable selected entitlements", body: bulkConfirmBody("disable"), requiresReason: true, run: () => runBatch("disable") })}>Disable</button><button type="button" disabled={busy} onClick={() => void runBatch("reenable")}>Reenable</button><button type="button" className="danger" disabled={busy} onClick={() => requestConfirm({ title: "Revoke selected entitlements", body: bulkConfirmBody("revoke"), requiresReason: true, run: () => runBatch("revoke") })}>Revoke selected</button><button type="button" disabled={busy} onClick={() => setSelectedIds(new Set())}>Clear</button></div>}
+        <table><thead><tr><th className="checkCol"><input type="checkbox" aria-label={`Select up to ${ENTITLEMENT_BATCH_MAX_IDS} loaded rows`} checked={allSelected} onChange={toggleSelectAll} /></th><th>Project</th><th>Feature</th><th>Fingerprint</th><th>Details</th><th>Status</th><th>Seq</th><th>Actions</th></tr></thead><tbody>{entitlements.map((item) => <React.Fragment key={item.id}>
+          <tr><td className="checkCol"><input type="checkbox" aria-label={`Select ${item.project}/${item.feature}`} disabled={busy || (!selectedIds.has(item.id) && selectedIds.size >= ENTITLEMENT_BATCH_MAX_IDS)} checked={selectedIds.has(item.id)} onChange={() => toggleSelected(item.id)} /></td><td>{item.project}</td><td>{item.feature}</td><td><code>{shortHash(item.license_fingerprint)}</code></td><td><div className="details"><span>TTL {item.assertion_ttl_seconds}s</span><span>Valid {item.valid_from ?? "any"} to {item.valid_until ?? "any"}</span><span>Customer {item.customer_id ?? "-"}</span><span>License {item.license_id ?? "-"}</span><span>Mode {item.license_mode}</span><span>Pool {item.pool_size} / Max devices {item.max_active_devices} / Borrow {item.max_borrow_sec}s</span>{item.policy_id !== null && <span>Policy {item.policy_id}</span>}{item.notes !== "" && <span>Notes {item.notes}</span>}</div></td><td><span className={`status ${item.status}`}>{item.status}</span><HealthBadge status={item.status} validUntil={item.valid_until} now={nowSeconds} /></td><td>{item.revocation_seq}</td><td className="actions"><button disabled={busy || !canEditEntitlement(item.status)} onClick={() => beginEdit(item)}>Edit</button><button className="danger" disabled={busy || !canRunAction(item.status, "disable")} onClick={() => requestConfirm({ title: "Disable entitlement", body: disableEntitlementConfirm(item), requiresReason: true, run: () => transition(item, "disable") })}>Disable</button><button disabled={busy || !canRunAction(item.status, "reenable")} onClick={() => void transition(item, "reenable")}>Reenable</button><button className="danger" disabled={busy || !canRunAction(item.status, "revoke")} onClick={() => requestConfirm({ title: "Revoke entitlement", body: revokeEntitlementConfirm(item), requiresReason: true, run: () => transition(item, "revoke") })}>Revoke</button><button className="danger" disabled={busy || item.license_mode !== "floating" || item.status !== "active"} onClick={() => requestConfirm({ title: "Release seats", body: releaseSeatsConfirm(item), requiresReason: true, run: () => releaseSeats(item) })}>Release seats</button><button type="button" disabled={busy} aria-expanded={deviceEntitlementId === item.id} onClick={() => toggleDevices(item.id)}>Devices</button><button type="button" disabled={busy} aria-expanded={meterEntitlementId === item.id} onClick={() => toggleMeter(item.id)}>Meter</button></td></tr>
           {editingId === item.id && <tr className="editRow"><td colSpan={8}><form className="editForm" onSubmit={(event) => void submitPatch(event, item)}><label>Device hash<input value={editForm.device_hash} onChange={(event) => setEditForm({ ...editForm, device_hash: event.target.value })} /></label><label>Assertion TTL<input type="number" value={editForm.assertion_ttl_seconds} onChange={(event) => setEditForm({ ...editForm, assertion_ttl_seconds: Number(event.target.value) })} /></label><label>Valid from<input type="date" value={editForm.valid_from} onChange={(event) => setEditForm({ ...editForm, valid_from: event.target.value })} /></label><label>Valid until<input type="date" value={editForm.valid_until} onChange={(event) => setEditForm({ ...editForm, valid_until: event.target.value })} /></label><label>Customer ID<input value={editForm.customer_id} onChange={(event) => setEditForm({ ...editForm, customer_id: event.target.value })} /></label><label>License ID<input value={editForm.license_id} onChange={(event) => setEditForm({ ...editForm, license_id: event.target.value })} /></label><label className="wide">Notes<textarea value={editForm.notes} onChange={(event) => setEditForm({ ...editForm, notes: event.target.value })} /></label><div className="actions wide"><button disabled={busy} type="submit">Update</button><button disabled={busy} type="button" onClick={cancelEdit}>Cancel</button></div></form></td></tr>}
         </React.Fragment>)}</tbody></table>
         <div className="tableFooter"><span className="muted">{entitlements.length} shown</span>{entitlementsCursor !== null && <button type="button" disabled={busy} onClick={() => void loadMore(entitlementsUrl, entitlementsCursor, setEntitlements, setEntitlementsCursor, setMessage)}>Load more</button>}</div>

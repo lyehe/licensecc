@@ -1,4 +1,8 @@
 import type { LabeledPathFragment } from "../assemble.js";
+import {
+  ENTITLEMENT_BATCH_MAX_IDS,
+  ENTITLEMENT_BATCH_TOO_LARGE_CODE,
+} from "../../../shared/api.js";
 import { LIMIT_ONLY_PAGINATION_OPTIONS } from "../../query.js";
 import {
   ADMIN_AUTH_ERRORS,
@@ -6,6 +10,7 @@ import {
   ADMIN_SECURITY,
   csvExportResponse,
   deviceKeyIdParam,
+  entitlementBatchTooLargeResponse,
   errorResponse,
   featureKeyParam,
   formatCsvParam,
@@ -184,7 +189,7 @@ export const entitlementPaths: LabeledPathFragment = {
     ["/api/admin/entitlements/batch", {
     post: {
       tags: ["admin:entitlements"],
-      summary: "Bulk transition entitlements (admin-only): disable/reenable/revoke up to 100 ids, per-row results",
+      summary: `Bulk transition entitlements (admin-only): disable/reenable/revoke up to ${ENTITLEMENT_BATCH_MAX_IDS} ids, per-row results`,
       operationId: "batchTransitionEntitlements",
       security: ADMIN_SECURITY,
       parameters: [idempotencyKeyHeader],
@@ -198,7 +203,14 @@ export const entitlementPaths: LabeledPathFragment = {
           "#/components/schemas/BatchResultData",
           "batch_done",
         ),
-        "400": errorResponse("Invalid action/ids/json/idempotency key, more than 100 ids, or a missing reason for disable/revoke.", "invalid_request", "invalid_idempotency_key", "invalid_json", "too_many", "reason_required"),
+        "400": entitlementBatchTooLargeResponse(
+          "Invalid action/ids/json/idempotency key or a missing reason for disable/revoke. More than four ids is rejected before any D1 query or mutation; split the request using the response data guidance.",
+          "invalid_request",
+          "invalid_idempotency_key",
+          "invalid_json",
+          "reason_required",
+          ENTITLEMENT_BATCH_TOO_LARGE_CODE,
+        ),
         ...ADMIN_MUTATION_AUTH_ERRORS,
         "413": errorResponse("Request body exceeds 8192 bytes.", "body_too_large"),
         "500": errorResponse("Dev bearer enabled outside development.", "dev_bearer_forbidden_in_environment"),

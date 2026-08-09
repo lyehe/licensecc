@@ -393,7 +393,7 @@
           "type": "object"
         },
         "BatchTransitionInput": {
-          "description": "Bulk transition body. `reason` is required (non-empty) for disable/revoke. `ids` is the encoded entitlement ids (1..100).",
+          "description": "Bulk transition body. `reason` is required (non-empty) for disable/revoke. `ids` is the encoded entitlement ids (1..4); a larger batch is rejected before any D1 query or mutation, with recovery guidance in the error data.",
           "properties": {
             "action": {
               "enum": [
@@ -408,7 +408,7 @@
                 "description": "Encoded entitlement id.",
                 "type": "string"
               },
-              "maxItems": 100,
+              "maxItems": 4,
               "minItems": 1,
               "type": "array"
             },
@@ -1499,6 +1499,44 @@
           "additionalProperties": false,
           "description": "Empty JSON object (`{}`). An empty request body is also accepted.",
           "type": "object"
+        },
+        "EntitlementBatchTooLargeData": {
+          "additionalProperties": false,
+          "properties": {
+            "guidance": {
+              "const": "split the request into batches of at most 4 entitlement ids"
+            },
+            "max_ids": {
+              "const": 4
+            }
+          },
+          "required": [
+            "max_ids",
+            "guidance"
+          ],
+          "type": "object"
+        },
+        "EntitlementBatchTooLargeError": {
+          "allOf": [
+            {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            },
+            {
+              "properties": {
+                "code": {
+                  "const": "entitlement_batch_too_large"
+                },
+                "data": {
+                  "$ref": "#/components/schemas/EntitlementBatchTooLargeData"
+                }
+              },
+              "required": [
+                "code",
+                "data"
+              ],
+              "type": "object"
+            }
+          ]
         },
         "EntitlementDevice": {
           "description": "A registered relay-resistance device key (entitlement_devices). The public key is not surfaced here.",
@@ -11568,6 +11606,17 @@
               "content": {
                 "application/json": {
                   "examples": {
+                    "entitlement_batch_too_large": {
+                      "value": {
+                        "code": "entitlement_batch_too_large",
+                        "data": {
+                          "guidance": "split the request into batches of at most 4 entitlement ids",
+                          "max_ids": 4
+                        },
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    },
                     "invalid_idempotency_key": {
                       "value": {
                         "code": "invalid_idempotency_key",
@@ -11595,21 +11644,41 @@
                         "ok": false,
                         "request_id": "1a2b3c-1"
                       }
-                    },
-                    "too_many": {
-                      "value": {
-                        "code": "too_many",
-                        "ok": false,
-                        "request_id": "1a2b3c-1"
-                      }
                     }
                   },
                   "schema": {
-                    "$ref": "#/components/schemas/ErrorEnvelope"
+                    "oneOf": [
+                      {
+                        "allOf": [
+                          {
+                            "$ref": "#/components/schemas/ErrorEnvelope"
+                          },
+                          {
+                            "properties": {
+                              "code": {
+                                "enum": [
+                                  "invalid_request",
+                                  "invalid_idempotency_key",
+                                  "invalid_json",
+                                  "reason_required"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "code"
+                            ],
+                            "type": "object"
+                          }
+                        ]
+                      },
+                      {
+                        "$ref": "#/components/schemas/EntitlementBatchTooLargeError"
+                      }
+                    ]
                   }
                 }
               },
-              "description": "Invalid action/ids/json/idempotency key, more than 100 ids, or a missing reason for disable/revoke."
+              "description": "Invalid action/ids/json/idempotency key or a missing reason for disable/revoke. More than four ids is rejected before any D1 query or mutation; split the request using the response data guidance."
             },
             "401": {
               "content": {
@@ -11717,7 +11786,7 @@
               "devBearer": []
             }
           ],
-          "summary": "Bulk transition entitlements (admin-only): disable/reenable/revoke up to 100 ids, per-row results",
+          "summary": "Bulk transition entitlements (admin-only): disable/reenable/revoke up to 4 ids, per-row results",
           "tags": [
             "admin:entitlements"
           ]

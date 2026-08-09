@@ -18,6 +18,11 @@ import "./worker/transition-contracts.test.mjs";
 import { PAGINATION_ROUTE_OPTIONS } from "../dist-worker/worker/query.js";
 import { API_ROUTES, ALL_ROUTES, META_ROUTES } from "../dist-worker/worker/routes.js";
 import { API_BINDING_KEYS } from "../dist-worker/worker/index.js";
+import {
+  ENTITLEMENT_BATCH_MAX_IDS,
+  ENTITLEMENT_BATCH_TOO_LARGE_CODE,
+  ENTITLEMENT_BATCH_TOO_LARGE_GUIDANCE,
+} from "../dist-worker/shared/api.js";
 import { POLICY_TYPES } from "@licensecc/licensing-domain/entitlements/policy";
 import { MAX_SUPPORT_UNTIL_EPOCH_SECONDS } from "@licensecc/licensing-domain/catalog/plan_projection";
 
@@ -114,6 +119,66 @@ test("plan projection documents the bounded epoch contract without exposing priv
   assert.equal(input.properties.support_until.maximum, MAX_SUPPORT_UNTIL_EPOCH_SECONDS);
   assert.match(input.properties.support_until.description, /9999-12-31T23:59:59Z/);
   assert.equal(Object.hasOwn(openApiDocument.components.schemas.PlanProjectionItem.properties, "cache_ttl_seconds"), false);
+});
+
+test("entitlement batch documents the Free-tier-safe pre-query cap and recovery data", () => {
+  const input = openApiDocument.components.schemas.BatchTransitionInput;
+  assert.equal(input.properties.ids.minItems, 1);
+  assert.equal(input.properties.ids.maxItems, ENTITLEMENT_BATCH_MAX_IDS);
+  assert.match(input.description, /before any D1 query or mutation/i);
+
+  const operation = openApiDocument.paths["/api/admin/entitlements/batch"].post;
+  assert.match(operation.summary, /up to 4 ids/i);
+  const errorSchema = operation.responses["400"].content["application/json"].schema;
+  assert.deepEqual(errorSchema.oneOf, [
+    {
+      allOf: [
+        { $ref: "#/components/schemas/ErrorEnvelope" },
+        {
+          type: "object",
+          required: ["code"],
+          properties: {
+            code: { enum: ["invalid_request", "invalid_idempotency_key", "invalid_json", "reason_required"] },
+          },
+        },
+      ],
+    },
+    { $ref: "#/components/schemas/EntitlementBatchTooLargeError" },
+  ]);
+  assert.deepEqual(openApiDocument.components.schemas.EntitlementBatchTooLargeData, {
+    type: "object",
+    additionalProperties: false,
+    required: ["max_ids", "guidance"],
+    properties: {
+      max_ids: { const: ENTITLEMENT_BATCH_MAX_IDS },
+      guidance: { const: ENTITLEMENT_BATCH_TOO_LARGE_GUIDANCE },
+    },
+  });
+  assert.deepEqual(openApiDocument.components.schemas.EntitlementBatchTooLargeError, {
+    allOf: [
+      { $ref: "#/components/schemas/ErrorEnvelope" },
+      {
+        type: "object",
+        required: ["code", "data"],
+        properties: {
+          code: { const: ENTITLEMENT_BATCH_TOO_LARGE_CODE },
+          data: { $ref: "#/components/schemas/EntitlementBatchTooLargeData" },
+        },
+      },
+    ],
+  });
+  assert.deepEqual(
+    operation.responses["400"].content["application/json"].examples[ENTITLEMENT_BATCH_TOO_LARGE_CODE].value,
+    {
+      ok: false,
+      code: ENTITLEMENT_BATCH_TOO_LARGE_CODE,
+      request_id: "1a2b3c-1",
+      data: {
+        max_ids: ENTITLEMENT_BATCH_MAX_IDS,
+        guidance: ENTITLEMENT_BATCH_TOO_LARGE_GUIDANCE,
+      },
+    },
+  );
 });
 
 test("catalog import documents its server-bound Preview/Apply protocol", () => {

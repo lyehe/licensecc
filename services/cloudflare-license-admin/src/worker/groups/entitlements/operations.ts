@@ -15,6 +15,11 @@ import type { Actor, MutationContext } from "@licensecc/cloudflare-runtime/d1/en
 import { stampFromPolicy } from "@licensecc/licensing-domain/entitlements/policy";
 import { buildPolicyStampStatement } from "@licensecc/cloudflare-runtime/entitlements/policy_store";
 import { readIdempotentResponse, writeIdempotentResponse } from "@licensecc/cloudflare-runtime/d1/idempotency_store";
+import {
+  ENTITLEMENT_BATCH_MAX_IDS,
+  ENTITLEMENT_BATCH_TOO_LARGE_CODE,
+  ENTITLEMENT_BATCH_TOO_LARGE_GUIDANCE,
+} from "../../../shared/api.js";
 import type { EntitlementRecord, Policy } from "../../../shared/api";
 import type { Env } from "../../env.js";
 import { requireAdmin } from "../../auth.js";
@@ -25,7 +30,6 @@ import { clientIp } from "../../support.js";
 import { CSV_ROW_CAP, LIMIT_ONLY_PAGINATION_OPTIONS, boundedCursor, csvResponse, wantsCsv } from "../../query.js";
 
 const HEX_64 = /^[0-9a-fA-F]{64}$/;
-const BATCH_MAX_IDS = 100;
 
 function policyStampOn(env: Env): boolean {
   return env.POLICY_STAMP_MODE === "on";
@@ -252,11 +256,21 @@ export async function handleBatchTransition(request: Request, env: Env, actor: A
     return envelope(requestIdValue, "reason_required", undefined, 400);
   }
   const ids = input.ids;
-  if (!Array.isArray(ids) || ids.length === 0 || ids.some((id) => typeof id !== "string")) {
+  if (!Array.isArray(ids) || ids.length === 0) {
     return envelope(requestIdValue, "invalid_request", undefined, 400);
   }
-  if (ids.length > BATCH_MAX_IDS) {
-    return envelope(requestIdValue, "too_many", undefined, 400);
+  // This check must remain above decoding, idempotency reads, and every D1
+  // side effect. Four rows leave deterministic headroom below Free D1's 50
+  // query limit even on same-target guarded-CAS races, while fitting the
+  // Worker-wide 8 KiB JSON parser budget for canonical encoded ids.
+  if (ids.length > ENTITLEMENT_BATCH_MAX_IDS) {
+    return envelope(requestIdValue, ENTITLEMENT_BATCH_TOO_LARGE_CODE, {
+      max_ids: ENTITLEMENT_BATCH_MAX_IDS,
+      guidance: ENTITLEMENT_BATCH_TOO_LARGE_GUIDANCE,
+    }, 400);
+  }
+  if (ids.some((id) => typeof id !== "string")) {
+    return envelope(requestIdValue, "invalid_request", undefined, 400);
   }
   // The per-row idempotency BASE: the caller's key, or a stable per-request batch id when absent
   // (a generated base means no cross-request replay, but the rows are still mutually distinct).

@@ -8,9 +8,10 @@
 //
 // Covers:
 //   - BULK TRANSITIONS POST /api/admin/entitlements/batch: per-row results (mixed success / revoked
-//     terminal / missing / bad id), the >100 cap, the disable/revoke reason gate, reader RBAC block,
+//     terminal / missing / bad id), the four-row Free-tier-safe cap, the disable/revoke reason gate, reader RBAC block,
 //     and THE PER-ROW IDEMPOTENCY FOOTGUN (re-POST same batch + same Idempotency-Key => each row
-//     replays its OWN cached result, NOT row #1's), plus createEntitlement byte-identical (untouched).
+//     replays its OWN cached result, NOT row #1's), plus a migration-backed query-budget adapter
+//     that fails on query 51, and createEntitlement byte-identical (untouched).
 //   - GLOBAL SEARCH GET /api/admin/search: fan-out across customers/licenses/entitlements/orders,
 //     fingerprint PREFIX match, empty/over-long q => 400, reader allowed.
 //   - CSV EXPORT ?format=csv on entitlements/customers/events: content-type + attachment, the SAME
@@ -88,6 +89,109 @@ class D1Like {
   }
 }
 
+// Free D1 allows 50 queries per Worker invocation. This measures executions, not
+// prepared-statement construction: a prepared statement is inert until first/all/run
+// or a batch executes it. The real migrated SQLite database remains underneath the
+// adapter, so the budget proof covers the Worker SQL rather than a hand-written mock.
+class QueryBudgetPreparedStatement extends PreparedStatement {
+  constructor(owner, db, sql) {
+    super(db, sql);
+    this.owner = owner;
+  }
+  bind(...values) {
+    const next = new QueryBudgetPreparedStatement(this.owner, this.db, this.sql);
+    next.params = values.map(normalizeParam);
+    return next;
+  }
+  async first() {
+    this.owner.recordQuery(this.sql);
+    return super.first();
+  }
+  async all() {
+    this.owner.recordQuery(this.sql);
+    return super.all();
+  }
+  async run() {
+    this.owner.recordQuery(this.sql);
+    return super.run();
+  }
+}
+
+class QueryBudgetD1Like extends D1Like {
+  constructor(db, queryLimit = 50) {
+    super(db);
+    this.queryLimit = queryLimit;
+    this.resetMetrics();
+  }
+  resetMetrics() {
+    this.queryCount = 0;
+    this.prepareCalls = 0;
+    this.batchCalls = 0;
+    this.writeQueries = 0;
+  }
+  prepare(sql) {
+    this.prepareCalls += 1;
+    return new QueryBudgetPreparedStatement(this, this.db, sql);
+  }
+  recordQuery(sql) {
+    this.queryCount += 1;
+    if (this.queryCount > this.queryLimit) {
+      throw new Error(`d1_query_budget_exceeded:${this.queryCount}`);
+    }
+    if (/^\s*(?:INSERT|UPDATE|DELETE|REPLACE)\b/i.test(sql)) {
+      this.writeQueries += 1;
+    }
+  }
+  async batch(statements) {
+    this.batchCalls += 1;
+    // Count every statement before opening the local transaction. That mirrors
+    // D1's per-statement request budget and prevents a test overflow from
+    // leaving an artificial partial local batch behind.
+    for (const statement of statements) {
+      this.recordQuery(statement.sql);
+    }
+    return super.batch(statements);
+  }
+}
+
+// Simulates a different Worker request winning the guarded status CAS after
+// this request's read and immediately before its D1 batch. The external winner
+// writes both the state and its audit row against the real migrated schema; its
+// work is intentionally outside this request's budget. The adapter still
+// executes the real Worker SQL for every statement owned by the request under
+// test.
+class SameTargetRaceQueryBudgetD1Like extends QueryBudgetD1Like {
+  constructor(db, queryLimit = 50) {
+    super(db, queryLimit);
+    this.racedKeys = new Set();
+  }
+  async batch(statements) {
+    const first = statements[0];
+    if (first?.sql.includes("UPDATE entitlements SET status")) {
+      const [targetStatus, updatedAt, project, feature, fingerprint] = first.params;
+      const key = `${project}\u0000${feature}\u0000${fingerprint}`;
+      if (!this.racedKeys.has(key)) {
+        this.racedKeys.add(key);
+        const eventType = targetStatus === "active" ? "reenable" : targetStatus === "disabled" ? "disable" : "revoke";
+        this.db.exec("BEGIN");
+        try {
+          const winner = this.db.prepare(
+            "UPDATE entitlements SET status = ?, revocation_seq = revocation_seq + 1, updated_at = ? WHERE project = ? AND feature = ? AND license_fingerprint = ? RETURNING revocation_seq",
+          ).get(targetStatus, updatedAt, project, feature, fingerprint);
+          this.db.prepare(
+            "INSERT INTO entitlement_events (project, feature, license_fingerprint, event_type, status, revocation_seq, actor, actor_type, source, request_id, reason, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+          ).run(project, feature, fingerprint, eventType, targetStatus, winner.revocation_seq, "race-winner", "system", "admin", "race-winner", "same-target competitor", updatedAt);
+          this.db.exec("COMMIT");
+        } catch (error) {
+          this.db.exec("ROLLBACK");
+          throw error;
+        }
+      }
+    }
+    return super.batch(statements);
+  }
+}
+
 function freshDb() {
   const db = new DatabaseSync(":memory:");
   for (const name of readdirSync(migrationsDir).filter((f) => f.endsWith(".sql")).sort()) {
@@ -100,6 +204,7 @@ const NOW = Math.floor(Date.now() / 1000);
 const FP_A = "a".repeat(64);
 const FP_B = "b".repeat(64);
 const FP_C = "c".repeat(64);
+const FP_D = "d".repeat(64);
 
 // --- Cloudflare Access fixture (reader vs admin RBAC) ------------------------
 async function accessFixture(t) {
@@ -134,9 +239,9 @@ function accessToken(fixture, email) {
     .sign(fixture.privateKey);
 }
 
-function devEnv(db) {
+function devEnv(db, dbBinding = new D1Like(db)) {
   return {
-    DB: new D1Like(db),
+    DB: dbBinding,
     ENVIRONMENT: "development",
     ADMIN_DEV_BEARER_ENABLED: "1",
     ADMIN_DEV_BEARER: "dev-secret",
@@ -184,6 +289,20 @@ async function createEntitlementFor(env, fingerprint, extra = {}) {
   return (await body(res)).data;
 }
 
+async function createMaxBatchEntitlements(env) {
+  const records = [];
+  for (const fingerprint of [FP_A, FP_B, FP_C, FP_D]) {
+    records.push(await createEntitlementFor(env, fingerprint));
+  }
+  return records;
+}
+
+function assertWithinFreeTierBudget(d1, label, expectedQueries) {
+  assert.equal(d1.queryLimit, 50, `${label}: the adapter must fail at query 51`);
+  assert.equal(d1.queryCount, expectedQueries, `${label}: query count is deliberate maintenance headroom, not a soft best effort`);
+  assert.ok(d1.queryCount <= d1.queryLimit, `${label}: must remain inside the Free-tier D1 request budget`);
+}
+
 // ── BULK TRANSITIONS ──────────────────────────────────────────────────────────
 
 test("batch: per-row results — mixed success / revoked-terminal / missing / bad id; one bad row never aborts", async () => {
@@ -191,7 +310,6 @@ test("batch: per-row results — mixed success / revoked-terminal / missing / ba
   const env = devEnv(db);
   const a = await createEntitlementFor(env, FP_A); // will succeed (active -> disabled)
   const b = await createEntitlementFor(env, FP_B); // pre-revoke so disable hits the terminal guard
-  await createEntitlementFor(env, FP_C);           // active, will succeed
 
   // Revoke B up front so a later "disable" on it is rejected as terminal.
   const revokeB = await worker.fetch(devReq(`/api/admin/entitlements/${b.id}/revoke`, {
@@ -205,7 +323,9 @@ test("batch: per-row results — mixed success / revoked-terminal / missing / ba
     body: JSON.stringify({
       action: "disable",
       reason: "bulk pause",
-      ids: [a.id, b.id, missingId, "!!!not-base64!!!", entitlementId("DEFAULT", "DEFAULT", FP_C)],
+      // Keep this accepted request at the public maximum. Put the successful
+      // row last so the proof also shows earlier isolated errors do not abort it.
+      ids: [b.id, missingId, "!!!not-base64!!!", a.id],
     }),
   }), env);
   assert.equal(res.status, 200);
@@ -213,20 +333,17 @@ test("batch: per-row results — mixed success / revoked-terminal / missing / ba
   assert.equal(result.code, "batch_done");
   const byId = new Map(result.data.results.map((r) => [r.id, r]));
 
-  assert.equal(byId.get(a.id).ok, true);
-  assert.equal(byId.get(a.id).code, "entitlement_disabled");
   assert.equal(byId.get(b.id).ok, false);
   assert.equal(byId.get(b.id).code, "revoked_entitlement_is_terminal");
   assert.equal(byId.get(missingId).ok, false);
   assert.equal(byId.get(missingId).code, "not_found");
   assert.equal(byId.get("!!!not-base64!!!").ok, false);
   assert.equal(byId.get("!!!not-base64!!!").code, "invalid_entitlement_id");
-  const cId = entitlementId("DEFAULT", "DEFAULT", FP_C);
-  assert.equal(byId.get(cId).ok, true);
+  assert.equal(byId.get(a.id).ok, true);
+  assert.equal(byId.get(a.id).code, "entitlement_disabled");
 
-  // The good rows actually flipped; the terminal row stayed revoked.
+  // The trailing good row actually flipped; isolated failures did not abort it.
   assert.equal(db.prepare("SELECT status FROM entitlements WHERE license_fingerprint=?").get(FP_A).status, "disabled");
-  assert.equal(db.prepare("SELECT status FROM entitlements WHERE license_fingerprint=?").get(FP_C).status, "disabled");
   assert.equal(db.prepare("SELECT status FROM entitlements WHERE license_fingerprint=?").get(FP_B).status, "revoked");
 });
 
@@ -276,7 +393,7 @@ test("batch: THE PER-ROW IDEMPOTENCY FOOTGUN — re-POST same batch + key replay
   assert.equal(eventsAfterReplay, 2, "replay wrote no new audit events — each row replayed its own cached result");
 });
 
-test("batch: validation — bad action, missing reason for disable/revoke, empty/over-100 ids", async () => {
+test("batch: validation — bad action, missing reason for disable/revoke, empty ids", async () => {
   const db = freshDb();
   const env = devEnv(db);
   const a = await createEntitlementFor(env, FP_A);
@@ -309,22 +426,103 @@ test("batch: validation — bad action, missing reason for disable/revoke, empty
   assert.equal(res.status, 400);
   assert.equal((await body(res)).code, "invalid_request");
 
-  // >100 ids -> too_many. The cap is a length check that runs BEFORE any id is decoded, so short
-  // placeholder ids suffice (and keep the body under the 8192-byte limit; 101 full encoded ids would
-  // legitimately trip the 413 body-size guard first).
-  const ids = Array.from({ length: 101 }, (_unused, i) => `id${i}`);
-  res = await worker.fetch(devReq("/api/admin/entitlements/batch", {
-    method: "POST", body: JSON.stringify({ action: "reenable", ids }),
-  }), env);
-  assert.equal(res.status, 400);
-  assert.equal((await body(res)).code, "too_many");
-
   // reenable needs no reason -> succeeds (a is active so it's a no-op success).
   res = await worker.fetch(devReq("/api/admin/entitlements/batch", {
     method: "POST", body: JSON.stringify({ action: "reenable", ids: [a.id] }),
   }), env);
   assert.equal(res.status, 200);
   assert.equal((await body(res)).data.results[0].ok, true);
+});
+
+test("batch query-budget adapter fails exactly at query 51 over the migrated schema", async () => {
+  const d1 = new QueryBudgetD1Like(freshDb());
+  for (let index = 0; index < 50; index += 1) {
+    await d1.prepare("SELECT ? AS value").bind(index).first();
+  }
+  await assert.rejects(
+    () => d1.prepare("SELECT 51 AS value").first(),
+    /d1_query_budget_exceeded:51/,
+  );
+  assert.equal(d1.queryCount, 51);
+});
+
+test("batch: four changed rows complete inside the Free-tier D1 budget", async () => {
+  const db = freshDb();
+  const d1 = new QueryBudgetD1Like(db);
+  const env = devEnv(db, d1);
+  const records = await createMaxBatchEntitlements(env);
+  d1.resetMetrics();
+
+  const payload = JSON.stringify({ action: "disable", reason: "budget changed", ids: records.map((record) => record.id) });
+  assert.ok(new TextEncoder().encode(payload).byteLength < 8192, "four encoded ids stay below the request-body parser limit");
+  const response = await worker.fetch(devReq("/api/admin/entitlements/batch", { method: "POST", body: payload }), env);
+  assert.equal(response.status, 200);
+  const result = await body(response);
+  assert.ok(result.data.results.every((row) => row.ok), "no accepted row may degrade into an opaque budget failure");
+  assertWithinFreeTierBudget(d1, "four changed rows", 24);
+});
+
+test("batch: four target-state no-op rows complete inside the Free-tier D1 budget", async () => {
+  const db = freshDb();
+  const d1 = new QueryBudgetD1Like(db);
+  const env = devEnv(db, d1);
+  const records = await createMaxBatchEntitlements(env);
+  d1.resetMetrics();
+
+  const response = await worker.fetch(devReq("/api/admin/entitlements/batch", {
+    method: "POST",
+    body: JSON.stringify({ action: "reenable", ids: records.map((record) => record.id) }),
+  }), env);
+  assert.equal(response.status, 200);
+  const result = await body(response);
+  assert.ok(result.data.results.every((row) => row.ok), "same-target no-ops remain per-row successes");
+  assertWithinFreeTierBudget(d1, "four no-op rows", 20);
+});
+
+test("batch: four same-target CAS races complete inside the Free-tier D1 budget without partial abort", async () => {
+  const db = freshDb();
+  const d1 = new SameTargetRaceQueryBudgetD1Like(db);
+  const env = devEnv(db, d1);
+  const records = await createMaxBatchEntitlements(env);
+  d1.resetMetrics();
+
+  const response = await worker.fetch(devReq("/api/admin/entitlements/batch", {
+    method: "POST",
+    body: JSON.stringify({ action: "disable", reason: "budget race", ids: records.map((record) => record.id) }),
+  }), env);
+  assert.equal(response.status, 200);
+  const result = await body(response);
+  assert.ok(result.data.results.every((row) => row.ok), "the same-target winner is a truthful no-op, not an opaque partial failure");
+  assert.equal(d1.racedKeys.size, 4, "each accepted row exercised the guarded-race path");
+  assertWithinFreeTierBudget(d1, "four same-target race rows", 40);
+});
+
+test("batch: max-plus-one is rejected before any D1 prepare, batch, query, or write", async () => {
+  const db = freshDb();
+  const d1 = new QueryBudgetD1Like(db);
+  const env = devEnv(db, d1);
+  const record = await createEntitlementFor(env, FP_A);
+  d1.resetMetrics();
+
+  const response = await worker.fetch(devReq("/api/admin/entitlements/batch", {
+    method: "POST",
+    // Full valid ids keep the body well below 8192 bytes and prove this is the
+    // operation-specific row guard, not a malformed-id or body-size rejection.
+    body: JSON.stringify({ action: "disable", reason: "too many", ids: Array.from({ length: 5 }, () => record.id) }),
+  }), env);
+  assert.equal(response.status, 400);
+  const result = await body(response);
+  assert.equal(result.ok, false);
+  assert.equal(result.code, "entitlement_batch_too_large");
+  assert.equal(typeof result.request_id, "string");
+  assert.deepEqual(result.data, {
+    max_ids: 4,
+    guidance: "split the request into batches of at most 4 entitlement ids",
+  });
+  assert.equal(d1.prepareCalls, 0, "the length guard runs before any D1 prepare");
+  assert.equal(d1.batchCalls, 0, "the length guard runs before any D1 batch");
+  assert.equal(d1.queryCount, 0, "the length guard runs before any D1 query");
+  assert.equal(d1.writeQueries, 0, "the length guard runs before any D1 write");
 });
 
 test("batch: reader RBAC is blocked; createEntitlement remains byte-identical (untouched)", async (t) => {

@@ -237,6 +237,20 @@ export interface PolicyPatch {
 // ── Workstream C: bulk transition + global search response shapes ─────────────
 // The admin Worker's POST /api/admin/entitlements/batch returns one row per input id (input order);
 // a bad row never aborts the others, so each carries its own ok/code.
+//
+// This is deliberately service-local rather than a licensing-domain limit: it
+// bounds one admin Worker operation's D1 request budget and its 8 KiB JSON
+// parser budget. Keep every caller on this exported contract; do not silently
+// raise the cap in a UI-only path.
+export const ENTITLEMENT_BATCH_MAX_IDS = 4;
+export const ENTITLEMENT_BATCH_TOO_LARGE_CODE = "entitlement_batch_too_large";
+export const ENTITLEMENT_BATCH_TOO_LARGE_GUIDANCE = "split the request into batches of at most 4 entitlement ids";
+
+export interface EntitlementBatchTooLargeData {
+  max_ids: typeof ENTITLEMENT_BATCH_MAX_IDS;
+  guidance: typeof ENTITLEMENT_BATCH_TOO_LARGE_GUIDANCE;
+}
+
 export interface BatchRowResult {
   id: string;
   ok: boolean;

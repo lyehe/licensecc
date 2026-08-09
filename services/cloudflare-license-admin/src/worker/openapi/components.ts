@@ -3,6 +3,11 @@ import {
   CATALOG_IMPORT_MAX_MUTABLE_ACTIONS,
   CATALOG_IMPORT_TOO_LARGE_GUIDANCE,
 } from "@licensecc/licensing-domain/catalog/import_preview";
+import {
+  ENTITLEMENT_BATCH_MAX_IDS,
+  ENTITLEMENT_BATCH_TOO_LARGE_CODE,
+  ENTITLEMENT_BATCH_TOO_LARGE_GUIDANCE,
+} from "../../shared/api.js";
 import { DEFAULT_PAGINATION_OPTIONS } from "../query.js";
 import type { PaginationOptions } from "../query.js";
 
@@ -94,6 +99,49 @@ export function catalogImportConflictResponse(description: string, ...codes: Rea
             }
             : code === "invalid_plan_config"
               ? { ok: false, code, request_id: "1a2b3c-1", data: { policy_id: "policy_example" } }
+            : { ok: false, code, request_id: "1a2b3c-1" },
+        }])),
+      },
+    },
+  };
+}
+
+// The entitlement batch capacity response is a public operation contract, not
+// a generic `too_many` error: callers get the stable cap and recovery guidance
+// before any D1 work has started. Exclude it from the generic envelope branch
+// so the OpenAPI oneOf remains mutually exclusive.
+export function entitlementBatchTooLargeResponse(description: string, ...codes: ReadonlyArray<string>): Record<string, unknown> {
+  const ordinaryCodes = codes.filter((code) => code !== ENTITLEMENT_BATCH_TOO_LARGE_CODE);
+  return {
+    description,
+    content: {
+      "application/json": {
+        schema: {
+          oneOf: [
+            {
+              allOf: [
+                { $ref: "#/components/schemas/ErrorEnvelope" },
+                {
+                  type: "object",
+                  required: ["code"],
+                  properties: { code: { enum: ordinaryCodes } },
+                },
+              ],
+            },
+            { $ref: "#/components/schemas/EntitlementBatchTooLargeError" },
+          ],
+        },
+        examples: Object.fromEntries(codes.map((code) => [code, {
+          value: code === ENTITLEMENT_BATCH_TOO_LARGE_CODE
+            ? {
+              ok: false,
+              code,
+              request_id: "1a2b3c-1",
+              data: {
+                max_ids: ENTITLEMENT_BATCH_MAX_IDS,
+                guidance: ENTITLEMENT_BATCH_TOO_LARGE_GUIDANCE,
+              },
+            }
             : { ok: false, code, request_id: "1a2b3c-1" },
         }])),
       },
@@ -1076,12 +1124,34 @@ export const openApiComponents: LabeledComponentFragment = {
       ["BatchTransitionInput", {
         type: "object",
         required: ["action", "ids"],
-        description: "Bulk transition body. `reason` is required (non-empty) for disable/revoke. `ids` is the encoded entitlement ids (1..100).",
+        description: `Bulk transition body. \`reason\` is required (non-empty) for disable/revoke. \`ids\` is the encoded entitlement ids (1..${ENTITLEMENT_BATCH_MAX_IDS}); a larger batch is rejected before any D1 query or mutation, with recovery guidance in the error data.`,
         properties: {
           action: { type: "string", enum: ["disable", "reenable", "revoke"] },
           reason: { type: "string", maxLength: 1000, description: "Required (non-empty) for disable/revoke; ignored for reenable." },
-          ids: { type: "array", minItems: 1, maxItems: 100, items: { type: "string", description: "Encoded entitlement id." } },
+          ids: { type: "array", minItems: 1, maxItems: ENTITLEMENT_BATCH_MAX_IDS, items: { type: "string", description: "Encoded entitlement id." } },
         },
+      }],
+      ["EntitlementBatchTooLargeData", {
+        type: "object",
+        additionalProperties: false,
+        required: ["max_ids", "guidance"],
+        properties: {
+          max_ids: { const: ENTITLEMENT_BATCH_MAX_IDS },
+          guidance: { const: ENTITLEMENT_BATCH_TOO_LARGE_GUIDANCE },
+        },
+      }],
+      ["EntitlementBatchTooLargeError", {
+        allOf: [
+          { $ref: "#/components/schemas/ErrorEnvelope" },
+          {
+            type: "object",
+            required: ["code", "data"],
+            properties: {
+              code: { const: ENTITLEMENT_BATCH_TOO_LARGE_CODE },
+              data: { $ref: "#/components/schemas/EntitlementBatchTooLargeData" },
+            },
+          },
+        ],
       }],
       ["BatchResultData", {
         type: "object",
