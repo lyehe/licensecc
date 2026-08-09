@@ -2,6 +2,7 @@ import { test } from "node:test";
 import { readFileSync } from "node:fs";
 import { assert, worker, mintSession, codeFromSecretBytes, requestOtp, redeemOtp, policyCapacityViolation, FP_A, FP_B, installBackendStub, cookieFor, sameSiteHeaders, entitlementId, ownedEntitlementId, call, baseFixture, seedDevice, seedEntitlement, CTX, NOW } from "./portal-worker-fixtures.mjs";
 import { sendEmail } from "../src/auth/portal_email.mjs";
+import { _internals as portalTokenInternals } from "../src/auth/portal_token.mjs";
 import { openApiDocument } from "../dist-worker/worker/openapi/document.js";
 import { backendStubCases, proxiedBackendOperations } from "./backend-proxy-contract.mjs";
 
@@ -31,6 +32,8 @@ const INVALID_DESTINATIONS = Object.freeze([
   ["userinfo injection", "https://attacker:password@backend.test"],
   ["path/query/fragment injection", "https://backend.test/health?next=https://attacker.test#fragment"],
 ]);
+
+const REDIRECT_STATUSES = Object.freeze([301, 302, 307, 308]);
 
 async function settlesWithin(promise, milliseconds) {
   let timer;
@@ -141,13 +144,14 @@ test("/health verifies the backend's required mode instead of a duplicated porta
         url: String(url),
         method: init.method ?? "GET",
         authorization: new Headers(init.headers ?? {}).get("authorization"),
+        redirect: init.redirect,
       });
       return backendHealth({ accountTokenMode: "required" });
     }, () => call(env, "GET", "/health", {}));
     assert.equal(healthy.status, 200);
     assert.equal(healthy.body.code, "healthy");
     assert.equal(healthy.body.data.account_token_mode_required, true);
-    assert.deepEqual(calls, [{ url: "https://backend.test/health", method: "GET", authorization: null }]);
+    assert.deepEqual(calls, [{ url: "https://backend.test/health", method: "GET", authorization: null, redirect: "manual" }]);
   } finally {
     db.close();
   }
@@ -260,7 +264,7 @@ test("invalid email destinations fail before a provider fetch or API-key header"
 test("a canonical HTTPS email destination keeps the compatible email flow", async () => {
   const calls = [];
   const response = await withFetchStub(async (url, init = {}) => {
-    calls.push({ url: String(url), authorization: new Headers(init.headers ?? {}).get("authorization") });
+    calls.push({ url: String(url), authorization: new Headers(init.headers ?? {}).get("authorization"), redirect: init.redirect });
     return new Response("{}", { status: 202 });
   }, () => sendEmail({
     PORTAL_EMAIL_API_KEY: "test-key",
@@ -268,7 +272,103 @@ test("a canonical HTTPS email destination keeps the compatible email flow", asyn
     PORTAL_EMAIL_API_BASE: "https://email.test/",
   }, "customer@example.test", "Subject", "Body"));
   assert.deepEqual(response, { ok: true, code: "sent" });
-  assert.deepEqual(calls, [{ url: "https://email.test/emails", authorization: "Bearer test-key" }]);
+  assert.deepEqual(calls, [{ url: "https://email.test/emails", authorization: "Bearer test-key", redirect: "manual" }]);
+});
+
+test("credentialed backend calls never follow cross-origin redirects", async () => {
+  for (const operation of proxiedBackendOperations) {
+    for (const status of REDIRECT_STATUSES) {
+      const calls = [];
+      let cancelled = false;
+      const endless = new ReadableStream({
+        cancel() { cancelled = true; },
+      });
+      const response = await proxyFailure(operation, {
+        fetchStub: async (url, init = {}) => {
+          calls.push({
+            url: String(url),
+            authorization: new Headers(init.headers ?? {}).get("authorization"),
+            body: init.body,
+            redirect: init.redirect,
+          });
+          return new Response(endless, {
+            status,
+            headers: { location: "https://attacker.test/credential-collector" },
+          });
+        },
+      });
+      assert.equal(response.status, 502, `${operation.name} ${status} redirect is a transport failure`);
+      assert.equal(response.body.code, "backend_invalid_response", `${operation.name} ${status} redirect is never passed through`);
+      assert.equal(response.body.data, undefined, `${operation.name} ${status} redirect body is not reflected`);
+      assert.equal(calls.length, 1, `${operation.name} ${status} makes exactly one request`);
+      assert.equal(calls[0].redirect, "manual", `${operation.name} ${status} disables automatic redirect following`);
+      assert.equal(new URL(calls[0].url).origin, "https://backend.test", `${operation.name} ${status} never contacts the redirect target`);
+      assert.match(calls[0].authorization ?? "", /^Bearer lcca_/, `${operation.name} ${status} only sends the bearer to the configured backend`);
+      assert.equal(typeof calls[0].body, "string", `${operation.name} ${status} only sends the JSON body to the configured backend`);
+      assert.equal(cancelled, true, `${operation.name} ${status} cancels the redirect body`);
+    }
+  }
+});
+
+test("email API credentials and OTP content never follow cross-origin redirects", async () => {
+  for (const status of REDIRECT_STATUSES) {
+    const calls = [];
+    const otpBody = "One-time sign-in code: 867530";
+    let cancelled = false;
+    const endless = new ReadableStream({
+      cancel() { cancelled = true; },
+    });
+    const response = await withFetchStub(async (url, init = {}) => {
+      calls.push({
+        url: String(url),
+        authorization: new Headers(init.headers ?? {}).get("authorization"),
+        body: init.body,
+        redirect: init.redirect,
+      });
+      return new Response(endless, {
+        status,
+        headers: { location: "https://attacker.test/otp-collector" },
+      });
+    }, () => sendEmail({
+      PORTAL_EMAIL_API_KEY: "test-key",
+      PORTAL_EMAIL_FROM: "portal@example.test",
+      PORTAL_EMAIL_API_BASE: "https://email.test",
+    }, "customer@example.test", "Your licensecc sign-in code", otpBody));
+    assert.deepEqual(response, { ok: false, code: "email_send_failed" }, `email ${status} redirect fails closed`);
+    assert.equal(calls.length, 1, `email ${status} makes exactly one request`);
+    assert.equal(calls[0].redirect, "manual", `email ${status} disables automatic redirect following`);
+    assert.equal(new URL(calls[0].url).origin, "https://email.test", `email ${status} never contacts the redirect target`);
+    assert.equal(calls[0].authorization, "Bearer test-key", `email ${status} sends the API key only to the configured provider`);
+    assert.equal(JSON.parse(calls[0].body).text, otpBody, `email ${status} sends the OTP only to the configured provider`);
+    assert.equal(cancelled, true, `email ${status} cancels the redirect body`);
+  }
+});
+
+test("health treats redirects as terminal and cancels their body", async () => {
+  for (const status of REDIRECT_STATUSES) {
+    const { db, env } = baseFixture();
+    const calls = [];
+    let cancelled = false;
+    const endless = new ReadableStream({
+      cancel() { cancelled = true; },
+    });
+    try {
+      const response = await withFetchStub(async (url, init = {}) => {
+        calls.push({ url: String(url), redirect: init.redirect });
+        return new Response(endless, {
+          status,
+          headers: { location: "https://attacker.test/readiness-collector" },
+        });
+      }, () => settlesWithin(call(env, "GET", "/health", {}), 500));
+      assert.notEqual(response, null, `health ${status} never waits for a redirect body`);
+      assert.equal(response.status, 503, `health ${status} retains the readiness failure envelope`);
+      assert.equal(response.body.code, "account_token_mode_not_required");
+      assert.deepEqual(calls, [{ url: "https://backend.test/health", redirect: "manual" }]);
+      assert.equal(cancelled, true, `health ${status} cancels the redirect body`);
+    } finally {
+      db.close();
+    }
+  }
 });
 
 test("/health bounds an oversized backend health body", async () => {
@@ -357,10 +457,95 @@ test("canonical backend failures preserve their status and code through every po
       });
       assert.equal(response.status, failure.status, `${operation.name} preserves backend ${failure.status}`);
       assert.equal(response.body.code, failure.code, `${operation.name} preserves backend ${failure.code}`);
-      assert.deepEqual(response.body.data, upstreamBody, `${operation.name} preserves the backend error payload`);
+      assert.equal(response.body.data, undefined, `${operation.name} does not reflect arbitrary backend error fields`);
       assertRuntimeErrorIsDocumented(operation.portalPath, response);
     }
   }
+});
+
+test("action and download reject malformed or disallowed backend error envelopes", async () => {
+  const malformed = [
+    ["empty object", 400, {}],
+    ["missing code", 400, { ok: false }],
+    ["empty code", 400, { ok: false, code: "" }],
+    ["wrong ok type", 400, { ok: "false", code: "invalid_request" }],
+    ["wrong code type", 400, { ok: false, code: 42 }],
+    ["status/code mismatch", 400, { ok: false, code: "seat_signing_error" }],
+    ["unsupported status", 418, { ok: false, code: "invalid_request" }],
+  ];
+  for (const operation of proxiedBackendOperations) {
+    for (const [label, status, upstreamBody] of malformed) {
+      const response = await proxyFailure(operation, {
+        fetchStub: async () => new Response(JSON.stringify(upstreamBody), {
+          status,
+          headers: { "content-type": "application/json" },
+        }),
+      });
+      assert.equal(response.status, 502, `${operation.name} ${label} maps to the bounded transport error`);
+      assert.equal(response.body.code, "backend_invalid_response", `${operation.name} ${label} is not reflected`);
+      assert.equal(response.body.data, undefined, `${operation.name} ${label} exposes no upstream fields`);
+      assertRuntimeErrorIsDocumented(operation.portalPath, response);
+    }
+  }
+});
+
+test("bounded backend error reads cancel oversized and failed action/download streams", async () => {
+  for (const operation of proxiedBackendOperations.filter((candidate) => candidate.name === "checkout" || candidate.name === "download")) {
+    let oversizedCancelled = false;
+    const oversized = new ReadableStream({
+      start(controller) { controller.enqueue(new TextEncoder().encode("x".repeat(8_192))); },
+      cancel() { oversizedCancelled = true; },
+    });
+    const tooLarge = await proxyFailure(operation, {
+      fetchStub: async () => new Response(oversized, { status: 400, headers: { "content-type": "application/json" } }),
+    });
+    assert.equal(tooLarge.status, 502, `${operation.name} oversized error body fails closed`);
+    assert.equal(tooLarge.body.code, "backend_invalid_response");
+    assert.equal(oversizedCancelled, true, `${operation.name} cancels an oversized error stream`);
+
+    const failed = new ReadableStream({
+      pull(controller) { controller.error(new Error("backend stream failed")); },
+    });
+    const readFailure = await proxyFailure(operation, {
+      fetchStub: async () => new Response(failed, { status: 400, headers: { "content-type": "application/json" } }),
+    });
+    assert.equal(readFailure.status, 502, `${operation.name} read failure fails closed`);
+    assert.equal(readFailure.body.code, "backend_invalid_response");
+  }
+});
+
+test("bounded backend error helper aborts stalled streams and header stalls without retrying", async () => {
+  assert.equal(portalTokenInternals.BACKEND_RESPONSE_TIMEOUT_MS, 2_000, "production proxy timeout remains explicit and short");
+  let stalledCancelled = false;
+  const stalled = new ReadableStream({
+    cancel() { stalledCancelled = true; },
+  });
+  const stalledResult = await settlesWithin(withFetchStub(
+    async () => new Response(stalled, { status: 400, headers: { "content-type": "application/json" } }),
+    () => portalTokenInternals.proxyBackendWithTimeout("https://backend.test", "/v1/checkout", "lcca_test", {}, "checkout", 1),
+  ), 500);
+  assert.notEqual(stalledResult, null, "stalled backend error stream is bounded by an abort timeout");
+  assert.deepEqual(stalledResult, { ok: false, status: 502, code: "backend_invalid_response" });
+  assert.equal(stalledCancelled, true, "stalled backend error stream is cancelled after abort");
+
+  const calls = [];
+  let aborted = false;
+  const abortedResult = await settlesWithin(withFetchStub(
+    async (url, init = {}) => {
+      calls.push({ url: String(url), redirect: init.redirect, authorization: new Headers(init.headers ?? {}).get("authorization") });
+      return await new Promise((_resolve, reject) => {
+        init.signal.addEventListener("abort", () => {
+          aborted = true;
+          reject(new Error("backend request timed out"));
+        }, { once: true });
+      });
+    },
+    () => portalTokenInternals.proxyBackendWithTimeout("https://backend.test", "/v1/activate", "lcca_test", {}, "download", 1),
+  ), 500);
+  assert.notEqual(abortedResult, null, "header stall is bounded by an abort timeout");
+  assert.deepEqual(abortedResult, { ok: false, status: 502, code: "backend_unreachable" });
+  assert.equal(aborted, true, "the credentialed subrequest is aborted");
+  assert.deepEqual(calls, [{ url: "https://backend.test/v1/activate", redirect: "manual", authorization: "Bearer lcca_test" }]);
 });
 
 test("local proxy failures from every action and download fit their assembled OpenAPI schemas", async () => {

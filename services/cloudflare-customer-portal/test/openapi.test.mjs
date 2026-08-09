@@ -13,7 +13,8 @@ import { assembleComponents, assemblePaths, assertUniqueOperationIds } from "../
 import { openApiDocument } from "../dist-worker/worker/openapi/document.js";
 import { ALL_ROUTES, META_ROUTES, PUBLIC_ROUTES, SESSION_ROUTES } from "../dist-worker/worker/routes.js";
 import worker, { PORTAL_ROUTE_KEYS } from "../dist-worker/worker/index.js";
-import { expectedProxyErrorCodes, PROXIED_ERROR_STATUSES, proxiedBackendOperations } from "./backend-proxy-contract.mjs";
+import { BACKEND_PROXY_ERROR_MANIFEST } from "../src/auth/portal_backend_error_manifest.mjs";
+import { canonicalBackendErrorManifest, expectedProxyErrorCodes, PROXIED_ERROR_STATUSES, proxiedBackendOperations } from "./backend-proxy-contract.mjs";
 
 const keyOf = (r) => `${r.method} ${r.path}`;
 
@@ -169,6 +170,16 @@ test("OpenAPI models exact portal and canonical-backend proxy error alternatives
     }
   }
   assert.deepEqual(documentedErrorCodes("/api/portal/devices/release", 500), ["portal_error"]);
+});
+
+test("runtime backend-error manifest is exactly derived from the canonical backend contract", () => {
+  for (const operation of proxiedBackendOperations) {
+    assert.deepEqual(
+      BACKEND_PROXY_ERROR_MANIFEST[operation.name],
+      canonicalBackendErrorManifest(operation),
+      `${operation.name} runtime error allowlist must be neither broader nor narrower than its backend contract`,
+    );
+  }
 });
 
 test("the doc routes are served without credentials or environment (behavioral)", async () => {

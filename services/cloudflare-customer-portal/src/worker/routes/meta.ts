@@ -108,7 +108,9 @@ async function backendRequiresAccountTokenMode(env: Env): Promise<boolean> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), READINESS_TIMEOUT_MS);
   try {
-    const response = await fetch(new URL("/health", origin).toString(), { signal: controller.signal });
+    // Redirects are terminal, even though readiness carries no credential: never let an untrusted
+    // Location turn this explicit backend trust check into a second request.
+    const response = await fetch(new URL("/health", origin).toString(), { signal: controller.signal, redirect: "manual" });
     if (response.status !== 200) {
       // The status is enough to fail readiness, but its body may be an endless upstream stream. Drain
       // no bytes and cancel it before returning the established 503 envelope.

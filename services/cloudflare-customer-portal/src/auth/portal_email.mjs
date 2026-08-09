@@ -10,6 +10,15 @@
 
 import { emailApiOrigin } from "./portal_destination.mjs";
 
+function discardResponseBody(response) {
+  try {
+    const cancellation = response.body?.cancel();
+    if (cancellation !== undefined) void cancellation.catch(() => {});
+  } catch {
+    // The provider response is never consumed; cancellation is best effort and must not delay auth.
+  }
+}
+
 /**
  * sendEmail(env, to, subject, body) -> { ok, code }
  *
@@ -40,7 +49,15 @@ export async function sendEmail(env, to, subject, body) {
         "content-type": "application/json",
       },
       body: JSON.stringify({ from, to, subject, text: body }),
+      // A provider redirect must be terminal: never forward the API key or OTP body to Location.
+      redirect: "manual",
     });
+    // sendEmail only needs the status. Drop every provider body immediately, including a redirect's
+    // potentially unbounded body, before the background auth work settles.
+    discardResponseBody(response);
+    if (response.status >= 300 && response.status < 400) {
+      return { ok: false, code: "email_send_failed" };
+    }
     if (response.status >= 200 && response.status < 300) {
       return { ok: true, code: "sent" };
     }

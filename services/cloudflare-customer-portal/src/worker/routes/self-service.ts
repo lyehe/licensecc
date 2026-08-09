@@ -16,7 +16,7 @@ import {
 
 type AnyFn = (...args: any[]) => any;
 const mintSessionToken = (tokenModule as { mintSessionToken: AnyFn }).mintSessionToken;
-const proxyBackend = (tokenModule as { proxyBackend: (origin: string, path: string, token: string, body: unknown) => Promise<Response> }).proxyBackend;
+const proxyBackend = (tokenModule as { proxyBackend: AnyFn }).proxyBackend;
 const portalRateLimit = (ratelimitModule as { portalRateLimit: AnyFn }).portalRateLimit;
 
 async function apiMe(session: { customer_id: string }, reqId: string): Promise<Response> {
@@ -238,7 +238,9 @@ async function apiAction(
   for (const k of ["client_instance_id", "nonce", "seat_id", "device_key_id"]) {
     if (typeof body[k] === "string") proxyBody[k] = body[k];
   }
-  const upstream = await proxyBackend(origin, `/v1/${operation}`, minted.raw, proxyBody);
+  const proxied = await proxyBackend(origin, `/v1/${operation}`, minted.raw, proxyBody, operation);
+  if (!proxied.ok) return envelope(reqId, proxied.code, undefined, proxied.status);
+  const upstream = proxied.response as Response;
   let upstreamBody: Record<string, unknown> = {};
   try {
     const parsed = await upstream.json();
@@ -286,21 +288,14 @@ async function apiDownload(
   if (minted.code === "config_error") return envelope(reqId, "config_error", undefined, 503);
   if (!minted.ok) return envelope(reqId, "not_found", undefined, 404);
 
-  let upstream: Response;
-  try {
-    upstream = await fetch(new URL("/v1/activate", origin).toString(), {
-      method: "POST",
-      headers: { authorization: `Bearer ${minted.raw}`, "content-type": "application/json" },
-      body: JSON.stringify({
-        project: entitlement.project,
-        feature: entitlement.feature,
-        license_fingerprint: entitlement.license_fingerprint,
-        device_key_id: deviceKeyId,
-      }),
-    });
-  } catch {
-    return envelope(reqId, "backend_unreachable", undefined, 502);
-  }
+  const proxied = await proxyBackend(origin, "/v1/activate", minted.raw, {
+    project: entitlement.project,
+    feature: entitlement.feature,
+    license_fingerprint: entitlement.license_fingerprint,
+    device_key_id: deviceKeyId,
+  }, "download");
+  if (!proxied.ok) return envelope(reqId, proxied.code, undefined, proxied.status);
+  const upstream = proxied.response as Response;
   let upstreamBody: Record<string, unknown>;
   try {
     const parsed = await upstream.json();

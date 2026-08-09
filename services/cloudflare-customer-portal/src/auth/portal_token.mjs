@@ -19,6 +19,7 @@
 import { buildIssue } from "@licensecc/cloudflare-runtime/auth/account_token_issue";
 import { loadPepperMap } from "@licensecc/cloudflare-runtime/auth/primitives";
 import { canonicalHttpsOrigin } from "./portal_destination.mjs";
+import { isAllowedBackendProxyError } from "./portal_backend_error_manifest.mjs";
 
 /** @typedef {import("../worker/env.js").Env} PortalEnv */
 /** @typedef {{ [key: string]: Uint8Array }} PepperMap */
@@ -29,6 +30,8 @@ import { canonicalHttpsOrigin } from "./portal_destination.mjs";
 const TOKEN_TTL_SEC = 120;
 const READ_OPERATIONS = ["report"];
 const ACTION_OPERATIONS = ["activate", "checkout", "heartbeat", "release", "renew"];
+const BACKEND_RESPONSE_TIMEOUT_MS = 2_000;
+const BACKEND_ERROR_MAX_BYTES = 4_096;
 
 /** @param {PortalEnv} env @param {PepperMap} peppers */
 function activePepper(env, peppers) {
@@ -137,48 +140,155 @@ export async function mintSessionToken(
 }
 
 /**
- * proxyBackend(origin, path, token, body) -> Response
+ * proxyBackend(origin, path, token, body, operation) -> { ok:true, response } | { ok:false, status, code }
  *
  * Forwards an /api/portal action to ${BACKEND_ORIGIN}/v1/* with Authorization: Bearer <ephemeral
  * account token>. The backend (ACCOUNT_TOKEN_MODE=required) is the authoritative isolation boundary.
  *
- * On a non-2xx upstream we pass the JSON body through but STRIP the upstream Authorization (and any
- * Set-Cookie / sensitive headers) so a backend echo can never leak the bearer back to the browser.
+ * Every credentialed request uses redirect:"manual". A redirect is never followed, so the bearer
+ * and body cannot be forwarded to a Location-controlled host. Non-2xx bodies are read under a
+ * short abort timeout and small byte cap, then accepted only when their exact status/code appears in
+ * the route-specific canonical-backend manifest. We return only that approved code; upstream fields
+ * (including a hostile backend echo) never reach the browser.
  */
-/** @param {string} origin @param {string} path @param {string} token @param {unknown} body */
-export async function proxyBackend(origin, path, token, body) {
+/** @param {string} origin @param {string} path @param {string} token @param {unknown} body @param {string} operation */
+export function proxyBackend(origin, path, token, body, operation) {
+  return proxyBackendWithTimeout(origin, path, token, body, operation, BACKEND_RESPONSE_TIMEOUT_MS);
+}
+
+// The production export above always uses the fixed short timeout. Keep the timeout-taking form
+// private to this module's test internals so stream-abort behavior can be tested without turning
+// every deterministic test run into a multi-second wall-clock delay.
+async function proxyBackendWithTimeout(origin, path, token, body, operation, timeoutMs) {
   // Defence in depth: callers normally resolve this once before minting a token, but the proxy
   // itself also refuses any non-canonical destination before it can construct a Bearer header.
   const destination = canonicalHttpsOrigin(origin);
   if (destination === null || !path.startsWith("/") || path.startsWith("//")) {
-    return new Response(JSON.stringify({ ok: false, code: "backend_unconfigured" }), {
-      status: 503,
-      headers: { "content-type": "application/json; charset=utf-8" },
-    });
+    return { ok: false, status: 503, code: "backend_unconfigured" };
   }
-  let upstream;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    upstream = await fetch(new URL(path, destination).toString(), {
+    const upstream = await fetch(new URL(path, destination).toString(), {
       method: "POST",
       headers: {
         authorization: `Bearer ${token}`,
         "content-type": "application/json",
       },
       body: JSON.stringify(body ?? {}),
+      redirect: "manual",
+      signal: controller.signal,
     });
+    if (upstream.status >= 300 && upstream.status < 400) {
+      cancelResponseBody(upstream);
+      return { ok: false, status: 502, code: "backend_invalid_response" };
+    }
+    if (!upstream.ok) {
+      const code = await readBoundedBackendErrorCode(upstream, operation, controller.signal);
+      return code === null
+        ? { ok: false, status: 502, code: "backend_invalid_response" }
+        : { ok: false, status: upstream.status, code };
+    }
+    return { ok: true, response: upstream };
   } catch {
-    return new Response(JSON.stringify({ ok: false, code: "backend_unreachable" }), {
-      status: 502,
-      headers: { "content-type": "application/json; charset=utf-8" },
-    });
+    return { ok: false, status: 502, code: "backend_unreachable" };
+  } finally {
+    clearTimeout(timeout);
   }
-  // Re-emit ONLY the body + content-type. Never forward upstream Authorization / Set-Cookie / other
-  // headers (the ephemeral bearer must not round-trip to the browser).
-  const text = await upstream.text();
-  return new Response(text, {
-    status: upstream.status,
-    headers: { "content-type": "application/json; charset=utf-8" },
+}
+
+function isRecord(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function cancelResponseBody(response) {
+  try {
+    const cancellation = response.body?.cancel();
+    if (cancellation !== undefined) void cancellation.catch(() => {});
+  } catch {
+    // A redirect body is already terminal; cancellation is best effort and never delays the response.
+  }
+}
+
+function cancelReader(reader) {
+  try {
+    const cancellation = reader.cancel();
+    void cancellation.catch(() => {});
+  } catch {
+    // An errored or closed reader may reject cancellation; the caller still fails closed.
+  }
+  try {
+    reader.releaseLock();
+  } catch {
+    // A pending read may retain the lock until cancellation settles.
+  }
+}
+
+function readChunkWithAbort(reader, signal) {
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) {
+      reject(new Error("backend response timed out"));
+      return;
+    }
+    const onAbort = () => {
+      cleanup();
+      reject(new Error("backend response timed out"));
+    };
+    const cleanup = () => signal.removeEventListener("abort", onAbort);
+    signal.addEventListener("abort", onAbort, { once: true });
+    void reader.read().then(
+      (result) => {
+        cleanup();
+        resolve(result);
+      },
+      (error) => {
+        cleanup();
+        reject(error);
+      },
+    );
   });
 }
 
-export const _internals = { TOKEN_TTL_SEC, READ_OPERATIONS, ACTION_OPERATIONS };
+async function readBoundedBackendErrorCode(response, operation, signal) {
+  const reader = response.body?.getReader();
+  if (reader === undefined) return null;
+  try {
+    const contentLength = response.headers.get("content-length");
+    if (contentLength !== null && /^(?:0|[1-9][0-9]*)$/.test(contentLength) && Number(contentLength) > BACKEND_ERROR_MAX_BYTES) {
+      return null;
+    }
+    const chunks = [];
+    let total = 0;
+    while (true) {
+      const { done, value } = await readChunkWithAbort(reader, signal);
+      if (done) break;
+      if (!(value instanceof Uint8Array)) return null;
+      total += value.byteLength;
+      if (total > BACKEND_ERROR_MAX_BYTES) return null;
+      chunks.push(value);
+    }
+    const bytes = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    const parsed = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+    if (!isRecord(parsed) || parsed.ok !== false || typeof parsed.code !== "string" || parsed.code.length === 0) return null;
+    return isAllowedBackendProxyError(operation, response.status, parsed.code) ? parsed.code : null;
+  } catch {
+    return null;
+  } finally {
+    // Never retain an upstream error stream after its bounded validation attempt.
+    cancelReader(reader);
+  }
+}
+
+export const _internals = {
+  TOKEN_TTL_SEC,
+  READ_OPERATIONS,
+  ACTION_OPERATIONS,
+  BACKEND_RESPONSE_TIMEOUT_MS,
+  BACKEND_ERROR_MAX_BYTES,
+  proxyBackendWithTimeout,
+};

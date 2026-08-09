@@ -152,4 +152,16 @@ export function backendStubCases(operation) {
   ]).map((code) => ({ status: Number(status), code })));
 }
 
+export function canonicalBackendErrorManifest(operation) {
+  return Object.fromEntries(
+    BACKEND_STUB_STATUSES.flatMap((status) => {
+      const codes = unique([
+        ...canonicalBackendErrorCodes(operation.backendPath, status),
+        ...(status === "500" ? BACKEND_TOP_LEVEL_500_CODES : []),
+      ]);
+      return codes.length === 0 ? [] : [[status, codes]];
+    }),
+  );
+}
+
 export { BACKEND_STUB_STATUSES, PROXIED_ERROR_STATUSES };
