@@ -10,6 +10,13 @@ export function likeContains(value: unknown): string | null {
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 100;
+// Per-type fan-out cap for global search (bounded so no single type floods the result).
+export const SEARCH_PER_TYPE_LIMIT = 10;
+
+export interface PaginationOptions {
+  readonly defaultLimit?: number;
+  readonly maxLimit?: number;
+}
 
 function parsePageInteger(raw: string | null, defaultValue: number, min: number, max: number): number | null {
   if (raw === null || raw === "") {
@@ -23,8 +30,10 @@ function parsePageInteger(raw: string | null, defaultValue: number, min: number,
 }
 
 /** Parse the shared offset pagination contract; null means an explicit value is malformed. */
-export function boundedCursor(url: URL): { limit: number; cursor: number } | null {
-  const limit = parsePageInteger(url.searchParams.get("limit"), DEFAULT_LIMIT, 1, MAX_LIMIT);
+export function boundedCursor(url: URL, options: PaginationOptions = {}): { limit: number; cursor: number } | null {
+  const defaultLimit = options.defaultLimit ?? DEFAULT_LIMIT;
+  const maxLimit = options.maxLimit ?? MAX_LIMIT;
+  const limit = parsePageInteger(url.searchParams.get("limit"), defaultLimit, 1, maxLimit);
   const cursor = parsePageInteger(url.searchParams.get("cursor"), 0, 0, Number.MAX_SAFE_INTEGER);
   return limit === null || cursor === null ? null : { limit, cursor };
 }
@@ -41,16 +50,21 @@ export function boundedCursor(url: URL): { limit: number; cursor: number } | nul
 export const CSV_ROW_CAP = 10000;
 // Cap on the number of ids a single bulk transition may carry (over -> 400 too_many).
 const BATCH_MAX_IDS = 100;
-// Per-type fan-out cap for global search (bounded so no single type floods the result).
-export const SEARCH_PER_TYPE_LIMIT = 10;
+
+// Spreadsheet engines may ignore a run of Unicode whitespace, BOM, or zero-width markers
+// before deciding whether a cell is a formula. Leading tab/CR/LF are treated as dangerous
+// controls themselves; ASCII and full-width formula introducers are checked after the run.
+const CSV_IGNORED_LEADING = /^(?:\s|\uFEFF|\u200B|\u200C|\u200D|\u2060)*/u;
+const CSV_FORMULA_PREFIX = /^[=+\-@＝＋－＠]/u;
 
 // CSV-escape one field: stringify, then quote + double any embedded quote. null/undefined
 // render as the empty string. Always quoted so commas/newlines/quotes in data are inert.
 export function csvField(value: unknown): string {
   const text = value === null || value === undefined ? "" : String(value);
-  // Prefix formula-like cells after optional leading spaces. Tabs and CR are themselves
-  // dangerous effective prefixes, so they remain in the checked character class.
-  const safeText = /^[ ]*[=+\-@\t\r]/.test(text) ? `'${text}` : text;
+  const ignoredLeading = CSV_IGNORED_LEADING.exec(text)?.[0] ?? "";
+  const effective = text.slice(ignoredLeading.length);
+  const hasDangerousControl = /[\t\r\n]/u.test(ignoredLeading);
+  const safeText = hasDangerousControl || CSV_FORMULA_PREFIX.test(effective) ? `'${text}` : text;
   return `"${safeText.replace(/"/g, '""')}"`;
 }
 

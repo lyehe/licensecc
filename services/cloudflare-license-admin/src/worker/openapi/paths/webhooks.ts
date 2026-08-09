@@ -10,6 +10,7 @@ import {
   formatCsvParam,
   idempotencyKeyHeader,
   idParam,
+  invalidPaginationResponse,
   limitCursorParams,
   okResponse,
   SYNC_SECURITY,
@@ -30,6 +31,7 @@ export const webhookPaths: LabeledPathFragment = {
       ],
       responses: {
         "200": okResponse("Webhook endpoint page.", "#/components/schemas/WebhooksListData", "webhooks_listed"),
+        "400": invalidPaginationResponse(),
         ...ADMIN_AUTH_ERRORS,
       },
     },
@@ -65,7 +67,7 @@ export const webhookPaths: LabeledPathFragment = {
       ],
       responses: {
         "200": okResponse("Delivery page.", "#/components/schemas/WebhookDeliveriesListData", "webhook_deliveries_listed"),
-        "400": errorResponse("Invalid status / endpoint_id filter.", "invalid_request"),
+        "400": errorResponse("Invalid status / endpoint_id filter or pagination bounds.", "invalid_request"),
         ...ADMIN_AUTH_ERRORS,
       },
     },

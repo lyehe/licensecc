@@ -10,6 +10,7 @@ import {
   formatCsvParam,
   idempotencyKeyHeader,
   idParam,
+  invalidPaginationResponse,
   limitCursorParams,
   okResponse,
   SYNC_SECURITY,
@@ -32,6 +33,7 @@ export const policyPaths: LabeledPathFragment = {
       ],
       responses: {
         "200": okResponse("Policy page.", "#/components/schemas/PoliciesListData", "policies_listed"),
+        "400": invalidPaginationResponse(),
         ...ADMIN_AUTH_ERRORS,
       },
     },

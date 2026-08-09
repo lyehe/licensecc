@@ -31,7 +31,7 @@ export const catalogPaths: LabeledPathFragment = {
       ],
       responses: {
         "200": okResponse("Catalog feature page.", "#/components/schemas/CatalogFeaturesListData", "catalog_features_listed"),
-        "400": errorResponse("Invalid filter.", "invalid_request"),
+        "400": errorResponse("Invalid filter or pagination bounds.", "invalid_request"),
         ...ADMIN_AUTH_ERRORS,
       },
     },
@@ -133,7 +133,7 @@ export const catalogPaths: LabeledPathFragment = {
       ],
       responses: {
         "200": okResponse("Catalog plan page.", "#/components/schemas/CatalogPlansListData", "catalog_plans_listed"),
-        "400": errorResponse("Invalid filter.", "invalid_request"),
+        "400": errorResponse("Invalid filter or pagination bounds.", "invalid_request"),
         ...ADMIN_AUTH_ERRORS,
       },
     },

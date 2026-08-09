@@ -10,6 +10,7 @@ import {
   formatCsvParam,
   idempotencyKeyHeader,
   idParam,
+  invalidPaginationResponse,
   limitCursorParams,
   okResponse,
   SYNC_SECURITY,
@@ -72,6 +73,7 @@ export const summaryReportPaths: LabeledPathFragment = {
       ],
       responses: {
         "200": okResponse("Expiring-soon entitlement page (valid_until ASC) with days_left.", "#/components/schemas/ExpiringData", "report_expiring"),
+        "400": invalidPaginationResponse(),
         ...ADMIN_AUTH_ERRORS,
       },
     },

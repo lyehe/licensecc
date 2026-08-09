@@ -1,4 +1,5 @@
 import type { LabeledPathFragment } from "../assemble.js";
+import { SEARCH_PER_TYPE_LIMIT } from "../../query.js";
 import {
   ADMIN_AUTH_ERRORS,
   ADMIN_MUTATION_AUTH_ERRORS,
@@ -10,6 +11,7 @@ import {
   formatCsvParam,
   idempotencyKeyHeader,
   idParam,
+  invalidPaginationResponse,
   limitCursorParams,
   okResponse,
   SYNC_SECURITY,
@@ -32,7 +34,7 @@ export const customerPaths: LabeledPathFragment = {
       ],
       responses: {
         "200": okResponse("Customer page (JSON), or a CSV attachment when ?format=csv.", "#/components/schemas/CustomersListData", "customers_listed"),
-        "400": errorResponse("Invalid query parameter (e.g. over-long search term).", "invalid_request"),
+        "400": errorResponse("Invalid query parameter, including pagination bounds (e.g. over-long search term).", "invalid_request"),
         ...ADMIN_AUTH_ERRORS,
       },
     },
@@ -110,7 +112,7 @@ export const customerPaths: LabeledPathFragment = {
       ],
       responses: {
         "200": okResponse("License page.", "#/components/schemas/LicensesListData", "licenses_listed"),
-        "400": errorResponse("Invalid query parameter (e.g. over-long search term).", "invalid_request"),
+        "400": errorResponse("Invalid query parameter, including pagination bounds (e.g. over-long search term).", "invalid_request"),
         ...ADMIN_AUTH_ERRORS,
       },
     },
@@ -129,8 +131,8 @@ export const customerPaths: LabeledPathFragment = {
       ],
       responses: {
         "200": okResponse("Order-event page with fulfillment summary.", "#/components/schemas/OrdersListData", "orders_listed"),
+        "400": invalidPaginationResponse(),
         ...ADMIN_AUTH_ERRORS,
-
       },
     },
   }],
@@ -148,11 +150,11 @@ export const searchPaths: LabeledPathFragment = {
       security: ADMIN_SECURITY,
       parameters: [
         { name: "q", in: "query", required: true, description: "Search term (1..128 chars). Contains-match (escaped LIKE) on customers (id/email/name/external_ref), licenses (id/label), orders (subscription_id); PREFIX-match on the hex entitlement license_fingerprint.", schema: { type: "string", minLength: 1, maxLength: 128 } },
-        { name: "limit", in: "query", required: false, description: "Per-type result cap (default 10, clamped to 10).", schema: { type: "integer", default: 10, minimum: 1, maximum: 10 } },
+        ...limitCursorParams({ defaultLimit: SEARCH_PER_TYPE_LIMIT, maxLimit: SEARCH_PER_TYPE_LIMIT, includeCursor: false }),
       ],
       responses: {
         "200": okResponse("Mixed-type search results for UI deep-linking.", "#/components/schemas/SearchData", "search_results"),
-        "400": errorResponse("Empty or over-long q.", "invalid_request"),
+        "400": errorResponse("Empty or over-long q, or invalid pagination bounds.", "invalid_request"),
         ...ADMIN_AUTH_ERRORS,
       },
     },

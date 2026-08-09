@@ -84,8 +84,8 @@ test("every cursor-paginated route family rejects malformed cursors before touch
 });
 
 test("CSV fields neutralize formula prefixes after leading spaces and preserve RFC-4180 escaping", () => {
-  for (const prefix of ["=", "+", "-", "@", "\t", "\r"]) {
-    for (const leading of ["", " ", "  ", "\t", "\r", " \t\r"]) {
+  for (const prefix of ["=", "+", "-", "@", "\t", "\r", "＝", "＋", "－", "＠"]) {
+    for (const leading of ["", " ", "  ", "\t", "\r", "\n", " \t\r\n", "\uFEFF", "\u00A0", "\u2003", "\u200B", "\u2060", "\uFEFF\u00A0\u2003"]) {
       const value = `${leading}${prefix}SUM(A1)`;
       assert.equal(csvField(value), `"'${value.replaceAll('"', '""')}"`, JSON.stringify(value));
     }
@@ -98,10 +98,69 @@ test("CSV fields neutralize formula prefixes after leading spaces and preserve R
   assert.equal(csvField(null), '""');
   assert.equal(csvField(undefined), '""');
   assert.equal(csvField("comma,quote\"and\nnewline"), '"comma,quote""and\nnewline"');
-  assert.equal(csvField("\n=SUM(A1)"), '"\n=SUM(A1)"');
+  assert.equal(csvField("\n=SUM(\"A1\")\n"), '"\'\n=SUM(""A1"")\n"');
+  assert.equal(csvField("\u00A0＝SUM(A1)"), '"\'\u00A0＝SUM(A1)"');
+  assert.equal(csvField("\u200B＠SUM(A1)"), '"\'\u200B＠SUM(A1)"');
 
   assert.equal(
     toCsv(["value"], [{ value: "=SUM(A1)" }, { value: "normal" }], false),
     '"value"\r\n"\'=SUM(A1)"\r\n"normal"\r\n',
   );
+});
+
+function recordingDb(rows = []) {
+  return {
+    prepareCalls: 0,
+    prepare(sql) {
+      this.prepareCalls += 1;
+      return {
+        bind(...values) {
+          return {
+            async all() {
+              return { results: rows, values, sql };
+            },
+          };
+        },
+      };
+    },
+  };
+}
+
+function rejectingDb() {
+  return {
+    prepareCalls: 0,
+    prepare() {
+      this.prepareCalls += 1;
+      throw new Error("D1 must not be touched for invalid pagination");
+    },
+  };
+}
+
+test("CSV HTTP exports neutralize formula cells for customers, entitlements, and events", async () => {
+  const cases = [
+    ["/api/admin/customers?format=csv", [{ id: "c-1", name: "\n=SUM(\"A1\")", email: "customer@example.com", status: "active", external_ref: "ref", entitlement_count: 0, active_entitlement_count: 0, created_at: 1, updated_at: 1 }]],
+    ["/api/admin/entitlements?format=csv", [{ project: "p", feature: "f", license_fingerprint: "a".repeat(64), device_hash: "", status: "active", assertion_ttl_seconds: 300, revocation_seq: 1, valid_from: null, valid_until: null, notes: "\uFEFF＠SUM(A1)", customer_id: null, license_id: null, created_at: 1, updated_at: 1 }]],
+    ["/api/admin/events?format=csv", [{ id: 1, project: "p", feature: "f", license_fingerprint: "a".repeat(64), event_type: "update", status: "active", revocation_seq: 1, actor: "admin", actor_type: "admin", source: "admin", request_id: "req", reason: "\u00A0＋SUM(A1)", detail: "", created_at: 1 }]],
+  ];
+  for (const [path, rows] of cases) {
+    const db = recordingDb(rows);
+    const response = await worker.fetch(authed(path), baseEnv(db));
+    assert.equal(response.status, 200, path);
+    assert.match(response.headers.get("content-type") ?? "", /^text\/csv/);
+    const body = await response.text();
+    assert.match(body, /"'[\s\uFEFF\u200B\u200C\u200D\u2060]*(?:=|＠|＋)SUM/u, path);
+    assert.equal(db.prepareCalls, 1, `${path} uses one export query`);
+  }
+});
+
+test("malformed pagination on CSV routes returns 400 without preparing D1", async () => {
+  for (const path of ["/api/admin/customers?format=csv", "/api/admin/entitlements?format=csv", "/api/admin/events?format=csv"]) {
+    for (const query of ["limit=-1", "cursor=-1", "limit=Infinity"]) {
+      const db = rejectingDb();
+      const response = await worker.fetch(authed(`${path}&${query}`), baseEnv(db));
+      assert.equal(response.status, 400, `${path}&${query}`);
+      assert.equal((await json(response)).code, "invalid_request", `${path}&${query}`);
+      assert.equal(db.prepareCalls, 0, `${path}&${query}`);
+    }
+  }
 });

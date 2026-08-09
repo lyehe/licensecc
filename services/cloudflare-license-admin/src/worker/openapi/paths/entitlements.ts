@@ -10,6 +10,7 @@ import {
   formatCsvParam,
   idempotencyKeyHeader,
   idParam,
+  invalidPaginationResponse,
   limitCursorParams,
   okResponse,
   SYNC_SECURITY,
@@ -33,6 +34,7 @@ export const entitlementPaths: LabeledPathFragment = {
       ],
       responses: {
         "200": okResponse("Entitlement page (JSON), or a CSV attachment when ?format=csv.", "#/components/schemas/EntitlementsListData", "entitlements_listed"),
+        "400": invalidPaginationResponse(),
         ...ADMIN_AUTH_ERRORS,
       },
     },
@@ -167,11 +169,12 @@ export const entitlementPaths: LabeledPathFragment = {
       operationId: "listEvents",
       security: ADMIN_SECURITY,
       parameters: [
-        { name: "limit", in: "query", required: false, description: "Page size (default 50, clamped to max 100).", schema: { type: "integer", default: 50, minimum: 1, maximum: 100 } },
+        ...limitCursorParams({ includeCursor: false }),
         formatCsvParam,
       ],
       responses: {
         "200": okResponse("Audit-event list (JSON), or a CSV attachment when ?format=csv.", "#/components/schemas/EventsListData", "events_listed"),
+        "400": invalidPaginationResponse(),
         ...ADMIN_AUTH_ERRORS,
       },
     },

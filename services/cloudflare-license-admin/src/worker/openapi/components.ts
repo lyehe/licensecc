@@ -68,11 +68,38 @@ export const featureKeyParam = {
   schema: { type: "string", maxLength: 15 },
 } as const;
 
-export function limitCursorParams(): ReadonlyArray<Record<string, unknown>> {
-  return [
-    { name: "limit", in: "query", required: false, description: "Page size (default 50, clamped to max 100).", schema: { type: "integer", default: 50, minimum: 1, maximum: 100 } },
-    { name: "cursor", in: "query", required: false, description: "Opaque numeric offset cursor (default 0). Use `next_cursor` from the previous page.", schema: { type: "string", default: "0" } },
+export interface LimitCursorOptions {
+  readonly defaultLimit?: number;
+  readonly maxLimit?: number;
+  readonly includeCursor?: boolean;
+}
+
+export function limitCursorParams(options: LimitCursorOptions = {}): ReadonlyArray<Record<string, unknown>> {
+  const defaultLimit = options.defaultLimit ?? 50;
+  const maxLimit = options.maxLimit ?? 100;
+  const params: Array<Record<string, unknown>> = [
+    {
+      name: "limit",
+      in: "query",
+      required: false,
+      description: `Page size (default ${defaultLimit}; explicit values must be safe integers from 1 through ${maxLimit}; malformed values return 400 invalid_request).`,
+      schema: { type: "integer", default: defaultLimit, minimum: 1, maximum: maxLimit },
+    },
   ];
+  if (options.includeCursor !== false) {
+    params.push({
+      name: "cursor",
+      in: "query",
+      required: false,
+      description: "Non-negative safe integer offset cursor (default 0). Use `next_cursor` from the previous page; malformed values return 400 invalid_request.",
+      schema: { type: "string", default: "0", pattern: "^[0-9]+$" },
+    });
+  }
+  return params;
+}
+
+export function invalidPaginationResponse(): Record<string, unknown> {
+  return errorResponse("Invalid limit or cursor query parameter; explicit values must be safe integers within the documented bounds.", "invalid_request");
 }
 
 // CSV export rides the existing list path: `?format=csv` streams a text/csv attachment of

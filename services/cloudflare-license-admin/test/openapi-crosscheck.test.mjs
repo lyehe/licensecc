@@ -169,3 +169,43 @@ test("operation identifiers and auth declarations are unique and match route own
   const sync = openApiDocument.paths["/api/sync/entitlements"].post;
   assert.deepEqual(sync.security, [{ syncBearer: [] }]);
 });
+
+test("every bounded route documents strict pagination bounds and invalid_request", () => {
+  const boundedRoutes = [
+    ["GET", "/api/admin/customers", true],
+    ["GET", "/api/admin/licenses", true],
+    ["GET", "/api/admin/orders", true],
+    ["GET", "/api/admin/search", false],
+    ["GET", "/api/admin/entitlements", true],
+    ["GET", "/api/admin/events", false],
+    ["GET", "/api/admin/policies", true],
+    ["GET", "/api/admin/catalog/features", true],
+    ["GET", "/api/admin/catalog/plans", true],
+    ["GET", "/api/admin/webhooks", true],
+    ["GET", "/api/admin/webhooks/deliveries", true],
+    ["GET", "/api/admin/report/expiring", true],
+  ];
+  const expected = new Set(boundedRoutes.map(([method, path]) => `${method} ${path}`));
+  const documented = new Set();
+  for (const [path, item] of Object.entries(openApiDocument.paths)) {
+    for (const method of ["get", "post", "patch"]) {
+      const operation = item[method];
+      if (!operation) continue;
+      const parameterNames = (operation.parameters ?? []).filter((parameter) => parameter.in === "query").map((parameter) => parameter.name);
+      if (!parameterNames.includes("limit")) continue;
+      const key = `${method.toUpperCase()} ${path}`;
+      documented.add(key);
+      assert.ok(expected.has(key), `${key} is not in the bounded route contract`);
+      assert.ok(operation.responses?.["400"], `${key} must document HTTP 400`);
+      const examples = operation.responses["400"].content?.["application/json"]?.examples ?? {};
+      assert.ok(examples.invalid_request, `${key} must document invalid_request`);
+      const limit = operation.parameters.find((parameter) => parameter.name === "limit");
+      assert.equal(limit.schema?.minimum, 1, `${key} limit minimum`);
+      assert.equal(limit.schema?.maximum, key === "GET /api/admin/search" ? 10 : 100, `${key} limit maximum`);
+      assert.equal(limit.schema?.default, key === "GET /api/admin/search" ? 10 : 50, `${key} limit default`);
+      const expectedCursor = boundedRoutes.find(([routeMethod, routePath]) => `${routeMethod} ${routePath}` === key)?.[2];
+      assert.equal(parameterNames.includes("cursor"), expectedCursor, `${key} cursor parameter`);
+    }
+  }
+  assert.deepEqual(documented, expected, "every runtime bounded route must be documented exactly once");
+});

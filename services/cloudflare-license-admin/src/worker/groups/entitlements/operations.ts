@@ -45,6 +45,10 @@ export async function listEntitlements(request: Request, env: Env, requestIdValu
       values.push(value);
     }
   }
+  const pagination = boundedCursor(url);
+  if (pagination === null) {
+    return envelope(requestIdValue, "invalid_request", undefined, 400);
+  }
   const where = filters.length === 0 ? "" : `WHERE ${filters.join(" AND ")}`;
   if (wantsCsv(url)) {
     // CSV export: SAME filters, but bounded by the CSV cap instead of a page cursor.
@@ -56,10 +60,6 @@ export async function listEntitlements(request: Request, env: Env, requestIdValu
       ["id", "project", "feature", "license_fingerprint", "device_hash", "status", "assertion_ttl_seconds", "revocation_seq", "valid_from", "valid_until", "notes", "customer_id", "license_id", "created_at", "updated_at"],
       csvRows.results.map(withId) as unknown as ReadonlyArray<Record<string, unknown>>,
     );
-  }
-  const pagination = boundedCursor(url);
-  if (pagination === null) {
-    return envelope(requestIdValue, "invalid_request", undefined, 400);
   }
   const { limit, cursor } = pagination;
   values.push(limit + 1, cursor);
@@ -75,6 +75,10 @@ export async function listEntitlements(request: Request, env: Env, requestIdValu
 
 export async function listEvents(request: Request, env: Env, requestIdValue: string): Promise<Response> {
   const url = new URL(request.url);
+  const pagination = boundedCursor(url);
+  if (pagination === null) {
+    return envelope(requestIdValue, "invalid_request", undefined, 400);
+  }
   // `detail` carries the device-transition attribution ("device-revoke <keyId>: <reason>") that a
   // device revoke/disable writes on an event_type='update' row (audit R6.5); surface it so the console
   // + CSV distinguish a device revocation from a plain entitlement edit.
@@ -89,10 +93,6 @@ export async function listEvents(request: Request, env: Env, requestIdValue: str
       ["id", "project", "feature", "license_fingerprint", "event_type", "status", "revocation_seq", "actor", "actor_type", "source", "request_id", "reason", "detail", "created_at"],
       csvRows.results,
     );
-  }
-  const pagination = boundedCursor(url);
-  if (pagination === null) {
-    return envelope(requestIdValue, "invalid_request", undefined, 400);
   }
   const { limit } = pagination;
   const rows = await env.DB.prepare(

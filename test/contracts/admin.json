@@ -3187,7 +3187,7 @@
               }
             },
             {
-              "description": "Page size (default 50, clamped to max 100).",
+              "description": "Page size (default 50; explicit values must be safe integers from 1 through 100; malformed values return 400 invalid_request).",
               "in": "query",
               "name": "limit",
               "required": false,
@@ -3199,12 +3199,13 @@
               }
             },
             {
-              "description": "Opaque numeric offset cursor (default 0). Use `next_cursor` from the previous page.",
+              "description": "Non-negative safe integer offset cursor (default 0). Use `next_cursor` from the previous page; malformed values return 400 invalid_request.",
               "in": "query",
               "name": "cursor",
               "required": false,
               "schema": {
                 "default": "0",
+                "pattern": "^[0-9]+$",
                 "type": "string"
               }
             }
@@ -3252,7 +3253,7 @@
                   }
                 }
               },
-              "description": "Invalid filter."
+              "description": "Invalid filter or pagination bounds."
             },
             "401": {
               "content": {
@@ -4705,7 +4706,7 @@
               }
             },
             {
-              "description": "Page size (default 50, clamped to max 100).",
+              "description": "Page size (default 50; explicit values must be safe integers from 1 through 100; malformed values return 400 invalid_request).",
               "in": "query",
               "name": "limit",
               "required": false,
@@ -4717,12 +4718,13 @@
               }
             },
             {
-              "description": "Opaque numeric offset cursor (default 0). Use `next_cursor` from the previous page.",
+              "description": "Non-negative safe integer offset cursor (default 0). Use `next_cursor` from the previous page; malformed values return 400 invalid_request.",
               "in": "query",
               "name": "cursor",
               "required": false,
               "schema": {
                 "default": "0",
+                "pattern": "^[0-9]+$",
                 "type": "string"
               }
             }
@@ -4770,7 +4772,7 @@
                   }
                 }
               },
-              "description": "Invalid filter."
+              "description": "Invalid filter or pagination bounds."
             },
             "401": {
               "content": {
@@ -6993,7 +6995,7 @@
               }
             },
             {
-              "description": "Page size (default 50, clamped to max 100).",
+              "description": "Page size (default 50; explicit values must be safe integers from 1 through 100; malformed values return 400 invalid_request).",
               "in": "query",
               "name": "limit",
               "required": false,
@@ -7005,12 +7007,13 @@
               }
             },
             {
-              "description": "Opaque numeric offset cursor (default 0). Use `next_cursor` from the previous page.",
+              "description": "Non-negative safe integer offset cursor (default 0). Use `next_cursor` from the previous page; malformed values return 400 invalid_request.",
               "in": "query",
               "name": "cursor",
               "required": false,
               "schema": {
                 "default": "0",
+                "pattern": "^[0-9]+$",
                 "type": "string"
               }
             },
@@ -7070,7 +7073,7 @@
                   }
                 }
               },
-              "description": "Invalid query parameter (e.g. over-long search term)."
+              "description": "Invalid query parameter, including pagination bounds (e.g. over-long search term)."
             },
             "401": {
               "content": {
@@ -7810,7 +7813,7 @@
               }
             },
             {
-              "description": "Page size (default 50, clamped to max 100).",
+              "description": "Page size (default 50; explicit values must be safe integers from 1 through 100; malformed values return 400 invalid_request).",
               "in": "query",
               "name": "limit",
               "required": false,
@@ -7822,12 +7825,13 @@
               }
             },
             {
-              "description": "Opaque numeric offset cursor (default 0). Use `next_cursor` from the previous page.",
+              "description": "Non-negative safe integer offset cursor (default 0). Use `next_cursor` from the previous page; malformed values return 400 invalid_request.",
               "in": "query",
               "name": "cursor",
               "required": false,
               "schema": {
                 "default": "0",
+                "pattern": "^[0-9]+$",
                 "type": "string"
               }
             },
@@ -7869,6 +7873,25 @@
                 }
               },
               "description": "Entitlement page (JSON), or a CSV attachment when ?format=csv."
+            },
+            "400": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "invalid_request": {
+                      "value": {
+                        "code": "invalid_request",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "Invalid limit or cursor query parameter; explicit values must be safe integers within the documented bounds."
             },
             "401": {
               "content": {
@@ -10933,7 +10956,7 @@
           "operationId": "listEvents",
           "parameters": [
             {
-              "description": "Page size (default 50, clamped to max 100).",
+              "description": "Page size (default 50; explicit values must be safe integers from 1 through 100; malformed values return 400 invalid_request).",
               "in": "query",
               "name": "limit",
               "required": false,
@@ -10982,6 +11005,25 @@
                 }
               },
               "description": "Audit-event list (JSON), or a CSV attachment when ?format=csv."
+            },
+            "400": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "invalid_request": {
+                      "value": {
+                        "code": "invalid_request",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "Invalid limit or cursor query parameter; explicit values must be safe integers within the documented bounds."
             },
             "401": {
               "content": {
@@ -11623,7 +11665,7 @@
               }
             },
             {
-              "description": "Page size (default 50, clamped to max 100).",
+              "description": "Page size (default 50; explicit values must be safe integers from 1 through 100; malformed values return 400 invalid_request).",
               "in": "query",
               "name": "limit",
               "required": false,
@@ -11635,12 +11677,13 @@
               }
             },
             {
-              "description": "Opaque numeric offset cursor (default 0). Use `next_cursor` from the previous page.",
+              "description": "Non-negative safe integer offset cursor (default 0). Use `next_cursor` from the previous page; malformed values return 400 invalid_request.",
               "in": "query",
               "name": "cursor",
               "required": false,
               "schema": {
                 "default": "0",
+                "pattern": "^[0-9]+$",
                 "type": "string"
               }
             }
@@ -11688,7 +11731,7 @@
                   }
                 }
               },
-              "description": "Invalid query parameter (e.g. over-long search term)."
+              "description": "Invalid query parameter, including pagination bounds (e.g. over-long search term)."
             },
             "401": {
               "content": {
@@ -11798,7 +11841,7 @@
               }
             },
             {
-              "description": "Page size (default 50, clamped to max 100).",
+              "description": "Page size (default 50; explicit values must be safe integers from 1 through 100; malformed values return 400 invalid_request).",
               "in": "query",
               "name": "limit",
               "required": false,
@@ -11810,12 +11853,13 @@
               }
             },
             {
-              "description": "Opaque numeric offset cursor (default 0). Use `next_cursor` from the previous page.",
+              "description": "Non-negative safe integer offset cursor (default 0). Use `next_cursor` from the previous page; malformed values return 400 invalid_request.",
               "in": "query",
               "name": "cursor",
               "required": false,
               "schema": {
                 "default": "0",
+                "pattern": "^[0-9]+$",
                 "type": "string"
               }
             }
@@ -11845,6 +11889,25 @@
                 }
               },
               "description": "Order-event page with fulfillment summary."
+            },
+            "400": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "invalid_request": {
+                      "value": {
+                        "code": "invalid_request",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "Invalid limit or cursor query parameter; explicit values must be safe integers within the documented bounds."
             },
             "401": {
               "content": {
@@ -11955,7 +12018,7 @@
               }
             },
             {
-              "description": "Page size (default 50, clamped to max 100).",
+              "description": "Page size (default 50; explicit values must be safe integers from 1 through 100; malformed values return 400 invalid_request).",
               "in": "query",
               "name": "limit",
               "required": false,
@@ -11967,12 +12030,13 @@
               }
             },
             {
-              "description": "Opaque numeric offset cursor (default 0). Use `next_cursor` from the previous page.",
+              "description": "Non-negative safe integer offset cursor (default 0). Use `next_cursor` from the previous page; malformed values return 400 invalid_request.",
               "in": "query",
               "name": "cursor",
               "required": false,
               "schema": {
                 "default": "0",
+                "pattern": "^[0-9]+$",
                 "type": "string"
               }
             }
@@ -12002,6 +12066,25 @@
                 }
               },
               "description": "Policy page."
+            },
+            "400": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "invalid_request": {
+                      "value": {
+                        "code": "invalid_request",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "Invalid limit or cursor query parameter; explicit values must be safe integers within the documented bounds."
             },
             "401": {
               "content": {
@@ -13266,7 +13349,7 @@
               }
             },
             {
-              "description": "Page size (default 50, clamped to max 100).",
+              "description": "Page size (default 50; explicit values must be safe integers from 1 through 100; malformed values return 400 invalid_request).",
               "in": "query",
               "name": "limit",
               "required": false,
@@ -13278,12 +13361,13 @@
               }
             },
             {
-              "description": "Opaque numeric offset cursor (default 0). Use `next_cursor` from the previous page.",
+              "description": "Non-negative safe integer offset cursor (default 0). Use `next_cursor` from the previous page; malformed values return 400 invalid_request.",
               "in": "query",
               "name": "cursor",
               "required": false,
               "schema": {
                 "default": "0",
+                "pattern": "^[0-9]+$",
                 "type": "string"
               }
             }
@@ -13313,6 +13397,25 @@
                 }
               },
               "description": "Expiring-soon entitlement page (valid_until ASC) with days_left."
+            },
+            "400": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "invalid_request": {
+                      "value": {
+                        "code": "invalid_request",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "Invalid limit or cursor query parameter; explicit values must be safe integers within the documented bounds."
             },
             "401": {
               "content": {
@@ -13546,7 +13649,7 @@
               }
             },
             {
-              "description": "Per-type result cap (default 10, clamped to 10).",
+              "description": "Page size (default 10; explicit values must be safe integers from 1 through 10; malformed values return 400 invalid_request).",
               "in": "query",
               "name": "limit",
               "required": false,
@@ -13601,7 +13704,7 @@
                   }
                 }
               },
-              "description": "Empty or over-long q."
+              "description": "Empty or over-long q, or invalid pagination bounds."
             },
             "401": {
               "content": {
@@ -13880,7 +13983,7 @@
               }
             },
             {
-              "description": "Page size (default 50, clamped to max 100).",
+              "description": "Page size (default 50; explicit values must be safe integers from 1 through 100; malformed values return 400 invalid_request).",
               "in": "query",
               "name": "limit",
               "required": false,
@@ -13892,12 +13995,13 @@
               }
             },
             {
-              "description": "Opaque numeric offset cursor (default 0). Use `next_cursor` from the previous page.",
+              "description": "Non-negative safe integer offset cursor (default 0). Use `next_cursor` from the previous page; malformed values return 400 invalid_request.",
               "in": "query",
               "name": "cursor",
               "required": false,
               "schema": {
                 "default": "0",
+                "pattern": "^[0-9]+$",
                 "type": "string"
               }
             }
@@ -13927,6 +14031,25 @@
                 }
               },
               "description": "Webhook endpoint page."
+            },
+            "400": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "invalid_request": {
+                      "value": {
+                        "code": "invalid_request",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "Invalid limit or cursor query parameter; explicit values must be safe integers within the documented bounds."
             },
             "401": {
               "content": {
@@ -15103,7 +15226,7 @@
               }
             },
             {
-              "description": "Page size (default 50, clamped to max 100).",
+              "description": "Page size (default 50; explicit values must be safe integers from 1 through 100; malformed values return 400 invalid_request).",
               "in": "query",
               "name": "limit",
               "required": false,
@@ -15115,12 +15238,13 @@
               }
             },
             {
-              "description": "Opaque numeric offset cursor (default 0). Use `next_cursor` from the previous page.",
+              "description": "Non-negative safe integer offset cursor (default 0). Use `next_cursor` from the previous page; malformed values return 400 invalid_request.",
               "in": "query",
               "name": "cursor",
               "required": false,
               "schema": {
                 "default": "0",
+                "pattern": "^[0-9]+$",
                 "type": "string"
               }
             }
@@ -15168,7 +15292,7 @@
                   }
                 }
               },
-              "description": "Invalid status / endpoint_id filter."
+              "description": "Invalid status / endpoint_id filter or pagination bounds."
             },
             "401": {
               "content": {
