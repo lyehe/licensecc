@@ -75,11 +75,24 @@ test("admin UI workflow binds every editable plan projection field to a stable s
       plan_id: "plan_pro",
       plan_key: "pro",
       support_until: 1783209600,
+      support_until_provided: true,
       addons: ["team_seats", "export"],
       notes: "annual renewal",
     }),
   );
-  assert.match(await workflow.planProjectionInputDigest(body), /^[0-9a-f]{64}$/);
+  const digest = await workflow.planProjectionInputDigest(body);
+  assert.match(digest, /^[0-9a-f]{64}$/);
+  const omittedSupportUntil = { ...body };
+  delete omittedSupportUntil.support_until;
+  const explicitNullSupportUntil = { ...body, support_until: null };
+  assert.notEqual(
+    workflow.planProjectionInputSnapshot(omittedSupportUntil),
+    workflow.planProjectionInputSnapshot(explicitNullSupportUntil),
+  );
+  assert.notEqual(
+    await workflow.planProjectionInputDigest(omittedSupportUntil),
+    await workflow.planProjectionInputDigest(explicitNullSupportUntil),
+  );
 });
 
 test("admin UI workflow builds catalog paths and payloads", async () => {

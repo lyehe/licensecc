@@ -280,6 +280,7 @@ export function planProjectionInputSnapshot(input: PlanProjectionInput): string 
     plan_id: input.plan_id ?? null,
     plan_key: input.plan_key ?? null,
     support_until: input.support_until ?? null,
+    support_until_provided: Object.prototype.hasOwnProperty.call(input, "support_until"),
     addons: input.addons ?? [],
     notes: input.notes ?? "",
   };

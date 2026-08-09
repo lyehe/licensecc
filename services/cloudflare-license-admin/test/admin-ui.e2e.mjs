@@ -1189,16 +1189,98 @@ test("admin UI previews and applies a license plan projection", async ({ page })
   await expect(applyButton).toBeDisabled();
   await expect.poll(() => api.requests.planApplies.length).toBe(0);
 
-  await form.getByRole("button", { name: "Preview" }).click();
-  await expect.poll(() => api.requests.planPreviews.length).toBe(2);
-  await expect(applyButton).toBeEnabled();
+  let expectedPreviews = 1;
+  async function freshPreview() {
+    await form.getByRole("button", { name: "Preview" }).click();
+    expectedPreviews += 1;
+    await expect.poll(() => api.requests.planPreviews.length).toBe(expectedPreviews);
+    await expect(applyButton).toBeEnabled();
+  }
+
+  await freshPreview();
   expect(api.requests.planPreviews[1]).toMatchObject({
     notes: "changed after preview",
   });
 
+  // Each successful catalog dependency mutation invalidates the projection binding.
+  const coreFeatureRow = page.getByRole("row", { name: /Core Runtime core/ });
+  await coreFeatureRow.getByRole("button", { name: "Edit" }).click();
+  await featureForm.getByLabel("Name").fill("Core Runtime v2");
+  await featureForm.getByRole("button", { name: "Update feature" }).click();
+  await expect.poll(() => api.requests.catalogFeaturePatches.length).toBe(2);
+  await expect(applyButton).toBeDisabled();
+  await freshPreview();
+
+  await page.getByRole("row", { name: /Core Runtime v2 core/ }).getByRole("button", { name: "Disable" }).click();
+  await page.getByLabel("Reason (required)").fill("invalidate projection feature");
+  await page.getByRole("button", { name: "Confirm" }).click();
+  await expect.poll(() => api.requests.catalogFeatureTransitions.length).toBe(3);
+  await expect(applyButton).toBeDisabled();
+  await page.getByRole("row", { name: /Core Runtime v2 core/ }).getByRole("button", { name: "Reenable" }).click();
+  await expect.poll(() => api.requests.catalogFeatureTransitions.length).toBe(4);
+  await expect(applyButton).toBeDisabled();
+  await freshPreview();
+
+  const proPlanRow = page.getByRole("row", { name: /Pro Annual pro/ });
+  await proPlanRow.getByRole("button", { name: "Edit" }).click();
+  await catalogPlanForm.getByLabel("Description").fill("Annual plan v2");
+  await catalogPlanForm.getByRole("button", { name: "Update plan" }).click();
+  await expect.poll(() => api.requests.catalogPlanPatches.length).toBe(2);
+  await expect(applyButton).toBeDisabled();
+  await freshPreview();
+
+  await page.getByRole("row", { name: /Pro Annual pro/ }).getByRole("button", { name: "Disable" }).click();
+  await page.getByLabel("Reason (required)").fill("invalidate projection plan");
+  await page.getByRole("button", { name: "Confirm" }).click();
+  await expect.poll(() => api.requests.catalogPlanTransitions.length).toBe(3);
+  await expect(applyButton).toBeDisabled();
+  await page.getByRole("row", { name: /Pro Annual pro/ }).getByRole("button", { name: "Reenable" }).click();
+  await expect.poll(() => api.requests.catalogPlanTransitions.length).toBe(4);
+  await expect(applyButton).toBeDisabled();
+  await freshPreview();
+
+  await planFeatureForm.getByLabel("Feature key").fill("analytics");
+  await planFeatureForm.getByLabel("Policy ID").fill("pol_node");
+  await planFeatureForm.getByRole("button", { name: "Save plan feature" }).click();
+  await expect.poll(() => api.requests.catalogPlanFeatures.length).toBe(3);
+  await expect(applyButton).toBeDisabled();
+  await freshPreview();
+
+  const analyticsRow = page.getByRole("row", { name: /Analytics analytics included - pol_node/ });
+  await analyticsRow.getByRole("button", { name: "Disable" }).click();
+  await page.getByLabel("Reason (required)").fill("invalidate projection row");
+  await page.getByRole("button", { name: "Confirm" }).click();
+  await expect.poll(() => api.requests.catalogPlanFeatureTransitions.length).toBe(3);
+  await expect(applyButton).toBeDisabled();
+  await analyticsRow.getByRole("button", { name: "Reenable" }).click();
+  await expect.poll(() => api.requests.catalogPlanFeatureTransitions.length).toBe(4);
+  await expect(applyButton).toBeDisabled();
+  await freshPreview();
+
+  await importForm.getByLabel("Manifest JSON").fill(JSON.stringify(importedManifest));
+  await importForm.getByRole("button", { name: "Apply import" }).click();
+  await expect.poll(() => api.requests.catalogImports.length).toBe(3);
+  await expect(applyButton).toBeDisabled();
+  await page.getByRole("row", { name: /Growth growth/ }).getByRole("button", { name: "Use" }).click();
+  await form.getByLabel("Plan ID").fill("");
+  await form.getByLabel("Plan key").fill("pro");
+  await freshPreview();
+
+  // Returning to the pane and refreshing its catalog data both require a new preview.
+  await page.getByRole("button", { name: "Entitlements", exact: true }).click();
+  await page.getByRole("button", { name: "Plans", exact: true }).click();
+  await expect(applyButton).toBeDisabled();
+  await freshPreview();
+  await page.locator(".tablePane .filters").first().locator("input").fill("DEFAULT");
+  await expect(applyButton).toBeDisabled();
+  await freshPreview();
+
+  const boundPayload = api.requests.planPreviews.at(-1);
   await applyButton.click();
   await expect.poll(() => api.requests.planApplies.length).toBe(1);
-  expect(api.requests.planApplies[0]).toEqual(api.requests.planPreviews[1]);
+  expect(api.requests.planApplies[0]).toEqual(boundPayload);
+  await expect(applyButton).toBeDisabled();
+  await expect(page.getByText(/Execution result; re-preview required before another Apply/)).toBeVisible();
   await expect(page.getByText(/license_plan_projection_applied/)).toBeVisible();
 
   await page.getByRole("button", { name: "Entitlements", exact: true }).click();
