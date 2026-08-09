@@ -13,6 +13,7 @@ import { assembleComponents, assemblePaths, assertUniqueOperationIds } from "../
 import { openApiDocument } from "../dist-worker/worker/openapi/document.js";
 import { ALL_ROUTES, META_ROUTES, PUBLIC_ROUTES, SESSION_ROUTES } from "../dist-worker/worker/routes.js";
 import worker, { PORTAL_ROUTE_KEYS } from "../dist-worker/worker/index.js";
+import { expectedProxyErrorCodes, PROXIED_ERROR_STATUSES, proxiedBackendOperations } from "./backend-proxy-contract.mjs";
 
 const keyOf = (r) => `${r.method} ${r.path}`;
 
@@ -151,10 +152,21 @@ test("health OpenAPI keeps the reviewed readiness envelope and status contract",
   assert.equal(health.responses["503"].content["application/json"].schema.properties.code.const, "account_token_mode_not_required");
 });
 
-test("OpenAPI models exact action and device-release runtime error-code alternatives", () => {
-  for (const path of ["/api/portal/checkout", "/api/portal/heartbeat", "/api/portal/release", "/api/portal/download"]) {
-    assert.deepEqual(documentedErrorCodes(path, 502), ["backend_unreachable", "backend_invalid_response"], `${path} 502 alternatives`);
-    assert.deepEqual(documentedErrorCodes(path, 503), ["backend_unconfigured", "config_error"], `${path} 503 alternatives`);
+test("OpenAPI models exact portal and canonical-backend proxy error alternatives", () => {
+  for (const operation of proxiedBackendOperations) {
+    for (const status of PROXIED_ERROR_STATUSES) {
+      const expectedCodes = expectedProxyErrorCodes(operation, status);
+      const response = openApiDocument.paths[operation.portalPath]?.post?.responses?.[status];
+      if (expectedCodes.length === 0) {
+        assert.equal(response, undefined, `${operation.portalPath} must not claim impossible backend ${status} failures`);
+        continue;
+      }
+      assert.deepEqual(
+        [...documentedErrorCodes(operation.portalPath, status)].sort(),
+        [...expectedCodes].sort(),
+        `${operation.portalPath} ${status} alternatives must match the portal and canonical backend contracts`,
+      );
+    }
   }
   assert.deepEqual(documentedErrorCodes("/api/portal/devices/release", 500), ["portal_error"]);
 });

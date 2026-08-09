@@ -251,13 +251,16 @@
                     ],
                     "properties": {
                       "code": {
-                        "const": "invalid_json"
+                        "enum": [
+                          "invalid_json",
+                          "invalid_request"
+                        ]
                       }
                     }
                   }
                 }
               },
-              "description": "Body was not a JSON object."
+              "description": "Body was not JSON (invalid_json), or portal/backend checkout validation rejected it (invalid_request)."
             },
             "401": {
               "content": {
@@ -270,13 +273,17 @@
                     ],
                     "properties": {
                       "code": {
-                        "const": "unauthorized"
+                        "enum": [
+                          "unauthorized",
+                          "token_revoked",
+                          "token_expired"
+                        ]
                       }
                     }
                   }
                 }
               },
-              "description": "No / invalid session."
+              "description": "No / invalid portal session (unauthorized), or the backend account token was rejected, revoked, or expired."
             },
             "403": {
               "content": {
@@ -289,13 +296,21 @@
                     ],
                     "properties": {
                       "code": {
-                        "const": "cross_site_forbidden"
+                        "enum": [
+                          "cross_site_forbidden",
+                          "forbidden_scope",
+                          "no_active_entitlement",
+                          "floating_disabled",
+                          "device_proof_required",
+                          "device_proof_invalid",
+                          "borrowing_disabled"
+                        ]
                       }
                     }
                   }
                 }
               },
-              "description": "Cross-site request rejected (Sec-Fetch-Site not same-origin, or Origin does not match PORTAL_PUBLIC_ORIGIN)."
+              "description": "Cross-site request rejected, or backend checkout returned a documented policy denial."
             },
             "404": {
               "content": {
@@ -316,6 +331,25 @@
               },
               "description": "entitlement_id not owned or not active (generic — no existence oracle)."
             },
+            "409": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "pool_exhausted"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Backend checkout could not reserve a concurrent seat because the pool was exhausted."
+            },
             "413": {
               "content": {
                 "application/json": {
@@ -334,6 +368,29 @@
                 }
               },
               "description": "Request body exceeded 8192 bytes."
+            },
+            "500": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "portal_error",
+                          "seat_signing_error",
+                          "verification_error"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "The portal failed unexpectedly, or backend checkout failed to sign/verify the seat response."
             },
             "502": {
               "content": {
@@ -370,14 +427,15 @@
                       "code": {
                         "enum": [
                           "backend_unconfigured",
-                          "config_error"
+                          "config_error",
+                          "verification_error"
                         ]
                       }
                     }
                   }
                 }
               },
-              "description": "BACKEND_ORIGIN is absent or invalid (backend_unconfigured), or account-token mint configuration is invalid (config_error)."
+              "description": "BACKEND_ORIGIN is absent or invalid (backend_unconfigured), portal token minting is misconfigured (config_error), or the backend returns config_error/verification_error."
             }
           },
           "security": [
@@ -754,13 +812,17 @@
                     ],
                     "properties": {
                       "code": {
-                        "const": "invalid_json"
+                        "enum": [
+                          "invalid_json",
+                          "device_key_required",
+                          "invalid_request"
+                        ]
                       }
                     }
                   }
                 }
               },
-              "description": "Body was not a JSON object."
+              "description": "Body was not JSON (invalid_json), device_key_id was absent (device_key_required), or portal/backend activate validation rejected it (invalid_request)."
             },
             "401": {
               "content": {
@@ -773,13 +835,17 @@
                     ],
                     "properties": {
                       "code": {
-                        "const": "unauthorized"
+                        "enum": [
+                          "unauthorized",
+                          "token_revoked",
+                          "token_expired"
+                        ]
                       }
                     }
                   }
                 }
               },
-              "description": "No / invalid session."
+              "description": "No / invalid portal session (unauthorized), or the backend account token was rejected, revoked, or expired."
             },
             "403": {
               "content": {
@@ -792,13 +858,23 @@
                     ],
                     "properties": {
                       "code": {
-                        "const": "cross_site_forbidden"
+                        "enum": [
+                          "cross_site_forbidden",
+                          "forbidden_scope",
+                          "no_active_entitlement",
+                          "expired_subscription",
+                          "device_proof_required",
+                          "device_proof_invalid",
+                          "device_limit_exceeded",
+                          "trial_device_proof_required",
+                          "trial_device_locked"
+                        ]
                       }
                     }
                   }
                 }
               },
-              "description": "Cross-site request rejected (Sec-Fetch-Site not same-origin, or Origin does not match PORTAL_PUBLIC_ORIGIN)."
+              "description": "Cross-site request rejected, or backend activate returned a documented entitlement/device policy denial."
             },
             "404": {
               "content": {
@@ -838,6 +914,29 @@
               },
               "description": "Request body exceeded 8192 bytes."
             },
+            "500": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "portal_error",
+                          "lease_signing_error",
+                          "verification_error"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "The portal failed unexpectedly, or backend activate failed to sign/verify the lease response."
+            },
             "502": {
               "content": {
                 "application/json": {
@@ -873,14 +972,15 @@
                       "code": {
                         "enum": [
                           "backend_unconfigured",
-                          "config_error"
+                          "config_error",
+                          "verification_error"
                         ]
                       }
                     }
                   }
                 }
               },
-              "description": "BACKEND_ORIGIN is absent or invalid (backend_unconfigured), or account-token mint configuration is invalid (config_error)."
+              "description": "BACKEND_ORIGIN is absent or invalid (backend_unconfigured), portal token minting is misconfigured (config_error), or the backend returns config_error/verification_error."
             }
           },
           "security": [
@@ -1043,13 +1143,16 @@
                     ],
                     "properties": {
                       "code": {
-                        "const": "invalid_json"
+                        "enum": [
+                          "invalid_json",
+                          "invalid_request"
+                        ]
                       }
                     }
                   }
                 }
               },
-              "description": "Body was not a JSON object."
+              "description": "Body was not JSON (invalid_json), or portal/backend heartbeat validation rejected it (invalid_request)."
             },
             "401": {
               "content": {
@@ -1062,13 +1165,17 @@
                     ],
                     "properties": {
                       "code": {
-                        "const": "unauthorized"
+                        "enum": [
+                          "unauthorized",
+                          "token_revoked",
+                          "token_expired"
+                        ]
                       }
                     }
                   }
                 }
               },
-              "description": "No / invalid session."
+              "description": "No / invalid portal session (unauthorized), or the backend account token was rejected, revoked, or expired."
             },
             "403": {
               "content": {
@@ -1081,13 +1188,17 @@
                     ],
                     "properties": {
                       "code": {
-                        "const": "cross_site_forbidden"
+                        "enum": [
+                          "cross_site_forbidden",
+                          "forbidden_scope",
+                          "no_active_entitlement"
+                        ]
                       }
                     }
                   }
                 }
               },
-              "description": "Cross-site request rejected (Sec-Fetch-Site not same-origin, or Origin does not match PORTAL_PUBLIC_ORIGIN)."
+              "description": "Cross-site request rejected, or backend heartbeat returned a documented policy denial."
             },
             "404": {
               "content": {
@@ -1108,6 +1219,25 @@
               },
               "description": "entitlement_id not owned or not active."
             },
+            "410": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "seat_reclaimed"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "The backend seat was reclaimed, revoked, or reached its heartbeat deadline."
+            },
             "413": {
               "content": {
                 "application/json": {
@@ -1126,6 +1256,29 @@
                 }
               },
               "description": "Request body exceeded 8192 bytes."
+            },
+            "500": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "portal_error",
+                          "seat_signing_error",
+                          "verification_error"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "The portal failed unexpectedly, or backend heartbeat failed to sign/verify the seat response."
             },
             "502": {
               "content": {
@@ -1162,14 +1315,15 @@
                       "code": {
                         "enum": [
                           "backend_unconfigured",
-                          "config_error"
+                          "config_error",
+                          "verification_error"
                         ]
                       }
                     }
                   }
                 }
               },
-              "description": "BACKEND_ORIGIN is absent or invalid (backend_unconfigured), or account-token mint configuration is invalid (config_error)."
+              "description": "BACKEND_ORIGIN is absent or invalid (backend_unconfigured), portal token minting is misconfigured (config_error), or the backend returns config_error/verification_error."
             }
           },
           "security": [
@@ -1302,13 +1456,16 @@
                     ],
                     "properties": {
                       "code": {
-                        "const": "invalid_json"
+                        "enum": [
+                          "invalid_json",
+                          "invalid_request"
+                        ]
                       }
                     }
                   }
                 }
               },
-              "description": "Body was not a JSON object."
+              "description": "Body was not JSON (invalid_json), or portal/backend release validation rejected it (invalid_request)."
             },
             "401": {
               "content": {
@@ -1321,13 +1478,17 @@
                     ],
                     "properties": {
                       "code": {
-                        "const": "unauthorized"
+                        "enum": [
+                          "unauthorized",
+                          "token_revoked",
+                          "token_expired"
+                        ]
                       }
                     }
                   }
                 }
               },
-              "description": "No / invalid session."
+              "description": "No / invalid portal session (unauthorized), or the backend account token was rejected, revoked, or expired."
             },
             "403": {
               "content": {
@@ -1340,13 +1501,16 @@
                     ],
                     "properties": {
                       "code": {
-                        "const": "cross_site_forbidden"
+                        "enum": [
+                          "cross_site_forbidden",
+                          "forbidden_scope"
+                        ]
                       }
                     }
                   }
                 }
               },
-              "description": "Cross-site request rejected (Sec-Fetch-Site not same-origin, or Origin does not match PORTAL_PUBLIC_ORIGIN)."
+              "description": "Cross-site request rejected, or backend release denied the token scope."
             },
             "404": {
               "content": {
@@ -1386,6 +1550,28 @@
               },
               "description": "Request body exceeded 8192 bytes."
             },
+            "500": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "portal_error",
+                          "verification_error"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "The portal failed unexpectedly, or the backend returned its generic verification error."
+            },
             "502": {
               "content": {
                 "application/json": {
@@ -1421,14 +1607,15 @@
                       "code": {
                         "enum": [
                           "backend_unconfigured",
-                          "config_error"
+                          "config_error",
+                          "verification_error"
                         ]
                       }
                     }
                   }
                 }
               },
-              "description": "BACKEND_ORIGIN is absent or invalid (backend_unconfigured), or account-token mint configuration is invalid (config_error)."
+              "description": "BACKEND_ORIGIN is absent or invalid (backend_unconfigured), portal token minting is misconfigured (config_error), or the backend returns config_error/verification_error."
             }
           },
           "security": [

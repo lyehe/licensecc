@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { assert, worker, mintSession, codeFromSecretBytes, requestOtp, redeemOtp, policyCapacityViolation, FP_A, FP_B, installBackendStub, cookieFor, sameSiteHeaders, entitlementId, ownedEntitlementId, call, baseFixture, seedDevice, seedEntitlement, CTX, NOW } from "./portal-worker-fixtures.mjs";
 import { sendEmail } from "../src/auth/portal_email.mjs";
 import { openApiDocument } from "../dist-worker/worker/openapi/document.js";
+import { backendStubCases, proxiedBackendOperations } from "./backend-proxy-contract.mjs";
 
 async function withFetchStub(fetchStub, run) {
   const originalFetch = globalThis.fetch;
@@ -51,25 +52,70 @@ function documentedErrorCodes(path, status) {
   throw new Error(`${path} ${status} does not declare an exact error-code schema`);
 }
 
-function assertRuntimeErrorIsDocumented(path, response) {
-  assert.equal(response.body.ok, false, `${path} error envelope must set ok:false`);
-  assert.ok(
-    documentedErrorCodes(path, response.status).includes(response.body.code),
-    `${path} ${response.status} runtime code ${response.body.code} must be documented`,
-  );
+function dereferenceSchema(schema) {
+  if (typeof schema?.$ref !== "string") return schema;
+  const prefix = "#/components/schemas/";
+  assert.ok(schema.$ref.startsWith(prefix), `unsupported OpenAPI schema reference ${schema.$ref}`);
+  const resolved = openApiDocument.components.schemas[schema.$ref.slice(prefix.length)];
+  assert.ok(resolved && typeof resolved === "object", `missing OpenAPI schema ${schema.$ref}`);
+  return resolved;
 }
 
-async function checkoutFailure(extraEnv, fetchStub) {
+function valueMatchesType(value, type) {
+  if (type === "object") return typeof value === "object" && value !== null && !Array.isArray(value);
+  if (type === "array") return Array.isArray(value);
+  if (type === "string") return typeof value === "string";
+  if (type === "boolean") return typeof value === "boolean";
+  if (type === "number") return typeof value === "number";
+  if (type === "integer") return typeof value === "number" && Number.isInteger(value);
+  return true;
+}
+
+function assertValueMatchesSchema(value, sourceSchema, label) {
+  const schema = dereferenceSchema(sourceSchema);
+  assert.ok(schema && typeof schema === "object", `${label} schema must be an object`);
+  if (Array.isArray(schema.allOf)) {
+    for (const part of schema.allOf) assertValueMatchesSchema(value, part, label);
+  }
+  if (Object.hasOwn(schema, "const")) assert.deepEqual(value, schema.const, `${label} must equal its OpenAPI const`);
+  if (Array.isArray(schema.enum)) assert.ok(schema.enum.includes(value), `${label} must be an OpenAPI enum member`);
+  if (schema.type !== undefined) {
+    const types = Array.isArray(schema.type) ? schema.type : [schema.type];
+    assert.ok(types.some((type) => valueMatchesType(value, type)), `${label} must match OpenAPI type ${types.join("|")}`);
+  }
+  if (schema.type === "object" && value !== null && typeof value === "object" && !Array.isArray(value)) {
+    for (const required of schema.required ?? []) {
+      assert.ok(Object.hasOwn(value, required), `${label} must include required property ${required}`);
+    }
+    for (const [name, propertySchema] of Object.entries(schema.properties ?? {})) {
+      if (Object.hasOwn(value, name)) assertValueMatchesSchema(value[name], propertySchema, `${label}.${name}`);
+    }
+  }
+}
+
+function assertRuntimeErrorIsDocumented(path, response) {
+  const schema = openApiDocument.paths[path]?.post?.responses?.[String(response.status)]?.content?.["application/json"]?.schema;
+  assert.ok(schema, `${path} ${response.status} must expose an assembled JSON response schema`);
+  assert.equal(response.body.ok, false, `${path} error envelope must set ok:false`);
+  assertValueMatchesSchema(response.body, schema, `${path} ${response.status} runtime envelope`);
+  assert.ok(documentedErrorCodes(path, response.status).includes(response.body.code), `${path} ${response.status} runtime code ${response.body.code} must be documented`);
+}
+
+async function proxyFailure(operation, { extraEnv = {}, fetchStub, headers, mutateEnv } = {}) {
   const { db, env } = baseFixture(extraEnv);
+  let restore;
   try {
     const cookie = await cookieFor(env, "A");
     const id = await ownedEntitlementId(env, cookie);
-    const run = () => call(env, "POST", "/api/portal/checkout", {
+    restore = mutateEnv?.(env);
+    const run = () => call(env, "POST", operation.portalPath, {
       cookie,
-      body: { entitlement_id: id, client_instance_id: "i1", nonce: "e".repeat(64) },
+      body: operation.requestBody(id),
+      headers,
     });
     return fetchStub === undefined ? await run() : await withFetchStub(fetchStub, run);
   } finally {
+    if (typeof restore === "function") restore();
     db.close();
   }
 }
@@ -299,27 +345,80 @@ test("/health cancels a non-200 backend stream before returning its existing 503
   }
 });
 
-test("runtime action and device-release error envelopes are declared by OpenAPI", async () => {
-  const unconfigured = await checkoutFailure({ BACKEND_ORIGIN: "http://backend.test" });
-  assert.equal(unconfigured.status, 503);
-  assert.equal(unconfigured.body.code, "backend_unconfigured");
-  assertRuntimeErrorIsDocumented("/api/portal/checkout", unconfigured);
+test("canonical backend failures preserve their status and code through every portal proxy", async () => {
+  for (const operation of proxiedBackendOperations) {
+    for (const failure of backendStubCases(operation)) {
+      const upstreamBody = { ok: false, code: failure.code, backend_marker: `${operation.name}:${failure.status}` };
+      const response = await proxyFailure(operation, {
+        fetchStub: async () => new Response(JSON.stringify(upstreamBody), {
+          status: failure.status,
+          headers: { "content-type": "application/json" },
+        }),
+      });
+      assert.equal(response.status, failure.status, `${operation.name} preserves backend ${failure.status}`);
+      assert.equal(response.body.code, failure.code, `${operation.name} preserves backend ${failure.code}`);
+      assert.deepEqual(response.body.data, upstreamBody, `${operation.name} preserves the backend error payload`);
+      assertRuntimeErrorIsDocumented(operation.portalPath, response);
+    }
+  }
+});
 
-  const configError = await checkoutFailure({ ACCOUNT_TOKEN_PEPPERS: "" });
-  assert.equal(configError.status, 503);
-  assert.equal(configError.body.code, "config_error");
-  assertRuntimeErrorIsDocumented("/api/portal/checkout", configError);
+test("local proxy failures from every action and download fit their assembled OpenAPI schemas", async () => {
+  const cases = [
+    {
+      label: "cross-site rejection",
+      status: 403,
+      code: "cross_site_forbidden",
+      options: { headers: { origin: "https://cross-site.test", "sec-fetch-site": "cross-site" } },
+    },
+    {
+      label: "unconfigured backend",
+      status: 503,
+      code: "backend_unconfigured",
+      options: { extraEnv: { BACKEND_ORIGIN: "http://backend.test" } },
+    },
+    {
+      label: "token-mint configuration failure",
+      status: 503,
+      code: "config_error",
+      options: { extraEnv: { ACCOUNT_TOKEN_PEPPERS: "" } },
+    },
+    {
+      label: "unreachable backend",
+      status: 502,
+      code: "backend_unreachable",
+      options: { fetchStub: async () => { throw new Error("backend unavailable"); } },
+    },
+    {
+      label: "invalid backend response",
+      status: 502,
+      code: "backend_invalid_response",
+      options: { fetchStub: async () => new Response("not-json", { status: 200 }) },
+    },
+    {
+      label: "unhandled portal failure",
+      status: 500,
+      code: "portal_error",
+      options: {
+        mutateEnv: (env) => {
+          const originalPrepare = env.DB.prepare;
+          env.DB.prepare = () => { throw new Error("D1 unavailable"); };
+          return () => { env.DB.prepare = originalPrepare; };
+        },
+      },
+    },
+  ];
+  for (const operation of proxiedBackendOperations) {
+    for (const failure of cases) {
+      const response = await proxyFailure(operation, failure.options);
+      assert.equal(response.status, failure.status, `${operation.name} ${failure.label} status`);
+      assert.equal(response.body.code, failure.code, `${operation.name} ${failure.label} code`);
+      assertRuntimeErrorIsDocumented(operation.portalPath, response);
+    }
+  }
+});
 
-  const unreachable = await checkoutFailure({}, async () => { throw new Error("backend unavailable"); });
-  assert.equal(unreachable.status, 502);
-  assert.equal(unreachable.body.code, "backend_unreachable");
-  assertRuntimeErrorIsDocumented("/api/portal/checkout", unreachable);
-
-  const invalidResponse = await checkoutFailure({}, async () => new Response("not-json", { status: 200 }));
-  assert.equal(invalidResponse.status, 502);
-  assert.equal(invalidResponse.body.code, "backend_invalid_response");
-  assertRuntimeErrorIsDocumented("/api/portal/checkout", invalidResponse);
-
+test("device-release portal errors are declared by OpenAPI", async () => {
   const { db, env } = baseFixture();
   try {
     seedDevice(db, { fingerprint: FP_A, deviceKeyId: "dk_a" });
