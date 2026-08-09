@@ -60,6 +60,8 @@ test("portal UI workflow maps floating-seat release confirmation copy to its con
   assert.match(workflow.FLOATING_SEAT_RELEASE_CONFIRM_COPY, /cannot be undone/i);
   assert.match(workflow.FLOATING_SEAT_RELEASE_CONFIRM_COPY, /available to another user/i);
   assert.match(workflow.FLOATING_SEAT_RELEASE_CONFIRM_COPY, /device must check out a new seat/i);
+  assert.match(workflow.FLOATING_SEAT_RELEASE_NETWORK_ERROR_COPY, /service was unreachable/i);
+  assert.match(workflow.FLOATING_SEAT_RELEASE_NETWORK_ERROR_COPY, /try again/i);
 });
 
 test("portal UI workflow exposes resend-code action + 10-minute expiry copy", async () => {

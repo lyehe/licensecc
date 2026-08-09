@@ -10,6 +10,7 @@ import {
   describeResultCode,
   FLOATING_SEAT_RELEASE_CONFIRM_COPY,
   FLOATING_SEAT_RELEASE_CONFIRM_TITLE,
+  FLOATING_SEAT_RELEASE_NETWORK_ERROR_COPY,
   authRequestPath,
   authVerifyPath,
   checkoutPath,
@@ -199,6 +200,7 @@ function App(): React.ReactElement {
   };
   const [downloadDeviceKeys, setDownloadDeviceKeys] = useState<Record<string, string>>({});
   const [pendingSeatRelease, setPendingSeatRelease] = useState<{ item: EntitlementRow; session: SeatSession } | null>(null);
+  const [seatReleaseError, setSeatReleaseError] = useState<string | null>(null);
   const [seatReleaseFocusId, setSeatReleaseFocusId] = useState<string | null>(null);
   const seatReleaseDialogRef = useRef<HTMLDivElement>(null);
   const seatReleaseReturnFocusRef = useRef<HTMLElement | null>(null);
@@ -393,11 +395,13 @@ function App(): React.ReactElement {
       return;
     }
     seatReleaseReturnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setSeatReleaseError(null);
     setPendingSeatRelease({ item, session });
   }
 
   function dismissSeatRelease(): void {
     if (seatReleaseConfirmingRef.current) return;
+    setSeatReleaseError(null);
     setPendingSeatRelease(null);
     const returnFocus = seatReleaseReturnFocusRef.current;
     seatReleaseDeferredFocusRef.current = returnFocus;
@@ -409,19 +413,30 @@ function App(): React.ReactElement {
     if (pending === null || seatReleaseConfirmingRef.current || busyRef.current) return;
     const returnFocus = seatReleaseReturnFocusRef.current;
     seatReleaseConfirmingRef.current = true;
+    setSeatReleaseError(null);
+    seatReleaseDialogRef.current?.focus();
+    let closeDialog = false;
     try {
       // Keep the established seatAction path/body/auth and success/error refresh behavior. The
       // captured context only gates the explicit confirmation; it does not add a reason/body field.
-      const succeeded = await seatAction(pending.item, "release");
-      if (succeeded) {
-        setSeatReleaseFocusId(pending.item.id);
-      } else {
-        seatReleaseDeferredFocusRef.current = returnFocus;
+      try {
+        const succeeded = await seatAction(pending.item, "release");
+        if (succeeded) {
+          setSeatReleaseFocusId(pending.item.id);
+        } else {
+          seatReleaseDeferredFocusRef.current = returnFocus;
+        }
+        setPendingSeatRelease(null);
+        closeDialog = true;
+      } catch {
+        setSeatReleaseError(FLOATING_SEAT_RELEASE_NETWORK_ERROR_COPY);
+        seatReleaseDialogRef.current?.focus();
       }
-      setPendingSeatRelease(null);
     } finally {
       seatReleaseConfirmingRef.current = false;
-      seatReleaseReturnFocusRef.current = null;
+      if (closeDialog) {
+        seatReleaseReturnFocusRef.current = null;
+      }
     }
   }
 
@@ -765,10 +780,13 @@ function App(): React.ReactElement {
             aria-modal="true"
             aria-labelledby="floatingSeatReleaseTitle"
             aria-describedby="floatingSeatReleaseDescription"
+            aria-busy={busy}
             tabIndex={-1}
           >
             <h2 id="floatingSeatReleaseTitle">{FLOATING_SEAT_RELEASE_CONFIRM_TITLE}</h2>
             <p id="floatingSeatReleaseDescription">{FLOATING_SEAT_RELEASE_CONFIRM_COPY}</p>
+            {busy && <p className="modalProgress" role="status" aria-live="polite">Releasing…</p>}
+            {seatReleaseError !== null && <p className="modalError" role="alert">{seatReleaseError}</p>}
             <dl className="releaseContext">
               <div>
                 <dt>License</dt>

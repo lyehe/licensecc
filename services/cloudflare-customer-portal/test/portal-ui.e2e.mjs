@@ -18,7 +18,7 @@ makeEnvelope.nextRequestId = 0;
 function makePortalApiFixture() {
   const VALID_CODE = "80315426";
   let authed = false;
-  const controls = { failNextRelease: false };
+  const controls = { failNextRelease: false, deferNextRelease: false, rejectNextRelease: false, resolveRelease: null };
   const requests = { authRequests: 0, verifies: 0, checkouts: 0, heartbeats: 0, releases: 0, downloads: 0, logouts: 0, seatActions: [] };
 
   const entitlements = [
@@ -104,6 +104,15 @@ function makePortalApiFixture() {
       }
       requests[`${op}s`] += 1;
       requests.seatActions.push({ op, body });
+      if (op === "release" && controls.deferNextRelease) {
+        controls.deferNextRelease = false;
+        await new Promise((resolve) => { controls.resolveRelease = resolve; });
+        controls.resolveRelease = null;
+      }
+      if (op === "release" && controls.rejectNextRelease) {
+        controls.rejectNextRelease = false;
+        return route.abort("failed");
+      }
       if (op === "release" && controls.failNextRelease) {
         controls.failNextRelease = false;
         return fulfill(503, { ok: false, code: "verification_error", request_id: "portal-e2e-release-failure" });
@@ -183,6 +192,7 @@ test("customer portal signs in with an 8-digit code and walks every screen witho
 
   // Release is destructive: opening the confirmation must not send a request or change the live
   // session. The dialog names the exact license, seat, and device plus the availability impact.
+  await page.setViewportSize({ width: 320, height: 240 });
   await seatCard.getByRole("button", { name: "Release" }).click();
   const releaseDialog = page.getByRole("dialog");
   await expect(releaseDialog).toBeVisible();
@@ -191,8 +201,39 @@ test("customer portal signs in with an 8-digit code and walks every screen witho
   await expect(releaseDialog).toContainText("seat-e2e");
   await expect(releaseDialog).toContainText("cannot be undone");
   await expect(releaseDialog).toContainText("available to another user");
+  const compactModalLayout = await page.evaluate(() => {
+    const modal = document.querySelector('[role="dialog"]');
+    const overlay = modal?.parentElement;
+    return {
+      modalScrollable: modal !== null && modal.scrollHeight > modal.clientHeight,
+      modalOverflowY: modal === null ? "" : getComputedStyle(modal).overflowY,
+      modalOverflowX: modal === null ? "" : getComputedStyle(modal).overflowX,
+      overlayOverflowY: overlay === null ? "" : getComputedStyle(overlay).overflowY,
+      overlayOverflowX: overlay === null ? "" : getComputedStyle(overlay).overflowX,
+      bodyHasHorizontalOverflow: document.body.scrollWidth > window.innerWidth,
+    };
+  });
+  expect(compactModalLayout.modalScrollable).toBe(true);
+  expect(compactModalLayout.modalOverflowY).toBe("auto");
+  expect(compactModalLayout.modalOverflowX).toBe("hidden");
+  expect(compactModalLayout.overlayOverflowY).toBe("auto");
+  expect(compactModalLayout.overlayOverflowX).toBe("hidden");
+  expect(compactModalLayout.bodyHasHorizontalOverflow).toBe(false);
   const cancelRelease = releaseDialog.getByRole("button", { name: "Cancel" });
   const confirmRelease = releaseDialog.getByRole("button", { name: "Confirm release" });
+  const releaseTitle = releaseDialog.getByRole("heading", { name: "Release floating seat?" });
+  await releaseTitle.scrollIntoViewIfNeeded();
+  const titleInViewport = await releaseTitle.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    return rect.top >= 0 && rect.bottom <= window.innerHeight;
+  });
+  expect(titleInViewport).toBe(true);
+  await confirmRelease.scrollIntoViewIfNeeded();
+  const actionsInViewport = await confirmRelease.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    return rect.top >= 0 && rect.bottom <= window.innerHeight;
+  });
+  expect(actionsInViewport).toBe(true);
   await expect(cancelRelease).toBeFocused();
   await expect(page.locator("main")).toHaveAttribute("aria-hidden", "true");
   await expect(page.locator("main")).toHaveAttribute("inert", "");
@@ -220,6 +261,7 @@ test("customer portal signs in with an 8-digit code and walks every screen witho
   await expect(seatCard.getByRole("button", { name: "Refresh" })).toBeEnabled();
   await expect(seatCard.getByRole("button", { name: "Release" })).toBeEnabled();
   await expect(seatCard.getByRole("button", { name: "Release" })).toBeFocused();
+  await page.setViewportSize({ width: 1280, height: 720 });
 
   // Escape is the keyboard cancellation path and likewise must not release the seat.
   await seatCard.getByRole("button", { name: "Release" }).click();
@@ -231,17 +273,44 @@ test("customer portal signs in with an 8-digit code and walks every screen witho
   await expect(seatCard.getByRole("button", { name: "Release" })).toBeEnabled();
   await expect(seatCard.getByRole("button", { name: "Release" })).toBeFocused();
 
-  // A failed explicit confirmation preserves the active seat, leaves the error visible, and
-  // restores focus to the invoking Release trigger.
+  // A deferred failed confirmation keeps focus inside the busy dialog, blocks Escape/Cancel, and
+  // then preserves the active seat, leaves the error visible, and restores trigger focus.
   api.controls.failNextRelease = true;
+  api.controls.deferNextRelease = true;
   await seatCard.getByRole("button", { name: "Release" }).click();
   const failedReleaseDialog = page.getByRole("dialog");
   await expect(failedReleaseDialog).toBeVisible();
   await failedReleaseDialog.getByRole("button", { name: "Confirm release" }).click();
   await expect.poll(() => api.requests.releases).toBe(1);
+  await expect(failedReleaseDialog).toHaveAttribute("aria-busy", "true");
+  await expect(failedReleaseDialog.getByText("Releasing…")).toBeVisible();
+  await expect(failedReleaseDialog.getByRole("button", { name: "Cancel" })).toBeDisabled();
+  await expect(failedReleaseDialog.getByRole("button", { name: "Confirm release" })).toBeDisabled();
+  await expect.poll(() => page.evaluate(() => document.activeElement?.closest('[role="dialog"]') !== null)).toBe(true);
+  await page.keyboard.press("Escape");
+  await expect(failedReleaseDialog).toBeVisible();
+  await expect.poll(() => page.evaluate(() => document.activeElement?.closest('[role="dialog"]') !== null)).toBe(true);
+  await expect.poll(() => typeof api.controls.resolveRelease).toBe("function");
+  api.controls.resolveRelease();
   await expect(failedReleaseDialog).toHaveCount(0);
   await expect(page.getByText(/verification_error/)).toBeVisible();
   await expect(seatCard.getByRole("button", { name: "Release" })).toBeEnabled();
+  await expect(seatCard.getByRole("button", { name: "Release" })).toBeFocused();
+  await expect.poll(() => page.evaluate(() => window.localStorage.getItem("licensecc.portal.seats.v1"))).toBe(storedSeatSessionBeforeReleaseConfirm);
+
+  // A rejected fetch keeps the context/modal present with an explicit failure, then Escape closes
+  // it through the normal policy path and restores the original Release trigger.
+  api.controls.rejectNextRelease = true;
+  await seatCard.getByRole("button", { name: "Release" }).click();
+  const networkErrorDialog = page.getByRole("dialog");
+  await networkErrorDialog.getByRole("button", { name: "Confirm release" }).click();
+  await expect(networkErrorDialog).toContainText("service was unreachable");
+  await expect(networkErrorDialog).toContainText("seat-e2e");
+  await expect(networkErrorDialog.getByRole("alert")).toBeVisible();
+  await expect.poll(() => page.evaluate(() => document.activeElement?.closest('[role="dialog"]') !== null)).toBe(true);
+  await expect(networkErrorDialog.getByRole("button", { name: "Cancel" })).toBeEnabled();
+  await page.keyboard.press("Escape");
+  await expect(networkErrorDialog).toHaveCount(0);
   await expect(seatCard.getByRole("button", { name: "Release" })).toBeFocused();
   await expect.poll(() => page.evaluate(() => window.localStorage.getItem("licensecc.portal.seats.v1"))).toBe(storedSeatSessionBeforeReleaseConfirm);
 
@@ -251,7 +320,7 @@ test("customer portal signs in with an 8-digit code and walks every screen witho
   const confirmReleaseDialog = page.getByRole("dialog");
   await expect(confirmReleaseDialog).toBeVisible();
   await confirmReleaseDialog.getByRole("button", { name: "Confirm release" }).dblclick();
-  await expect.poll(() => api.requests.releases).toBe(2);
+  await expect.poll(() => api.requests.releases).toBe(3);
   const release = api.requests.seatActions.at(-1);
   expect(release).toMatchObject({ op: "release", body: { entitlement_id: "ent_floating", seat_id: "seat-e2e" } });
   expect(release.body).toEqual({

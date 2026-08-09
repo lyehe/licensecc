@@ -250,11 +250,13 @@ code {
 
 /* Consequence-led confirmation for the destructive floating-seat release action. */
 .modalOverlay {
-  align-items: center;
+  align-items: flex-start;
   background: rgba(27, 31, 35, 0.45);
   display: flex;
   inset: 0;
   justify-content: center;
+  overflow-x: hidden;
+  overflow-y: auto;
   padding: 16px;
   position: fixed;
   z-index: 50;
@@ -265,6 +267,10 @@ code {
   border-radius: 10px;
   box-shadow: 0 12px 40px rgba(27, 31, 35, 0.25);
   max-width: 520px;
+  max-height: calc(100vh - 32px);
+  margin: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   padding: 20px 22px;
   width: 100%;
 }
@@ -281,6 +287,16 @@ code {
   color: #485047;
   line-height: 1.4;
   margin: 0 0 12px;
+}
+
+.modal .modalProgress {
+  color: #285f52;
+  font-weight: 600;
+}
+
+.modal .modalError {
+  color: #8b3028;
+  font-weight: 600;
 }
 
 .modal .actions {

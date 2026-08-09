@@ -97,6 +97,9 @@ export const FLOATING_SEAT_RELEASE_CONFIRM_TITLE = "Release floating seat?";
 export const FLOATING_SEAT_RELEASE_CONFIRM_COPY =
   "This release cannot be undone. It ends the active checkout immediately, makes the seat available to another user, and this device must check out a new seat before using the license again.";
 
+export const FLOATING_SEAT_RELEASE_NETWORK_ERROR_COPY =
+  "Release could not be completed because the service was unreachable. Check your connection and try again, or cancel to return to the seat.";
+
 // Empty-state copy for each portal tab. Shown when the tab has no rows so the customer sees an
 // explanation instead of a bare table header.
 export const NO_ENTITLEMENTS_EMPTY_COPY = "No entitlements yet — licenses appear here after purchase.";
