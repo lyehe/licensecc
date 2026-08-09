@@ -97,8 +97,6 @@ export function boundedCursor(url: URL, options: PaginationOptions = DEFAULT_PAG
 // this many rows (the SAME filters as the JSON list), then appends a trailing comment row
 // noting the cap so an operator can tell a truncated export from a complete one.
 export const CSV_ROW_CAP = 10000;
-// Cap on the number of ids a single bulk transition may carry (over -> 400 too_many).
-const BATCH_MAX_IDS = 100;
 
 // Spreadsheet engines may ignore a run of Unicode whitespace, BOM, or zero-width markers
 // before deciding whether a cell is a formula. Leading tab/CR/LF are treated as dangerous
