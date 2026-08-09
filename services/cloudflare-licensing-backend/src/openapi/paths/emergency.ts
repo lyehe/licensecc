@@ -1,5 +1,5 @@
 import type { LabeledPathFragment } from "../assemble.js";
-import { ACCOUNT_TOKEN_AUTH_ERRORS, errorResponse, jsonBody, LEASE_SUCCESS, REPORT_SUCCESS, SEAT_SUCCESS } from "../components.js";
+import { ACCOUNT_TOKEN_AUTH_ERRORS, errorResponse, jsonBody, LEASE_SUCCESS, REPORT_SUCCESS, SEAT_SUCCESS, securityModeConfigErrorResponse } from "../components.js";
 
 // ---------------------------------------------------------------------------
 // /v1/emergency/* break-glass overrides. Same request/response shapes as the underlying scoped
@@ -31,7 +31,10 @@ function emergencyLease(op: "activate" | "renew"): Record<string, unknown> {
         ),
         "404": emergencyNotFound(),
         "500": errorResponse("lease_signing_error: crypto signing failed.", "lease_signing_error"),
-        "503": errorResponse("verification_error or lease_signing_unavailable.", "verification_error"),
+        "503": securityModeConfigErrorResponse(
+          "Other route-specific 503 codes include verification_error and lease_signing_unavailable.",
+          ["verification_error", "lease_signing_unavailable"],
+        ),
       },
     },
   };
@@ -59,7 +62,10 @@ const emergencyCheckoutPath: Record<string, unknown> = {
       "404": emergencyNotFound(),
       "409": errorResponse("pool_exhausted: concurrent seat count at/above pool_size + allow_overdraft.", "pool_exhausted"),
       "500": errorResponse("seat_signing_error: crypto signing failed.", "seat_signing_error"),
-      "503": errorResponse("verification_error or seat_signing_unavailable.", "verification_error"),
+      "503": securityModeConfigErrorResponse(
+        "Other route-specific 503 codes include verification_error and seat_signing_unavailable.",
+        ["verification_error", "seat_signing_unavailable"],
+      ),
     },
   },
 };
@@ -80,7 +86,10 @@ const emergencyHeartbeatPath: Record<string, unknown> = {
       "404": emergencyNotFound(),
       "410": errorResponse("seat_reclaimed: seat not found, revoked, or heartbeat deadline expired.", "seat_reclaimed"),
       "500": errorResponse("seat_signing_error: crypto signing failed.", "seat_signing_error"),
-      "503": errorResponse("verification_error or seat_signing_unavailable.", "verification_error"),
+      "503": securityModeConfigErrorResponse(
+        "Other route-specific 503 codes include verification_error and seat_signing_unavailable.",
+        ["verification_error", "seat_signing_unavailable"],
+      ),
     },
   },
 };
@@ -101,7 +110,10 @@ const emergencyReleasePath: Record<string, unknown> = {
       "400": errorResponse("invalid_request: missing seat_id.", "invalid_request"),
       "401": emergencyUnauthorized(),
       "404": emergencyNotFound(),
-      "503": errorResponse("verification_error.", "verification_error"),
+      "503": securityModeConfigErrorResponse(
+        "Other route-specific 503 code is verification_error.",
+        ["verification_error"],
+      ),
     },
   },
 };
@@ -124,7 +136,10 @@ const emergencyMeterPath: Record<string, unknown> = {
       "403": errorResponse("no_active_entitlement.", "no_active_entitlement"),
       "404": emergencyNotFound(),
       "429": errorResponse("quota_exceeded.", "quota_exceeded"),
-      "503": errorResponse("verification_error.", "verification_error"),
+      "503": securityModeConfigErrorResponse(
+        "Other route-specific 503 code is verification_error.",
+        ["verification_error"],
+      ),
     },
   },
 };
@@ -148,7 +163,10 @@ const emergencyReportPath: Record<string, unknown> = {
       "400": errorResponse("invalid_request: missing query params.", "invalid_request"),
       "401": emergencyUnauthorized(),
       "404": emergencyNotFound(),
-      "503": errorResponse("verification_error.", "verification_error"),
+      "503": securityModeConfigErrorResponse(
+        "Other route-specific 503 code is verification_error.",
+        ["verification_error"],
+      ),
     },
   },
 };

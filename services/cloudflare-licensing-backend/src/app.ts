@@ -54,9 +54,13 @@ const app = {
     try {
       const url = new URL(request.url);
       const route = DISPATCH[`${request.method} ${url.pathname}`];
-      // Health is deliberately the exception: it is the authenticated-deployment
-      // readiness signal and reports invalid mode *names* without their values.
-      if (route !== undefined && url.pathname === "/health") {
+      // Meta documentation is static and must remain inspectable when a deployment has
+      // invalid security configuration. Health is the readiness exception: it reports
+      // invalid mode *names* without their values.
+      if (
+        route !== undefined &&
+        (url.pathname === "/openapi.json" || url.pathname === "/docs" || url.pathname === "/health")
+      ) {
         return await route(request, env, ctx);
       }
       const invalidConfigModes = invalidSecurityModeNames(env);

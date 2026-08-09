@@ -25,6 +25,7 @@ import {
   requireString,
   resolveIsolation,
 } from "./verify.js";
+import { parseDeviceProofMode } from "../security_modes.mjs";
 import { logEvent } from "../observability/index.js";
 
 // ============================ Lease platform (activate / renew) ============================
@@ -278,6 +279,9 @@ export async function handleLeaseIssue(
 ): Promise<Response> {
   const now = Math.floor(Date.now() / 1000);
 
+  if (!parseDeviceProofMode(env).valid) {
+    return json({ ok: false, code: "config_error" }, 503);
+  }
   if (!env.LEASE_SIGNING_PRIVATE_KEY_PKCS8_PEM || !env.LEASE_SIGNING_KEY_ID) {
     return json({ ok: false, code: "lease_signing_unavailable" }, 503);
   }
@@ -321,7 +325,7 @@ export async function handleLeaseIssue(
     now,
     LEASE_PROOF_PURPOSE,
   );
-  if (!leaseProof.ok) return json({ ok: false, code: leaseProof.code }, 403);
+  if (!leaseProof.ok) return json({ ok: false, code: leaseProof.code }, leaseProof.code === "config_error" ? 503 : 403);
 
   // Stage 4: server-computed trial timing. The frozen trial columns were read off the SAME
   // entitlements row (no join). Device lock (one-per-device / require-proof) is evaluated BEFORE any

@@ -1,5 +1,10 @@
 import type { Env } from "../env.js";
-import { invalidSecurityModeNames as invalidSecurityModeNamesFromEnv } from "../security_modes.mjs";
+import {
+  invalidSecurityModeNames as invalidSecurityModeNamesFromEnv,
+  parseAccountTokenMode,
+  parseOrderSignerScopeMode,
+  parseRequestSignatureMode,
+} from "../security_modes.mjs";
 
 export type LogSeverity = "info" | "warn" | "error";
 
@@ -29,20 +34,23 @@ export function invalidSecurityModeNames(env: Env): string[] {
 export function configConsistencyWarnings(env: Env): string[] {
   const warnings: string[] = [];
   const has = (v: string | undefined): boolean => typeof v === "string" && v.length > 0;
+  const accountToken = parseAccountTokenMode(env);
+  const requestSignature = parseRequestSignatureMode(env);
+  const orderSignerScope = parseOrderSignerScopeMode(env);
   for (const name of invalidSecurityModeNames(env)) {
     warnings.push(`${name} has an invalid value — use only its documented exact mode names`);
   }
-  if (has(env.ACCOUNT_TOKEN_PEPPERS) && env.ACCOUNT_TOKEN_MODE !== "required") {
+  if (has(env.ACCOUNT_TOKEN_PEPPERS) && accountToken.valid && accountToken.mode !== "required") {
     warnings.push(
       "ACCOUNT_TOKEN_PEPPERS is set but ACCOUNT_TOKEN_MODE is not 'required' — per-customer isolation is not enforced",
     );
   }
-  if (has(env.ONLINE_SIGNING_PRIVATE_KEY_PKCS8_PEM) && (env.REQUEST_SIGNATURE_MODE ?? "off") === "off") {
+  if (has(env.ONLINE_SIGNING_PRIVATE_KEY_PKCS8_PEM) && requestSignature.valid && requestSignature.mode === "off") {
     warnings.push(
       "online signing is configured but REQUEST_SIGNATURE_MODE is off — request device-proofs are not enforced",
     );
   }
-  if (has(env.ORDER_SIGNER_SCOPES) && (env.ORDER_SIGNER_SCOPE_MODE ?? "off") === "off") {
+  if (has(env.ORDER_SIGNER_SCOPES) && orderSignerScope.valid && orderSignerScope.mode === "off") {
     warnings.push(
       "ORDER_SIGNER_SCOPES is set but ORDER_SIGNER_SCOPE_MODE is off — order signer scoping is not enforced",
     );

@@ -1,5 +1,5 @@
 import type { LabeledPathFragment } from "../assemble.js";
-import { ACCOUNT_TOKEN_AUTH_ERRORS, errorResponse, jsonBody, LEASE_SUCCESS, REPORT_SUCCESS, SEAT_SUCCESS } from "../components.js";
+import { ACCOUNT_TOKEN_AUTH_ERRORS, errorResponse, jsonBody, LEASE_SUCCESS, REPORT_SUCCESS, SEAT_SUCCESS, securityModeConfigErrorResponse } from "../components.js";
 
 const checkoutPath: Record<string, unknown> = {
   post: {
@@ -29,9 +29,9 @@ const checkoutPath: Record<string, unknown> = {
         "pool_exhausted",
       ),
       "500": errorResponse("seat_signing_error: crypto signing failed.", "seat_signing_error"),
-      "503": errorResponse(
-        "config_error (ACCOUNT_TOKEN_PEPPERS / ONLINE_SIGNING_PRIVATE_KEY_PKCS8_PEM unavailable) or verification_error (D1 errors).",
-        "verification_error",
+      "503": securityModeConfigErrorResponse(
+        "Other route-specific 503 codes include seat_signing_unavailable and verification_error for D1 errors.",
+        ["seat_signing_unavailable", "verification_error"],
       ),
     },
   },
@@ -64,9 +64,9 @@ const heartbeatPath: Record<string, unknown> = {
         "seat_reclaimed",
       ),
       "500": errorResponse("seat_signing_error: crypto signing failed.", "seat_signing_error"),
-      "503": errorResponse(
-        "config_error (ACCOUNT_TOKEN_PEPPERS / ONLINE_SIGNING_PRIVATE_KEY_PKCS8_PEM unavailable) or verification_error (D1 errors).",
-        "verification_error",
+      "503": securityModeConfigErrorResponse(
+        "Other route-specific 503 codes include seat_signing_unavailable and verification_error for D1 errors.",
+        ["seat_signing_unavailable", "verification_error"],
       ),
     },
   },
@@ -95,9 +95,9 @@ const releasePath: Record<string, unknown> = {
       ),
       "401": ACCOUNT_TOKEN_AUTH_ERRORS["401"],
       "403": errorResponse("forbidden_scope: token scopes do not allow release on project:feature.", "forbidden_scope"),
-      "503": errorResponse(
-        "config_error (ACCOUNT_TOKEN_PEPPERS absent/unparseable in soft/required mode) or verification_error (D1 errors).",
-        "verification_error",
+      "503": securityModeConfigErrorResponse(
+        "Other route-specific 503 code is verification_error for D1 errors.",
+        ["verification_error"],
       ),
     },
   },

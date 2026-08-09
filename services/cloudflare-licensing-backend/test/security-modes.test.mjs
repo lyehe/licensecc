@@ -10,7 +10,15 @@ import {
   resetSigningKeyCacheForTests,
   signingKeyImportCountForTests,
 } from "../dist/routes/verify.js";
+import { handleLeaseIssue } from "../dist/routes/leases.js";
+import { handleSeatCheckout } from "../dist/routes/seats.js";
 import { accountAuth, accountTokenMode } from "../src/auth/account_auth.mjs";
+import {
+  parseAccountTokenMode,
+  parseDeviceProofMode,
+  parseOrderSignerScopeMode,
+  parseRequestSignatureMode,
+} from "../src/security_modes.mjs";
 
 function countingDb(calls) {
   return {
@@ -34,6 +42,22 @@ function verifyRequest() {
     }),
   });
 }
+
+test("security-mode parsers preserve legacy empty values and every exact supported value", () => {
+  const cases = [
+    [parseAccountTokenMode, "ACCOUNT_TOKEN_MODE", ["off", "soft", "required"]],
+    [parseRequestSignatureMode, "REQUEST_SIGNATURE_MODE", ["off", "soft", "required"]],
+    [parseDeviceProofMode, "DEVICE_PROOF_MODE", ["off", "required"]],
+    [parseOrderSignerScopeMode, "ORDER_SIGNER_SCOPE_MODE", ["off", "soft", "required"]],
+  ];
+  for (const [parse, selector, supported] of cases) {
+    for (const raw of [undefined, "", ...supported]) {
+      const parsed = parse({ [selector]: raw });
+      assert.equal(parsed.valid, true, selector + "=" + JSON.stringify(raw));
+      assert.equal(parsed.mode, raw === undefined || raw === "" ? "off" : raw);
+    }
+  }
+});
 
 test("invalid security-mode selectors are observable and block Worker work before D1 or signing", async () => {
   const selectors = ["ACCOUNT_TOKEN_MODE", "REQUEST_SIGNATURE_MODE", "DEVICE_PROOF_MODE", "ORDER_SIGNER_SCOPE_MODE"];
@@ -97,4 +121,17 @@ test("device-proof mode parser rejects unknown values before device lookup", asy
     assert.deepEqual(result, { ok: false, code: "config_error", proven: false });
     assert.equal(calls.prepare, 0);
   }
+});
+
+test("direct lease and seat checkout handlers return config_error before signing or D1 for invalid device-proof mode", async () => {
+  const calls = { prepare: 0 };
+  const env = { DEVICE_PROOF_MODE: "not-a-mode", DB: countingDb(calls) };
+  const lease = await handleLeaseIssue(new Request("https://example.test/v1/activate", { method: "POST" }), env, "activate");
+  assert.equal(lease.status, 503);
+  assert.deepEqual(await lease.json(), { ok: false, code: "config_error" });
+
+  const checkout = await handleSeatCheckout(new Request("https://example.test/v1/checkout", { method: "POST" }), env);
+  assert.equal(checkout.status, 503);
+  assert.deepEqual(await checkout.json(), { ok: false, code: "config_error" });
+  assert.equal(calls.prepare, 0);
 });

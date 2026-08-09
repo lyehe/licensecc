@@ -79,3 +79,48 @@ test("/health has no config_warnings when enforcing modes match the configured s
   assert.equal(body.ok, true);
   assert.equal(body.config_warnings, undefined);
 });
+
+test("/health normalizes empty, unset, and off paired-mode values before emitting half-config warnings", async () => {
+  const cases = [
+    {
+      material: "ACCOUNT_TOKEN_PEPPERS",
+      mode: "ACCOUNT_TOKEN_MODE",
+      warning: "ACCOUNT_TOKEN_MODE",
+      value: "configured",
+    },
+    {
+      material: "ONLINE_SIGNING_PRIVATE_KEY_PKCS8_PEM",
+      mode: "REQUEST_SIGNATURE_MODE",
+      warning: "REQUEST_SIGNATURE_MODE",
+      value: "present",
+    },
+    {
+      material: "ORDER_SIGNER_SCOPES",
+      mode: "ORDER_SIGNER_SCOPE_MODE",
+      warning: "ORDER_SIGNER_SCOPE_MODE",
+      value: "configured",
+    },
+  ];
+  for (const entry of cases) {
+    for (const raw of [undefined, "", "off"]) {
+      const env = { [entry.material]: entry.value };
+      if (raw !== undefined) env[entry.mode] = raw;
+      const response = await worker.fetch(new Request("https://example.test/health"), env);
+      assert.equal(response.status, 200);
+      const body = await response.json();
+      assert.ok(body.config_warnings.some((warning) => warning.includes(entry.warning)));
+    }
+  }
+});
+
+test("/health treats an invalid paired mode as a readiness error rather than a permissive warning", async () => {
+  const response = await worker.fetch(new Request("https://example.test/health"), {
+    ONLINE_SIGNING_PRIVATE_KEY_PKCS8_PEM: "present",
+    REQUEST_SIGNATURE_MODE: "not-a-mode",
+  });
+  assert.equal(response.status, 503);
+  const body = await response.json();
+  assert.deepEqual(body.invalid_config_modes, ["REQUEST_SIGNATURE_MODE"]);
+  assert.ok(body.config_warnings.some((warning) => warning.includes("invalid value")));
+  assert.equal(body.config_warnings.some((warning) => warning.includes("online signing is configured")), false);
+});

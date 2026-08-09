@@ -1,5 +1,5 @@
 import type { LabeledPathFragment } from "../assemble.js";
-import { ACCOUNT_TOKEN_AUTH_ERRORS, errorResponse, jsonBody, LEASE_SUCCESS, REPORT_SUCCESS, SEAT_SUCCESS } from "../components.js";
+import { ACCOUNT_TOKEN_AUTH_ERRORS, errorResponse, jsonBody, LEASE_SUCCESS, REPORT_SUCCESS, SEAT_SUCCESS, securityModeConfigErrorResponse } from "../components.js";
 
 const verifyPath: Record<string, unknown> = {
   post: {
@@ -38,6 +38,7 @@ const verifyPath: Record<string, unknown> = {
         "rate_limited. source: cloudflare-client | d1-client | d1-entitlement | d1-global.",
         "rate_limited",
       ),
+      "503": securityModeConfigErrorResponse(),
       "500": errorResponse(
         "verification_error: D1 lookup failed, signing failed, or proof-nonce store unavailable.",
         "verification_error",

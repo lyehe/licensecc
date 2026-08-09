@@ -39,11 +39,40 @@ const healthPath: Record<string, unknown> = {
     security: [],
     responses: {
       "200": {
-        description: "Service healthy.",
+        description:
+          "Service healthy. account_token_mode is the normalized enforcement decision; config_warnings is present only for names-only paired-material consistency warnings.",
         content: {
           "application/json": {
             schema: { $ref: "#/components/schemas/HealthSuccess" },
-            examples: { ok: { value: { ok: true, service: "licensecc-online-verifier" } } },
+            examples: {
+              ok: {
+                value: {
+                  ok: true,
+                  service: "licensecc-online-verifier",
+                  account_token_mode: "off",
+                },
+              },
+            },
+          },
+        },
+      },
+      "503": {
+        description:
+          "config_error: one or more security rollout selectors is invalid. Health remains callable and returns selector names only, never raw configuration values or secrets.",
+        content: {
+          "application/json": {
+            schema: { $ref: "#/components/schemas/HealthConfigError" },
+            examples: {
+              config_error: {
+                value: {
+                  ok: false,
+                  service: "licensecc-online-verifier",
+                  code: "config_error",
+                  account_token_mode: "invalid",
+                  invalid_config_modes: ["REQUEST_SIGNATURE_MODE"],
+                },
+              },
+            },
           },
         },
       },

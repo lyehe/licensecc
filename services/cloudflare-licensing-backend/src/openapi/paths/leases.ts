@@ -1,5 +1,5 @@
 import type { LabeledPathFragment } from "../assemble.js";
-import { ACCOUNT_TOKEN_AUTH_ERRORS, errorResponse, jsonBody, LEASE_SUCCESS, REPORT_SUCCESS, SEAT_SUCCESS } from "../components.js";
+import { ACCOUNT_TOKEN_AUTH_ERRORS, errorResponse, jsonBody, LEASE_SUCCESS, REPORT_SUCCESS, SEAT_SUCCESS, securityModeConfigErrorResponse } from "../components.js";
 
 function leasePath(op: "activate" | "renew", summary: string): Record<string, unknown> {
   return {
@@ -24,9 +24,9 @@ function leasePath(op: "activate" | "renew", summary: string): Record<string, un
           "no_active_entitlement",
         ),
         "500": errorResponse("lease_signing_error: crypto signing failed.", "lease_signing_error"),
-        "503": errorResponse(
-          "config_error (ACCOUNT_TOKEN_PEPPERS / LEASE_SIGNING_PRIVATE_KEY_PKCS8_PEM unavailable) or verification_error (D1 errors).",
-          "verification_error",
+        "503": securityModeConfigErrorResponse(
+          "Other route-specific 503 codes include lease_signing_unavailable and verification_error for D1 errors.",
+          ["lease_signing_unavailable", "verification_error"],
         ),
       },
     },

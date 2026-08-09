@@ -20,6 +20,7 @@ import {
   safeDeviceKeyId,
   signAssertion,
 } from "./verify.js";
+import { parseDeviceProofMode } from "../security_modes.mjs";
 import { leaseWithinValidity } from "./leases.js";
 import { recordUsageEvent } from "./reports.js";
 import { reclaimOvercapSeats, sweepLapsedSeats } from "../maintenance/index.js";
@@ -141,6 +142,9 @@ function seatSigningUnavailable(env: Env): Response | null {
 
 export async function handleSeatCheckout(request: Request, env: Env, ctx?: ExecutionContextLike, isolationOverride?: IsolationBinding): Promise<Response> {
   const now = Math.floor(Date.now() / 1000);
+  if (!parseDeviceProofMode(env).valid) {
+    return json({ ok: false, code: "config_error" }, 503);
+  }
   const gate = seatSigningUnavailable(env);
   if (gate !== null) return gate;
 
@@ -172,7 +176,7 @@ export async function handleSeatCheckout(request: Request, env: Env, ctx?: Execu
     now,
     SEAT_PROOF_PURPOSE,
   );
-  if (!seatProof.ok) return json({ ok: false, code: seatProof.code }, 403);
+  if (!seatProof.ok) return json({ ok: false, code: seatProof.code }, seatProof.code === "config_error" ? 503 : 403);
 
   // Live by default; borrow only when the entitlement permits it, bounded by max_borrow_sec.
   let mode = "live";

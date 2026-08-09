@@ -3,16 +3,30 @@ import type { LabeledComponentFragment } from "./assemble.js";
 // ---------------------------------------------------------------------------
 // Reusable error-envelope helper. Each error response is { ok:false, code:"<code>" }.
 // ---------------------------------------------------------------------------
-export function errorResponse(description: string, code: string): Record<string, unknown> {
+export function errorResponse(description: string, code: string | readonly string[]): Record<string, unknown> {
+  const codes = typeof code === "string" ? [code] : code;
   return {
     description,
     content: {
       "application/json": {
         schema: { $ref: "#/components/schemas/ErrorEnvelope" },
-        examples: { [code]: { value: { ok: false, code } } },
+        examples: Object.fromEntries(codes.map((value) => [value, { value: { ok: false, code: value } }])),
       },
     },
   };
+}
+
+export const INVALID_SECURITY_MODE_CONFIG_ERROR =
+  "config_error: a nonempty ACCOUNT_TOKEN_MODE, REQUEST_SIGNATURE_MODE, DEVICE_PROOF_MODE, or ORDER_SIGNER_SCOPE_MODE is not an exact documented mode. The Worker rejects it before route authentication, body processing, persistence, or issuance.";
+
+export function securityModeConfigErrorResponse(
+  additionalDescription = "",
+  additionalCodes: readonly string[] = [],
+): Record<string, unknown> {
+  return errorResponse(
+    INVALID_SECURITY_MODE_CONFIG_ERROR + (additionalDescription.length > 0 ? " " + additionalDescription : ""),
+    ["config_error", ...additionalCodes],
+  );
 }
 
 export function jsonBody(schemaRef: string, required = true): Record<string, unknown> {
@@ -34,9 +48,9 @@ export const ACCOUNT_TOKEN_AUTH_ERRORS: Record<string, Record<string, unknown>> 
     "Forbidden. forbidden_scope: token scopes do not allow this operation on project:feature.",
     "forbidden_scope",
   ),
-  "503": errorResponse(
-    "config_error: ACCOUNT_TOKEN_PEPPERS absent/unparseable in soft/required mode (or required signing key missing); verification_error: D1 lookup/issuance errors.",
-    "config_error",
+  "503": securityModeConfigErrorResponse(
+    "Other route-specific 503 codes include unavailable account-token material and verification_error for D1 lookup/issuance failures.",
+    ["verification_error"],
   ),
 };
 
@@ -113,10 +127,48 @@ export const openApiComponents: LabeledComponentFragment = {
       }],
       ["HealthSuccess", {
         type: "object",
-        required: ["ok", "service"],
+        required: ["ok", "service", "account_token_mode"],
         properties: {
           ok: { type: "boolean", enum: [true] },
           service: { type: "string", enum: ["licensecc-online-verifier"] },
+          account_token_mode: {
+            type: "string",
+            enum: ["off", "soft", "required"],
+            description: "Normalized ACCOUNT_TOKEN_MODE; raw configuration values are never returned.",
+          },
+          config_warnings: {
+            type: "array",
+            items: { type: "string" },
+            description: "Optional names-only operator warnings for paired security material configured with a non-enforcing normalized mode.",
+          },
+        },
+      }],
+      ["HealthConfigError", {
+        type: "object",
+        required: ["ok", "service", "code", "account_token_mode", "invalid_config_modes"],
+        properties: {
+          ok: { type: "boolean", enum: [false] },
+          service: { type: "string", enum: ["licensecc-online-verifier"] },
+          code: { type: "string", enum: ["config_error"] },
+          account_token_mode: {
+            type: "string",
+            enum: ["off", "soft", "required", "invalid"],
+            description: "Normalized ACCOUNT_TOKEN_MODE; invalid indicates this selector is one of invalid_config_modes.",
+          },
+          invalid_config_modes: {
+            type: "array",
+            minItems: 1,
+            items: {
+              type: "string",
+              enum: ["ACCOUNT_TOKEN_MODE", "REQUEST_SIGNATURE_MODE", "DEVICE_PROOF_MODE", "ORDER_SIGNER_SCOPE_MODE"],
+            },
+            description: "Invalid selector names only; raw values are never returned.",
+          },
+          config_warnings: {
+            type: "array",
+            items: { type: "string" },
+            description: "Optional names-only consistency warnings; invalid configuration remains terminal readiness failure.",
+          },
         },
       }],
       ["RequestProofFields", {
@@ -164,7 +216,7 @@ export const openApiComponents: LabeledComponentFragment = {
         type: "object",
         required: ["subscription_id", "project", "feature", "intent", "event_id", "ts"],
         description:
-          "Signed subscription order event (body <= 16384 bytes), normalized/validated per order_event.mjs.",
+          "Signed subscription order event (raw wire body <= 16384 bytes), strictly UTF-8 decoded only after raw-byte HMAC verification and normalized/validated per order_event.mjs.",
         properties: {
           subscription_id: { type: "string" },
           project: { type: "string" },

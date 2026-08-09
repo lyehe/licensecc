@@ -195,6 +195,52 @@ test("chunked body is assembled as raw bytes and accepts the canonical signer", 
   assert.equal(calls.prepare, 0, "soft mode remains non-mutating after raw-byte authentication");
 });
 
+test("a UTF-8 code point split across chunks remains raw-byte authenticated and decodes only after assembly", async () => {
+  const { db, calls } = stubDb();
+  const env = baseEnv({ DB: db, ORDER_INGEST_MODE: "soft" });
+  const bodyBytes = textEncoder.encode(validBody({ provider_note: "€" }));
+  const euroStart = bodyBytes.indexOf(0xe2);
+  assert.ok(euroStart >= 0);
+  const ts = String(Math.floor(Date.now() / 1000));
+  const signature = await signOrderBytes({ ts, bodyBytes });
+  const streamed = streamedRequest({
+    ts,
+    signature,
+    chunks: [bodyBytes.slice(0, euroStart + 1), bodyBytes.slice(euroStart + 1, euroStart + 2), bodyBytes.slice(euroStart + 2)],
+  });
+  const response = await handleOrderIngest(streamed.request, env);
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).code, "observed");
+  assert.equal(calls.prepare, 0);
+});
+
+test("a raw-body read error cancels the reader before returning invalid_order", async () => {
+  const { db, calls } = stubDb();
+  const env = baseEnv({ DB: db });
+  let cancelled = false;
+  const request = {
+    headers: new Headers(),
+    body: {
+      getReader() {
+        return {
+          async read() {
+            throw new Error("stream failed");
+          },
+          async cancel() {
+            cancelled = true;
+          },
+          releaseLock() {},
+        };
+      },
+    },
+  };
+  const response = await handleOrderIngest(request, env);
+  assert.equal(response.status, 400);
+  assert.equal((await response.json()).code, "invalid_order");
+  assert.equal(cancelled, true);
+  assert.equal(calls.prepare, 0);
+});
+
 test("actual stream size, not a lying low Content-Length, controls the order body cap and cancellation", async () => {
   const { db, calls } = stubDb();
   const env = baseEnv({ DB: db });

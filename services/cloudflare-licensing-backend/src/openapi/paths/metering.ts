@@ -1,5 +1,5 @@
 import type { LabeledPathFragment } from "../assemble.js";
-import { ACCOUNT_TOKEN_AUTH_ERRORS, errorResponse, jsonBody, LEASE_SUCCESS, REPORT_SUCCESS, SEAT_SUCCESS } from "../components.js";
+import { ACCOUNT_TOKEN_AUTH_ERRORS, errorResponse, jsonBody, LEASE_SUCCESS, REPORT_SUCCESS, SEAT_SUCCESS, securityModeConfigErrorResponse } from "../components.js";
 
 const meterPath: Record<string, unknown> = {
   post: {
@@ -20,9 +20,9 @@ const meterPath: Record<string, unknown> = {
       "401": ACCOUNT_TOKEN_AUTH_ERRORS["401"],
       "403": errorResponse("forbidden_scope (token scopes disallow report on project:feature) or no_active_entitlement.", "no_active_entitlement"),
       "429": errorResponse("quota_exceeded: meter_quota > 0 and the increment would exceed it (nothing recorded).", "quota_exceeded"),
-      "503": errorResponse(
-        "config_error (ACCOUNT_TOKEN_PEPPERS absent/unparseable in soft/required mode) or verification_error (D1 errors).",
-        "verification_error",
+      "503": securityModeConfigErrorResponse(
+        "Other route-specific 503 code is verification_error for D1 errors.",
+        ["verification_error"],
       ),
     },
   },

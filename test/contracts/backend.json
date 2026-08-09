@@ -115,8 +115,85 @@
           ],
           "type": "object"
         },
+        "HealthConfigError": {
+          "properties": {
+            "account_token_mode": {
+              "description": "Normalized ACCOUNT_TOKEN_MODE; invalid indicates this selector is one of invalid_config_modes.",
+              "enum": [
+                "off",
+                "soft",
+                "required",
+                "invalid"
+              ],
+              "type": "string"
+            },
+            "code": {
+              "enum": [
+                "config_error"
+              ],
+              "type": "string"
+            },
+            "config_warnings": {
+              "description": "Optional names-only consistency warnings; invalid configuration remains terminal readiness failure.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "invalid_config_modes": {
+              "description": "Invalid selector names only; raw values are never returned.",
+              "items": {
+                "enum": [
+                  "ACCOUNT_TOKEN_MODE",
+                  "REQUEST_SIGNATURE_MODE",
+                  "DEVICE_PROOF_MODE",
+                  "ORDER_SIGNER_SCOPE_MODE"
+                ],
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            "ok": {
+              "enum": [
+                false
+              ],
+              "type": "boolean"
+            },
+            "service": {
+              "enum": [
+                "licensecc-online-verifier"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "ok",
+            "service",
+            "code",
+            "account_token_mode",
+            "invalid_config_modes"
+          ],
+          "type": "object"
+        },
         "HealthSuccess": {
           "properties": {
+            "account_token_mode": {
+              "description": "Normalized ACCOUNT_TOKEN_MODE; raw configuration values are never returned.",
+              "enum": [
+                "off",
+                "soft",
+                "required"
+              ],
+              "type": "string"
+            },
+            "config_warnings": {
+              "description": "Optional names-only operator warnings for paired security material configured with a non-enforcing normalized mode.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
             "ok": {
               "enum": [
                 true
@@ -132,7 +209,8 @@
           },
           "required": [
             "ok",
-            "service"
+            "service",
+            "account_token_mode"
           ],
           "type": "object"
         },
@@ -307,7 +385,7 @@
         },
         "OrderRequest": {
           "additionalProperties": true,
-          "description": "Signed subscription order event (body <= 16384 bytes), normalized/validated per order_event.mjs.",
+          "description": "Signed subscription order event (raw wire body <= 16384 bytes), strictly UTF-8 decoded only after raw-byte HMAC verification and normalized/validated per order_event.mjs.",
           "properties": {
             "customer": {
               "properties": {
@@ -967,6 +1045,7 @@
                   "examples": {
                     "ok": {
                       "value": {
+                        "account_token_mode": "off",
                         "ok": true,
                         "service": "licensecc-online-verifier"
                       }
@@ -977,7 +1056,30 @@
                   }
                 }
               },
-              "description": "Service healthy."
+              "description": "Service healthy. account_token_mode is the normalized enforcement decision; config_warnings is present only for names-only paired-material consistency warnings."
+            },
+            "503": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "config_error": {
+                      "value": {
+                        "account_token_mode": "invalid",
+                        "code": "config_error",
+                        "invalid_config_modes": [
+                          "REQUEST_SIGNATURE_MODE"
+                        ],
+                        "ok": false,
+                        "service": "licensecc-online-verifier"
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/HealthConfigError"
+                  }
+                }
+              },
+              "description": "config_error: one or more security rollout selectors is invalid. Health remains callable and returns selector names only, never raw configuration values or secrets."
             }
           },
           "security": [],
@@ -1110,6 +1212,18 @@
               "content": {
                 "application/json": {
                   "examples": {
+                    "config_error": {
+                      "value": {
+                        "code": "config_error",
+                        "ok": false
+                      }
+                    },
+                    "lease_signing_unavailable": {
+                      "value": {
+                        "code": "lease_signing_unavailable",
+                        "ok": false
+                      }
+                    },
                     "verification_error": {
                       "value": {
                         "code": "verification_error",
@@ -1122,7 +1236,7 @@
                   }
                 }
               },
-              "description": "config_error (ACCOUNT_TOKEN_PEPPERS / LEASE_SIGNING_PRIVATE_KEY_PKCS8_PEM unavailable) or verification_error (D1 errors)."
+              "description": "config_error: a nonempty ACCOUNT_TOKEN_MODE, REQUEST_SIGNATURE_MODE, DEVICE_PROOF_MODE, or ORDER_SIGNER_SCOPE_MODE is not an exact documented mode. The Worker rejects it before route authentication, body processing, persistence, or issuance. Other route-specific 503 codes include lease_signing_unavailable and verification_error for D1 errors."
             }
           },
           "security": [
@@ -1257,6 +1371,12 @@
               "content": {
                 "application/json": {
                   "examples": {
+                    "config_error": {
+                      "value": {
+                        "code": "config_error",
+                        "ok": false
+                      }
+                    },
                     "verification_error": {
                       "value": {
                         "code": "verification_error",
@@ -1269,7 +1389,7 @@
                   }
                 }
               },
-              "description": "config_error (ACCOUNT_TOKEN_PEPPERS absent/unparseable in soft/required mode) or verification_error (D1 errors)."
+              "description": "config_error: a nonempty ACCOUNT_TOKEN_MODE, REQUEST_SIGNATURE_MODE, DEVICE_PROOF_MODE, or ORDER_SIGNER_SCOPE_MODE is not an exact documented mode. The Worker rejects it before route authentication, body processing, persistence, or issuance. Other route-specific 503 code is verification_error for D1 errors."
             }
           },
           "security": [
@@ -1405,6 +1525,18 @@
               "content": {
                 "application/json": {
                   "examples": {
+                    "config_error": {
+                      "value": {
+                        "code": "config_error",
+                        "ok": false
+                      }
+                    },
+                    "seat_signing_unavailable": {
+                      "value": {
+                        "code": "seat_signing_unavailable",
+                        "ok": false
+                      }
+                    },
                     "verification_error": {
                       "value": {
                         "code": "verification_error",
@@ -1417,7 +1549,7 @@
                   }
                 }
               },
-              "description": "config_error (ACCOUNT_TOKEN_PEPPERS / ONLINE_SIGNING_PRIVATE_KEY_PKCS8_PEM unavailable) or verification_error (D1 errors)."
+              "description": "config_error: a nonempty ACCOUNT_TOKEN_MODE, REQUEST_SIGNATURE_MODE, DEVICE_PROOF_MODE, or ORDER_SIGNER_SCOPE_MODE is not an exact documented mode. The Worker rejects it before route authentication, body processing, persistence, or issuance. Other route-specific 503 codes include seat_signing_unavailable and verification_error for D1 errors."
             }
           },
           "security": [
@@ -1552,6 +1684,18 @@
               "content": {
                 "application/json": {
                   "examples": {
+                    "config_error": {
+                      "value": {
+                        "code": "config_error",
+                        "ok": false
+                      }
+                    },
+                    "lease_signing_unavailable": {
+                      "value": {
+                        "code": "lease_signing_unavailable",
+                        "ok": false
+                      }
+                    },
                     "verification_error": {
                       "value": {
                         "code": "verification_error",
@@ -1564,7 +1708,7 @@
                   }
                 }
               },
-              "description": "verification_error or lease_signing_unavailable."
+              "description": "config_error: a nonempty ACCOUNT_TOKEN_MODE, REQUEST_SIGNATURE_MODE, DEVICE_PROOF_MODE, or ORDER_SIGNER_SCOPE_MODE is not an exact documented mode. The Worker rejects it before route authentication, body processing, persistence, or issuance. Other route-specific 503 codes include verification_error and lease_signing_unavailable."
             }
           },
           "security": [
@@ -1693,6 +1837,12 @@
               "content": {
                 "application/json": {
                   "examples": {
+                    "config_error": {
+                      "value": {
+                        "code": "config_error",
+                        "ok": false
+                      }
+                    },
                     "verification_error": {
                       "value": {
                         "code": "verification_error",
@@ -1705,7 +1855,7 @@
                   }
                 }
               },
-              "description": "verification_error."
+              "description": "config_error: a nonempty ACCOUNT_TOKEN_MODE, REQUEST_SIGNATURE_MODE, DEVICE_PROOF_MODE, or ORDER_SIGNER_SCOPE_MODE is not an exact documented mode. The Worker rejects it before route authentication, body processing, persistence, or issuance. Other route-specific 503 code is verification_error."
             }
           },
           "security": [
@@ -1855,6 +2005,18 @@
               "content": {
                 "application/json": {
                   "examples": {
+                    "config_error": {
+                      "value": {
+                        "code": "config_error",
+                        "ok": false
+                      }
+                    },
+                    "seat_signing_unavailable": {
+                      "value": {
+                        "code": "seat_signing_unavailable",
+                        "ok": false
+                      }
+                    },
                     "verification_error": {
                       "value": {
                         "code": "verification_error",
@@ -1867,7 +2029,7 @@
                   }
                 }
               },
-              "description": "verification_error or seat_signing_unavailable."
+              "description": "config_error: a nonempty ACCOUNT_TOKEN_MODE, REQUEST_SIGNATURE_MODE, DEVICE_PROOF_MODE, or ORDER_SIGNER_SCOPE_MODE is not an exact documented mode. The Worker rejects it before route authentication, body processing, persistence, or issuance. Other route-specific 503 codes include verification_error and seat_signing_unavailable."
             }
           },
           "security": [
@@ -2017,6 +2179,18 @@
               "content": {
                 "application/json": {
                   "examples": {
+                    "config_error": {
+                      "value": {
+                        "code": "config_error",
+                        "ok": false
+                      }
+                    },
+                    "seat_signing_unavailable": {
+                      "value": {
+                        "code": "seat_signing_unavailable",
+                        "ok": false
+                      }
+                    },
                     "verification_error": {
                       "value": {
                         "code": "verification_error",
@@ -2029,7 +2203,7 @@
                   }
                 }
               },
-              "description": "verification_error or seat_signing_unavailable."
+              "description": "config_error: a nonempty ACCOUNT_TOKEN_MODE, REQUEST_SIGNATURE_MODE, DEVICE_PROOF_MODE, or ORDER_SIGNER_SCOPE_MODE is not an exact documented mode. The Worker rejects it before route authentication, body processing, persistence, or issuance. Other route-specific 503 codes include verification_error and seat_signing_unavailable."
             }
           },
           "security": [
@@ -2161,6 +2335,12 @@
               "content": {
                 "application/json": {
                   "examples": {
+                    "config_error": {
+                      "value": {
+                        "code": "config_error",
+                        "ok": false
+                      }
+                    },
                     "verification_error": {
                       "value": {
                         "code": "verification_error",
@@ -2173,7 +2353,7 @@
                   }
                 }
               },
-              "description": "verification_error."
+              "description": "config_error: a nonempty ACCOUNT_TOKEN_MODE, REQUEST_SIGNATURE_MODE, DEVICE_PROOF_MODE, or ORDER_SIGNER_SCOPE_MODE is not an exact documented mode. The Worker rejects it before route authentication, body processing, persistence, or issuance. Other route-specific 503 code is verification_error."
             }
           },
           "security": [
@@ -2269,6 +2449,12 @@
               "content": {
                 "application/json": {
                   "examples": {
+                    "config_error": {
+                      "value": {
+                        "code": "config_error",
+                        "ok": false
+                      }
+                    },
                     "verification_error": {
                       "value": {
                         "code": "verification_error",
@@ -2281,7 +2467,7 @@
                   }
                 }
               },
-              "description": "verification_error."
+              "description": "config_error: a nonempty ACCOUNT_TOKEN_MODE, REQUEST_SIGNATURE_MODE, DEVICE_PROOF_MODE, or ORDER_SIGNER_SCOPE_MODE is not an exact documented mode. The Worker rejects it before route authentication, body processing, persistence, or issuance. Other route-specific 503 code is verification_error."
             }
           },
           "security": [
@@ -2413,6 +2599,18 @@
               "content": {
                 "application/json": {
                   "examples": {
+                    "config_error": {
+                      "value": {
+                        "code": "config_error",
+                        "ok": false
+                      }
+                    },
+                    "lease_signing_unavailable": {
+                      "value": {
+                        "code": "lease_signing_unavailable",
+                        "ok": false
+                      }
+                    },
                     "verification_error": {
                       "value": {
                         "code": "verification_error",
@@ -2425,7 +2623,7 @@
                   }
                 }
               },
-              "description": "verification_error or lease_signing_unavailable."
+              "description": "config_error: a nonempty ACCOUNT_TOKEN_MODE, REQUEST_SIGNATURE_MODE, DEVICE_PROOF_MODE, or ORDER_SIGNER_SCOPE_MODE is not an exact documented mode. The Worker rejects it before route authentication, body processing, persistence, or issuance. Other route-specific 503 codes include verification_error and lease_signing_unavailable."
             }
           },
           "security": [
@@ -2558,6 +2756,18 @@
               "content": {
                 "application/json": {
                   "examples": {
+                    "config_error": {
+                      "value": {
+                        "code": "config_error",
+                        "ok": false
+                      }
+                    },
+                    "seat_signing_unavailable": {
+                      "value": {
+                        "code": "seat_signing_unavailable",
+                        "ok": false
+                      }
+                    },
                     "verification_error": {
                       "value": {
                         "code": "verification_error",
@@ -2570,7 +2780,7 @@
                   }
                 }
               },
-              "description": "config_error (ACCOUNT_TOKEN_PEPPERS / ONLINE_SIGNING_PRIVATE_KEY_PKCS8_PEM unavailable) or verification_error (D1 errors)."
+              "description": "config_error: a nonempty ACCOUNT_TOKEN_MODE, REQUEST_SIGNATURE_MODE, DEVICE_PROOF_MODE, or ORDER_SIGNER_SCOPE_MODE is not an exact documented mode. The Worker rejects it before route authentication, body processing, persistence, or issuance. Other route-specific 503 codes include seat_signing_unavailable and verification_error for D1 errors."
             }
           },
           "security": [
@@ -2688,6 +2898,12 @@
               "content": {
                 "application/json": {
                   "examples": {
+                    "config_error": {
+                      "value": {
+                        "code": "config_error",
+                        "ok": false
+                      }
+                    },
                     "verification_error": {
                       "value": {
                         "code": "verification_error",
@@ -2700,7 +2916,7 @@
                   }
                 }
               },
-              "description": "config_error (ACCOUNT_TOKEN_PEPPERS absent/unparseable in soft/required mode) or verification_error (D1 errors)."
+              "description": "config_error: a nonempty ACCOUNT_TOKEN_MODE, REQUEST_SIGNATURE_MODE, DEVICE_PROOF_MODE, or ORDER_SIGNER_SCOPE_MODE is not an exact documented mode. The Worker rejects it before route authentication, body processing, persistence, or issuance. Other route-specific 503 code is verification_error for D1 errors."
             }
           },
           "security": [
@@ -2719,7 +2935,7 @@
       },
       "/v1/orders": {
         "post": {
-          "description": "Authenticated by the Order-Signature header: HMAC-SHA256 over the raw body keyed by ORDER_HMAC_SECRETS[key_id], with a bounded timestamp (ORDER_MAX_SKEW_SECONDS) and the ORDER_INGEST_AUDIENCE folded into the signed bytes. Body must be <= 16384 bytes. Replay of a processed event_id with a matching payload digest returns HTTP 200 ok:false code:cached.",
+          "description": "Authenticated by the Order-Signature header: HMAC-SHA256 over the original raw wire bytes keyed by ORDER_HMAC_SECRETS[key_id], with a bounded timestamp (ORDER_MAX_SKEW_SECONDS) and the ORDER_INGEST_AUDIENCE folded into the signed bytes. The raw-byte stream is capped at 16384 bytes, then strictly UTF-8 decoded before JSON parsing. Replay of a processed event_id with a matching payload digest returns HTTP 200 ok:false code:cached.",
           "operationId": "postOrders",
           "requestBody": {
             "content": {
@@ -2758,7 +2974,7 @@
                   }
                 }
               },
-              "description": "invalid_order: malformed JSON, invalid normalize result, or Step 5 redrive failure."
+              "description": "invalid_order: validly signed bytes that are malformed UTF-8, malformed JSON, invalid normalize result, or Step 5 redrive failure."
             },
             "401": {
               "content": {
@@ -2776,7 +2992,7 @@
                   }
                 }
               },
-              "description": "Auth failure: config_error (ORDER_HMAC_SECRETS absent/empty/unparseable), unknown_key_id, stale_timestamp, bad_signature, or replayed (nonce already consumed)."
+              "description": "Auth failure: unknown_key_id, stale_timestamp, bad_signature, or replayed (nonce already consumed)."
             },
             "404": {
               "content": {
@@ -2830,12 +3046,18 @@
                   }
                 }
               },
-              "description": "payload_too_large: Content-Length over 16384 or utf-8 encoded body over 16384 bytes."
+              "description": "payload_too_large: declared Content-Length over 16384 or accumulated raw wire bytes over 16384. The stream is cancelled on rejection; Content-Length is only an early hint and cannot bypass the raw-byte cap."
             },
             "503": {
               "content": {
                 "application/json": {
                   "examples": {
+                    "config_error": {
+                      "value": {
+                        "code": "config_error",
+                        "ok": false
+                      }
+                    },
                     "write_failed": {
                       "value": {
                         "code": "write_failed",
@@ -2848,7 +3070,7 @@
                   }
                 }
               },
-              "description": "write_failed: DB batch unavailable, DB errors, or order_ingest_nonces store unavailable."
+              "description": "config_error: a nonempty ACCOUNT_TOKEN_MODE, REQUEST_SIGNATURE_MODE, DEVICE_PROOF_MODE, or ORDER_SIGNER_SCOPE_MODE is not an exact documented mode. The Worker rejects it before route authentication, body processing, persistence, or issuance. config_error also covers unusable ORDER_HMAC_SECRETS or ORDER_INGEST_AUDIENCE, and a missing/invalid required ORDER_SIGNER_SCOPES map. write_failed: DB batch unavailable, DB errors, or order_ingest_nonces store unavailable."
             }
           },
           "security": [
@@ -2945,6 +3167,12 @@
               "content": {
                 "application/json": {
                   "examples": {
+                    "config_error": {
+                      "value": {
+                        "code": "config_error",
+                        "ok": false
+                      }
+                    },
                     "verification_error": {
                       "value": {
                         "code": "verification_error",
@@ -2957,7 +3185,7 @@
                   }
                 }
               },
-              "description": "config_error (ACCOUNT_TOKEN_PEPPERS absent/unparseable in soft/required mode) or verification_error (D1 errors)."
+              "description": "config_error: a nonempty ACCOUNT_TOKEN_MODE, REQUEST_SIGNATURE_MODE, DEVICE_PROOF_MODE, or ORDER_SIGNER_SCOPE_MODE is not an exact documented mode. The Worker rejects it before route authentication, body processing, persistence, or issuance. Other route-specific 503 code is verification_error for D1 errors."
             }
           },
           "security": [
@@ -3075,6 +3303,18 @@
               "content": {
                 "application/json": {
                   "examples": {
+                    "config_error": {
+                      "value": {
+                        "code": "config_error",
+                        "ok": false
+                      }
+                    },
+                    "lease_signing_unavailable": {
+                      "value": {
+                        "code": "lease_signing_unavailable",
+                        "ok": false
+                      }
+                    },
                     "verification_error": {
                       "value": {
                         "code": "verification_error",
@@ -3087,7 +3327,7 @@
                   }
                 }
               },
-              "description": "config_error (ACCOUNT_TOKEN_PEPPERS / LEASE_SIGNING_PRIVATE_KEY_PKCS8_PEM unavailable) or verification_error (D1 errors)."
+              "description": "config_error: a nonempty ACCOUNT_TOKEN_MODE, REQUEST_SIGNATURE_MODE, DEVICE_PROOF_MODE, or ORDER_SIGNER_SCOPE_MODE is not an exact documented mode. The Worker rejects it before route authentication, body processing, persistence, or issuance. Other route-specific 503 codes include lease_signing_unavailable and verification_error for D1 errors."
             }
           },
           "security": [
@@ -3236,6 +3476,24 @@
                 }
               },
               "description": "verification_error: D1 lookup failed, signing failed, or proof-nonce store unavailable."
+            },
+            "503": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "config_error": {
+                      "value": {
+                        "code": "config_error",
+                        "ok": false
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "config_error: a nonempty ACCOUNT_TOKEN_MODE, REQUEST_SIGNATURE_MODE, DEVICE_PROOF_MODE, or ORDER_SIGNER_SCOPE_MODE is not an exact documented mode. The Worker rejects it before route authentication, body processing, persistence, or issuance."
             }
           },
           "security": [

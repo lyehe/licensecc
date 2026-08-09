@@ -151,3 +151,50 @@ test("the doc routes are served without credentials or environment (behavioral)"
   assert.equal(docs.status, 200);
   assert.match(docs.headers.get("content-type") ?? "", /text\/html/);
 });
+
+test("invalid security-mode config leaves static docs available and is documented on every gated operation", async () => {
+  const staticMeta = new Set(["/openapi.json", "/docs"]);
+  for (const route of CANONICAL) {
+    const operation = openApiSpec.paths[route.path][route.method.toLowerCase()];
+    if (staticMeta.has(route.path)) {
+      assert.equal(operation.responses["503"], undefined, route.path + " stays available during invalid security config");
+      continue;
+    }
+    const response = operation.responses["503"];
+    assert.ok(response, route.path + " documents the global invalid-config response");
+    assert.match(JSON.stringify(response), /config_error/, route.path + " 503 documents config_error");
+  }
+
+  const invalidEnv = { REQUEST_SIGNATURE_MODE: "not-a-mode" };
+  const spec = await worker.fetch(new Request("http://test/openapi.json"), invalidEnv);
+  assert.equal(spec.status, 200);
+  const docs = await worker.fetch(new Request("http://test/docs"), invalidEnv);
+  assert.equal(docs.status, 200);
+  const health = await worker.fetch(new Request("http://test/health"), invalidEnv);
+  assert.equal(health.status, 503);
+  assert.equal((await health.json()).code, "config_error");
+});
+
+test("health documents normalized readiness fields, warnings, and invalid-mode config errors", () => {
+  const schemas = openApiSpec.components.schemas;
+  const healthy = schemas.HealthSuccess;
+  assert.ok(healthy.required.includes("account_token_mode"));
+  assert.equal(healthy.properties.account_token_mode.type, "string");
+  assert.equal(healthy.properties.config_warnings.type, "array");
+
+  const healthOperation = openApiSpec.paths["/health"].get;
+  assert.ok(healthOperation.responses["503"]);
+  assert.match(JSON.stringify(healthOperation.responses["503"]), /config_error/);
+  assert.equal(healthOperation.responses["503"].content["application/json"].schema.$ref, "#/components/schemas/HealthConfigError");
+});
+
+test("order ingest documents distinct config/write failures and raw-wire body semantics", () => {
+  const operation = openApiSpec.paths["/v1/orders"].post;
+  const order503 = operation.responses["503"];
+  const examples = order503.content["application/json"].examples;
+  assert.deepEqual(Object.keys(examples).sort(), ["config_error", "write_failed"]);
+  assert.match(order503.description, /config_error/);
+  assert.match(order503.description, /write_failed/);
+  assert.match(operation.responses["400"].description, /UTF-8/);
+  assert.match(operation.responses["413"].description, /raw wire bytes/);
+});

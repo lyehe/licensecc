@@ -186,8 +186,12 @@ also supports an optional Cloudflare rate-limit binding named
   `REQUEST_SIGNATURE_MODE`, `DEVICE_PROOF_MODE`, and
   `ORDER_SIGNER_SCOPE_MODE` accept only their documented lowercase values.
   An unset/empty value keeps its legacy `off` default; any other non-empty
-  value fails closed with `503 config_error`, and `/health` reports the invalid
-  selector name without exposing its configured value.
+  value fails closed with `503 config_error`. `/health` stays callable: a
+  healthy `200` reports normalized `account_token_mode` plus optional
+  names-only `config_warnings`; invalid configuration returns `503
+  config_error` with selector names only. Static `/openapi.json` and `/docs`
+  remain available so operators can inspect this contract during a readiness
+  failure.
 - `required` request-proof mode expects `request_signature_version=1`,
   `device_key_id=sha256:<64-hex>`, `request_timestamp`,
   `request_signature_algorithm=ecdsa-p256-sha256`, and a base64
@@ -292,7 +296,7 @@ fraud.confirmed / chargeback) and the Worker projects them onto entitlements.
   `409 event_id_conflict`, `409 fingerprint_owned`, `200 no_entitlement`
   (modify on a never-activated subscription — never materializes access),
   `409 entitlement_revoked` (terminal), `401` (auth family), `400 invalid_order`,
-  `503 write_failed`. The body is read once as a bounded raw-byte stream and
+  `503 config_error`, or `503 write_failed`. The body is read once as a bounded raw-byte stream and
   capped at `MAX_ORDER_BODY_BYTES = 16384`; overflow cancels the stream even if
   `Content-Length` is absent or lies. The HMAC is over those original bytes,
   then the body must decode as valid UTF-8 before JSON parsing.
