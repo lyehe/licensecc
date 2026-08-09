@@ -19,8 +19,11 @@ another service's generated output.
 
 The repository uses one root npm workspace install:
 
-1. The four existing service directories remain the only workspaces until a
-   later task adds explicitly reviewed packages.
+1. The six declared workspaces are the two reviewed shared packages and four
+   independently deployable service directories: `licensing-domain`,
+   `cloudflare-runtime`, `cloudflare-licensing-backend`,
+   `cloudflare-license-admin`, `cloudflare-customer-portal`, and
+   `cloudflare-d1-backup`.
 2. `package-lock.json` at the repository root is the authoritative lockfile.
    Package-local lockfiles are not tracked.
 3. The package-manager policy is pinned to `npm@10.9.8` through the root
@@ -29,9 +32,10 @@ The repository uses one root npm workspace install:
    `npm run <script> --workspace <workspace-name>`. A service remains
    independently runnable: after the root install, `npm run <script>` from a
    service directory resolves through the workspace root.
-5. Existing service dependency declarations, including the temporary backend
-   `file:` dependencies, remain unchanged until Task 4 extracts shared
-   packages.
+5. Workspace dependency declarations point only to explicit shared packages
+   or ordinary third-party dependencies. The temporary service-to-service
+   `file:` dependencies were removed during the shared-package extraction;
+   services do not depend on another deployable's implementation.
 6. CI caches and installs from the root lockfile with one `npm ci`.
 7. Optional real-PostgreSQL or `pg-mem` smoke dependencies are not ordinary
    workspace dependencies. Their opt-in instructions must install them
@@ -53,3 +57,23 @@ before running its single `npm ci`.
   package-local lockfile exists.
 - Optional PostgreSQL smoke tests remain intentionally separate from ordinary
   service and CI installs, avoiding flaky network/database prerequisites.
+
+## Final workspace outcome
+
+As of the accepted Task 10 base on 2026-08-08, the workspace decision is
+implemented and no longer transitional:
+
+* `package-lock.json` is the only tracked **npm workspace** lockfile and covers
+  the six declared workspaces: `licensing-domain`, `cloudflare-runtime`, and
+  the four deployables. SDK-specific lock/material files such as Python's
+  `uv.lock` remain separate concerns.
+* `npm ci` with npm `10.9.8` installs one reproducible dependency graph; no
+  service-local lockfile or install command is part of the repository contract.
+* The four Workers still build and deploy independently. A workspace install
+  does not combine their bundles or make one service's runtime depend on
+  another service.
+* `npm run check:architecture` reports no service-to-service debt, and package
+  boundaries are enforced by explicit exports and dependencies.
+* CI and local checks use the same root command surface; optional SDK, browser,
+  dry-run, and documentation checks remain dedicated commands described in
+  the root README.

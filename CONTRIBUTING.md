@@ -36,27 +36,38 @@ For normal work on this public fork, target `main` unless an issue or maintainer
 Before opening a pull request:
 
 ```powershell
-pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/bootstrap.ps1 -CheckOnly
-pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/check-build-purity.ps1 -Preset dev-debug
+npm ci
+npm run check:pr
 ```
 
 For service, SDK, database-backend, and portal changes, run the relevant local gates as well:
 
 ```powershell
-pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -SkipCore -IncludeServices -IncludeUi -IncludeSchemaParity
-pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -SkipCore -IncludeE2E
-pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -SkipCore -IncludeSdks
+npm run test:sdks
+npm run setup:browsers
+npm run test:e2e
+npm run check:dry-run
+npm run check:docs
 ```
 
 The root `package.json` exposes the same service-oriented entry points:
 
 ```powershell
-npm run check:services
-npm run check:e2e
-npm run lint:services
+npm run test:services
+npm run test:contracts
+npm run check:architecture
 ```
 
-If you cannot run that script on your platform, use the equivalent non-mutating configure, build, and test commands:
+For C++ changes, first inspect the pinned generator and then run the
+non-mutating source-purity gate:
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/bootstrap.ps1 -CheckOnly
+pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/check-build-purity.ps1 -Preset dev-debug
+```
+
+If a platform cannot run the PowerShell wrapper, use the equivalent configure,
+build, and test commands:
 
 ```console
 cmake --preset dev-debug
@@ -64,7 +75,9 @@ cmake --build --preset dev-debug
 ctest --preset dev-debug
 ```
 
-Do not repair, reset, or patch the generator checkout from a build command. Use `scripts/bootstrap.ps1` only after preserving any local generator work.
+Do not repair, reset, or patch the generator checkout from a build command. Use
+`scripts/bootstrap.ps1` only for the explicit bootstrap action, after
+preserving any local generator work; `-CheckOnly` is safe for inspection.
 
 The tracked generator compatibility patch is transitional and must be removed only with its reviewed replacement generator revision and gitlink update.
 
@@ -97,6 +110,13 @@ Do not commit generated files or local-only state:
 Track Wrangler example templates such as `wrangler.example.toml` and `wrangler.example.jsonc`; keep real deployment IDs and secrets local.
 
 The current `main` branch now includes the C++ core plus service, SDK, database-backend, and portal slices. Changes to those areas should keep their local gates green and update docs when commands, workflows, public APIs, or support status change.
+
+Use [`doc/architecture/change-guide.md`](doc/architecture/change-guide.md) to
+route API, Worker, D1, policy, UI, SDK, and OpenAPI changes. Read
+[`doc/architecture/ownership.md`](doc/architecture/ownership.md) before
+crossing a deployable boundary. The documentation split is deliberate:
+maintained project docs live under `doc/`, protected execution plans under
+`docs/superpowers/plans/`, and evidence reports under `docs/implementation/`.
 
 ## Coding Guidelines
 

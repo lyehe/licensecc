@@ -24,9 +24,13 @@ versioned independently until the first platform release. See [CHANGELOG.md](CHA
 - `cmake/`: CMake find modules and build helpers.
 - `extern/`: pinned license-generator submodule; `scripts/bootstrap.ps1` is the only workflow that initializes it.
 - `doc/`: documentation source and architecture notes.
+- `doc/architecture/`: system map, change guide, role ownership, and architecture decisions.
+- `docs/implementation/`: implementation evidence reports; `docs/superpowers/plans/` contains protected execution plans.
 - `scripts/`: local developer helper scripts.
 - `patches/`: reviewed transition patches; build and check commands never apply them to vendored source.
 - `package.json`: root orchestration scripts for service, SDK, schema, and E2E checks.
+- `packages/licensing-domain/`: portable licensing values, policy transitions, contracts, and pure projections.
+- `packages/cloudflare-runtime/`: shared Cloudflare/Web-platform mechanics used by multiple deployables.
 - `services/cloudflare-licensing-backend/`: licensing backend service, local SQLite adapter, D1 migrations, and fenced PostgreSQL/Supabase adapter.
 - `services/cloudflare-license-admin/`: operator console Worker and React UI.
 - `services/cloudflare-customer-portal/`: customer portal Worker and React UI.
@@ -61,65 +65,46 @@ If the repository was cloned without submodules, initialize the pinned checkout 
 pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/bootstrap.ps1
 ```
 
-## Recommended Local Check
+## Recommended local checks
 
-With PowerShell 7 (`pwsh`, any platform), first inspect bootstrap state and then run the source-purity gate:
+With PowerShell 7 (`pwsh`) and the pinned npm `10.9.8`, inspect bootstrap state,
+install the root workspace, and run the deterministic pull-request gate:
 
 ```powershell
 pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/bootstrap.ps1 -CheckOnly
+npm ci
+npm run check:pr
+```
+
+For C++ changes, also run the source-purity gate (it configures, builds, and
+tests the selected preset without mutating source or the generator checkout):
+
+```powershell
 pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/check-build-purity.ps1 -Preset dev-debug
 ```
 
-The purity gate snapshots the source tree before configure/build/CTest and fails if any tracked, untracked, generator, `projects/`, or `install/` fingerprint changes. It tolerates pre-existing local work only when it is byte-identical after the check. Configure, build, and test never initialize submodules or edit vendored source.
+The root command surface is intentionally explicit:
 
-`scripts/dev-check.ps1` remains a convenience entry point and delegates its C++ core phase to the same purity gate. Its `-AllowDirtyGeneratorSubmodule` switch is retained for compatibility; it does not authorize vendor edits.
+| Command | Scope |
+| --- | --- |
+| `npm run scan:secrets` | Committed-secret and token-guard scan. |
+| `npm run lint` | Source lint for packages, services, and scripts. |
+| `npm run typecheck` | Production TypeScript/JavaScript type-check coverage. |
+| `npm run check:architecture` | Dependency direction, composition roots, and repository hygiene. |
+| `npm run test:contracts` | Canonical route/OpenAPI contract checks. |
+| `npm run test:services` | Package, Worker, SQL, UI workflow, and schema-parity tests. |
+| `npm run test:sdks` | Python and .NET SDK tests. |
+| `npm run setup:browsers` | One explicit setup command installing both retained Playwright Chromium revisions. |
+| `npm run test:e2e` | Browser and cross-service smoke tests; no install side effect. |
+| `npm run check:dry-run` | Credential-free Wrangler bundle/deploy dry-runs. |
+| `npm run check:docs` | Strict Doxygen then Sphinx build under ignored `doc/_build/`. |
+| `npm run check:docs:links` | Network-sensitive Sphinx link check for scheduled/manual use. |
+| `npm run check:pr` | Deterministic scan, lint, type, architecture, contract, and service gate. |
 
-`patches/license-generator-cstdint.patch` remains tracked only as a transition record while the reviewed generator candidate and gitlink are pending. It is not applied by any runtime workflow; remove it in the same reviewed change that accepts that candidate and updates the gitlink.
-
-Useful variants:
-
-```powershell
-pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -Preset dev-release
-pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -Preset ci-windows-msvc
-pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -Preset ci-windows-msvc-release-static
-pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -Preset ci-linux-release
-pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -SkipTests
-pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -SkipCore -IncludeServices -IncludeUi -IncludeSchemaParity
-pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -AllowDirtyGeneratorSubmodule
-pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -IncludeBackend
-pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -IncludeServices
-pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -IncludeUi
-pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -IncludeE2E
-pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -IncludeSchemaParity
-pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -IncludeDryRun
-pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -IncludeSdks
-```
-
-`-IncludeBackend` runs backend lint, the unit suite, SQL/migration suite, and fenced PostgreSQL adapter tests after the core C++ checks.
-`-IncludeServices` runs lint and unit/API tests for the backend, admin portal, customer portal, and D1 backup service.
-`-IncludeUi` adds Vite UI workflow tests for the admin and customer portals.
-`-IncludeE2E` adds the backend flow tests and Playwright browser suites.
-`-IncludeSchemaParity` runs D1 schema and PostgreSQL schema parity checks.
-`-IncludeDryRun` runs each service deployment dry-run against tracked example Wrangler configs.
-`-IncludeSdks` runs the Python and .NET SDK test suites after the core C++ checks.
-
-Equivalent root npm shortcuts are available for common service runs:
-
-```powershell
-npm run check:core
-npm run check:services
-npm run check:e2e
-npm run check:all
-```
-
-The checked-in GitHub Actions workflows cover the C++ core (Linux and Windows
-CMake matrices plus pull-request C/C++ formatting) and the services
-(`services.yml`: per-service lint, unit/API tests, SQL suites, the Vite UI
-workflow tests, and D1/PostgreSQL schema parity — the same set as
-`dev-check.ps1 -IncludeServices -IncludeUi -IncludeSchemaParity`). SDK, E2E,
-and dry-run validation remains local-first through the commands above and the
-root npm shortcuts; add remote workflow coverage only after the matching local
-command exists and is documented.
+SDK, browser, docs, dry-run, and native CMake matrix checks are dedicated
+commands rather than hidden side effects of `check:pr`. See
+[`doc/architecture/change-guide.md`](doc/architecture/change-guide.md) for
+the smallest correct change surface and exact focused checks.
 
 ## Manual Build
 
@@ -186,7 +171,7 @@ Use the current active branch policy for this repository. For normal work on thi
 Before opening a pull request:
 
 ```powershell
-pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/dev-check.ps1
+npm run check:pr
 ```
 
 Do not commit generated outputs such as `build/`, `install/`, `.wrangler/`, `dist/`, `node_modules/`, `doc/_doxygen/`, Python caches, or .NET `bin/obj` directories. Create local Python environments as `.venv/`; the legacy root `pyvenv.cfg` marker is ignored.

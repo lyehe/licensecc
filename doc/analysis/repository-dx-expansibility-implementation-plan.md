@@ -2,6 +2,19 @@
 
 Date: 2026-07-06
 
+## Historical status (2026-08-08)
+
+This document is retained as the historical implementation plan and evidence
+record for the repository-DX work that preceded the current architecture
+publication. Tasks 0 through 10 were accepted on the organization branch; the
+remaining ownership, architecture, and final-grade evidence work is tracked in
+`docs/superpowers/plans/2026-08-08-a-level-repository-organization.md` and
+published in `docs/implementation/a-level-organization-report.md`.
+
+The historical command outputs and checklist below are preserved as recorded
+at the time. They are not a second active plan or permission to rewrite the
+protected execution plan.
+
 ## Objective
 
 Make the current `main` branch easier to develop, verify, and extend before merging or expanding the SDK, service, database-backend, and licensing-tier work.
@@ -78,7 +91,10 @@ Verified in this pass:
 - `npm --prefix services/cloudflare-licensing-backend run schema:parity` passes.
 - `npm --prefix services/cloudflare-licensing-backend run schema:parity:pg` passes.
 
-Remaining work starts with larger modularization, stricter TypeScript coverage, CI/local-command parity cleanup, and resolving the unrelated dirty `extern/license-generator` WIP. The default core `scripts/dev-check.ps1` intentionally stops early while that submodule has local modifications; preserve or clean that submodule before using the default core check as a full green signal.
+The original implementation pass is complete for this plan's scope. Any
+remaining generator promotion, native Ubuntu evidence, or release-readiness
+work is tracked by the current A-level plan and its evidence report; the
+generator submodule remains an independently protected external input.
 
 ## Phase 0: Preserve and Classify Current Local State
 

@@ -21,30 +21,46 @@ rewrite.
 | `sdks/` | Python and .NET client surfaces. | Client SDK packages. |
 | `test/` | C++/service tests and deterministic public golden vectors. | Test-only fixtures and suites. |
 
-`extern/license-generator` is a pinned submodule. Its dirty nested worktree is
-user-owned and deliberately outside this task's change set.
+`extern/license-generator` is a pinned submodule. `scripts/bootstrap.ps1
+-CheckOnly` reports its expected revision without mutation; initialization is an
+explicit bootstrap action and build/check commands never patch or update the
+submodule.
 
-## Current TypeScript package edges
+## Current TypeScript dependency direction
 
-There is no `packages/` directory yet. The only production cross-workspace
-edges are temporary, exact service-to-service imports:
+The shared-package extraction is complete. Production dependencies flow from
+portable domain rules through Cloudflare/Web-platform adapters into the four
+independently deployable services:
 
-| Importer | Target | Exact imports | Removal |
-| --- | --- | ---: | --- |
-| `cloudflare-license-admin` | `@licensecc/cloudflare-licensing-backend` | 17 | `org/04-shared-packages` |
-| `cloudflare-customer-portal` | `@licensecc/cloudflare-licensing-backend` | 6 | `org/04-shared-packages` |
-| `cloudflare-licensing-backend` | workspace package/service | 0 | — |
-| `cloudflare-d1-backup` | workspace package/service | 0 | — |
+```text
+packages/licensing-domain <- packages/cloudflare-runtime <- services/*
+```
 
-Every one of the 23 edges records its importing file and backend export subpath
-in `scripts/architecture-boundaries.json`. The checker treats a new edge, a
-different subpath, an unused entry, or an expired entry as a failure.
+An arrow points toward a dependency. `licensing-domain` has no Worker or D1
+binding; `cloudflare-runtime` may depend on the domain package but never on a
+deployable; each service owns its composition root, routes, persistence
+queries, migrations, UI, and deployment configuration. No service imports
+another service, and no UI imports Worker implementation code.
+
+| Importer | Allowed workspace targets | Notes |
+| --- | --- | --- |
+| `packages/licensing-domain` | none | Portable policy, values, contracts, and pure projections. |
+| `packages/cloudflare-runtime` | `@licensecc/licensing-domain` | Shared HTTP/auth/D1 mechanics used by multiple deployables. |
+| `cloudflare-licensing-backend` | `@licensecc/cloudflare-runtime`, `@licensecc/licensing-domain` | Backend route and D1 ownership. |
+| `cloudflare-license-admin` | `@licensecc/cloudflare-runtime`, `@licensecc/licensing-domain` | Admin Worker and operator UI ownership. |
+| `cloudflare-customer-portal` | `@licensecc/cloudflare-runtime`, `@licensecc/licensing-domain` | Portal Worker and customer UI ownership. |
+| `cloudflare-d1-backup` | none | Backup Worker and Workflow remain service-local. |
+
+`npm run check:architecture` enforces this direction and the composition-root
+rules in `scripts/architecture-boundaries.json`. A new cross-workspace edge,
+undeclared dependency, service-to-service import, or UI/Worker boundary breach
+fails the check.
 
 ## Worker contracts
 
 The reviewed JSON snapshots in `test/contracts/` are created from compiled
-JavaScript only, after all four current `npm --prefix <service> run build`
-commands complete.
+JavaScript only, after the four service `build` scripts run through the root
+workspace install.
 
 | Service | Captured exports | Canonical route inventory |
 | --- | --- | ---: |
@@ -66,31 +82,41 @@ top-level build writes generated project material beneath
 `${CMAKE_BINARY_DIR}/generated-project-templates`; lease-ring generation also
 uses `${CMAKE_BINARY_DIR}/lease_test_ring` and
 `${CMAKE_BINARY_DIR}/lease_ring_records.cmake`. Export/configuration artifacts
-remain beneath `${CMAKE_BINARY_DIR}`. Presets currently install into
-`install/<preset>` for developer/Linux shapes and `C:/licensecc` for the Windows
-CI shapes. Task 2 owns making this build/source boundary fully pure.
+remain beneath `${CMAKE_BINARY_DIR}`. All checked-in presets install into
+`build/<preset>/install`; the build/source boundary is enforced by the CMake
+path guard and the build-purity script.
 
-## Measured hotspots
+## Measured hotspots and responsibility audit
 
-Measurements are tracked source lines at the accepted baseline, collected from
-the top-level implementation and public-header trees. They identify ownership
-pressure; they are not a quality score.
+Measurements are tracked source lines at the Task 11 base, collected from
+production `src` trees. They identify ownership pressure; they are not a
+quality score. The large files below have explicit owners in
+{doc}`ownership` and are not shared implementation by accident.
 
-| Path | Lines | Current concern |
+| Path | Lines | Responsibility audit |
 | --- | ---: | --- |
-| `services/cloudflare-license-admin/src/worker/index.ts` | 2,983 | Admin Worker composition, dispatch, validation, and use cases are concentrated together. |
-| `services/cloudflare-license-admin/src/ui/main.tsx` | 2,532 | Operator UI state and presentation are concentrated in one entry point. |
-| `services/cloudflare-license-admin/src/worker/openapi.ts` | 2,214 | Large generated-like API description remains one document. |
-| `services/cloudflare-licensing-backend/src/index.ts` | 2,205 | Backend composition root owns many bounded contexts. |
-| `src/library/licensecc.cpp` | 1,373 | C++ public API orchestration is a central runtime hotspot. |
-| `services/cloudflare-license-admin/src/ui/operatorWorkflow.ts` | 1,207 | Operator UI workflow state is concentrated. |
-| `services/cloudflare-licensing-backend/src/openapi.ts` | 1,074 | Backend API description is a second large document. |
-| `services/cloudflare-licensing-backend/src/fulfillment/order_ingest.mjs` | 1,008 | Fulfillment ingestion is a bounded-context hotspot. |
+| `src/library/licensecc.cpp` | 1,462 | C++ public API orchestration; changes pair with public ABI tests and CMake packaging. |
+| `services/cloudflare-license-admin/src/worker/openapi/components.ts` | 988 | Admin contract components; API-contract ownership stays with the admin deployable. |
+| `services/cloudflare-licensing-backend/src/fulfillment/order_ingest.mjs` | 1,091 | Backend order-ingest bounded context; persistence and exactly-once tests stay backend-owned. |
+| `services/cloudflare-licensing-backend/src/routes/verify.ts` | 985 | Backend verification route and abuse controls; it is not a shared package concern. |
+| `services/cloudflare-customer-portal/src/ui/main.tsx` | 640 | Portal UI composition and customer workflows; portal-local UI ownership. |
+| `services/cloudflare-d1-backup/src/core.ts` | 326 | D1 export/R2 backup orchestration; backup remains independently deployable. |
 
-Current service-source totals are 10,427 lines for license-admin, 8,517 for
-licensing-backend, 3,053 for customer-portal, and 510 for D1-backup. Later
-tasks use these measurements to split responsibility without moving code merely
-to improve a count.
+Composition roots remain intentionally small. The Task 9 accepted final and
+Task 11 current counts are:
+
+| Deployable | Task 9 accepted | Task 11 current |
+| --- | ---: | ---: |
+| Backend `src/index.ts` / `src/app.ts` | 1 / 73 | 1 / 80 |
+| Admin Worker `src/worker/index.ts` / `src/worker/app.ts` | 1 / 50 | 1 / 54 |
+| Admin UI `src/ui/main.tsx` / `src/ui/app/App.tsx` | 4 / 75 | 6 / 81 |
+| Portal Worker `src/worker/index.ts` / `src/worker/app.ts` | 2 / 67 | 2 / 75 |
+
+Current production-source totals are 10,940 lines for license-admin, 5,946 for
+licensing-backend, 3,480 for customer-portal, and 568 for D1-backup. These
+counts include TypeScript, TSX, JavaScript, and MJS under each service's
+tracked `src` tree. They are evidence for responsibility review, not a reason
+to move code without a behavioral or ownership boundary.
 
 ## Enforced rules
 
@@ -98,7 +124,7 @@ to improve a count.
 `services/*/src` and `packages/*/src` files. It resolves relative imports,
 including TypeScript `.js` fallbacks, static literal dynamic imports, package
 manifests, exports, and declared dependencies. It rejects package-to-service,
-service-to-service (except the exact temporary inventory), UI-to-worker,
+service-to-service, UI-to-worker,
 undeclared workspace, unresolved relative/subpath, and cross-workspace-relative
 imports. It also checks tracked repository hygiene without inspecting ignored
 local build output.

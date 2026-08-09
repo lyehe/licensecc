@@ -6,15 +6,15 @@
 
 ## Context
 
-The repository currently contains C++ runtime code, four independently
-deployable Cloudflare services, and temporary direct imports from the admin and
-portal deployables into the licensing-backend deployable. This made a shared
-implementation look like a deployable dependency and left architectural intent
-implicit in source paths.
+The repository contains C++ runtime code and four independently deployable
+Cloudflare services. During the completed organization transition, temporary
+direct imports from the admin and portal deployables into the
+licensing-backend deployable made shared implementation look like a deployable
+dependency and left architectural intent implicit in source paths.
 
-The organization plan needs a direction that supports independently deployable
-Workers while retaining a small, explicit home for truly shared policy and
-runtime adapters.
+The organization plan required a direction that supports independently
+deployable Workers while retaining a small, explicit home for truly shared
+policy and runtime adapters.
 
 ## Decision
 
@@ -62,18 +62,16 @@ Placement rules are:
 It scans tracked production code only, emits deterministic diagnostics, and
 fails repository hygiene debt that is expired or unused.
 
-## Transitional exception
+## Historical transition outcome
 
-Until Task 4, exactly 23 production imports from admin/portal into
-`@licensecc/cloudflare-licensing-backend` are documented in
-`scripts/architecture-boundaries.json`. Each entry includes the importing file,
-the backend export subpath, a reason, and `removeBy:
-org/04-shared-packages`. No wildcard or broader service allowance is valid.
-Task 4 must move the shared implementation into the two packages above and
-delete every entry rather than retaining compatibility forwarding shims.
+The 23 exact admin/portal-to-backend imports described during the transition
+were moved into the two packages above and the compatibility edges were
+removed. `scripts/architecture-boundaries.json` now has an empty
+`serviceImportAllowances` list; a new service-to-service edge fails closed.
 
-`pyvenv.cfg` is separately documented temporary build-purity debt and carries
-both `owner` and `removeBy` `org/02-build-purity`. Task 2 removes it.
+The temporary `pyvenv.cfg` build-purity exception was also removed. These
+historical exceptions remain described here so their closure is auditable, not
+as permission for new source changes.
 
 ## Consequences
 
@@ -83,5 +81,5 @@ both `owner` and `removeBy` `org/02-build-purity`. Task 2 removes it.
   orchestration, not a combined runtime.
 - Extracting shared code requires deliberately choosing domain versus runtime,
   avoiding a generic shared-package junk drawer.
-- The temporary direct imports are intentionally visible and will cause failure
-  once their exact source use disappears, preventing stale debt metadata.
+- Closed transition inventories are kept empty and fail closed, preventing a
+  stale compatibility allowance from becoming a new service boundary.
