@@ -13,5 +13,5 @@
     "noImplicitAny": false,
     "outDir": "dist-worker"
   },
-  "include": ["src/worker/**/*.ts", "src/shared/**/*.ts", "src/auth/**/*.mjs"]
+  "include": ["src/worker/**/*.ts", "src/shared/**/*.ts", "src/auth/**/*.mjs", ".wrangler/worker-configuration.d.ts"]
 }

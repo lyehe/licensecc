@@ -21,10 +21,33 @@ interface ExecutionContextLike {
   waitUntil(promise: Promise<unknown>): void;
 }
 
-export interface Env extends BackupEnvLike, BackupHttpEnv {
+// The generated declaration records the deployable's resource bindings. Its
+// example-config literals are widened so backup validation keeps accepting
+// real runtime values rather than only placeholder values.
+type WidenWranglerStringBindings<Bindings extends object> = {
+  [Binding in keyof Bindings]: Bindings[Binding] extends string ? string : Bindings[Binding];
+};
+
+type WithRuntimeNarrowing<Generated extends object, Runtime extends object> = Omit<Generated, keyof Runtime> & Runtime;
+
+// Explicit keys make checked Wrangler binding drift a type error. Keep the
+// service-local structural interfaces below for HTTP/Workflow test adapters.
+type WranglerBindings = Pick<Cloudflare.Env,
+  | "BACKUP_BUCKET"
+  | "ACCOUNT_ID"
+  | "DATABASE_ID"
+  | "DATABASE_NAME"
+  | "BACKUP_PREFIX"
+  | "BACKUP_RETENTION_DAYS"
+  | "D1_BACKUP_WORKFLOW"
+>;
+
+interface RuntimeEnv extends BackupEnvLike, BackupHttpEnv {
   D1_REST_API_TOKEN?: string;
   BACKUP_BUCKET: R2BucketLike;
 }
+
+export type Env = WithRuntimeNarrowing<WidenWranglerStringBindings<WranglerBindings>, RuntimeEnv>;
 
 export class D1BackupWorkflow extends WorkflowEntrypoint<Env, BackupTriggerParams> {
   async run(event: WorkflowEvent<BackupTriggerParams>, step: WorkflowStep): Promise<BackupResult> {

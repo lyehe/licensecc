@@ -13,5 +13,5 @@
     "rootDir": "src",
     "skipLibCheck": true
   },
-  "include": ["src/**/*.ts"]
+  "include": ["src/**/*.ts", ".wrangler/worker-configuration.d.ts"]
 }

@@ -21,7 +21,27 @@ export interface ExecutionContextLike {
   waitUntil(promise: Promise<unknown>): void;
 }
 
-export interface Env {
+// Example-config strings remain broad at runtime, but every resource binding
+// continues to come from Wrangler's generated environment declaration.
+type WidenWranglerStringBindings<Bindings extends object> = {
+  [Binding in keyof Bindings]: Bindings[Binding] extends string ? string : Bindings[Binding];
+};
+
+type WithRuntimeNarrowing<Generated extends object, Runtime extends object> = Omit<Generated, keyof Runtime> & Runtime;
+
+// Keep a direct generated dependency on each checked portal binding. This is
+// deliberately not inferred from local names so config drift fails closed.
+type WranglerBindings = Pick<Cloudflare.Env,
+  | "DB"
+  | "ASSETS"
+  | "ENVIRONMENT"
+  | "PORTAL_PUBLIC_ORIGIN"
+  | "BACKEND_ORIGIN"
+  | "PORTAL_EMAIL_FROM"
+  | "PORTAL_EMAIL_API_BASE"
+>;
+
+interface RuntimeEnv {
   DB: D1DatabaseLike;
   ASSETS?: { fetch(request: Request): Promise<Response> };
   ENVIRONMENT?: string;
@@ -37,6 +57,8 @@ export interface Env {
   PORTAL_BOOTSTRAP_BEARER?: string;
   PORTAL_BOOTSTRAP_REQUIRE_ACCESS?: string;
 }
+
+export type Env = WithRuntimeNarrowing<WidenWranglerStringBindings<WranglerBindings>, RuntimeEnv>;
 
 export type SessionRow = { customer_id: string; id: string };
 

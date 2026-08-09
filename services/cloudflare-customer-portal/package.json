@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build:worker": "tsc -p tsconfig.worker.json",
+    "build:worker": "npm run generate:wrangler-types && tsc -p tsconfig.worker.json",
     "build:ui": "vite build",
     "build": "npm run build:worker && npm run build:ui",
     "test:ui": "npm run build:ui && node --test test/portal-ui-workflow.test.mjs",

@@ -35,6 +35,20 @@ const WORKER_TYPECHECK_CONFIGS = new Set([
   "services/cloudflare-d1-backup/tsconfig.typecheck.json",
 ]);
 
+const WORKER_BUILD_CONFIGS = new Set([
+  "services/cloudflare-licensing-backend/tsconfig.json",
+  "services/cloudflare-license-admin/tsconfig.worker.json",
+  "services/cloudflare-customer-portal/tsconfig.worker.json",
+  "services/cloudflare-d1-backup/tsconfig.json",
+]);
+
+const WORKER_BUILD_SCRIPTS = new Map([
+  ["services/cloudflare-licensing-backend/package.json", "build"],
+  ["services/cloudflare-license-admin/package.json", "build:worker"],
+  ["services/cloudflare-customer-portal/package.json", "build:worker"],
+  ["services/cloudflare-d1-backup/package.json", "build"],
+]);
+
 function trackedFiles() {
   return execFileSync("git", ["-C", REPOSITORY_ROOT, "ls-files", "-z", "--", "packages", "services", "scripts"], {
     encoding: "buffer",
@@ -115,6 +129,24 @@ for (const configPath of WORKER_TYPECHECK_CONFIGS) {
   }
   if (config.compilerOptions?.noEmit !== true) {
     fail(`${configPath} must be no-emit only`);
+  }
+}
+
+for (const configPath of WORKER_BUILD_CONFIGS) {
+  const config = parsedConfigs.get(configPath);
+  if (config === undefined) {
+    fail(`expected Worker build config is missing: ${configPath}`);
+    continue;
+  }
+  if (!Array.isArray(config.include) || !config.include.includes(".wrangler/worker-configuration.d.ts")) {
+    fail(`${configPath} must include generated Wrangler bindings`);
+  }
+}
+
+for (const [manifestPath, buildScript] of WORKER_BUILD_SCRIPTS) {
+  const manifest = JSON.parse(readFileSync(resolve(REPOSITORY_ROOT, manifestPath), "utf8"));
+  if (typeof manifest.scripts?.[buildScript] !== "string" || !manifest.scripts[buildScript].includes("generate:wrangler-types")) {
+    fail(`${manifestPath} ${buildScript} must generate Wrangler bindings before TypeScript`);
   }
 }
 

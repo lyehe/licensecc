@@ -26,7 +26,36 @@ export interface RateLimitBindingLike {
   limit(input: { key: string }): Promise<{ success: boolean }>;
 }
 
-export interface Env {
+// `wrangler types` intentionally emits literal values from the checked example
+// config. Keep those strings broad at the service boundary: deployed mode
+// values may differ, while resource bindings retain their generated types.
+type WidenWranglerStringBindings<Bindings extends object> = {
+  [Binding in keyof Bindings]: Bindings[Binding] extends string ? string : Bindings[Binding];
+};
+
+type WithRuntimeNarrowing<Generated extends object, Runtime extends object> = Omit<Generated, keyof Runtime> & Runtime;
+
+// Naming every checked binding here makes a Wrangler rename/removal fail the
+// Worker typecheck instead of silently falling back to this service contract.
+type WranglerBindings = Pick<Cloudflare.Env,
+  | "DB"
+  | "VERIFY_RATE_LIMITER"
+  | "D1_RATE_LIMIT_ENABLED"
+  | "D1_RATE_LIMIT_LIMIT"
+  | "D1_RATE_LIMIT_PERIOD_SECONDS"
+  | "REQUEST_SIGNATURE_MODE"
+  | "REQUEST_SIGNATURE_MAX_SKEW_SECONDS"
+  | "DEVICE_PROOF_MODE"
+  | "ORDER_INGEST_MODE"
+  | "ORDER_INGEST_AUDIENCE"
+  | "ORDER_MAX_SKEW_SECONDS"
+  | "ORDER_SIGNER_SCOPE_MODE"
+  | "ACCOUNT_TOKEN_MODE"
+  | "ACCOUNT_TOKEN_ACTIVE_PEPPER_ID"
+  | "ACCOUNT_TOKEN_LAST_USED_THROTTLE_SEC"
+>;
+
+interface RuntimeEnv {
   DB: D1DatabaseLike;
   VERIFY_RATE_LIMITER?: RateLimitBindingLike;
   ONLINE_SIGNING_PRIVATE_KEY_PKCS8_PEM: string;
@@ -89,6 +118,8 @@ export interface Env {
   WEBHOOK_SIGNING_SECRETS?: string;
   WEBHOOK_SIGNING_KEY_ID?: string;
 }
+
+export type Env = WithRuntimeNarrowing<WidenWranglerStringBindings<WranglerBindings>, RuntimeEnv>;
 
 export interface VerifyRequest {
   project: string;

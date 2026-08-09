@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "npm run generate:wrangler-types && tsc -p tsconfig.json",
     "test": "npm run build && node --test test/*.mjs",
     "scan:secrets": "node scripts/lint.mjs",
     "lint": "eslint \"src/**/*.{js,mjs,ts,tsx}\" --max-warnings 0",

@@ -11,5 +11,5 @@
     "skipLibCheck": true,
     "outDir": "dist-worker"
   },
-  "include": ["src/worker/**/*.ts", "src/shared/**/*.ts"]
+  "include": ["src/worker/**/*.ts", "src/shared/**/*.ts", ".wrangler/worker-configuration.d.ts"]
 }
