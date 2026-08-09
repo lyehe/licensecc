@@ -1,57 +1,61 @@
 # A-level organization evidence report
 
-## Status and scope
+## Verdict
 
-**A-level status: CONDITIONAL / PENDING.** The repository organization and
-local gates have evidence, but the grade cannot be promoted while the reviewed
-generator candidate is unpublished/unpinned and native Ubuntu CMake plus native
-Doxygen/CI evidence is absent. CI links and run identifiers were not collected;
-the results below are local evidence or accepted task evidence, never a claim
-about a remote run.
+**A-level status: CONDITIONAL / PENDING.** The repository is well organized at
+the reviewed implementation tip and its local deterministic gates are strong.
+It is not yet an unconditional A because the final generator candidate is not
+published and pinned, native Ubuntu and remote-CI evidence has not been
+collected, and this Windows host cannot complete the documentation gate without
+Doxygen.
 
-This report covers Task 11 at base
-`9b7bdef4dbf2e6cc97f676617fbdb4f01ba7dda3` on branch
-`org/11-architecture-evidence`. The reviewed generator candidate is
-`74996a7d345df7b9a7cb46a08d423cb738217ed1`, but it is unpublished and
-unpinned: the superproject gitlink is `0227a3e` and the protected WIP nested
-revision is `dbbaed0`. Promotion remains conditional on maintainer approval
-and publication/pinning. The protected nested generator worktree is outside
-the packet; the 15 existing untracked `.lic` files and untracked
-`docs/superpowers/plans/**` were not staged, cleaned, or edited.
+| Dimension | Evidence at the reviewed tip | Assessment |
+| --- | --- | --- |
+| Ownership and dependency direction | Architecture gate is green; no production service-to-service import edge | A |
+| API and schema governance | Canonical contracts, D1/PostgreSQL parity, exact transition evidence, and OpenAPI checks are green | A |
+| Mutation safety | Catalog/projection capabilities, CAS transitions, atomic idempotency, and Free-tier query caps are migration-backed | A |
+| Operator UX | Consequence-led dialogs, immutable replay, exact response proof, current-read recovery, focus, and pagination fences have browser coverage | A |
+| Supply-chain hygiene | npm and workflow pins are exact; the 2026-08-09 audit attestation reports zero vulnerabilities | A |
+| Release provenance | Reviewed generator candidate remains unpublished/unpinned | Pending |
+| Cross-platform/documentation evidence | Windows is green; Ubuntu, Doxygen, and remote run identifiers are absent | Pending |
 
-The documentation split is deliberate: `doc/` contains maintained project and
-architecture documentation; `docs/superpowers/plans/` contains protected
-execution plans; `docs/implementation/` contains evidence reports.
+This is an evidence grade for organization and release readiness, not a claim
+that every planned product feature exists. In particular, Windows/Ubuntu TPM
+provider integration remains plan-only and this service does not claim TPM
+support.
 
-## Accepted implementation commits
+## Reviewed tree and protected state
 
-The following task commits are the accepted evidence chain. Short SHAs are
-preserved as supplied by the task packet; the generator candidate is explicitly
-not accepted into the superproject.
+The final integrated implementation tip is
+`4f33243b09f27db83e090b914f2fb0d776c34302` on
+`org/11-architecture-evidence`. Its final server/UI integration packets are:
 
-| Task | Accepted commit(s) and provenance |
+| Purpose | Commit |
 | --- | --- |
-| Task 0 | `456f701270bf75040992c8e1bd0136fde8792fa2` |
-| Task 1 | `d36c62f1c8f63ba6d2c58ae88bc95d489663aac8`, `2a8bf1854038e9b1c6fd3faaa30ed8ad61a8df58` |
-| Task 2 | `21ef71b41ace61ef2e4caff1386915309f0dd8e9`; follow-up `83365aa7ca2fe4398d873e6cabfa57addff7df1a` (source `04ed6ee`) |
-| Task 3 | Superproject `be6e551`, `8e5de1864006b85e5c4bf3e8057c333de449b08a`; final reviewed generator candidate `74996a7d345df7b9a7cb46a08d423cb738217ed1` remains unpublished/unpinned (superproject gitlink `0227a3e`, protected WIP `dbbaed0`). Promotion is conditional on maintainer approval and publication/pinning. |
-| Task 4 | `15e7af553c167fcb1a2c94383d3e570a17ebab3b` |
-| Task 5 | Integrated `dea865f` (source `5aab455`) |
-| Task 6 | Integrated `142f453`, `c3dab95`, `10c64d6` |
-| Task 7 | Integrated `9f3d0f5` (source `f3e3583`) |
-| Task 8 | `a2ef469`, `d5146e2`, `9c7ec5c` |
-| Task 9 | `e7bb8f91851febaf5031733b11c006340b916f3e` |
-| Task 10 | `9b7bdef4dbf2e6cc97f676617fbdb4f01ba7dda3` |
+| Catalog, projection, and transition server integration | `a054d50a47f86fff9ef070a2615263ef6aee6874` |
+| Free-tier entitlement batch budget | `550080adfcb1e62aa904a34f600df5643de63e9b` |
+| Stale batch-cap cleanup | `f68a0df` |
+| Consequence-led catalog-import UI integration | `26464bc17a8e7cf71ce1737c83f3a80c13776305` |
+| Exact retained catalog replay proof | `b67d36a390f342999c3d1483710da54c5b8a7d12` |
+| Focus preservation after stale replay | `eb68c5d243f40fdafeaed54f26e0ade3068ae88f` |
+| Generated Wrangler binding-to-Env enforcement | `8b2343719b1c517a0d9789a518d22971424ab7f3` |
+| Generated binding-kind compatibility enforcement | `4f33243b09f27db83e090b914f2fb0d776c34302` |
 
-## Dependency graph: before and after
+The final reviewed generator candidate
+`74996a7d345df7b9a7cb46a08d423cb738217ed1` remains
+unpublished/unpinned. The superproject gitlink `0227a3e` was not moved, while
+the protected WIP `dbbaed0` and its 15 existing untracked `.lic` fixtures were
+preserved. Publication and pinning are conditional on maintainer approval and
+publication/pinning. The 3 untracked `docs/superpowers/plans/**` execution
+plans were likewise preserved.
 
-Before the organization sequence, service implementation was concentrated in
-deployable roots, admin and portal had 23 temporary direct imports into the
-backend, each Worker carried an installation boundary, and route/OpenAPI
-ownership was implicit. The C++ ABI/core and the platform slices were also
-documented in separate local conventions.
+The documentation split is intentional:
 
-The accepted result is:
+- `doc/` contains maintained project and architecture documentation.
+- `docs/superpowers/plans/` contains protected execution plans.
+- `docs/implementation/` contains evidence reports.
+
+## Resulting dependency and ownership model
 
 ```text
 include/licensecc + src/library + CMake/test
@@ -71,156 +75,151 @@ backend Worker   admin     portal   D1 backup
  + D1 owner     Worker/UI  Worker/UI  Worker/Workflow
 ```
 
-Arrows point toward a dependency. The domain package is portable; runtime
-contains only reusable Cloudflare/Web-platform mechanics; each service owns its
-composition root, routes, OpenAPI inventory/fragments, service-specific SQL,
-UI, tests, and deployment configuration. The root `package-lock.json` is the
-only tracked **npm workspace** lockfile and covers the six workspaces;
-SDK-specific lock/material files such as Python's `uv.lock` remain separate
-concerns. `check:architecture`
-reports no service-to-service debt and no package-to-service dependency.
+Arrows point toward a dependency. The portable domain package owns shared
+business contracts. The runtime package owns reusable Cloudflare/Web-platform
+mechanics. Each deployable owns its composition root, routes, OpenAPI
+fragments, service-specific persistence, UI, tests, and Wrangler configuration.
+The root `package-lock.json` is the sole npm-workspace lockfile; SDK-native lock
+files remain within their own ecosystems.
 
-## Hotspot responsibility audit
+Current tracked service-source totals (TypeScript, TSX, JavaScript, and MJS)
+show substantial bounded contexts without moving service behavior into a
+generic dumping-ground package:
 
-Tracked production-source line counts at the Task 11 base are evidence of
-ownership pressure, not a quality score:
-
-| Path | Lines | Responsible boundary / audit result |
-| --- | ---: | --- |
-| `src/library/licensecc.cpp` | 1,462 | C++ public API orchestration; pair ABI changes with public-header tests and CMake packaging. |
-| `services/cloudflare-license-admin/src/worker/openapi/components.ts` | 988 | Admin contract components remain admin-owned. |
-| `services/cloudflare-licensing-backend/src/fulfillment/order_ingest.mjs` | 1,091 | Backend order-ingest and exactly-once persistence remain backend-owned. |
-| `services/cloudflare-licensing-backend/src/routes/verify.ts` | 985 | Backend verification and abuse controls are not shared implementation. |
-| `services/cloudflare-customer-portal/src/ui/main.tsx` | 640 | Portal UI composition and customer workflows remain portal-local. |
-| `services/cloudflare-d1-backup/src/core.ts` | 326 | D1 export/R2 backup orchestration remains backup-local. |
-
-Composition-root measurements (Task 9 accepted final → current):
-
-| Deployable | Task 9 | Current |
+| Boundary | Files | Lines |
 | --- | ---: | ---: |
-| Backend `src/index.ts` / `src/app.ts` | 1 / 73 | 1 / 80 |
-| Admin Worker `src/worker/index.ts` / `src/worker/app.ts` | 1 / 50 | 1 / 54 |
-| Admin UI `src/ui/main.tsx` / `src/ui/app/App.tsx` | 4 / 75 | 6 / 81 |
-| Portal Worker `src/worker/index.ts` / `src/worker/app.ts` | 2 / 67 | 2 / 75 |
+| Admin | 90 | 16,432 |
+| Licensing backend | 33 | 6,300 |
+| Customer portal | 25 | 4,464 |
+| D1 backup | 5 | 637 |
 
-Current service-source totals (TypeScript, TSX, JavaScript, and MJS under
-tracked `src` trees) are: license-admin **10,940**, licensing-backend **5,946**,
-customer-portal **3,480**, and D1-backup **568** lines. Large bounded-context
-files remain local rather than being moved into a generic shared package.
+The deployable composition roots remain small:
+
+| Composition boundary | Entry lines | App lines |
+| --- | ---: | ---: |
+| Backend Worker | 1 | 98 |
+| Admin Worker | 1 | 55 |
+| Admin UI | 6 | 81 |
+| Portal Worker | 2 | 69 |
+
+Large implementation files remain explicitly owned hotspots rather than
+implicit architecture:
+
+| Owned hotspot | Lines |
+| --- | ---: |
+| `src/library/licensecc.cpp` | 1,462 |
+| `services/cloudflare-license-admin/src/worker/openapi/components.ts` | 1,308 |
+| `services/cloudflare-licensing-backend/src/fulfillment/order_ingest.mjs` | 1,159 |
+| `services/cloudflare-licensing-backend/src/routes/verify.ts` | 994 |
+| `services/cloudflare-customer-portal/src/ui/main.tsx` | 875 |
+| `services/cloudflare-d1-backup/src/core.ts` | 326 |
+
+## Integrated correctness and organization outcomes
+
+- Catalog import now uses an actor-bound, expiring Preview capability and one
+  atomic Apply batch, with exact effects, source-generation fencing, rollback,
+  consumption, replay, and a 13-action/Free-tier query budget.
+- Plan projection snapshots are versioned and fail closed across rolling
+  deployment, include the private cache TTL in internal reconciliation, scrub
+  that field from outbound webhooks, fence legacy identities, bound cleanup,
+  validate safe epochs, and durably audit assignment-only changes.
+- Entitlement and device transitions use identity/status/sequence CAS. Their
+  dependent audit, policy, device, and idempotency statements are claim-gated;
+  same-key collection races roll back and replay the authoritative response.
+- Entitlement batch transitions are single-sourced at four IDs, reject five
+  before any D1 query, and stay below the 50-query Free-tier ceiling in changed,
+  no-op, and CAS-race paths.
+- Admin destructive flows retain an immutable request body and idempotency key
+  until exact applied/unapplied proof, separate mutation proof from refresh
+  proof, reject malformed success evidence, fence stale/ABA reads, prevent
+  cursor cycles and duplicate pages, and preserve keyboard focus.
+- Catalog Apply is consequence-led and preview-ID-only. Its dialog shows exact
+  typed targets/deltas, supports cancel/Escape/single-submit behavior, and
+  accepts only a response that deep-matches the confirmed preview binding.
+- Portal credentialed proxying uses manual redirects and bounded validated
+  bodies; magic-link bodies, floating-seat release, webhook redirects, and
+  response cancellation have explicit security and accessibility coverage.
+- Wrangler and GitHub Actions are immutable-version pinned with repository
+  gates that reject drift.
+- Each Worker's effective environment now derives its checked bindings from
+  generated `Cloudflare.Env`; a four-service negative regression removes a
+  generated binding or substitutes an incompatible resource kind and requires
+  a binding-specific TypeScript compilation failure.
+
+Focused Sol reviews approved the integrated server/admin chain and final focus
+correction. The final whole-root Sol audit then found the generated-Env and
+prose-only evidence-gate P2 gaps, followed by a binding-kind compatibility
+residual. Commits `8b23437` and `4f33243` plus the dynamic evidence gate in this
+report packet close them. These reviews are local task evidence, not remote CI
+attestations.
 
 ## Contract and schema evidence
 
-SHA-256 hashes of the reviewed canonical fixtures at the Task 10 base:
+Current canonical fixture hashes are:
 
-| Contract | File | SHA-256 |
+| Contract | Routes / operations | SHA-256 |
 | --- | --- | --- |
-| Backend | `test/contracts/backend.json` | `4f80e2c81467ab9e3765b6b7274ce93f64c44e312e40e4047cc5b67b4a7d09d5` |
-| Admin | `test/contracts/admin.json` | `b53fc33d05762b44dc2f0f3174b5758f40afaab07e15580cfffe3f28b38ce8c9` |
-| Portal | `test/contracts/portal.json` | `b8aa4ddbcff8216036b9b1487b37875ae7be26ec91d9c1dd505d2a897a9f8817` |
-| Backup | `test/contracts/backup.json` | `afe7676c22c35f5ca89f4e2882065b542018b1fd286b45e1fddff193d38705bf` |
+| Backend | 19 / 19 | `9c93750cb71fced5cdca781285c0899cd9e1824be85d13a78720c758c2ddf728` |
+| Admin | 65 / 65 | `357421e2b07b50d8e51489f5894f2b78d48f6766bc5c600b93d55899bd156f41` |
+| Portal | 18 routes / 16 operations | `c15e7c99ac393a0539071c186205da86a15c82cf351f4c0248ba12c260927400` |
+| Backup | fetch, scheduled, workflow | `afe7676c22c35f5ca89f4e2882065b542018b1fd286b45e1fddff193d38705bf` |
 
-The canonical contract fixture suite is **6/6** green; runtime contract
-comparison reports backend **19** routes, admin **65**, portal **18**, and the
-backup composition surface. D1 schema parity is green for both the SQLite/D1
-snapshot and PostgreSQL translation; the PostgreSQL result reports **34
-tables**. No contract or schema file was changed by this documentation packet.
+The integrated schema includes migration 0031 for catalog-import previews and
+0032 for projection assignment audit/index changes. D1 migration-to-snapshot
+and PostgreSQL structural parity are green at 38 tables.
 
-## Command and test evidence
+## Final local command attestations
 
-| Command/surface | Result |
+All results below are timestamped command attestations measured on the final
+integrated Windows tree on 2026-08-09 unless explicitly labeled accepted
+candidate evidence. The docs-accuracy gate independently recomputes stable tree
+facts (contract hashes and inventories, schema table sets, source counts,
+gitlink state, and non-running E2E inventory); it does not pretend to rerun or
+continuously prove these historical command results.
+
+| Command / surface | Result |
 | --- | --- |
-| `npm run check:pr` | Green locally at the Task 10 base; scan, lint, typecheck, architecture, contracts, services, and schema gates completed. |
-| Secret scan wrapper | **13/13** tests passed. |
-| Architecture checker tests | **23/23** tests passed; production policy passed with empty service/hygiene allowances. |
-| Contract tests | **6/6** tests passed; all four canonical hashes above unchanged. |
-| Service and schema gate | Full package/Worker/SQL/UI/backup and schema-parity run green. Aggregate service TAP count was not separately collected in the Task 11 log; no failing suite was suppressed. |
-| SDKs | Python **70/70**; .NET **43/43**. |
-| Browser setup | One explicit `npm run setup:browsers` command installs both retained Playwright Chromium revisions. |
-| Browser E2E | Backend **2**, admin **5**, portal **1** tests passed in the accepted Task 10 evidence. |
-| Credential-free deploy checks | All four Worker dry-runs green. |
-| Core Windows Task 0 | Full CTest **34/34** passed. |
-| Isolated generator-candidate superproject check | Disposable short-path worktree at superproject `c306807614495027864b5bd8b809008df66671e4` with nested final reviewed candidate `74996a7d345df7b9a7cb46a08d423cb738217ed1`: embedded Debug configure/build and full CTest **37/37** passed. Logs: `build/fd-candidate-749/evidence/{identity,configure-debug,build-debug,ctest-debug}.log`. The published superproject remains at gitlink `0227a3e` while protected WIP is `dbbaed0`; candidate publication/pinning is conditional on maintainer approval. |
-| Ubuntu native CMake | **Blocked/not-run**: the available WSL environment had no `cmake` executable; no tool installation was performed. |
-| Strict raw Sphinx | Green locally using the pinned raw Sphinx command after the authored-page updates. |
-| `npm run check:docs` | **Blocked/not-run to completion** on this host because `doxygen` is unavailable; the command fails closed before consuming stale XML. |
-| CI links/run IDs | **not-collected**; no remote status is claimed here. |
+| Fresh install (`npx --yes npm@10.9.8 ci`, Node 22.12.0) | Attested green; deterministic install |
+| `npm run check:pr` | Attested green end-to-end: scans, pins, docs accuracy, lint, typecheck, architecture, contracts, services, SQL, and D1/PostgreSQL parity |
+| `npm run check:dry-run` | Attested green for all four Workers; no deployment performed |
+| `npm run setup:browsers` | Attested installation of both retained Playwright Chromium revisions |
+| `npm run test:e2e` | Attested green; current non-running inventory is backend 2, admin 68, portal 1 |
+| `npm run test:sdks` | Attested green: Python 70/70; .NET 43/43 |
+| `npm audit --json` | Attested 0 total vulnerabilities at all severities |
+| `pwsh -NoProfile -File scripts/check-build-purity.ps1 -Preset dev-debug` | Attested green: configure/build, CTest 34/34, and unchanged source fingerprints |
+| `npm run check:docs` | Attested fail-closed prerequisite result because Doxygen is absent; no stale XML was consumed |
+| Ubuntu native CMake | Not run; no Ubuntu CMake evidence collected |
+| Remote CI | Not collected; no run link or identifier is claimed |
 
-## Required audit searches
+Accepted generator-candidate evidence remains separate from the protected
+superproject state: candidate `74996a7` passed its standalone Debug suite 9/9,
+Release build/install, external `find_package` consumer, and ZIP packaging; a
+disposable superproject with that nested candidate passed Debug CTest 37/37.
+This proves the candidate but does not publish or pin it.
 
-The final verification searches are recorded as local evidence:
+No tracked `node_modules`, `.wrangler`, `dist`, SDK `bin`/`obj`, or virtual
+environment output is present. The final working tree still contains only the
+protected dirty generator gitlink state and protected untracked execution
+plans.
 
-* `git ls-files pyvenv.cfg build dist .wrangler node_modules` returned only the
-  tracked `build/.gitkeep` sentinel, not generated/local-environment output.
-* `rg -n "submodule update|git -C extern/license-generator apply" CMakeLists.txt cmake scripts`
-  found only the explicit `scripts/bootstrap.ps1` initialization action; no
-  configure/check-time mutation command applies a patch or updates Git state.
-* `rg -n "confirm_license.*return LICENSE_OK|release_license.*return LICENSE_OK" src/library/licensecc.cpp test/library`
-  returned no placeholder public-API success assertion.
-* The service-to-service import search found no production import edge; package
-  manifests and service-local documentation references to the backend name are
-  expected and are not implementation imports.
-* The typecheck audit found no `checkJs:false`, `@ts-nocheck`,
-  `@ts-ignore`, or `@ts-expect-error` production suppression. The intentional
-  legacy JSDoc graphs remain explicitly closed with `checkJs:true` and
-  quantified `noImplicitAny` debt: domain **80**, runtime **214**, backend
-  **291**, portal **52** diagnostics.
+## Remaining gaps and promotion gate
 
-Deletion proof was completed before removing the two obsolete files:
-Excluding this evidence report, `rg` found no consumer of
-`doc/analysis/Backoffice.txt` (the file itself said it was an old sketch to
-remove) or `doc/snippets.txt`; `git ls-files` confirmed both were tracked and
-`doc/snippets/hardware.cpp` was a separate retained snippet. No compatibility
-shim or service code was deleted.
+1. Publish the reviewed generator candidate, obtain maintainer approval, and
+   update the superproject gitlink in a dedicated reviewed change.
+2. Run Debug and Release native CMake/CTest on Ubuntu against the published
+   candidate and retain CI run identifiers/artifacts.
+3. Install Doxygen in the supported documentation environment and run the full
+   `npm run check:docs` gate so Sphinx consumes freshly generated XML.
+4. Capture green remote CI links/run IDs for the deterministic PR, SDK, E2E,
+   dry-run, docs, and native matrix.
+5. Treat TPM providers as a separate product implementation: define, build,
+   test, and document Windows/Ubuntu providers before advertising TPM support.
 
-## Destructive-flow and smell audit
+Non-blocking maintenance remains: modernize the generator's CMake minimum and
+Boost policy usage, consider the generator review's stricter zero ACE-flags and
+MinGW target-version hardening, and retain a deliberate deployment policy for
+any historical queued webhook bodies created before private-field scrubbing.
 
-The final audit used the repository-wide code/design/anti-pattern/UX lanes.
-Findings are classified as risks rather than bugs, and no legal conclusion is
-made:
-
-* **Insufficient evidence / resource-boundary policy risk — portal magic
-  redeem.** `services/cloudflare-customer-portal/src/worker/support.ts:9,99-103`
-  caps JSON through `readTextBody(..., 8192)`, while
-  `src/worker/routes/auth.ts:115-125` accepts the interstitial through
-  `request.formData()` with no equivalent explicit byte cap. The interstitial
-  is intentional CSRF protection, so this is a bounded follow-up to validate
-  form parsing limits, not a confirmed exploit or dark pattern.
-* **Usability/policy risk — floating-seat release has no explicit confirmation.**
-  `src/ui/main.tsx:567-569` binds the `Release` button directly to
-  `seatAction(item, "release")`; by contrast, device release at lines 374-376
-  calls `window.confirm` with consequence copy. This packet does not change the
-  behavior; add a deliberate confirmation before treating the flow as safe for
-  high-consequence release.
-* **Usability/policy risk — catalog import Apply bypasses preview confirmation.**
-  `services/cloudflare-license-admin/src/ui/features/catalog/Catalog.tsx:351-352`
-  exposes `Preview import` and `Apply import` side by side, and the Apply path
-  calls `runCatalogImport(false)` without requiring the preview result. The
-  server remains authoritative and tests cover preview/apply; a rendered-flow
-  review should decide whether an explicit preview/confirmation is required.
-
-No confirmed deceptive/dark pattern was found. The listed risks are
-transparent, reversible or policy-dependent signals requiring product-policy
-and rendered-flow validation; no source or UI behavior was altered in this
-docs packet. `npm audit` reported **6 inherited vulnerabilities**; severity
-breakdown was not collected, so no severity is inferred here.
-
-## Unresolved risks and exit gate
-
-1. Final reviewed generator candidate
-   `74996a7d345df7b9a7cb46a08d423cb738217ed1` is not a published/pinned
-   submodule revision: the superproject gitlink is `0227a3e` and the protected
-   WIP nested revision is `dbbaed0`. Publication/pinning remains conditional on
-   maintainer approval; the protected nested worktree remains untouched.
-2. Ubuntu Debug/Release native CMake and native Doxygen/Sphinx CI evidence is
-   absent from this local environment; CI links/run IDs are `not-collected`.
-3. The quantified legacy JSDoc `noImplicitAny` debt and six inherited npm audit
-   findings remain; neither was broadened or hidden by this packet.
-4. The three flow risks above need product/security review and rendered E2E
-   evidence; they are not P0/P1 organizational blockers based on current
-   evidence.
-
-The organization exit gate is therefore **pending/conditional** until the
-generator is published and pinned and the missing Ubuntu/native Doxygen/green
-CI evidence is collected. All documentation, ownership, route/OpenAPI ADR,
-build/bootstrap ADR, protected-state, local command, contract-hash, schema,
-dry-run, and deletion-proof requirements in this packet have local evidence.
+The project is therefore organized at an A-level standard in the reviewed
+local implementation, while the release grade remains honestly
+**CONDITIONAL / PENDING** until the five promotion items above are evidenced.
