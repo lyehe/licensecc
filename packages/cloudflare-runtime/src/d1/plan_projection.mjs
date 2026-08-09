@@ -140,6 +140,21 @@ function managedEntitlementsStatement(env, input) {
   ).bind(input.project, input.license_id, input.license_fingerprint);
 }
 
+function entitlementFingerprintConflictStatement(env, input) {
+  // This is an identity fence, not a managed-catalog lookup: historic rows
+  // may predate license_plan_assignments or refer to arbitrary features. A
+  // normalized projection license_id is always non-empty, so NULL/empty legacy
+  // license ids retain their existing non-match behavior.
+  return env.DB.prepare(
+    `SELECT 1
+     FROM entitlements e
+     WHERE e.project = ?
+       AND e.license_id = ?
+       AND e.license_fingerprint <> ?
+     LIMIT 1`,
+  ).bind(input.project, input.license_id, input.license_fingerprint);
+}
+
 function assignmentSnapshotStatement(env, input) {
   return env.DB.prepare(
     `SELECT license_id, project, plan_id, license_fingerprint, customer_id, status, support_until, addons_json, created_at, updated_at
@@ -191,10 +206,10 @@ function selectedPlanRows(rows, plan, addonList) {
 
 // All source-dependent Preview reads run in one D1 batch. D1 executes a batch
 // atomically, so generation, plan, feature/policy rows, managed entitlement
-// rows, and the compatibility-critical assignment snapshot all come from one
-// source snapshot rather than a sequence of independently fresh reads. Cleanup
-// deliberately follows capacity validation, so an oversized Preview remains
-// entirely read-only.
+// rows, the all-entitlement identity fence, and the compatibility-critical
+// assignment snapshot all come from one source snapshot rather than a sequence
+// of independently fresh reads. Cleanup deliberately follows capacity
+// validation, so an oversized Preview remains entirely read-only.
 async function buildProjectionSnapshot(env, input, effectiveAt) {
   requireBatch(env);
   const normalized = normalizePlanProjectionInput(input);
@@ -203,6 +218,7 @@ async function buildProjectionSnapshot(env, input, effectiveAt) {
     planStatement(env, normalized),
     planFeatureStatement(env, normalized),
     managedEntitlementsStatement(env, normalized),
+    entitlementFingerprintConflictStatement(env, normalized),
     assignmentSnapshotStatement(env, normalized),
   ]);
   const generationRow = firstResult(results[0]);
@@ -214,8 +230,9 @@ async function buildProjectionSnapshot(env, input, effectiveAt) {
   const rows = selectedPlanRows(resultsOf(results[2]), plan, normalized.addons);
   const desired = rows.map((row) => desiredPlanProjectionRow(row, normalized, effectiveAt));
   const existingRows = resultsOf(results[3]).map((row) => withId(row));
-  const assignmentSnapshot = firstResult(results[4]);
-  if (assignmentSnapshot !== null && assignmentSnapshot.license_fingerprint !== normalized.license_fingerprint) {
+  const entitlementConflict = firstResult(results[4]);
+  const assignmentSnapshot = firstResult(results[5]);
+  if (entitlementConflict !== null || (assignmentSnapshot !== null && assignmentSnapshot.license_fingerprint !== normalized.license_fingerprint)) {
     throw new Error("license_fingerprint_conflict");
   }
   return { input: normalized, plan, desired, existingRows, assignmentSnapshot, sourceGeneration };
@@ -345,6 +362,20 @@ function assignmentFingerprintConflictSql(previewAlias) {
   )`;
 }
 
+function entitlementFingerprintConflictSql(previewAlias) {
+  return `EXISTS (
+    SELECT 1
+    FROM entitlements e
+    WHERE e.project = json_extract(${previewAlias}.actions_json, '$.assignment.project')
+      AND e.license_id = json_extract(${previewAlias}.actions_json, '$.assignment.license_id')
+      AND e.license_fingerprint <> json_extract(${previewAlias}.actions_json, '$.assignment.license_fingerprint')
+  )`;
+}
+
+function licenseFingerprintConflictSql(previewAlias) {
+  return `(${assignmentFingerprintConflictSql(previewAlias)} OR ${entitlementFingerprintConflictSql(previewAlias)})`;
+}
+
 function assignmentSnapshotStillMatchesSql(previewAlias) {
   // The generation condition is the primary concurrent-source fence. This
   // snapshot comparison makes the assignment dependency explicit too: an
@@ -395,7 +426,7 @@ function claimStatement(env, previewId, actorSubject, claimToken, now) {
        AND p.source_generation = (
          SELECT generation FROM license_plan_projection_generations WHERE scope = ?
        )
-       AND NOT ${assignmentFingerprintConflictSql("p")}
+       AND NOT ${licenseFingerprintConflictSql("p")}
        AND ${assignmentSnapshotStillMatchesSql("p")}
        AND NOT ${derivedGrantExpiredSql("p")}
      RETURNING id`,
@@ -411,7 +442,7 @@ function claimFailureStatement(env, previewId, actorSubject, now) {
        WHEN EXISTS (
          SELECT 1 FROM license_plan_projection_previews p
          WHERE p.id = ? AND p.actor_subject = ?
-           AND ${assignmentFingerprintConflictSql("p")}
+           AND ${licenseFingerprintConflictSql("p")}
        ) THEN 'license_fingerprint_conflict'
        WHEN EXISTS (
          SELECT 1 FROM license_plan_projection_previews p

@@ -552,6 +552,9 @@ CREATE INDEX IF NOT EXISTS idx_entitlements_license
 CREATE INDEX IF NOT EXISTS idx_entitlements_project_feature_status
   ON entitlements(project, feature, status);
 
+CREATE INDEX IF NOT EXISTS idx_entitlements_project_license_fingerprint
+  ON entitlements(project, license_id, license_fingerprint);
+
 CREATE INDEX IF NOT EXISTS idx_entitlements_status
   ON entitlements(status);
 

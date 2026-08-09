@@ -736,6 +736,29 @@ test("license-plan Preview reports license_fingerprint_conflict without changing
   assert.equal(db.prepare("SELECT COUNT(*) AS c FROM license_plan_projection_previews").get().c, 0);
 });
 
+test("license-plan Preview rejects a legacy entitlement identity conflict without an assignment", async () => {
+  const db = freshDb();
+  seedCatalog(db);
+  const env = devEnv(db);
+  const oldFingerprint = "1".repeat(64);
+  db.prepare(
+    "INSERT INTO entitlements (project, feature, license_fingerprint, status, license_id, created_at, updated_at) VALUES ('DEFAULT', 'legacy_unmanaged', ?, 'active', 'lic_plan', ?, ?)",
+  ).run(oldFingerprint, NOW, NOW);
+
+  const preview = await worker.fetch(
+    devReq("/api/admin/license-plans/preview", { method: "POST", body: JSON.stringify(projectionBody()) }),
+    env,
+  );
+  assert.equal(preview.status, 409, await preview.clone().text());
+  assert.equal((await body(preview)).code, "license_fingerprint_conflict");
+  assert.equal(db.prepare("SELECT COUNT(*) AS c FROM entitlements WHERE license_fingerprint = ?").get(oldFingerprint).c, 1);
+  assert.equal(db.prepare("SELECT COUNT(*) AS c FROM entitlements WHERE license_fingerprint = ?").get(FP).c, 0);
+  assert.equal(db.prepare("SELECT COUNT(*) AS c FROM license_plan_assignments WHERE license_id = 'lic_plan'").get().c, 0);
+  assert.equal(db.prepare("SELECT COUNT(*) AS c FROM entitlement_events").get().c, 0);
+  assert.equal(db.prepare("SELECT COUNT(*) AS c FROM mutation_idempotency").get().c, 0);
+  assert.equal(db.prepare("SELECT COUNT(*) AS c FROM license_plan_projection_previews").get().c, 0);
+});
+
 test("license-plan Apply atomically reports license_fingerprint_conflict after a preview and writes nothing", async () => {
   const db = freshDb();
   seedCatalog(db);
@@ -766,6 +789,41 @@ test("license-plan Apply atomically reports license_fingerprint_conflict after a
   const persisted = db.prepare("SELECT claim_token, consumed_at FROM license_plan_projection_previews WHERE id = ?").get(previewId);
   assert.equal(persisted.claim_token, null);
   assert.equal(persisted.consumed_at, null);
+});
+
+test("license-plan Apply reports a post-Preview legacy entitlement identity conflict with zero writes", async () => {
+  const db = freshDb();
+  seedCatalog(db);
+  const env = devEnv(db);
+  const preview = await worker.fetch(
+    devReq("/api/admin/license-plans/preview", { method: "POST", body: JSON.stringify(projectionBody()) }),
+    env,
+  );
+  const previewId = (await body(preview)).data.preview_id;
+  const oldFingerprint = "2".repeat(64);
+  db.prepare(
+    "INSERT INTO entitlements (project, feature, license_fingerprint, status, license_id, created_at, updated_at) VALUES ('DEFAULT', 'legacy_race', ?, 'active', 'lic_plan', ?, ?)",
+  ).run(oldFingerprint, NOW, NOW);
+
+  const apply = await worker.fetch(
+    devReq("/api/admin/license-plans/apply", {
+      method: "POST",
+      headers: { "idempotency-key": "legacy-identity-race" },
+      body: JSON.stringify({ preview_id: previewId }),
+    }),
+    env,
+  );
+  assert.equal(apply.status, 409, await apply.clone().text());
+  assert.equal((await body(apply)).code, "license_fingerprint_conflict");
+  assert.equal(db.prepare("SELECT COUNT(*) AS c FROM entitlements WHERE license_fingerprint = ?").get(oldFingerprint).c, 1);
+  assert.equal(db.prepare("SELECT COUNT(*) AS c FROM entitlements WHERE license_fingerprint = ?").get(FP).c, 0);
+  assert.equal(db.prepare("SELECT COUNT(*) AS c FROM license_plan_assignments WHERE license_id = 'lic_plan'").get().c, 0);
+  assert.equal(db.prepare("SELECT COUNT(*) AS c FROM entitlement_events").get().c, 0);
+  assert.equal(db.prepare("SELECT COUNT(*) AS c FROM mutation_idempotency WHERE idempotency_key = 'legacy-identity-race'").get().c, 0);
+  const persisted = db.prepare("SELECT claim_token, consumed_at, applied_response_json FROM license_plan_projection_previews WHERE id = ?").get(previewId);
+  assert.equal(persisted.claim_token, null);
+  assert.equal(persisted.consumed_at, null);
+  assert.equal(persisted.applied_response_json, null);
 });
 
 test("a changed source generation makes Apply return stale_projection_preview with no projection writes", async () => {

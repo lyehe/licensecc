@@ -90,6 +90,10 @@ CREATE INDEX IF NOT EXISTS idx_entitlements_customer
 CREATE INDEX IF NOT EXISTS idx_entitlements_license
   ON entitlements(license_id);
 
+-- Migration 0030: plan-projection identity fence across legacy/unmanaged rows.
+CREATE INDEX IF NOT EXISTS idx_entitlements_project_license_fingerprint
+  ON entitlements(project, license_id, license_fingerprint);
+
 -- =====================================================================================
 -- entitlement_devices  (migration 0008) -- per-entitlement ECDSA device keys.
 -- Composite FK back to entitlements with ON DELETE CASCADE, ported verbatim.
