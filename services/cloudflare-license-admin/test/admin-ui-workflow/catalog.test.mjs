@@ -40,6 +40,48 @@ test("admin UI workflow builds plan projection paths and payloads", async () => 
   }), /license_id_required/);
 });
 
+test("admin UI workflow binds every editable plan projection field to a stable snapshot", async () => {
+  const workflow = await loadWorkflowModule("features/catalog/workflow.ts");
+  const body = workflow.normalizePlanProjectionForm({
+    ...workflow.emptyPlanProjectionForm,
+    project: "ACME",
+    license_id: "lic_123",
+    license_fingerprint: "d".repeat(64),
+    customer_id: "cus_123",
+    plan_id: "plan_pro",
+    plan_key: "pro",
+    support_until: "2026-07-05",
+    addons: "team_seats, export, team_seats",
+    notes: "annual renewal",
+  });
+  assert.deepEqual(body, {
+    project: "ACME",
+    license_id: "lic_123",
+    license_fingerprint: "d".repeat(64),
+    customer_id: "cus_123",
+    addons: ["team_seats", "export"],
+    notes: "annual renewal",
+    plan_id: "plan_pro",
+    plan_key: "pro",
+    support_until: 1783209600,
+  });
+  assert.equal(
+    workflow.planProjectionInputSnapshot(body),
+    JSON.stringify({
+      project: "ACME",
+      license_id: "lic_123",
+      license_fingerprint: "d".repeat(64),
+      customer_id: "cus_123",
+      plan_id: "plan_pro",
+      plan_key: "pro",
+      support_until: 1783209600,
+      addons: ["team_seats", "export"],
+      notes: "annual renewal",
+    }),
+  );
+  assert.match(await workflow.planProjectionInputDigest(body), /^[0-9a-f]{64}$/);
+});
+
 test("admin UI workflow builds catalog paths and payloads", async () => {
   const workflow = await loadWorkflowModule("features/catalog/workflow.ts");
   assert.equal(workflow.catalogFeaturesPath({ project: "", status: "" }), "/api/admin/catalog/features");

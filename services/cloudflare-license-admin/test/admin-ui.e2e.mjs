@@ -1180,8 +1180,25 @@ test("admin UI previews and applies a license plan projection", async ({ page })
   await expect(page.getByRole("cell", { name: "team", exact: true })).toBeVisible();
   await expect(page.getByText("floating")).toBeVisible();
 
-  await form.getByRole("button", { name: "Apply" }).click();
+  const applyButton = form.getByRole("button", { name: "Apply" });
+  await expect(applyButton).toBeEnabled();
+  await expect(page.getByText(/Preview digest [0-9a-f]{64}/)).toBeVisible();
+
+  // Any projection-form edit invalidates the bound preview until the operator previews again.
+  await form.getByLabel("Notes").fill("changed after preview");
+  await expect(applyButton).toBeDisabled();
+  await expect.poll(() => api.requests.planApplies.length).toBe(0);
+
+  await form.getByRole("button", { name: "Preview" }).click();
+  await expect.poll(() => api.requests.planPreviews.length).toBe(2);
+  await expect(applyButton).toBeEnabled();
+  expect(api.requests.planPreviews[1]).toMatchObject({
+    notes: "changed after preview",
+  });
+
+  await applyButton.click();
   await expect.poll(() => api.requests.planApplies.length).toBe(1);
+  expect(api.requests.planApplies[0]).toEqual(api.requests.planPreviews[1]);
   await expect(page.getByText(/license_plan_projection_applied/)).toBeVisible();
 
   await page.getByRole("button", { name: "Entitlements", exact: true }).click();

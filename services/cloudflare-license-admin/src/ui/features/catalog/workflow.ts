@@ -271,6 +271,27 @@ export function normalizePlanProjectionForm(form: PlanProjectionFormState): Plan
   return body;
 }
 
+export function planProjectionInputSnapshot(input: PlanProjectionInput): string {
+  const snapshot: Record<string, unknown> = {
+    project: input.project,
+    license_id: input.license_id,
+    license_fingerprint: input.license_fingerprint,
+    customer_id: input.customer_id ?? null,
+    plan_id: input.plan_id ?? null,
+    plan_key: input.plan_key ?? null,
+    support_until: input.support_until ?? null,
+    addons: input.addons ?? [],
+    notes: input.notes ?? "",
+  };
+  return JSON.stringify(snapshot);
+}
+
+export async function planProjectionInputDigest(input: PlanProjectionInput): Promise<string> {
+  const bytes = new TextEncoder().encode(planProjectionInputSnapshot(input));
+  const digest = await globalThis.crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest), (value) => value.toString(16).padStart(2, "0")).join("");
+}
+
 export function planProjectionPreviewPath(): string {
   return "/api/admin/license-plans/preview";
 }
