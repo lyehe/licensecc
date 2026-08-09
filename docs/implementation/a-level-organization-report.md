@@ -11,11 +11,13 @@ about a remote run.
 
 This report covers Task 11 at base
 `9b7bdef4dbf2e6cc97f676617fbdb4f01ba7dda3` on branch
-`org/11-architecture-evidence`. The protected nested generator worktree is
-outside the packet: superproject status is `M extern/license-generator` with
-nested revision `dbbaed01122c07110d76ccb92eeddf2fd1bfb239`; the 15 existing
-untracked `.lic` files and untracked `docs/superpowers/plans/**` were not
-staged, cleaned, or edited.
+`org/11-architecture-evidence`. The reviewed generator candidate is
+`f969e5f40bae55d61a98c208d6198b75cfb86fb3`, but it is unpublished and
+unpinned: the superproject gitlink is `0227a3e` and the protected WIP nested
+revision is `dbbaed0`. Promotion remains conditional on maintainer approval
+and publication/pinning. The protected nested generator worktree is outside
+the packet; the 15 existing untracked `.lic` files and untracked
+`docs/superpowers/plans/**` were not staged, cleaned, or edited.
 
 The documentation split is deliberate: `doc/` contains maintained project and
 architecture documentation; `docs/superpowers/plans/` contains protected
@@ -32,7 +34,7 @@ not accepted into the superproject.
 | Task 0 | `456f701270bf75040992c8e1bd0136fde8792fa2` |
 | Task 1 | `d36c62f1c8f63ba6d2c58ae88bc95d489663aac8`, `2a8bf1854038e9b1c6fd3faaa30ed8ad61a8df58` |
 | Task 2 | `21ef71b41ace61ef2e4caff1386915309f0dd8e9`; follow-up `83365aa7ca2fe4398d873e6cabfa57addff7df1a` (source `04ed6ee`) |
-| Task 3 | Superproject `be6e551`, `8e5de1864006b85e5c4bf3e8057c333de449b08a`; generator candidate `4a716a593748d205a67dabf789c6fb39da9a975e` remains unpublished and not gitlinked. |
+| Task 3 | Superproject `be6e551`, `8e5de1864006b85e5c4bf3e8057c333de449b08a`; final reviewed generator candidate `f969e5f40bae55d61a98c208d6198b75cfb86fb3` remains unpublished/unpinned (superproject gitlink `0227a3e`, protected WIP `dbbaed0`). Promotion is conditional on maintainer approval and publication/pinning. |
 | Task 4 | `15e7af553c167fcb1a2c94383d3e570a17ebab3b` |
 | Task 5 | Integrated `dea865f` (source `5aab455`) |
 | Task 6 | Integrated `142f453`, `c3dab95`, `10c64d6` |
@@ -137,7 +139,7 @@ tables**. No contract or schema file was changed by this documentation packet.
 | Browser E2E | Backend **2**, admin **5**, portal **1** tests passed in the accepted Task 10 evidence. |
 | Credential-free deploy checks | All four Worker dry-runs green. |
 | Core Windows Task 0 | Full CTest **34/34** passed. |
-| Isolated generator-candidate superproject check | Embedded candidate run **37/37** passed; candidate remains unpublished/unpinned and was not gitlinked. |
+| Isolated generator-candidate superproject check | Embedded final reviewed candidate `f969e5f40bae55d61a98c208d6198b75cfb86fb3` run **37/37** passed; the superproject remains at gitlink `0227a3e` while protected WIP is `dbbaed0`. Candidate publication/pinning is conditional on maintainer approval. |
 | Ubuntu native CMake | **Blocked/not-run**: the available WSL environment had no `cmake` executable; no tool installation was performed. |
 | Strict raw Sphinx | Green locally using the pinned raw Sphinx command after the authored-page updates. |
 | `npm run check:docs` | **Blocked/not-run to completion** on this host because `doxygen` is unavailable; the command fails closed before consuming stale XML. |
@@ -204,9 +206,11 @@ breakdown was not collected, so no severity is inferred here.
 
 ## Unresolved risks and exit gate
 
-1. Generator candidate `4a716a593748d205a67dabf789c6fb39da9a975e` is not a
-   published/pinned submodule revision; the protected nested worktree remains
-   untouched.
+1. Final reviewed generator candidate
+   `f969e5f40bae55d61a98c208d6198b75cfb86fb3` is not a published/pinned
+   submodule revision: the superproject gitlink is `0227a3e` and the protected
+   WIP nested revision is `dbbaed0`. Publication/pinning remains conditional on
+   maintainer approval; the protected nested worktree remains untouched.
 2. Ubuntu Debug/Release native CMake and native Doxygen/Sphinx CI evidence is
    absent from this local environment; CI links/run IDs are `not-collected`.
 3. The quantified legacy JSDoc `noImplicitAny` debt and six inherited npm audit

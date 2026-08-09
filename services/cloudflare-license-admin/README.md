@@ -30,12 +30,14 @@ this service directory; do not create a package-local lockfile.
 `../cloudflare-licensing-backend/migrations` because the admin service and public
 verifier share the same D1 schema.
 
-`npm run test:e2e` installs the Playwright Chromium runtime when needed, starts
-a local Vite preview, and runs a browser workflow with mocked admin API
-responses. It covers create, metadata/validity/TTL patch, disable, reenable,
-revoke, audit timeline display, duplicate-submit guarding, and UI secret
-exposure checks. It does not replace the real Cloudflare Access staging drill
-below.
+Run `npm run setup:browsers` once from the repository root before browser
+checks; that command installs both retained Playwright Chromium revisions for
+the admin and portal workspaces. `npm run test:e2e` itself does not install
+browsers. It starts a local Vite preview and runs a browser workflow with
+mocked admin API responses. It covers create, metadata/validity/TTL patch,
+disable, reenable, revoke, audit timeline display, duplicate-submit guarding,
+and UI secret exposure checks. It does not replace the real Cloudflare Access
+staging drill below.
 
 Remote D1 atomicity validation against a staging/test Cloudflare database:
 

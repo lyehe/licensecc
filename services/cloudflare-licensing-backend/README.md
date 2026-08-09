@@ -5,17 +5,19 @@ Reference Cloudflare Worker for low-volume online license verification.
 The Worker accepts `POST /v1/verify`, looks up an entitlement in D1, and returns
 a signed `lccoa1.<payload_b64>.<signature_b64>` assertion for active
 entitlements. Unknown, revoked, disabled, expired, or not-yet-valid
-entitlements return a generic unsigned denial by default. Licensecc core still
-does not perform HTTP; host applications call this Worker from their own
-`LCC_ONLINE_CHECK` callback and pass returned assertions back to
-`acquire_license_ex()`.
+entitlements return a generic unsigned denial by default. The accepted C++
+library exposes `acquire_license_ex()` and the secure
+`lcc_acquire_license_decision()` entry point in its public header/source. Core
+does not perform HTTP: the host implements the `LCC_ONLINE_CHECK` callback,
+calls this Worker from that callback, and returns the assertion to the C++ API.
 
-> **Status:** the C++ client entry points referenced in this README
-> (`acquire_license_ex()`, `lcc_acquire_license_decision()`, `LCC_ONLINE_CHECK`)
-> belong to the in-progress online-verification client and are **not yet in the
-> C++ library on `main`**. Until that work lands, consume assertions with the
-> Python/.NET SDKs under `sdks/`, or verify the documented `lccoa1` token format
-> yourself.
+For production C++ hosts, use `lcc_acquire_license_decision()`. It requires
+online verification and host callbacks that load and store the strongest
+persisted revocation sequence for the exact project/feature/fingerprint tuple;
+it fails closed when those callbacks or the signed assertion are unavailable.
+`acquire_license_ex()` remains available for lower-level integrations, but its
+revocation floor is process-local unless the host restores a persisted floor
+with the public floor helpers.
 
 The successful hot path is one validated request, rate-limit checks, one D1
 lookup by primary key, one signed assertion, and one JSON response. The Worker
@@ -111,9 +113,13 @@ also supports an optional Cloudflare rate-limit binding named
    ```
 
    The generated private-key file is for local integration tests and bootstrap
-   only. Production hosts should create or import the P-256 key through the OS
-   key store/secure enclave/TPM path when available, then persist the public
-   SPKI and `sha256:<spki der>` key id.
+   only. Production hosts should create or import the P-256 key through their
+   own platform key-store or secure-enclave integration when available, then
+   persist only the public SPKI and `sha256:<spki der>` key id. The optional
+   request-proof protocol is available for integration, but no universal client
+   key provider is shipped: Windows/Ubuntu TPM-provider/request-proof
+   integration remains plan-only, conditional on approval and publication.
+   This service does not claim TPM support.
 
    To smoke-test the signed request body fields during integration:
 
