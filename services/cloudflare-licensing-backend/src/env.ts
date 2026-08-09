@@ -35,6 +35,12 @@ type WidenWranglerStringBindings<Bindings extends object> = {
 
 type WithRuntimeNarrowing<Generated extends object, Runtime extends object> = Omit<Generated, keyof Runtime> & Runtime;
 
+type IncompatibleGeneratedBindings<Generated extends object, Runtime extends object> = {
+  [Binding in keyof Generated & keyof Runtime]: Generated[Binding] extends Runtime[Binding] ? never : Binding;
+}[keyof Generated & keyof Runtime];
+
+type AssertNoIncompatibleGeneratedBindings<Bindings extends never> = Bindings;
+
 // Naming every checked binding here makes a Wrangler rename/removal fail the
 // Worker typecheck instead of silently falling back to this service contract.
 type WranglerBindings = Pick<Cloudflare.Env,
@@ -118,6 +124,10 @@ interface RuntimeEnv {
   WEBHOOK_SIGNING_SECRETS?: string;
   WEBHOOK_SIGNING_KEY_ID?: string;
 }
+
+type GeneratedBindingsMatchRuntime = AssertNoIncompatibleGeneratedBindings<
+  IncompatibleGeneratedBindings<WidenWranglerStringBindings<WranglerBindings>, RuntimeEnv>
+>;
 
 export type Env = WithRuntimeNarrowing<WidenWranglerStringBindings<WranglerBindings>, RuntimeEnv>;
 

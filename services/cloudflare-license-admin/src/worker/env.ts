@@ -8,6 +8,12 @@ type WidenWranglerStringBindings<Bindings extends object> = {
 
 type WithRuntimeNarrowing<Generated extends object, Runtime extends object> = Omit<Generated, keyof Runtime> & Runtime;
 
+type IncompatibleGeneratedBindings<Generated extends object, Runtime extends object> = {
+  [Binding in keyof Generated & keyof Runtime]: Generated[Binding] extends Runtime[Binding] ? never : Binding;
+}[keyof Generated & keyof Runtime];
+
+type AssertNoIncompatibleGeneratedBindings<Bindings extends never> = Bindings;
+
 // Every checked config binding is named explicitly so a rename/removal is a
 // type error rather than an unnoticed divergence from Worker composition.
 type WranglerBindings = Pick<Cloudflare.Env,
@@ -39,5 +45,9 @@ interface RuntimeEnv {
   SYNC_API_TOKEN?: string;
   POLICY_STAMP_MODE?: string;
 }
+
+type GeneratedBindingsMatchRuntime = AssertNoIncompatibleGeneratedBindings<
+  IncompatibleGeneratedBindings<WidenWranglerStringBindings<WranglerBindings>, RuntimeEnv>
+>;
 
 export type Env = WithRuntimeNarrowing<WidenWranglerStringBindings<WranglerBindings>, RuntimeEnv>;

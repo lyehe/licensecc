@@ -30,6 +30,12 @@ type WidenWranglerStringBindings<Bindings extends object> = {
 
 type WithRuntimeNarrowing<Generated extends object, Runtime extends object> = Omit<Generated, keyof Runtime> & Runtime;
 
+type IncompatibleGeneratedBindings<Generated extends object, Runtime extends object> = {
+  [Binding in keyof Generated & keyof Runtime]: Generated[Binding] extends Runtime[Binding] ? never : Binding;
+}[keyof Generated & keyof Runtime];
+
+type AssertNoIncompatibleGeneratedBindings<Bindings extends never> = Bindings;
+
 // Explicit keys make checked Wrangler binding drift a type error. Keep the
 // service-local structural interfaces below for HTTP/Workflow test adapters.
 type WranglerBindings = Pick<Cloudflare.Env,
@@ -46,6 +52,10 @@ interface RuntimeEnv extends BackupEnvLike, BackupHttpEnv {
   D1_REST_API_TOKEN?: string;
   BACKUP_BUCKET: R2BucketLike;
 }
+
+type GeneratedBindingsMatchRuntime = AssertNoIncompatibleGeneratedBindings<
+  IncompatibleGeneratedBindings<WidenWranglerStringBindings<WranglerBindings>, RuntimeEnv>
+>;
 
 export type Env = WithRuntimeNarrowing<WidenWranglerStringBindings<WranglerBindings>, RuntimeEnv>;
 

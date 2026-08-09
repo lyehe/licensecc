@@ -29,6 +29,12 @@ type WidenWranglerStringBindings<Bindings extends object> = {
 
 type WithRuntimeNarrowing<Generated extends object, Runtime extends object> = Omit<Generated, keyof Runtime> & Runtime;
 
+type IncompatibleGeneratedBindings<Generated extends object, Runtime extends object> = {
+  [Binding in keyof Generated & keyof Runtime]: Generated[Binding] extends Runtime[Binding] ? never : Binding;
+}[keyof Generated & keyof Runtime];
+
+type AssertNoIncompatibleGeneratedBindings<Bindings extends never> = Bindings;
+
 // Keep a direct generated dependency on each checked portal binding. This is
 // deliberately not inferred from local names so config drift fails closed.
 type WranglerBindings = Pick<Cloudflare.Env,
@@ -57,6 +63,10 @@ interface RuntimeEnv {
   PORTAL_BOOTSTRAP_BEARER?: string;
   PORTAL_BOOTSTRAP_REQUIRE_ACCESS?: string;
 }
+
+type GeneratedBindingsMatchRuntime = AssertNoIncompatibleGeneratedBindings<
+  IncompatibleGeneratedBindings<WidenWranglerStringBindings<WranglerBindings>, RuntimeEnv>
+>;
 
 export type Env = WithRuntimeNarrowing<WidenWranglerStringBindings<WranglerBindings>, RuntimeEnv>;
 
