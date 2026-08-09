@@ -507,7 +507,7 @@ button.searchResult:hover:not(:disabled) .searchResultMeta {
 }
 
 /* ── Workstream F — inline-SVG charts, expiring-soon, health badge, force-release ──
-   The SVGs carry ONLY geometry + an aria-label (from operatorWorkflow.ts); every colour,
+   The SVGs carry ONLY geometry + an aria-label (from shared chart helpers); every colour,
    stroke, and fill below is owned by CSS so the chart math stays pure and unit-tested. */
 
 .reportsTab {

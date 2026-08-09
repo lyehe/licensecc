@@ -40,10 +40,46 @@ function makeAdminApiFixture() {
     catalogPlanFeatures: [],
     catalogPlanFeatureTransitions: [],
     catalogImports: [],
+    customerTransitions: [],
+    policyTransitions: [],
+    webhookTransitions: [],
+    deviceTransitions: [],
   };
   const catalogFeatures = [];
   const catalogPlans = [];
   const catalogPlanFeatures = [];
+  const policies = [];
+  const webhooks = [];
+
+  function seedPolicy() {
+    const policy = {
+      id: "pol_confirm", project: "DEFAULT", name: "Confirm policy", type: "trial", status: "active",
+      valid_from_offset_sec: null, duration_sec: null, assertion_ttl_seconds: 300, pool_size: 0,
+      max_active_devices: 1, max_borrow_sec: 0, meter_quota: 0, meter_period_sec: 2592000,
+      expiry_strategy: "fixed_window", trial_expiration_basis: "from_issue", trial_duration_sec: 0,
+      trial_one_per_device: 0, trial_require_device_proof: 0, notes: "", created_at: now, updated_at: now,
+    };
+    policies.push(policy);
+    return policy;
+  }
+
+  function seedWebhook() {
+    const endpoint = {
+      id: "wh_confirm", url: "https://hooks.example.test/confirm", event_types: "", status: "active",
+      description: "", scope_project: null, scope_customer_id: null, created_at: now, updated_at: now,
+    };
+    webhooks.push(endpoint);
+    return endpoint;
+  }
+
+  function seedCatalogFeature() {
+    const feature = {
+      id: "feat_confirm", project: "DEFAULT", feature_key: "confirm", name: "Confirm feature",
+      description: "", category: "", status: "active", created_at: now, updated_at: now,
+    };
+    catalogFeatures.push(feature);
+    return feature;
+  }
 
   function importCounts() {
     return {
@@ -324,6 +360,17 @@ function makeAdminApiFixture() {
     if (method === "GET" && customerDetailMatch !== null) {
       return fulfill(200, makeEnvelope("customer", customerDetail(decodeURIComponent(customerDetailMatch[1]))));
     }
+    const customerActionMatch = /^\/api\/admin\/customers\/([^/]+)\/(disable|reenable)$/.exec(path);
+    if (method === "POST" && customerActionMatch !== null) {
+      const id = decodeURIComponent(customerActionMatch[1]);
+      const action = customerActionMatch[2];
+      const body = await jsonBody(request);
+      requests.customerTransitions.push({ id, action, reason: body.reason ?? "" });
+      const customer = customers.find((item) => item.id === id);
+      if (customer === undefined) return fulfill(404, { ok: false, code: "customer_not_found", request_id: "ui-e2e-customer-missing" });
+      customer.status = action === "disable" ? "disabled" : "active";
+      return fulfill(200, makeEnvelope(`customer_${action}d`, { ...customer }));
+    }
     // Workstream C — bulk transitions. One POST carries action/reason/ids; returns per-row results.
     if (method === "POST" && path === "/api/admin/entitlements/batch") {
       const body = await jsonBody(request);
@@ -356,7 +403,37 @@ function makeAdminApiFixture() {
     }
     // The Entitlements and Plans tabs load active policies for policy selectors.
     if (method === "GET" && path === "/api/admin/policies") {
-      return fulfill(200, makeEnvelope("policies_listed", { items: [], next_cursor: null }));
+      const status = url.searchParams.get("status");
+      const items = status === null ? policies : policies.filter((policy) => policy.status === status);
+      return fulfill(200, makeEnvelope("policies_listed", { items: items.map((policy) => ({ ...policy })), next_cursor: null }));
+    }
+    const policyActionMatch = /^\/api\/admin\/policies\/([^/]+)\/(disable|reenable)$/.exec(path);
+    if (method === "POST" && policyActionMatch !== null) {
+      const id = decodeURIComponent(policyActionMatch[1]);
+      const action = policyActionMatch[2];
+      const body = await jsonBody(request);
+      requests.policyTransitions.push({ id, action, reason: body.reason ?? "" });
+      const policy = policies.find((item) => item.id === id);
+      if (policy === undefined) return fulfill(404, { ok: false, code: "policy_not_found", request_id: "ui-e2e-policy-missing" });
+      policy.status = action === "disable" ? "disabled" : "active";
+      return fulfill(200, makeEnvelope(`policy_${action}d`, { ...policy }));
+    }
+    if (method === "GET" && path === "/api/admin/webhooks") {
+      return fulfill(200, makeEnvelope("webhooks_listed", { items: webhooks.map((endpoint) => ({ ...endpoint })), next_cursor: null }));
+    }
+    if (method === "GET" && path === "/api/admin/webhooks/deliveries") {
+      return fulfill(200, makeEnvelope("webhook_deliveries_listed", { items: [], next_cursor: null }));
+    }
+    const webhookActionMatch = /^\/api\/admin\/webhooks\/([^/]+)\/(disable|reenable)$/.exec(path);
+    if (method === "POST" && webhookActionMatch !== null) {
+      const id = decodeURIComponent(webhookActionMatch[1]);
+      const action = webhookActionMatch[2];
+      const body = await jsonBody(request);
+      requests.webhookTransitions.push({ id, action, reason: body.reason ?? "" });
+      const endpoint = webhooks.find((item) => item.id === id);
+      if (endpoint === undefined) return fulfill(404, { ok: false, code: "webhook_not_found", request_id: "ui-e2e-webhook-missing" });
+      endpoint.status = action === "disable" ? "disabled" : "active";
+      return fulfill(200, makeEnvelope(`webhook_${action}d`, { ...endpoint }));
     }
     if (method === "GET" && path === "/api/admin/catalog/features") {
       return fulfill(200, makeEnvelope("catalog_features_listed", { items: catalogFeatures.map((item) => ({ ...item })), next_cursor: null }));
@@ -734,6 +811,23 @@ function makeAdminApiFixture() {
       return fulfill(200, makeEnvelope("entitlement_saved", publicRecord(row)));
     }
 
+    const devicesMatch = /^\/api\/admin\/entitlements\/([^/]+)\/devices(?:\/([^/]+)\/(disable|reenable|revoke))?$/.exec(path);
+    if (devicesMatch !== null) {
+      const entitlementId = decodeURIComponent(devicesMatch[1]);
+      const defaultDevice = {
+        device_key_id: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        status: "active", created_at: now, last_seen_at: now,
+      };
+      if (method === "GET" && devicesMatch[2] === undefined) {
+        return fulfill(200, makeEnvelope("entitlement_devices_listed", { items: [defaultDevice] }));
+      }
+      if (method === "POST" && devicesMatch[2] !== undefined && devicesMatch[3] !== undefined) {
+        const body = await jsonBody(request);
+        requests.deviceTransitions.push({ entitlement_id: entitlementId, device_key_id: decodeURIComponent(devicesMatch[2]), action: devicesMatch[3], reason: body.reason ?? "" });
+        return fulfill(200, makeEnvelope(`device_${devicesMatch[3]}d`, {}));
+      }
+    }
+
     const match = /^\/api\/admin\/entitlements\/([^/]+)(?:\/(disable|reenable|revoke))?$/.exec(path);
     if (match !== null) {
       const row = findById(match[1]);
@@ -777,6 +871,7 @@ function makeAdminApiFixture() {
   return {
     route,
     requests,
+    seed: { policy: seedPolicy, webhook: seedWebhook, catalogFeature: seedCatalogFeature },
   };
 }
 
@@ -1150,9 +1245,81 @@ test("admin UI renders Workstream F charts, expiring panel, health badge, and fo
   // FULFILLMENT TAB: the fulfillment-events bar spark renders (aria-labelled).
   await page.getByRole("button", { name: "Fulfillment" }).click();
   await expect(page.getByRole("img", { name: /Fulfillment .* events/ })).toBeVisible();
+  await expect(page.locator(".fulfillmentSpark .rangeSelector button.active")).toHaveText("last 30d");
 
   // No secret material ever leaks into the rendered DOM.
   const pageText = await page.locator("body").innerText();
   expect(pageText).not.toContain("PRIVATE KEY");
   expect(pageText).not.toContain("Bearer ");
+});
+
+test("admin UI keeps destructive operator actions consequence-led, reason-gated, and cancellable", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  api.seed.policy();
+  api.seed.webhook();
+  api.seed.catalogFeature();
+  await page.route("**/api/admin/**", api.route);
+
+  async function assertConfirmation(button, consequence, dismissWithEscape = false) {
+    await button.click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toContainText(consequence);
+    const confirm = dialog.getByRole("button", { name: "Confirm" });
+    await expect(confirm).toBeDisabled();
+    await dialog.getByLabel("Reason (required)").fill("operator review");
+    await expect(confirm).toBeEnabled();
+    if (dismissWithEscape) {
+      await page.keyboard.press("Escape");
+    } else {
+      await dialog.getByRole("button", { name: "Cancel" }).click();
+    }
+    await expect(dialog).toHaveCount(0);
+  }
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "Entitlements", exact: true }).click();
+  const createForm = page.locator("aside form");
+  await createForm.getByLabel("Feature").fill("float");
+  await createForm.getByLabel("Fingerprint").fill("f".repeat(64));
+  await createForm.getByRole("button", { name: "Save" }).click();
+  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
+
+  const entitlementRow = page.locator(".tablePane > table tbody tr").first();
+  await assertConfirmation(entitlementRow.getByRole("button", { name: "Disable", exact: true }), "Verification and downloads stop until it is re-enabled", true);
+  await assertConfirmation(entitlementRow.getByRole("button", { name: "Revoke", exact: true }), "TERMINAL and cannot be undone");
+  await assertConfirmation(entitlementRow.getByRole("button", { name: "Release seats", exact: true }), "dead/unreachable machine");
+  expect(api.requests.transitions).toHaveLength(0);
+  expect(api.requests.releaseSeats).toHaveLength(0);
+
+  await entitlementRow.getByRole("button", { name: "Devices", exact: true }).click();
+  const devicePane = page.locator('[aria-label="Registered devices"]');
+  await expect(devicePane).toBeVisible();
+  await assertConfirmation(devicePane.getByRole("button", { name: "Disable", exact: true }), "refused on its next online check");
+  await assertConfirmation(devicePane.getByRole("button", { name: "Revoke", exact: true }), "TERMINAL");
+  expect(api.requests.deviceTransitions).toHaveLength(0);
+
+  await page.getByRole("button", { name: "Customers", exact: true }).click();
+  await page.getByRole("button", { name: "cus_acme", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Acme Corp" })).toBeVisible();
+  await assertConfirmation(page.getByRole("button", { name: "Disable", exact: true }), "customer-portal access");
+  expect(api.requests.customerTransitions).toHaveLength(0);
+
+  await page.getByRole("button", { name: "Policies", exact: true }).click();
+  const policyRow = page.locator("tr").filter({ hasText: "Confirm policy" });
+  await expect(policyRow).toBeVisible();
+  await assertConfirmation(policyRow.getByRole("button", { name: "Disable", exact: true }), "already-stamped entitlements are frozen and unaffected");
+  expect(api.requests.policyTransitions).toHaveLength(0);
+
+  await page.getByRole("button", { name: "Plans", exact: true }).click();
+  const catalogFeatureRow = page.locator("tr").filter({ hasText: "Confirm feature" });
+  await expect(catalogFeatureRow).toBeVisible();
+  await assertConfirmation(catalogFeatureRow.getByRole("button", { name: "Disable", exact: true }), "New plan projections skip disabled feature definitions");
+  expect(api.requests.catalogFeatureTransitions).toHaveLength(0);
+
+  await page.getByRole("button", { name: "Webhooks", exact: true }).click();
+  const webhookRow = page.locator("tr").filter({ hasText: "https://hooks.example.test/confirm" });
+  await expect(webhookRow).toBeVisible();
+  await assertConfirmation(webhookRow.getByRole("button", { name: "Disable", exact: true }), "queued or failed deliveries already recorded are unaffected");
+  expect(api.requests.webhookTransitions).toHaveLength(0);
 });
