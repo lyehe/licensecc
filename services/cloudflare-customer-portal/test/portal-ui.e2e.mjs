@@ -382,6 +382,8 @@ test("customer portal signs in with an 8-digit code and walks every screen witho
   await page.getByRole("button", { name: "Refresh status" }).click();
   await expect(page.getByRole("button", { name: "Refresh status" })).toHaveCount(0);
   await expect(page.locator('header p[role="status"]')).toContainText("ready");
+  await expect(page.getByRole("button", { name: "My devices" })).toBeFocused();
+  expect(await page.evaluate(() => document.activeElement?.tagName)).not.toBe("BODY");
 
   // --- Usage ---
   await page.getByRole("button", { name: "Usage" }).click();

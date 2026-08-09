@@ -1,4 +1,4 @@
-import React, { FormEvent, useEffect, useRef, useState } from "react";
+import React, { FormEvent, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { createRoot } from "react-dom/client";
 import {
@@ -214,6 +214,8 @@ function App(): React.ReactElement {
   const seatReleaseReturnFocusRef = useRef<HTMLElement | null>(null);
   const seatReleaseDeferredFocusRef = useRef<HTMLElement | null>(null);
   const seatReleaseConfirmingRef = useRef(false);
+  const refreshFocusRef = useRef<HTMLElement | null>(null);
+  const activeTabButtonRef = useRef<HTMLButtonElement | null>(null);
   const seatStartButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const seatCardRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
@@ -257,6 +259,8 @@ function App(): React.ReactElement {
   }, [phase]);
 
   async function refreshPortalData(): Promise<void> {
+    if (busyRef.current) return;
+    refreshFocusRef.current = activeTabButtonRef.current;
     await runOnce(async () => {
       try {
         if (await refreshData()) {
@@ -269,6 +273,13 @@ function App(): React.ReactElement {
       }
     });
   }
+
+  useLayoutEffect(() => {
+    if (busy || refreshFocusRef.current === null) return;
+    const target = refreshFocusRef.current;
+    refreshFocusRef.current = null;
+    if (document.contains(target) && !target.hasAttribute("disabled")) target.focus();
+  }, [busy, message]);
 
   async function runOnce(work: () => Promise<void>): Promise<void> {
     if (busyRef.current) {
@@ -673,10 +684,10 @@ function App(): React.ReactElement {
           {message?.code === FLOATING_SEAT_RELEASE_REFRESH_FAILED_CODE && (
             <button disabled={busy} onClick={() => void refreshPortalData()}>{PORTAL_STATUS_REFRESH_ACTION_LABEL}</button>
           )}
-          <button className={activeTab === "entitlements" ? "active" : ""} onClick={() => setActiveTab("entitlements")}>My entitlements</button>
-          <button className={activeTab === "devices" ? "active" : ""} onClick={() => setActiveTab("devices")}>My devices</button>
-          <button className={activeTab === "usage" ? "active" : ""} onClick={() => setActiveTab("usage")}>Usage</button>
-          <button className={activeTab === "download" ? "active" : ""} onClick={() => setActiveTab("download")}>Download</button>
+          <button ref={activeTab === "entitlements" ? activeTabButtonRef : undefined} className={activeTab === "entitlements" ? "active" : ""} onClick={() => setActiveTab("entitlements")}>My entitlements</button>
+          <button ref={activeTab === "devices" ? activeTabButtonRef : undefined} className={activeTab === "devices" ? "active" : ""} onClick={() => setActiveTab("devices")}>My devices</button>
+          <button ref={activeTab === "usage" ? activeTabButtonRef : undefined} className={activeTab === "usage" ? "active" : ""} onClick={() => setActiveTab("usage")}>Usage</button>
+          <button ref={activeTab === "download" ? activeTabButtonRef : undefined} className={activeTab === "download" ? "active" : ""} onClick={() => setActiveTab("download")}>Download</button>
           <button disabled={busy} onClick={() => void logout()}>Log out</button>
         </nav>
       </header>
