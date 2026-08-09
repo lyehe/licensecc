@@ -98,7 +98,14 @@ export const FLOATING_SEAT_RELEASE_CONFIRM_COPY =
   "This release cannot be undone. It ends the active checkout immediately, makes the seat available to another user, and this device must check out a new seat before using the license again.";
 
 export const FLOATING_SEAT_RELEASE_NETWORK_ERROR_COPY =
-  "Release could not be completed because the service was unreachable. Check your connection and try again, or cancel to return to the seat.";
+  "The release request outcome is unknown because the service was unreachable. Check the seat status before taking another action.";
+
+export const FLOATING_SEAT_RELEASE_REFRESH_FAILED_CODE = "floating_seat_release_refresh_failed";
+
+export const FLOATING_SEAT_RELEASE_REFRESH_ERROR_COPY =
+  "Seat released; status refresh failed. Refresh status manually to verify current availability.";
+
+export const PORTAL_STATUS_REFRESH_ACTION_LABEL = "Refresh status";
 
 // Empty-state copy for each portal tab. Shown when the tab has no rows so the customer sees an
 // explanation instead of a bare table header.
@@ -120,6 +127,7 @@ const RESULT_CODE_COPY: Record<string, string> = {
   invalid_otp: "That code is wrong or expired — request a new one.",
   seat_reclaimed: "Your seat was reclaimed after inactivity — check out again.",
   rate_limited: "Too many attempts — wait a moment and try again.",
+  [FLOATING_SEAT_RELEASE_REFRESH_FAILED_CODE]: FLOATING_SEAT_RELEASE_REFRESH_ERROR_COPY,
 };
 
 export function describeResultCode(code: string): string | null {

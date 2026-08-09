@@ -18,8 +18,8 @@ makeEnvelope.nextRequestId = 0;
 function makePortalApiFixture() {
   const VALID_CODE = "80315426";
   let authed = false;
-  const controls = { failNextRelease: false, deferNextRelease: false, rejectNextRelease: false, resolveRelease: null };
-  const requests = { authRequests: 0, verifies: 0, checkouts: 0, heartbeats: 0, releases: 0, downloads: 0, logouts: 0, seatActions: [] };
+  const controls = { failNextRelease: false, deferNextRelease: false, rejectNextRelease: false, rejectRefreshes: 0, resolveRelease: null };
+  const requests = { authRequests: 0, verifies: 0, checkouts: 0, heartbeats: 0, releases: 0, refreshRejects: 0, downloads: 0, logouts: 0, seatActions: [] };
 
   const entitlements = [
     { id: "ent_floating", project: "DEFAULT", feature: "pro", status: "active", license_fingerprint: "a".repeat(64), valid_from: 1_710_000_000, valid_until: null, license_mode: "floating", pool_size: 5, max_active_devices: 1, max_borrow_sec: 0, heartbeat_grace_sec: 900, policy_id: "pol_float" },
@@ -79,14 +79,29 @@ function makePortalApiFixture() {
       return fulfill(200, makeEnvelope("me", { customer_id: "cus_self" }));
     }
     if (method === "GET" && path === "/api/portal/entitlements") {
+      if (controls.rejectRefreshes > 0) {
+        controls.rejectRefreshes -= 1;
+        requests.refreshRejects += 1;
+        return route.abort("failed");
+      }
       if (!authed) return fulfill(401, { ok: false, code: "unauthorized", request_id: "portal-e2e-401" });
       return fulfill(200, makeEnvelope("entitlements", { items: entitlements.map((item) => ({ ...item })) }));
     }
     if (method === "GET" && path === "/api/portal/devices") {
+      if (controls.rejectRefreshes > 0) {
+        controls.rejectRefreshes -= 1;
+        requests.refreshRejects += 1;
+        return route.abort("failed");
+      }
       if (!authed) return fulfill(401, { ok: false, code: "unauthorized", request_id: "portal-e2e-401" });
       return fulfill(200, makeEnvelope("devices", { items: devices.map((item) => ({ ...item })) }));
     }
     if (method === "GET" && path === "/api/portal/usage") {
+      if (controls.rejectRefreshes > 0) {
+        controls.rejectRefreshes -= 1;
+        requests.refreshRejects += 1;
+        return route.abort("failed");
+      }
       if (!authed) return fulfill(401, { ok: false, code: "unauthorized", request_id: "portal-e2e-401" });
       return fulfill(200, makeEnvelope("usage", { items: usage.map((item) => ({ ...item })) }));
     }
@@ -305,10 +320,13 @@ test("customer portal signs in with an 8-digit code and walks every screen witho
   const networkErrorDialog = page.getByRole("dialog");
   await networkErrorDialog.getByRole("button", { name: "Confirm release" }).click();
   await expect(networkErrorDialog).toContainText("service was unreachable");
+  await expect(networkErrorDialog).toContainText("outcome is unknown");
+  await expect(networkErrorDialog).toContainText(/check the seat status/i);
   await expect(networkErrorDialog).toContainText("seat-e2e");
   await expect(networkErrorDialog.getByRole("alert")).toBeVisible();
   await expect.poll(() => page.evaluate(() => document.activeElement?.closest('[role="dialog"]') !== null)).toBe(true);
   await expect(networkErrorDialog.getByRole("button", { name: "Cancel" })).toBeEnabled();
+  await expect(networkErrorDialog.getByRole("button", { name: "Confirm release" })).toBeDisabled();
   await page.keyboard.press("Escape");
   await expect(networkErrorDialog).toHaveCount(0);
   await expect(seatCard.getByRole("button", { name: "Release" })).toBeFocused();
@@ -336,6 +354,34 @@ test("customer portal signs in with an 8-digit code and walks every screen witho
   expect(await page.evaluate(() => document.activeElement?.tagName)).not.toBe("BODY");
   await expect(seatCard.getByRole("button", { name: "Refresh" })).toBeDisabled();
   await expect(seatCard.getByRole("button", { name: "Release" })).toBeDisabled();
+
+  // A valid release is authoritative even when the follow-up status refresh rejects. The local
+  // session is already gone, the dialog closes once, and manual status refresh remains available;
+  // no second release POST is offered or sent.
+  await seatCard.getByRole("button", { name: "Start seat" }).click();
+  await expect.poll(() => api.requests.checkouts).toBe(2);
+  await expect(seatCard.getByRole("button", { name: "Start seat" })).toBeDisabled();
+  await expect(seatCard.getByRole("button", { name: "Refresh" })).toBeEnabled();
+  const refreshFailureReleaseCount = api.requests.releases;
+  const refreshFailureStoredSession = await page.evaluate(() => window.localStorage.getItem("licensecc.portal.seats.v1"));
+  expect(refreshFailureStoredSession).not.toBeNull();
+  api.controls.rejectRefreshes = 3;
+  await seatCard.getByRole("button", { name: "Release" }).click();
+  const refreshFailedDialog = page.getByRole("dialog");
+  await refreshFailedDialog.getByRole("button", { name: "Confirm release" }).click();
+  await expect.poll(() => api.requests.releases).toBe(refreshFailureReleaseCount + 1);
+  await expect(refreshFailedDialog).toHaveCount(0);
+  await expect.poll(() => api.requests.refreshRejects).toBe(3);
+  await expect(page.locator('header p[role="status"]')).toContainText(/released; status refresh failed/i);
+  await expect(page.getByRole("button", { name: "Refresh status" })).toBeVisible();
+  await expect.poll(() => page.evaluate(() => window.localStorage.getItem("licensecc.portal.seats.v1"))).toBe("{}");
+  await expect(seatCard.getByRole("button", { name: "Start seat" })).toBeEnabled();
+  await expect(seatCard.getByRole("button", { name: "Start seat" })).toBeFocused();
+  expect(await page.evaluate(() => document.activeElement?.tagName)).not.toBe("BODY");
+
+  await page.getByRole("button", { name: "Refresh status" }).click();
+  await expect(page.getByRole("button", { name: "Refresh status" })).toHaveCount(0);
+  await expect(page.locator('header p[role="status"]')).toContainText("ready");
 
   // --- Usage ---
   await page.getByRole("button", { name: "Usage" }).click();

@@ -11,6 +11,8 @@ import {
   FLOATING_SEAT_RELEASE_CONFIRM_COPY,
   FLOATING_SEAT_RELEASE_CONFIRM_TITLE,
   FLOATING_SEAT_RELEASE_NETWORK_ERROR_COPY,
+  FLOATING_SEAT_RELEASE_REFRESH_FAILED_CODE,
+  PORTAL_STATUS_REFRESH_ACTION_LABEL,
   authRequestPath,
   authVerifyPath,
   checkoutPath,
@@ -82,6 +84,11 @@ interface UsageRow {
 
 type Tab = "entitlements" | "devices" | "usage" | "download";
 type SeatOperation = "checkout" | "heartbeat" | "release";
+
+interface SeatActionResult {
+  succeeded: boolean;
+  refreshFailed: boolean;
+}
 
 // Invariant 3: ALWAYS credentials:"same-origin" (the HttpOnly session cookie travels automatically),
 // ALWAYS content-type: application/json, and NEVER an Authorization/bearer header — the browser never
@@ -201,6 +208,7 @@ function App(): React.ReactElement {
   const [downloadDeviceKeys, setDownloadDeviceKeys] = useState<Record<string, string>>({});
   const [pendingSeatRelease, setPendingSeatRelease] = useState<{ item: EntitlementRow; session: SeatSession } | null>(null);
   const [seatReleaseError, setSeatReleaseError] = useState<string | null>(null);
+  const [seatReleaseOutcomeUnknown, setSeatReleaseOutcomeUnknown] = useState(false);
   const [seatReleaseFocusId, setSeatReleaseFocusId] = useState<string | null>(null);
   const seatReleaseDialogRef = useRef<HTMLDivElement>(null);
   const seatReleaseReturnFocusRef = useRef<HTMLElement | null>(null);
@@ -225,7 +233,7 @@ function App(): React.ReactElement {
     void loadMe();
   }, []);
 
-  async function refreshData(): Promise<void> {
+  async function refreshData(): Promise<boolean> {
     const [entitlementResponse, deviceResponse, usageResponse] = await Promise.all([
       api<{ items: EntitlementRow[] }>(entitlementsPath()),
       api<{ items: DeviceRow[] }>(devicesPath()),
@@ -235,7 +243,11 @@ function App(): React.ReactElement {
     if (deviceResponse.ok && deviceResponse.data) setDevices(deviceResponse.data.items);
     if (usageResponse.ok && usageResponse.data) setUsage(usageResponse.data.items);
     const failed = [entitlementResponse, deviceResponse, usageResponse].find((item) => !item.ok);
-    if (failed) setMessage(resultMessage(failed));
+    if (failed) {
+      setMessage(resultMessage(failed));
+      return false;
+    }
+    return true;
   }
 
   useEffect(() => {
@@ -243,6 +255,20 @@ function App(): React.ReactElement {
       void refreshData();
     }
   }, [phase]);
+
+  async function refreshPortalData(): Promise<void> {
+    await runOnce(async () => {
+      try {
+        if (await refreshData()) {
+          setMessage(null);
+        } else {
+          setMessage(localMessage(FLOATING_SEAT_RELEASE_REFRESH_FAILED_CODE, false));
+        }
+      } catch {
+        setMessage(localMessage(FLOATING_SEAT_RELEASE_REFRESH_FAILED_CODE, false));
+      }
+    });
+  }
 
   async function runOnce(work: () => Promise<void>): Promise<void> {
     if (busyRef.current) {
@@ -333,8 +359,9 @@ function App(): React.ReactElement {
   async function seatAction(
     item: EntitlementRow,
     operation: SeatOperation,
-  ): Promise<boolean> {
+  ): Promise<SeatActionResult> {
     let succeeded = false;
+    let refreshFailed = false;
     await runOnce(async () => {
       const existing = seatSessions[item.id];
       if ((operation === "heartbeat" || operation === "release") && existing === undefined) {
@@ -379,12 +406,21 @@ function App(): React.ReactElement {
             delete next[item.id];
             return next;
           });
+          // A valid release response is authoritative immediately. A later status refresh can only
+          // affect the displayed snapshot, never whether this destructive action completed.
+          succeeded = true;
+          try {
+            if (!(await refreshData())) refreshFailed = true;
+          } catch {
+            refreshFailed = true;
+          }
+          return;
         }
         await refreshData();
         succeeded = true;
       }
     });
-    return succeeded;
+    return { succeeded, refreshFailed };
   }
 
   function requestSeatRelease(item: EntitlementRow): void {
@@ -396,12 +432,14 @@ function App(): React.ReactElement {
     }
     seatReleaseReturnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setSeatReleaseError(null);
+    setSeatReleaseOutcomeUnknown(false);
     setPendingSeatRelease({ item, session });
   }
 
   function dismissSeatRelease(): void {
     if (seatReleaseConfirmingRef.current) return;
     setSeatReleaseError(null);
+    setSeatReleaseOutcomeUnknown(false);
     setPendingSeatRelease(null);
     const returnFocus = seatReleaseReturnFocusRef.current;
     seatReleaseDeferredFocusRef.current = returnFocus;
@@ -420,9 +458,12 @@ function App(): React.ReactElement {
       // Keep the established seatAction path/body/auth and success/error refresh behavior. The
       // captured context only gates the explicit confirmation; it does not add a reason/body field.
       try {
-        const succeeded = await seatAction(pending.item, "release");
-        if (succeeded) {
+        const outcome = await seatAction(pending.item, "release");
+        if (outcome.succeeded) {
           setSeatReleaseFocusId(pending.item.id);
+          if (outcome.refreshFailed) {
+            setMessage(localMessage(FLOATING_SEAT_RELEASE_REFRESH_FAILED_CODE, false));
+          }
         } else {
           seatReleaseDeferredFocusRef.current = returnFocus;
         }
@@ -430,6 +471,7 @@ function App(): React.ReactElement {
         closeDialog = true;
       } catch {
         setSeatReleaseError(FLOATING_SEAT_RELEASE_NETWORK_ERROR_COPY);
+        setSeatReleaseOutcomeUnknown(true);
         seatReleaseDialogRef.current?.focus();
       }
     } finally {
@@ -628,6 +670,9 @@ function App(): React.ReactElement {
           <StatusLine message={message} fallback="ready" />
         </div>
         <nav>
+          {message?.code === FLOATING_SEAT_RELEASE_REFRESH_FAILED_CODE && (
+            <button disabled={busy} onClick={() => void refreshPortalData()}>{PORTAL_STATUS_REFRESH_ACTION_LABEL}</button>
+          )}
           <button className={activeTab === "entitlements" ? "active" : ""} onClick={() => setActiveTab("entitlements")}>My entitlements</button>
           <button className={activeTab === "devices" ? "active" : ""} onClick={() => setActiveTab("devices")}>My devices</button>
           <button className={activeTab === "usage" ? "active" : ""} onClick={() => setActiveTab("usage")}>Usage</button>
@@ -807,7 +852,7 @@ function App(): React.ReactElement {
             </dl>
             <div className="actions">
               <button type="button" disabled={busy} onClick={dismissSeatRelease}>Cancel</button>
-              <button type="button" className="danger" disabled={busy} onClick={() => void confirmSeatRelease()}>Confirm release</button>
+              <button type="button" className="danger" disabled={busy || seatReleaseOutcomeUnknown} onClick={() => void confirmSeatRelease()}>Confirm release</button>
             </div>
           </div>
         </div>
