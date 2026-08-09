@@ -118,7 +118,6 @@ export function portalEnv(db, overrides = {}) {
   return {
     DB: new D1Like(db),
     ENVIRONMENT: "test",
-    ACCOUNT_TOKEN_MODE: "required",
     ACCOUNT_TOKEN_ACTIVE_PEPPER_ID: "a1",
     PORTAL_PUBLIC_ORIGIN: "https://portal.test",
     BACKEND_ORIGIN: "https://backend.test",

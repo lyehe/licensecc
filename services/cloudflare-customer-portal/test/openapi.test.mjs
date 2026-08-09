@@ -132,6 +132,17 @@ test("spec is OpenAPI 3.1.0 with the shared envelope/server conventions", () => 
   assert.ok(openApiDocument.components.securitySchemes.sessionCookie, "sessionCookie security scheme missing");
 });
 
+test("health OpenAPI keeps the reviewed readiness envelope and status contract", () => {
+  const health = openApiDocument.paths["/health"].get;
+  assert.deepEqual(Object.keys(health.responses), ["200", "503"]);
+  assert.equal(health.responses["200"].content["application/json"].schema.properties.code.const, "healthy");
+  assert.equal(
+    health.responses["200"].content["application/json"].schema.properties.data.properties.account_token_mode_required.const,
+    true,
+  );
+  assert.equal(health.responses["503"].content["application/json"].schema.properties.code.const, "account_token_mode_not_required");
+});
+
 test("the doc routes are served without credentials or environment (behavioral)", async () => {
   // The doc handlers must never touch env or auth: they must succeed with an EMPTY env and no
   // cookies. (The SPA fallback and every other route may require env bindings — not these two.)

@@ -25,7 +25,6 @@ export interface Env {
   DB: D1DatabaseLike;
   ASSETS?: { fetch(request: Request): Promise<Response> };
   ENVIRONMENT?: string;
-  ACCOUNT_TOKEN_MODE?: string;
   PORTAL_PUBLIC_ORIGIN?: string;
   BACKEND_ORIGIN?: string;
   PORTAL_OTP_PEPPERS?: string;

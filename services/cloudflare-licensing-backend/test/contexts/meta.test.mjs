@@ -9,6 +9,20 @@ test("health route returns status", async () => {
   assert.equal((await response.json()).ok, true);
 });
 
+test("/health exposes the backend's normalized account-token enforcement mode without secrets", async () => {
+  const health = async (ACCOUNT_TOKEN_MODE) => {
+    const response = await worker.fetch(new Request("https://example.test/health"), { ACCOUNT_TOKEN_MODE });
+    assert.equal(response.status, 200, "backend liveness remains independent of account-token rollout mode");
+    return response.json();
+  };
+
+  assert.equal((await health("required")).account_token_mode, "required");
+  assert.equal((await health("soft")).account_token_mode, "soft");
+  assert.equal((await health("off")).account_token_mode, "off");
+  assert.equal((await health(undefined)).account_token_mode, "off");
+  assert.equal((await health("not-a-mode")).account_token_mode, "off");
+});
+
 test("/health surfaces config-consistency warnings for a half-configured deploy (R2.3)", async () => {
   // Secrets present but their enforcing modes left off -> a permissive posture the operator likely
   // did not intend. Marker-free non-empty values (the check only tests presence, never parses).

@@ -27,10 +27,6 @@
   ],
   "vars": {
     "ENVIRONMENT": "development",
-    // Invariant 7: the portal /health asserts the backend is in required mode (full account
-    // isolation). The portal proxies to the backend with per-action account tokens, so the
-    // backend MUST enforce isolation.
-    "ACCOUNT_TOKEN_MODE": "required",
     // The portal's public origin — used to build magic-link URLs. NEVER taken from the request
     // Host header (invariant 6); always this configured value.
     "PORTAL_PUBLIC_ORIGIN": "https://portal.example.com",

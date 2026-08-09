@@ -2,7 +2,7 @@
 
 import { requestId } from "@licensecc/cloudflare-runtime/http/kit";
 import { ALL_ROUTES, META_ROUTES, PUBLIC_ROUTES, SESSION_ROUTES } from "./routes.js";
-import { META_DISPATCH } from "./routes/meta.js";
+import { HEALTH_DISPATCH, META_DISPATCH } from "./routes/meta.js";
 import { AUTH_DISPATCH, authSession } from "./routes/auth.js";
 import { SESSION_DISPATCH, resolveOwnedEntitlement } from "./routes/self-service.js";
 import { envelope, isCrossSite, constantTimeEqual, decodeEntitlementId, entitlementId } from "./support.js";
@@ -10,17 +10,11 @@ import type { Env, ExecutionContextLike, TopRoute } from "./env.js";
 
 export type { Env } from "./env.js";
 
-function health(env: Env, reqId: string): Response {
-  // Invariant 7: the portal is only healthy if the backend enforces full account isolation.
-  const required = env.ACCOUNT_TOKEN_MODE === "required";
-  return envelope(reqId, required ? "healthy" : "account_token_mode_not_required", { account_token_mode_required: required }, required ? 200 : 503);
-}
-
 // Top-level routes are composed in canonical inventory order. Session lookup remains a separate
 // boundary so every /api/portal request authenticates before its method/path is inspected.
 const TOP_DISPATCH: Record<string, TopRoute> = {
   ...META_DISPATCH,
-  "GET /health": (_request, env, _ctx, reqId) => health(env, reqId),
+  ...HEALTH_DISPATCH,
   ...AUTH_DISPATCH,
 };
 
