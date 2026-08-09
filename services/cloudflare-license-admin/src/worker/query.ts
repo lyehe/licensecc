@@ -8,11 +8,25 @@ export function likeContains(value: unknown): string | null {
   return `%${term.toLowerCase().replace(/[\\%_]/g, (ch) => `\\${ch}`)}%`;
 }
 
-export function boundedCursor(url: URL): { limit: number; cursor: number } {
-  return {
-    limit: Math.min(Number(url.searchParams.get("limit") ?? "50") || 50, 100),
-    cursor: Math.max(Number(url.searchParams.get("cursor") ?? "0") || 0, 0),
-  };
+const DEFAULT_LIMIT = 50;
+const MAX_LIMIT = 100;
+
+function parsePageInteger(raw: string | null, defaultValue: number, min: number, max: number): number | null {
+  if (raw === null || raw === "") {
+    return defaultValue;
+  }
+  if (!/^[0-9]+$/.test(raw)) {
+    return null;
+  }
+  const value = Number(raw);
+  return Number.isSafeInteger(value) && value >= min && value <= max ? value : null;
+}
+
+/** Parse the shared offset pagination contract; null means an explicit value is malformed. */
+export function boundedCursor(url: URL): { limit: number; cursor: number } | null {
+  const limit = parsePageInteger(url.searchParams.get("limit"), DEFAULT_LIMIT, 1, MAX_LIMIT);
+  const cursor = parsePageInteger(url.searchParams.get("cursor"), 0, 0, Number.MAX_SAFE_INTEGER);
+  return limit === null || cursor === null ? null : { limit, cursor };
 }
 
 // ── Workstream C BACKEND: CSV export, global search, bulk transitions ─────────
@@ -34,7 +48,10 @@ export const SEARCH_PER_TYPE_LIMIT = 10;
 // render as the empty string. Always quoted so commas/newlines/quotes in data are inert.
 export function csvField(value: unknown): string {
   const text = value === null || value === undefined ? "" : String(value);
-  return `"${text.replace(/"/g, '""')}"`;
+  // Prefix formula-like cells after optional leading spaces. Tabs and CR are themselves
+  // dangerous effective prefixes, so they remain in the checked character class.
+  const safeText = /^[ ]*[=+\-@\t\r]/.test(text) ? `'${text}` : text;
+  return `"${safeText.replace(/"/g, '""')}"`;
 }
 
 // Render header + rows (each a record keyed by `columns`) as a CSV body, then append a

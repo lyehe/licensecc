@@ -57,8 +57,11 @@ export async function listEntitlements(request: Request, env: Env, requestIdValu
       csvRows.results.map(withId) as unknown as ReadonlyArray<Record<string, unknown>>,
     );
   }
-  const limit = Math.min(Number(url.searchParams.get("limit") ?? "50") || 50, 100);
-  const cursor = Math.max(Number(url.searchParams.get("cursor") ?? "0") || 0, 0);
+  const pagination = boundedCursor(url);
+  if (pagination === null) {
+    return envelope(requestIdValue, "invalid_request", undefined, 400);
+  }
+  const { limit, cursor } = pagination;
   values.push(limit + 1, cursor);
   const rows = await env.DB.prepare(`${entitlementSelectSql(where)} ORDER BY updated_at DESC LIMIT ? OFFSET ?`)
     .bind(...values)
@@ -87,7 +90,11 @@ export async function listEvents(request: Request, env: Env, requestIdValue: str
       csvRows.results,
     );
   }
-  const limit = Math.min(Number(url.searchParams.get("limit") ?? "50") || 50, 100);
+  const pagination = boundedCursor(url);
+  if (pagination === null) {
+    return envelope(requestIdValue, "invalid_request", undefined, 400);
+  }
+  const { limit } = pagination;
   const rows = await env.DB.prepare(
     `SELECT ${eventColumns} FROM entitlement_events ORDER BY created_at DESC, id DESC LIMIT ?`,
   ).bind(limit).all();

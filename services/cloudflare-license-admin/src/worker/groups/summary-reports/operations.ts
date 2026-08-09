@@ -190,7 +190,11 @@ export async function reportExpiring(request: Request, env: Env, requestIdValue:
     EXPIRING_MAX_WITHIN_DAYS,
   );
   const horizon = now + withinDays * SECONDS_PER_DAY;
-  const { limit, cursor } = boundedCursor(url);
+  const pagination = boundedCursor(url);
+  if (pagination === null) {
+    return envelope(requestIdValue, "invalid_request", undefined, 400);
+  }
+  const { limit, cursor } = pagination;
   const rows = await env.DB.prepare(
     `SELECT project, feature, license_fingerprint, customer_id, valid_until
        FROM entitlements

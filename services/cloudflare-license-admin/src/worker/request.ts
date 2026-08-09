@@ -26,9 +26,5 @@ export async function parseJsonBody(request: Request, requestIdValue: string): P
   }
 }
 
-export function boundedCursor(url: URL): { limit: number; cursor: number } {
-  return {
-    limit: Math.min(Number(url.searchParams.get("limit") ?? "50") || 50, 100),
-    cursor: Math.max(Number(url.searchParams.get("cursor") ?? "0") || 0, 0),
-  };
-}
+// Keep the historical request-module export while query.ts owns the one parser implementation.
+export { boundedCursor } from "./query.js";

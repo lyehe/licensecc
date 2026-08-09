@@ -41,7 +41,11 @@ export async function listCustomers(request: Request, env: Env, requestIdValue: 
       csvRows.results,
     );
   }
-  const { limit, cursor } = boundedCursor(url);
+  const pagination = boundedCursor(url);
+  if (pagination === null) {
+    return envelope(requestIdValue, "invalid_request", undefined, 400);
+  }
+  const { limit, cursor } = pagination;
   values.push(limit + 1, cursor);
   const rows = await env.DB.prepare(`${projection} ORDER BY c.updated_at DESC, c.id LIMIT ? OFFSET ?`)
     .bind(...values).all();
@@ -107,7 +111,11 @@ export async function listLicenses(request: Request, env: Env, requestIdValue: s
     filters.push("(lower(id) LIKE ? ESCAPE '\\' OR lower(label) LIKE ? ESCAPE '\\')");
     values.push(like, like);
   }
-  const { limit, cursor } = boundedCursor(url);
+  const pagination = boundedCursor(url);
+  if (pagination === null) {
+    return envelope(requestIdValue, "invalid_request", undefined, 400);
+  }
+  const { limit, cursor } = pagination;
   const where = filters.length === 0 ? "" : `WHERE ${filters.join(" AND ")}`;
   values.push(limit + 1, cursor);
   const rows = await env.DB.prepare(
@@ -135,7 +143,11 @@ export async function listOrders(request: Request, env: Env, requestIdValue: str
     filters.push("subscription_id = ?");
     values.push(sub);
   }
-  const { limit, cursor } = boundedCursor(url);
+  const pagination = boundedCursor(url);
+  if (pagination === null) {
+    return envelope(requestIdValue, "invalid_request", undefined, 400);
+  }
+  const { limit, cursor } = pagination;
   const where = filters.length === 0 ? "" : `WHERE ${filters.join(" AND ")}`;
   values.push(limit + 1, cursor);
   const rows = await env.DB.prepare(
@@ -229,7 +241,11 @@ export async function globalSearch(request: Request, env: Env, requestIdValue: s
   if (like === null || prefix === null) {
     return envelope(requestIdValue, "invalid_request", undefined, 400);
   }
-  const perType = Math.min(Number(url.searchParams.get("limit") ?? String(SEARCH_PER_TYPE_LIMIT)) || SEARCH_PER_TYPE_LIMIT, SEARCH_PER_TYPE_LIMIT);
+  const pagination = boundedCursor(url);
+  if (pagination === null) {
+    return envelope(requestIdValue, "invalid_request", undefined, 400);
+  }
+  const perType = Math.min(pagination.limit, SEARCH_PER_TYPE_LIMIT);
   const [customers, licenses, entitlements, orders] = await Promise.all([
     env.DB.prepare(
       "SELECT id, name, email, external_ref, status FROM customers WHERE lower(id) LIKE ? ESCAPE '\\' OR lower(email) LIKE ? ESCAPE '\\' OR lower(name) LIKE ? ESCAPE '\\' OR lower(external_ref) LIKE ? ESCAPE '\\' ORDER BY updated_at DESC, id LIMIT ?",

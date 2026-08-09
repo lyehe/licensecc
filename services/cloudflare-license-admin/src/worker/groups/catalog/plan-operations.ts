@@ -49,7 +49,11 @@ export async function transitionCatalogFeature(request: Request, env: Env, actor
 
 export async function listCatalogPlans(request: Request, env: Env, requestIdValue: string): Promise<Response> {
   const url = new URL(request.url);
-  const { limit, cursor } = boundedCursor(url);
+  const pagination = boundedCursor(url);
+  if (pagination === null) {
+    return envelope(requestIdValue, "invalid_request", undefined, 400);
+  }
+  const { limit, cursor } = pagination;
   const filters: string[] = [];
   const values: unknown[] = [];
   const project = url.searchParams.get("project");

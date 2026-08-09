@@ -10,3 +10,4 @@ import "./worker/devices.test.mjs";
 import "./worker/webhooks.test.mjs";
 import "./worker/sync.test.mjs";
 import "./worker/structure.test.mjs";
+import "./worker/query-boundaries.test.mjs";

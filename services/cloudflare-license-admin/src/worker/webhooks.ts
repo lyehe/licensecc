@@ -203,7 +203,11 @@ export async function listWebhooks(request: Request, env: Env, requestIdValue: s
     filters.push("status = ?");
     values.push(status);
   }
-  const { limit, cursor } = boundedCursor(url);
+  const pagination = boundedCursor(url);
+  if (pagination === null) {
+    return envelope(requestIdValue, "invalid_request", undefined, 400);
+  }
+  const { limit, cursor } = pagination;
   const where = filters.length === 0 ? "" : `WHERE ${filters.join(" AND ")}`;
   values.push(limit + 1, cursor);
   const rows = await env.DB.prepare(
@@ -249,7 +253,11 @@ export async function listWebhookDeliveries(request: Request, env: Env, requestI
     filters.push("endpoint_id = ?");
     values.push(endpointId);
   }
-  const { limit, cursor } = boundedCursor(url);
+  const pagination = boundedCursor(url);
+  if (pagination === null) {
+    return envelope(requestIdValue, "invalid_request", undefined, 400);
+  }
+  const { limit, cursor } = pagination;
   const where = filters.length === 0 ? "" : `WHERE ${filters.join(" AND ")}`;
   values.push(limit + 1, cursor);
   const rows = await env.DB.prepare(
