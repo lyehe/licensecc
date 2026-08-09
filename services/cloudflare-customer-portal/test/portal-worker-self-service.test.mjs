@@ -186,6 +186,50 @@ test("ownership transfer between the device pre-read and batch cannot revoke the
   db.close();
 });
 
+test("an audit failure rolls back the device release batch without a seq or audit side effect", async () => {
+  const { db, env } = baseFixture();
+  seedDevice(db, { fingerprint: FP_A, deviceKeyId: "dk_a" });
+  const cookie = await cookieFor(env, "A");
+  const seqBefore = db.prepare("SELECT revocation_seq FROM entitlements WHERE license_fingerprint = ?").get(FP_A).revocation_seq;
+  const realPrepare = env.DB.prepare.bind(env.DB);
+  const realBatch = env.DB.batch.bind(env.DB);
+  let batchStatementCount = 0;
+  env.DB.prepare = (sql) => {
+    // Fail only the portal-device-release audit statement. With the old separate audit this happens
+    // after the bump/flip commit (RED); with the audited three-statement D1 transaction it aborts and
+    // rolls back the prior guarded updates (GREEN).
+    if (sql.startsWith("INSERT INTO entitlement_events")) {
+      return realPrepare("INSERT INTO entitlement_events (missing_audit_column) VALUES (1)");
+    }
+    return realPrepare(sql);
+  };
+  env.DB.batch = async (statements) => {
+    batchStatementCount = statements.length;
+    return realBatch(statements);
+  };
+
+  const rel = await call(env, "POST", "/api/portal/devices/release", { cookie, body: { device_key_id: "dk_a" } });
+  assert.equal(rel.status, 500);
+  assert.equal(rel.body.code, "portal_error");
+  assert.equal(batchStatementCount, 3, "the audit must execute inside the same D1 batch as bump and flip");
+  assert.equal(
+    db.prepare("SELECT status FROM entitlement_devices WHERE device_key_id = 'dk_a'").get().status,
+    "active",
+    "the failed audit rolls the device transition back",
+  );
+  assert.equal(
+    db.prepare("SELECT revocation_seq FROM entitlements WHERE license_fingerprint = ?").get(FP_A).revocation_seq,
+    seqBefore,
+    "the failed audit rolls the revocation sequence back",
+  );
+  assert.equal(
+    db.prepare("SELECT COUNT(*) AS n FROM entitlement_events WHERE reason = 'portal_device_release'").get().n,
+    0,
+    "the failed audit leaves no audit row",
+  );
+  db.close();
+});
+
 // =================================================================================================
 // ACTIONS — server-resolve the tuple; forged body ignored; no oracle
 // =================================================================================================

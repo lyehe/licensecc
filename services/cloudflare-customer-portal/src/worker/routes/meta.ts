@@ -94,6 +94,14 @@ async function readBoundedJson(response: Response, signal: AbortSignal): Promise
   }
 }
 
+async function cancelResponseBody(response: Response): Promise<void> {
+  try {
+    await response.body?.cancel();
+  } catch {
+    // A failed upstream cancellation still fails readiness closed through the caller's 503 envelope.
+  }
+}
+
 async function backendRequiresAccountTokenMode(env: Env): Promise<boolean> {
   const origin = backendOrigin(env);
   if (origin === null) return false;
@@ -101,7 +109,12 @@ async function backendRequiresAccountTokenMode(env: Env): Promise<boolean> {
   const timeout = setTimeout(() => controller.abort(), READINESS_TIMEOUT_MS);
   try {
     const response = await fetch(new URL("/health", origin).toString(), { signal: controller.signal });
-    if (response.status !== 200) return false;
+    if (response.status !== 200) {
+      // The status is enough to fail readiness, but its body may be an endless upstream stream. Drain
+      // no bytes and cancel it before returning the established 503 envelope.
+      await cancelResponseBody(response);
+      return false;
+    }
     return provesRequiredAccountTokenMode(await readBoundedJson(response, controller.signal));
   } catch {
     return false;

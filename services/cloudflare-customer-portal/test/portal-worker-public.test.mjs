@@ -2,6 +2,7 @@ import { test } from "node:test";
 import { readFileSync } from "node:fs";
 import { assert, worker, mintSession, codeFromSecretBytes, requestOtp, redeemOtp, policyCapacityViolation, FP_A, FP_B, installBackendStub, cookieFor, sameSiteHeaders, entitlementId, ownedEntitlementId, call, baseFixture, seedDevice, seedEntitlement, CTX, NOW } from "./portal-worker-fixtures.mjs";
 import { sendEmail } from "../src/auth/portal_email.mjs";
+import { openApiDocument } from "../dist-worker/worker/openapi/document.js";
 
 async function withFetchStub(fetchStub, run) {
   const originalFetch = globalThis.fetch;
@@ -39,6 +40,37 @@ async function settlesWithin(promise, milliseconds) {
     ]);
   } finally {
     if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
+function documentedErrorCodes(path, status) {
+  const response = openApiDocument.paths[path]?.post?.responses?.[String(status)];
+  const code = response?.content?.["application/json"]?.schema?.properties?.code;
+  if (typeof code?.const === "string") return [code.const];
+  if (Array.isArray(code?.enum) && code.enum.every((value) => typeof value === "string")) return code.enum;
+  throw new Error(`${path} ${status} does not declare an exact error-code schema`);
+}
+
+function assertRuntimeErrorIsDocumented(path, response) {
+  assert.equal(response.body.ok, false, `${path} error envelope must set ok:false`);
+  assert.ok(
+    documentedErrorCodes(path, response.status).includes(response.body.code),
+    `${path} ${response.status} runtime code ${response.body.code} must be documented`,
+  );
+}
+
+async function checkoutFailure(extraEnv, fetchStub) {
+  const { db, env } = baseFixture(extraEnv);
+  try {
+    const cookie = await cookieFor(env, "A");
+    const id = await ownedEntitlementId(env, cookie);
+    const run = () => call(env, "POST", "/api/portal/checkout", {
+      cookie,
+      body: { entitlement_id: id, client_instance_id: "i1", nonce: "e".repeat(64) },
+    });
+    return fetchStub === undefined ? await run() : await withFetchStub(fetchStub, run);
+  } finally {
+    db.close();
   }
 }
 
@@ -242,6 +274,63 @@ test("/health times out and cancels a stalled backend response stream", async ()
     assert.equal(response.status, 503);
     assert.equal(response.body.code, "account_token_mode_not_required");
     assert.equal(cancelled, true, "the stalled response reader is cancelled on timeout");
+  } finally {
+    db.close();
+  }
+});
+
+test("/health cancels a non-200 backend stream before returning its existing 503 envelope", async () => {
+  const { db, env } = baseFixture();
+  let cancelled = false;
+  const endless = new ReadableStream({
+    cancel() { cancelled = true; },
+  });
+  try {
+    const response = await withFetchStub(
+      async () => new Response(endless, { status: 502, headers: { "content-type": "application/json" } }),
+      () => settlesWithin(call(env, "GET", "/health", {}), 500),
+    );
+    assert.notEqual(response, null, "readiness must not wait for a non-200 backend body");
+    assert.equal(response.status, 503);
+    assert.equal(response.body.code, "account_token_mode_not_required");
+    assert.equal(cancelled, true, "the non-200 backend body is cancelled before readiness returns");
+  } finally {
+    db.close();
+  }
+});
+
+test("runtime action and device-release error envelopes are declared by OpenAPI", async () => {
+  const unconfigured = await checkoutFailure({ BACKEND_ORIGIN: "http://backend.test" });
+  assert.equal(unconfigured.status, 503);
+  assert.equal(unconfigured.body.code, "backend_unconfigured");
+  assertRuntimeErrorIsDocumented("/api/portal/checkout", unconfigured);
+
+  const configError = await checkoutFailure({ ACCOUNT_TOKEN_PEPPERS: "" });
+  assert.equal(configError.status, 503);
+  assert.equal(configError.body.code, "config_error");
+  assertRuntimeErrorIsDocumented("/api/portal/checkout", configError);
+
+  const unreachable = await checkoutFailure({}, async () => { throw new Error("backend unavailable"); });
+  assert.equal(unreachable.status, 502);
+  assert.equal(unreachable.body.code, "backend_unreachable");
+  assertRuntimeErrorIsDocumented("/api/portal/checkout", unreachable);
+
+  const invalidResponse = await checkoutFailure({}, async () => new Response("not-json", { status: 200 }));
+  assert.equal(invalidResponse.status, 502);
+  assert.equal(invalidResponse.body.code, "backend_invalid_response");
+  assertRuntimeErrorIsDocumented("/api/portal/checkout", invalidResponse);
+
+  const { db, env } = baseFixture();
+  try {
+    seedDevice(db, { fingerprint: FP_A, deviceKeyId: "dk_a" });
+    env.DB.batch = undefined;
+    const response = await call(env, "POST", "/api/portal/devices/release", {
+      cookie: await cookieFor(env, "A"),
+      body: { device_key_id: "dk_a" },
+    });
+    assert.equal(response.status, 500);
+    assert.equal(response.body.code, "portal_error");
+    assertRuntimeErrorIsDocumented("/api/portal/devices/release", response);
   } finally {
     db.close();
   }

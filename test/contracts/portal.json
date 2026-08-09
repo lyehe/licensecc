@@ -346,13 +346,16 @@
                     ],
                     "properties": {
                       "code": {
-                        "const": "backend_unreachable"
+                        "enum": [
+                          "backend_unreachable",
+                          "backend_invalid_response"
+                        ]
                       }
                     }
                   }
                 }
               },
-              "description": "Backend fetch threw."
+              "description": "Backend was unreachable or its response was not valid JSON."
             },
             "503": {
               "content": {
@@ -365,13 +368,16 @@
                     ],
                     "properties": {
                       "code": {
-                        "const": "config_error"
+                        "enum": [
+                          "backend_unconfigured",
+                          "config_error"
+                        ]
                       }
                     }
                   }
                 }
               },
-              "description": "BACKEND_ORIGIN unset (backend_unconfigured), or ACCOUNT_TOKEN_PEPPERS unset / customer has no entitlements (config_error)."
+              "description": "BACKEND_ORIGIN is absent or invalid (backend_unconfigured), or account-token mint configuration is invalid (config_error)."
             }
           },
           "security": [
@@ -665,6 +671,25 @@
                 }
               },
               "description": "Per-session release rate limit exceeded."
+            },
+            "500": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "portal_error"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "The atomic device-release and audit transaction could not be completed."
             }
           },
           "security": [
@@ -824,13 +849,16 @@
                     ],
                     "properties": {
                       "code": {
-                        "const": "backend_unreachable"
+                        "enum": [
+                          "backend_unreachable",
+                          "backend_invalid_response"
+                        ]
                       }
                     }
                   }
                 }
               },
-              "description": "Backend /v1/activate fetch threw."
+              "description": "Backend /v1/activate was unreachable or returned invalid JSON."
             },
             "503": {
               "content": {
@@ -843,13 +871,16 @@
                     ],
                     "properties": {
                       "code": {
-                        "const": "config_error"
+                        "enum": [
+                          "backend_unconfigured",
+                          "config_error"
+                        ]
                       }
                     }
                   }
                 }
               },
-              "description": "BACKEND_ORIGIN unset (backend_unconfigured), or ACCOUNT_TOKEN_PEPPERS unset / customer has no entitlements (config_error)."
+              "description": "BACKEND_ORIGIN is absent or invalid (backend_unconfigured), or account-token mint configuration is invalid (config_error)."
             }
           },
           "security": [
@@ -1107,13 +1138,16 @@
                     ],
                     "properties": {
                       "code": {
-                        "const": "backend_unreachable"
+                        "enum": [
+                          "backend_unreachable",
+                          "backend_invalid_response"
+                        ]
                       }
                     }
                   }
                 }
               },
-              "description": "Backend fetch threw."
+              "description": "Backend was unreachable or its response was not valid JSON."
             },
             "503": {
               "content": {
@@ -1126,13 +1160,16 @@
                     ],
                     "properties": {
                       "code": {
-                        "const": "config_error"
+                        "enum": [
+                          "backend_unconfigured",
+                          "config_error"
+                        ]
                       }
                     }
                   }
                 }
               },
-              "description": "BACKEND_ORIGIN unset (backend_unconfigured) or config_error."
+              "description": "BACKEND_ORIGIN is absent or invalid (backend_unconfigured), or account-token mint configuration is invalid (config_error)."
             }
           },
           "security": [
@@ -1360,13 +1397,16 @@
                     ],
                     "properties": {
                       "code": {
-                        "const": "backend_unreachable"
+                        "enum": [
+                          "backend_unreachable",
+                          "backend_invalid_response"
+                        ]
                       }
                     }
                   }
                 }
               },
-              "description": "Backend fetch threw."
+              "description": "Backend was unreachable or its response was not valid JSON."
             },
             "503": {
               "content": {
@@ -1379,13 +1419,16 @@
                     ],
                     "properties": {
                       "code": {
-                        "const": "config_error"
+                        "enum": [
+                          "backend_unconfigured",
+                          "config_error"
+                        ]
                       }
                     }
                   }
                 }
               },
-              "description": "BACKEND_ORIGIN unset (backend_unconfigured) or config_error."
+              "description": "BACKEND_ORIGIN is absent or invalid (backend_unconfigured), or account-token mint configuration is invalid (config_error)."
             }
           },
           "security": [

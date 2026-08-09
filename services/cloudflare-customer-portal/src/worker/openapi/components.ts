@@ -1,17 +1,18 @@
 import type { LabeledComponentFragment } from "./assemble.js";
 
 // ---- Reusable error responses ($ref into components.responses-style inline schemas) -------------
-// Each error response is the FLAT envelope { ok:false, code, request_id }. We model the discrete
-// `code` value as an enum const so the doc states the exact string the handler returns.
+// Each error response is the FLAT envelope { ok:false, code, request_id }. We model the exact
+// allowed code string(s) as a const or enum so the document cannot claim a different runtime code.
 
-export function errorResponse(description: string, code: string): Record<string, unknown> {
+export function errorResponse(description: string, code: string | readonly string[]): Record<string, unknown> {
+  const codeSchema = typeof code === "string" ? { const: code } : { enum: [...code] };
   return {
     description,
     content: {
       "application/json": {
         schema: {
           allOf: [{ $ref: "#/components/schemas/ErrorEnvelope" }],
-          properties: { code: { const: code } },
+          properties: { code: codeSchema },
         },
       },
     },

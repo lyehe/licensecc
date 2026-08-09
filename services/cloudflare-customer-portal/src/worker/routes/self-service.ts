@@ -50,11 +50,10 @@ async function apiDevices(env: Env, session: { customer_id: string }, reqId: str
 // SESSION-SCOPED: the device is resolved through the SAME ownership EXISTS as apiDevices, so a foreign
 // or absent device is the SAME generic not_found (invariant 4 — no existence oracle). The write is an
 // atomic guarded transition mirroring the admin device-revoke: it (1) bumps the entitlement
-// revocation_seq (so the released device is refused by online-verify on its next check) and (2) flips
-// the device out of 'active' — BOTH in one guarded D1 batch, so a lost race (already released) matches
-// 0 rows and yields 409, never a torn write. Only AFTER confirming the guarded bump returned a row does
-// it (3) append a 'portal_device_release' audit event carrying the session customer id and the freshly
-// bumped revocation_seq — so a lost-race 409 records nothing (no phantom audit, no stale seq).
+// revocation_seq (so the released device is refused by online-verify on its next check), (2) flips
+// the device out of 'active', and (3) appends the 'portal_device_release' audit event — ALL in one
+// guarded D1 batch. A statement failure rolls the full sequence back; a lost race matches 0 rows and
+// yields 409, with neither a torn slot change nor a phantom audit.
 async function apiDeviceRelease(
   request: Request,
   env: Env,
@@ -106,27 +105,55 @@ async function apiDeviceRelease(
       "RETURNING device_key_id",
   ).bind(now, device.project, device.feature, device.license_fingerprint, deviceKeyId, session.customer_id);
 
-  const results = await env.DB.batch([bump, flip]);
+  // (3) Append the audit within the SAME transaction. `changes() = 1` is transaction-visible SQLite
+  // state from the preceding guarded flip, while the entitlement's current `revocation_seq` is the
+  // freshly bumped value. Together with the fresh timestamps and ownership predicates, this cannot
+  // produce an audit row for a lost pre-read race.
+  const audit = env.DB.prepare(
+    "INSERT INTO entitlement_events (project, feature, license_fingerprint, device_hash, event_type, status, revocation_seq, detail, actor, actor_type, source, request_id, ip, reason, created_at) " +
+      "SELECT e.project, e.feature, e.license_fingerprint, '', 'revoke', e.status, e.revocation_seq, ?, ?, 'system', 'portal', ?, ?, 'portal_device_release', ? " +
+      "FROM entitlements e WHERE changes() = 1 AND e.project = ? AND e.feature = ? AND e.license_fingerprint = ? " +
+      "AND e.customer_id = ? AND e.updated_at = ? AND EXISTS (SELECT 1 FROM entitlement_devices d WHERE d.project = e.project " +
+      "AND d.feature = e.feature AND d.license_fingerprint = e.license_fingerprint AND d.device_key_id = ? " +
+      "AND d.status = 'revoked' AND d.updated_at = ?) RETURNING revocation_seq",
+  ).bind(
+    detail,
+    session.customer_id,
+    reqId,
+    clientIp(request),
+    now,
+    device.project,
+    device.feature,
+    device.license_fingerprint,
+    session.customer_id,
+    now,
+    deviceKeyId,
+    now,
+  );
+
+  const results = await env.DB.batch([bump, flip, audit]);
   const bumpRows = results[0]?.results;
   const flipRows = results[1]?.results;
-  if (!Array.isArray(bumpRows) || bumpRows.length !== 1 || !Array.isArray(flipRows) || flipRows.length !== 1) {
-    // Both statements must prove their exact one-row transition. A lost release/removal/ownership
-    // transfer matches zero rows for both under D1's atomic batch, so no audit is emitted.
+  const auditRows = results[2]?.results;
+  if ([bumpRows, flipRows, auditRows].every((rows) => Array.isArray(rows) && rows.length === 0)) {
+    // A lost release/removal/ownership transfer matches zero rows for every guarded statement under
+    // D1's atomic batch, so no state or audit side effect is emitted.
     return envelope(reqId, "device_status_conflict", undefined, 409);
   }
-  // (3) Append-only audit — issued ONLY after the guarded bump returned a row, so a lost-race 409 emits
-  // no phantom row. The recorded revocation_seq is the FRESHLY-BUMPED value from the UPDATE's RETURNING,
-  // never the stale pre-read value. Actor is the SESSION customer id; source distinguishes it from admin.
-  const first0 = bumpRows[0];
-  const bumpedSeq = first0 !== null && typeof first0 === "object" && "revocation_seq" in first0 && typeof first0.revocation_seq === "number"
-    ? first0.revocation_seq
+  if (!Array.isArray(bumpRows) || bumpRows.length !== 1 || !Array.isArray(flipRows) || flipRows.length !== 1 || !Array.isArray(auditRows) || auditRows.length !== 1) {
+    return envelope(reqId, "portal_error", undefined, 500);
+  }
+  // The audit must carry the freshly bumped sequence from the same transaction. A mismatch signals a
+  // broken/mock D1 contract, so fail closed instead of claiming a successful release.
+  const bumped = bumpRows[0];
+  const audited = auditRows[0];
+  const bumpedSeq = bumped !== null && typeof bumped === "object" && "revocation_seq" in bumped && typeof bumped.revocation_seq === "number"
+    ? bumped.revocation_seq
     : null;
-  if (bumpedSeq === null) return envelope(reqId, "portal_error", undefined, 500);
-  await env.DB.prepare(
-    "INSERT INTO entitlement_events (project, feature, license_fingerprint, device_hash, event_type, status, revocation_seq, detail, actor, actor_type, source, request_id, ip, reason, created_at) " +
-      "SELECT project, feature, license_fingerprint, '', 'revoke', status, ?, ?, ?, 'system', 'portal', ?, ?, 'portal_device_release', ? " +
-      "FROM entitlements WHERE project = ? AND feature = ? AND license_fingerprint = ?",
-  ).bind(bumpedSeq, detail, session.customer_id, reqId, clientIp(request), now, device.project, device.feature, device.license_fingerprint).run();
+  const auditedSeq = audited !== null && typeof audited === "object" && "revocation_seq" in audited && typeof audited.revocation_seq === "number"
+    ? audited.revocation_seq
+    : null;
+  if (bumpedSeq === null || auditedSeq === null || bumpedSeq !== auditedSeq) return envelope(reqId, "portal_error", undefined, 500);
   return envelope(reqId, "device_released", { device_key_id: deviceKeyId });
 }
 

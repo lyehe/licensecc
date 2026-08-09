@@ -16,6 +16,14 @@ import worker, { PORTAL_ROUTE_KEYS } from "../dist-worker/worker/index.js";
 
 const keyOf = (r) => `${r.method} ${r.path}`;
 
+function documentedErrorCodes(path, status) {
+  const response = openApiDocument.paths[path]?.post?.responses?.[String(status)];
+  const code = response?.content?.["application/json"]?.schema?.properties?.code;
+  if (typeof code?.const === "string") return [code.const];
+  if (Array.isArray(code?.enum) && code.enum.every((value) => typeof value === "string")) return code.enum;
+  throw new Error(`${path} ${status} does not declare an exact error-code schema`);
+}
+
 test("OpenAPI assembly rejects collisions without mutating portal fragments", () => {
   const getFragment = { label: "get", entries: [["/shared", { get: { operationId: "getShared" } }]] };
   const postFragment = { label: "post", entries: [["/shared", { post: { operationId: "postShared" } }]] };
@@ -141,6 +149,14 @@ test("health OpenAPI keeps the reviewed readiness envelope and status contract",
     true,
   );
   assert.equal(health.responses["503"].content["application/json"].schema.properties.code.const, "account_token_mode_not_required");
+});
+
+test("OpenAPI models exact action and device-release runtime error-code alternatives", () => {
+  for (const path of ["/api/portal/checkout", "/api/portal/heartbeat", "/api/portal/release", "/api/portal/download"]) {
+    assert.deepEqual(documentedErrorCodes(path, 502), ["backend_unreachable", "backend_invalid_response"], `${path} 502 alternatives`);
+    assert.deepEqual(documentedErrorCodes(path, 503), ["backend_unconfigured", "config_error"], `${path} 503 alternatives`);
+  }
+  assert.deepEqual(documentedErrorCodes("/api/portal/devices/release", 500), ["portal_error"]);
 });
 
 test("the doc routes are served without credentials or environment (behavioral)", async () => {
