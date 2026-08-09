@@ -774,6 +774,10 @@ CREATE TABLE IF NOT EXISTS license_plan_projection_previews (
 CREATE INDEX IF NOT EXISTS idx_license_plan_projection_previews_expiry
   ON license_plan_projection_previews(expires_at);
 
+CREATE INDEX IF NOT EXISTS idx_license_plan_projection_previews_consumed
+  ON license_plan_projection_previews(consumed_at)
+  WHERE consumed_at IS NOT NULL;
+
 -- Keep the Postgres port semantically aligned with D1's conservative source
 -- generation, even though the current production protocol is D1-backed.
 CREATE OR REPLACE FUNCTION bump_license_plan_projection_generation()

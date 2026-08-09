@@ -570,6 +570,10 @@ CREATE INDEX IF NOT EXISTS idx_license_plan_assignments_customer
 CREATE INDEX IF NOT EXISTS idx_license_plan_assignments_plan
   ON license_plan_assignments(project, plan_id, status);
 
+CREATE INDEX IF NOT EXISTS idx_license_plan_projection_previews_consumed
+  ON license_plan_projection_previews(consumed_at)
+  WHERE consumed_at IS NOT NULL;
+
 CREATE INDEX IF NOT EXISTS idx_license_plan_projection_previews_expiry
   ON license_plan_projection_previews(expires_at);
 

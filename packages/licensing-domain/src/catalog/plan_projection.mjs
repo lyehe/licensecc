@@ -16,6 +16,15 @@ const ZERO_TRIAL = Object.freeze({
   trial_require_device_proof: 0,
 });
 
+// Apply accepts an opaque server capability, never a client-selected form
+// payload. Keep this grammar shared by runtime, admin validation, UI, and the
+// OpenAPI contract: no whitespace, `=`, or line breaks can enter any layer.
+export const PLAN_PROJECTION_PREVIEW_ID_PATTERN = /^ppv_[A-Za-z0-9_-]{1,124}$/;
+
+export function isPlanProjectionPreviewId(value) {
+  return typeof value === "string" && PLAN_PROJECTION_PREVIEW_ID_PATTERN.test(value);
+}
+
 function requiredString(input, field) {
   const value = input?.[field];
   if (typeof value !== "string" || value.trim() === "") throw new Error(`invalid_${field}`);

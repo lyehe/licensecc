@@ -1,4 +1,4 @@
-import type { PlanProjectionApplyInput, PlanProjectionInput } from "@licensecc/licensing-domain/catalog/plan_projection";
+import { isPlanProjectionPreviewId, type PlanProjectionApplyInput, type PlanProjectionInput } from "@licensecc/licensing-domain/catalog/plan_projection";
 import { safeString } from "@licensecc/cloudflare-runtime/http/kit";
 
 const HEX_64 = /^[0-9a-fA-F]{64}$/;
@@ -132,7 +132,7 @@ export function validatePlanProjectionApplyInput(value: unknown): PlanProjection
     return null;
   }
   const previewId = safeString(input.preview_id, 128);
-  if (previewId === null || !previewId.startsWith("ppv_")) {
+  if (previewId === null || !isPlanProjectionPreviewId(previewId)) {
     return null;
   }
   return { preview_id: previewId };

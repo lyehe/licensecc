@@ -11,21 +11,26 @@ import {
   entitlementId,
   withId,
 } from "./entitlement_mutation.mjs";
+import { entitlementCurrentJsonSql } from "./entitlement_json.mjs";
 import {
   classifyPlanProjection,
   desiredPlanProjectionRow,
+  isPlanProjectionPreviewId,
   normalizePlanProjectionInput,
   planProjectionMatchesDesired,
 } from "@licensecc/licensing-domain/catalog/plan_projection";
 
 const PREVIEW_SCOPE = "catalog";
 const PREVIEW_TTL_SECONDS = 300;
+const PREVIEW_CLEANUP_BATCH_SIZE = 25;
 // A desired action needs at most four D1 statements during Apply (mutation,
-// policy stamp, audit, and assertion). Nine actions are 44 batch statements
-// in the idempotency case; the generic replay lookup and persisted-preview
-// decode make 46 D1 queries total, below the Workers Free 50-query limit (and
-// therefore also below Paid's 1,000-query limit). Never chunk Apply: reject a
-// larger preview before it becomes a capability.
+// policy stamp, audit, and assertion). Nine actions are 45 batch statements
+// with the atomic claim-failure classifier and idempotency path. The winning
+// request performs 47 top-level D1 statements (replay lookup + preview decode
+// + batch); a stale concurrent loser that replays performs 48. Both remain
+// below the Workers Free 50-query limit, and therefore Paid's 1,000-query
+// limit. Never chunk Apply: reject a larger preview before it becomes a
+// capability.
 const MAX_ATOMIC_ACTIONS = 9;
 const APPLY_CODE = "license_plan_projection_applied";
 
@@ -135,6 +140,32 @@ function managedEntitlementsStatement(env, input) {
   ).bind(input.project, input.license_id, input.license_fingerprint);
 }
 
+function assignmentSnapshotStatement(env, input) {
+  return env.DB.prepare(
+    `SELECT license_id, project, plan_id, license_fingerprint, customer_id, status, support_until, addons_json, created_at, updated_at
+     FROM license_plan_assignments
+     WHERE license_id = ? AND project = ?
+     LIMIT 1`,
+  ).bind(input.license_id, input.project);
+}
+
+function cleanupExpiredPreviewsStatement(env, now) {
+  // Lazy cleanup is intentionally part of Preview, not Apply: Apply's only
+  // mutations must be guarded by its successful claim. The bounded subquery
+  // prevents a frequently-used admin endpoint from turning retention work into
+  // an unbounded D1 operation.
+  return env.DB.prepare(
+    `DELETE FROM license_plan_projection_previews
+     WHERE id IN (
+       SELECT id
+       FROM license_plan_projection_previews
+       WHERE expires_at <= ? OR consumed_at IS NOT NULL
+       ORDER BY expires_at ASC, id ASC
+       LIMIT ?
+     )`,
+  ).bind(now, PREVIEW_CLEANUP_BATCH_SIZE);
+}
+
 function selectedPlanRows(rows, plan, addonList) {
   const requested = new Set(addonList);
   const availableAddons = new Set();
@@ -158,9 +189,12 @@ function selectedPlanRows(rows, plan, addonList) {
   return selected;
 }
 
-// All preview reads run in one D1 batch. D1 executes a batch atomically, so
-// generation, plan, feature/policy rows, and managed entitlement rows all come
-// from one source snapshot rather than a sequence of independently fresh reads.
+// All source-dependent Preview reads run in one D1 batch. D1 executes a batch
+// atomically, so generation, plan, feature/policy rows, managed entitlement
+// rows, and the compatibility-critical assignment snapshot all come from one
+// source snapshot rather than a sequence of independently fresh reads. Cleanup
+// deliberately follows capacity validation, so an oversized Preview remains
+// entirely read-only.
 async function buildProjectionSnapshot(env, input, effectiveAt) {
   requireBatch(env);
   const normalized = normalizePlanProjectionInput(input);
@@ -169,6 +203,7 @@ async function buildProjectionSnapshot(env, input, effectiveAt) {
     planStatement(env, normalized),
     planFeatureStatement(env, normalized),
     managedEntitlementsStatement(env, normalized),
+    assignmentSnapshotStatement(env, normalized),
   ]);
   const generationRow = firstResult(results[0]);
   const sourceGeneration = Number(generationRow?.generation);
@@ -179,7 +214,11 @@ async function buildProjectionSnapshot(env, input, effectiveAt) {
   const rows = selectedPlanRows(resultsOf(results[2]), plan, normalized.addons);
   const desired = rows.map((row) => desiredPlanProjectionRow(row, normalized, effectiveAt));
   const existingRows = resultsOf(results[3]).map((row) => withId(row));
-  return { input: normalized, plan, desired, existingRows, sourceGeneration };
+  const assignmentSnapshot = firstResult(results[4]);
+  if (assignmentSnapshot !== null && assignmentSnapshot.license_fingerprint !== normalized.license_fingerprint) {
+    throw new Error("license_fingerprint_conflict");
+  }
+  return { input: normalized, plan, desired, existingRows, assignmentSnapshot, sourceGeneration };
 }
 
 function actionId(desired) {
@@ -243,7 +282,7 @@ function insertPreviewStatement(env, previewId, actorSubject, projection, previe
     projection.sourceGeneration,
     JSON.stringify(projection.input),
     JSON.stringify(preview),
-    JSON.stringify({ ...actions, assignment: preview.assignment }),
+    JSON.stringify({ ...actions, assignment: preview.assignment, assignment_snapshot: projection.assignmentSnapshot }),
     effectiveAt,
     expiresAt,
     effectiveAt,
@@ -262,8 +301,15 @@ export async function previewPlanProjection(env, input, actorSubject, now = nowS
     const preview = previewResponse(projection, previewId, effectiveAt, expiresAt);
     const actions = deriveActions(projection);
     assertAtomicActionCapacity(actions);
-    const inserted = await insertPreviewStatement(env, previewId, actorSubject, projection, preview, actions, effectiveAt, expiresAt).all();
-    if (resultsOf(inserted).length === 1) return preview;
+    // This is intentionally after assertAtomicActionCapacity(): an operator
+    // who must narrow an over-large scope gets no write attempt at all. Once
+    // valid, cleanup and preview persistence share one batch; the INSERT's
+    // generation predicate still rejects any source change after the snapshot.
+    const persisted = await env.DB.batch([
+      cleanupExpiredPreviewsStatement(env, effectiveAt),
+      insertPreviewStatement(env, previewId, actorSubject, projection, preview, actions, effectiveAt, expiresAt),
+    ]);
+    if (resultsOf(persisted[1]).length === 1) return preview;
   }
   throw new Error("projection_snapshot_stale");
 }
@@ -279,7 +325,7 @@ async function storedPreview(env, previewId) {
   if (row === null) throw new Error("stale_projection_preview");
   const preview = parseJson(row.projection_json, "projection_preview_invalid");
   const actions = parseJson(row.actions_json, "projection_preview_invalid");
-  if (!Array.isArray(actions.created) || !Array.isArray(actions.updated) || !Array.isArray(actions.disabled) || typeof actions.assignment !== "object" || actions.assignment === null) {
+  if (!Array.isArray(actions.created) || !Array.isArray(actions.updated) || !Array.isArray(actions.disabled) || typeof actions.assignment !== "object" || actions.assignment === null || !Object.prototype.hasOwnProperty.call(actions, "assignment_snapshot")) {
     throw new Error("projection_preview_invalid");
   }
   return { preview, actions };
@@ -289,20 +335,92 @@ function claimGuardSql() {
   return "EXISTS (SELECT 1 FROM license_plan_projection_previews p WHERE p.id = ? AND p.claim_token = ? AND p.consumed_at IS NULL)";
 }
 
+function assignmentFingerprintConflictSql(previewAlias) {
+  return `EXISTS (
+    SELECT 1
+    FROM license_plan_assignments a
+    WHERE a.license_id = json_extract(${previewAlias}.actions_json, '$.assignment.license_id')
+      AND a.project = json_extract(${previewAlias}.actions_json, '$.assignment.project')
+      AND a.license_fingerprint <> json_extract(${previewAlias}.actions_json, '$.assignment.license_fingerprint')
+  )`;
+}
+
+function assignmentSnapshotStillMatchesSql(previewAlias) {
+  // The generation condition is the primary concurrent-source fence. This
+  // snapshot comparison makes the assignment dependency explicit too: an
+  // implementation error or future trigger omission cannot silently turn a
+  // preview for no assignment (or a prior assignment) into a transfer.
+  const snapshot = `${previewAlias}.actions_json`;
+  return `(CASE json_type(${snapshot}, '$.assignment_snapshot')
+    WHEN 'null' THEN NOT EXISTS (
+      SELECT 1 FROM license_plan_assignments a
+      WHERE a.license_id = json_extract(${snapshot}, '$.assignment.license_id')
+        AND a.project = json_extract(${snapshot}, '$.assignment.project')
+    )
+    WHEN 'object' THEN EXISTS (
+      SELECT 1 FROM license_plan_assignments a
+      WHERE a.license_id = json_extract(${snapshot}, '$.assignment_snapshot.license_id')
+        AND a.project = json_extract(${snapshot}, '$.assignment_snapshot.project')
+        AND a.plan_id = json_extract(${snapshot}, '$.assignment_snapshot.plan_id')
+        AND a.license_fingerprint = json_extract(${snapshot}, '$.assignment_snapshot.license_fingerprint')
+        AND a.customer_id IS json_extract(${snapshot}, '$.assignment_snapshot.customer_id')
+        AND a.status = json_extract(${snapshot}, '$.assignment_snapshot.status')
+        AND a.support_until IS json_extract(${snapshot}, '$.assignment_snapshot.support_until')
+        AND a.addons_json = json_extract(${snapshot}, '$.assignment_snapshot.addons_json')
+        AND a.created_at = json_extract(${snapshot}, '$.assignment_snapshot.created_at')
+        AND a.updated_at = json_extract(${snapshot}, '$.assignment_snapshot.updated_at')
+    )
+    ELSE 0
+  END)`;
+}
+
+function derivedGrantExpiredSql(previewAlias) {
+  return `EXISTS (
+    SELECT 1
+    FROM json_each(${previewAlias}.projection_json, '$.desired') AS desired
+    WHERE json_extract(desired.value, '$.valid_until') IS NOT NULL
+      AND CAST(json_extract(desired.value, '$.valid_until') AS INTEGER) <= ?
+  )`;
+}
+
 function claimStatement(env, previewId, actorSubject, claimToken, now) {
   return env.DB.prepare(
-    `UPDATE license_plan_projection_previews
+    `UPDATE license_plan_projection_previews AS p
      SET claim_token = ?, claimed_at = ?
-     WHERE id = ?
-       AND actor_subject = ?
-       AND claim_token IS NULL
-       AND consumed_at IS NULL
-       AND expires_at > ?
-       AND source_generation = (
+     WHERE p.id = ?
+       AND p.actor_subject = ?
+       AND p.claim_token IS NULL
+       AND p.consumed_at IS NULL
+       AND p.expires_at > ?
+       AND p.source_generation = (
          SELECT generation FROM license_plan_projection_generations WHERE scope = ?
        )
+       AND NOT ${assignmentFingerprintConflictSql("p")}
+       AND ${assignmentSnapshotStillMatchesSql("p")}
+       AND NOT ${derivedGrantExpiredSql("p")}
      RETURNING id`,
-  ).bind(claimToken, now, previewId, actorSubject, now, PREVIEW_SCOPE);
+  ).bind(claimToken, now, previewId, actorSubject, now, PREVIEW_SCOPE, now);
+}
+
+function claimFailureStatement(env, previewId, actorSubject, now) {
+  // This is deliberately in the same D1 batch as the conditional claim. It
+  // classifies a zero-row claim without reopening a TOCTOU gap; every later
+  // mutation checks claimGuardSql(), so this read can never enable writes.
+  return env.DB.prepare(
+    `SELECT CASE
+       WHEN EXISTS (
+         SELECT 1 FROM license_plan_projection_previews p
+         WHERE p.id = ? AND p.actor_subject = ?
+           AND ${assignmentFingerprintConflictSql("p")}
+       ) THEN 'license_fingerprint_conflict'
+       WHEN EXISTS (
+         SELECT 1 FROM license_plan_projection_previews p
+         WHERE p.id = ? AND p.actor_subject = ?
+           AND ${derivedGrantExpiredSql("p")}
+       ) THEN 'projection_preview_grant_expired'
+       ELSE 'stale_projection_preview'
+     END AS projection_claim_error`,
+  ).bind(previewId, actorSubject, previewId, actorSubject, now);
 }
 
 function valuesForDesired(desired) {
@@ -455,44 +573,6 @@ function disableEntitlementStatement(env, action, now, previewId, claimToken) {
   ).bind(now, previous.project, previous.feature, previous.license_fingerprint, previewId, claimToken);
 }
 
-function currentEntitlementJson(alias, idExpression) {
-  return `json_object(
-    'project', ${alias}.project,
-    'feature', ${alias}.feature,
-    'license_fingerprint', ${alias}.license_fingerprint,
-    'device_hash', ${alias}.device_hash,
-    'status', ${alias}.status,
-    'assertion_ttl_seconds', ${alias}.assertion_ttl_seconds,
-    'revocation_seq', ${alias}.revocation_seq,
-    'valid_from', ${alias}.valid_from,
-    'valid_until', ${alias}.valid_until,
-    'notes', ${alias}.notes,
-    'customer_id', ${alias}.customer_id,
-    'license_id', ${alias}.license_id,
-    'policy_id', ${alias}.policy_id,
-    'is_trial', ${alias}.is_trial,
-    'trial_expiration_basis', ${alias}.trial_expiration_basis,
-    'trial_duration_sec', ${alias}.trial_duration_sec,
-    'trial_one_per_device', ${alias}.trial_one_per_device,
-    'trial_require_device_proof', ${alias}.trial_require_device_proof,
-    'trial_started_at', ${alias}.trial_started_at,
-    'trial_device_hash', ${alias}.trial_device_hash,
-    'max_active_devices', ${alias}.max_active_devices,
-    'lease_seconds', ${alias}.lease_seconds,
-    'rebind_window_sec', ${alias}.rebind_window_sec,
-    'pool_size', ${alias}.pool_size,
-    'heartbeat_grace_sec', ${alias}.heartbeat_grace_sec,
-    'max_borrow_sec', ${alias}.max_borrow_sec,
-    'allow_overdraft', ${alias}.allow_overdraft,
-    'meter_quota', ${alias}.meter_quota,
-    'meter_period_sec', ${alias}.meter_period_sec,
-    'license_mode', CASE WHEN ${alias}.is_trial = 1 THEN 'trial' WHEN ${alias}.pool_size > 0 THEN 'floating' ELSE 'node_locked' END,
-    'created_at', ${alias}.created_at,
-    'updated_at', ${alias}.updated_at,
-    'id', ${idExpression}
-  )`;
-}
-
 function entitlementAuditStatement(env, action, eventType, reason, ctx, now, previewId, claimToken) {
   const desired = action.desired;
   const key = desired === undefined
@@ -508,7 +588,7 @@ function entitlementAuditStatement(env, action, eventType, reason, ctx, now, pre
     `INSERT INTO entitlement_events
        (project, feature, license_fingerprint, device_hash, event_type, status, revocation_seq, detail, actor, actor_type, source, request_id, ip, prev_json, next_json, reason, idempotency_key, created_at)
      SELECT e.project, e.feature, e.license_fingerprint, e.device_hash, ?, e.status, e.revocation_seq, ?, ?, ?, ?, ?, ?, ?,
-       ${currentEntitlementJson("e", "?")}, ?, ?, ?
+       ${entitlementCurrentJsonSql("e", "?")}, ?, ?, ?
      FROM entitlements e
      WHERE e.project = ? AND e.feature = ? AND e.license_fingerprint = ?
        AND ${claimGuardSql()}
@@ -608,7 +688,7 @@ function assignmentAssertionStatement(env, assignment, previewId, claimToken) {
 
 function appliedRowsJsonSql(path) {
   return `json(COALESCE((
-    SELECT json_group_array(${currentEntitlementJson("e", "json_extract(a.value, '$.id')")})
+    SELECT json_group_array(${entitlementCurrentJsonSql("e", "json_extract(a.value, '$.id')")})
     FROM json_each(p.actions_json, '${path}') AS a
     JOIN entitlements e
       ON e.project = COALESCE(json_extract(a.value, '$.desired.input.project'), json_extract(a.value, '$.previous.project'))
@@ -732,13 +812,16 @@ function appendDisableActionStatements(statements, env, action, ctx, now, previe
 
 export async function applyPlanProjection(env, previewId, ctx, idempotency, now = nowSeconds()) {
   requireBatch(env);
-  if (!nonEmptyString(previewId)) throw new Error("invalid_preview_id");
+  if (!isPlanProjectionPreviewId(previewId)) throw new Error("invalid_preview_id");
   const { preview, actions } = await storedPreview(env, previewId);
   if (Array.isArray(preview.blocked) && preview.blocked.length > 0) {
     throw new Error("projection_blocked_revoked_entitlement");
   }
   const claimToken = crypto.randomUUID();
-  const statements = [claimStatement(env, previewId, ctx.actor.subject, claimToken, now)];
+  const statements = [
+    claimStatement(env, previewId, ctx.actor.subject, claimToken, now),
+    claimFailureStatement(env, previewId, ctx.actor.subject, now),
+  ];
   for (const action of actions.created) appendDesiredActionStatements(statements, env, action, "create", ctx, now, previewId, claimToken);
   for (const action of actions.updated) appendDesiredActionStatements(statements, env, action, "update", ctx, now, previewId, claimToken);
   for (const action of actions.disabled) appendDisableActionStatements(statements, env, action, ctx, now, previewId, claimToken);
@@ -753,7 +836,11 @@ export async function applyPlanProjection(env, previewId, ctx, idempotency, now 
   statements.push(finalResponseStatement(env, previewId, claimToken, now));
 
   const results = await env.DB.batch(statements);
-  if (batchReturnedRow(results[0]) === null) throw new Error("stale_projection_preview");
+  if (batchReturnedRow(results[0]) === null) {
+    const failure = batchReturnedRow(results[1]);
+    const code = typeof failure?.projection_claim_error === "string" ? failure.projection_claim_error : "stale_projection_preview";
+    throw new Error(code);
+  }
   const final = batchReturnedRow(results.at(-1));
   if (final === null || typeof final.applied_response_json !== "string") throw new Error("projection_apply_failed");
   const envelope = parseJson(final.applied_response_json, "projection_apply_failed");

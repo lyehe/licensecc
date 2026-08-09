@@ -51,7 +51,7 @@ function makeAdminApiFixture() {
   const policies = [];
   const webhooks = [];
   const projectionPreviews = new Map();
-  const projectionState = { staleNextPlanApply: false };
+  const projectionState = { staleNextPlanApply: false, nextPlanApplyError: null };
   let nextProjectionPreviewId = 1;
 
   function seedPolicy() {
@@ -736,6 +736,11 @@ function makeAdminApiFixture() {
         projectionState.staleNextPlanApply = false;
         return fulfill(409, { ok: false, code: "stale_projection_preview", request_id: "ui-e2e-projection-stale" });
       }
+      if (projectionState.nextPlanApplyError !== null) {
+        const code = projectionState.nextPlanApplyError;
+        projectionState.nextPlanApplyError = null;
+        return fulfill(409, { ok: false, code, request_id: "ui-e2e-projection-conflict" });
+      }
       const stored = projectionPreviews.get(body.preview_id);
       if (stored === undefined) {
         return fulfill(409, { ok: false, code: "stale_projection_preview", request_id: "ui-e2e-projection-missing" });
@@ -1311,7 +1316,7 @@ test("admin UI previews and applies a license plan projection", async ({ page })
   await expect(page.getByText("License lic_plan").first()).toBeVisible();
 });
 
-test("admin UI forces a fresh preview when Apply reports stale_projection_preview", async ({ page }) => {
+test("admin UI clears its bound preview for stale and fingerprint-conflict Apply responses", async ({ page }) => {
   const api = makeAdminApiFixture();
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
@@ -1343,6 +1348,15 @@ test("admin UI forces a fresh preview when Apply reports stale_projection_previe
   await expect(applyButton).toBeDisabled();
   await projectionForm.getByRole("button", { name: "Preview" }).click();
   await expect(applyButton).toBeEnabled();
+
+  api.projectionState.nextPlanApplyError = "license_fingerprint_conflict";
+  await applyButton.click();
+  await expect(page.getByText(/license_fingerprint_conflict.*preview again/)).toBeVisible();
+  await expect(applyButton).toBeDisabled();
+  // Both simulated 409s return before the fixture's entitlement/event/assignment
+  // mutation path; the UI has only sent the server-bound preview_id.
+  expect(api.requests.planApplies).toHaveLength(2);
+  expect(api.requests.planApplies.every((body) => Object.keys(body).length === 1 && typeof body.preview_id === "string")).toBe(true);
 });
 
 test("admin UI renders Workstream F charts, expiring panel, health badge, and force-release", async ({ page }) => {

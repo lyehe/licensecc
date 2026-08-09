@@ -375,9 +375,9 @@ export function Catalog({ active }: { active: boolean }): React.ReactElement | n
       const body: PlanProjectionApplyInput = planProjectionApplyBody(binding.preview.preview_id);
       const result = await api<PlanProjectionApplyResult>(planProjectionApplyPath(), { method: "POST", headers: { "idempotency-key": crypto.randomUUID() }, body: JSON.stringify(body) });
       if (revision !== planProjectionRevision.current) return;
-      if (!result.ok && result.code === "stale_projection_preview") {
+      if (!result.ok && ["stale_projection_preview", "projection_preview_grant_expired", "license_fingerprint_conflict"].includes(result.code)) {
         invalidatePlanProjectionPreview();
-        setMessage("stale_projection_preview — preview again");
+        setMessage(`${result.code} — preview again`);
         return;
       }
       if (!result.ok && result.code === "plan_projection_too_large") {

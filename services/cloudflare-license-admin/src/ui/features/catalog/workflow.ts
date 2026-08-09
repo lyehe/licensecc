@@ -9,6 +9,7 @@ import type {
   PlanProjectionApplyInput,
   PlanProjectionInput,
 } from "../../../shared/api";
+import { isPlanProjectionPreviewId } from "@licensecc/licensing-domain/catalog/plan_projection";
 import { dateInputToEpoch } from "../../shared/dates";
 
 export interface CatalogFilter {
@@ -303,7 +304,7 @@ export function planProjectionApplyPath(): string {
 }
 
 export function planProjectionApplyBody(previewId: string): PlanProjectionApplyInput {
-  if (!previewId.startsWith("ppv_") || previewId.length > 128 || previewId.includes("\n") || previewId.includes("\r") || previewId.includes("=") || previewId.includes("\0")) {
+  if (!isPlanProjectionPreviewId(previewId)) {
     throw new Error("preview_id_required_or_invalid");
   }
   return { preview_id: previewId };

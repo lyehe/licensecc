@@ -1,5 +1,8 @@
 import type { EntitlementRecord } from "../entitlements/contracts";
 
+export const PLAN_PROJECTION_PREVIEW_ID_PATTERN: RegExp;
+export function isPlanProjectionPreviewId(value: unknown): value is string;
+
 export interface PlanProjectionInput {
   project: string;
   license_id: string;

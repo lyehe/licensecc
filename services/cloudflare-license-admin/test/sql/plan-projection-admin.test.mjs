@@ -11,7 +11,9 @@ const here = dirname(fileURLToPath(import.meta.url));
 const migrationsDir = join(here, "..", "..", "..", "cloudflare-licensing-backend", "migrations");
 const FP = "c".repeat(64);
 const NOW = 1_700_000_000;
-const SUPPORT_UNTIL = NOW + 31_536_000;
+// Worker tests use the real wall clock for Apply, so keep an explicit support
+// expiry safely in the future rather than the historical fixture timestamp.
+const SUPPORT_UNTIL = 2_000_000_000;
 
 function normalizeParam(value) {
   if (value === undefined) return null;
@@ -66,6 +68,63 @@ class D1Like {
   }
 }
 
+class CountingPreparedStatement {
+  constructor(owner, sql, params = []) {
+    this.owner = owner;
+    this.sql = sql;
+    this.params = params;
+  }
+  bind(...values) {
+    return new CountingPreparedStatement(this.owner, this.sql, values.map(normalizeParam));
+  }
+  async first() {
+    this.owner.queryCount += 1;
+    if (this.owner.hideFirstIdempotencyRead && this.sql.startsWith("SELECT response_json FROM mutation_idempotency")) {
+      this.owner.hideFirstIdempotencyRead = false;
+      return null;
+    }
+    const row = this.owner.db.prepare(this.sql).get(...this.params);
+    return row === undefined ? null : row;
+  }
+  async all() {
+    this.owner.queryCount += 1;
+    return { results: this.owner.db.prepare(this.sql).all(...this.params) };
+  }
+  async run() {
+    this.owner.queryCount += 1;
+    this.owner.db.prepare(this.sql).all(...this.params);
+    return { success: true };
+  }
+}
+
+class CountingD1Like {
+  constructor(db) {
+    this.db = db;
+    this.queryCount = 0;
+    this.batchLengths = [];
+    this.hideFirstIdempotencyRead = false;
+  }
+  prepare(sql) {
+    return new CountingPreparedStatement(this, sql);
+  }
+  async batch(statements) {
+    this.queryCount += statements.length;
+    this.batchLengths.push(statements.length);
+    const out = [];
+    this.db.exec("BEGIN");
+    try {
+      for (const statement of statements) {
+        out.push({ results: this.db.prepare(statement.sql).all(...statement.params), success: true });
+      }
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+    return out;
+  }
+}
+
 function freshDb() {
   const db = new DatabaseSync(":memory:");
   for (const name of readdirSync(migrationsDir).filter((file) => file.endsWith(".sql")).sort()) {
@@ -74,13 +133,31 @@ function freshDb() {
   return db;
 }
 
-function devEnv(db) {
+function devEnv(db, d1 = new D1Like(db)) {
   return {
-    DB: new D1Like(db),
+    DB: d1,
     ENVIRONMENT: "development",
     ADMIN_DEV_BEARER_ENABLED: "1",
     ADMIN_DEV_BEARER: "dev-secret",
   };
+}
+
+function addIncludedProjectionFeatures(db, count) {
+  const feature = db.prepare(
+    "INSERT INTO catalog_features (id, project, feature_key, name, description, category, status, created_at, updated_at) VALUES (?, 'DEFAULT', ?, ?, '', '', 'active', ?, ?)",
+  );
+  const planFeature = db.prepare(
+    `INSERT INTO catalog_plan_features
+      (project, plan_id, feature_key, feature_inclusion, addon_key, policy_id, status, display_order,
+       assertion_ttl_seconds, pool_size, max_active_devices, max_borrow_sec, meter_quota, meter_period_sec,
+       created_at, updated_at)
+     VALUES ('DEFAULT', 'plan_pro', ?, 'included', NULL, 'pol_node', 'active', ?, NULL, NULL, NULL, NULL, NULL, NULL, ?, ?)`,
+  );
+  for (let index = 0; index < count; index += 1) {
+    const key = `budget_${index}`;
+    feature.run(`feat_${key}`, key, key, NOW, NOW);
+    planFeature.run(key, 20 + index, NOW, NOW);
+  }
 }
 
 function devReq(path, options = {}) {
@@ -621,6 +698,74 @@ test("license-plan apply accepts only its server preview id, rejecting form subs
   assert.equal(substituted.status, 400);
   assert.equal((await body(substituted)).code, "invalid_request");
   assert.equal(db.prepare("SELECT COUNT(*) AS c FROM entitlements").get().c, 0);
+
+  const malformedPreviewId = await worker.fetch(
+    devReq("/api/admin/license-plans/apply", {
+      method: "POST",
+      body: JSON.stringify({ preview_id: "ppv_bad=identifier" }),
+    }),
+    env,
+  );
+  assert.equal(malformedPreviewId.status, 400);
+  assert.equal((await body(malformedPreviewId)).code, "invalid_request");
+});
+
+test("license-plan Preview reports license_fingerprint_conflict without changing old or new assignment state", async () => {
+  const db = freshDb();
+  seedCatalog(db);
+  const env = devEnv(db);
+  const oldFingerprint = "e".repeat(64);
+  db.prepare("INSERT INTO entitlements (project, feature, license_fingerprint, status, license_id, created_at, updated_at) VALUES ('DEFAULT', 'core', ?, 'active', 'lic_plan', ?, ?)").run(oldFingerprint, NOW, NOW);
+  db.prepare("INSERT INTO license_plan_assignments (license_id, project, plan_id, license_fingerprint, customer_id, status, support_until, addons_json, created_at, updated_at) VALUES ('lic_plan', 'DEFAULT', 'plan_pro', ?, 'cus_old', 'active', NULL, '[]', ?, ?)").run(oldFingerprint, NOW, NOW);
+  const before = {
+    old: db.prepare("SELECT feature, status, license_id FROM entitlements WHERE license_fingerprint = ?").get(oldFingerprint),
+    assignment: db.prepare("SELECT plan_id, license_fingerprint, customer_id, addons_json FROM license_plan_assignments WHERE license_id = 'lic_plan' AND project = 'DEFAULT'").get(),
+    events: db.prepare("SELECT COUNT(*) AS c FROM entitlement_events").get().c,
+  };
+
+  const preview = await worker.fetch(
+    devReq("/api/admin/license-plans/preview", { method: "POST", body: JSON.stringify(projectionBody()) }),
+    env,
+  );
+  assert.equal(preview.status, 409, await preview.clone().text());
+  assert.equal((await body(preview)).code, "license_fingerprint_conflict");
+  assert.deepEqual(db.prepare("SELECT feature, status, license_id FROM entitlements WHERE license_fingerprint = ?").get(oldFingerprint), before.old);
+  assert.equal(db.prepare("SELECT COUNT(*) AS c FROM entitlements WHERE license_fingerprint = ?").get(FP).c, 0);
+  assert.deepEqual(db.prepare("SELECT plan_id, license_fingerprint, customer_id, addons_json FROM license_plan_assignments WHERE license_id = 'lic_plan' AND project = 'DEFAULT'").get(), before.assignment);
+  assert.equal(db.prepare("SELECT COUNT(*) AS c FROM entitlement_events").get().c, before.events);
+  assert.equal(db.prepare("SELECT COUNT(*) AS c FROM license_plan_projection_previews").get().c, 0);
+});
+
+test("license-plan Apply atomically reports license_fingerprint_conflict after a preview and writes nothing", async () => {
+  const db = freshDb();
+  seedCatalog(db);
+  const env = devEnv(db);
+  const preview = await worker.fetch(
+    devReq("/api/admin/license-plans/preview", { method: "POST", body: JSON.stringify(projectionBody()) }),
+    env,
+  );
+  const previewId = (await body(preview)).data.preview_id;
+  const oldFingerprint = "f".repeat(64);
+  db.prepare("INSERT INTO entitlements (project, feature, license_fingerprint, status, license_id, created_at, updated_at) VALUES ('DEFAULT', 'core', ?, 'active', 'lic_plan', ?, ?)").run(oldFingerprint, NOW, NOW);
+  db.prepare("INSERT INTO license_plan_assignments (license_id, project, plan_id, license_fingerprint, customer_id, status, support_until, addons_json, created_at, updated_at) VALUES ('lic_plan', 'DEFAULT', 'plan_pro', ?, 'cus_old', 'active', NULL, '[]', ?, ?)").run(oldFingerprint, NOW, NOW);
+  const before = {
+    assignment: db.prepare("SELECT plan_id, license_fingerprint, customer_id, addons_json FROM license_plan_assignments WHERE license_id = 'lic_plan' AND project = 'DEFAULT'").get(),
+    events: db.prepare("SELECT COUNT(*) AS c FROM entitlement_events").get().c,
+  };
+
+  const apply = await worker.fetch(
+    devReq("/api/admin/license-plans/apply", { method: "POST", body: JSON.stringify({ preview_id: previewId }) }),
+    env,
+  );
+  assert.equal(apply.status, 409, await apply.clone().text());
+  assert.equal((await body(apply)).code, "license_fingerprint_conflict");
+  assert.equal(db.prepare("SELECT COUNT(*) AS c FROM entitlements WHERE license_fingerprint = ?").get(FP).c, 0);
+  assert.equal(db.prepare("SELECT COUNT(*) AS c FROM entitlements WHERE license_fingerprint = ?").get(oldFingerprint).c, 1);
+  assert.deepEqual(db.prepare("SELECT plan_id, license_fingerprint, customer_id, addons_json FROM license_plan_assignments WHERE license_id = 'lic_plan' AND project = 'DEFAULT'").get(), before.assignment);
+  assert.equal(db.prepare("SELECT COUNT(*) AS c FROM entitlement_events").get().c, before.events);
+  const persisted = db.prepare("SELECT claim_token, consumed_at FROM license_plan_projection_previews WHERE id = ?").get(previewId);
+  assert.equal(persisted.claim_token, null);
+  assert.equal(persisted.consumed_at, null);
 });
 
 test("a changed source generation makes Apply return stale_projection_preview with no projection writes", async () => {
@@ -672,4 +817,69 @@ test("concurrent same-key Apply requests produce one committed result and one re
   assert.equal(db.prepare("SELECT COUNT(*) AS c FROM entitlement_events WHERE license_fingerprint = ?").get(FP).c, 3);
   assert.equal(db.prepare("SELECT COUNT(*) AS c FROM license_plan_assignments WHERE license_id = 'lic_plan'").get().c, 1);
   assert.equal(db.prepare("SELECT COUNT(*) AS c FROM mutation_idempotency WHERE idempotency_key = 'plan-concurrent-1'").get().c, 1);
+});
+
+test("the nine-action Free-tier projection path has 45 batch statements, 47 winner queries, and 48 stale-loser replay queries", async () => {
+  const winnerDb = freshDb();
+  seedCatalog(winnerDb);
+  addIncludedProjectionFeatures(winnerDb, 6); // core/export/team plus six = exactly nine creates.
+  const winnerD1 = new CountingD1Like(winnerDb);
+  const winnerEnv = devEnv(winnerDb, winnerD1);
+  const winnerPreview = await worker.fetch(
+    devReq("/api/admin/license-plans/preview", { method: "POST", body: JSON.stringify(projectionBody()) }),
+    winnerEnv,
+  );
+  const winnerPreviewId = (await body(winnerPreview)).data.preview_id;
+  winnerD1.queryCount = 0;
+  winnerD1.batchLengths = [];
+  const winner = await worker.fetch(
+    devReq("/api/admin/license-plans/apply", {
+      method: "POST",
+      headers: { "idempotency-key": "plan-budget-winner" },
+      body: JSON.stringify({ preview_id: winnerPreviewId }),
+    }),
+    winnerEnv,
+  );
+  assert.equal(winner.status, 200, await winner.clone().text());
+  assert.equal(winnerD1.batchLengths.at(-1), 45);
+  assert.equal(winnerD1.queryCount, 47);
+  assert.ok(winnerD1.queryCount <= 50);
+
+  const loserDb = freshDb();
+  seedCatalog(loserDb);
+  addIncludedProjectionFeatures(loserDb, 6);
+  const loserD1 = new CountingD1Like(loserDb);
+  const loserEnv = devEnv(loserDb, loserD1);
+  const loserPreview = await worker.fetch(
+    devReq("/api/admin/license-plans/preview", { method: "POST", body: JSON.stringify(projectionBody()) }),
+    loserEnv,
+  );
+  const loserPreviewId = (await body(loserPreview)).data.preview_id;
+  // Model the only concurrent window that matters: the loser has already read
+  // an empty replay cache, then the winner consumes the capability and writes
+  // the replay row. The wrapper hides just that first lookup; its later replay
+  // lookup reads the real row while its 45-statement claimed batch stays gated.
+  loserDb.prepare("UPDATE license_plan_projection_previews SET consumed_at = ? WHERE id = ?").run(NOW, loserPreviewId);
+  loserDb.prepare("INSERT INTO mutation_idempotency (scope, idempotency_key, response_json, created_at) VALUES (?, ?, ?, ?)").run(
+    "POST:/api/admin/license-plans/apply:dev",
+    "plan-budget-loser",
+    JSON.stringify({ ok: true, code: "license_plan_projection_applied", request_id: "winner", data: {} }),
+    NOW,
+  );
+  loserD1.queryCount = 0;
+  loserD1.batchLengths = [];
+  loserD1.hideFirstIdempotencyRead = true;
+  const loser = await worker.fetch(
+    devReq("/api/admin/license-plans/apply", {
+      method: "POST",
+      headers: { "idempotency-key": "plan-budget-loser" },
+      body: JSON.stringify({ preview_id: loserPreviewId }),
+    }),
+    loserEnv,
+  );
+  assert.equal(loser.status, 200, await loser.clone().text());
+  assert.equal(loser.headers.get("x-idempotent-replay"), "1");
+  assert.equal(loserD1.batchLengths.at(-1), 45);
+  assert.equal(loserD1.queryCount, 48);
+  assert.ok(loserD1.queryCount <= 50);
 });

@@ -1887,7 +1887,7 @@
           "properties": {
             "preview_id": {
               "maxLength": 128,
-              "pattern": "^ppv_",
+              "pattern": "^ppv_[A-Za-z0-9_-]{1,124}$",
               "type": "string"
             }
           },
@@ -11299,9 +11299,23 @@
               "content": {
                 "application/json": {
                   "examples": {
+                    "license_fingerprint_conflict": {
+                      "value": {
+                        "code": "license_fingerprint_conflict",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    },
                     "plan_projection_blocked": {
                       "value": {
                         "code": "plan_projection_blocked",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    },
+                    "projection_preview_grant_expired": {
+                      "value": {
+                        "code": "projection_preview_grant_expired",
                         "ok": false,
                         "request_id": "1a2b3c-1"
                       }
@@ -11319,7 +11333,7 @@
                   }
                 }
               },
-              "description": "Preview expired, was consumed, belongs to a different actor, or its source generation changed; re-preview before Apply."
+              "description": "Preview expired, was consumed, belongs to a different actor, its source generation changed, its derived grant has expired, or an assignment now has a different license fingerprint; re-preview before Apply. A fingerprint transfer needs a separate deliberate protocol."
             },
             "413": {
               "content": {
@@ -11556,6 +11570,13 @@
                         "request_id": "1a2b3c-1"
                       }
                     },
+                    "license_fingerprint_conflict": {
+                      "value": {
+                        "code": "license_fingerprint_conflict",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    },
                     "plan_disabled": {
                       "value": {
                         "code": "plan_disabled",
@@ -11583,7 +11604,7 @@
                   }
                 }
               },
-              "description": "Plan or referenced policy is disabled, the plan references a policy from another project, or `plan_projection_too_large` requires the operator to narrow the plan/add-on scope before previewing again. The nine-action bound keeps one Apply transaction below D1 Workers Free (50 query) and Paid (1,000 query) invocation limits."
+              "description": "Plan or referenced policy is disabled, the plan references a policy from another project, a different existing license fingerprint requires a deliberate transfer protocol, or `plan_projection_too_large` requires the operator to narrow the plan/add-on scope before previewing again. The nine-action bound keeps one Apply transaction below D1 Workers Free (50 query) and Paid (1,000 query) invocation limits."
             },
             "413": {
               "content": {

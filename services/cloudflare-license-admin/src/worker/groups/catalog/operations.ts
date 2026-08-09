@@ -38,6 +38,12 @@ export function planProjectionError(error: unknown, requestIdValue: string): Res
   if (message === "stale_projection_preview") {
     return envelope(requestIdValue, "stale_projection_preview", undefined, 409);
   }
+  if (message === "license_fingerprint_conflict") {
+    return envelope(requestIdValue, "license_fingerprint_conflict", undefined, 409);
+  }
+  if (message === "projection_preview_grant_expired") {
+    return envelope(requestIdValue, "projection_preview_grant_expired", undefined, 409);
+  }
   if (message === "projection_too_large") {
     return envelope(requestIdValue, "plan_projection_too_large", undefined, 409);
   }

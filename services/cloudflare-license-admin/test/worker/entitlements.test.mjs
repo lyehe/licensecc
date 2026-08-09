@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import test from "node:test";
+import { entitlementCurrentJsonSql } from "@licensecc/cloudflare-runtime/d1/entitlement_json";
 import {
   NEXT_JSON_KEYS,
   MockD1,
@@ -345,13 +345,15 @@ test("audit next_json carries the full production json_object field set", async 
   assert.equal(db.events[0].prev_json, ""); // prev was null on create
 });
 
-test("production json_object next_json key set matches the audit contract (drift guard)", () => {
-  // eventFromCurrentStatement moved into the shared entitlement_mutation core; read it there.
-  const moduleUrl = import.meta.resolve("@licensecc/cloudflare-runtime/d1/entitlement_mutation");
-  const src = readFileSync(new URL(moduleUrl), "utf8");
-  const match = /function eventFromCurrentStatement\([\s\S]*?json_object\(([\s\S]*?)\),\s*\n/.exec(src);
-  assert.ok(match, "eventFromCurrentStatement json_object block not found");
-  const keys = [...match[1].matchAll(/'([a-z_]+)'\s*,/g)].map((m) => m[1]);
+test("canonical D1-safe next_json key set matches the audit contract (drift guard)", () => {
+  // Both entitlement mutation and plan projection interpolate this shared
+  // expression. Keep the semantic key contract independent of its safe nested
+  // json_set representation; a monolithic json_object exceeds D1's arg cap.
+  const expression = entitlementCurrentJsonSql("", "?", { includeCacheTtl: true });
+  const keys = [
+    ...expression.matchAll(/'([a-z_]+)'\s*,/g),
+    ...expression.matchAll(/'\$\.([a-z_]+)'\s*,/g),
+  ].map((m) => m[1]);
   assert.deepEqual(keys.sort(), [...NEXT_JSON_KEYS].sort());
 });
 

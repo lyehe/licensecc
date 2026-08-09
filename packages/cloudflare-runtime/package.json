@@ -29,6 +29,10 @@
       "types": "./src/d1/entitlement_mutation.d.ts",
       "default": "./src/d1/entitlement_mutation.mjs"
     },
+    "./d1/entitlement_json": {
+      "types": "./src/d1/entitlement_json.d.ts",
+      "default": "./src/d1/entitlement_json.mjs"
+    },
     "./d1/idempotency_store": {
       "types": "./src/d1/idempotency_store.d.ts",
       "default": "./src/d1/idempotency_store.mjs"

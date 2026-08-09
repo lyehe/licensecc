@@ -334,7 +334,7 @@ export const openApiComponents: LabeledComponentFragment = {
         additionalProperties: false,
         description: "Apply exactly one server-persisted preview. Catalog/form fields are intentionally not accepted here.",
         properties: {
-          preview_id: { type: "string", maxLength: 128, pattern: "^ppv_" },
+          preview_id: { type: "string", maxLength: 128, pattern: "^ppv_[A-Za-z0-9_-]{1,124}$" },
         },
       }],
       ["PlanProjectionApplyResult", {

@@ -10,6 +10,7 @@ import {
   entitlementMatchesInput,
   syncEventType,
 } from "@licensecc/licensing-domain/entitlements/contracts";
+import { entitlementCurrentJsonSql } from "./entitlement_json.mjs";
 
 export {
   decodeEntitlementId,
@@ -77,41 +78,7 @@ export function idempotencyFromCurrentStatement(
          'ok', json('true'),
          'code', ?,
          'request_id', ?,
-         'data', json_object(
-           'project', project,
-           'feature', feature,
-           'license_fingerprint', license_fingerprint,
-           'device_hash', device_hash,
-           'status', status,
-           'assertion_ttl_seconds', assertion_ttl_seconds,
-           'revocation_seq', revocation_seq,
-           'valid_from', valid_from,
-           'valid_until', valid_until,
-           'notes', notes,
-           'customer_id', customer_id,
-           'license_id', license_id,
-           'policy_id', policy_id,
-           'is_trial', is_trial,
-           'trial_expiration_basis', trial_expiration_basis,
-           'trial_duration_sec', trial_duration_sec,
-           'trial_one_per_device', trial_one_per_device,
-           'trial_require_device_proof', trial_require_device_proof,
-           'trial_started_at', trial_started_at,
-           'trial_device_hash', trial_device_hash,
-           'max_active_devices', max_active_devices,
-           'lease_seconds', lease_seconds,
-           'rebind_window_sec', rebind_window_sec,
-           'pool_size', pool_size,
-           'heartbeat_grace_sec', heartbeat_grace_sec,
-           'max_borrow_sec', max_borrow_sec,
-           'allow_overdraft', allow_overdraft,
-           'meter_quota', meter_quota,
-           'meter_period_sec', meter_period_sec,
-           'license_mode', CASE WHEN is_trial = 1 THEN 'trial' WHEN pool_size > 0 THEN 'floating' ELSE 'node_locked' END,
-           'created_at', created_at,
-           'updated_at', updated_at,
-           'id', ?
-         )
+         'data', ${entitlementCurrentJsonSql("", "?")}
        ),
        ?
      FROM entitlements
@@ -142,42 +109,7 @@ export function eventFromCurrentStatement(
   return env.DB.prepare(
     `INSERT INTO entitlement_events (project, feature, license_fingerprint, device_hash, event_type, status, revocation_seq, detail, actor, actor_type, source, request_id, ip, prev_json, next_json, reason, idempotency_key, created_at)
      SELECT project, feature, license_fingerprint, device_hash, ?, status, revocation_seq, ?, ?, ?, '${source}', ?, ?, ?,
-       json_object(
-         'project', project,
-         'feature', feature,
-         'license_fingerprint', license_fingerprint,
-         'device_hash', device_hash,
-         'status', status,
-         'assertion_ttl_seconds', assertion_ttl_seconds,
-         'cache_ttl_seconds', cache_ttl_seconds,
-         'revocation_seq', revocation_seq,
-         'valid_from', valid_from,
-         'valid_until', valid_until,
-         'notes', notes,
-         'customer_id', customer_id,
-         'license_id', license_id,
-         'policy_id', policy_id,
-         'is_trial', is_trial,
-         'trial_expiration_basis', trial_expiration_basis,
-         'trial_duration_sec', trial_duration_sec,
-         'trial_one_per_device', trial_one_per_device,
-         'trial_require_device_proof', trial_require_device_proof,
-         'trial_started_at', trial_started_at,
-         'trial_device_hash', trial_device_hash,
-         'max_active_devices', max_active_devices,
-         'lease_seconds', lease_seconds,
-         'rebind_window_sec', rebind_window_sec,
-         'pool_size', pool_size,
-         'heartbeat_grace_sec', heartbeat_grace_sec,
-         'max_borrow_sec', max_borrow_sec,
-         'allow_overdraft', allow_overdraft,
-         'meter_quota', meter_quota,
-         'meter_period_sec', meter_period_sec,
-         'license_mode', CASE WHEN is_trial = 1 THEN 'trial' WHEN pool_size > 0 THEN 'floating' ELSE 'node_locked' END,
-         'created_at', created_at,
-         'updated_at', updated_at,
-         'id', ?
-       ),
+       ${entitlementCurrentJsonSql("", "?", { includeCacheTtl: true })},
        ?, ?, ?
      FROM entitlements
      WHERE project = ? AND feature = ? AND license_fingerprint = ?`,

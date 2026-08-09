@@ -96,6 +96,15 @@ test("spec is OpenAPI 3.1 with the expected envelope schemas", () => {
   }
 });
 
+test("plan projection Apply documents the canonical opaque preview-id grammar and conflict responses", () => {
+  const input = openApiDocument.components.schemas.PlanProjectionApplyInput;
+  assert.equal(input.properties.preview_id.pattern, "^ppv_[A-Za-z0-9_-]{1,124}$");
+  const apply = openApiDocument.paths["/api/admin/license-plans/apply"].post;
+  const projectionErrors = JSON.stringify(apply.responses["409"]);
+  assert.match(projectionErrors, /license_fingerprint_conflict/);
+  assert.match(projectionErrors, /projection_preview_grant_expired/);
+});
+
 test("spec operations equal the canonical route inventory exactly (no drift either way)", () => {
   const spec = specOperationKeys();
   const inventory = new Set(ALL_ROUTES.map((r) => `${r.method} ${r.path}`));
