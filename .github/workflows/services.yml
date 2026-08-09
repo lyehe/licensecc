@@ -1,7 +1,70 @@
-name: Services_CI
-on: [push, pull_request]
+name: Services CI
+
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
 jobs:
   services:
+    if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - uses: astral-sh/setup-uv@v5
+      - name: Select npm 10.9.8
+        run: |
+          npm install --global npm@10.9.8 --no-audit --no-fund
+          test "$(npm --version)" = "10.9.8"
+      - name: Install root workspace
+        run: npm ci
+      - name: Service, schema, and contract gates
+        run: |
+          npm run scan:secrets
+          npm run lint
+          npm run typecheck
+          npm run check:architecture
+          npm run test:contracts
+          npm run test:services
+      - name: Credential-free Worker dry-runs
+        run: npm run check:dry-run
+
+  sdks:
+    if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/setup-dotnet@v4
+      - name: Select npm 10.9.8
+        run: |
+          npm install --global npm@10.9.8 --no-audit --no-fund
+          test "$(npm --version)" = "10.9.8"
+      - name: Install root workspace
+        run: npm ci
+      - name: Python and .NET SDK tests
+        run: npm run test:sdks
+
+  e2e:
+    if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -14,42 +77,62 @@ jobs:
         run: |
           npm install --global npm@10.9.8 --no-audit --no-fund
           test "$(npm --version)" = "10.9.8"
-      - name: Install dependencies
+      - name: Install root workspace
         run: npm ci
-      # Mirrors scripts/dev-check.ps1 -IncludeServices (the documented local gate):
-      # lint + unit/API tests + SQL suites per service. UI workflow tests, E2E,
-      # schema parity, and deploy dry-runs remain local-first via dev-check flags.
-      - name: Licensing backend
-        run: |
-          npm --prefix services/cloudflare-licensing-backend run lint
-          npm --prefix services/cloudflare-licensing-backend run test
-          npm --prefix services/cloudflare-licensing-backend run test:sql
-          npm --prefix services/cloudflare-licensing-backend run test:pg
-      - name: License admin console
-        run: |
-          npm --prefix services/cloudflare-license-admin run lint
-          npm --prefix services/cloudflare-license-admin run test
-          npm --prefix services/cloudflare-license-admin run test:sql
-          npm --prefix services/cloudflare-license-admin run test:ui
-      - name: Customer portal
-        run: |
-          npm --prefix services/cloudflare-customer-portal run lint
-          npm --prefix services/cloudflare-customer-portal run test
-          npm --prefix services/cloudflare-customer-portal run test:ui
-      - name: D1 backup
-        run: |
-          npm --prefix services/cloudflare-d1-backup run lint
-          npm --prefix services/cloudflare-d1-backup run test
-  schema-parity:
+      # Admin stays on Playwright 1.60 while the portal stays on 1.61; those
+      # releases require different Chromium revisions. This is the one dedicated
+      # browser setup step, and no test script installs browsers.
+      - name: Install retained Playwright Chromium revisions
+        run: npm run setup:browsers
+      - name: Browser end-to-end tests
+        run: npm run test:e2e
+
+  documentation:
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
       - uses: astral-sh/setup-uv@v5
-      # Both scripts run via `uv run --no-project` (sqlglot fetched on demand); no npm install needed.
-      - name: D1 and PostgreSQL schema parity
+      - name: Select npm 10.9.8
         run: |
-          npm --prefix services/cloudflare-licensing-backend run schema:parity
-          npm --prefix services/cloudflare-licensing-backend run schema:parity:pg
+          npm install --global npm@10.9.8 --no-audit --no-fund
+          test "$(npm --version)" = "10.9.8"
+      - name: Install root workspace
+        run: npm ci
+      - name: Install Doxygen
+        run: sudo apt-get update && sudo apt-get install -y doxygen
+      - name: Strict Doxygen and Sphinx build
+        run: npm run check:docs
+
+  linkcheck:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v5
+      - name: Select npm 10.9.8
+        run: |
+          npm install --global npm@10.9.8 --no-audit --no-fund
+          test "$(npm --version)" = "10.9.8"
+      - name: Install root workspace
+        run: npm ci
+      - name: Install Doxygen
+        run: sudo apt-get update && sudo apt-get install -y doxygen
+      - name: Strict link checker
+        run: npm run check:docs:links

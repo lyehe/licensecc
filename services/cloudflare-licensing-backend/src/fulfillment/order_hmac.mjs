@@ -20,15 +20,25 @@
 //
 // Design: docs/superpowers/plans/2026-06-24-slice1-order-ingest-blueprint.md
 
+import { bytesFromBase64, loadSecretMap, lookupSecret } from "@licensecc/cloudflare-runtime/auth/secret_map";
+
 const SIGNED_PREFIX = "POST\n/v1/orders\n";
 const DEFAULT_MAX_SKEW_SECONDS = 300;
 const MAX_SKEW_CAP_SECONDS = 3600;
 
 const textEncoder = new TextEncoder();
 
-import { bytesFromBase64, loadSecretMap, lookupSecret } from "@licensecc/cloudflare-runtime/auth/secret_map";
-
 export { bytesFromBase64, loadSecretMap, lookupSecret } from "@licensecc/cloudflare-runtime/auth/secret_map";
+
+// Copy into an owned ArrayBuffer before Web Crypto.  TypeScript 5.9 correctly
+// distinguishes a view backed by a potentially shared buffer from BufferSource;
+// the copy also prevents a caller from mutating key/signature bytes during the
+// crypto operation.
+function cryptoBuffer(bytes) {
+  const copy = new Uint8Array(bytes.byteLength);
+  copy.set(bytes);
+  return copy.buffer;
+}
 
 /**
  * The canonical bytes the order-ingest HMAC is computed over. Exported so the
@@ -138,12 +148,17 @@ export async function verifyOrderHmac(request, env, bodyText) {
   try {
     const key = await crypto.subtle.importKey(
       "raw",
-      secretBytes,
+      cryptoBuffer(secretBytes),
       { name: "HMAC", hash: "SHA-256" },
       false,
       ["verify"],
     );
-    valid = await crypto.subtle.verify("HMAC", key, signatureBytes, textEncoder.encode(signedText));
+    valid = await crypto.subtle.verify(
+      "HMAC",
+      key,
+      cryptoBuffer(signatureBytes),
+      textEncoder.encode(signedText),
+    );
   } catch {
     // A malformed signature byte length (or any crypto error) is a verification
     // failure, never a 5xx: never poison the inbox over a bad signature.

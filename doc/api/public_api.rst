@@ -2,30 +2,15 @@
 Public api
 #######################################
 
-The public api of the library can be found in ``include/licensecc/licensecc.h`` that is the only file you should 
-include when you want to use the library. 
-
-Print hardware identifier
-**************************
-
-.. doxygenfunction:: identify_pc
-
-.. doxygenenum:: LCC_API_HW_IDENTIFICATION_STRATEGY
-
-.. doxygengroup:: strategies  
-   :content-only:
-
+The public C API is declared in ``include/licensecc/licensecc.h``. It is the
+only header an application needs to include when integrating the library.
 
 Verify a license
-***********************
+****************
 
-.. doxygenfunction:: acquire_license
+The reference below is generated directly from that public header. Keeping it
+as a group avoids duplicating individual symbol names in reStructuredText and
+makes a strict documentation build fail when the documented API group changes.
 
-.. doxygenstruct:: CallerInformations
-	:members:
-
-.. doxygenstruct:: LicenseLocation
-	:members:
-	
-.. doxygenstruct:: LicenseInfo
-	:members:
+.. doxygengroup:: api
+   :content-only:

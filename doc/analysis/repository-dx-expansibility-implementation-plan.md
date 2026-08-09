@@ -133,7 +133,7 @@ Files to change:
 Implementation steps:
 
 1. Extend `.gitignore` for generated and local-only outputs:
-   ```gitignore
+   ```text
    /doc/_build/
    /doc/_doxygen/
    /.wrangler/

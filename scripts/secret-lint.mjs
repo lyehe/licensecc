@@ -1,5 +1,6 @@
-import { readFileSync, readdirSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { execFileSync } from "node:child_process";
+import { existsSync, readFileSync, statSync } from "node:fs";
+import { join, resolve } from "node:path";
 
 // ---------------------------------------------------------------------------
 // Shared committed-secret scanner for every Cloudflare service.
@@ -13,9 +14,9 @@ import { join } from "node:path";
 //
 // Self-exclusion: the env-var-name needles are built with a reserved-word join
 // trick so the needle strings never appear literally in scanned source. The PEM
-// header markers below appear literally, but this file lives at the repo root
-// (`scripts/`) and is never inside any per-service scan root, so it never scans
-// itself. The thin wrappers are additionally skipped by path (see runSecretLint).
+// header markers below appear literally, so the repository-level entry point
+// excludes this implementation and its deliberately adversarial unit fixture by
+// exact path. All other tracked source, including the service wrappers, is read.
 // ---------------------------------------------------------------------------
 
 // Universally-forbidden markers: actual secret VALUES / PEM material / token
@@ -47,57 +48,89 @@ export const SIGNING_KEY_NEEDLES = [
   ["LEASE", "SIGNING", "PRIVATE", "KEY", "PKCS8", "PEM"].join("_"),
 ];
 
-const DEFAULT_SKIP_DIRS = ["node_modules", "dist", "dist-worker", ".wrangler"];
-
-function* walk(root, skipDirs) {
-  for (const entry of readdirSync(root)) {
-    const path = join(root, entry);
-    const stat = statSync(path);
-    if (stat.isDirectory()) {
-      if (skipDirs.includes(entry)) continue;
-      yield* walk(path, skipDirs);
-    } else {
-      yield path;
-    }
+/**
+ * Return the existing files Git tracks below a scanner root. This intentionally
+ * never walks the working tree: an untracked fixture, local secret, generated
+ * output, or a stale node_modules directory must never become scanner input.
+ * A locally deleted tracked path is skipped rather than turning a scan into an
+ * I/O error; there is no source file left in the checkout to inspect.
+ *
+ * Git emits paths relative to the `-C` directory, including when that directory
+ * is a service nested inside the monorepo.  Resolve those paths here so callers
+ * can safely read them regardless of their current working directory.
+ *
+ * @param {string} root
+ * @returns {string[]}
+ */
+export function listTrackedFiles(root) {
+  const absoluteRoot = resolve(root);
+  let output;
+  try {
+    output = execFileSync("git", ["-C", absoluteRoot, "ls-files", "-z", "--", "."], {
+      encoding: "buffer",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(`scan:secrets requires a Git worktree at ${absoluteRoot}: ${detail}`);
   }
+
+  return output
+    .toString("utf8")
+    .split("\0")
+    .filter(Boolean)
+    .map((relativePath) => join(absoluteRoot, relativePath))
+    .filter((file) => existsSync(file));
+}
+
+/**
+ * Find forbidden marker occurrences in a supplied source string.  Keeping this
+ * pure makes the scanner's security floor directly testable without creating
+ * workspace files that the production command must deliberately ignore.
+ *
+ * @param {string} content
+ * @param {Array<string|RegExp>} needles
+ * @returns {Array<string|RegExp>}
+ */
+export function findSecretNeedles(content, needles) {
+  return needles.filter((needle) =>
+    typeof needle === "string" ? content.includes(needle) : needle.test(content),
+  );
 }
 
 /**
  * Scan a service tree for committed secrets.
  *
  * @param {object} [options]
- * @param {string} [options.root="."]            Directory to scan (service dir; cwd is the service).
+ * @param {string} [options.root="."]            Git worktree directory to scan (service cwd).
  * @param {Array<string|RegExp>} [options.extraNeedles=[]]  Service-specific markers on top of the base union.
  * @param {string[]} [options.excludeFiles=[]]   Path suffixes to skip (documented legitimate fixtures).
- * @param {string[]} [options.skipDirs]          Directory names to prune (defaults to the portal set).
  * @param {string} [options.label="secret"]      Word used in the violation message.
  */
 export function runSecretLint({
   root = ".",
   extraNeedles = [],
   excludeFiles = [],
-  skipDirs = DEFAULT_SKIP_DIRS,
   label = "secret",
 } = {}) {
   const needles = [...BASE_NEEDLES, ...extraNeedles];
   let failed = false;
-  for (const file of walk(root, skipDirs)) {
+  for (const file of listTrackedFiles(root)) {
+    // Git lists submodule gitlinks too.  They are tracked repository entries,
+    // but not files belonging to this scanner's worktree and must never be
+    // descended into or read as part of the superproject scan.
+    if (statSync(file).isDirectory()) continue;
     const norm = file.replace(/\\/g, "/");
-    // Never scan the thin wrappers (they name their own extra needles) or the
-    // documented legitimate fixtures.
-    if (norm.endsWith("scripts/lint.mjs")) continue;
+    // Skip only documented, path-specific legitimate fixtures.
     if (excludeFiles.some((ex) => norm.endsWith(ex))) continue;
     const content = readFileSync(file, "utf8");
-    for (const needle of needles) {
-      const hit = typeof needle === "string" ? content.includes(needle) : needle.test(content);
-      if (hit) {
-        console.error(`forbidden ${label} secret reference in ${file}: ${needle.toString()}`);
-        failed = true;
-      }
+    for (const needle of findSecretNeedles(content, needles)) {
+      console.error(`forbidden ${label} secret reference in ${file}: ${needle.toString()}`);
+      failed = true;
     }
   }
   if (failed) {
     process.exit(1);
   }
-  console.log("lint ok");
+  console.log("scan:secrets ok");
 }

@@ -129,6 +129,5 @@ export async function shadowEvalAccountToken(request, env, project, feature, now
 
 // A minimal structured logger so this module stays free of route-handler imports (avoids a cycle).
 function logShadow(event, fields) {
-  // eslint-disable-next-line no-console
   console.log(JSON.stringify({ event, ...fields }));
 }

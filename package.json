@@ -4,22 +4,33 @@
   "private": true,
   "description": "Local orchestration scripts for the Licensecc monorepo.",
   "scripts": {
-    "check": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -IncludeServices -IncludeSdks -IncludeSchemaParity",
-    "check:all": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -IncludeServices -IncludeSdks -IncludeUi -IncludeE2E -IncludeSchemaParity",
+    "check": "npm run check:pr",
+    "check:all": "npm run check:pr && npm run test:sdks && npm run check:dry-run && npm run check:docs",
     "check:core": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/dev-check.ps1",
-    "check:services": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -SkipCore -IncludeServices -IncludeUi -IncludeSchemaParity",
-    "check:e2e": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -SkipCore -IncludeE2E",
-    "check:dry-run": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -SkipCore -IncludeDryRun",
+    "check:services": "npm run test:services",
+    "check:e2e": "npm run test:e2e",
+    "check:dry-run": "npm run dry-run --workspace @licensecc/cloudflare-licensing-backend && npm run dry-run --workspace @licensecc/cloudflare-license-admin && npm run dry-run --workspace @licensecc/cloudflare-customer-portal && npm run dry-run --workspace @licensecc/cloudflare-d1-backup",
+    "check:docs": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/check-docs.ps1",
+    "check:docs:links": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/check-docs.ps1 -LinkCheck",
+    "scan:secrets": "node scripts/scan-secrets.mjs",
+    "test:scan:secrets": "node --test scripts/secret-lint.test.mjs",
+    "lint": "eslint \"packages/*/src/**/*.{js,mjs,ts,tsx}\" \"services/cloudflare-licensing-backend/src/**/*.{js,mjs,ts,tsx}\" \"services/cloudflare-license-admin/src/**/*.{js,mjs,ts,tsx}\" \"services/cloudflare-customer-portal/src/**/*.{js,mjs,ts,tsx}\" \"services/cloudflare-d1-backup/src/**/*.{js,mjs,ts,tsx}\" \"scripts/**/*.{js,mjs,ts,tsx}\" --max-warnings 0",
     "lint:services": "npm run lint --workspace @licensecc/cloudflare-licensing-backend && npm run lint --workspace @licensecc/cloudflare-license-admin && npm run lint --workspace @licensecc/cloudflare-customer-portal && npm run lint --workspace @licensecc/cloudflare-d1-backup",
+    "typecheck": "node scripts/check-typecheck-coverage.mjs && npm run typecheck --workspace @licensecc/licensing-domain && npm run typecheck --workspace @licensecc/cloudflare-runtime && npm run typecheck --workspace @licensecc/cloudflare-licensing-backend && npm run typecheck --workspace @licensecc/cloudflare-license-admin && npm run typecheck --workspace @licensecc/cloudflare-customer-portal && npm run typecheck --workspace @licensecc/cloudflare-d1-backup",
     "test:backend": "npm run test --workspace @licensecc/cloudflare-licensing-backend && npm run test:sql --workspace @licensecc/cloudflare-licensing-backend && npm run test:pg --workspace @licensecc/cloudflare-licensing-backend",
     "test:admin": "npm run test --workspace @licensecc/cloudflare-license-admin && npm run test:sql --workspace @licensecc/cloudflare-license-admin && npm run test:ui --workspace @licensecc/cloudflare-license-admin",
     "test:portal": "npm run test --workspace @licensecc/cloudflare-customer-portal && npm run test:ui --workspace @licensecc/cloudflare-customer-portal",
     "test:backup": "npm run test --workspace @licensecc/cloudflare-d1-backup",
-    "test:lint": "node --test scripts/secret-lint.test.mjs",
+    "check:schema-parity": "npm run schema:parity --workspace @licensecc/cloudflare-licensing-backend && npm run schema:parity:pg --workspace @licensecc/cloudflare-licensing-backend",
+    "test:services": "npm run test --workspace @licensecc/licensing-domain && npm run test --workspace @licensecc/cloudflare-runtime && npm run test:backend && npm run test:admin && npm run test:portal && npm run test:backup && npm run check:schema-parity",
+    "test:sdks": "uv run --directory sdks/python --locked pytest && dotnet test sdks/dotnet/Licensecc.Client.sln",
+    "setup:browsers": "npm run setup:browsers --workspace @licensecc/cloudflare-license-admin && npm run setup:browsers --workspace @licensecc/cloudflare-customer-portal",
+    "test:e2e": "npm run test:e2e --workspace @licensecc/cloudflare-licensing-backend && npm run test:e2e --workspace @licensecc/cloudflare-license-admin && npm run test:e2e --workspace @licensecc/cloudflare-customer-portal",
     "check:architecture": "node scripts/check-architecture.mjs",
     "test:architecture": "node --test scripts/check-architecture.test.mjs",
     "test:contracts": "node --test test/contracts/canonical-contracts.test.mjs && node scripts/canonical-contracts.mjs",
-    "write:contract-baselines": "node scripts/canonical-contracts.mjs --write"
+    "write:contract-baselines": "node scripts/canonical-contracts.mjs --write",
+    "check:pr": "npm run scan:secrets && npm run test:scan:secrets && npm run lint && npm run typecheck && npm run check:architecture && npm run test:architecture && npm run test:contracts && npm run test:services"
   },
   "workspaces": [
     "packages/licensing-domain",
@@ -33,5 +44,14 @@
     "node": ">=22",
     "npm": "10.9.8"
   },
-  "packageManager": "npm@10.9.8"
+  "packageManager": "npm@10.9.8",
+  "devDependencies": {
+    "@eslint/js": "9.39.5",
+    "eslint": "9.39.5",
+    "eslint-plugin-import": "2.32.0",
+    "eslint-plugin-react": "7.37.5",
+    "eslint-plugin-react-hooks": "7.1.1",
+    "globals": "17.9.0",
+    "typescript-eslint": "8.50.0"
+  }
 }

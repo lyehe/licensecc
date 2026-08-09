@@ -339,14 +339,16 @@ function App(): React.ReactElement {
         body: JSON.stringify(body),
       });
       setMessage(resultMessage(result));
+      const resultData = result.data;
       // The backend checkout/heartbeat body carries `expires_at` (epoch seconds, the lease deadline);
       // capture it so a post-reload hydrate can drop the entry once the seat is actually stale.
-      const leaseExpiresAt = typeof result.data?.expires_at === "number" ? result.data.expires_at : 0;
+      const leaseExpiresAt = typeof resultData?.expires_at === "number" ? resultData.expires_at : 0;
+      const seatId = typeof resultData?.seat_id === "string" ? resultData.seat_id : null;
       if (result.ok) {
-        if (operation === "checkout" && typeof result.data?.seat_id === "string") {
+        if (operation === "checkout" && seatId !== null) {
           setSeatSessions((current) => ({
             ...current,
-            [item.id]: { seat_id: result.data.seat_id as string, client_instance_id: clientInstanceId, expires_at: leaseExpiresAt },
+            [item.id]: { seat_id: seatId, client_instance_id: clientInstanceId, expires_at: leaseExpiresAt },
           }));
         }
         if (operation === "heartbeat" && existing !== undefined) {

@@ -13,35 +13,48 @@
 
 import { loadSecretMap } from "@licensecc/cloudflare-runtime/auth/secret_map";
 
+/** @typedef {import("../worker/env.js").Env} PortalEnv */
+/** @typedef {{ [key: string]: Uint8Array }} PepperMap */
+/** @typedef {{ customerId?: string, userAgent?: string, now?: number }} MintSessionOptions */
+/** @typedef {{ id?: string, customer_id?: string, status?: string, expires_at: number }} SessionRow */
+
 const SESSION_PREFIX = "lccp_";
 const SESSION_BYTES = 32;
 const SESSION_TTL_SEC = 86400; // 24h cookie Max-Age.
 const COOKIE_NAME = "lccp_session";
 const textEncoder = new TextEncoder();
 
+/** @param {PortalEnv | null | undefined} env */
 export function loadSessionPeppers(env) {
   return loadSecretMap(env?.PORTAL_SESSION_PEPPERS);
 }
 
+/** @param {Uint8Array} bytes */
 function base64(bytes) {
   let binary = "";
   for (const b of bytes) binary += String.fromCharCode(b);
   return btoa(binary);
 }
 
+/** @param {Uint8Array} bytes */
 function base64Url(bytes) {
   return base64(bytes).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }
 
+/** @param {Uint8Array} pepperBytes @param {string} message */
 async function hmac(pepperBytes, message) {
-  const key = await crypto.subtle.importKey("raw", pepperBytes, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const copy = new Uint8Array(pepperBytes.byteLength);
+  copy.set(pepperBytes);
+  const key = await crypto.subtle.importKey("raw", copy.buffer, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
   const mac = await crypto.subtle.sign("HMAC", key, textEncoder.encode(message));
   return base64(new Uint8Array(mac));
 }
 
+/** @param {PepperMap} peppers */
 function activePepperId(peppers) {
   const keys = Object.keys(peppers);
-  return keys.length > 0 ? keys[0] : null;
+  const activeId = keys[0];
+  return activeId === undefined ? null : activeId;
 }
 
 function newSessionId() {
@@ -62,14 +75,18 @@ function newSessionId() {
  * The caller binds the cookie via setSessionCookie(raw). raw is the ONLY copy of the session token
  * and never lands in the DB or a log.
  */
+/** @param {PortalEnv} env @param {MintSessionOptions} [options] */
 export async function mintSession(env, { customerId, userAgent = "", now = Math.floor(Date.now() / 1000) } = {}) {
   const peppers = loadSessionPeppers(env);
   if (peppers === null) return { ok: false, code: "config_error" };
   const activeId = activePepperId(peppers);
+  // Preserve the pre-typecheck behavior for a malformed empty map. The
+  // configuration contract guarantees a string id and Uint8Array value.
+  const pepperBytes = /** @type {Uint8Array} */ (peppers[/** @type {string} */ (activeId)]);
   const random = new Uint8Array(SESSION_BYTES);
   crypto.getRandomValues(random);
   const raw = SESSION_PREFIX + base64Url(random);
-  const sessionHmac = await hmac(peppers[activeId], raw);
+  const sessionHmac = await hmac(pepperBytes, raw);
   await env.DB.prepare(
     "INSERT INTO portal_sessions (id, customer_id, session_hmac, pepper_key_id, account_token_id, status, user_agent, created_at, last_used_at, expires_at) " +
       "VALUES (?, ?, ?, ?, NULL, 'active', ?, ?, ?, ?)",
@@ -89,6 +106,7 @@ export async function mintSession(env, { customerId, userAgent = "", now = Math.
  * from a stale replica. customer_id here is the ONLY trusted source of the caller's identity — every
  * /api/portal handler binds it (invariant 2).
  */
+/** @param {PortalEnv} env @param {unknown} raw @param {number} [now] */
 export async function resolveSession(env, raw, now = Math.floor(Date.now() / 1000)) {
   const peppers = loadSessionPeppers(env);
   if (peppers === null) return { ok: false, code: "config_error" };
@@ -96,10 +114,14 @@ export async function resolveSession(env, raw, now = Math.floor(Date.now() / 100
     return { ok: false, code: "unauthorized" };
   }
   const candidates = [];
-  for (const id of Object.keys(peppers)) candidates.push(await hmac(peppers[id], raw));
+  for (const id of Object.keys(peppers)) {
+    const pepperBytes = /** @type {Uint8Array} */ (peppers[id]);
+    candidates.push(await hmac(pepperBytes, raw));
+  }
   const placeholders = candidates.map(() => "?").join(",");
 
   const reader = typeof env.DB.withSession === "function" ? env.DB.withSession("first-primary") : env.DB;
+  /** @type {SessionRow | null} */
   const row = await reader.prepare(
     `SELECT s.id, s.customer_id, s.status, s.expires_at ` +
       `FROM portal_sessions s ` +
@@ -118,6 +140,7 @@ export async function resolveSession(env, raw, now = Math.floor(Date.now() / 100
  * to its customer_id so a forged session id cannot revoke a foreign row). The worker ALSO bumps
  * account_token_revocations.revocation_seq (invariant 9) to kill any in-flight 120s account token.
  */
+/** @param {PortalEnv} env @param {string} sessionId @param {string} customerId */
 export async function revokeSession(env, sessionId, customerId) {
   await env.DB.prepare(
     "UPDATE portal_sessions SET status = 'revoked' WHERE id = ? AND customer_id = ? AND status = 'active'",
@@ -125,6 +148,7 @@ export async function revokeSession(env, sessionId, customerId) {
 }
 
 /** revokeAllForCustomer(env, customerId) — log out everywhere (every active session for a customer). */
+/** @param {PortalEnv} env @param {string} customerId */
 export async function revokeAllForCustomer(env, customerId) {
   await env.DB.prepare(
     "UPDATE portal_sessions SET status = 'revoked' WHERE customer_id = ? AND status = 'active'",
@@ -132,6 +156,7 @@ export async function revokeAllForCustomer(env, customerId) {
 }
 
 /** Parse the opaque session token out of the Cookie header, or null. */
+/** @param {Request} request */
 export function cookieFromRequest(request) {
   const header = request.headers.get("cookie") ?? "";
   for (const part of header.split(/;\s*/)) {
@@ -146,6 +171,7 @@ export function cookieFromRequest(request) {
 }
 
 /** The Set-Cookie value that binds an opaque session (HttpOnly; Secure; SameSite=Lax). */
+/** @param {string} raw */
 export function setSessionCookie(raw) {
   return `${COOKIE_NAME}=${raw}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${SESSION_TTL_SEC}`;
 }

@@ -23,33 +23,45 @@
 import { loadSecretMap } from "@licensecc/cloudflare-runtime/auth/secret_map";
 import { portalRateLimit } from "./portal_ratelimit.mjs";
 
+/** @typedef {import("../worker/env.js").Env} PortalEnv */
+/** @typedef {{ [key: string]: Uint8Array }} PepperMap */
+/** @typedef {{ email?: unknown, clientIp?: string, sendEmailFn?: (env: PortalEnv, to: string, subject: string, body: string) => unknown, waitUntil?: (work: Promise<unknown>) => void, magicLinkBase?: string, returnSecret?: boolean, now?: number }} RequestOtpOptions */
+/** @typedef {{ email?: unknown, code?: unknown, secret?: unknown, clientIp?: string, now?: number }} RedeemOtpOptions */
+
 const OTP_TTL_SEC = 600; // 10 minutes (blueprint (a)).
 const MAX_ATTEMPTS = 5;
 const SECRET_BYTES = 32;
 const textEncoder = new TextEncoder();
 
 // loadSecretMap lives on account_token via order_hmac; re-export the same contract for OTP peppers.
+/** @param {PortalEnv | null | undefined} env */
 export function loadOtpPeppers(env) {
   return loadSecretMap(env?.PORTAL_OTP_PEPPERS);
 }
 
+/** @param {Uint8Array} bytes */
 function base64(bytes) {
   let binary = "";
   for (const b of bytes) binary += String.fromCharCode(b);
   return btoa(binary);
 }
 
+/** @param {Uint8Array} bytes */
 function base64Url(bytes) {
   return base64(bytes).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }
 
+/** @param {Uint8Array} pepperBytes @param {string} message */
 async function hmac(pepperBytes, message) {
-  const key = await crypto.subtle.importKey("raw", pepperBytes, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const copy = new Uint8Array(pepperBytes.byteLength);
+  copy.set(pepperBytes);
+  const key = await crypto.subtle.importKey("raw", copy.buffer, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
   const mac = await crypto.subtle.sign("HMAC", key, textEncoder.encode(message));
   return base64(new Uint8Array(mac));
 }
 
 // Derive the 8-digit numeric code from the first 4 secret bytes (big-endian uint32 % 1e8).
+/** @param {Uint8Array} secretBytes */
 export function codeFromSecretBytes(secretBytes) {
   const view = new DataView(secretBytes.buffer, secretBytes.byteOffset, 4);
   const n = view.getUint32(0, false) % 100_000_000;
@@ -70,9 +82,11 @@ function normalizeEmail(email) {
 
 // The active pepper to mint NEW HMACs under: the first key in the (ordered) pepper map. Redemption
 // tries every pepper, so rotation is safe (issue under new, redeem under any live one).
+/** @param {PepperMap} peppers */
 function activePepperId(peppers) {
   const keys = Object.keys(peppers);
-  return keys.length > 0 ? keys[0] : null;
+  const activeId = keys[0];
+  return activeId === undefined ? null : activeId;
 }
 
 /**
@@ -94,6 +108,7 @@ function activePepperId(peppers) {
  * returned to the caller. The worker gates this behind a constant-time bearer + network gate + audit;
  * on the normal login path it is false and the secret NEVER leaves this function.
  */
+/** @param {PortalEnv} env @param {RequestOtpOptions} [options] */
 export async function requestOtp(env, { email, clientIp = "", sendEmailFn, waitUntil, magicLinkBase, returnSecret = false, now = Math.floor(Date.now() / 1000) } = {}) {
   const peppers = loadOtpPeppers(env);
   if (peppers === null) return { ok: false, code: "config_error" };
@@ -110,7 +125,10 @@ export async function requestOtp(env, { email, clientIp = "", sendEmailFn, waitU
   if (ipRl.limited) return { ok: false, code: "rate_limited" };
 
   const activeId = activePepperId(peppers);
-  const pepperBytes = peppers[activeId];
+  // The secret-map contract guarantees a nonempty map here. Keep that legacy
+  // contract (and its existing failure behavior for a malformed map) rather
+  // than turning a typecheck-only refactor into a new response policy.
+  const pepperBytes = /** @type {Uint8Array} */ (peppers[/** @type {string} */ (activeId)]);
 
   // Resolve the customer by lower(email), active only.
   const customer = await env.DB.prepare(
@@ -183,6 +201,7 @@ export async function requestOtp(env, { email, clientIp = "", sendEmailFn, waitU
  * RETURNING the customer_id. attempt_count is bumped ONLY when a live row matched but the claim
  * predicate was otherwise satisfiable — handled by the worker's verify counter + this row guard.
  */
+/** @param {PortalEnv} env @param {RedeemOtpOptions} [options] */
 export async function redeemOtp(env, { email, code, secret, clientIp = "", now = Math.floor(Date.now() / 1000) } = {}) {
   const peppers = loadOtpPeppers(env);
   if (peppers === null) return { ok: false, code: "config_error" };
@@ -195,7 +214,10 @@ export async function redeemOtp(env, { email, code, secret, clientIp = "", now =
   let column;
   if (typeof secret === "string" && secret.length > 0) {
     column = "secret_hmac";
-    for (const id of Object.keys(peppers)) candidates.push(await hmac(peppers[id], secret));
+    for (const id of Object.keys(peppers)) {
+      const pepperBytes = /** @type {Uint8Array} */ (peppers[id]);
+      candidates.push(await hmac(pepperBytes, secret));
+    }
   } else {
     const emailLower = normalizeEmail(email);
     if (emailLower.length === 0 || typeof code !== "string" || !/^[0-9]{8}$/.test(code)) {
@@ -203,7 +225,10 @@ export async function redeemOtp(env, { email, code, secret, clientIp = "", now =
       return { ok: false, code: "invalid_otp" };
     }
     column = "code_hmac";
-    for (const id of Object.keys(peppers)) candidates.push(await hmac(peppers[id], `${emailLower}:${code}`));
+    for (const id of Object.keys(peppers)) {
+      const pepperBytes = /** @type {Uint8Array} */ (peppers[id]);
+      candidates.push(await hmac(pepperBytes, `${emailLower}:${code}`));
+    }
   }
   const placeholders = candidates.map(() => "?").join(",");
 

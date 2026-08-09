@@ -147,7 +147,7 @@ try {
     }
 
     $backendDir = $null
-    if ($IncludeBackend -or $IncludeServices -or $IncludeSchemaParity -or $IncludeE2E -or $IncludeDryRun) {
+    if ($IncludeBackend -or $IncludeServices -or $IncludeUi -or $IncludeSchemaParity -or $IncludeE2E -or $IncludeDryRun) {
         $backendDir = Ensure-NpmPackage "Backend" "services/cloudflare-licensing-backend"
     }
 
@@ -166,22 +166,36 @@ try {
         $backupDir = Ensure-NpmPackage "D1 backup" "services/cloudflare-d1-backup"
     }
 
+    if ($null -ne $backendDir) {
+        Invoke-Step "Tracked secret scan" {
+            npm run scan:secrets
+        }
+        Invoke-Step "JavaScript and TypeScript lint" {
+            npm run lint
+        }
+        Invoke-Step "JavaScript and TypeScript typecheck" {
+            npm run typecheck
+        }
+        Invoke-Step "Architecture boundary check" {
+            npm run check:architecture
+        }
+        Invoke-Step "Canonical contract check" {
+            npm run test:contracts
+        }
+    }
+
     if ($IncludeBackend -or $IncludeServices) {
-        Invoke-NpmScript "Backend" $backendDir "lint"
         Invoke-NpmScript "Backend" $backendDir "test"
         Invoke-NpmScript "Backend" $backendDir "test:sql"
         Invoke-NpmScript "Backend" $backendDir "test:pg"
     }
 
     if ($IncludeServices) {
-        Invoke-NpmScript "Admin portal" $adminDir "lint"
         Invoke-NpmScript "Admin portal" $adminDir "test"
         Invoke-NpmScript "Admin portal" $adminDir "test:sql"
 
-        Invoke-NpmScript "Customer portal" $customerPortalDir "lint"
         Invoke-NpmScript "Customer portal" $customerPortalDir "test"
 
-        Invoke-NpmScript "D1 backup" $backupDir "lint"
         Invoke-NpmScript "D1 backup" $backupDir "test"
     }
 
@@ -196,16 +210,18 @@ try {
     }
 
     if ($IncludeE2E) {
-        Invoke-NpmScript "Backend" $backendDir "test:e2e"
-        Invoke-NpmScript "Admin portal" $adminDir "test:e2e"
-        Invoke-NpmScript "Customer portal" $customerPortalDir "test:e2e"
+        Invoke-Step "Install retained Playwright browser revisions" {
+            npm run setup:browsers
+        }
+        Invoke-Step "Browser E2E tests" {
+            npm run test:e2e
+        }
     }
 
     if ($IncludeDryRun) {
-        Invoke-NpmScript "Backend" $backendDir "dry-run"
-        Invoke-NpmScript "Admin portal" $adminDir "dry-run"
-        Invoke-NpmScript "Customer portal" $customerPortalDir "dry-run"
-        Invoke-NpmScript "D1 backup" $backupDir "dry-run"
+        Invoke-Step "Credential-free Worker dry-runs" {
+            npm run check:dry-run
+        }
     }
 
     if ($SkipTests) {
@@ -251,23 +267,8 @@ try {
     }
 
     if ($IncludeSdks) {
-        $pythonSdkDir = Join-Path $repoRoot "sdks/python"
-        $dotnetSdkSolution = Join-Path $repoRoot "sdks/dotnet/Licensecc.Client.sln"
-
-        if (Test-Path (Join-Path $pythonSdkDir "pyproject.toml")) {
-            Invoke-Step "Python SDK tests" {
-                uv run --directory $pythonSdkDir pytest
-            }
-        } else {
-            Write-Warning "Python SDK package not found at sdks/python"
-        }
-
-        if (Test-Path $dotnetSdkSolution) {
-            Invoke-Step ".NET SDK tests" {
-                dotnet test $dotnetSdkSolution
-            }
-        } else {
-            Write-Warning ".NET SDK solution not found at sdks/dotnet/Licensecc.Client.sln"
+        Invoke-Step "Python and .NET SDK tests" {
+            npm run test:sdks
         }
     }
 

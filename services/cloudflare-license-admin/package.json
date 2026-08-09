@@ -11,8 +11,12 @@
     "test:openapi": "npm run build:worker && node --test test/openapi-crosscheck.test.mjs",
     "test": "npm run build:worker && node --test test/access-validator.test.mjs test/admin-worker.test.mjs test/openapi-crosscheck.test.mjs test/routes-table.test.mjs test/webhooks.test.mjs",
     "test:sql": "node --experimental-sqlite --test test/sql/*.mjs",
-    "test:e2e": "playwright install chromium && playwright test --config playwright.config.mjs",
-    "lint": "node scripts/lint.mjs",
+    "setup:browsers": "playwright install chromium",
+    "test:e2e": "playwright test --config playwright.config.mjs",
+    "scan:secrets": "node scripts/lint.mjs",
+    "lint": "eslint \"src/**/*.{js,mjs,ts,tsx}\" --max-warnings 0",
+    "generate:wrangler-types": "wrangler types .wrangler/worker-configuration.d.ts --config wrangler.example.jsonc",
+    "typecheck": "npm run generate:wrangler-types && tsc -p tsconfig.worker.typecheck.json --noEmit && tsc -p tsconfig.json --noEmit",
     "dry-run": "npm run build && npx wrangler deploy --dry-run --config wrangler.example.jsonc",
     "migrate:local": "npx wrangler d1 migrations apply DB --local --config ../cloudflare-licensing-backend/wrangler.example.toml",
     "sync:entitlement": "node scripts/sync-entitlement.mjs",
@@ -31,6 +35,8 @@
   },
   "devDependencies": {
     "@playwright/test": "1.60.0",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.4",
     "typescript": "5.9.3",
     "wrangler": "4.98.0"
   }

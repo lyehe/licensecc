@@ -1,0 +1,8 @@
+{
+  "extends": "./tsconfig.worker.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": "."
+  },
+  "include": ["src/worker/**/*.ts", "src/shared/**/*.ts", "src/auth/**/*.mjs", ".wrangler/worker-configuration.d.ts"]
+}

@@ -5,9 +5,8 @@ import { ALL_ROUTES, META_ROUTES, PUBLIC_ROUTES, SESSION_ROUTES } from "./routes
 import { META_DISPATCH } from "./routes/meta.js";
 import { AUTH_DISPATCH, authSession } from "./routes/auth.js";
 import { SESSION_DISPATCH, resolveOwnedEntitlement } from "./routes/self-service.js";
-import { envelope } from "./support.js";
+import { envelope, isCrossSite, constantTimeEqual, decodeEntitlementId, entitlementId } from "./support.js";
 import type { Env, ExecutionContextLike, TopRoute } from "./env.js";
-import { isCrossSite, constantTimeEqual, decodeEntitlementId, entitlementId } from "./support.js";
 
 export type { Env } from "./env.js";
 

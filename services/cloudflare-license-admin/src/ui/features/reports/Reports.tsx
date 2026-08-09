@@ -60,9 +60,10 @@ export function Reports({ active, onNavigate }: { active: boolean; onNavigate: (
   async function loadMoreExpiring(): Promise<void> {
     if (expiringCursor === null) return;
     const response = await api<ExpiringData>(withCursor(expiringPath(expiringWithinDays), expiringCursor));
-    if (response.ok && response.data) {
-      setExpiring((previous) => [...previous, ...response.data.items]);
-      setExpiringCursor(response.data.next_cursor ?? null);
+    const data = response.data;
+    if (response.ok && data) {
+      setExpiring((previous) => [...previous, ...data.items]);
+      setExpiringCursor(data.next_cursor ?? null);
     } else {
       setMessage(`${response.code} (${response.request_id})`);
     }

@@ -16,9 +16,10 @@ export async function loadMore<T>(
     return;
   }
   const response = await api<{ items: T[]; next_cursor: string | null }>(withCursor(url, cursor));
-  if (response.ok && response.data) {
-    setItems((previous) => [...previous, ...response.data.items]);
-    setCursor(response.data.next_cursor ?? null);
+  const data = response.data;
+  if (response.ok && data) {
+    setItems((previous) => [...previous, ...data.items]);
+    setCursor(data.next_cursor ?? null);
   } else {
     setMessage(`${response.code} (${response.request_id})`);
   }

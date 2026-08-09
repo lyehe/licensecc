@@ -1,6 +1,5 @@
 import { readFileSync } from "node:fs";
-import { dirname, normalize, relative, resolve, sep } from "node:path";
-import path from "node:path";
+import path, { dirname, normalize, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { spawnSync } from "node:child_process";
 

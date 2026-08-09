@@ -1,4 +1,5 @@
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -13,19 +14,16 @@ import { fileURLToPath } from "node:url";
 // ---------------------------------------------------------------------------
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
-const SKIP_DIRS = new Set(["node_modules", "dist", "dist-worker", ".wrangler"]);
-
-function* walk(root) {
-  for (const entry of readdirSync(root)) {
-    if (SKIP_DIRS.has(entry)) continue;
-    const path = join(root, entry);
-    const stat = statSync(path);
-    if (stat.isDirectory()) {
-      yield* walk(path);
-    } else if (/\.(mjs|ts|js)$/.test(entry)) {
-      yield path;
-    }
-  }
+function trackedSourceFiles() {
+  const output = execFileSync("git", ["-C", ROOT, "ls-files", "-z", "--", "src", "scripts"], {
+    encoding: "buffer",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  return output
+    .toString("utf8")
+    .split("\0")
+    .filter((relativePath) => /\.(mjs|ts|js)$/.test(relativePath))
+    .map((relativePath) => join(ROOT, relativePath));
 }
 
 function lineIsComment(line) {
@@ -55,11 +53,7 @@ const RAW_SECRET_IDENT = /\b(?:rawToken|raw|plaintext|bearer|tokenRaw)\b|[Aa]uth
 
 /** Run the backend structural token guards; exits the process with code 1 on any violation. */
 export function checkTokenGuards() {
-  const scanRoots = [join(ROOT, "src"), join(ROOT, "scripts")];
-  const sourceFiles = [];
-  for (const dir of scanRoots) {
-    for (const f of walk(dir)) sourceFiles.push(f);
-  }
+  const sourceFiles = trackedSourceFiles();
 
   const violations = [];
 

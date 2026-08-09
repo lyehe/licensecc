@@ -163,24 +163,22 @@ cmake -DCMAKE_TOOLCHAIN_FILE=../modules/toolchain-ubuntu-mingw64.cmake -DOPENSSL
 
 ###Build documentation
 
-Setup the python virtual environment:
+Install the pinned documentation dependencies with `uv`:
 
 ```
 python3 -m venv .venv
 
 . .venv/bin/activate
 pip install wheel
-pip install -r requirements.txt
+uv pip sync doc/requirements.txt
 
 ```
 
-Use `.venv/` for local Python environments. The legacy root `pyvenv.cfg` marker is intentionally ignored and must not be committed.
+The strict documentation command writes only ignored output directories and
+never relies on a root-level Python requirements file.
 
-Build the docs:
+Build the docs (with Doxygen and Sphinx warnings treated as errors):
 
 ```
-. .venv/bin/activate
-cd build
-cmake ..
-make documentation
+npm run check:docs
 ```

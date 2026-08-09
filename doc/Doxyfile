@@ -1,0 +1,24 @@
+# Strict XML-only Doxygen input for the Sphinx/Breathe documentation build.
+PROJECT_NAME           = "licensecc"
+PROJECT_BRIEF          = "Local licensing library and online licensing services"
+OUTPUT_DIRECTORY       = doc/_doxygen
+CREATE_SUBDIRS         = NO
+OUTPUT_LANGUAGE        = English
+INPUT                  = include src doc/structure.dox
+FILE_PATTERNS          = *.c *.cc *.cpp *.cxx *.h *.hh *.hpp *.hxx *.ipp *.inl *.in *.dox
+RECURSIVE              = YES
+EXCLUDE_PATTERNS       = */library/ini/* */doc/resources/* */build/* */extern/*
+EXTRACT_ALL            = YES
+EXTRACT_PRIVATE        = NO
+EXTRACT_STATIC         = YES
+GENERATE_HTML          = NO
+GENERATE_LATEX         = NO
+GENERATE_XML           = YES
+XML_OUTPUT             = xml
+XML_PROGRAMLISTING     = NO
+LAYOUT_FILE            = doc/DoxygenLayout.xml
+QUIET                  = YES
+WARNINGS               = YES
+WARN_IF_UNDOCUMENTED   = YES
+WARN_IF_DOC_ERROR      = YES
+WARN_AS_ERROR          = FAIL_ON_WARNINGS

@@ -1,24 +1,53 @@
 name: Lint
+
 on: [pull_request]
+
+permissions:
+  contents: read
+
 jobs:
-   clang-format:
-      runs-on: ubuntu-latest
-      steps:
-      -  uses: actions/checkout@v4
-         with:
-            fetch-depth: 0
-      -  name: Install clang-format
-         run: sudo apt-get update && sudo apt-get install -y clang-format
-      -  name: Check formatting of changed files
-         run: |
-            base="${{ github.event.pull_request.base.sha }}"
-            files=$(git diff --name-only --diff-filter=ACMR "$base"...HEAD \
-              | grep -E '\.(c|cc|cpp|h|hpp)$' \
-              | grep -vE '^(extern/|src/library/ini/)' || true)
-            if [ -z "$files" ]; then
-              echo "No non-vendored C/C++ source changes to check."
-              exit 0
-            fi
-            echo "Checking formatting of:"
-            echo "$files"
-            clang-format --dry-run --Werror $files
+  clang-format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install clang-format
+        run: sudo apt-get update && sudo apt-get install -y clang-format
+      - name: Check formatting of changed files
+        run: |
+          base="${{ github.event.pull_request.base.sha }}"
+          files=$(git diff --name-only --diff-filter=ACMR "$base"...HEAD \
+            | grep -E '\.(c|cc|cpp|h|hpp)$' \
+            | grep -vE '^(extern/|src/library/ini/)' || true)
+          if [ -z "$files" ]; then
+            echo "No non-vendored C/C++ source changes to check."
+            exit 0
+          fi
+          echo "Checking formatting of:"
+          echo "$files"
+          clang-format --dry-run --Werror $files
+
+  repository-quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Select npm 10.9.8
+        run: |
+          npm install --global npm@10.9.8 --no-audit --no-fund
+          test "$(npm --version)" = "10.9.8"
+      - name: Install root workspace
+        run: npm ci
+      - name: Deterministic quality gates
+        run: |
+          npm run scan:secrets
+          npm run test:scan:secrets
+          npm run lint
+          npm run typecheck
+          npm run check:architecture
+          npm run test:architecture

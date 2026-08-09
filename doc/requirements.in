@@ -1,0 +1,9 @@
+# Human-edited documentation dependency policy. Regenerate the pinned lock with:
+#   uv pip compile --generate-hashes doc/requirements.in --output-file doc/requirements.txt
+breathe>=4.36,<5
+myst-parser>=2,<4
+sphinx>=7.4,<8
+sphinx-markdown-tables>=0.0.17,<0.1
+sphinx-rtd-theme>=2,<4
+sphinx-sitemap>=2.6,<3
+sphinxemoji>=0.3,<0.4

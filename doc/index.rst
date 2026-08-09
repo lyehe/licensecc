@@ -101,6 +101,15 @@ run ``scripts/dev-check.ps1`` before submitting.
    :glob:
    :maxdepth: 2
    :hidden:
+   :caption: Architecture:
+
+   architecture/*
+   architecture/decisions/*
+
+.. toctree::
+   :glob:
+   :maxdepth: 2
+   :hidden:
    :caption: Miscellaneous:
 
    other/*

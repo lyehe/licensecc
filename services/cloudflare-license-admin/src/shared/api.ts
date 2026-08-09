@@ -2,6 +2,8 @@
 // shared mutation core's .d.ts so the admin Worker and the licensing backend
 // share ONE shape. Re-exported here so existing `../shared/api` import sites are
 // unchanged.
+import type { EntitlementStatus, EntitlementInput, EntitlementEventType } from "@licensecc/licensing-domain/entitlements/contracts";
+
 export type {
   EntitlementStatus,
   EntitlementRecord,
@@ -17,8 +19,6 @@ export type {
   PlanProjectionItem,
   PlanProjectionPreview,
 } from "@licensecc/licensing-domain/catalog/plan_projection";
-
-import type { EntitlementStatus, EntitlementInput, EntitlementEventType } from "@licensecc/licensing-domain/entitlements/contracts";
 
 export interface EntitlementEvent {
   id: number;

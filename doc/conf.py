@@ -24,6 +24,8 @@
 
 # -- General configuration ------------------------------------------------
 
+from pathlib import Path
+
 # If your documentation needs a minimal Sphinx version, state it here.
 #
 # needs_sphinx = '1.0'
@@ -32,7 +34,7 @@
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
 # ones.
 extensions = ['sphinx.ext.todo',
-    'sphinx.ext.githubpages', 'breathe', 'recommonmark', 'sphinx_markdown_tables', 'sphinx_rtd_theme',
+    'sphinx.ext.githubpages', 'breathe', 'myst_parser', 'sphinx_markdown_tables', 'sphinx_rtd_theme',
     'sphinxemoji.sphinxemoji', 'sphinx_sitemap','sphinx.ext.autosectionlabel' ]
 
 autosectionlabel_prefix_document = True
@@ -40,6 +42,9 @@ autosectionlabel_prefix_document = True
 # Breathe Configuration
 breathe_default_project = "licensecc"
 breathe_domain_by_extension = {"h" : "cpp"}
+breathe_projects = {
+    "licensecc": str(Path(__file__).resolve().parent / "_doxygen" / "xml"),
+}
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ['_templates']
@@ -48,7 +53,7 @@ templates_path = ['_templates']
 # You can specify multiple suffix as a list of string:
 #
 # source_suffix = ['.rst', '.md']
-source_suffix = ['.rst', '.md']
+source_suffix = {'.rst': 'restructuredtext', '.md': 'markdown'}
 
 # The master toctree document.
 master_doc = 'index'
@@ -72,12 +77,12 @@ release = '2.1.0'
 #
 # This is also used if you do content translation via gettext catalogs.
 # Usually you set "language" from the command line for these cases.
-language = None
+language = 'en'
 
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
 # This patterns also effect to html_static_path and html_extra_path
-exclude_patterns = []
+exclude_patterns = ["_build", "_doxygen"]
 
 # The name of the Pygments (syntax highlighting) style to use.
 pygments_style = 'sphinx'
@@ -98,9 +103,7 @@ html_theme = 'sphinx_rtd_theme'
 # documentation.
 #
 html_theme_options = {
-  'canonical_url': 'http://open-license-manager.github.io/licensecc/',
-  'analytics_id': 'UA-160839650-1',  #  Provided by Google in your dashboard
-  'titles_only': False
+  'titles_only': False,
 }
 
 # Add any paths that contain custom static files (such as style sheets) here,
@@ -185,7 +188,7 @@ texinfo_documents = [
 ]
 
 # Sitemap plugin
-html_baseurl = 'http://open-license-manager.github.io/licensecc'
+html_baseurl = 'https://open-license-manager.github.io/licensecc/'
 #sitemap_url_scheme = "{lang}{version}subdir/{link}"
 sitemap_url_scheme = "{link}"
 

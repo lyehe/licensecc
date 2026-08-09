@@ -69,8 +69,9 @@ export function Fulfillment({ active, navigationIntent, onNavigationHandled }: {
   async function loadMoreOrders(): Promise<void> {
     if (orders === null || orders.next_cursor === null) return;
     const response = await api<OrdersResponse>(withCursor(ordersUrl, orders.next_cursor));
-    if (response.ok && response.data) {
-      setOrders((previous) => previous === null ? response.data : { ...response.data, items: [...previous.items, ...response.data.items] });
+    const data = response.data;
+    if (response.ok && data) {
+      setOrders((previous) => previous === null ? data : { ...data, items: [...previous.items, ...data.items] });
     } else {
       setMessage(`${response.code} (${response.request_id})`);
     }

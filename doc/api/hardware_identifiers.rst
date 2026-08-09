@@ -12,11 +12,12 @@ Included with the library there are three hardware identification strategies: `I
   - you can change the order of the strategies in the following code block (the strategies will be tried in sequence until the first one succeeds):
 
 .. code-block:: c
-#define LCC_BARE_TO_METAL_STRATEGIES { STRATEGY_DISK, STRATEGY_ETHERNET, STRATEGY_NONE }
-#define LCC_VM_STRATEGIES { STRATEGY_ETHERNET, STRATEGY_NONE }
-#define LCC_LXC_STRATEGIES { STRATEGY_ETHERNET, STRATEGY_NONE }
-#define LCC_DOCKER_STRATEGIES { STRATEGY_NONE }
-#define LCC_CLOUD_STRATEGIES { STRATEGY_NONE }
+
+   #define LCC_BARE_TO_METAL_STRATEGIES { STRATEGY_DISK, STRATEGY_ETHERNET, STRATEGY_NONE }
+   #define LCC_VM_STRATEGIES { STRATEGY_ETHERNET, STRATEGY_NONE }
+   #define LCC_LXC_STRATEGIES { STRATEGY_ETHERNET, STRATEGY_NONE }
+   #define LCC_DOCKER_STRATEGIES { STRATEGY_NONE }
+   #define LCC_CLOUD_STRATEGIES { STRATEGY_NONE }
 
 Implement your own hardware signature generator 
 *************************************************

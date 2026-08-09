@@ -40,6 +40,11 @@ export async function constantTimeEqual(a, b) {
   const macA = new Uint8Array(await crypto.subtle.sign("HMAC", key, textEncoder.encode(a)));
   const macB = new Uint8Array(await crypto.subtle.sign("HMAC", key, textEncoder.encode(b)));
   let diff = 0;
-  for (let index = 0; index < macA.length; index += 1) diff |= macA[index] ^ macB[index];
+  for (let index = 0; index < macA.length; index += 1) {
+    const left = macA[index];
+    const right = macB[index];
+    if (left === undefined || right === undefined) return false;
+    diff |= left ^ right;
+  }
   return diff === 0;
 }

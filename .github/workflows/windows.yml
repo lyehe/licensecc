@@ -1,5 +1,9 @@
 name: Github_CI
 on: [push, pull_request]
+
+permissions:
+   contents: read
+
 jobs:
    build-windows:
       runs-on: ${{ matrix.os }}

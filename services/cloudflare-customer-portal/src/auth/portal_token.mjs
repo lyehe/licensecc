@@ -19,17 +19,30 @@
 import { buildIssue } from "@licensecc/cloudflare-runtime/auth/account_token_issue";
 import { loadPepperMap } from "@licensecc/cloudflare-runtime/auth/primitives";
 
+/** @typedef {import("../worker/env.js").Env} PortalEnv */
+/** @typedef {{ [key: string]: Uint8Array }} PepperMap */
+/** @typedef {{ customer_id: string }} PortalSession */
+/** @typedef {{ project: string, feature: string, operation?: string }} NarrowScope */
+/** @typedef {{ operationClass?: "read" | "action", now?: number, narrow?: NarrowScope | null }} MintSessionTokenOptions */
+
 const TOKEN_TTL_SEC = 120;
 const READ_OPERATIONS = ["report"];
 const ACTION_OPERATIONS = ["activate", "checkout", "heartbeat", "release", "renew"];
 
+/** @param {PortalEnv} env @param {PepperMap} peppers */
 function activePepper(env, peppers) {
   const configured = env?.ACCOUNT_TOKEN_ACTIVE_PEPPER_ID;
-  if (typeof configured === "string" && configured.length > 0 && peppers[configured] instanceof Uint8Array) {
-    return { id: configured, bytes: peppers[configured] };
+  if (typeof configured === "string" && configured.length > 0) {
+    const configuredBytes = peppers[configured];
+    if (configuredBytes instanceof Uint8Array) {
+      return { id: configured, bytes: configuredBytes };
+    }
   }
   const keys = Object.keys(peppers);
-  return keys.length > 0 ? { id: keys[0], bytes: peppers[keys[0]] } : null;
+  const firstId = keys[0];
+  if (firstId === undefined) return null;
+  const firstBytes = peppers[firstId];
+  return firstBytes instanceof Uint8Array ? { id: firstId, bytes: firstBytes } : null;
 }
 
 /**
@@ -43,6 +56,7 @@ function activePepper(env, peppers) {
  *   { ok:true,  raw, code:"ok" }         the ephemeral plaintext token (used ONCE, then discarded;
  *                                        never returned to the browser, never persisted client-side).
  */
+/** @param {PortalEnv} env @param {PortalSession} session @param {MintSessionTokenOptions} [options] */
 export async function mintSessionToken(
   env,
   session,
@@ -130,6 +144,7 @@ export async function mintSessionToken(
  * On a non-2xx upstream we pass the JSON body through but STRIP the upstream Authorization (and any
  * Set-Cookie / sensitive headers) so a backend echo can never leak the bearer back to the browser.
  */
+/** @param {PortalEnv} env @param {string} path @param {string} token @param {unknown} body */
 export async function proxyBackend(env, path, token, body) {
   const origin = (env?.BACKEND_ORIGIN ?? "").replace(/\/$/, "");
   if (origin.length === 0) {
