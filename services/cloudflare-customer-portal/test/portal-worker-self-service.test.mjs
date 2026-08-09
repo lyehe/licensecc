@@ -240,10 +240,11 @@ test("A's checkout on A's tuple proxies the SERVER-RESOLVED fingerprint with a r
   try {
     const cookie = await cookieFor(env, "A");
     const id = await ownedEntitlementId(env, cookie);
+    const beforeCheckout = Math.floor(Date.now() / 1000);
     const r = await call(env, "POST", "/api/portal/checkout", { cookie, body: { entitlement_id: id, client_instance_id: "i1", nonce: "e".repeat(64) } });
     assert.equal(r.status, 200);
     assert.equal(r.body.ok, true);
-    assert.equal(r.body.code, "ok");
+    assert.equal(r.body.code, "checkout_ok");
     assert.equal(stub.calls.length, 1);
     assert.match(stub.calls[0].url, /\/v1\/checkout$/);
     assert.match(stub.calls[0].auth, /^Bearer lcca_/, "a real ephemeral account token is presented");
@@ -259,8 +260,9 @@ test("A's checkout on A's tuple proxies the SERVER-RESOLVED fingerprint with a r
     assert.deepEqual(scopes.operations, ["checkout"]);
     assert.ok(scopes.allow_all === undefined, "never allow_all");
     assert.ok(!scopes.projects.includes("*") && !scopes.features.includes("*"), "scope axes are never *");
-    // ~120s TTL; +5 slop absorbs a Date.now() second-boundary between NOW capture and the worker call.
-    assert.ok(tok.expires_at > NOW && tok.expires_at <= NOW + 125, "~120s TTL");
+    // ~120s TTL; anchor the check beside the minting call so the intentional readiness-timeout
+    // coverage elsewhere in this process cannot age the fixture's module-load NOW baseline.
+    assert.ok(tok.expires_at > beforeCheckout && tok.expires_at <= beforeCheckout + 125, "~120s TTL");
     db.close();
   } finally {
     stub.restore();

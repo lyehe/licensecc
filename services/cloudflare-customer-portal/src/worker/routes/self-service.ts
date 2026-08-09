@@ -240,22 +240,12 @@ async function apiAction(
   }
   const proxied = await proxyBackend(origin, `/v1/${operation}`, minted.raw, proxyBody, operation);
   if (!proxied.ok) return envelope(reqId, proxied.code, undefined, proxied.status);
-  const upstream = proxied.response as Response;
-  let upstreamBody: Record<string, unknown> = {};
-  try {
-    const parsed = await upstream.json();
-    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
-      upstreamBody = parsed as Record<string, unknown>;
-    }
-  } catch {
-    return envelope(reqId, "backend_invalid_response", undefined, 502);
-  }
-  const code = typeof upstreamBody.code === "string"
-    ? upstreamBody.code
-    : upstream.ok
-      ? `${operation}_ok`
-      : `${operation}_failed`;
-  return envelope(reqId, code, upstreamBody, upstream.status);
+  // proxyBackend has already consumed the entire bounded upstream body while its abort timeout was
+  // live, checked an exact 200 route-specific success envelope, and copied only approved fields.
+  // Do not call Response.json() here: an unread response would reintroduce an unbounded path after
+  // the credentialed fetch timer had been cleared.
+  const code = typeof proxied.code === "string" ? proxied.code : `${operation}_ok`;
+  return envelope(reqId, code, proxied.data, 200);
 }
 
 // Download the signed .lic: server-resolve the tuple, stream the backend's signed bytes UNCHANGED.
@@ -295,18 +285,10 @@ async function apiDownload(
     device_key_id: deviceKeyId,
   }, "download");
   if (!proxied.ok) return envelope(reqId, proxied.code, undefined, proxied.status);
-  const upstream = proxied.response as Response;
-  let upstreamBody: Record<string, unknown>;
-  try {
-    const parsed = await upstream.json();
-    upstreamBody = typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
-  } catch {
-    return envelope(reqId, "backend_invalid_response", undefined, 502);
-  }
-  if (!upstream.ok || upstreamBody.ok !== true || typeof upstreamBody.lic !== "string") {
-    const code = typeof upstreamBody.code === "string" ? upstreamBody.code : "activate_failed";
-    return envelope(reqId, code, upstreamBody, upstream.status);
-  }
+  const lic = typeof proxied.data?.lic === "string" ? proxied.data.lic : null;
+  // Defence in depth for the attachment boundary. A successful proxy result is already required to
+  // include a string `lic`; this fallback cannot reflect any upstream body if that invariant drifts.
+  if (lic === null) return envelope(reqId, "backend_invalid_response", undefined, 502);
   // Convert the backend's JSON lease body into an attachment while STRIPPING upstream Authorization
   // and Set-Cookie so the ephemeral bearer cannot leak back to the browser.
   const headers = new Headers({
@@ -314,7 +296,7 @@ async function apiDownload(
     "content-disposition": `attachment; filename="${entitlement.project}-${entitlement.feature}.lic"`,
     "cache-control": "no-store",
   });
-  return new Response(upstreamBody.lic, { status: 200, headers });
+  return new Response(lic, { status: 200, headers });
 }
 
 export const SESSION_DISPATCH = {

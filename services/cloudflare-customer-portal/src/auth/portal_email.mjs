@@ -10,6 +10,8 @@
 
 import { emailApiOrigin } from "./portal_destination.mjs";
 
+const EMAIL_RESPONSE_TIMEOUT_MS = 2_000;
+
 function discardResponseBody(response) {
   try {
     const cancellation = response.body?.cancel();
@@ -28,7 +30,13 @@ function discardResponseBody(response) {
  *
  * NEVER throws (so a flaky email provider can never 500 the auth path) and NEVER logs the body.
  */
-export async function sendEmail(env, to, subject, body) {
+export function sendEmail(env, to, subject, body) {
+  return sendEmailWithTimeout(env, to, subject, body, EMAIL_RESPONSE_TIMEOUT_MS);
+}
+
+// The production export above fixes a small response deadline. The timeout-taking form is test-only
+// internal surface so a stalled provider can be exercised without making deterministic tests wait.
+async function sendEmailWithTimeout(env, to, subject, body, timeoutMs) {
   // Validate the destination BEFORE reading/assembling API-key credentials. Invalid config must be
   // indistinguishable from a provider failure to callers, but it must never cause a subrequest.
   const base = emailApiOrigin(env);
@@ -41,6 +49,8 @@ export async function sendEmail(env, to, subject, body) {
   if (typeof to !== "string" || to.length === 0) {
     return { ok: false, code: "email_send_failed" };
   }
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetch(new URL("/emails", base).toString(), {
       method: "POST",
@@ -51,9 +61,10 @@ export async function sendEmail(env, to, subject, body) {
       body: JSON.stringify({ from, to, subject, text: body }),
       // A provider redirect must be terminal: never forward the API key or OTP body to Location.
       redirect: "manual",
+      signal: controller.signal,
     });
     // sendEmail only needs the status. Drop every provider body immediately, including a redirect's
-    // potentially unbounded body, before the background auth work settles.
+    // potentially unbounded body, while the provider timeout is still live.
     discardResponseBody(response);
     if (response.status >= 300 && response.status < 400) {
       return { ok: false, code: "email_send_failed" };
@@ -64,5 +75,12 @@ export async function sendEmail(env, to, subject, body) {
     return { ok: false, code: "email_send_failed" };
   } catch {
     return { ok: false, code: "email_send_failed" };
+  } finally {
+    clearTimeout(timeout);
   }
 }
+
+export const _internals = {
+  EMAIL_RESPONSE_TIMEOUT_MS,
+  sendEmailWithTimeout,
+};

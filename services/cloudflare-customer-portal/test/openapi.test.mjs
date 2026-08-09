@@ -13,8 +13,8 @@ import { assembleComponents, assemblePaths, assertUniqueOperationIds } from "../
 import { openApiDocument } from "../dist-worker/worker/openapi/document.js";
 import { ALL_ROUTES, META_ROUTES, PUBLIC_ROUTES, SESSION_ROUTES } from "../dist-worker/worker/routes.js";
 import worker, { PORTAL_ROUTE_KEYS } from "../dist-worker/worker/index.js";
-import { BACKEND_PROXY_ERROR_MANIFEST } from "../src/auth/portal_backend_error_manifest.mjs";
-import { canonicalBackendErrorManifest, expectedProxyErrorCodes, PROXIED_ERROR_STATUSES, proxiedBackendOperations } from "./backend-proxy-contract.mjs";
+import { BACKEND_PROXY_ERROR_MANIFEST, BACKEND_PROXY_SUCCESS_MANIFEST } from "../src/auth/portal_backend_error_manifest.mjs";
+import { canonicalBackendErrorManifest, canonicalBackendSuccessManifest, expectedProxyErrorCodes, PROXIED_ERROR_STATUSES, proxiedBackendOperations } from "./backend-proxy-contract.mjs";
 
 const keyOf = (r) => `${r.method} ${r.path}`;
 
@@ -178,6 +178,16 @@ test("runtime backend-error manifest is exactly derived from the canonical backe
       BACKEND_PROXY_ERROR_MANIFEST[operation.name],
       canonicalBackendErrorManifest(operation),
       `${operation.name} runtime error allowlist must be neither broader nor narrower than its backend contract`,
+    );
+  }
+});
+
+test("runtime backend-success manifest is exactly derived from the canonical backend contract", () => {
+  for (const operation of proxiedBackendOperations) {
+    assert.deepEqual(
+      BACKEND_PROXY_SUCCESS_MANIFEST[operation.name],
+      canonicalBackendSuccessManifest(operation),
+      `${operation.name} runtime success allowlist must expose only its canonical backend fields`,
     );
   }
 });

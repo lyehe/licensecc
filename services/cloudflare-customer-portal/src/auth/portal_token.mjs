@@ -19,7 +19,7 @@
 import { buildIssue } from "@licensecc/cloudflare-runtime/auth/account_token_issue";
 import { loadPepperMap } from "@licensecc/cloudflare-runtime/auth/primitives";
 import { canonicalHttpsOrigin } from "./portal_destination.mjs";
-import { isAllowedBackendProxyError } from "./portal_backend_error_manifest.mjs";
+import { isAllowedBackendProxyError, sanitizeBackendProxySuccess } from "./portal_backend_error_manifest.mjs";
 
 /** @typedef {import("../worker/env.js").Env} PortalEnv */
 /** @typedef {{ [key: string]: Uint8Array }} PepperMap */
@@ -32,6 +32,13 @@ const READ_OPERATIONS = ["report"];
 const ACTION_OPERATIONS = ["activate", "checkout", "heartbeat", "release", "renew"];
 const BACKEND_RESPONSE_TIMEOUT_MS = 2_000;
 const BACKEND_ERROR_MAX_BYTES = 4_096;
+// Signed seat assertions can legitimately be larger than a terse JSON error. A 64 KiB action cap
+// admits those finite claims without exposing a Worker to an unbounded backend response.
+const BACKEND_ACTION_SUCCESS_MAX_BYTES = 64 * 1024;
+// A signed v201 license can be materially larger than an assertion, so downloads get a separately
+// documented 256 KiB finite cap. The portal still converts only the validated `lic` string into an
+// attachment and never streams an unbounded upstream body to the browser.
+const BACKEND_DOWNLOAD_SUCCESS_MAX_BYTES = 256 * 1024;
 
 /** @param {PortalEnv} env @param {PepperMap} peppers */
 function activePepper(env, peppers) {
@@ -140,16 +147,17 @@ export async function mintSessionToken(
 }
 
 /**
- * proxyBackend(origin, path, token, body, operation) -> { ok:true, response } | { ok:false, status, code }
+ * proxyBackend(origin, path, token, body, operation) -> { ok:true, status:200, data, code? } | { ok:false, status, code }
  *
  * Forwards an /api/portal action to ${BACKEND_ORIGIN}/v1/* with Authorization: Bearer <ephemeral
  * account token>. The backend (ACCOUNT_TOKEN_MODE=required) is the authoritative isolation boundary.
  *
  * Every credentialed request uses redirect:"manual". A redirect is never followed, so the bearer
- * and body cannot be forwarded to a Location-controlled host. Non-2xx bodies are read under a
- * short abort timeout and small byte cap, then accepted only when their exact status/code appears in
- * the route-specific canonical-backend manifest. We return only that approved code; upstream fields
- * (including a hostile backend echo) never reach the browser.
+ * and body cannot be forwarded to a Location-controlled host. Every upstream body is either
+ * cancelled or consumed under the same short abort timeout before this function settles. The only
+ * accepted success is an exact 200 with a bounded, fatal-UTF-8 JSON body matching the route-specific
+ * canonical schema. Non-2xx bodies use the corresponding exact status/code manifest. We return only
+ * approved, freshly copied fields; a hostile backend echo never reaches the browser.
  */
 /** @param {string} origin @param {string} path @param {string} token @param {unknown} body @param {string} operation */
 export function proxyBackend(origin, path, token, body, operation) {
@@ -189,7 +197,22 @@ async function proxyBackendWithTimeout(origin, path, token, body, operation, tim
         ? { ok: false, status: 502, code: "backend_invalid_response" }
         : { ok: false, status: upstream.status, code };
     }
-    return { ok: true, response: upstream };
+    // `Response.ok` admits 201/202/204. This proxy's canonical backend contract admits only 200;
+    // discard every other 2xx body without attempting to parse or forward it.
+    if (upstream.status !== 200) {
+      cancelResponseBody(upstream);
+      return { ok: false, status: 502, code: "backend_invalid_response" };
+    }
+    const maxBytes = successMaxBytesForOperation(operation);
+    if (maxBytes === null) {
+      cancelResponseBody(upstream);
+      return { ok: false, status: 502, code: "backend_invalid_response" };
+    }
+    const parsed = await readBoundedBackendJson(upstream, maxBytes, controller.signal);
+    const success = parsed === null ? null : sanitizeBackendProxySuccess(operation, parsed);
+    return success === null
+      ? { ok: false, status: 502, code: "backend_invalid_response" }
+      : { ok: true, status: 200, ...success };
   } catch {
     return { ok: false, status: 502, code: "backend_unreachable" };
   } finally {
@@ -199,6 +222,14 @@ async function proxyBackendWithTimeout(origin, path, token, body, operation, tim
 
 function isRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function successMaxBytesForOperation(operation) {
+  if (operation === "download") return BACKEND_DOWNLOAD_SUCCESS_MAX_BYTES;
+  if (operation === "checkout" || operation === "heartbeat" || operation === "release") {
+    return BACKEND_ACTION_SUCCESS_MAX_BYTES;
+  }
+  return null;
 }
 
 function cancelResponseBody(response) {
@@ -249,12 +280,12 @@ function readChunkWithAbort(reader, signal) {
   });
 }
 
-async function readBoundedBackendErrorCode(response, operation, signal) {
+async function readBoundedBackendJson(response, maxBytes, signal) {
   const reader = response.body?.getReader();
   if (reader === undefined) return null;
   try {
     const contentLength = response.headers.get("content-length");
-    if (contentLength !== null && /^(?:0|[1-9][0-9]*)$/.test(contentLength) && Number(contentLength) > BACKEND_ERROR_MAX_BYTES) {
+    if (contentLength !== null && /^(?:0|[1-9][0-9]*)$/.test(contentLength) && Number(contentLength) > maxBytes) {
       return null;
     }
     const chunks = [];
@@ -264,7 +295,7 @@ async function readBoundedBackendErrorCode(response, operation, signal) {
       if (done) break;
       if (!(value instanceof Uint8Array)) return null;
       total += value.byteLength;
-      if (total > BACKEND_ERROR_MAX_BYTES) return null;
+      if (total > maxBytes) return null;
       chunks.push(value);
     }
     const bytes = new Uint8Array(total);
@@ -273,15 +304,19 @@ async function readBoundedBackendErrorCode(response, operation, signal) {
       bytes.set(chunk, offset);
       offset += chunk.byteLength;
     }
-    const parsed = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
-    if (!isRecord(parsed) || parsed.ok !== false || typeof parsed.code !== "string" || parsed.code.length === 0) return null;
-    return isAllowedBackendProxyError(operation, response.status, parsed.code) ? parsed.code : null;
+    return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
   } catch {
     return null;
   } finally {
-    // Never retain an upstream error stream after its bounded validation attempt.
+    // Never retain an upstream stream after its bounded validation attempt, successful or failed.
     cancelReader(reader);
   }
+}
+
+async function readBoundedBackendErrorCode(response, operation, signal) {
+  const parsed = await readBoundedBackendJson(response, BACKEND_ERROR_MAX_BYTES, signal);
+  if (!isRecord(parsed) || parsed.ok !== false || typeof parsed.code !== "string" || parsed.code.length === 0) return null;
+  return isAllowedBackendProxyError(operation, response.status, parsed.code) ? parsed.code : null;
 }
 
 export const _internals = {
@@ -290,5 +325,7 @@ export const _internals = {
   ACTION_OPERATIONS,
   BACKEND_RESPONSE_TIMEOUT_MS,
   BACKEND_ERROR_MAX_BYTES,
+  BACKEND_ACTION_SUCCESS_MAX_BYTES,
+  BACKEND_DOWNLOAD_SUCCESS_MAX_BYTES,
   proxyBackendWithTimeout,
 };

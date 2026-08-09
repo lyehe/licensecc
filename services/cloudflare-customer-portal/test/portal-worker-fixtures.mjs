@@ -34,9 +34,17 @@ export function installBackendStub() {
     let body = null;
     try { body = init.body ? JSON.parse(init.body) : null; } catch { body = init.body; }
     calls.push({ url: String(url), auth, body });
-    // Canned signed .lic / ok response. Echo the bearer back in the body to PROVE the portal strips
-    // it (a hostile/buggy backend that reflects the token must not leak it to the browser).
-    return new Response(JSON.stringify({ ok: true, code: "ok", lic: "SIGNED-LIC-BYTES", echoed_auth: auth }), {
+    // Canned canonical 200 response. Echo the bearer back in an otherwise-valid body to PROVE the
+    // portal's success sanitizer strips it (a hostile/buggy backend must not leak it to the browser).
+    const target = new URL(String(url)).pathname;
+    const response = target.endsWith("/v1/checkout")
+      ? { ok: true, assertion: "lccoa1-checkout-assertion", seat_id: "seat-1", mode: "live", server_time: NOW, expires_at: NOW + 3600, heartbeat_in: 60, echoed_auth: auth }
+      : target.endsWith("/v1/heartbeat")
+        ? { ok: true, assertion: "lccoa1-heartbeat-assertion", server_time: NOW, expires_at: NOW + 3600, heartbeat_in: 60, echoed_auth: auth }
+        : target.endsWith("/v1/release")
+          ? { ok: true, server_time: NOW, echoed_auth: auth }
+          : { ok: true, lic: "SIGNED-LIC-BYTES", server_time: NOW, renew_by: NOW + 1800, valid_to_epoch: NOW + 86400, echoed_auth: auth };
+    return new Response(JSON.stringify(response), {
       status: 200,
       headers: { "content-type": "application/json", authorization: auth ?? "" },
     });

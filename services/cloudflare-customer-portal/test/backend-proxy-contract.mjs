@@ -38,6 +38,42 @@ function backendResponse(path, status) {
   return response;
 }
 
+function backendSchemaReference(schema) {
+  if (!schema || typeof schema !== "object") {
+    throw new Error("Backend canonical response schema is unavailable.");
+  }
+  if (typeof schema.$ref !== "string") return schema;
+  const prefix = "#/components/schemas/";
+  if (!schema.$ref.startsWith(prefix)) {
+    throw new Error(`Backend canonical schema reference ${schema.$ref} is not a component schema.`);
+  }
+  const resolved = backendOpenApi.components?.schemas?.[schema.$ref.slice(prefix.length)];
+  if (!resolved || typeof resolved !== "object") {
+    throw new Error(`Backend canonical schema reference ${schema.$ref} is missing.`);
+  }
+  return resolved;
+}
+
+function backendSuccessSchema(path) {
+  const response = backendResponse(path, "200");
+  const schema = response?.content?.["application/json"]?.schema;
+  return backendSchemaReference(schema);
+}
+
+function successFieldDescriptor(schema, label) {
+  if (!schema || typeof schema !== "object" || typeof schema.type !== "string") {
+    throw new Error(`Backend canonical success field ${label} must declare one exact type.`);
+  }
+  const descriptor = { type: schema.type };
+  if (Array.isArray(schema.enum)) {
+    if (!schema.enum.every((value) => typeof value === "string")) {
+      throw new Error(`Backend canonical success field ${label} has a non-string enum.`);
+    }
+    descriptor.enum = [...schema.enum];
+  }
+  return descriptor;
+}
+
 function codeExamples(response) {
   const examples = response.content?.["application/json"]?.examples;
   if (!examples || typeof examples !== "object") return [];
@@ -162,6 +198,30 @@ export function canonicalBackendErrorManifest(operation) {
       return codes.length === 0 ? [] : [[status, codes]];
     }),
   );
+}
+
+export function canonicalBackendSuccessManifest(operation) {
+  const schema = backendSuccessSchema(operation.backendPath);
+  if (schema.type !== "object" || !Array.isArray(schema.required) || !schema.required.includes("ok")) {
+    throw new Error(`${operation.name} backend 200 response must require an object ok field.`);
+  }
+  const ok = schema.properties?.ok;
+  if (!ok || !Array.isArray(ok.enum) || ok.enum.length !== 1 || ok.enum[0] !== true) {
+    throw new Error(`${operation.name} backend 200 response must pin ok:true.`);
+  }
+  const code = schema.properties?.code;
+  let codes = [];
+  if (code !== undefined) {
+    if (typeof code.const === "string") codes = [code.const];
+    else if (Array.isArray(code.enum) && code.enum.every((value) => typeof value === "string")) codes = [...code.enum];
+    else throw new Error(`${operation.name} backend 200 code must be exact when present.`);
+  }
+  const fields = {};
+  for (const name of schema.required) {
+    if (name === "ok" || name === "code") continue;
+    fields[name] = successFieldDescriptor(schema.properties?.[name], `${operation.name}.${name}`);
+  }
+  return { codes, fields };
 }
 
 export { BACKEND_STUB_STATUSES, PROXIED_ERROR_STATUSES };
