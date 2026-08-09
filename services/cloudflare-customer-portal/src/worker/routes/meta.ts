@@ -2,6 +2,7 @@
 
 import { DOCS_HTML } from "../docs_page.js";
 import { openApiDocument } from "../openapi/document.js";
+import { backendOrigin } from "../../auth/portal_destination.mjs";
 import type { Env, ExecutionContextLike, TopRoute } from "../env.js";
 import { envelope, json } from "../support.js";
 
@@ -16,10 +17,8 @@ export const META_DISPATCH = {
 
 const BACKEND_SERVICE = "licensecc-online-verifier";
 const REQUIRED_ACCOUNT_TOKEN_MODE = "required";
-
-function backendOrigin(env: Env): string {
-  return (env.BACKEND_ORIGIN ?? "").replace(/\/$/, "");
-}
+const READINESS_TIMEOUT_MS = 2_000;
+const READINESS_MAX_JSON_BYTES = 4_096;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -32,15 +31,82 @@ function provesRequiredAccountTokenMode(value: unknown): boolean {
     value.account_token_mode === REQUIRED_ACCOUNT_TOKEN_MODE;
 }
 
+function readChunkWithAbort(reader: ReadableStreamDefaultReader<Uint8Array>, signal: AbortSignal): Promise<ReadableStreamReadResult<Uint8Array>> {
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) {
+      reject(new Error("backend health request timed out"));
+      return;
+    }
+    const cleanup = () => signal.removeEventListener("abort", onAbort);
+    const onAbort = () => {
+      cleanup();
+      reject(new Error("backend health request timed out"));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    void reader.read().then(
+      (value) => {
+        cleanup();
+        resolve(value);
+      },
+      (error: unknown) => {
+        cleanup();
+        reject(error);
+      },
+    );
+  });
+}
+
+async function readBoundedJson(response: Response, signal: AbortSignal): Promise<unknown | null> {
+  const reader = response.body?.getReader();
+  if (reader === undefined) return null;
+  try {
+    const contentLength = response.headers.get("content-length");
+    if (contentLength !== null && /^(?:0|[1-9][0-9]*)$/.test(contentLength) && Number(contentLength) > READINESS_MAX_JSON_BYTES) {
+      return null;
+    }
+    const chunks: Uint8Array[] = [];
+    let total = 0;
+    while (true) {
+      const { done, value } = await readChunkWithAbort(reader, signal);
+      if (done) break;
+      if (value === undefined) return null;
+      total += value.byteLength;
+      if (total > READINESS_MAX_JSON_BYTES) return null;
+      chunks.push(value);
+    }
+    const bytes = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return JSON.parse(new TextDecoder().decode(bytes));
+  } catch {
+    return null;
+  } finally {
+    // Release the upstream body even for a malformed, oversized, or stalled health response.
+    try {
+      await reader.cancel();
+    } catch {
+      // A completed body is already closed; there is nothing left to cancel.
+    }
+    reader.releaseLock();
+  }
+}
+
 async function backendRequiresAccountTokenMode(env: Env): Promise<boolean> {
   const origin = backendOrigin(env);
-  if (origin.length === 0) return false;
+  if (origin === null) return false;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), READINESS_TIMEOUT_MS);
   try {
-    const response = await fetch(`${origin}/health`);
+    const response = await fetch(new URL("/health", origin).toString(), { signal: controller.signal });
     if (response.status !== 200) return false;
-    return provesRequiredAccountTokenMode(await response.json());
+    return provesRequiredAccountTokenMode(await readBoundedJson(response, controller.signal));
   } catch {
     return false;
+  } finally {
+    clearTimeout(timeout);
   }
 }
 

@@ -14,7 +14,7 @@ export interface D1PreparedStatement {
 export interface D1DatabaseLike {
   prepare(sql: string): D1PreparedStatement;
   withSession?(mode: string): D1DatabaseLike;
-  batch?(statements: D1PreparedStatement[]): Promise<unknown[]>;
+  batch?(statements: D1PreparedStatement[]): Promise<D1Result<unknown>[]>;
 }
 
 export interface ExecutionContextLike {

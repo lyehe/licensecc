@@ -145,6 +145,47 @@ test("lost race between the ownership pre-read and the guarded write -> 409 with
   db.close();
 });
 
+test("ownership transfer between the device pre-read and batch cannot revoke the new owner's device", async () => {
+  const { db, env } = baseFixture();
+  seedDevice(db, { fingerprint: FP_A, deviceKeyId: "dk_a" });
+  const cookie = await cookieFor(env, "A");
+  const seqBefore = db.prepare("SELECT revocation_seq FROM entitlements WHERE license_fingerprint = ?").get(FP_A).revocation_seq;
+
+  // This models the precise TOCTOU: A owned the device when the route's ownership-scoped pre-read
+  // succeeded, but the entitlement transfers to B immediately before D1 executes its atomic batch.
+  // The transition must see both guarded UPDATEs affect zero rows; in particular it must NOT revoke
+  // the device after it belongs to B.
+  const realBatch = env.DB.batch.bind(env.DB);
+  let transferred = false;
+  env.DB.batch = async (statements) => {
+    if (!transferred) {
+      transferred = true;
+      db.prepare("UPDATE entitlements SET customer_id = 'B' WHERE license_fingerprint = ?").run(FP_A);
+    }
+    return realBatch(statements);
+  };
+
+  const rel = await call(env, "POST", "/api/portal/devices/release", { cookie, body: { device_key_id: "dk_a" } });
+  assert.equal(rel.status, 409);
+  assert.equal(rel.body.code, "device_status_conflict");
+  assert.equal(
+    db.prepare("SELECT status FROM entitlement_devices WHERE device_key_id = 'dk_a'").get().status,
+    "active",
+    "the new owner's device is not changed by A's stale release",
+  );
+  assert.equal(
+    db.prepare("SELECT revocation_seq FROM entitlements WHERE license_fingerprint = ?").get(FP_A).revocation_seq,
+    seqBefore,
+    "the stale release does not bump B's entitlement revocation sequence",
+  );
+  assert.equal(
+    db.prepare("SELECT COUNT(*) AS n FROM entitlement_events WHERE reason = 'portal_device_release'").get().n,
+    0,
+    "the stale release emits no audit event",
+  );
+  db.close();
+});
+
 // =================================================================================================
 // ACTIONS — server-resolve the tuple; forged body ignored; no oracle
 // =================================================================================================

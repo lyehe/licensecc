@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import { readFileSync } from "node:fs";
 import { assert, worker, mintSession, codeFromSecretBytes, requestOtp, redeemOtp, policyCapacityViolation, FP_A, FP_B, installBackendStub, cookieFor, sameSiteHeaders, entitlementId, ownedEntitlementId, call, baseFixture, seedDevice, seedEntitlement, CTX, NOW } from "./portal-worker-fixtures.mjs";
+import { sendEmail } from "../src/auth/portal_email.mjs";
 
 async function withFetchStub(fetchStub, run) {
   const originalFetch = globalThis.fetch;
@@ -19,6 +20,26 @@ function backendHealth({ service = "licensecc-online-verifier", accountTokenMode
     status: 200,
     headers: { "content-type": "application/json; charset=utf-8" },
   });
+}
+
+const INVALID_DESTINATIONS = Object.freeze([
+  ["scheme typo", "https:/backend.test"],
+  ["plaintext HTTP", "http://backend.test"],
+  ["malformed URL", "https://"],
+  ["userinfo injection", "https://attacker:password@backend.test"],
+  ["path/query/fragment injection", "https://backend.test/health?next=https://attacker.test#fragment"],
+]);
+
+async function settlesWithin(promise, milliseconds) {
+  let timer;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((resolve) => { timer = setTimeout(() => resolve(null), milliseconds); }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
 }
 
 test("public documentation routes are direct, credential-free responses", async () => {
@@ -91,6 +112,136 @@ test("/health fails closed when the backend health request is unavailable", asyn
     assert.equal(unavailable.status, 503);
     assert.equal(unavailable.body.code, "account_token_mode_not_required");
     assert.equal(unavailable.body.data.account_token_mode_required, false);
+  } finally {
+    db.close();
+  }
+});
+
+test("/health rejects invalid backend destinations before any outbound request", async () => {
+  for (const [label, backendOrigin] of INVALID_DESTINATIONS) {
+    const { db, env } = baseFixture({ BACKEND_ORIGIN: backendOrigin });
+    const calls = [];
+    try {
+      const response = await withFetchStub(async (url, init = {}) => {
+        calls.push({ url: String(url), authorization: new Headers(init.headers ?? {}).get("authorization") });
+        return backendHealth({ accountTokenMode: "required" });
+      }, () => call(env, "GET", "/health", {}));
+      assert.equal(response.status, 503, `${label} fails closed`);
+      assert.equal(response.body.code, "account_token_mode_not_required");
+      assert.deepEqual(calls, [], `${label} never makes an outbound request`);
+    } finally {
+      db.close();
+    }
+  }
+});
+
+test("invalid backend destinations stop checkout before account-token minting or bearer proxying", async () => {
+  for (const [label, backendOrigin] of INVALID_DESTINATIONS) {
+    const { db, env } = baseFixture({ BACKEND_ORIGIN: backendOrigin });
+    const calls = [];
+    try {
+      const cookie = await cookieFor(env, "A");
+      const id = await ownedEntitlementId(env, cookie);
+      const response = await withFetchStub(async (url, init = {}) => {
+        calls.push({ url: String(url), authorization: new Headers(init.headers ?? {}).get("authorization") });
+        return backendHealth({ accountTokenMode: "required" });
+      }, () => call(env, "POST", "/api/portal/checkout", {
+        cookie,
+        body: { entitlement_id: id, client_instance_id: "i1", nonce: "e".repeat(64) },
+      }));
+      assert.equal(response.status, 503, `${label} fails before the backend proxy`);
+      assert.equal(response.body.code, "backend_unconfigured");
+      assert.deepEqual(calls, [], `${label} never receives a bearer request`);
+      assert.equal(
+        db.prepare("SELECT COUNT(*) AS n FROM account_tokens WHERE customer_id = 'A'").get().n,
+        0,
+        `${label} does not mint an account token for an invalid destination`,
+      );
+    } finally {
+      db.close();
+    }
+  }
+});
+
+test("invalid email destinations fail before a provider fetch or API-key header", async () => {
+  for (const [label, emailOrigin] of INVALID_DESTINATIONS) {
+    const calls = [];
+    const response = await withFetchStub(async (url, init = {}) => {
+      calls.push({ url: String(url), authorization: new Headers(init.headers ?? {}).get("authorization") });
+      return new Response("{}", { status: 202 });
+    }, () => sendEmail({
+      PORTAL_EMAIL_API_KEY: "test-key",
+      PORTAL_EMAIL_FROM: "portal@example.test",
+      PORTAL_EMAIL_API_BASE: emailOrigin,
+    }, "customer@example.test", "Subject", "Body"));
+    assert.deepEqual(response, { ok: false, code: "email_send_failed" }, `${label} is rejected`);
+    assert.deepEqual(calls, [], `${label} cannot receive the email API key`);
+  }
+});
+
+test("a canonical HTTPS email destination keeps the compatible email flow", async () => {
+  const calls = [];
+  const response = await withFetchStub(async (url, init = {}) => {
+    calls.push({ url: String(url), authorization: new Headers(init.headers ?? {}).get("authorization") });
+    return new Response("{}", { status: 202 });
+  }, () => sendEmail({
+    PORTAL_EMAIL_API_KEY: "test-key",
+    PORTAL_EMAIL_FROM: "portal@example.test",
+    PORTAL_EMAIL_API_BASE: "https://email.test/",
+  }, "customer@example.test", "Subject", "Body"));
+  assert.deepEqual(response, { ok: true, code: "sent" });
+  assert.deepEqual(calls, [{ url: "https://email.test/emails", authorization: "Bearer test-key" }]);
+});
+
+test("/health bounds an oversized backend health body", async () => {
+  const { db, env } = baseFixture();
+  const payload = JSON.stringify({
+    ok: true,
+    service: "licensecc-online-verifier",
+    account_token_mode: "required",
+    padding: "x".repeat(8192),
+  });
+  try {
+    const response = await withFetchStub(async () => new Response(payload, {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    }), () => call(env, "GET", "/health", {}));
+    assert.equal(response.status, 503);
+    assert.equal(response.body.code, "account_token_mode_not_required");
+  } finally {
+    db.close();
+  }
+});
+
+test("/health fails closed when the bounded backend body is not JSON", async () => {
+  const { db, env } = baseFixture();
+  try {
+    const response = await withFetchStub(async () => new Response("not-json", {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    }), () => call(env, "GET", "/health", {}));
+    assert.equal(response.status, 503);
+    assert.equal(response.body.code, "account_token_mode_not_required");
+  } finally {
+    db.close();
+  }
+});
+
+test("/health times out and cancels a stalled backend response stream", async () => {
+  const { db, env } = baseFixture();
+  let cancelled = false;
+  const stalled = new ReadableStream({
+    cancel() { cancelled = true; },
+  });
+  try {
+    const response = await withFetchStub(
+      async () => new Response(stalled, { status: 200, headers: { "content-type": "application/json" } }),
+      () => settlesWithin(call(env, "GET", "/health", {}), 2_500),
+    );
+    assert.notEqual(response, null, "readiness must not wait indefinitely for a backend body");
+    assert.equal(response.status, 503);
+    assert.equal(response.body.code, "account_token_mode_not_required");
+    assert.equal(cancelled, true, "the stalled response reader is cancelled on timeout");
   } finally {
     db.close();
   }

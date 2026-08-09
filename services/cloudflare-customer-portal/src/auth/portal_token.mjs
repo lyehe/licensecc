@@ -18,6 +18,7 @@
 
 import { buildIssue } from "@licensecc/cloudflare-runtime/auth/account_token_issue";
 import { loadPepperMap } from "@licensecc/cloudflare-runtime/auth/primitives";
+import { canonicalHttpsOrigin } from "./portal_destination.mjs";
 
 /** @typedef {import("../worker/env.js").Env} PortalEnv */
 /** @typedef {{ [key: string]: Uint8Array }} PepperMap */
@@ -136,7 +137,7 @@ export async function mintSessionToken(
 }
 
 /**
- * proxyBackend(env, path, token, body) -> Response
+ * proxyBackend(origin, path, token, body) -> Response
  *
  * Forwards an /api/portal action to ${BACKEND_ORIGIN}/v1/* with Authorization: Bearer <ephemeral
  * account token>. The backend (ACCOUNT_TOKEN_MODE=required) is the authoritative isolation boundary.
@@ -144,10 +145,12 @@ export async function mintSessionToken(
  * On a non-2xx upstream we pass the JSON body through but STRIP the upstream Authorization (and any
  * Set-Cookie / sensitive headers) so a backend echo can never leak the bearer back to the browser.
  */
-/** @param {PortalEnv} env @param {string} path @param {string} token @param {unknown} body */
-export async function proxyBackend(env, path, token, body) {
-  const origin = (env?.BACKEND_ORIGIN ?? "").replace(/\/$/, "");
-  if (origin.length === 0) {
+/** @param {string} origin @param {string} path @param {string} token @param {unknown} body */
+export async function proxyBackend(origin, path, token, body) {
+  // Defence in depth: callers normally resolve this once before minting a token, but the proxy
+  // itself also refuses any non-canonical destination before it can construct a Bearer header.
+  const destination = canonicalHttpsOrigin(origin);
+  if (destination === null || !path.startsWith("/") || path.startsWith("//")) {
     return new Response(JSON.stringify({ ok: false, code: "backend_unconfigured" }), {
       status: 503,
       headers: { "content-type": "application/json; charset=utf-8" },
@@ -155,7 +158,7 @@ export async function proxyBackend(env, path, token, body) {
   }
   let upstream;
   try {
-    upstream = await fetch(`${origin}${path}`, {
+    upstream = await fetch(new URL(path, destination).toString(), {
       method: "POST",
       headers: {
         authorization: `Bearer ${token}`,

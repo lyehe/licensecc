@@ -8,6 +8,8 @@
 //
 // Worker-safe: no node:/Buffer; only fetch + standard globals.
 
+import { emailApiOrigin } from "./portal_destination.mjs";
+
 /**
  * sendEmail(env, to, subject, body) -> { ok, code }
  *
@@ -18,6 +20,10 @@
  * NEVER throws (so a flaky email provider can never 500 the auth path) and NEVER logs the body.
  */
 export async function sendEmail(env, to, subject, body) {
+  // Validate the destination BEFORE reading/assembling API-key credentials. Invalid config must be
+  // indistinguishable from a provider failure to callers, but it must never cause a subrequest.
+  const base = emailApiOrigin(env);
+  if (base === null) return { ok: false, code: "email_send_failed" };
   const apiKey = env?.PORTAL_EMAIL_API_KEY;
   const from = env?.PORTAL_EMAIL_FROM;
   if (typeof apiKey !== "string" || apiKey.length === 0 || typeof from !== "string" || from.length === 0) {
@@ -26,11 +32,8 @@ export async function sendEmail(env, to, subject, body) {
   if (typeof to !== "string" || to.length === 0) {
     return { ok: false, code: "email_send_failed" };
   }
-  const base = typeof env?.PORTAL_EMAIL_API_BASE === "string" && env.PORTAL_EMAIL_API_BASE.length > 0
-    ? env.PORTAL_EMAIL_API_BASE.replace(/\/$/, "")
-    : "https://api.resend.com";
   try {
-    const response = await fetch(`${base}/emails`, {
+    const response = await fetch(new URL("/emails", base).toString(), {
       method: "POST",
       headers: {
         authorization: `Bearer ${apiKey}`,

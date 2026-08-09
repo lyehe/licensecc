@@ -31,10 +31,13 @@
     // Host header (invariant 6); always this configured value.
     "PORTAL_PUBLIC_ORIGIN": "https://portal.example.com",
     // The licensing-backend origin the portal proxies per-action account tokens to (POST /v1/*).
+    // It must be a canonical HTTPS origin only: no userinfo, path, query, fragment, or HTTP.
+    // This applies in development too; use a local HTTPS endpoint rather than an HTTP exception.
     "BACKEND_ORIGIN": "https://licensecc-online-verifier.example.workers.dev",
     // Resend (or compatible) transactional email. email_unconfigured does NOT 503 — it falls
     // back to operator bootstrap (blueprint (e)). Set the API key as a Worker SECRET.
     "PORTAL_EMAIL_FROM": "",
+    // This optional Resend-compatible destination has the same strict HTTPS-origin policy.
     "PORTAL_EMAIL_API_BASE": "https://api.resend.com"
     // Secrets (wrangler secret put):
     //   PORTAL_OTP_PEPPERS         JSON { key_id: base64-secret(>=32 bytes) } — OTP HMAC-at-rest

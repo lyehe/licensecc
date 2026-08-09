@@ -2,6 +2,7 @@
 
 import * as tokenModule from "../../auth/portal_token.mjs";
 import * as ratelimitModule from "../../auth/portal_ratelimit.mjs";
+import { backendOrigin } from "../../auth/portal_destination.mjs";
 import type { Env, SessionRow } from "../env.js";
 import {
   clientIp,
@@ -15,7 +16,7 @@ import {
 
 type AnyFn = (...args: any[]) => any;
 const mintSessionToken = (tokenModule as { mintSessionToken: AnyFn }).mintSessionToken;
-const proxyBackend = (tokenModule as { proxyBackend: (env: Env, path: string, token: string, body: unknown) => Promise<Response> }).proxyBackend;
+const proxyBackend = (tokenModule as { proxyBackend: (origin: string, path: string, token: string, body: unknown) => Promise<Response> }).proxyBackend;
 const portalRateLimit = (ratelimitModule as { portalRateLimit: AnyFn }).portalRateLimit;
 
 async function apiMe(session: { customer_id: string }, reqId: string): Promise<Response> {
@@ -95,27 +96,32 @@ async function apiDeviceRelease(
       "AND EXISTS (SELECT 1 FROM entitlement_devices d WHERE d.project = entitlements.project AND d.feature = entitlements.feature " +
       "AND d.license_fingerprint = entitlements.license_fingerprint AND d.device_key_id = ? AND d.status = 'active') RETURNING revocation_seq",
   ).bind(now, device.project, device.feature, device.license_fingerprint, session.customer_id, deviceKeyId);
-  // (2) Flip the device out of 'active' (guarded on its current status). We reuse 'revoked' — the only
-  // terminal, CHECK-allowed non-active status — so the device is retired and re-activation registers anew.
+  // (2) Flip the device out of 'active', repeating the entitlement ownership guard. This closes the
+  // ownership-transfer TOCTOU: if the entitlement changed hands after the pre-read, BOTH statements
+  // return zero rows in the atomic batch, so the new owner's device remains active.
   const flip = env.DB.prepare(
-    "UPDATE entitlement_devices SET status = 'revoked', updated_at = ? WHERE project = ? AND feature = ? AND license_fingerprint = ? AND device_key_id = ? AND status = 'active'",
-  ).bind(now, device.project, device.feature, device.license_fingerprint, deviceKeyId);
+    "UPDATE entitlement_devices SET status = 'revoked', updated_at = ? WHERE project = ? AND feature = ? AND license_fingerprint = ? " +
+      "AND device_key_id = ? AND status = 'active' AND EXISTS (SELECT 1 FROM entitlements e WHERE e.project = entitlement_devices.project " +
+      "AND e.feature = entitlement_devices.feature AND e.license_fingerprint = entitlement_devices.license_fingerprint AND e.customer_id = ?) " +
+      "RETURNING device_key_id",
+  ).bind(now, device.project, device.feature, device.license_fingerprint, deviceKeyId, session.customer_id);
 
   const results = await env.DB.batch([bump, flip]);
-  const first = results[0];
-  const returned = first !== null && typeof first === "object" && "results" in first ? (first as { results: unknown[] }).results : [];
-  if (!Array.isArray(returned) || returned.length === 0) {
-    // Lost race: the device was released/removed between the pre-read and the guarded write. The bump
-    // and flip both matched 0 rows, so NOTHING is recorded — we return before issuing the audit below.
+  const bumpRows = results[0]?.results;
+  const flipRows = results[1]?.results;
+  if (!Array.isArray(bumpRows) || bumpRows.length !== 1 || !Array.isArray(flipRows) || flipRows.length !== 1) {
+    // Both statements must prove their exact one-row transition. A lost release/removal/ownership
+    // transfer matches zero rows for both under D1's atomic batch, so no audit is emitted.
     return envelope(reqId, "device_status_conflict", undefined, 409);
   }
   // (3) Append-only audit — issued ONLY after the guarded bump returned a row, so a lost-race 409 emits
   // no phantom row. The recorded revocation_seq is the FRESHLY-BUMPED value from the UPDATE's RETURNING,
   // never the stale pre-read value. Actor is the SESSION customer id; source distinguishes it from admin.
-  const first0 = returned[0];
-  const bumpedSeq = first0 !== null && typeof first0 === "object" && "revocation_seq" in first0
-    ? (first0 as { revocation_seq: number }).revocation_seq
+  const first0 = bumpRows[0];
+  const bumpedSeq = first0 !== null && typeof first0 === "object" && "revocation_seq" in first0 && typeof first0.revocation_seq === "number"
+    ? first0.revocation_seq
     : null;
+  if (bumpedSeq === null) return envelope(reqId, "portal_error", undefined, 500);
   await env.DB.prepare(
     "INSERT INTO entitlement_events (project, feature, license_fingerprint, device_hash, event_type, status, revocation_seq, detail, actor, actor_type, source, request_id, ip, reason, created_at) " +
       "SELECT project, feature, license_fingerprint, '', 'revoke', status, ?, ?, ?, 'system', 'portal', ?, ?, 'portal_device_release', ? " +
@@ -179,6 +185,11 @@ async function apiAction(
     return envelope(reqId, "invalid_request", undefined, 400);
   }
 
+  // Resolve the credential destination before minting an account token. A bad configuration cannot
+  // cause a bearer to be created or sent anywhere.
+  const origin = backendOrigin(env);
+  if (origin === null) return envelope(reqId, "backend_unconfigured", undefined, 503);
+
   // Invariant 2: identity is SESSION-ONLY (session.customer_id). The narrow (project,feature,operation)
   // is the already-owner-verified tuple + the server-controlled operation; the mint re-verifies it
   // against the customer's own entitlements and scopes the token to exactly that (audit R2.5 least
@@ -200,7 +211,7 @@ async function apiAction(
   for (const k of ["client_instance_id", "nonce", "seat_id", "device_key_id"]) {
     if (typeof body[k] === "string") proxyBody[k] = body[k];
   }
-  const upstream = await proxyBackend(env, `/v1/${operation}`, minted.raw, proxyBody);
+  const upstream = await proxyBackend(origin, `/v1/${operation}`, minted.raw, proxyBody);
   let upstreamBody: Record<string, unknown> = {};
   try {
     const parsed = await upstream.json();
@@ -235,6 +246,10 @@ async function apiDownload(
   const deviceKeyId = typeof body.device_key_id === "string" ? body.device_key_id : "";
   if (deviceKeyId === "") return envelope(reqId, "device_key_required", undefined, 400);
 
+  // As with actions, destination validation precedes account-token minting and bearer construction.
+  const origin = backendOrigin(env);
+  if (origin === null) return envelope(reqId, "backend_unconfigured", undefined, 503);
+
   // Download performs an activate; scope the token to exactly this owned tuple + "activate" (R2.5).
   const minted = await mintSessionToken(env, session, {
     operationClass: "action",
@@ -244,11 +259,9 @@ async function apiDownload(
   if (minted.code === "config_error") return envelope(reqId, "config_error", undefined, 503);
   if (!minted.ok) return envelope(reqId, "not_found", undefined, 404);
 
-  const origin = (env.BACKEND_ORIGIN ?? "").replace(/\/$/, "");
-  if (origin.length === 0) return envelope(reqId, "backend_unconfigured", undefined, 503);
   let upstream: Response;
   try {
-    upstream = await fetch(`${origin}/v1/activate`, {
+    upstream = await fetch(new URL("/v1/activate", origin).toString(), {
       method: "POST",
       headers: { authorization: `Bearer ${minted.raw}`, "content-type": "application/json" },
       body: JSON.stringify({
