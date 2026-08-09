@@ -2239,12 +2239,22 @@ test("admin UI replays a retained catalog-import Apply after a tab round-trip wi
   await page.keyboard.press("Enter");
   await expect(form.getByRole("button", { name: "Apply import" })).toBeDisabled();
   const catalogHeading = page.locator('[data-focus-section="catalog-import"] h2');
-  await page.getByRole("button", { name: "Reconcile catalog import" }).click();
+  const reconcile = page.getByRole("button", { name: "Reconcile catalog import" });
+  await reconcile.focus();
+  await expect(reconcile).toBeFocused();
+  await page.keyboard.press("Enter");
   await expect.poll(() => api.requests.catalogImports.length).toBe(3);
   const replay = api.requests.catalogImports[2];
   expect(replay.idempotency_key).toBe(first.idempotency_key);
   expect(replay.body).toEqual(first.body);
   await expect(page.locator(".operatorNotice")).toHaveCount(0);
+  // The focused recovery control unmounts. Because the original Catalog
+  // generation is stale, restoration must land on a live shell target rather
+  // than the stale catalog heading or browser <body>.
+  await expect(plansTab).toBeVisible();
+  await expect(plansTab).toBeEnabled();
+  await expect(plansTab).toBeFocused();
+  await expect.poll(() => page.evaluate(() => document.activeElement === document.body)).toBe(false);
   await expect(catalogHeading).not.toBeFocused();
 });
 

@@ -350,6 +350,21 @@ function resolvePendingFocus(pending: PendingFocus): HTMLElement | null {
   return stableFocusTarget(pending.invokingElement, pending.rowKey, pending.sectionKey);
 }
 
+/**
+ * A stale retained replay is allowed to settle its immutable server request,
+ * but its original row/section must not regain focus.  The shell's selected
+ * navigation button is a live, current-context target that survives removal
+ * of the recovery notice.
+ */
+function currentContextStableFocusTarget(): HTMLElement | null {
+  const activeTab = document.querySelector<HTMLElement>("main > header.topbar nav button.active:not([disabled])");
+  if (usableFocusTarget(activeTab)) {
+    return activeTab;
+  }
+  const shellHeading = document.querySelector<HTMLElement>("main > header.topbar h1");
+  return usableFocusTarget(shellHeading) ? shellHeading : null;
+}
+
 export function OperatorControlsProvider({ children }: { children: ReactNode }): React.ReactElement {
   const [message, setMessage] = useState("");
   const [reason, setReason] = useState("");
@@ -861,12 +876,20 @@ export function OperatorControlsProvider({ children }: { children: ReactNode }):
         unresolvedOperationRef.current = null;
       }
       const focusAllowed = canRestoreFocus();
+      const staleRetainedReplay = !focusAllowed
+        && recovery.settlesRetainedAttempt === true
+        && recovery.isCurrent?.() === false;
       if (focusAllowed) {
         // The recovery control is about to unmount. Move focus before that
         // happens, then let the post-render pass refine it against refreshed
         // row data; otherwise browsers may transiently fall back to <body>.
         focusSoon(resolvePendingFocus(focusTarget));
         pendingSuccessFocusRef.current = focusTarget;
+      } else if (staleRetainedReplay) {
+        // The old presentation is stale, so never resolve its Catalog/row
+        // target. Move from the soon-to-unmount notice to a live shell target
+        // before clearing it, then reaffirm after React removes the notice.
+        focusSoon(currentContextStableFocusTarget());
       }
       clearActionNotice();
       operationOwnerRef.current = null;
@@ -879,6 +902,13 @@ export function OperatorControlsProvider({ children }: { children: ReactNode }):
         setFocusGeneration((current) => current + 1);
       }
       restoreNoticeFocus();
+      if (staleRetainedReplay) {
+        window.requestAnimationFrame(() => {
+          if (confirmActionRef.current === null) {
+            focusSoon(currentContextStableFocusTarget());
+          }
+        });
+      }
     } catch {
       if (actionNoticeRef.current?.generation === generation) {
         if (canRestoreFocus()) {
