@@ -1,7 +1,7 @@
 import { json, requestId } from "@licensecc/cloudflare-runtime/http/kit";
 import type { Env, ExecutionContextLike } from "./env.js";
 import { scheduled as scheduledMaintenance } from "./maintenance/index.js";
-import { logEvent } from "./observability/index.js";
+import { invalidSecurityModeNames, logEvent } from "./observability/index.js";
 import { handleEmergencyRoute } from "./routes/emergency.js";
 import { handleLeaseIssue } from "./routes/leases.js";
 import { handleOpenApi, handleDocs, handleHealth } from "./routes/meta.js";
@@ -53,6 +53,21 @@ const app = {
   async fetch(request: Request, env: Env, ctx?: ExecutionContextLike): Promise<Response> {
     try {
       const url = new URL(request.url);
+      const route = DISPATCH[`${request.method} ${url.pathname}`];
+      // Health is deliberately the exception: it is the authenticated-deployment
+      // readiness signal and reports invalid mode *names* without their values.
+      if (route !== undefined && url.pathname === "/health") {
+        return await route(request, env, ctx);
+      }
+      const invalidConfigModes = invalidSecurityModeNames(env);
+      if ((url.pathname.startsWith("/v1/emergency/") || route !== undefined) && invalidConfigModes.length > 0) {
+        logEvent("error", "config.invalid_security_modes", {
+          request_id: requestId(request),
+          path: url.pathname,
+          invalid_config_modes: invalidConfigModes,
+        });
+        return json({ ok: false, code: "config_error" }, 503);
+      }
       // D10 break-glass: a SEPARATE /v1/emergency/* route gated ONLY by EMERGENCY_OPERATOR_BEARER
       // (constant-time), never reachable from the 6 scoped paths. On match it dispatches the
       // corresponding handler with isolation FORCED off (non-isolated, customerId null) and logs
@@ -60,7 +75,6 @@ const app = {
       if (url.pathname.startsWith("/v1/emergency/")) {
         return await handleEmergencyRoute(request, env, url, ctx);
       }
-      const route = DISPATCH[`${request.method} ${url.pathname}`];
       if (route !== undefined) {
         return await route(request, env, ctx);
       }

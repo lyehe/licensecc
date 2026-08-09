@@ -11,6 +11,9 @@ preview_urls = false
 crons = ["*/5 * * * *"]
 
 [vars]
+# Security mode selectors are exact and case/whitespace sensitive. Empty/unset
+# retains the legacy off default; any other non-empty value fails closed with
+# 503 config_error and is surfaced by /health without reflecting its value.
 D1_RATE_LIMIT_ENABLED = "0"
 D1_RATE_LIMIT_LIMIT = "20"
 D1_RATE_LIMIT_PERIOD_SECONDS = "60"
@@ -34,6 +37,9 @@ ORDER_INGEST_MODE = "required"
 ORDER_INGEST_AUDIENCE = "prod"
 # Accepted clock skew (seconds) for the signed X-LCC-Timestamp; default 300, hard cap 3600.
 ORDER_MAX_SKEW_SECONDS = "300"
+# HMAC signer authorization scope: off (default), soft (log), or required
+# (deny a signer outside ORDER_SIGNER_SCOPES). The scope map remains a secret.
+ORDER_SIGNER_SCOPE_MODE = "off"
 # --- Slice 2 account tokens (per-customer credentials + account isolation) ---
 # Mode: off (DEFAULT, back-compat — legacy LEASE_ISSUE_BEARER path, NO per-customer isolation;
 # runs shadow-eval logging) | soft (account token required; NULL-owner entitlement allowed+logged,

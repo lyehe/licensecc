@@ -26,6 +26,7 @@ import {
   mapIntentToMutation,
 } from "./order_event.mjs";
 import { verifyOrderHmac } from "./order_hmac.mjs";
+import { parseOrderSignerScopeMode } from "../security_modes.mjs";
 import {
   ENTITLEMENT_COLUMNS,
   REVOCATION_SEQ_BUMP,
@@ -35,8 +36,8 @@ import {
   entitlementId,
 } from "@licensecc/cloudflare-runtime/d1/entitlement_mutation";
 
-// 16 KiB raw-body ceiling (blueprint MAX_ORDER_BODY_BYTES). Enforced over the EXACT
-// bytes read once via request.text(); never re-stringify a parsed object.
+// 16 KiB raw-body ceiling (blueprint MAX_ORDER_BODY_BYTES). Enforced over the exact
+// stream bytes before any decoding; never re-stringify a parsed object.
 export const MAX_ORDER_BODY_BYTES = 16384;
 
 const DEFAULT_ASSERTION_TTL_SECONDS = 300;
@@ -71,12 +72,76 @@ async function sha256Hex(text) {
   return bytesToHex(new Uint8Array(digest));
 }
 
+async function cancelBody(body) {
+  try {
+    await body.cancel();
+  } catch {
+    // The rejection is already determined; cancellation is a resource cleanup only.
+  }
+}
+
 /**
- * The byte length of a UTF-8 string. request.text() already decoded the body; we
- * measure the encoded length so the size cap matches Content-Length semantics.
+ * Read one bounded order body as original bytes. Content-Length is an inexpensive
+ * early rejection when truthful, but the stream count is authoritative so a missing
+ * or lying value can never force an unbounded read. On actual overflow the reader is
+ * cancelled before returning.
+ *
+ * @param {Request} request
+ * @returns {Promise<{ ok: true, bytes: Uint8Array } | { ok: false, code: "payload_too_large" | "invalid_order" }>}
  */
-function utf8ByteLength(text) {
-  return textEncoder.encode(text).length;
+async function readOrderBodyBytes(request) {
+  const contentLength = Number(request.headers.get("content-length") ?? "");
+  if (Number.isInteger(contentLength) && contentLength > MAX_ORDER_BODY_BYTES) {
+    if (request.body !== null) await cancelBody(request.body);
+    return { ok: false, code: "payload_too_large" };
+  }
+  if (request.body === null) {
+    return { ok: true, bytes: new Uint8Array(0) };
+  }
+
+  let reader;
+  try {
+    reader = request.body.getReader();
+  } catch {
+    return { ok: false, code: "invalid_order" };
+  }
+  const chunks = [];
+  let size = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value === undefined) continue;
+      size += value.byteLength;
+      if (size > MAX_ORDER_BODY_BYTES) {
+        await cancelBody(reader);
+        return { ok: false, code: "payload_too_large" };
+      }
+      chunks.push(value);
+    }
+  } catch {
+    await cancelBody(reader);
+    return { ok: false, code: "invalid_order" };
+  } finally {
+    reader.releaseLock();
+  }
+
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return { ok: true, bytes };
+}
+
+/** @returns {{ ok: true, text: string } | { ok: false }} */
+function decodeOrderUtf8(bytes) {
+  try {
+    return { ok: true, text: new TextDecoder("utf-8", { fatal: true }).decode(bytes) };
+  } catch {
+    return { ok: false };
+  }
 }
 
 /** Stable digest over the NORMALIZED order (NOT the ts-bearing signed bytes), so two
@@ -119,8 +184,8 @@ function ingestMode(env) {
 
 /** off (default) | soft | required. */
 function signerScopeMode(env) {
-  const raw = env?.ORDER_SIGNER_SCOPE_MODE;
-  return raw === "soft" || raw === "required" ? raw : "off";
+  const parsed = parseOrderSignerScopeMode(env);
+  return parsed.valid ? parsed.mode : null;
 }
 
 /** Parse ORDER_SIGNER_SCOPES; null when unset/blank/malformed. */
@@ -823,31 +888,28 @@ async function loadPriorAppliedEvent(env, order) {
 
 export async function handleOrderIngest(request, env) {
   const mode = ingestMode(env);
+  const scopeMode = signerScopeMode(env);
+
+  // An unknown non-empty scope mode must never silently disable signer authz.
+  // Resolve it before body/HMAC work so a deployment typo has no side effects.
+  if (scopeMode === null) {
+    return jsonResponse({ ok: false, code: "config_error" }, 503);
+  }
 
   // Step 0a — mode gate. off => the endpoint does not exist (dev-only).
   if (mode === "off") {
     return jsonResponse({ ok: false, code: "not_found" }, 404);
   }
 
-  // Step 0b — size precheck via Content-Length (cheap pre-auth rejection).
-  const contentLength = Number(request.headers.get("content-length"));
-  if (Number.isInteger(contentLength) && contentLength > MAX_ORDER_BODY_BYTES) {
-    return jsonResponse({ ok: false, code: "payload_too_large" }, 413);
-  }
-
-  // Step 0c — read the raw body ONCE (never .json()); enforce the byte ceiling.
-  let bodyText;
-  try {
-    bodyText = await request.text();
-  } catch {
-    return jsonResponse({ ok: false, code: "invalid_order" }, 400);
-  }
-  if (utf8ByteLength(bodyText) > MAX_ORDER_BODY_BYTES) {
-    return jsonResponse({ ok: false, code: "payload_too_large" }, 413);
+  // Step 0b/c — read the raw body ONCE (never .text()/.json()); the byte ceiling
+  // is enforced against actual stream bytes, including a missing or lying header.
+  const rawBody = await readOrderBodyBytes(request);
+  if (!rawBody.ok) {
+    return jsonResponse({ ok: false, code: rawBody.code }, rawBody.code === "payload_too_large" ? 413 : 400);
   }
 
   // Step 0d — HMAC verify over the EXACT raw bytes.
-  const hmac = await verifyOrderHmac(request, env, bodyText);
+  const hmac = await verifyOrderHmac(request, env, rawBody.bytes);
   if (!hmac.ok) {
     if (hmac.code === "config_error") {
       // No usable key map / audience: fail-closed config error (503, not a 401 — the
@@ -863,7 +925,14 @@ export async function handleOrderIngest(request, env) {
     return jsonResponse({ ok: false, code: "bad_signature" }, 401);
   }
 
-  // Step 0e — parse + normalize (the parse is JSON, but signing was over raw bytes).
+  // Step 0e — decode as fatal UTF-8, then parse + normalize. Signature verification
+  // intentionally precedes decoding so a replacement-character re-encoding can never
+  // authenticate malformed wire bytes.
+  const decoded = decodeOrderUtf8(rawBody.bytes);
+  if (!decoded.ok) {
+    return jsonResponse({ ok: false, code: "invalid_order" }, 400);
+  }
+  const bodyText = decoded.text;
   let parsedBody;
   try {
     parsedBody = JSON.parse(bodyText);
@@ -879,7 +948,6 @@ export async function handleOrderIngest(request, env) {
   // Step 0e2 — signer-scope authz (audit R2.1). Orthogonal to the ingest mode: a signer that is not
   // allowed to write this project/customer is denied even in ingest-soft (it is an authz failure, not
   // a mutation). Runs before the ingest-soft observe-return so violations are surfaced there too.
-  const scopeMode = signerScopeMode(env);
   if (scopeMode !== "off") {
     const scopes = loadSignerScopes(env);
     if (scopes === null) {

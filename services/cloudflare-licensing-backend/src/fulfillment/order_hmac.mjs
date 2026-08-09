@@ -9,7 +9,7 @@
 //
 // HMAC scheme (blueprint):
 //   Headers: X-LCC-Key-Id, X-LCC-Timestamp (unix-seconds int), X-LCC-Signature (b64 HMAC-SHA256).
-//   signedBytes = "POST\n/v1/orders\n" + audience + "\n" + canonicalIntTs + "\n" + bodyText
+//   signedBytes = utf8("POST\n/v1/orders\n" + audience + "\n" + canonicalIntTs + "\n") + rawBodyBytes
 //   Key map ORDER_HMAC_SECRETS = JSON { key_id: base64-secret } into Object.create(null);
 //   lookup via hasOwnProperty + typeof==='string'; reject empty map / empty / <32-byte
 //   decoded secret at load (fail-closed). Unknown key_id -> unknown_key_id.
@@ -50,6 +50,24 @@ export function canonicalOrderSignedText(audience, timestamp, bodyText) {
 }
 
 /**
+ * The actual HMAC input. The framing is UTF-8 text, but the body is appended as
+ * its original wire bytes: it is never decoded and re-encoded before verification.
+ * `canonicalOrderSignedText` remains the text helper used by the offline UTF-8
+ * signer; for a canonical UTF-8 JSON body both forms produce identical bytes.
+ */
+export function canonicalOrderSignedBytes(audience, timestamp, bodyBytes) {
+  const framing = textEncoder.encode(canonicalOrderSignedText(audience, timestamp, ""));
+  const raw = typeof bodyBytes === "string" ? textEncoder.encode(bodyBytes) : bodyBytes;
+  if (!(raw instanceof Uint8Array)) {
+    throw new TypeError("order body must be a string or Uint8Array");
+  }
+  const signed = new Uint8Array(framing.byteLength + raw.byteLength);
+  signed.set(framing);
+  signed.set(raw, framing.byteLength);
+  return signed;
+}
+
+/**
  * The canonical integer string form of a unix-seconds timestamp header. The header
  * MUST equal this exactly: "123" passes, "123.0"/" 123"/"+123"/"0x7b" do not. This
  * blocks signed-bytes ambiguity where two distinct header strings hash differently
@@ -86,8 +104,8 @@ function clampMaxSkew(rawValue) {
  *
  *   request  : the incoming Request (header source).
  *   env      : { ORDER_HMAC_SECRETS, ORDER_INGEST_AUDIENCE, ORDER_MAX_SKEW_SECONDS? }.
- *   bodyText : the raw body text already read once via request.text() (we sign over
- *              these EXACT bytes; the caller must not re-stringify a parsed object).
+ *   bodyBytes: the raw request bytes already read once by the bounded stream reader.
+ *              A string remains accepted for the offline UTF-8 signer/unit-test API.
  *
  * Returns { ok, code, keyId }:
  *   - { ok:true,  code:'ok',                keyId } on success.
@@ -99,7 +117,7 @@ function clampMaxSkew(rawValue) {
  * Constant-time: the signature comparison is crypto.subtle.verify, never a manual
  * string/byte ===.
  */
-export async function verifyOrderHmac(request, env, bodyText) {
+export async function verifyOrderHmac(request, env, bodyBytes) {
   const now = Math.floor(Date.now() / 1000);
 
   // Fail closed if the key map or audience is not configured/usable.
@@ -142,7 +160,12 @@ export async function verifyOrderHmac(request, env, bodyText) {
     return { ok: false, code: "bad_signature", keyId };
   }
 
-  const signedText = canonicalOrderSignedText(audience, ts.canonical, bodyText);
+  let signedBytes;
+  try {
+    signedBytes = canonicalOrderSignedBytes(audience, ts.canonical, bodyBytes);
+  } catch {
+    return { ok: false, code: "bad_signature", keyId };
+  }
 
   let valid;
   try {
@@ -157,7 +180,7 @@ export async function verifyOrderHmac(request, env, bodyText) {
       "HMAC",
       key,
       cryptoBuffer(signatureBytes),
-      textEncoder.encode(signedText),
+      cryptoBuffer(signedBytes),
     );
   } catch {
     // A malformed signature byte length (or any crypto error) is a verification

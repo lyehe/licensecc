@@ -182,7 +182,12 @@ also supports an optional Cloudflare rate-limit binding named
   log missing or invalid device-key proof while preserving otherwise-valid
   allows, then move selected products to `required` only after clients register
   device keys and support has a recovery path. `off` is the compatibility
-  default.
+  default. Security rollout selectors are exact: `ACCOUNT_TOKEN_MODE`,
+  `REQUEST_SIGNATURE_MODE`, `DEVICE_PROOF_MODE`, and
+  `ORDER_SIGNER_SCOPE_MODE` accept only their documented lowercase values.
+  An unset/empty value keeps its legacy `off` default; any other non-empty
+  value fails closed with `503 config_error`, and `/health` reports the invalid
+  selector name without exposing its configured value.
 - `required` request-proof mode expects `request_signature_version=1`,
   `device_key_id=sha256:<64-hex>`, `request_timestamp`,
   `request_signature_algorithm=ecdsa-p256-sha256`, and a base64
@@ -287,6 +292,8 @@ fraud.confirmed / chargeback) and the Worker projects them onto entitlements.
   `409 event_id_conflict`, `409 fingerprint_owned`, `200 no_entitlement`
   (modify on a never-activated subscription — never materializes access),
   `409 entitlement_revoked` (terminal), `401` (auth family), `400 invalid_order`,
-  `503 write_failed`. The body is read once with `request.text()` and capped at
-  `MAX_ORDER_BODY_BYTES = 16384`.
+  `503 write_failed`. The body is read once as a bounded raw-byte stream and
+  capped at `MAX_ORDER_BODY_BYTES = 16384`; overflow cancels the stream even if
+  `Content-Length` is absent or lies. The HMAC is over those original bytes,
+  then the body must decode as valid UTF-8 before JSON parsing.
 - Set the HMAC key map as a secret: `wrangler secret put ORDER_HMAC_SECRETS`.

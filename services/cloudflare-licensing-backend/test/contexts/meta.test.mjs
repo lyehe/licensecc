@@ -12,15 +12,39 @@ test("health route returns status", async () => {
 test("/health exposes the backend's normalized account-token enforcement mode without secrets", async () => {
   const health = async (ACCOUNT_TOKEN_MODE) => {
     const response = await worker.fetch(new Request("https://example.test/health"), { ACCOUNT_TOKEN_MODE });
-    assert.equal(response.status, 200, "backend liveness remains independent of account-token rollout mode");
-    return response.json();
+    return { status: response.status, body: await response.json() };
   };
 
-  assert.equal((await health("required")).account_token_mode, "required");
-  assert.equal((await health("soft")).account_token_mode, "soft");
-  assert.equal((await health("off")).account_token_mode, "off");
-  assert.equal((await health(undefined)).account_token_mode, "off");
-  assert.equal((await health("not-a-mode")).account_token_mode, "off");
+  for (const mode of ["required", "soft", "off", undefined]) {
+    const healthResult = await health(mode);
+    assert.equal(healthResult.status, 200);
+    assert.equal(healthResult.body.account_token_mode, mode ?? "off");
+  }
+
+  const invalid = await health("not-a-mode");
+  assert.equal(invalid.status, 503, "invalid security configuration fails readiness");
+  assert.equal(invalid.body.ok, false);
+  assert.equal(invalid.body.code, "config_error");
+  assert.equal(invalid.body.account_token_mode, "invalid");
+  assert.deepEqual(invalid.body.invalid_config_modes, ["ACCOUNT_TOKEN_MODE"]);
+  assert.doesNotMatch(JSON.stringify(invalid.body), /not-a-mode/, "health never reflects raw configuration values");
+});
+
+test("/health exposes every invalid security-mode selector without its raw value", async () => {
+  const selectors = ["ACCOUNT_TOKEN_MODE", "REQUEST_SIGNATURE_MODE", "DEVICE_PROOF_MODE", "ORDER_SIGNER_SCOPE_MODE"];
+  // Treat typos, case changes, and whitespace changes as configuration errors. Each
+  // one could otherwise normalize into an unintentionally permissive mode.
+  for (const raw of ["typo", "REQUIRED", " required"]) {
+    for (const selector of selectors) {
+      const response = await worker.fetch(new Request("https://example.test/health"), { [selector]: raw });
+      assert.equal(response.status, 503, `${selector}=${JSON.stringify(raw)} fails readiness`);
+      const body = await response.json();
+      assert.equal(body.ok, false);
+      assert.equal(body.code, "config_error");
+      assert.deepEqual(body.invalid_config_modes, [selector]);
+      assert.doesNotMatch(JSON.stringify(body), new RegExp(raw.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    }
+  }
 });
 
 test("/health surfaces config-consistency warnings for a half-configured deploy (R2.3)", async () => {

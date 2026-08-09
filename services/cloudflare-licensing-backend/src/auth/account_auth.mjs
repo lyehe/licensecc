@@ -24,21 +24,21 @@
 
 import { resolveAccountToken, tokenAllows, touchLastUsed } from "./account_token.mjs";
 import { constantTimeEqual } from "@licensecc/cloudflare-runtime/auth/primitives";
+import { parseAccountTokenMode } from "../security_modes.mjs";
 
 export { constantTimeEqual } from "@licensecc/cloudflare-runtime/auth/primitives";
 
 const DEFAULT_LAST_USED_THROTTLE_SEC = 300;
 
 /**
- * Resolve ACCOUNT_TOKEN_MODE. The runtime fallback is 'off' (legacy bearer + shadow-eval),
- * mirroring REQUEST_SIGNATURE_MODE: an unconfigured/dev Worker must NOT silently 401 legacy
- * callers that have no account token yet. Production MUST set 'required' (see wrangler.example.toml);
- * the safe cutover is off -> soft (observe) -> required.
+ * Resolve ACCOUNT_TOKEN_MODE for health/readiness. The runtime fallback is 'off'
+ * (legacy bearer + shadow-eval); an unknown non-empty value is reported as
+ * 'invalid' and accountAuth fails closed. Production MUST set 'required' (see
+ * wrangler.example.toml); the safe cutover is off -> soft (observe) -> required.
  */
 export function accountTokenMode(env) {
-  const raw = env?.ACCOUNT_TOKEN_MODE;
-  if (raw === "off" || raw === "soft" || raw === "required") return raw;
-  return "off";
+  const parsed = parseAccountTokenMode(env);
+  return parsed.valid ? parsed.mode : "invalid";
 }
 
 function lastUsedThrottleSec(env) {
@@ -73,7 +73,11 @@ function denyResponseFor(code) {
  * scopes axis). `ctx` (optional) provides waitUntil for the off-response-path last_used write.
  */
 export async function accountAuth(request, env, operation, project, feature, now, ctx) {
-  const mode = accountTokenMode(env);
+  const parsedMode = parseAccountTokenMode(env);
+  if (!parsedMode.valid) {
+    return { ok: false, status: 503, code: "config_error" };
+  }
+  const mode = parsedMode.mode;
 
   if (mode === "off") {
     // Legacy bearer gate (constant-time). When LEASE_ISSUE_BEARER is unset/empty the path is open

@@ -66,6 +66,10 @@ export interface Env {
   ORDER_INGEST_MODE?: string;
   ORDER_MAX_SKEW_SECONDS?: string;
   ORDER_INGEST_AUDIENCE?: string;
+  // Optional authorization binding for order-HMAC signer keys. `off` (default),
+  // `soft`, or `required`; unknown non-empty values are a fail-closed config error.
+  ORDER_SIGNER_SCOPE_MODE?: string;
+  ORDER_SIGNER_SCOPES?: string;
   // Slice 2 account-token isolation (D9/D10). ACCOUNT_TOKEN_PEPPERS is a JSON map
   // {id: base64 >= 32B} (fail-closed; null => 503 on the 6 scoped paths). MODE mirrors
   // REQUEST_SIGNATURE_MODE: off (runtime default; legacy bearer + shadow-eval) | soft (token

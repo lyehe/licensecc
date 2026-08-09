@@ -1,4 +1,5 @@
 import { accountAuth } from "../auth/account_auth.mjs";
+import { parseDeviceProofMode, parseRequestSignatureMode } from "../security_modes.mjs";
 import { json, readTextBody, requestId, clientIp, safeString } from "@licensecc/cloudflare-runtime/http/kit";
 import type {
   AssertionClaims,
@@ -99,6 +100,9 @@ export async function resolveIsolation(
   if (!auth.ok) {
     return { ok: false, code: auth.code, status: typeof auth.status === "number" ? auth.status : 401 };
   }
+  if (auth.mode !== "off" && auth.mode !== "soft" && auth.mode !== "required") {
+    return { ok: false, code: "config_error", status: 503 };
+  }
   return { mode: auth.mode, customerId: auth.customerId };
 }
 
@@ -177,11 +181,9 @@ function d1RateLimitEnabled(env: Env): boolean {
 // wrangler.example.toml) so missing/invalid/replayed request proofs are denied. The
 // runtime fallback stays "off" only so an unconfigured dev Worker does not silently
 // reject legacy clients. Roll out off -> soft (observe) -> required.
-function requestSignatureMode(env: Env): RequestSignatureMode {
-  if (env.REQUEST_SIGNATURE_MODE === "soft" || env.REQUEST_SIGNATURE_MODE === "required") {
-    return env.REQUEST_SIGNATURE_MODE;
-  }
-  return "off";
+function requestSignatureMode(env: Env): RequestSignatureMode | null {
+  const parsed = parseRequestSignatureMode(env);
+  return parsed.valid ? (parsed.mode as RequestSignatureMode) : null;
 }
 
 function fixedWindowStart(nowSeconds: number, periodSeconds: number): number {
@@ -721,8 +723,8 @@ async function evaluateRequestProof(
   env: Env,
   verifyRequest: VerifyRequest,
   nowSeconds: number,
+  mode: RequestSignatureMode,
 ): Promise<RequestProofEvaluation> {
-  const mode = requestSignatureMode(env);
   if (mode === "off") {
     return { mode, result: "not_configured" };
   }
@@ -770,8 +772,9 @@ export function parseRequestProofFields(
   return { invalid: true };
 }
 
-function deviceProofMode(env: Env): "off" | "required" {
-  return env.DEVICE_PROOF_MODE === "required" ? "required" : "off";
+function deviceProofMode(env: Env): "off" | "required" | null {
+  const parsed = parseDeviceProofMode(env);
+  return parsed.valid ? (parsed.mode as "off" | "required") : null;
 }
 
 // Lease/seat device-proof gate (relay-resistance / anti-cloning). A presented proof is ALWAYS
@@ -791,8 +794,10 @@ export async function checkDeviceProof(
   now: number,
   purpose: string,
 ): Promise<{ ok: boolean; code?: string; proven: boolean }> {
+  const mode = deviceProofMode(env);
+  if (mode === null) return { ok: false, code: "config_error", proven: false };
   if (proof === undefined) {
-    if (deviceProofMode(env) === "required") return { ok: false, code: "device_proof_required", proven: false };
+    if (mode === "required") return { ok: false, code: "device_proof_required", proven: false };
     return { ok: true, proven: false };
   }
   const verifyRequest: VerifyRequest = {
@@ -813,6 +818,10 @@ export async function checkDeviceProof(
 }
 
 export async function handleVerify(request: Request, env: Env): Promise<Response> {
+  const mode = requestSignatureMode(env);
+  if (mode === null) {
+    return json({ ok: false, code: "config_error" }, 503);
+  }
   const id = requestId(request);
   const body = await readTextBody(request, MAX_BODY_BYTES);
   if (!body.ok) {
@@ -848,7 +857,7 @@ export async function handleVerify(request: Request, env: Env): Promise<Response
     return json({ ok: false, code: "rate_limited" }, 429);
   }
 
-  const proofEvaluation = await evaluateRequestProof(env, verifyRequest, now);
+  const proofEvaluation = await evaluateRequestProof(env, verifyRequest, now, mode);
   if (proofEvaluation.result !== "not_configured") {
     const severity: LogSeverity =
       proofEvaluation.result === "valid" ? "info" : proofEvaluation.result === "d1_error" ? "error" : "warn";

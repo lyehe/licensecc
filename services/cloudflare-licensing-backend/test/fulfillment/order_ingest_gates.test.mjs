@@ -46,9 +46,10 @@ function baseEnv(overrides = {}) {
 //   "replayed"-> yields null,
 //   "error"   -> the prepare/first throws.
 function stubDb({ nonceState = "fresh", failBatch = true } = {}) {
-  const calls = { batch: 0 };
+  const calls = { batch: 0, prepare: 0 };
   const db = {
     prepare(sql) {
+      calls.prepare += 1;
       return {
         bind() {
           return this;
@@ -87,6 +88,16 @@ async function signOrder({ ts, bodyText, audience = AUDIENCE, secretBytes = SECR
   return bytesToBase64(new Uint8Array(sig));
 }
 
+async function signOrderBytes({ ts, bodyBytes, audience = AUDIENCE, secretBytes = SECRET_BYTES }) {
+  const framing = textEncoder.encode("POST\n/v1/orders\n" + audience + "\n" + ts + "\n");
+  const signedBytes = new Uint8Array(framing.byteLength + bodyBytes.byteLength);
+  signedBytes.set(framing);
+  signedBytes.set(bodyBytes, framing.byteLength);
+  const key = await crypto.subtle.importKey("raw", secretBytes, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const sig = await crypto.subtle.sign("HMAC", key, signedBytes);
+  return bytesToBase64(new Uint8Array(sig));
+}
+
 function makeRequest({ keyId = KEY_ID, ts, signature, body, contentLength }) {
   const headers = new Headers();
   if (keyId !== null) headers.set("X-LCC-Key-Id", keyId);
@@ -94,6 +105,34 @@ function makeRequest({ keyId = KEY_ID, ts, signature, body, contentLength }) {
   if (signature !== null) headers.set("X-LCC-Signature", signature);
   if (contentLength !== undefined) headers.set("content-length", String(contentLength));
   return new Request("https://verifier.example/v1/orders", { method: "POST", headers, body });
+}
+
+function streamedRequest({ keyId = KEY_ID, ts, signature, chunks, contentLength }) {
+  const headers = new Headers();
+  if (keyId !== null) headers.set("X-LCC-Key-Id", keyId);
+  if (ts !== null) headers.set("X-LCC-Timestamp", ts);
+  if (signature !== null) headers.set("X-LCC-Signature", signature);
+  if (contentLength !== undefined) headers.set("content-length", String(contentLength));
+
+  let cancelled = false;
+  let next = 0;
+  const stream = new ReadableStream({
+    pull(controller) {
+      if (next >= chunks.length) {
+        controller.close();
+        return;
+      }
+      controller.enqueue(chunks[next]);
+      next += 1;
+    },
+    cancel() {
+      cancelled = true;
+    },
+  });
+  return {
+    request: new Request("https://verifier.example/v1/orders", { method: "POST", headers, body: stream, duplex: "half" }),
+    wasCancelled: () => cancelled,
+  };
 }
 
 function validBody(overrides = {}) {
@@ -121,12 +160,121 @@ test("mode=off -> 404 (endpoint does not exist in dev-only off mode)", async () 
   assert.equal(res.status, 404);
 });
 
-test("oversize Content-Length -> 413 before reading the body", async () => {
-  const { db } = stubDb();
+test("oversize Content-Length -> 413 and cancels the body before reading it", async () => {
+  const { db, calls } = stubDb();
   const env = baseEnv({ DB: db });
-  const res = await handleOrderIngest(makeRequest({ body: "x", contentLength: 16385 }), env);
+  const streamed = streamedRequest({
+    ts: "0",
+    signature: "ignored",
+    contentLength: 16385,
+    chunks: [new Uint8Array(16385).fill(0x78)],
+  });
+  const res = await handleOrderIngest(streamed.request, env);
   assert.equal(res.status, 413);
   assert.equal((await res.json()).code, "payload_too_large");
+  assert.equal(streamed.wasCancelled(), true);
+  assert.equal(calls.prepare, 0);
+});
+
+test("chunked body is assembled as raw bytes and accepts the canonical signer", async () => {
+  const { db, calls } = stubDb();
+  const env = baseEnv({ DB: db, ORDER_INGEST_MODE: "soft" });
+  const bodyText = validBody();
+  const bodyBytes = textEncoder.encode(bodyText);
+  const ts = String(Math.floor(Date.now() / 1000));
+  const signature = await signOrderBytes({ ts, bodyBytes });
+  const streamed = streamedRequest({
+    ts,
+    signature,
+    chunks: [bodyBytes.slice(0, 7), bodyBytes.slice(7, 31), bodyBytes.slice(31)],
+  });
+
+  const res = await handleOrderIngest(streamed.request, env);
+  assert.equal(res.status, 200);
+  assert.equal((await res.json()).code, "observed");
+  assert.equal(calls.prepare, 0, "soft mode remains non-mutating after raw-byte authentication");
+});
+
+test("actual stream size, not a lying low Content-Length, controls the order body cap and cancellation", async () => {
+  const { db, calls } = stubDb();
+  const env = baseEnv({ DB: db });
+  const overflow = new Uint8Array(16385).fill(0x78);
+  const streamed = streamedRequest({
+    ts: "0",
+    signature: "ignored",
+    contentLength: 1,
+    chunks: [overflow.slice(0, 8000), overflow.slice(8000)],
+  });
+
+  const res = await handleOrderIngest(streamed.request, env);
+  assert.equal(res.status, 413);
+  assert.equal((await res.json()).code, "payload_too_large");
+  assert.equal(streamed.wasCancelled(), true, "overflow cancels the unread request stream");
+  assert.equal(calls.prepare, 0, "oversized payload never reaches nonce or persistence work");
+});
+
+test("missing Content-Length still cancels an actual raw-byte overflow", async () => {
+  const { db, calls } = stubDb();
+  const env = baseEnv({ DB: db });
+  const overflow = new Uint8Array(16385).fill(0x78);
+  const streamed = streamedRequest({
+    ts: "0",
+    signature: "ignored",
+    chunks: [overflow],
+  });
+
+  const res = await handleOrderIngest(streamed.request, env);
+  assert.equal(res.status, 413);
+  assert.equal(streamed.wasCancelled(), true);
+  assert.equal(calls.prepare, 0);
+});
+
+test("an exact-limit chunked body is accepted even when Content-Length lies low", async () => {
+  const { db, calls } = stubDb();
+  const env = baseEnv({ DB: db, ORDER_INGEST_MODE: "soft" });
+  const emptyPadding = validBody({ padding: "" });
+  const bodyText = validBody({ padding: "x".repeat(16384 - textEncoder.encode(emptyPadding).byteLength) });
+  const bodyBytes = textEncoder.encode(bodyText);
+  assert.equal(bodyBytes.byteLength, 16384);
+  const ts = String(Math.floor(Date.now() / 1000));
+  const signature = await signOrderBytes({ ts, bodyBytes });
+  const streamed = streamedRequest({
+    ts,
+    signature,
+    contentLength: 1,
+    chunks: [bodyBytes.slice(0, 8192), bodyBytes.slice(8192)],
+  });
+
+  const res = await handleOrderIngest(streamed.request, env);
+  assert.equal(res.status, 200);
+  assert.equal((await res.json()).code, "observed");
+  assert.equal(streamed.wasCancelled(), false);
+  assert.equal(calls.prepare, 0);
+});
+
+test("valid HMAC over malformed UTF-8 returns invalid_order without persistence", async () => {
+  const { db, calls } = stubDb();
+  const env = baseEnv({ DB: db });
+  const bodyBytes = new Uint8Array([0x7b, 0xff, 0x7d]); // { <invalid UTF-8> }
+  const ts = String(Math.floor(Date.now() / 1000));
+  const signature = await signOrderBytes({ ts, bodyBytes });
+  const res = await handleOrderIngest(makeRequest({ ts, signature, body: bodyBytes }), env);
+  assert.equal(res.status, 400);
+  assert.equal((await res.json()).code, "invalid_order");
+  assert.equal(calls.prepare, 0);
+});
+
+test("a signature over UTF-8 replacement bytes never authenticates malformed wire bytes", async () => {
+  const { db, calls } = stubDb();
+  const env = baseEnv({ DB: db });
+  const malformedBytes = new Uint8Array([0x7b, 0xff, 0x7d]);
+  const replacementBytes = textEncoder.encode(new TextDecoder().decode(malformedBytes));
+  const ts = String(Math.floor(Date.now() / 1000));
+  const signature = await signOrderBytes({ ts, bodyBytes: replacementBytes });
+  const res = await handleOrderIngest(makeRequest({ ts, signature, body: malformedBytes }), env);
+  assert.equal(res.status, 401);
+  assert.equal((await res.json()).code, "bad_signature");
+  assert.equal(calls.prepare, 0);
 });
 
 test("missing HMAC secrets map -> 503 config_error (fail-closed)", async () => {
@@ -222,6 +370,17 @@ test("signer scope required + out-of-project -> 403 signer_scope_forbidden (no m
   assert.equal(res.status, 403);
   assert.equal((await res.json()).code, "signer_scope_forbidden");
   assert.equal(calls.batch, 0, "an out-of-scope signer never reaches the mutator");
+});
+
+test("unknown signer-scope modes fail closed before HMAC or DB work", async () => {
+  for (const mode of ["typo", "REQUIRED", " required"]) {
+    const { db, calls } = stubDb();
+    const env = baseEnv({ DB: db, ORDER_SIGNER_SCOPE_MODE: mode });
+    const res = await handleOrderIngest(makeRequest({ body: validBody() }), env);
+    assert.equal(res.status, 503, `ORDER_SIGNER_SCOPE_MODE=${JSON.stringify(mode)}`);
+    assert.equal((await res.json()).code, "config_error");
+    assert.equal(calls.prepare, 0, "invalid configuration precedes nonce/persistence work");
+  }
 });
 
 test("signer scope required + no scope entry for the key -> 403 (fail-closed)", async () => {
