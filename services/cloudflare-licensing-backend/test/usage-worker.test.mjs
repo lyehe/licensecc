@@ -57,6 +57,42 @@ test("report returns the aggregated usage summary", async () => {
   assert.equal(out.denial_rate, 1 / 3); // 2 checkouts + 1 denial = 3 attempts
 });
 
+test("report keeps a successful zero baseline as a complete report", async () => {
+  const events = [{ event_type: "checkout", seat_id: "s1", device_key_id: "d1", ts: 150 }];
+  const res = await worker.fetch(reportRequest({ ...ENTITLEMENT, from: "100", to: "200" }), makeEnv(events));
+  assert.equal(res.status, 200);
+  const out = await res.json();
+  assert.equal(out.ok, true);
+  assert.equal(out.peak_concurrent, 1);
+});
+
+test("report fails closed when the window baseline query fails", async () => {
+  const events = [{ event_type: "checkout", seat_id: "s1", device_key_id: "d1", ts: 150 }];
+  const env = makeEnv(events, {
+    DB: {
+      prepare(sql) {
+        return {
+          bind() {
+            return {
+              async first() {
+                if (sql.includes("COUNT(*) AS baseline")) throw new Error("baseline query failed");
+                return { baseline: 0 };
+              },
+              async all() {
+                return { results: events };
+              },
+            };
+          },
+        };
+      },
+    },
+  });
+
+  const res = await worker.fetch(reportRequest({ ...ENTITLEMENT, from: "100", to: "200" }), env);
+  assert.equal(res.status, 503);
+  assert.deepEqual(await res.json(), { ok: false, code: "verification_error" });
+});
+
 test("report requires the entitlement key", async () => {
   const res = await worker.fetch(reportRequest({ project: "DEFAULT" }), makeEnv([]));
   assert.equal(res.status, 400);

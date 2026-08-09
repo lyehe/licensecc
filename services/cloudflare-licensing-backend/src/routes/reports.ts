@@ -56,7 +56,7 @@ async function liveSeatsAt(
   fingerprint: string,
   t: number,
   isolation: IsolationBinding,
-): Promise<number> {
+): Promise<number | null> {
   try {
     // Distinct seats checked out before t minus distinct seats ended before t = seats still open
     // at t. EXCEPT dedups by seat_id, so a seat with both a reclaim AND a release (a double-end)
@@ -79,8 +79,14 @@ async function liveSeatsAt(
         : [project, feature, fingerprint, t, isolation.customerId, project, feature, fingerprint, t, isolation.customerId];
     const row = await env.DB.prepare(sql).bind(...binds).first<{ baseline: number }>();
     return Math.max(0, Number(row?.baseline ?? 0));
-  } catch {
-    return 0;
+  } catch (error) {
+    logEvent("error", "usage.report_baseline_failed", {
+      project,
+      feature,
+      window_from: t,
+      error: error instanceof Error ? error.message : "unknown D1 error",
+    });
+    return null;
   }
 }
 
@@ -128,6 +134,7 @@ export async function handleUsageReport(request: Request, env: Env, ctx?: Execut
   const truncated = rows.length > USAGE_REPORT_MAX_ROWS;
   if (truncated) rows = rows.slice(0, USAGE_REPORT_MAX_ROWS);
   const baseline = windowFrom > 0 ? await liveSeatsAt(env, project, feature, fingerprint, windowFrom, isolation) : 0;
+  if (baseline === null) return json({ ok: false, code: "verification_error" }, 503);
   const summary = summarizeUsage(rows, baseline);
   return json({ ok: true, project, feature, from: windowFrom, to: windowTo, server_time: now, truncated, ...summary });
 }
