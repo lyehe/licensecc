@@ -29,10 +29,12 @@ import {
   catalogFeaturesPath,
   catalogFeatureTransitionPath,
   catalogImportApplyBody,
+  catalogImportApplyMatchesConfirmedPreview,
   catalogImportEffectValueLabel,
   catalogImportInputDigest,
   catalogImportInputSnapshot,
   catalogImportPath,
+  catalogImportPreviewMatchesLocalInput,
   catalogImportTargetFields,
   catalogImportTargetKey,
   catalogPlanExportPath,
@@ -126,7 +128,9 @@ export function Catalog({ active }: { active: boolean }): React.ReactElement | n
   const catalogPlanFeatureFormContextKey = JSON.stringify(catalogPlanFeatureForm);
   const { generation: catalogPlanFeatureFormGeneration, isCurrent: isCatalogPlanFeatureFormGenerationCurrent } = useContextGeneration(catalogPlanFeatureFormContextKey);
   const catalogImportContextKey = `${active ? "active" : "inactive"}\u0000${catalogImportText}`;
-  const { generation: catalogImportGeneration, isCurrent: isCatalogImportGenerationCurrent } = useContextGeneration(catalogImportContextKey);
+  const { generation: catalogImportGeneration, isCurrent: isCatalogImportGenerationCurrent, currentGeneration: currentCatalogImportGeneration } = useContextGeneration(catalogImportContextKey);
+  const catalogImportActiveRef = useRef(active);
+  catalogImportActiveRef.current = active;
   const catalogPlanFeaturesFence = useRequestFence(`${active ? "active" : "inactive"}\u0000${catalogPlanFeatureContextKey}`);
   const activePoliciesFence = useRequestFence(`${active ? "active" : "inactive"}\u0000catalog-active-policies`);
   const exportFence = useRequestFence(`${active ? "active" : "inactive"}\u0000catalog-export`);
@@ -662,7 +666,7 @@ export function Catalog({ active }: { active: boolean }): React.ReactElement | n
       );
       if (!isCurrent()) return;
       if (parsed.kind === "success") {
-        if (parsed.data.manifest_digest !== digest) {
+        if (!catalogImportPreviewMatchesLocalInput(parsed.data, digest, snapshot)) {
           invalidateCatalogImportPreview();
           setMessage("catalog_import_manifest_digest_mismatch");
           return;
@@ -694,26 +698,37 @@ export function Catalog({ active }: { active: boolean }): React.ReactElement | n
     importGeneration: number,
     idempotencyKey: string,
   ): Promise<ConfirmActionOutcome> {
-    const isCurrent = (): boolean => active && isCatalogImportGenerationCurrent(importGeneration);
-    if (!catalogImportBindingIsUsable(binding, revision)) {
+    // The original presentation owns its focus target. A retained same-key
+    // replay may still be required after navigating away, but must never use
+    // this captured generation to publish into or focus a successor view.
+    const isCurrent = (): boolean => catalogImportActiveRef.current && isCatalogImportGenerationCurrent(importGeneration);
+    const bindingMatchesLocalInput = catalogImportPreviewMatchesLocalInput(binding.preview, binding.digest, binding.snapshot);
+    if (!catalogImportBindingIsUsable(binding, revision) || !bindingMatchesLocalInput) {
       return { ok: false, message: "preview_required", retryable: true };
     }
     const body = JSON.stringify(catalogImportApplyBody(binding.preview.preview_id));
     const refreshStatus = async (): Promise<ExactReadProof | null> => await currentCatalogImportRefreshRef.current();
     const postSuccessRefresh = confirmSuccessWithRefreshFailure(refreshStatus, isCurrent).manualRefresh;
-    const applyKnown = async (parsed: { code: string; requestId: string; data: CatalogImportApplyResult }): Promise<ConfirmActionResolution> => {
-      // The capability is consumed on the server even when the view became
-      // inactive while the response was in flight. Only clear the exact
-      // binding that issued this request, so a newer Preview is never lost.
-      if (catalogImportBindingIsUsable(binding, revision)) {
+    const hasConfirmedApplyData = (value: unknown): value is CatalogImportApplyResult =>
+      bindingMatchesLocalInput && hasCatalogImportApplyData(value) && catalogImportApplyMatchesConfirmedPreview(value, binding.preview);
+    const applyKnown = async (
+      parsed: { code: string; requestId: string; data: CatalogImportApplyResult },
+      publicationGeneration: number,
+    ): Promise<ConfirmActionResolution> => {
+      const ownsBinding = catalogImportBindingIsUsable(binding, revision);
+      const mayPublish = ownsBinding && catalogImportActiveRef.current && isCatalogImportGenerationCurrent(publicationGeneration);
+      // A known write consumes only the precise capability that issued it.
+      // Clearing that capability is safe even when its screen is inactive;
+      // rendering the response/result is not.
+      if (ownsBinding) {
         invalidateCatalogImportPreview();
-        setCatalogImportApplyResult(parsed.data);
         invalidatePlanProjectionPreview();
       }
-      if (isCurrent()) {
+      if (mayPublish) {
+        setCatalogImportApplyResult(parsed.data);
         setMessage(`${parsed.code} (${parsed.requestId})`);
       }
-      if (!isCurrent()) return "applied";
+      if (!mayPublish) return "applied";
       try {
         return (await refreshStatus()) === EXACT_READ_PROOF ? "applied" : "refresh_failed";
       } catch {
@@ -721,7 +736,9 @@ export function Catalog({ active }: { active: boolean }): React.ReactElement | n
       }
     };
     const replay = async (): Promise<ConfirmActionResolution> => {
-      if (!isCurrent()) return "indeterminate";
+      // Reconciliation owns an immutable request. Presentation freshness must
+      // not suppress the same-key POST: it is the only safe way to determine
+      // whether the already-submitted server mutation committed.
       let retry: unknown | undefined;
       try {
         retry = await runMutation(async () => await api<unknown>(catalogImportPath(), {
@@ -733,9 +750,12 @@ export function Catalog({ active }: { active: boolean }): React.ReactElement | n
         return "indeterminate";
       }
       if (retry === undefined) return "indeterminate";
-      const parsed = parseMutationResponse(retry, "catalog_import_applied", hasCatalogImportApplyData, mutationFailurePolicies.catalogImport, "replay");
+      const parsed = parseMutationResponse(retry, "catalog_import_applied", hasConfirmedApplyData, mutationFailurePolicies.catalogImport, "replay");
       if (parsed.kind !== "success") return parsed.kind === "failure" ? "unapplied" : "indeterminate";
-      return await applyKnown(parsed);
+      // Capture the generation only after the replay response arrives. The
+      // exact binding check in applyKnown prevents it from overwriting a new
+      // Preview or a view that was superseded while the request was in flight.
+      return await applyKnown(parsed, currentCatalogImportGeneration());
     };
     const reconciliation = { label: "Reconcile catalog import", run: replay, isCurrent, settlesRetainedAttempt: true, postSuccessRefresh };
     let mutation: unknown | undefined;
@@ -749,7 +769,7 @@ export function Catalog({ active }: { active: boolean }): React.ReactElement | n
       return confirmMutationUnknown(reconciliation);
     }
     if (mutation === undefined) return confirmMutationUnknown(reconciliation);
-    const parsed = parseMutationResponse(mutation, "catalog_import_applied", hasCatalogImportApplyData, mutationFailurePolicies.catalogImport, "initial");
+    const parsed = parseMutationResponse(mutation, "catalog_import_applied", hasConfirmedApplyData, mutationFailurePolicies.catalogImport, "initial");
     if (parsed.kind === "invalid") return confirmMutationUnknown(reconciliation);
     if (parsed.kind === "failure") {
       if (["catalog_import_snapshot_stale", "stale_catalog_import_preview", "expired_catalog_import_preview", "claimed_catalog_import_preview", "catalog_import_too_large"].includes(parsed.code)) {
@@ -761,7 +781,7 @@ export function Catalog({ active }: { active: boolean }): React.ReactElement | n
       setMessage(message);
       return { ok: false, message, retryable: true };
     }
-    return await applyKnown(parsed) === "applied"
+    return await applyKnown(parsed, importGeneration) === "applied"
       ? { ok: true }
       : confirmSuccessWithRefreshFailure(refreshStatus, isCurrent);
   }

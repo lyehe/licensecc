@@ -3,8 +3,10 @@ import type {
   CatalogFeatureInput,
   CatalogFeaturePatch,
   CatalogImportApplyInput,
+  CatalogImportApplyResult,
   CatalogImportEffect,
   CatalogImportManifest,
+  CatalogImportPreviewResponse,
   CatalogPlan,
   CatalogPlanFeatureInput,
   CatalogPlanInput,
@@ -213,6 +215,47 @@ export function catalogImportInputSnapshot(manifest: CatalogImportManifest): str
 
 export async function catalogImportInputDigest(manifest: CatalogImportManifest): Promise<string> {
   return domainCatalogImportManifestDigest(manifest);
+}
+
+/**
+ * Preview stores the server's normalized manifest, so accepting only its
+ * digest would let a structurally-valid substituted body cross the UI trust
+ * boundary. The original canonical input snapshot must also agree.
+ */
+export function catalogImportPreviewMatchesLocalInput(
+  preview: CatalogImportPreviewResponse,
+  digest: string,
+  snapshot: string,
+): boolean {
+  return preview.manifest_digest === digest && catalogImportInputSnapshot(preview.manifest) === snapshot;
+}
+
+function exactlyMatchesCatalogImportValue(left: unknown, right: unknown): boolean {
+  if (Object.is(left, right)) return true;
+  if (typeof left !== "object" || left === null || typeof right !== "object" || right === null) return false;
+  const leftArray = Array.isArray(left);
+  const rightArray = Array.isArray(right);
+  if (leftArray || rightArray) {
+    return leftArray && rightArray && left.length === right.length && left.every((item, index) => exactlyMatchesCatalogImportValue(item, right[index]));
+  }
+  const leftRecord = left as Record<string, unknown>;
+  const rightRecord = right as Record<string, unknown>;
+  const leftKeys = Object.keys(leftRecord).sort();
+  const rightKeys = Object.keys(rightRecord).sort();
+  return leftKeys.length === rightKeys.length && leftKeys.every((key, index) => key === rightKeys[index] && exactlyMatchesCatalogImportValue(leftRecord[key], rightRecord[key]));
+}
+
+/**
+ * An Apply/replay response is proof only when it echoes the exact persisted
+ * Preview that the operator confirmed. This deliberately covers the opaque
+ * id, digest, normalized manifest, every ordered effect/action and its
+ * counters, plus timing/source-generation fields—not just envelope shape.
+ */
+export function catalogImportApplyMatchesConfirmedPreview(
+  response: CatalogImportApplyResult,
+  confirmed: CatalogImportPreviewResponse,
+): boolean {
+  return exactlyMatchesCatalogImportValue(response, confirmed);
 }
 
 export function canRunCatalogAction(status: string, action: CatalogAction): boolean {

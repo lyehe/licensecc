@@ -149,6 +149,10 @@ function makeAdminApiFixture() {
     orderRows: [],
     catalogImportReadFailures: [],
     catalogImportApplyErrors: [],
+    // Test-only response transforms let the browser contract distinguish a
+    // syntactically valid Apply replay from the exact persisted Preview it
+    // must echo.
+    catalogImportApplyResponseTransforms: [],
     catalogImportAbortAfterApply: false,
   };
   let nextProjectionPreviewId = 1;
@@ -448,6 +452,12 @@ function makeAdminApiFixture() {
       consumed: false,
     });
     return preview;
+  }
+
+  function catalogImportApplyResponse(preview) {
+    const transform = behavior.catalogImportApplyResponseTransforms.shift();
+    const response = JSON.parse(JSON.stringify(preview));
+    return transform === undefined ? response : transform(response);
   }
 
   // A couple of customers so the Customers tab + a global-search customer deep-link have rows.
@@ -1114,7 +1124,7 @@ function makeAdminApiFixture() {
       }
       const replay = catalogImportApplications.get(idempotencyKey);
       if (replay !== undefined) {
-        return fulfill(200, makeEnvelope("catalog_import_applied", replay));
+        return fulfill(200, makeEnvelope("catalog_import_applied", catalogImportApplyResponse(replay)));
       }
       const forcedError = behavior.catalogImportApplyErrors.shift() ?? null;
       if (forcedError !== null) {
@@ -1144,7 +1154,7 @@ function makeAdminApiFixture() {
         behavior.catalogImportAbortAfterApply = false;
         return route.abort("failed");
       }
-      return fulfill(200, makeEnvelope("catalog_import_applied", stored.preview));
+      return fulfill(200, makeEnvelope("catalog_import_applied", catalogImportApplyResponse(stored.preview)));
     }
     const catalogPlanActionMatch = /^\/api\/admin\/catalog\/plans\/([^/]+)\/(disable|reenable)$/.exec(path);
     if (method === "POST" && catalogPlanActionMatch !== null) {
@@ -2191,6 +2201,132 @@ test("admin UI reconciles an unknown catalog-import Apply with the original prev
   await expect(dialog).toHaveCount(0);
   await expect(page.locator(".operatorNotice")).toHaveCount(0);
   await expect(page.getByRole("row", { name: /Replay replay/ })).toHaveCount(1);
+});
+
+test("admin UI replays a retained catalog-import Apply after a tab round-trip without publishing stale focus", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  await page.route("**/api/admin/**", api.route);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Plans", exact: true }).click();
+
+  const form = page.getByRole("form", { name: "Catalog import" });
+  await form.getByLabel("Manifest JSON").fill(JSON.stringify({
+    format_version: 1,
+    features: [{ project: "DEFAULT", feature_key: "tab_replay", name: "Tab replay" }],
+    plans: [],
+  }));
+  await form.getByRole("button", { name: "Preview import" }).click();
+  await expect.poll(() => api.requests.catalogImports.length).toBe(1);
+  api.behavior.catalogImportAbortAfterApply = true;
+  await form.getByRole("button", { name: "Apply import" }).click();
+  const dialog = page.getByRole("dialog");
+  await dialog.getByRole("button", { name: "Confirm" }).click();
+  await expect.poll(() => api.requests.catalogImports.length).toBe(2);
+  const first = api.requests.catalogImports[1];
+  await expect(dialog.locator(".modalError")).toContainText("Mutation outcome unknown; do not retry.");
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+
+  // The screen that captured the dialog is now stale. Its immutable same-key
+  // replay is still required to settle the retained server mutation, but may
+  // not reclaim focus when the operator comes back to this pane.
+  const reportsTab = page.getByRole("button", { name: "Reports", exact: true });
+  await reportsTab.focus();
+  await expect(reportsTab).toBeFocused();
+  await page.keyboard.press("Enter");
+  const plansTab = page.getByRole("button", { name: "Plans", exact: true });
+  await plansTab.focus();
+  await expect(plansTab).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(form.getByRole("button", { name: "Apply import" })).toBeDisabled();
+  const catalogHeading = page.locator('[data-focus-section="catalog-import"] h2');
+  await page.getByRole("button", { name: "Reconcile catalog import" }).click();
+  await expect.poll(() => api.requests.catalogImports.length).toBe(3);
+  const replay = api.requests.catalogImports[2];
+  expect(replay.idempotency_key).toBe(first.idempotency_key);
+  expect(replay.body).toEqual(first.body);
+  await expect(page.locator(".operatorNotice")).toHaveCount(0);
+  await expect(catalogHeading).not.toBeFocused();
+});
+
+test("admin UI retains a substituted initial catalog-import Apply response for exact same-key reconciliation", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  api.behavior.catalogImportApplyResponseTransforms.push((preview) => ({
+    ...preview,
+    effects: {
+      ...preview.effects,
+      features: preview.effects.features.map((effect, index) => index === 0
+        ? { ...effect, after: { ...effect.after, name: "Substituted server effect" } }
+        : effect),
+    },
+  }));
+  await page.route("**/api/admin/**", api.route);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Plans", exact: true }).click();
+
+  const form = page.getByRole("form", { name: "Catalog import" });
+  await form.getByLabel("Manifest JSON").fill(JSON.stringify({
+    format_version: 1,
+    features: [{ project: "DEFAULT", feature_key: "initial_substitution", name: "Initial substitution" }],
+    plans: [],
+  }));
+  await form.getByRole("button", { name: "Preview import" }).click();
+  await expect.poll(() => api.requests.catalogImports.length).toBe(1);
+  await form.getByRole("button", { name: "Apply import" }).click();
+  const dialog = page.getByRole("dialog");
+  await dialog.getByRole("button", { name: "Confirm" }).click();
+  await expect.poll(() => api.requests.catalogImports.length).toBe(2);
+  const first = api.requests.catalogImports[1];
+  await expect(dialog.locator(".modalError")).toContainText("Mutation outcome unknown; do not retry.");
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await page.getByRole("button", { name: "Reconcile catalog import" }).click();
+  await expect.poll(() => api.requests.catalogImports.length).toBe(3);
+  const replay = api.requests.catalogImports[2];
+  expect(replay.idempotency_key).toBe(first.idempotency_key);
+  expect(replay.body).toEqual(first.body);
+  await expect(page.locator(".operatorNotice")).toHaveCount(0);
+});
+
+test("admin UI retains a substituted replayed catalog-import response until an exact replay arrives", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  await page.route("**/api/admin/**", api.route);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Plans", exact: true }).click();
+
+  const form = page.getByRole("form", { name: "Catalog import" });
+  await form.getByLabel("Manifest JSON").fill(JSON.stringify({
+    format_version: 1,
+    features: [{ project: "DEFAULT", feature_key: "replay_substitution", name: "Replay substitution" }],
+    plans: [],
+  }));
+  await form.getByRole("button", { name: "Preview import" }).click();
+  await expect.poll(() => api.requests.catalogImports.length).toBe(1);
+  api.behavior.catalogImportAbortAfterApply = true;
+  await form.getByRole("button", { name: "Apply import" }).click();
+  const dialog = page.getByRole("dialog");
+  await dialog.getByRole("button", { name: "Confirm" }).click();
+  await expect.poll(() => api.requests.catalogImports.length).toBe(2);
+  const first = api.requests.catalogImports[1];
+  await expect(dialog.locator(".modalError")).toContainText("Mutation outcome unknown; do not retry.");
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+
+  api.behavior.catalogImportApplyResponseTransforms.push((preview) => ({
+    ...preview,
+    preview_id: `${preview.preview_id}_substituted`,
+  }));
+  await page.getByRole("button", { name: "Reconcile catalog import" }).click();
+  await expect.poll(() => api.requests.catalogImports.length).toBe(3);
+  const substitutedReplay = api.requests.catalogImports[2];
+  expect(substitutedReplay.idempotency_key).toBe(first.idempotency_key);
+  expect(substitutedReplay.body).toEqual(first.body);
+  await expect(page.locator(".operatorNotice")).toContainText("Mutation outcome unknown; do not retry.");
+  await expect(page.getByRole("button", { name: "Reconcile catalog import" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Reconcile catalog import" }).click();
+  await expect.poll(() => api.requests.catalogImports.length).toBe(4);
+  const exactReplay = api.requests.catalogImports[3];
+  expect(exactReplay.idempotency_key).toBe(first.idempotency_key);
+  expect(exactReplay.body).toEqual(first.body);
+  await expect(page.locator(".operatorNotice")).toHaveCount(0);
 });
 
 test("admin UI surfaces catalog-import capability failures exactly and recovers known success with a current read", async ({ page }) => {

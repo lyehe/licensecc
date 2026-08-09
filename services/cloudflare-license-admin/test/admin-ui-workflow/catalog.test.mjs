@@ -294,6 +294,71 @@ test("admin UI workflow binds catalog import Apply to a canonical manifest snaps
   );
 });
 
+test("admin UI workflow accepts an Apply response only when it exactly echoes the confirmed catalog preview", async () => {
+  const workflow = await loadWorkflowModule("features/catalog/workflow.ts");
+  const manifest = {
+    format_version: 1,
+    features: [
+      { project: "DEFAULT", feature_key: "first", name: "First" },
+      { project: "DEFAULT", feature_key: "second", name: "Second" },
+    ],
+    plans: [],
+  };
+  const snapshot = workflow.catalogImportInputSnapshot(manifest);
+  const normalized = JSON.parse(snapshot);
+  const digest = await workflow.catalogImportInputDigest(manifest);
+  const preview = {
+    preview_id: "civ_confirmed_preview",
+    manifest_digest: digest,
+    manifest: normalized,
+    effects: {
+      features: normalized.features.map((feature, index) => ({
+        target: { entity: "feature", project: feature.project, feature_key: feature.feature_key },
+        effect: "create",
+        before: null,
+        after: { id: `feat_${feature.feature_key}`, ...feature, created_at: index + 1, updated_at: index + 1 },
+      })),
+      plans: [],
+      plan_features: [],
+      summary: {
+        features: { create: 2, update: 0, disable: 0, reenable: 0, unchanged: 0 },
+        plans: { create: 0, update: 0, disable: 0, reenable: 0, unchanged: 0 },
+        plan_features: { create: 0, update: 0, disable: 0, reenable: 0, unchanged: 0 },
+      },
+    },
+    effective_at: 10,
+    expires_at: 310,
+    source_generation: 7,
+  };
+  const copy = () => JSON.parse(JSON.stringify(preview));
+
+  assert.equal(workflow.catalogImportPreviewMatchesLocalInput(preview, digest, snapshot), true);
+  assert.equal(workflow.catalogImportApplyMatchesConfirmedPreview(copy(), preview), true);
+
+  const wrongManifest = copy();
+  wrongManifest.manifest.features[0].name = "Substituted";
+  assert.equal(workflow.catalogImportPreviewMatchesLocalInput(wrongManifest, digest, snapshot), false);
+
+  const substitutions = [
+    (value) => { value.preview_id = "civ_substituted_preview"; },
+    (value) => { value.manifest_digest = "f".repeat(64); },
+    (value) => { value.manifest.features[0].name = "Substituted"; },
+    (value) => { value.effects.features[0].after.name = "Substituted"; },
+    (value) => {
+      value.effects.features[0].effect = "update";
+      value.effects.summary.features = { create: 1, update: 1, disable: 0, reenable: 0, unchanged: 0 };
+    },
+    (value) => { value.effects.features.reverse(); },
+    (value) => { value.effective_at += 1; },
+    (value) => { value.source_generation += 1; },
+  ];
+  for (const substitute of substitutions) {
+    const response = copy();
+    substitute(response);
+    assert.equal(workflow.catalogImportApplyMatchesConfirmedPreview(response, preview), false);
+  }
+});
+
 test("admin UI workflow preserves catalog-import target tuples and typed delta values", async () => {
   const workflow = await loadWorkflowModule("features/catalog/workflow.ts");
   const first = { entity: "feature", project: "A / B", feature_key: "C" };
