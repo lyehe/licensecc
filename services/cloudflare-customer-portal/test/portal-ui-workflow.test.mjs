@@ -54,6 +54,14 @@ test("portal UI workflow exposes the self-serve device-release path + copy", asy
   assert.match(workflow.DEVICE_RELEASE_CONFIRM_COPY, /activate again/);
 });
 
+test("portal UI workflow maps floating-seat release confirmation copy to its consequences", async () => {
+  const workflow = await loadWorkflowModule();
+  assert.equal(workflow.FLOATING_SEAT_RELEASE_CONFIRM_TITLE, "Release floating seat?");
+  assert.match(workflow.FLOATING_SEAT_RELEASE_CONFIRM_COPY, /cannot be undone/i);
+  assert.match(workflow.FLOATING_SEAT_RELEASE_CONFIRM_COPY, /available to another user/i);
+  assert.match(workflow.FLOATING_SEAT_RELEASE_CONFIRM_COPY, /device must check out a new seat/i);
+});
+
 test("portal UI workflow exposes resend-code action + 10-minute expiry copy", async () => {
   const workflow = await loadWorkflowModule();
   assert.match(workflow.RESEND_CODE_ACTION_LABEL, /resend/i);

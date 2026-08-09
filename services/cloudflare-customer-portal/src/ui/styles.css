@@ -248,6 +248,85 @@ code {
   padding: 14px;
 }
 
+/* Consequence-led confirmation for the destructive floating-seat release action. */
+.modalOverlay {
+  align-items: center;
+  background: rgba(27, 31, 35, 0.45);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding: 16px;
+  position: fixed;
+  z-index: 50;
+}
+
+.modal {
+  background: #ffffff;
+  border-radius: 10px;
+  box-shadow: 0 12px 40px rgba(27, 31, 35, 0.25);
+  max-width: 520px;
+  padding: 20px 22px;
+  width: 100%;
+}
+
+.modal.danger {
+  border-top: 4px solid #8b3028;
+}
+
+.modal h2 {
+  margin: 0 0 8px;
+}
+
+.modal p {
+  color: #485047;
+  line-height: 1.4;
+  margin: 0 0 12px;
+}
+
+.modal .actions {
+  justify-content: flex-end;
+  margin-top: 14px;
+}
+
+.modal button.danger {
+  border-color: #c2796f;
+  color: #8b3028;
+}
+
+.modal button.danger:hover:not(:disabled) {
+  background: #8b3028;
+  border-color: #8b3028;
+  color: #ffffff;
+}
+
+.releaseContext {
+  background: #f8faf6;
+  border: 1px solid #e5e9e0;
+  border-radius: 6px;
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 10px 12px;
+}
+
+.releaseContext div {
+  align-items: baseline;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 140px 1fr;
+}
+
+.releaseContext dt {
+  color: #59645a;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.releaseContext dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
 @media (max-width: 920px) {
   .topbar {
     align-items: stretch;

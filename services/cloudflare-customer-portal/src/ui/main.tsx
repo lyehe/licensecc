@@ -7,6 +7,8 @@ import {
   DEVICE_RELEASE_ACTION_LABEL,
   DEVICE_RELEASE_CONFIRM_COPY,
   describeResultCode,
+  FLOATING_SEAT_RELEASE_CONFIRM_COPY,
+  FLOATING_SEAT_RELEASE_CONFIRM_TITLE,
   authRequestPath,
   authVerifyPath,
   checkoutPath,
@@ -195,6 +197,10 @@ function App(): React.ReactElement {
     });
   };
   const [downloadDeviceKeys, setDownloadDeviceKeys] = useState<Record<string, string>>({});
+  const [pendingSeatRelease, setPendingSeatRelease] = useState<{ item: EntitlementRow; session: SeatSession } | null>(null);
+  const seatReleaseCancelRef = useRef<HTMLButtonElement>(null);
+  const seatReleaseReturnFocusRef = useRef<HTMLElement | null>(null);
+  const seatReleaseConfirmingRef = useRef(false);
 
   async function loadMe(): Promise<boolean> {
     const result = await api<PortalMe>(mePath());
@@ -370,6 +376,52 @@ function App(): React.ReactElement {
       }
     });
   }
+
+  function requestSeatRelease(item: EntitlementRow): void {
+    if (busyRef.current) return;
+    const session = seatSessions[item.id];
+    if (session === undefined) {
+      setMessage(localMessage("seat_not_checked_out", false));
+      return;
+    }
+    seatReleaseReturnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setPendingSeatRelease({ item, session });
+  }
+
+  function dismissSeatRelease(): void {
+    setPendingSeatRelease(null);
+    const returnFocus = seatReleaseReturnFocusRef.current;
+    seatReleaseReturnFocusRef.current = null;
+    returnFocus?.focus();
+  }
+
+  async function confirmSeatRelease(): Promise<void> {
+    const pending = pendingSeatRelease;
+    if (pending === null || seatReleaseConfirmingRef.current || busyRef.current) return;
+    seatReleaseConfirmingRef.current = true;
+    setPendingSeatRelease(null);
+    seatReleaseReturnFocusRef.current = null;
+    try {
+      // Keep the established seatAction path/body/auth and success/error refresh behavior. The
+      // captured context only gates the explicit confirmation; it does not add a reason/body field.
+      await seatAction(pending.item, "release");
+    } finally {
+      seatReleaseConfirmingRef.current = false;
+    }
+  }
+
+  useEffect(() => {
+    if (pendingSeatRelease === null) return;
+    seatReleaseCancelRef.current?.focus();
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        dismissSeatRelease();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [pendingSeatRelease]);
 
   async function releaseDevice(item: DeviceRow): Promise<void> {
     // Consequence-stating confirm so a device is never released by reflex (the app on it must re-activate).
@@ -566,7 +618,7 @@ function App(): React.ReactElement {
                   <div className="actions">
                     <button disabled={busy || item.status !== "active" || seatSessions[item.id] !== undefined} onClick={() => void seatAction(item, "checkout")}>Start seat</button>
                     <button disabled={busy || item.status !== "active" || seatSessions[item.id] === undefined} onClick={() => void seatAction(item, "heartbeat")}>Refresh</button>
-                    <button disabled={busy || seatSessions[item.id] === undefined} onClick={() => void seatAction(item, "release")}>Release</button>
+                    <button disabled={busy || seatSessions[item.id] === undefined} onClick={() => requestSeatRelease(item)}>Release</button>
                   </div>
                 </div>
               ))}
@@ -632,6 +684,43 @@ function App(): React.ReactElement {
           </table>
           {downloadableEntitlements.length === 0 && <p className="muted">{NO_DOWNLOADS_EMPTY_COPY}</p>}
         </section>
+      )}
+
+      {pendingSeatRelease !== null && (
+        <div className="modalOverlay" role="presentation">
+          <div
+            className="modal danger"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="floatingSeatReleaseTitle"
+            aria-describedby="floatingSeatReleaseDescription"
+          >
+            <h2 id="floatingSeatReleaseTitle">{FLOATING_SEAT_RELEASE_CONFIRM_TITLE}</h2>
+            <p id="floatingSeatReleaseDescription">{FLOATING_SEAT_RELEASE_CONFIRM_COPY}</p>
+            <dl className="releaseContext">
+              <div>
+                <dt>License</dt>
+                <dd>{pendingSeatRelease.item.project} / {pendingSeatRelease.item.feature}</dd>
+              </div>
+              <div>
+                <dt>License fingerprint</dt>
+                <dd><code>{pendingSeatRelease.item.license_fingerprint ? shortHash(pendingSeatRelease.item.license_fingerprint) : "-"}</code></dd>
+              </div>
+              <div>
+                <dt>Seat</dt>
+                <dd><code>{pendingSeatRelease.session.seat_id}</code></dd>
+              </div>
+              <div>
+                <dt>Device</dt>
+                <dd><code>{pendingSeatRelease.session.client_instance_id}</code></dd>
+              </div>
+            </dl>
+            <div className="actions">
+              <button ref={seatReleaseCancelRef} type="button" disabled={busy} onClick={dismissSeatRelease}>Cancel</button>
+              <button type="button" className="danger" disabled={busy} onClick={() => void confirmSeatRelease()}>Confirm release</button>
+            </div>
+          </div>
+        </div>
       )}
     </main>
   );

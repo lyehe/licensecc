@@ -89,6 +89,14 @@ export const DEVICE_RELEASE_ACTION_LABEL = "Release";
 export const DEVICE_RELEASE_CONFIRM_COPY =
   "Release this device? This frees one device slot; the application on that device will need to activate again.";
 
+// Floating-seat release is also destructive: it ends the current checkout and makes that seat
+// available to another customer/device. The dialog supplies the exact seat/device/license context
+// beside this consequence copy; no backend reason field exists for this portal operation.
+export const FLOATING_SEAT_RELEASE_CONFIRM_TITLE = "Release floating seat?";
+
+export const FLOATING_SEAT_RELEASE_CONFIRM_COPY =
+  "This release cannot be undone. It ends the active checkout immediately, makes the seat available to another user, and this device must check out a new seat before using the license again.";
+
 // Empty-state copy for each portal tab. Shown when the tab has no rows so the customer sees an
 // explanation instead of a bare table header.
 export const NO_ENTITLEMENTS_EMPTY_COPY = "No entitlements yet — licenses appear here after purchase.";

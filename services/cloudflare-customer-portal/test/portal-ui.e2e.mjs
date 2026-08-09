@@ -174,11 +174,53 @@ test("customer portal signs in with an 8-digit code and walks every screen witho
   const heartbeat = api.requests.seatActions.at(-1);
   expect(heartbeat).toMatchObject({ op: "heartbeat", body: { entitlement_id: "ent_floating", seat_id: "seat-e2e" } });
   expect(heartbeat.body.client_instance_id).toBe(checkout.body.client_instance_id);
+  const storedSeatSessionBeforeReleaseConfirm = await page.evaluate(() => window.localStorage.getItem("licensecc.portal.seats.v1"));
 
+  // Release is destructive: opening the confirmation must not send a request or change the live
+  // session. The dialog names the exact license, seat, and device plus the availability impact.
   await seatCard.getByRole("button", { name: "Release" }).click();
+  const releaseDialog = page.getByRole("dialog");
+  await expect(releaseDialog).toBeVisible();
+  await expect(releaseDialog).toContainText("DEFAULT");
+  await expect(releaseDialog).toContainText("pro");
+  await expect(releaseDialog).toContainText("seat-e2e");
+  await expect(releaseDialog).toContainText("cannot be undone");
+  await expect(releaseDialog).toContainText("available to another user");
+  await expect(releaseDialog.getByRole("button", { name: "Cancel" })).toBeFocused();
+  await expect.poll(() => api.requests.releases).toBe(0);
+
+  // Cancel is a no-op for the session and backend.
+  await releaseDialog.getByRole("button", { name: "Cancel" }).click();
+  await expect(releaseDialog).toHaveCount(0);
+  await expect.poll(() => api.requests.releases).toBe(0);
+  await expect.poll(() => page.evaluate(() => window.localStorage.getItem("licensecc.portal.seats.v1"))).toBe(storedSeatSessionBeforeReleaseConfirm);
+  await expect(seatCard.getByRole("button", { name: "Refresh" })).toBeEnabled();
+  await expect(seatCard.getByRole("button", { name: "Release" })).toBeEnabled();
+
+  // Escape is the keyboard cancellation path and likewise must not release the seat.
+  await seatCard.getByRole("button", { name: "Release" }).click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect.poll(() => api.requests.releases).toBe(0);
+  await expect.poll(() => page.evaluate(() => window.localStorage.getItem("licensecc.portal.seats.v1"))).toBe(storedSeatSessionBeforeReleaseConfirm);
+  await expect(seatCard.getByRole("button", { name: "Release" })).toBeEnabled();
+
+  // Only the explicit confirmation sends the original request, and a double click remains one
+  // release while the existing busy guard is active.
+  await seatCard.getByRole("button", { name: "Release" }).click();
+  const confirmReleaseDialog = page.getByRole("dialog");
+  await expect(confirmReleaseDialog).toBeVisible();
+  await confirmReleaseDialog.getByRole("button", { name: "Confirm release" }).dblclick();
   await expect.poll(() => api.requests.releases).toBe(1);
   const release = api.requests.seatActions.at(-1);
   expect(release).toMatchObject({ op: "release", body: { entitlement_id: "ent_floating", seat_id: "seat-e2e" } });
+  expect(release.body).toEqual({
+    entitlement_id: "ent_floating",
+    client_instance_id: checkout.body.client_instance_id,
+    nonce: expect.any(String),
+    seat_id: "seat-e2e",
+  });
   expect(release.body.client_instance_id).toBe(checkout.body.client_instance_id);
   await expect(page.getByText(/release_ok/)).toBeVisible();
   await expect(seatCard.getByRole("button", { name: "Start seat" })).toBeEnabled();
