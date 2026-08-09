@@ -14,10 +14,12 @@ export type {
 } from "@licensecc/licensing-domain/entitlements/contracts";
 
 export type {
+  PlanProjectionApplyInput,
   PlanProjectionApplyResult,
   PlanProjectionInput,
   PlanProjectionItem,
   PlanProjectionPreview,
+  PlanProjectionPreviewResponse,
 } from "@licensecc/licensing-domain/catalog/plan_projection";
 
 export interface EntitlementEvent {

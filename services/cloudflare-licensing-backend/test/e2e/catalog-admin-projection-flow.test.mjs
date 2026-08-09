@@ -204,7 +204,7 @@ test("admin catalog import and plan projection feed public verifier through work
     const appliedProjection = await adminWorker.fetch(adminReq("/api/admin/license-plans/apply", {
       method: "POST",
       headers: { "idempotency-key": "catalog-admin-worker-e2e-apply" },
-      body: JSON.stringify(projectionBody()),
+      body: JSON.stringify({ preview_id: previewBody.data.preview_id }),
     }), env);
     assert.equal(appliedProjection.status, 200, await appliedProjection.clone().text());
     const appliedBody = await responseBody(appliedProjection);

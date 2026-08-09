@@ -1,4 +1,4 @@
-import type { PlanProjectionInput } from "@licensecc/licensing-domain/catalog/plan_projection";
+import type { PlanProjectionApplyInput, PlanProjectionInput } from "@licensecc/licensing-domain/catalog/plan_projection";
 import { safeString } from "@licensecc/cloudflare-runtime/http/kit";
 
 const HEX_64 = /^[0-9a-fA-F]{64}$/;
@@ -121,6 +121,21 @@ export function validatePlanProjectionInput(value: unknown): PlanProjectionInput
     out.addons = addons;
   }
   return out;
+}
+
+export function validatePlanProjectionApplyInput(value: unknown): PlanProjectionApplyInput | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return null;
+  }
+  const input = value as Record<string, unknown>;
+  if (!hasOnlyKeys(input, new Set(["preview_id"]))) {
+    return null;
+  }
+  const previewId = safeString(input.preview_id, 128);
+  if (previewId === null || !previewId.startsWith("ppv_")) {
+    return null;
+  }
+  return { preview_id: previewId };
 }
 
 export interface CatalogFeatureInput {

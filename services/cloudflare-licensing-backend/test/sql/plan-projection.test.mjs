@@ -66,6 +66,31 @@ class D1Like {
   }
 }
 
+class FailingSecondEntitlementD1Like extends D1Like {
+  constructor(db) {
+    super(db);
+    this.failSecondEntitlementWrite = false;
+  }
+  async batch(statements) {
+    const out = [];
+    let entitlementWrites = 0;
+    this.db.exec("BEGIN");
+    try {
+      for (const statement of statements) {
+        if (this.failSecondEntitlementWrite && /^INSERT INTO entitlements/m.test(statement.sql) && ++entitlementWrites === 2) {
+          throw new Error("injected_second_entitlement_failure");
+        }
+        out.push({ results: this.db.prepare(statement.sql).all(...statement.params), success: true });
+      }
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+    return out;
+  }
+}
+
 function freshDb() {
   const db = new DatabaseSync(":memory:");
   for (const file of readdirSync(migrationsDir).filter((x) => x.endsWith(".sql")).sort()) {
@@ -74,13 +99,22 @@ function freshDb() {
   return db;
 }
 
-function ctx() {
+function preProjectionProtocolDb() {
+  const db = new DatabaseSync(":memory:");
+  for (const file of readdirSync(migrationsDir).filter((x) => x.endsWith(".sql") && x < "0028_plan_projection_preview_protocol.sql").sort()) {
+    db.exec(readFileSync(join(migrationsDir, file), "utf8"));
+  }
+  return db;
+}
+
+function ctx(overrides = {}) {
   return {
     actor: { subject: "admin", email: "admin@example.test", role: "admin", actorType: "access" },
     requestId: "req-plan",
     ip: "",
     idempotencyKey: null,
     source: "admin",
+    ...overrides,
   };
 }
 
@@ -181,17 +215,33 @@ function projectionInput(overrides = {}) {
   };
 }
 
+test("projection preview migration upgrades a pre-0028 D1 database without rewriting catalog data", async () => {
+  const db = preProjectionProtocolDb();
+  seedCatalog(db);
+  const catalogCount = db.prepare("SELECT COUNT(*) AS c FROM catalog_features").get().c;
+  db.exec(readFileSync(join(migrationsDir, "0028_plan_projection_preview_protocol.sql"), "utf8"));
+
+  assert.equal(db.prepare("SELECT COUNT(*) AS c FROM catalog_features").get().c, catalogCount);
+  const generation = db.prepare("SELECT scope, generation FROM license_plan_projection_generations").get();
+  assert.equal(generation.scope, "catalog");
+  assert.equal(generation.generation, 0);
+  const preview = await previewPlanProjection({ DB: new D1Like(db) }, projectionInput(), "admin", NOW);
+  assert.match(preview.preview_id, /^ppv_/);
+});
+
 test("previewPlanProjection is non-mutating and classifies plan + add-on creates", async () => {
   const db = freshDb();
   seedCatalog(db);
   const env = { DB: new D1Like(db) };
 
-  const preview = await previewPlanProjection(env, projectionInput(), NOW);
+  const preview = await previewPlanProjection(env, projectionInput(), "admin", NOW);
   assert.equal(preview.summary.create, 3);
   assert.equal(preview.summary.update, 0);
   assert.equal(preview.summary.disable, 0);
   assert.deepEqual(preview.will_create.map((row) => row.feature), ["core", "export", "team"]);
   assert.equal(preview.will_create.find((row) => row.feature === "team").license_mode, "floating");
+  assert.match(preview.preview_id, /^ppv_/);
+  assert.equal(preview.effective_at, NOW);
   assert.equal(db.prepare("SELECT COUNT(*) AS c FROM entitlements").get().c, 0);
 });
 
@@ -200,7 +250,8 @@ test("applyPlanProjection creates stamped concrete entitlements and records assi
   seedCatalog(db);
   const env = { DB: new D1Like(db) };
 
-  const result = await applyPlanProjection(env, projectionInput(), ctx(), NOW);
+  const preview = await previewPlanProjection(env, projectionInput(), "admin", NOW);
+  const result = await applyPlanProjection(env, preview.preview_id, ctx(), null, NOW);
   assert.equal(result.applied.created.length, 3);
   assert.equal(result.applied.updated.length, 0);
   assert.equal(result.applied.disabled.length, 0);
@@ -231,16 +282,18 @@ test("plan downgrade disables catalog-managed features that are no longer desire
   const db = freshDb();
   seedCatalog(db);
   const env = { DB: new D1Like(db) };
-  await applyPlanProjection(env, projectionInput(), ctx(), NOW);
+  const initialPreview = await previewPlanProjection(env, projectionInput(), "admin", NOW);
+  await applyPlanProjection(env, initialPreview.preview_id, ctx(), null, NOW);
 
   const downgrade = projectionInput({ plan_key: "basic", addons: [] });
-  const preview = await previewPlanProjection(env, downgrade, NOW);
+  const preview = await previewPlanProjection(env, downgrade, "admin", NOW);
   assert.equal(preview.summary.create, 0);
   assert.equal(preview.summary.update, 0);
   assert.equal(preview.summary.disable, 2);
   assert.deepEqual(preview.will_disable.map((row) => row.feature), ["export", "team"]);
 
-  const applied = await applyPlanProjection(env, downgrade, ctx(), NOW);
+  const applyPreview = await previewPlanProjection(env, downgrade, "admin", NOW);
+  const applied = await applyPlanProjection(env, applyPreview.preview_id, ctx(), null, NOW);
   assert.equal(applied.applied.disabled.length, 2);
   const statuses = db
     .prepare("SELECT feature, status FROM entitlements WHERE license_fingerprint = ? ORDER BY feature")
@@ -260,9 +313,139 @@ test("unknown add-on is rejected before mutating entitlements", async () => {
   const env = { DB: new D1Like(db) };
 
   await assert.rejects(
-    () => applyPlanProjection(env, projectionInput({ addons: ["missing_addon"] }), ctx(), NOW),
+    () => previewPlanProjection(env, projectionInput({ addons: ["missing_addon"] }), "admin", NOW),
     /unknown_addon:missing_addon/,
   );
   assert.equal(db.prepare("SELECT COUNT(*) AS c FROM entitlements").get().c, 0);
   assert.equal(db.prepare("SELECT COUNT(*) AS c FROM license_plan_assignments").get().c, 0);
+});
+
+test("Free-tier-safe atomic projection boundary accepts nine actions and rejects ten without persisting the overflow preview", async () => {
+  const db = freshDb();
+  seedCatalog(db);
+  const feature = db.prepare(
+    "INSERT INTO catalog_features (id, project, feature_key, name, description, category, status, created_at, updated_at) VALUES (?, 'DEFAULT', ?, ?, '', '', 'active', ?, ?)",
+  );
+  const planFeature = db.prepare(
+    `INSERT INTO catalog_plan_features
+      (project, plan_id, feature_key, feature_inclusion, addon_key, policy_id, status, display_order,
+       assertion_ttl_seconds, pool_size, max_active_devices, max_borrow_sec, meter_quota, meter_period_sec,
+       created_at, updated_at)
+     VALUES ('DEFAULT', 'plan_pro', ?, 'included', NULL, 'pol_node', 'active', ?, NULL, NULL, NULL, NULL, NULL, NULL, ?, ?)`,
+  );
+  for (let index = 0; index < 7; index += 1) {
+    const key = `atomic_${index}`;
+    feature.run(`feat_${key}`, key, key, NOW, NOW);
+    planFeature.run(key, index + 10, NOW, NOW);
+  }
+  const env = { DB: new D1Like(db) };
+  const accepted = await previewPlanProjection(env, projectionInput({ addons: [] }), "admin", NOW);
+  assert.equal(accepted.summary.create, 9);
+  assert.equal(db.prepare("SELECT COUNT(*) AS c FROM license_plan_projection_previews").get().c, 1);
+
+  const overflowKey = "atomic_7";
+  feature.run(`feat_${overflowKey}`, overflowKey, overflowKey, NOW, NOW);
+  planFeature.run(overflowKey, 17, NOW, NOW);
+  const generationBeforeOverflow = db.prepare("SELECT generation FROM license_plan_projection_generations WHERE scope = 'catalog'").get().generation;
+
+  await assert.rejects(
+    () => previewPlanProjection(env, projectionInput({ addons: [] }), "admin", NOW),
+    /projection_too_large/,
+  );
+  assert.equal(db.prepare("SELECT COUNT(*) AS c FROM license_plan_projection_previews").get().c, 1);
+  assert.equal(db.prepare("SELECT COUNT(*) AS c FROM entitlements").get().c, 0);
+  assert.equal(db.prepare("SELECT COUNT(*) AS c FROM entitlement_events").get().c, 0);
+  assert.equal(db.prepare("SELECT COUNT(*) AS c FROM license_plan_assignments").get().c, 0);
+  assert.equal(db.prepare("SELECT generation FROM license_plan_projection_generations WHERE scope = 'catalog'").get().generation, generationBeforeOverflow);
+});
+
+test("every conservative source dependency mutation invalidates a persisted projection preview before any apply write", async () => {
+  const mutations = [
+    ["catalog feature", (db) => db.prepare("UPDATE catalog_features SET name = name WHERE id = 'feat_core'").run()],
+    ["catalog plan", (db) => db.prepare("UPDATE catalog_plans SET description = description WHERE id = 'plan_pro'").run()],
+    ["catalog plan feature", (db) => db.prepare("UPDATE catalog_plan_features SET display_order = display_order WHERE plan_id = 'plan_pro' AND feature_key = 'core'").run()],
+    ["policy", (db) => db.prepare("UPDATE entitlement_policies SET assertion_ttl_seconds = assertion_ttl_seconds WHERE id = 'pol_node'").run()],
+    ["managed entitlement source", (db) => db.prepare("INSERT INTO entitlements (project, feature, license_fingerprint, status, created_at, updated_at) VALUES ('DEFAULT', 'side', ?, 'active', ?, ?)").run("a".repeat(64), NOW, NOW)],
+    ["assignment source", (db) => db.prepare("INSERT INTO license_plan_assignments (license_id, project, plan_id, license_fingerprint, customer_id, status, support_until, addons_json, created_at, updated_at) VALUES ('lic_other', 'DEFAULT', 'plan_pro', ?, NULL, 'active', NULL, '[]', ?, ?)").run("d".repeat(64), NOW, NOW)],
+  ];
+
+  for (const [label, mutate] of mutations) {
+    const db = freshDb();
+    seedCatalog(db);
+    const env = { DB: new D1Like(db) };
+    const preview = await previewPlanProjection(env, projectionInput(), "admin", NOW);
+    const beforeGeneration = db.prepare("SELECT generation FROM license_plan_projection_generations WHERE scope = 'catalog'").get().generation;
+    mutate(db);
+    assert.ok(db.prepare("SELECT generation FROM license_plan_projection_generations WHERE scope = 'catalog'").get().generation > beforeGeneration, label);
+    const before = {
+      entitlements: db.prepare("SELECT COUNT(*) AS c FROM entitlements").get().c,
+      events: db.prepare("SELECT COUNT(*) AS c FROM entitlement_events").get().c,
+      assignments: db.prepare("SELECT COUNT(*) AS c FROM license_plan_assignments").get().c,
+    };
+    await assert.rejects(
+      () => applyPlanProjection(env, preview.preview_id, ctx(), null, NOW + 1),
+      /stale_projection_preview/,
+      label,
+    );
+    assert.equal(db.prepare("SELECT COUNT(*) AS c FROM entitlements").get().c, before.entitlements, label);
+    assert.equal(db.prepare("SELECT COUNT(*) AS c FROM entitlement_events").get().c, before.events, label);
+    assert.equal(db.prepare("SELECT COUNT(*) AS c FROM license_plan_assignments").get().c, before.assignments, label);
+    const persisted = db.prepare("SELECT claim_token, consumed_at FROM license_plan_projection_previews WHERE id = ?").get(preview.preview_id);
+    assert.equal(persisted.claim_token, null, label);
+    assert.equal(persisted.consumed_at, null, label);
+  }
+});
+
+test("apply uses the preview effective_at for time-relative policy fields even after wall time advances", async () => {
+  const db = freshDb();
+  seedCatalog(db);
+  db.prepare("UPDATE entitlement_policies SET expiry_strategy = 'fixed_window', valid_from_offset_sec = 10, duration_sec = 90 WHERE id = 'pol_node'").run();
+  const env = { DB: new D1Like(db) };
+  const input = projectionInput({ addons: [] });
+  delete input.support_until;
+  const preview = await previewPlanProjection(env, input, "admin", NOW);
+  assert.equal(preview.effective_at, NOW);
+  await applyPlanProjection(env, preview.preview_id, ctx(), null, NOW + 100);
+  const core = db.prepare("SELECT valid_from, valid_until FROM entitlements WHERE feature = 'core' AND license_fingerprint = ?").get(FP);
+  assert.equal(core.valid_from, NOW + 10);
+  assert.equal(core.valid_until, NOW + 100);
+});
+
+test("a failure while applying the second entitlement rolls back entitlements, audits, assignment, idempotency, and preview consumption", async () => {
+  const db = freshDb();
+  seedCatalog(db);
+  const d1 = new FailingSecondEntitlementD1Like(db);
+  const env = { DB: d1 };
+  const preview = await previewPlanProjection(env, projectionInput(), "admin", NOW);
+  d1.failSecondEntitlementWrite = true;
+  const generationBeforeApply = db.prepare("SELECT generation FROM license_plan_projection_generations WHERE scope = 'catalog'").get().generation;
+  const mutation = { scope: "POST:/api/admin/license-plans/apply:admin", responseCode: "license_plan_projection_applied" };
+  await assert.rejects(
+    () => applyPlanProjection(env, preview.preview_id, ctx({ idempotencyKey: "projection-fail" }), mutation, NOW + 1),
+    /injected_second_entitlement_failure/,
+  );
+  assert.equal(db.prepare("SELECT COUNT(*) AS c FROM entitlements").get().c, 0);
+  assert.equal(db.prepare("SELECT COUNT(*) AS c FROM entitlement_events").get().c, 0);
+  assert.equal(db.prepare("SELECT COUNT(*) AS c FROM license_plan_assignments").get().c, 0);
+  assert.equal(db.prepare("SELECT COUNT(*) AS c FROM mutation_idempotency").get().c, 0);
+  const persisted = db.prepare("SELECT claim_token, consumed_at, applied_response_json FROM license_plan_projection_previews WHERE id = ?").get(preview.preview_id);
+  assert.equal(persisted.claim_token, null);
+  assert.equal(persisted.consumed_at, null);
+  assert.equal(persisted.applied_response_json, null);
+  assert.equal(db.prepare("SELECT generation FROM license_plan_projection_generations WHERE scope = 'catalog'").get().generation, generationBeforeApply);
+});
+
+test("expired previews are stale and leave the preview unclaimed", async () => {
+  const db = freshDb();
+  seedCatalog(db);
+  const env = { DB: new D1Like(db) };
+  const preview = await previewPlanProjection(env, projectionInput(), "admin", NOW);
+  await assert.rejects(
+    () => applyPlanProjection(env, preview.preview_id, ctx(), null, preview.expires_at),
+    /stale_projection_preview/,
+  );
+  assert.equal(db.prepare("SELECT COUNT(*) AS c FROM entitlements").get().c, 0);
+  const persisted = db.prepare("SELECT claim_token, consumed_at FROM license_plan_projection_previews WHERE id = ?").get(preview.preview_id);
+  assert.equal(persisted.claim_token, null);
+  assert.equal(persisted.consumed_at, null);
 });

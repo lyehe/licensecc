@@ -200,6 +200,8 @@ test("license-plan preview is non-mutating and returns the concrete entitlement 
   assert.equal(json.data.summary.create, 3);
   assert.deepEqual(json.data.will_create.map((row) => row.feature), ["core", "export", "team"]);
   assert.equal(json.data.will_create.find((row) => row.feature === "team").license_mode, "floating");
+  assert.match(json.data.preview_id, /^ppv_/);
+  assert.equal(typeof json.data.effective_at, "number");
   assert.equal(db.prepare("SELECT COUNT(*) AS c FROM entitlements").get().c, 0);
 });
 
@@ -557,10 +559,16 @@ test("license-plan apply creates stamped entitlements, assignment row, and is re
   const db = freshDb();
   seedCatalog(db);
   const env = devEnv(db);
+  const preview = await worker.fetch(
+    devReq("/api/admin/license-plans/preview", { method: "POST", body: JSON.stringify(projectionBody()) }),
+    env,
+  );
+  assert.equal(preview.status, 200, await preview.clone().text());
+  const previewId = (await body(preview)).data.preview_id;
   const request = {
     method: "POST",
     headers: { "idempotency-key": "plan-apply-1" },
-    body: JSON.stringify(projectionBody()),
+    body: JSON.stringify({ preview_id: previewId }),
   };
 
   const first = await worker.fetch(devReq("/api/admin/license-plans/apply", request), env);
@@ -585,7 +593,7 @@ test("license-plan apply creates stamped entitlements, assignment row, and is re
   assert.equal(db.prepare("SELECT COUNT(*) AS c FROM entitlement_events WHERE license_fingerprint = ?").get(FP).c, 3);
 });
 
-test("license-plan apply rejects unavailable add-ons before mutation", async () => {
+test("license-plan apply accepts only its server preview id, rejecting form substitution", async () => {
   const db = freshDb();
   seedCatalog(db);
   const env = devEnv(db);
@@ -595,6 +603,73 @@ test("license-plan apply rejects unavailable add-ons before mutation", async () 
     env,
   );
   assert.equal(res.status, 400);
-  assert.equal((await body(res)).code, "unknown_addon");
+  assert.equal((await body(res)).code, "invalid_request");
   assert.equal(db.prepare("SELECT COUNT(*) AS c FROM entitlements").get().c, 0);
+
+  const preview = await worker.fetch(
+    devReq("/api/admin/license-plans/preview", { method: "POST", body: JSON.stringify(projectionBody()) }),
+    env,
+  );
+  const previewId = (await body(preview)).data.preview_id;
+  const substituted = await worker.fetch(
+    devReq("/api/admin/license-plans/apply", {
+      method: "POST",
+      body: JSON.stringify({ preview_id: previewId, ...projectionBody({ notes: "cannot substitute" }) }),
+    }),
+    env,
+  );
+  assert.equal(substituted.status, 400);
+  assert.equal((await body(substituted)).code, "invalid_request");
+  assert.equal(db.prepare("SELECT COUNT(*) AS c FROM entitlements").get().c, 0);
+});
+
+test("a changed source generation makes Apply return stale_projection_preview with no projection writes", async () => {
+  const db = freshDb();
+  seedCatalog(db);
+  const env = devEnv(db);
+  const preview = await worker.fetch(
+    devReq("/api/admin/license-plans/preview", { method: "POST", body: JSON.stringify(projectionBody()) }),
+    env,
+  );
+  const previewId = (await body(preview)).data.preview_id;
+  db.prepare("UPDATE entitlement_policies SET notes = 'changed after preview' WHERE id = 'pol_node'").run();
+  const apply = await worker.fetch(
+    devReq("/api/admin/license-plans/apply", { method: "POST", body: JSON.stringify({ preview_id: previewId }) }),
+    env,
+  );
+  assert.equal(apply.status, 409);
+  assert.equal((await body(apply)).code, "stale_projection_preview");
+  assert.equal(db.prepare("SELECT COUNT(*) AS c FROM entitlements").get().c, 0);
+  assert.equal(db.prepare("SELECT COUNT(*) AS c FROM entitlement_events").get().c, 0);
+  assert.equal(db.prepare("SELECT COUNT(*) AS c FROM license_plan_assignments").get().c, 0);
+  const persisted = db.prepare("SELECT claim_token, consumed_at FROM license_plan_projection_previews WHERE id = ?").get(previewId);
+  assert.equal(persisted.claim_token, null);
+  assert.equal(persisted.consumed_at, null);
+});
+
+test("concurrent same-key Apply requests produce one committed result and one replay", async () => {
+  const db = freshDb();
+  seedCatalog(db);
+  const env = devEnv(db);
+  const preview = await worker.fetch(
+    devReq("/api/admin/license-plans/preview", { method: "POST", body: JSON.stringify(projectionBody()) }),
+    env,
+  );
+  const previewId = (await body(preview)).data.preview_id;
+  const request = {
+    method: "POST",
+    headers: { "idempotency-key": "plan-concurrent-1" },
+    body: JSON.stringify({ preview_id: previewId }),
+  };
+  const [first, second] = await Promise.all([
+    worker.fetch(devReq("/api/admin/license-plans/apply", request), env),
+    worker.fetch(devReq("/api/admin/license-plans/apply", request), env),
+  ]);
+  assert.equal(first.status, 200, await first.clone().text());
+  assert.equal(second.status, 200, await second.clone().text());
+  assert.equal([first.headers.get("x-idempotent-replay"), second.headers.get("x-idempotent-replay")].filter((value) => value === "1").length, 1);
+  assert.equal(db.prepare("SELECT COUNT(*) AS c FROM entitlements WHERE license_fingerprint = ?").get(FP).c, 3);
+  assert.equal(db.prepare("SELECT COUNT(*) AS c FROM entitlement_events WHERE license_fingerprint = ?").get(FP).c, 3);
+  assert.equal(db.prepare("SELECT COUNT(*) AS c FROM license_plan_assignments WHERE license_id = 'lic_plan'").get().c, 1);
+  assert.equal(db.prepare("SELECT COUNT(*) AS c FROM mutation_idempotency WHERE idempotency_key = 'plan-concurrent-1'").get().c, 1);
 });

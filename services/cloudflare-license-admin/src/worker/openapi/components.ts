@@ -313,9 +313,33 @@ export const openApiComponents: LabeledComponentFragment = {
           },
         },
       }],
-      ["PlanProjectionApplyResult", {
+      ["PlanProjectionPreviewResponse", {
         allOf: [
           { $ref: "#/components/schemas/PlanProjectionPreview" },
+          {
+            type: "object",
+            required: ["preview_id", "effective_at", "expires_at", "source_generation"],
+            properties: {
+              preview_id: { type: "string", description: "Opaque, short-lived server-bound preview capability. Apply accepts this value only." },
+              effective_at: { type: "integer", minimum: 0, description: "Single timestamp used to derive time-relative policy fields." },
+              expires_at: { type: "integer", minimum: 0 },
+              source_generation: { type: "integer", minimum: 0, description: "Conservative catalog-projection dependency generation bound to this preview." },
+            },
+          },
+        ],
+      }],
+      ["PlanProjectionApplyInput", {
+        type: "object",
+        required: ["preview_id"],
+        additionalProperties: false,
+        description: "Apply exactly one server-persisted preview. Catalog/form fields are intentionally not accepted here.",
+        properties: {
+          preview_id: { type: "string", maxLength: 128, pattern: "^ppv_" },
+        },
+      }],
+      ["PlanProjectionApplyResult", {
+        allOf: [
+          { $ref: "#/components/schemas/PlanProjectionPreviewResponse" },
           {
             type: "object",
             properties: {

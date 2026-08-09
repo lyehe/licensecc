@@ -6,6 +6,7 @@ import type {
   CatalogPlanFeatureInput,
   CatalogPlanInput,
   CatalogPlanPatch,
+  PlanProjectionApplyInput,
   PlanProjectionInput,
 } from "../../../shared/api";
 import { dateInputToEpoch } from "../../shared/dates";
@@ -299,6 +300,13 @@ export function planProjectionPreviewPath(): string {
 
 export function planProjectionApplyPath(): string {
   return "/api/admin/license-plans/apply";
+}
+
+export function planProjectionApplyBody(previewId: string): PlanProjectionApplyInput {
+  if (!previewId.startsWith("ppv_") || previewId.length > 128 || previewId.includes("\n") || previewId.includes("\r") || previewId.includes("=") || previewId.includes("\0")) {
+    throw new Error("preview_id_required_or_invalid");
+  }
+  return { preview_id: previewId };
 }
 
 export function disableCatalogFeatureConfirm(feature: { name: string; feature_key: string; project: string }): string {

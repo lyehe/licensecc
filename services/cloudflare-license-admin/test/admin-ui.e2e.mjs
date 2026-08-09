@@ -50,6 +50,9 @@ function makeAdminApiFixture() {
   const catalogPlanFeatures = [];
   const policies = [];
   const webhooks = [];
+  const projectionPreviews = new Map();
+  const projectionState = { staleNextPlanApply: false };
+  let nextProjectionPreviewId = 1;
 
   function seedPolicy() {
     const policy = {
@@ -715,12 +718,29 @@ function makeAdminApiFixture() {
     if (method === "POST" && path === "/api/admin/license-plans/preview") {
       const body = await jsonBody(request);
       requests.planPreviews.push(body);
-      return fulfill(200, makeEnvelope("license_plan_projection_previewed", planProjection(body)));
+      const preview = {
+        ...planProjection(body),
+        preview_id: `ppv_ui_${nextProjectionPreviewId}`,
+        effective_at: now,
+        expires_at: now + 300,
+        source_generation: 1,
+      };
+      nextProjectionPreviewId += 1;
+      projectionPreviews.set(preview.preview_id, { input: body, preview });
+      return fulfill(200, makeEnvelope("license_plan_projection_previewed", preview));
     }
     if (method === "POST" && path === "/api/admin/license-plans/apply") {
       const body = await jsonBody(request);
       requests.planApplies.push(body);
-      const preview = planProjection(body);
+      if (projectionState.staleNextPlanApply) {
+        projectionState.staleNextPlanApply = false;
+        return fulfill(409, { ok: false, code: "stale_projection_preview", request_id: "ui-e2e-projection-stale" });
+      }
+      const stored = projectionPreviews.get(body.preview_id);
+      if (stored === undefined) {
+        return fulfill(409, { ok: false, code: "stale_projection_preview", request_id: "ui-e2e-projection-missing" });
+      }
+      const { input, preview } = stored;
       const created = preview.will_create.map((item) => {
         now += 1;
         const row = {
@@ -734,9 +754,9 @@ function makeAdminApiFixture() {
           revocation_seq: 1,
           valid_from: item.valid_from,
           valid_until: item.valid_until,
-          notes: body.notes ?? "",
-          customer_id: body.customer_id ?? null,
-          license_id: body.license_id,
+          notes: input.notes ?? "",
+          customer_id: input.customer_id ?? null,
+          license_id: input.license_id,
           policy_id: item.policy_id,
           is_trial: 0,
           trial_expiration_basis: null,
@@ -871,6 +891,7 @@ function makeAdminApiFixture() {
   return {
     route,
     requests,
+    projectionState,
     seed: { policy: seedPolicy, webhook: seedWebhook, catalogFeature: seedCatalogFeature },
   };
 }
@@ -1182,7 +1203,8 @@ test("admin UI previews and applies a license plan projection", async ({ page })
 
   const applyButton = form.getByRole("button", { name: "Apply" });
   await expect(applyButton).toBeEnabled();
-  await expect(page.getByText(/Preview digest [0-9a-f]{64}/)).toBeVisible();
+  await expect(page.getByText(/Server preview ppv_ui_/)).toBeVisible();
+  await expect(page.getByText(/Local form digest [0-9a-f]{64}/)).toBeVisible();
 
   // Any projection-form edit invalidates the bound preview until the operator previews again.
   await form.getByLabel("Notes").fill("changed after preview");
@@ -1275,10 +1297,9 @@ test("admin UI previews and applies a license plan projection", async ({ page })
   await expect(applyButton).toBeDisabled();
   await freshPreview();
 
-  const boundPayload = api.requests.planPreviews.at(-1);
   await applyButton.click();
   await expect.poll(() => api.requests.planApplies.length).toBe(1);
-  expect(api.requests.planApplies[0]).toEqual(boundPayload);
+  expect(api.requests.planApplies[0]).toEqual({ preview_id: expect.stringMatching(/^ppv_ui_/) });
   await expect(applyButton).toBeDisabled();
   await expect(page.getByText(/Execution result; re-preview required before another Apply/)).toBeVisible();
   await expect(page.getByText(/license_plan_projection_applied/)).toBeVisible();
@@ -1288,6 +1309,40 @@ test("admin UI previews and applies a license plan projection", async ({ page })
   await expect(page.getByRole("cell", { name: "team", exact: true })).toBeVisible();
   await expect(page.getByText("Mode floating")).toBeVisible();
   await expect(page.getByText("License lic_plan").first()).toBeVisible();
+});
+
+test("admin UI forces a fresh preview when Apply reports stale_projection_preview", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  await page.route("**/api/admin/**", api.route);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Plans" }).click();
+
+  const featureForm = page.getByRole("form", { name: "Catalog feature" });
+  await featureForm.getByLabel("Feature key").fill("core");
+  await featureForm.getByLabel("Name").fill("Core");
+  await featureForm.getByRole("button", { name: "Create feature" }).click();
+  const planForm = page.getByRole("form", { name: "Catalog plan" });
+  await planForm.getByLabel("Plan key").fill("pro");
+  await planForm.getByLabel("Name").fill("Pro");
+  await planForm.getByRole("button", { name: "Create plan" }).click();
+  const planFeatureForm = page.getByRole("form", { name: "Plan feature" });
+  await planFeatureForm.getByLabel("Feature key").fill("core");
+  await planFeatureForm.getByRole("button", { name: "Save plan feature" }).click();
+
+  const projectionForm = page.getByRole("form", { name: "Plan projection" });
+  await projectionForm.getByLabel("License ID").fill("lic_stale");
+  await projectionForm.getByLabel("Fingerprint").fill("d".repeat(64));
+  await projectionForm.getByLabel("Plan key").fill("pro");
+  await projectionForm.getByRole("button", { name: "Preview" }).click();
+  const applyButton = projectionForm.getByRole("button", { name: "Apply" });
+  await expect(applyButton).toBeEnabled();
+
+  api.projectionState.staleNextPlanApply = true;
+  await applyButton.click();
+  await expect(page.getByText(/stale_projection_preview.*preview again/)).toBeVisible();
+  await expect(applyButton).toBeDisabled();
+  await projectionForm.getByRole("button", { name: "Preview" }).click();
+  await expect(applyButton).toBeEnabled();
 });
 
 test("admin UI renders Workstream F charts, expiring panel, health badge, and force-release", async ({ page }) => {

@@ -159,10 +159,14 @@ async function runStagingCatalogDrill(options) {
 
   let applied = null;
   if (options.allowMutation) {
+    const previewId = preview.data?.preview_id;
+    if (typeof previewId !== "string" || !previewId.startsWith("ppv_")) {
+      throw new Error("plan projection preview did not return a server preview_id");
+    }
     applied = assertEnvelope(await requestJson(options.baseUrl, "/api/admin/license-plans/apply", {
       method: "POST",
       headers: accessHeaders(options.accessToken, { "idempotency-key": `staging-plan-${randomUUID()}` }),
-      body: JSON.stringify(projection),
+      body: JSON.stringify({ preview_id: previewId }),
     }), "license_plan_projection_applied", "plan projection apply");
   }
 

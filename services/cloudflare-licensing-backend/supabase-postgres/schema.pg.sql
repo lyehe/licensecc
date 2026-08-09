@@ -741,3 +741,78 @@ CREATE INDEX IF NOT EXISTS idx_catalog_events_entity
 
 CREATE INDEX IF NOT EXISTS idx_catalog_events_project
   ON catalog_events(project, created_at DESC);
+
+-- =====================================================================================
+-- server-bound plan-projection previews  (migration 0028)
+-- =====================================================================================
+CREATE TABLE IF NOT EXISTS license_plan_projection_generations (
+  scope       TEXT   PRIMARY KEY CHECK (scope = 'catalog'),
+  generation  BIGINT NOT NULL DEFAULT 0,
+  updated_at  BIGINT NOT NULL DEFAULT 0
+);
+
+INSERT INTO license_plan_projection_generations (scope, generation, updated_at)
+VALUES ('catalog', 0, 0)
+ON CONFLICT (scope) DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS license_plan_projection_previews (
+  id                    TEXT   PRIMARY KEY,
+  actor_subject         TEXT   NOT NULL,
+  source_generation     BIGINT NOT NULL,
+  normalized_input_json TEXT   NOT NULL,
+  projection_json       TEXT   NOT NULL,
+  actions_json          TEXT   NOT NULL,
+  effective_at          BIGINT NOT NULL,
+  expires_at            BIGINT NOT NULL,
+  claim_token           TEXT   NULL,
+  claimed_at            BIGINT NULL,
+  consumed_at           BIGINT NULL,
+  applied_response_json TEXT   NULL,
+  created_at            BIGINT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_license_plan_projection_previews_expiry
+  ON license_plan_projection_previews(expires_at);
+
+-- Keep the Postgres port semantically aligned with D1's conservative source
+-- generation, even though the current production protocol is D1-backed.
+CREATE OR REPLACE FUNCTION bump_license_plan_projection_generation()
+RETURNS TRIGGER AS $$
+BEGIN
+  UPDATE license_plan_projection_generations
+  SET generation = generation + 1,
+      updated_at = EXTRACT(EPOCH FROM NOW())::BIGINT
+  WHERE scope = 'catalog';
+  RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS bump_license_plan_projection_generation_catalog_features ON catalog_features;
+CREATE TRIGGER bump_license_plan_projection_generation_catalog_features
+AFTER INSERT OR UPDATE OR DELETE ON catalog_features
+FOR EACH STATEMENT EXECUTE FUNCTION bump_license_plan_projection_generation();
+
+DROP TRIGGER IF EXISTS bump_license_plan_projection_generation_catalog_plans ON catalog_plans;
+CREATE TRIGGER bump_license_plan_projection_generation_catalog_plans
+AFTER INSERT OR UPDATE OR DELETE ON catalog_plans
+FOR EACH STATEMENT EXECUTE FUNCTION bump_license_plan_projection_generation();
+
+DROP TRIGGER IF EXISTS bump_license_plan_projection_generation_catalog_plan_features ON catalog_plan_features;
+CREATE TRIGGER bump_license_plan_projection_generation_catalog_plan_features
+AFTER INSERT OR UPDATE OR DELETE ON catalog_plan_features
+FOR EACH STATEMENT EXECUTE FUNCTION bump_license_plan_projection_generation();
+
+DROP TRIGGER IF EXISTS bump_license_plan_projection_generation_entitlement_policies ON entitlement_policies;
+CREATE TRIGGER bump_license_plan_projection_generation_entitlement_policies
+AFTER INSERT OR UPDATE OR DELETE ON entitlement_policies
+FOR EACH STATEMENT EXECUTE FUNCTION bump_license_plan_projection_generation();
+
+DROP TRIGGER IF EXISTS bump_license_plan_projection_generation_entitlements ON entitlements;
+CREATE TRIGGER bump_license_plan_projection_generation_entitlements
+AFTER INSERT OR UPDATE OR DELETE ON entitlements
+FOR EACH STATEMENT EXECUTE FUNCTION bump_license_plan_projection_generation();
+
+DROP TRIGGER IF EXISTS bump_license_plan_projection_generation_assignments ON license_plan_assignments;
+CREATE TRIGGER bump_license_plan_projection_generation_assignments
+AFTER INSERT OR UPDATE OR DELETE ON license_plan_assignments
+FOR EACH STATEMENT EXECUTE FUNCTION bump_license_plan_projection_generation();

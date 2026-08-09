@@ -330,7 +330,7 @@ export const catalogPaths: LabeledPathFragment = {
     ["/api/admin/license-plans/preview", {
     post: {
       tags: ["admin:plans"],
-      summary: "Preview applying a catalog plan to a license without mutating entitlements",
+      summary: "Persist a short-lived, server-bound preview of applying a catalog plan to a license",
       operationId: "previewLicensePlanProjection",
       security: ADMIN_SECURITY,
       requestBody: {
@@ -338,11 +338,11 @@ export const catalogPaths: LabeledPathFragment = {
         content: { "application/json": { schema: { $ref: "#/components/schemas/PlanProjectionInput" } } },
       },
       responses: {
-        "200": okResponse("Plan projection diff: create/update/disable/blocked/unchanged concrete entitlements.", "#/components/schemas/PlanProjectionPreview", "license_plan_projection_previewed"),
+        "200": okResponse("Persisted projection diff with an opaque preview_id and one effective_at timestamp.", "#/components/schemas/PlanProjectionPreviewResponse", "license_plan_projection_previewed"),
         "400": errorResponse("Invalid request / json, or an unavailable add-on was requested.", "invalid_json", "invalid_request", "unknown_addon"),
         ...ADMIN_MUTATION_AUTH_ERRORS,
         "404": errorResponse("Plan or referenced policy was not found.", "plan_not_found", "policy_not_found"),
-        "409": errorResponse("Plan or referenced policy is disabled, or the plan references a policy from another project.", "plan_disabled", "policy_disabled", "invalid_plan_config"),
+        "409": errorResponse("Plan or referenced policy is disabled, the plan references a policy from another project, or `plan_projection_too_large` requires the operator to narrow the plan/add-on scope before previewing again. The nine-action bound keeps one Apply transaction below D1 Workers Free (50 query) and Paid (1,000 query) invocation limits.", "plan_disabled", "policy_disabled", "invalid_plan_config", "plan_projection_too_large"),
         "413": errorResponse("Request body exceeds 8192 bytes.", "body_too_large"),
         "500": errorResponse("Projection failed, or dev bearer enabled outside development.", "plan_projection_failed", "dev_bearer_forbidden_in_environment"),
       },
@@ -351,20 +351,19 @@ export const catalogPaths: LabeledPathFragment = {
     ["/api/admin/license-plans/apply", {
     post: {
       tags: ["admin:plans"],
-      summary: "Apply a catalog plan to a license by projecting it into concrete entitlements",
+      summary: "Atomically apply one unexpired server-bound catalog-plan preview",
       operationId: "applyLicensePlanProjection",
       security: ADMIN_SECURITY,
       parameters: [idempotencyKeyHeader],
       requestBody: {
         required: true,
-        content: { "application/json": { schema: { $ref: "#/components/schemas/PlanProjectionInput" } } },
+        content: { "application/json": { schema: { $ref: "#/components/schemas/PlanProjectionApplyInput" } } },
       },
       responses: {
         "200": okResponse("Applied projection with created/updated/disabled entitlement records and assignment row.", "#/components/schemas/PlanProjectionApplyResult", "license_plan_projection_applied"),
-        "400": errorResponse("Invalid request / json / idempotency key, or an unavailable add-on was requested.", "invalid_idempotency_key", "invalid_json", "invalid_request", "unknown_addon"),
+        "400": errorResponse("Invalid request / json / idempotency key.", "invalid_idempotency_key", "invalid_json", "invalid_request"),
         ...ADMIN_MUTATION_AUTH_ERRORS,
-        "404": errorResponse("Plan or referenced policy was not found.", "plan_not_found", "policy_not_found"),
-        "409": errorResponse("Plan/policy disabled, invalid plan config, or projection blocked by a revoked entitlement.", "plan_disabled", "policy_disabled", "invalid_plan_config", "plan_projection_blocked", "revoked_entitlement_is_terminal"),
+        "409": errorResponse("Preview expired, was consumed, belongs to a different actor, or its source generation changed; re-preview before Apply.", "stale_projection_preview", "plan_projection_blocked"),
         "413": errorResponse("Request body exceeds 8192 bytes.", "body_too_large"),
         "500": errorResponse("Projection failed, mutation failed, or dev bearer enabled outside development.", "plan_projection_failed", "mutation_failed", "dev_bearer_forbidden_in_environment"),
       },

@@ -1881,10 +1881,25 @@
           },
           "type": "object"
         },
+        "PlanProjectionApplyInput": {
+          "additionalProperties": false,
+          "description": "Apply exactly one server-persisted preview. Catalog/form fields are intentionally not accepted here.",
+          "properties": {
+            "preview_id": {
+              "maxLength": 128,
+              "pattern": "^ppv_",
+              "type": "string"
+            }
+          },
+          "required": [
+            "preview_id"
+          ],
+          "type": "object"
+        },
         "PlanProjectionApplyResult": {
           "allOf": [
             {
-              "$ref": "#/components/schemas/PlanProjectionPreview"
+              "$ref": "#/components/schemas/PlanProjectionPreviewResponse"
             },
             {
               "properties": {
@@ -2179,6 +2194,42 @@
             }
           },
           "type": "object"
+        },
+        "PlanProjectionPreviewResponse": {
+          "allOf": [
+            {
+              "$ref": "#/components/schemas/PlanProjectionPreview"
+            },
+            {
+              "properties": {
+                "effective_at": {
+                  "description": "Single timestamp used to derive time-relative policy fields.",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "expires_at": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "preview_id": {
+                  "description": "Opaque, short-lived server-bound preview capability. Apply accepts this value only.",
+                  "type": "string"
+                },
+                "source_generation": {
+                  "description": "Conservative catalog-projection dependency generation bound to this preview.",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "preview_id",
+                "effective_at",
+                "expires_at",
+                "source_generation"
+              ],
+              "type": "object"
+            }
+          ]
         },
         "PoliciesListData": {
           "properties": {
@@ -11120,7 +11171,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PlanProjectionInput"
+                  "$ref": "#/components/schemas/PlanProjectionApplyInput"
                 }
               }
             },
@@ -11176,13 +11227,6 @@
                         "ok": false,
                         "request_id": "1a2b3c-1"
                       }
-                    },
-                    "unknown_addon": {
-                      "value": {
-                        "code": "unknown_addon",
-                        "ok": false,
-                        "request_id": "1a2b3c-1"
-                      }
                     }
                   },
                   "schema": {
@@ -11190,7 +11234,7 @@
                   }
                 }
               },
-              "description": "Invalid request / json / idempotency key, or an unavailable add-on was requested."
+              "description": "Invalid request / json / idempotency key."
             },
             "401": {
               "content": {
@@ -11251,50 +11295,10 @@
               },
               "description": "Authorization failed (RBAC / invalid JWT / admin role required)."
             },
-            "404": {
-              "content": {
-                "application/json": {
-                  "examples": {
-                    "plan_not_found": {
-                      "value": {
-                        "code": "plan_not_found",
-                        "ok": false,
-                        "request_id": "1a2b3c-1"
-                      }
-                    },
-                    "policy_not_found": {
-                      "value": {
-                        "code": "policy_not_found",
-                        "ok": false,
-                        "request_id": "1a2b3c-1"
-                      }
-                    }
-                  },
-                  "schema": {
-                    "$ref": "#/components/schemas/ErrorEnvelope"
-                  }
-                }
-              },
-              "description": "Plan or referenced policy was not found."
-            },
             "409": {
               "content": {
                 "application/json": {
                   "examples": {
-                    "invalid_plan_config": {
-                      "value": {
-                        "code": "invalid_plan_config",
-                        "ok": false,
-                        "request_id": "1a2b3c-1"
-                      }
-                    },
-                    "plan_disabled": {
-                      "value": {
-                        "code": "plan_disabled",
-                        "ok": false,
-                        "request_id": "1a2b3c-1"
-                      }
-                    },
                     "plan_projection_blocked": {
                       "value": {
                         "code": "plan_projection_blocked",
@@ -11302,16 +11306,9 @@
                         "request_id": "1a2b3c-1"
                       }
                     },
-                    "policy_disabled": {
+                    "stale_projection_preview": {
                       "value": {
-                        "code": "policy_disabled",
-                        "ok": false,
-                        "request_id": "1a2b3c-1"
-                      }
-                    },
-                    "revoked_entitlement_is_terminal": {
-                      "value": {
-                        "code": "revoked_entitlement_is_terminal",
+                        "code": "stale_projection_preview",
                         "ok": false,
                         "request_id": "1a2b3c-1"
                       }
@@ -11322,7 +11319,7 @@
                   }
                 }
               },
-              "description": "Plan/policy disabled, invalid plan config, or projection blocked by a revoked entitlement."
+              "description": "Preview expired, was consumed, belongs to a different actor, or its source generation changed; re-preview before Apply."
             },
             "413": {
               "content": {
@@ -11385,7 +11382,7 @@
               "devBearer": []
             }
           ],
-          "summary": "Apply a catalog plan to a license by projecting it into concrete entitlements",
+          "summary": "Atomically apply one unexpired server-bound catalog-plan preview",
           "tags": [
             "admin:plans"
           ]
@@ -11419,7 +11416,7 @@
                             "const": "license_plan_projection_previewed"
                           },
                           "data": {
-                            "$ref": "#/components/schemas/PlanProjectionPreview"
+                            "$ref": "#/components/schemas/PlanProjectionPreviewResponse"
                           }
                         },
                         "type": "object"
@@ -11428,7 +11425,7 @@
                   }
                 }
               },
-              "description": "Plan projection diff: create/update/disable/blocked/unchanged concrete entitlements."
+              "description": "Persisted projection diff with an opaque preview_id and one effective_at timestamp."
             },
             "400": {
               "content": {
@@ -11566,6 +11563,13 @@
                         "request_id": "1a2b3c-1"
                       }
                     },
+                    "plan_projection_too_large": {
+                      "value": {
+                        "code": "plan_projection_too_large",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    },
                     "policy_disabled": {
                       "value": {
                         "code": "policy_disabled",
@@ -11579,7 +11583,7 @@
                   }
                 }
               },
-              "description": "Plan or referenced policy is disabled, or the plan references a policy from another project."
+              "description": "Plan or referenced policy is disabled, the plan references a policy from another project, or `plan_projection_too_large` requires the operator to narrow the plan/add-on scope before previewing again. The nine-action bound keeps one Apply transaction below D1 Workers Free (50 query) and Paid (1,000 query) invocation limits."
             },
             "413": {
               "content": {
@@ -11635,7 +11639,7 @@
               "devBearer": []
             }
           ],
-          "summary": "Preview applying a catalog plan to a license without mutating entitlements",
+          "summary": "Persist a short-lived, server-bound preview of applying a catalog plan to a license",
           "tags": [
             "admin:plans"
           ]

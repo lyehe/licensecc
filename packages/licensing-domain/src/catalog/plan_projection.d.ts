@@ -127,7 +127,24 @@ export interface PlanProjectionPreview {
     unchanged: number;
   };
 }
-export interface PlanProjectionApplyResult extends PlanProjectionPreview {
+
+/**
+ * A server-persisted preview. `preview_id` is opaque and is the only payload
+ * accepted by Apply; the server holds the normalized input and exact action
+ * set that it represents.
+ */
+export interface PlanProjectionPreviewResponse extends PlanProjectionPreview {
+  preview_id: string;
+  effective_at: number;
+  expires_at: number;
+  source_generation: number;
+}
+
+export interface PlanProjectionApplyInput {
+  preview_id: string;
+}
+
+export interface PlanProjectionApplyResult extends PlanProjectionPreviewResponse {
   applied: {
     created: EntitlementRecord[];
     updated: EntitlementRecord[];

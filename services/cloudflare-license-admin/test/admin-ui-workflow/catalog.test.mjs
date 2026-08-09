@@ -7,6 +7,9 @@ test("admin UI workflow builds plan projection paths and payloads", async () => 
   const workflow = await loadWorkflowModule("features/catalog/workflow.ts");
   assert.equal(workflow.planProjectionPreviewPath(), "/api/admin/license-plans/preview");
   assert.equal(workflow.planProjectionApplyPath(), "/api/admin/license-plans/apply");
+  assert.deepEqual(workflow.planProjectionApplyBody("ppv_server_bound"), { preview_id: "ppv_server_bound" });
+  assert.throws(() => workflow.planProjectionApplyBody("not-a-preview"), /preview_id_required_or_invalid/);
+  assert.throws(() => workflow.planProjectionApplyBody("ppv_not=safe"), /preview_id_required_or_invalid/);
 
   const body = workflow.normalizePlanProjectionForm({
     ...workflow.emptyPlanProjectionForm,

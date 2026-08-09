@@ -1,13 +1,12 @@
-import { INVALID_IDEMPOTENCY_KEY, mutationResponse, readIdempotencyKey } from "../../idempotency.js";
+import { INVALID_IDEMPOTENCY_KEY, idempotentReplay, mutationResponse, readIdempotencyKey } from "../../idempotency.js";
 import { envelope } from "../../responses.js";
 import { batchReturnedRow } from "@licensecc/cloudflare-runtime/d1/entitlement_mutation";
 import type { Actor, D1DatabaseLike, MutationContext } from "@licensecc/cloudflare-runtime/d1/entitlement_mutation";
 import { applyPlanProjection, previewPlanProjection } from "@licensecc/cloudflare-runtime/d1/plan_projection";
-import type { PlanProjectionInput } from "@licensecc/licensing-domain/catalog/plan_projection";
 import type { Env } from "../../env.js";
 import { requireAdmin } from "../../auth.js";
 import { parseJsonBody } from "../../request.js";
-import { type CatalogFeatureInput, type CatalogFeaturePatch, type CatalogPlanFeatureInput, type CatalogPlanInput, validateCatalogFeatureInput, validateCatalogFeaturePatch, validateCatalogPlanInput, validatePlanProjectionInput } from "./validation.js";
+import { type CatalogFeatureInput, type CatalogFeaturePatch, type CatalogPlanFeatureInput, type CatalogPlanInput, validateCatalogFeatureInput, validateCatalogFeaturePatch, validateCatalogPlanInput, validatePlanProjectionApplyInput, validatePlanProjectionInput } from "./validation.js";
 import { clientIp } from "../../support.js";
 import { boundedCursor } from "../../query.js";
 export function planProjectionError(error: unknown, requestIdValue: string): Response {
@@ -35,6 +34,12 @@ export function planProjectionError(error: unknown, requestIdValue: string): Res
   }
   if (message === "projection_blocked_revoked_entitlement") {
     return envelope(requestIdValue, "plan_projection_blocked", undefined, 409);
+  }
+  if (message === "stale_projection_preview") {
+    return envelope(requestIdValue, "stale_projection_preview", undefined, 409);
+  }
+  if (message === "projection_too_large") {
+    return envelope(requestIdValue, "plan_projection_too_large", undefined, 409);
   }
   if (message === "revoked_terminal") {
     return envelope(requestIdValue, "revoked_entitlement_is_terminal", undefined, 409);
@@ -212,16 +217,20 @@ export async function handlePlanProjection(request: Request, env: Env, actor: Ac
   if (body instanceof Response) {
     return body;
   }
-  const input = validatePlanProjectionInput(body);
-  if (input === null) {
-    return envelope(requestIdValue, "invalid_request", undefined, 400);
-  }
   if (action === "preview") {
+    const input = validatePlanProjectionInput(body);
+    if (input === null) {
+      return envelope(requestIdValue, "invalid_request", undefined, 400);
+    }
     try {
-      return envelope(requestIdValue, "license_plan_projection_previewed", await previewPlanProjection(env, input));
+      return envelope(requestIdValue, "license_plan_projection_previewed", await previewPlanProjection(env, input, actor.subject));
     } catch (error) {
       return planProjectionError(error, requestIdValue);
     }
+  }
+  const apply = validatePlanProjectionApplyInput(body);
+  if (apply === null) {
+    return envelope(requestIdValue, "invalid_request", undefined, 400);
   }
   const ctx: MutationContext = {
     actor,
@@ -230,10 +239,20 @@ export async function handlePlanProjection(request: Request, env: Env, actor: Ac
     idempotencyKey,
     source: "admin",
   };
-  return mutationResponse(request, env, ctx, "license_plan_projection_applied", async () => {
+  return mutationResponse(request, env, ctx, "license_plan_projection_applied", async (idempotency) => {
     try {
-      return { data: await applyPlanProjection(env, input, ctx), idempotencyRecorded: false };
+      return {
+        data: await applyPlanProjection(env, apply.preview_id, ctx, idempotency),
+        idempotencyRecorded: idempotency !== null,
+      };
     } catch (error) {
+      // A same-key concurrent request can read the replay cache just before the
+      // winning batch writes it. Its claim then safely fails; re-read here so it
+      // becomes the normal idempotent replay rather than a false stale error.
+      if (error instanceof Error && error.message === "stale_projection_preview" && idempotency !== null) {
+        const replay = await idempotentReplay(env, idempotency.scope, ctx.idempotencyKey);
+        if (replay !== null) return replay;
+      }
       return planProjectionError(error, requestIdValue);
     }
   });

@@ -6,10 +6,11 @@ import type {
   CatalogImportResult,
   CatalogPlan,
   CatalogPlanFeature,
+  PlanProjectionApplyInput,
   PlanProjectionApplyResult,
   PlanProjectionInput,
   PlanProjectionItem,
-  PlanProjectionPreview,
+  PlanProjectionPreviewResponse,
   Policy,
 } from "../../../shared/api";
 import { api } from "../../shared/api";
@@ -46,6 +47,7 @@ import {
   normalizeCatalogPlanPatch,
   normalizePlanProjectionForm,
   planProjectionInputDigest,
+  planProjectionApplyBody,
   planProjectionApplyPath,
   PlanProjectionFormState,
   planProjectionPreviewPath,
@@ -54,7 +56,7 @@ import {
 interface PlanProjectionPreviewBinding {
   input: PlanProjectionInput;
   digest: string;
-  preview: PlanProjectionPreview;
+  preview: PlanProjectionPreviewResponse;
 }
 
 export function Catalog({ active }: { active: boolean }): React.ReactElement | null {
@@ -351,7 +353,7 @@ export function Catalog({ active }: { active: boolean }): React.ReactElement | n
       }
       setPlanPreviewBinding(null);
       setPlanApplyResult(null);
-      const result = await api<PlanProjectionPreview>(planProjectionPreviewPath(), { method: "POST", body: JSON.stringify(body) });
+      const result = await api<PlanProjectionPreviewResponse>(planProjectionPreviewPath(), { method: "POST", body: JSON.stringify(body) });
       if (revision !== planProjectionRevision.current) return;
       setMessage(`${result.code} (${result.request_id})`);
       if (result.ok && result.data) setPlanPreviewBinding({ input: body, digest, preview: result.data });
@@ -370,8 +372,18 @@ export function Catalog({ active }: { active: boolean }): React.ReactElement | n
         setMessage("plan_projection_preview_required");
         return;
       }
-      const result = await api<PlanProjectionApplyResult>(planProjectionApplyPath(), { method: "POST", headers: { "idempotency-key": crypto.randomUUID() }, body: JSON.stringify(binding.input) });
+      const body: PlanProjectionApplyInput = planProjectionApplyBody(binding.preview.preview_id);
+      const result = await api<PlanProjectionApplyResult>(planProjectionApplyPath(), { method: "POST", headers: { "idempotency-key": crypto.randomUUID() }, body: JSON.stringify(body) });
       if (revision !== planProjectionRevision.current) return;
+      if (!result.ok && result.code === "stale_projection_preview") {
+        invalidatePlanProjectionPreview();
+        setMessage("stale_projection_preview — preview again");
+        return;
+      }
+      if (!result.ok && result.code === "plan_projection_too_large") {
+        setMessage("plan_projection_too_large — narrow plan/add-ons and preview again");
+        return;
+      }
       setMessage(`${result.code} (${result.request_id})`);
       if (result.ok && result.data) {
         invalidatePlanProjectionPreview();
@@ -412,7 +424,7 @@ export function Catalog({ active }: { active: boolean }): React.ReactElement | n
         <section className="deliveriesPane"><h3>Catalog plans</h3><div className="filters"><input placeholder="project" value={catalogPlanFilter.project} onChange={(event) => setCatalogPlanFilter({ ...catalogPlanFilter, project: event.target.value })} /><select value={catalogPlanFilter.status} onChange={(event) => setCatalogPlanFilter({ ...catalogPlanFilter, status: event.target.value })}><option value="">all</option><option value="active">active</option><option value="disabled">disabled</option></select></div><table><thead><tr><th>Plan</th><th>Project</th><th>Version</th><th>Status</th><th>Actions</th></tr></thead><tbody>{catalogPlans.map((plan) => <tr key={plan.id} className={plan.id === selectedCatalogPlanId ? "selectedRow" : ""}><td>{plan.name}<div className="muted">{plan.plan_key}</div></td><td>{plan.project}</td><td>{plan.version}</td><td><span className={`status ${plan.status}`}>{plan.status}</span></td><td className="actions"><button type="button" disabled={busy} onClick={() => selectCatalogPlan(plan)}>Use</button><button type="button" disabled={busy} onClick={() => beginCatalogPlanEdit(plan)}>Edit</button><button type="button" disabled={busy} onClick={() => void exportCatalogPlan(plan)}>Export</button><button className="danger" type="button" disabled={busy || !canRunCatalogAction(plan.status, "disable")} onClick={() => requestConfirm({ title: "Disable plan", body: disableCatalogPlanConfirm(plan), requiresReason: true, run: () => catalogPlanTransition(plan, "disable") })}>Disable</button><button type="button" disabled={busy || !canRunCatalogAction(plan.status, "reenable")} onClick={() => void catalogPlanTransition(plan, "reenable")}>Reenable</button></td></tr>)}</tbody></table><div className="tableFooter"><span className="muted">{catalogPlans.length} shown</span>{catalogPlansCursor !== null && <button type="button" disabled={busy} onClick={() => void loadMore(catalogPlansUrl, catalogPlansCursor, setCatalogPlans, setCatalogPlansCursor, setMessage)}>Load more</button>}</div></section>
         <section className="deliveriesPane"><h3>Catalog features</h3><div className="filters"><input placeholder="project" value={catalogFeatureFilter.project} onChange={(event) => setCatalogFeatureFilter({ ...catalogFeatureFilter, project: event.target.value })} /><select value={catalogFeatureFilter.status} onChange={(event) => setCatalogFeatureFilter({ ...catalogFeatureFilter, status: event.target.value })}><option value="">all</option><option value="active">active</option><option value="disabled">disabled</option></select></div><table><thead><tr><th>Feature</th><th>Project</th><th>Category</th><th>Status</th><th>Actions</th></tr></thead><tbody>{catalogFeatures.map((feature) => <tr key={feature.id}><td>{feature.name}<div className="muted">{feature.feature_key}</div></td><td>{feature.project}</td><td>{feature.category || "-"}</td><td><span className={`status ${feature.status}`}>{feature.status}</span></td><td className="actions"><button type="button" disabled={busy} onClick={() => beginCatalogFeatureEdit(feature)}>Edit</button><button className="danger" type="button" disabled={busy || !canRunCatalogAction(feature.status, "disable")} onClick={() => requestConfirm({ title: "Disable feature", body: disableCatalogFeatureConfirm(feature), requiresReason: true, run: () => catalogFeatureTransition(feature, "disable") })}>Disable</button><button type="button" disabled={busy || !canRunCatalogAction(feature.status, "reenable")} onClick={() => void catalogFeatureTransition(feature, "reenable")}>Reenable</button></td></tr>)}</tbody></table><div className="tableFooter"><span className="muted">{catalogFeatures.length} shown</span>{catalogFeaturesCursor !== null && <button type="button" disabled={busy} onClick={() => void loadMore(catalogFeaturesUrl, catalogFeaturesCursor, setCatalogFeatures, setCatalogFeaturesCursor, setMessage)}>Load more</button>}</div></section>
         <section className="deliveriesPane"><h3>{selectedCatalogPlan === null ? "Plan features" : `Plan features / ${selectedCatalogPlan.plan_key}`}</h3><table><thead><tr><th>Feature</th><th>Inclusion</th><th>Add-on</th><th>Policy</th><th>Overrides</th><th>Status</th><th>Actions</th></tr></thead><tbody>{catalogPlanFeatures.map((row) => <tr key={`${row.plan_id}:${row.feature_key}`}><td>{row.feature_name}<div className="muted">{row.feature_key}</div></td><td>{row.feature_inclusion}</td><td>{row.addon_key ?? "-"}</td><td>{row.policy_id ?? "-"}</td><td>{catalogOverrideSummary(row)}</td><td><span className={`status ${row.status}`}>{row.status}</span></td><td className="actions"><button className="danger" type="button" disabled={busy || !canRunCatalogAction(row.status, "disable")} onClick={() => requestConfirm({ title: "Disable plan row", body: disableCatalogPlanFeatureConfirm(row), requiresReason: true, run: () => catalogPlanFeatureTransition(row, "disable") })}>Disable</button><button type="button" disabled={busy || !canRunCatalogAction(row.status, "reenable")} onClick={() => void catalogPlanFeatureTransition(row, "reenable")}>Reenable</button></td></tr>)}</tbody></table>{catalogPlanFeatures.length === 0 && <p className="muted">No rows for the selected plan.</p>}</section>
-        {planPreview === null ? <section className="deliveriesPane"><h3>Projection</h3><p className="muted">No preview loaded.</p></section> : <><section className="grid metrics"><div><span>Create</span><strong>{planPreview.summary.create}</strong></div><div><span>Update</span><strong>{planPreview.summary.update}</strong></div><div><span>Disable</span><strong>{planPreview.summary.disable}</strong></div><div><span>Blocked</span><strong>{planPreview.summary.blocked}</strong></div></section><section className="deliveriesPane"><h3>{planPreview.assignment.plan_key} / {planPreview.assignment.license_id}</h3><div className="details"><span>Project {planPreview.assignment.project}</span><span>Fingerprint {shortHash(planPreview.assignment.license_fingerprint)}</span><span>Customer {planPreview.assignment.customer_id ?? "-"}</span><span>Add-ons {planPreview.assignment.addons.length === 0 ? "-" : planPreview.assignment.addons.join(", ")}</span>{planPreviewBinding === null ? <span>Execution result; re-preview required before another Apply</span> : <span>Preview digest {planPreviewBinding.digest}</span>}</div></section>{projectionRows("Create", planPreview.will_create)}{projectionRows("Update", planPreview.will_update)}{projectionRows("Disable", planPreview.will_disable)}{projectionRows("Blocked", planPreview.blocked)}{projectionRows("Unchanged", planPreview.unchanged)}</>}
+        {planPreview === null ? <section className="deliveriesPane"><h3>Projection</h3><p className="muted">No preview loaded.</p></section> : <><section className="grid metrics"><div><span>Create</span><strong>{planPreview.summary.create}</strong></div><div><span>Update</span><strong>{planPreview.summary.update}</strong></div><div><span>Disable</span><strong>{planPreview.summary.disable}</strong></div><div><span>Blocked</span><strong>{planPreview.summary.blocked}</strong></div></section><section className="deliveriesPane"><h3>{planPreview.assignment.plan_key} / {planPreview.assignment.license_id}</h3><div className="details"><span>Project {planPreview.assignment.project}</span><span>Fingerprint {shortHash(planPreview.assignment.license_fingerprint)}</span><span>Customer {planPreview.assignment.customer_id ?? "-"}</span><span>Add-ons {planPreview.assignment.addons.length === 0 ? "-" : planPreview.assignment.addons.join(", ")}</span>{planPreviewBinding === null ? <span>Execution result; re-preview required before another Apply</span> : <><span>Server preview {planPreviewBinding.preview.preview_id}</span><span>Effective {formatEpoch(planPreviewBinding.preview.effective_at)}</span><span>Local form digest {planPreviewBinding.digest}</span></>}</div></section>{projectionRows("Create", planPreview.will_create)}{projectionRows("Update", planPreview.will_update)}{projectionRows("Disable", planPreview.will_disable)}{projectionRows("Blocked", planPreview.blocked)}{projectionRows("Unchanged", planPreview.unchanged)}</>}
       </section>
     </section>
   );
