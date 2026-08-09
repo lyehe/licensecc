@@ -18,6 +18,7 @@ makeEnvelope.nextRequestId = 0;
 function makePortalApiFixture() {
   const VALID_CODE = "80315426";
   let authed = false;
+  const controls = { failNextRelease: false };
   const requests = { authRequests: 0, verifies: 0, checkouts: 0, heartbeats: 0, releases: 0, downloads: 0, logouts: 0, seatActions: [] };
 
   const entitlements = [
@@ -103,6 +104,10 @@ function makePortalApiFixture() {
       }
       requests[`${op}s`] += 1;
       requests.seatActions.push({ op, body });
+      if (op === "release" && controls.failNextRelease) {
+        controls.failNextRelease = false;
+        return fulfill(503, { ok: false, code: "verification_error", request_id: "portal-e2e-release-failure" });
+      }
       return fulfill(200, makeEnvelope(`${op}_ok`, { seat_id: "seat-e2e", mode: "live" }));
     }
 
@@ -124,7 +129,7 @@ function makePortalApiFixture() {
     return fulfill(404, { ok: false, code: "not_found", request_id: "portal-e2e-unhandled" });
   }
 
-  return { route, requests, VALID_CODE };
+  return { route, requests, VALID_CODE, controls };
 }
 
 test("customer portal signs in with an 8-digit code and walks every screen without leaking secrets", async ({ page }) => {
@@ -186,16 +191,35 @@ test("customer portal signs in with an 8-digit code and walks every screen witho
   await expect(releaseDialog).toContainText("seat-e2e");
   await expect(releaseDialog).toContainText("cannot be undone");
   await expect(releaseDialog).toContainText("available to another user");
-  await expect(releaseDialog.getByRole("button", { name: "Cancel" })).toBeFocused();
+  const cancelRelease = releaseDialog.getByRole("button", { name: "Cancel" });
+  const confirmRelease = releaseDialog.getByRole("button", { name: "Confirm release" });
+  await expect(cancelRelease).toBeFocused();
+  await expect(page.locator("main")).toHaveAttribute("aria-hidden", "true");
+  await expect(page.locator("main")).toHaveAttribute("inert", "");
+  await expect(page.locator("main").getByRole("button", { name: "Refresh" })).toHaveCount(0);
+  await page.keyboard.press("Tab");
+  await expect(confirmRelease).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(cancelRelease).toBeFocused();
+  await page.keyboard.press("Shift+Tab");
+  await expect(confirmRelease).toBeFocused();
+  const backgroundFocused = await page.locator("main").evaluate((main) => {
+    const button = Array.from(main.querySelectorAll("button")).find((candidate) => candidate.textContent === "Refresh");
+    button?.focus();
+    return document.activeElement === button;
+  });
+  expect(backgroundFocused).toBe(false);
+  await expect(confirmRelease).toBeFocused();
   await expect.poll(() => api.requests.releases).toBe(0);
 
   // Cancel is a no-op for the session and backend.
-  await releaseDialog.getByRole("button", { name: "Cancel" }).click();
+  await cancelRelease.click();
   await expect(releaseDialog).toHaveCount(0);
   await expect.poll(() => api.requests.releases).toBe(0);
   await expect.poll(() => page.evaluate(() => window.localStorage.getItem("licensecc.portal.seats.v1"))).toBe(storedSeatSessionBeforeReleaseConfirm);
   await expect(seatCard.getByRole("button", { name: "Refresh" })).toBeEnabled();
   await expect(seatCard.getByRole("button", { name: "Release" })).toBeEnabled();
+  await expect(seatCard.getByRole("button", { name: "Release" })).toBeFocused();
 
   // Escape is the keyboard cancellation path and likewise must not release the seat.
   await seatCard.getByRole("button", { name: "Release" }).click();
@@ -205,14 +229,29 @@ test("customer portal signs in with an 8-digit code and walks every screen witho
   await expect.poll(() => api.requests.releases).toBe(0);
   await expect.poll(() => page.evaluate(() => window.localStorage.getItem("licensecc.portal.seats.v1"))).toBe(storedSeatSessionBeforeReleaseConfirm);
   await expect(seatCard.getByRole("button", { name: "Release" })).toBeEnabled();
+  await expect(seatCard.getByRole("button", { name: "Release" })).toBeFocused();
+
+  // A failed explicit confirmation preserves the active seat, leaves the error visible, and
+  // restores focus to the invoking Release trigger.
+  api.controls.failNextRelease = true;
+  await seatCard.getByRole("button", { name: "Release" }).click();
+  const failedReleaseDialog = page.getByRole("dialog");
+  await expect(failedReleaseDialog).toBeVisible();
+  await failedReleaseDialog.getByRole("button", { name: "Confirm release" }).click();
+  await expect.poll(() => api.requests.releases).toBe(1);
+  await expect(failedReleaseDialog).toHaveCount(0);
+  await expect(page.getByText(/verification_error/)).toBeVisible();
+  await expect(seatCard.getByRole("button", { name: "Release" })).toBeEnabled();
+  await expect(seatCard.getByRole("button", { name: "Release" })).toBeFocused();
+  await expect.poll(() => page.evaluate(() => window.localStorage.getItem("licensecc.portal.seats.v1"))).toBe(storedSeatSessionBeforeReleaseConfirm);
 
   // Only the explicit confirmation sends the original request, and a double click remains one
-  // release while the existing busy guard is active.
+  // release while the existing busy guard is active. Success focuses the newly available Start seat.
   await seatCard.getByRole("button", { name: "Release" }).click();
   const confirmReleaseDialog = page.getByRole("dialog");
   await expect(confirmReleaseDialog).toBeVisible();
   await confirmReleaseDialog.getByRole("button", { name: "Confirm release" }).dblclick();
-  await expect.poll(() => api.requests.releases).toBe(1);
+  await expect.poll(() => api.requests.releases).toBe(2);
   const release = api.requests.seatActions.at(-1);
   expect(release).toMatchObject({ op: "release", body: { entitlement_id: "ent_floating", seat_id: "seat-e2e" } });
   expect(release.body).toEqual({
@@ -224,6 +263,8 @@ test("customer portal signs in with an 8-digit code and walks every screen witho
   expect(release.body.client_instance_id).toBe(checkout.body.client_instance_id);
   await expect(page.getByText(/release_ok/)).toBeVisible();
   await expect(seatCard.getByRole("button", { name: "Start seat" })).toBeEnabled();
+  await expect(seatCard.getByRole("button", { name: "Start seat" })).toBeFocused();
+  expect(await page.evaluate(() => document.activeElement?.tagName)).not.toBe("BODY");
   await expect(seatCard.getByRole("button", { name: "Refresh" })).toBeDisabled();
   await expect(seatCard.getByRole("button", { name: "Release" })).toBeDisabled();
 

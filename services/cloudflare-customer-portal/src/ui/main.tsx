@@ -1,4 +1,5 @@
 import React, { FormEvent, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { createRoot } from "react-dom/client";
 import {
   ACTIVATION_DOWNLOAD_ACTION_LABEL,
@@ -198,9 +199,13 @@ function App(): React.ReactElement {
   };
   const [downloadDeviceKeys, setDownloadDeviceKeys] = useState<Record<string, string>>({});
   const [pendingSeatRelease, setPendingSeatRelease] = useState<{ item: EntitlementRow; session: SeatSession } | null>(null);
-  const seatReleaseCancelRef = useRef<HTMLButtonElement>(null);
+  const [seatReleaseFocusId, setSeatReleaseFocusId] = useState<string | null>(null);
+  const seatReleaseDialogRef = useRef<HTMLDivElement>(null);
   const seatReleaseReturnFocusRef = useRef<HTMLElement | null>(null);
+  const seatReleaseDeferredFocusRef = useRef<HTMLElement | null>(null);
   const seatReleaseConfirmingRef = useRef(false);
+  const seatStartButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const seatCardRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   async function loadMe(): Promise<boolean> {
     const result = await api<PortalMe>(mePath());
@@ -326,7 +331,8 @@ function App(): React.ReactElement {
   async function seatAction(
     item: EntitlementRow,
     operation: SeatOperation,
-  ): Promise<void> {
+  ): Promise<boolean> {
+    let succeeded = false;
     await runOnce(async () => {
       const existing = seatSessions[item.id];
       if ((operation === "heartbeat" || operation === "release") && existing === undefined) {
@@ -373,8 +379,10 @@ function App(): React.ReactElement {
           });
         }
         await refreshData();
+        succeeded = true;
       }
     });
+    return succeeded;
   }
 
   function requestSeatRelease(item: EntitlementRow): void {
@@ -389,39 +397,90 @@ function App(): React.ReactElement {
   }
 
   function dismissSeatRelease(): void {
+    if (seatReleaseConfirmingRef.current) return;
     setPendingSeatRelease(null);
     const returnFocus = seatReleaseReturnFocusRef.current;
+    seatReleaseDeferredFocusRef.current = returnFocus;
     seatReleaseReturnFocusRef.current = null;
-    returnFocus?.focus();
   }
 
   async function confirmSeatRelease(): Promise<void> {
     const pending = pendingSeatRelease;
     if (pending === null || seatReleaseConfirmingRef.current || busyRef.current) return;
+    const returnFocus = seatReleaseReturnFocusRef.current;
     seatReleaseConfirmingRef.current = true;
-    setPendingSeatRelease(null);
-    seatReleaseReturnFocusRef.current = null;
     try {
       // Keep the established seatAction path/body/auth and success/error refresh behavior. The
       // captured context only gates the explicit confirmation; it does not add a reason/body field.
-      await seatAction(pending.item, "release");
+      const succeeded = await seatAction(pending.item, "release");
+      if (succeeded) {
+        setSeatReleaseFocusId(pending.item.id);
+      } else {
+        seatReleaseDeferredFocusRef.current = returnFocus;
+      }
+      setPendingSeatRelease(null);
     } finally {
       seatReleaseConfirmingRef.current = false;
+      seatReleaseReturnFocusRef.current = null;
     }
   }
 
   useEffect(() => {
     if (pendingSeatRelease === null) return;
-    seatReleaseCancelRef.current?.focus();
+    const dialog = seatReleaseDialogRef.current;
+    if (dialog === null) return;
+    const focusableSelector = "button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled])";
+    const focusable = (): HTMLElement[] => Array.from(dialog.querySelectorAll<HTMLElement>(focusableSelector));
+    focusable()[0]?.focus();
     const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === "Escape") {
+      if (event.key === "Escape" && !seatReleaseConfirmingRef.current) {
         event.preventDefault();
         dismissSeatRelease();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const controls = focusable();
+      if (controls.length === 0) {
+        event.preventDefault();
+        dialog.focus();
+        return;
+      }
+      const first = controls[0];
+      const last = controls[controls.length - 1];
+      if (!dialog.contains(document.activeElement)) {
+        event.preventDefault();
+        (event.shiftKey ? last : first).focus();
+      } else if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [pendingSeatRelease]);
+
+  useEffect(() => {
+    if (pendingSeatRelease !== null) return;
+    const deferredFocus = seatReleaseDeferredFocusRef.current;
+    if (deferredFocus !== null) {
+      seatReleaseDeferredFocusRef.current = null;
+      deferredFocus.focus();
+    }
+  }, [pendingSeatRelease]);
+
+  useEffect(() => {
+    if (seatReleaseFocusId === null || pendingSeatRelease !== null || seatSessions[seatReleaseFocusId] !== undefined) return;
+    const startButton = seatStartButtonRefs.current[seatReleaseFocusId];
+    if (startButton !== null && !startButton.disabled) {
+      startButton.focus();
+    } else {
+      seatCardRefs.current[seatReleaseFocusId]?.focus();
+    }
+    setSeatReleaseFocusId(null);
+  }, [entitlements, pendingSeatRelease, seatReleaseFocusId, seatSessions]);
 
   async function releaseDevice(item: DeviceRow): Promise<void> {
     // Consequence-stating confirm so a device is never released by reflex (the app on it must re-activate).
@@ -546,7 +605,8 @@ function App(): React.ReactElement {
   const downloadableEntitlements = entitlements.filter((item) => item.license_mode !== "floating");
 
   return (
-    <main>
+    <>
+    <main aria-hidden={pendingSeatRelease !== null ? "true" : undefined} inert={pendingSeatRelease !== null ? true : undefined}>
       <header className="topbar">
         <div>
           <h1>licensecc customer portal</h1>
@@ -609,14 +669,23 @@ function App(): React.ReactElement {
             <div className="seatGrid">
               <h2>Seats by entitlement</h2>
               {floatingEntitlements.map((item, index) => (
-                <div className="seatCard" key={`seat/${item.id}/${index}`}>
+                <div
+                  className="seatCard"
+                  key={`seat/${item.id}/${index}`}
+                  ref={(element) => { seatCardRefs.current[item.id] = element; }}
+                  tabIndex={-1}
+                >
                   <div>
                     <strong>{item.project}</strong>
                     <span className="muted"> / {item.feature}</span>
                     <span className="muted"> pool {item.pool_size}</span>
                   </div>
                   <div className="actions">
-                    <button disabled={busy || item.status !== "active" || seatSessions[item.id] !== undefined} onClick={() => void seatAction(item, "checkout")}>Start seat</button>
+                    <button
+                      ref={(element) => { seatStartButtonRefs.current[item.id] = element; }}
+                      disabled={busy || item.status !== "active" || seatSessions[item.id] !== undefined}
+                      onClick={() => void seatAction(item, "checkout")}
+                    >Start seat</button>
                     <button disabled={busy || item.status !== "active" || seatSessions[item.id] === undefined} onClick={() => void seatAction(item, "heartbeat")}>Refresh</button>
                     <button disabled={busy || seatSessions[item.id] === undefined} onClick={() => requestSeatRelease(item)}>Release</button>
                   </div>
@@ -686,14 +755,17 @@ function App(): React.ReactElement {
         </section>
       )}
 
-      {pendingSeatRelease !== null && (
+    </main>
+    {pendingSeatRelease !== null && createPortal((
         <div className="modalOverlay" role="presentation">
           <div
+            ref={seatReleaseDialogRef}
             className="modal danger"
             role="dialog"
             aria-modal="true"
             aria-labelledby="floatingSeatReleaseTitle"
             aria-describedby="floatingSeatReleaseDescription"
+            tabIndex={-1}
           >
             <h2 id="floatingSeatReleaseTitle">{FLOATING_SEAT_RELEASE_CONFIRM_TITLE}</h2>
             <p id="floatingSeatReleaseDescription">{FLOATING_SEAT_RELEASE_CONFIRM_COPY}</p>
@@ -716,13 +788,13 @@ function App(): React.ReactElement {
               </div>
             </dl>
             <div className="actions">
-              <button ref={seatReleaseCancelRef} type="button" disabled={busy} onClick={dismissSeatRelease}>Cancel</button>
+              <button type="button" disabled={busy} onClick={dismissSeatRelease}>Cancel</button>
               <button type="button" className="danger" disabled={busy} onClick={() => void confirmSeatRelease()}>Confirm release</button>
             </div>
           </div>
         </div>
-      )}
-    </main>
+      ), document.body)}
+    </>
   );
 }
 
