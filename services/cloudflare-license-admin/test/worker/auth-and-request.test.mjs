@@ -22,6 +22,75 @@ import {
   syncEnv,
   worker,
 } from "./fixtures.mjs";
+
+const UNSAFE_MUTATION_METHODS = ["POST", "PATCH", "DELETE", "PUT"];
+
+function accessRequest(path, token, options = {}) {
+  const method = options.method ?? "GET";
+  return new Request(options.url ?? `https://admin.example${path}`, {
+    method,
+    headers: {
+      "cf-access-jwt-assertion": token,
+      "content-type": "application/json",
+      ...(options.headers ?? {}),
+    },
+    ...(options.body === undefined ? {} : { body: options.body }),
+  });
+}
+
+function trackedD1() {
+  const db = new MockD1();
+  const prepare = db.prepare.bind(db);
+  const batch = db.batch.bind(db);
+  let prepareCalls = 0;
+  let batchCalls = 0;
+  db.prepare = (...args) => {
+    prepareCalls += 1;
+    return prepare(...args);
+  };
+  db.batch = async (...args) => {
+    batchCalls += 1;
+    return batch(...args);
+  };
+  return {
+    db,
+    get prepareCalls() {
+      return prepareCalls;
+    },
+    get batchCalls() {
+      return batchCalls;
+    },
+  };
+}
+
+async function assertMutationBlockedBeforeAuthOrPersistence(fixture, token, headers, options = {}) {
+  const tracked = trackedD1();
+  const response = await worker.fetch(accessRequest(options.path ?? "/api/admin/entitlements", token, {
+    method: options.method ?? "POST",
+    headers: {
+      "content-type": "text/plain;charset=UTF-8",
+      ...headers,
+    },
+    body: JSON.stringify({ project: "DEFAULT", feature: "DEFAULT", license_fingerprint: fingerprint }),
+  }), accessEnv(tracked.db, fixture));
+  assert.equal(response.status, 403, options.label ?? "cross-site mutation is rejected");
+  const responseBody = await json(response);
+  assert.equal(responseBody.code, "cross_site_mutation_forbidden");
+  assert.equal(typeof responseBody.request_id, "string");
+  assert.equal(fixture.state.requests, 0, "provenance rejection happens before Access JWT verification");
+  assert.equal(tracked.prepareCalls, 0, "provenance rejection reaches no database statement");
+  assert.equal(tracked.batchCalls, 0, "provenance rejection reaches no database batch");
+  assert.equal(tracked.db.entitlements.size, 0, "provenance rejection creates no entitlement");
+  assert.equal(tracked.db.events.length, 0, "provenance rejection creates no audit event");
+  assert.equal(tracked.db.idempotency.size, 0, "provenance rejection creates no replay entry");
+}
+
+async function assertMutationAccepted(request, env) {
+  const response = await worker.fetch(request, env);
+  assert.equal(response.status, 200);
+  assert.equal((await json(response)).ok, true);
+}
+
 test("dev bearer cannot be enabled in production", async () => {
   const env = baseEnv();
   env.ENVIRONMENT = "production";
@@ -45,6 +114,87 @@ test("admin worker rejects oversized JSON bodies without relying on Content-Leng
   }), baseEnv());
   assert.equal(response.status, 413);
   assert.equal((await json(response)).code, "body_too_large");
+});
+
+test("access-authenticated browser mutations fail closed before auth or persistence", async (t) => {
+  const fixture = await rotatableAccessFixture(t);
+  const token = await accessToken(fixture, "admin@example.com");
+  for (const [label, headers] of [
+    ["cross-site Origin", { origin: "https://evil.example" }],
+    ["cross-site fetch metadata", { "sec-fetch-site": "cross-site" }],
+    ["opaque Origin", { origin: "null" }],
+    ["malformed Origin", { origin: "not-an-origin" }],
+    ["trailing slash Origin", { origin: "https://admin.example/" }],
+    ["non-origin URL Origin", { origin: "https://admin.example/path" }],
+  ]) {
+    await assertMutationBlockedBeforeAuthOrPersistence(fixture, token, headers, { label });
+  }
+  for (const [method, path] of [
+    ["POST", "/api/admin/entitlements"],
+    ["PATCH", "/api/admin/entitlements/not-a-real-id"],
+  ]) {
+    await assertMutationBlockedBeforeAuthOrPersistence(fixture, token, { origin: "https://evil.example" }, {
+      method,
+      path,
+      label: `${method} is blocked through the matched-route guard`,
+    });
+  }
+});
+
+test("unsafe mutation method handling is centralized for current and future routes", async () => {
+  const { ROUTE_DESCRIPTORS, isUnsafeMutationMethod } = await import("../../dist-worker/worker/dispatch.js");
+  for (const method of UNSAFE_MUTATION_METHODS) {
+    assert.equal(isUnsafeMutationMethod(method), true, `${method} must use mutation provenance checks`);
+  }
+  assert.equal(isUnsafeMutationMethod("GET"), false);
+  assert.deepEqual(
+    UNSAFE_MUTATION_METHODS.filter((method) => ROUTE_DESCRIPTORS.some((route) => route.method === method)),
+    ["POST", "PATCH"],
+    "the current admin route inventory exposes no PUT or DELETE mutations",
+  );
+});
+
+test("same-origin browser JSON, canonical origins, and non-browser Access clients remain compatible", async (t) => {
+  const fixture = await accessFixture(t);
+  const token = await accessToken(fixture, "admin@example.com");
+  const body = JSON.stringify({ project: "DEFAULT", feature: "DEFAULT", license_fingerprint: fingerprint });
+
+  const browserDb = new MockD1();
+  await assertMutationAccepted(accessRequest("/api/admin/entitlements", token, {
+    method: "POST",
+    headers: { origin: "https://admin.example", "sec-fetch-site": "same-origin" },
+    body,
+  }), accessEnv(browserDb, fixture));
+  assert.equal(browserDb.entitlements.size, 1);
+
+  const canonicalDb = new MockD1();
+  await assertMutationAccepted(accessRequest("/api/admin/entitlements", token, {
+    method: "POST",
+    url: "HTTPS://ADMIN.EXAMPLE:443/api/admin/entitlements",
+    headers: { origin: "HTTPS://ADMIN.EXAMPLE:443", "sec-fetch-site": "same-origin" },
+    body,
+  }), accessEnv(canonicalDb, fixture));
+  assert.equal(canonicalDb.entitlements.size, 1);
+
+  const apiClientDb = new MockD1();
+  await assertMutationAccepted(accessRequest("/api/admin/entitlements", token, {
+    method: "POST",
+    body,
+  }), accessEnv(apiClientDb, fixture));
+  assert.equal(apiClientDb.entitlements.size, 1);
+});
+
+test("mutation provenance leaves GET and public metadata behavior unchanged", async (t) => {
+  const meta = await worker.fetch(new Request("https://admin.example/openapi.json", {
+    headers: { origin: "https://evil.example", "sec-fetch-site": "cross-site" },
+  }), baseEnv());
+  assert.equal(meta.status, 200);
+
+  const fixture = await accessFixture(t);
+  const summary = await worker.fetch(accessRequest("/api/admin/summary", await accessToken(fixture, "admin@example.com"), {
+    headers: { origin: "https://evil.example", "sec-fetch-site": "cross-site" },
+  }), accessEnv(new MockD1(), fixture));
+  assert.equal(summary.status, 200);
 });
 
 

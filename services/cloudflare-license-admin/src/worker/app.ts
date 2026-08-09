@@ -1,7 +1,7 @@
 import { requestId } from "@licensecc/cloudflare-runtime/http/kit";
 import { authenticate, authenticateSync, requireAdmin } from "./auth.js";
 import type { AdminRequestContext } from "./context.js";
-import { matchRoute } from "./dispatch.js";
+import { matchRoute, rejectsCrossSiteMutation } from "./dispatch.js";
 import type { Env } from "./env.js";
 import { envelope } from "./response.js";
 
@@ -27,6 +27,7 @@ export const adminApp = {
     }
 
     const id = requestId(request);
+    if (rejectsCrossSiteMutation(request)) return envelope(id, "cross_site_mutation_forbidden", undefined, 403);
     let actor = null;
     if (match.descriptor.authorization === "reader" || match.descriptor.authorization === "admin") {
       const authenticated = await authenticate(request, env, id);

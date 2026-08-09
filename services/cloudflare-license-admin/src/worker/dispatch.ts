@@ -27,6 +27,40 @@ interface CompiledDescriptor {
   readonly pattern: RegExp | null;
 }
 
+const UNSAFE_MUTATION_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+
+export function isUnsafeMutationMethod(method: string): boolean {
+  return UNSAFE_MUTATION_METHODS.has(method.toUpperCase());
+}
+
+function canonicalOrigin(value: string): string | null {
+  if (value === "null" || !/^[A-Za-z][A-Za-z0-9+.-]*:\/\/[^/?#]+$/.test(value)) return null;
+  try {
+    const origin = new URL(value);
+    if (
+      origin.origin === "null"
+      || origin.username !== ""
+      || origin.password !== ""
+      || origin.pathname !== "/"
+      || origin.search !== ""
+      || origin.hash !== ""
+    ) {
+      return null;
+    }
+    return origin.origin;
+  } catch {
+    return null;
+  }
+}
+
+export function rejectsCrossSiteMutation(request: Request): boolean {
+  if (!isUnsafeMutationMethod(request.method)) return false;
+
+  const origin = request.headers.get("origin");
+  if (origin !== null && canonicalOrigin(origin) !== new URL(request.url).origin) return true;
+  return request.headers.get("sec-fetch-site")?.trim().toLowerCase() === "cross-site";
+}
+
 const compiled: readonly CompiledDescriptor[] = ROUTE_DESCRIPTORS.map((descriptor) => ({
   descriptor,
   pattern: descriptor.path.includes("{") ? pathToPattern(descriptor.path) : null,
