@@ -33,14 +33,42 @@ type BoundedBody =
   | { ok: true; bytes: Uint8Array }
   | { ok: false; code: "body_too_large" | "read_error" };
 
+function cancelBody(request: Request): void {
+  if (request.body === null) return;
+  try {
+    void Promise.resolve(request.body.cancel()).catch(() => {
+      // Cancellation is best effort; the bounded response must not wait for the source to settle.
+    });
+  } catch {
+    // A synchronous cancellation failure does not change the bounded response.
+  }
+}
+
+function cancelReader(reader: ReadableStreamDefaultReader<Uint8Array>): void {
+  try {
+    void Promise.resolve(reader.cancel()).catch(() => {
+      // Cancellation is best effort; the bounded response must not wait for the source to settle.
+    });
+  } catch {
+    // A synchronous cancellation failure does not change the bounded response.
+  }
+}
+
 async function readBoundedBody(request: Request): Promise<BoundedBody> {
   const declaredLength = Number(request.headers.get("content-length") ?? "");
   if (Number.isFinite(declaredLength) && declaredLength > MAGIC_REDEEM_MAX_BODY_BYTES) {
+    cancelBody(request);
     return { ok: false, code: "body_too_large" };
   }
   if (request.body === null) return { ok: true, bytes: new Uint8Array(0) };
 
-  const reader = request.body.getReader();
+  let reader: ReadableStreamDefaultReader<Uint8Array>;
+  try {
+    reader = request.body.getReader();
+  } catch {
+    cancelBody(request);
+    return { ok: false, code: "read_error" };
+  }
   const chunks: Uint8Array[] = [];
   let size = 0;
   try {
@@ -49,29 +77,25 @@ async function readBoundedBody(request: Request): Promise<BoundedBody> {
       try {
         result = await reader.read();
       } catch {
-        try {
-          await reader.cancel();
-        } catch {
-          // The body is already invalid; a cancellation failure must not change the envelope.
-        }
+        cancelReader(reader);
         return { ok: false, code: "read_error" };
       }
       if (result.done) break;
       const value = result.value;
       if (value === undefined) continue;
       if (size + value.byteLength > MAGIC_REDEEM_MAX_BODY_BYTES) {
-        try {
-          await reader.cancel();
-        } catch {
-          // The body is already too large; a cancellation failure must not change the response.
-        }
+        cancelReader(reader);
         return { ok: false, code: "body_too_large" };
       }
       chunks.push(value);
       size += value.byteLength;
     }
   } finally {
-    reader.releaseLock();
+    try {
+      reader.releaseLock();
+    } catch {
+      // The reader is no longer used; a release failure must not change the response.
+    }
   }
 
   const bytes = new Uint8Array(size);
@@ -217,7 +241,7 @@ function handleMagicInterstitial(request: Request, env: Env): Response {
 async function handleMagicRedeem(request: Request, env: Env, reqId: string, now: number): Promise<Response> {
   if (isCrossSite(request, env)) return envelope(reqId, "cross_site_forbidden", undefined, 403);
   const mediaType = (request.headers.get("content-type") ?? "").split(";", 1)[0]?.trim().toLowerCase() ?? "";
-  if (mediaType === "application/json" || mediaType.endsWith("+json")) {
+  if (mediaType === "application/json") {
     const body = await readJson(request, reqId);
     if (body instanceof Response) return body;
     return redeemAndMintSession(env, request, reqId, now, {
