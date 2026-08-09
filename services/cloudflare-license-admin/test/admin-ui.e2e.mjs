@@ -1,4 +1,6 @@
 import { expect, test } from "@playwright/test";
+import { createHash } from "node:crypto";
+import { catalogImportManifestSnapshot } from "@licensecc/licensing-domain/catalog/import_preview";
 
 function makeEnvelope(code, data) {
   makeEnvelope.nextRequestId += 1;
@@ -51,8 +53,10 @@ function makeAdminApiFixture() {
   const policies = [];
   const webhooks = [];
   const projectionPreviews = new Map();
+  const catalogImportPreviews = new Map();
   const projectionState = { staleNextPlanApply: false, nextPlanApplyError: null };
   let nextProjectionPreviewId = 1;
+  let nextCatalogImportPreviewId = 1;
 
   function seedPolicy() {
     const policy = {
@@ -82,6 +86,28 @@ function makeAdminApiFixture() {
     };
     catalogFeatures.push(feature);
     return feature;
+  }
+
+  function seedCatalogImportNullPolicy() {
+    const feature = {
+      id: "feat_null", project: "DEFAULT", feature_key: "core", name: "Core",
+      description: "", category: "", status: "active", created_at: now, updated_at: now,
+    };
+    const plan = {
+      id: "plan_null", project: "DEFAULT", plan_key: "null-check", name: "Null check",
+      description: "", status: "active", version: 1, created_at: now, updated_at: now,
+    };
+    const planFeature = {
+      project: "DEFAULT", plan_id: plan.id, plan_key: plan.plan_key, feature_key: feature.feature_key,
+      feature_name: feature.name, feature_inclusion: "included", addon_key: null, policy_id: null,
+      status: "active", display_order: 0, assertion_ttl_seconds: null, pool_size: null,
+      max_active_devices: null, max_borrow_sec: null, meter_quota: null, meter_period_sec: null,
+      created_at: now, updated_at: now,
+    };
+    catalogFeatures.push(feature);
+    catalogPlans.push(plan);
+    catalogPlanFeatures.push(planFeature);
+    return { feature, plan, planFeature };
   }
 
   function importCounts() {
@@ -203,6 +229,130 @@ function makeAdminApiFixture() {
       }
     }
     return counts;
+  }
+
+  function catalogImportEffectKind(existing, next) {
+    if (existing === undefined) return "create";
+    if (Object.entries(next).every(([key, value]) => existing[key] === value)) return "unchanged";
+    if (existing.status === "active" && next.status === "disabled") return "disable";
+    if (existing.status === "disabled" && next.status === "active") return "reenable";
+    return "update";
+  }
+
+  function emptyCatalogImportEffects() {
+    const counter = () => ({ create: 0, update: 0, disable: 0, reenable: 0, unchanged: 0 });
+    return {
+      features: [],
+      plans: [],
+      plan_features: [],
+      summary: { features: counter(), plans: counter(), plan_features: counter() },
+    };
+  }
+
+  function appendCatalogImportEffect(effects, collection, target, existing, next, after) {
+    const effect = catalogImportEffectKind(existing, next);
+    effects[collection].push({ target, effect, before: existing === undefined ? null : { ...existing }, after });
+    effects.summary[collection][effect] += 1;
+  }
+
+  function previewCatalogImportManifest(manifest) {
+    const snapshot = catalogImportManifestSnapshot(manifest);
+    const normalized = JSON.parse(snapshot);
+    const effectiveAt = now;
+    const effects = emptyCatalogImportEffects();
+    const plannedRows = new Map();
+
+    for (const feature of normalized.features) {
+      const existing = catalogFeatures.find((item) => item.project === feature.project && item.feature_key === feature.feature_key);
+      const next = {
+        project: feature.project,
+        feature_key: feature.feature_key,
+        name: feature.name,
+        description: feature.description,
+        category: feature.category,
+        status: feature.status,
+      };
+      const after = catalogImportEffectKind(existing, next) === "unchanged"
+        ? { ...existing }
+        : {
+          id: existing?.id ?? `feat_${feature.feature_key}`,
+          ...next,
+          created_at: existing?.created_at ?? effectiveAt,
+          updated_at: effectiveAt,
+        };
+      appendCatalogImportEffect(effects, "features", {
+        entity: "feature", project: feature.project, feature_key: feature.feature_key,
+      }, existing, next, after);
+    }
+
+    for (const plan of normalized.plans) {
+      const existing = catalogPlans.find((item) => item.project === plan.project && item.plan_key === plan.plan_key);
+      const next = {
+        project: plan.project,
+        plan_key: plan.plan_key,
+        name: plan.name,
+        description: plan.description,
+        status: plan.status,
+        version: plan.version,
+      };
+      const after = catalogImportEffectKind(existing, next) === "unchanged"
+        ? { ...existing }
+        : {
+          id: existing?.id ?? `plan_${plan.plan_key}`,
+          ...next,
+          created_at: existing?.created_at ?? effectiveAt,
+          updated_at: effectiveAt,
+        };
+      plannedRows.set(JSON.stringify([plan.project, plan.plan_key]), after);
+      appendCatalogImportEffect(effects, "plans", {
+        entity: "plan", project: plan.project, plan_key: plan.plan_key, plan_id: after.id,
+      }, existing, next, after);
+    }
+
+    for (const plan of normalized.plans) {
+      const planRow = plannedRows.get(JSON.stringify([plan.project, plan.plan_key]));
+      for (const feature of plan.features) {
+        const existing = catalogPlanFeatures.find((item) => item.plan_id === planRow.id && item.feature_key === feature.feature_key);
+        const next = {
+          project: feature.project,
+          plan_id: planRow.id,
+          feature_key: feature.feature_key,
+          feature_inclusion: feature.feature_inclusion,
+          addon_key: feature.addon_key,
+          policy_id: feature.policy_id,
+          status: feature.status,
+          display_order: feature.display_order,
+          assertion_ttl_seconds: feature.assertion_ttl_seconds,
+          pool_size: feature.pool_size,
+          max_active_devices: feature.max_active_devices,
+          max_borrow_sec: feature.max_borrow_sec,
+          meter_quota: feature.meter_quota,
+          meter_period_sec: feature.meter_period_sec,
+        };
+        const after = catalogImportEffectKind(existing, next) === "unchanged"
+          ? { ...existing }
+          : {
+            ...next,
+            created_at: existing?.created_at ?? effectiveAt,
+            updated_at: effectiveAt,
+          };
+        appendCatalogImportEffect(effects, "plan_features", {
+          entity: "plan_feature", project: feature.project, plan_key: plan.plan_key, plan_id: planRow.id, feature_key: feature.feature_key,
+        }, existing, next, after);
+      }
+    }
+
+    const preview = {
+      preview_id: `civ_ui_${nextCatalogImportPreviewId++}`,
+      manifest_digest: createHash("sha256").update(snapshot).digest("hex"),
+      manifest: normalized,
+      effects,
+      effective_at: effectiveAt,
+      expires_at: effectiveAt + 300,
+      source_generation: 0,
+    };
+    catalogImportPreviews.set(preview.preview_id, { manifest: normalized, preview });
+    return preview;
   }
 
   // A couple of customers so the Customers tab + a global-search customer deep-link have rows.
@@ -518,8 +668,15 @@ function makeAdminApiFixture() {
       const body = await jsonBody(request);
       const dryRun = url.searchParams.get("dry_run") === "1";
       requests.catalogImports.push({ dry_run: dryRun, idempotency_key: request.headers()["idempotency-key"] ?? null, body });
-      const counts = importCatalogManifest(body, dryRun);
-      return fulfill(200, makeEnvelope(dryRun ? "catalog_import_previewed" : "catalog_import_applied", counts));
+      if (dryRun) {
+        return fulfill(200, makeEnvelope("catalog_import_previewed", previewCatalogImportManifest(body)));
+      }
+      const stored = catalogImportPreviews.get(body.preview_id);
+      if (stored === undefined) {
+        return fulfill(409, { ok: false, code: "stale_catalog_import_preview", request_id: "ui-e2e-import-stale" });
+      }
+      importCatalogManifest(stored.manifest, false);
+      return fulfill(200, makeEnvelope("catalog_import_applied", stored.preview));
     }
     const catalogPlanActionMatch = /^\/api\/admin\/catalog\/plans\/([^/]+)\/(disable|reenable)$/.exec(path);
     if (method === "POST" && catalogPlanActionMatch !== null) {
@@ -897,7 +1054,7 @@ function makeAdminApiFixture() {
     route,
     requests,
     projectionState,
-    seed: { policy: seedPolicy, webhook: seedWebhook, catalogFeature: seedCatalogFeature },
+    seed: { policy: seedPolicy, webhook: seedWebhook, catalogFeature: seedCatalogFeature, catalogImportNullPolicy: seedCatalogImportNullPolicy },
   };
 }
 
@@ -1172,10 +1329,20 @@ test("admin UI previews and applies a license plan projection", async ({ page })
     ],
   };
   await importForm.getByLabel("Manifest JSON").fill(JSON.stringify(importedManifest));
-  await importForm.getByRole("button", { name: "Apply import" }).click();
+  await importForm.getByRole("button", { name: "Preview import" }).click();
   await expect.poll(() => api.requests.catalogImports.length).toBe(2);
-  expect(api.requests.catalogImports[1]).toMatchObject({ dry_run: false, body: importedManifest });
-  expect(api.requests.catalogImports[1].idempotency_key).toMatch(/^[0-9a-f-]{36}$/);
+  expect(api.requests.catalogImports[1]).toMatchObject({ dry_run: true, body: importedManifest });
+  await expect(page.getByText(/Server preview civ_ui_/)).toBeVisible();
+  await expect(page.getByText(/Local manifest digest [0-9a-f]{64}/)).toBeVisible();
+  const importDelta = page.locator("details").filter({ hasText: "Before → after" }).first();
+  await expect(importDelta).toBeVisible();
+  await importDelta.locator("summary").focus();
+  await page.keyboard.press("Enter");
+  await expect(importDelta).toContainText("status");
+  await importForm.getByRole("button", { name: "Apply import" }).click();
+  await expect.poll(() => api.requests.catalogImports.length).toBe(3);
+  expect(api.requests.catalogImports[2]).toMatchObject({ dry_run: false, body: { preview_id: expect.stringMatching(/^civ_ui_/) } });
+  expect(api.requests.catalogImports[2].idempotency_key).toMatch(/^[0-9a-f-]{36}$/);
   await expect(page.getByText(/catalog_import_applied/)).toBeVisible();
   await expect(page.getByRole("row", { name: /Growth growth/ })).toBeVisible();
   await expect(page.getByRole("row", { name: /Analytics analytics/ })).toBeVisible();
@@ -1285,8 +1452,10 @@ test("admin UI previews and applies a license plan projection", async ({ page })
   await freshPreview();
 
   await importForm.getByLabel("Manifest JSON").fill(JSON.stringify(importedManifest));
+  await importForm.getByRole("button", { name: "Preview import" }).click();
+  await expect.poll(() => api.requests.catalogImports.length).toBe(4);
   await importForm.getByRole("button", { name: "Apply import" }).click();
-  await expect.poll(() => api.requests.catalogImports.length).toBe(3);
+  await expect.poll(() => api.requests.catalogImports.length).toBe(5);
   await expect(applyButton).toBeDisabled();
   await page.getByRole("row", { name: /Growth growth/ }).getByRole("button", { name: "Use" }).click();
   await form.getByLabel("Plan ID").fill("");
@@ -1314,6 +1483,104 @@ test("admin UI previews and applies a license plan projection", async ({ page })
   await expect(page.getByRole("cell", { name: "team", exact: true })).toBeVisible();
   await expect(page.getByText("Mode floating")).toBeVisible();
   await expect(page.getByText("License lic_plan").first()).toBeVisible();
+});
+
+test("admin UI rejects semantically invalid catalog import shapes locally without leaving a stale capability or busy state", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  const pageErrors = [];
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+  await page.route("**/api/admin/**", api.route);
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "Plans", exact: true }).click();
+  const form = page.getByRole("form", { name: "Catalog import" });
+  const preview = form.getByRole("button", { name: "Preview import" });
+  const apply = form.getByRole("button", { name: "Apply import" });
+
+  await form.getByLabel("Manifest JSON").fill(JSON.stringify({ format_version: 1, features: [], plans: [] }));
+  await preview.click();
+  await expect.poll(() => api.requests.catalogImports.length).toBe(1);
+  await expect(apply).toBeEnabled();
+
+  const malformedShapes = [
+    { format_version: 1, features: [null], plans: [] },
+    {
+      format_version: 1,
+      features: [],
+      plans: [{ project: "DEFAULT", plan_key: "pro", name: "Pro", features: [null] }],
+    },
+  ];
+  for (const malformed of malformedShapes) {
+    await form.getByLabel("Manifest JSON").fill(JSON.stringify(malformed));
+    await expect(apply).toBeDisabled();
+    await preview.click();
+    await expect(page.getByText("invalid_catalog_import_manifest", { exact: true })).toBeVisible({ timeout: 2_000 });
+    await expect(preview).toBeEnabled();
+    expect(api.requests.catalogImports).toHaveLength(1);
+  }
+  expect(pageErrors).toEqual([]);
+});
+
+test("admin UI keeps catalog-import target tuples and typed delta values unambiguous", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  api.seed.catalogImportNullPolicy();
+  const reactKeyWarnings = [];
+  page.on("console", (message) => {
+    const text = message.text();
+    if (/unique "key"|same key/i.test(text)) reactKeyWarnings.push(text);
+  });
+  await page.route("**/api/admin/**", api.route);
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "Plans", exact: true }).click();
+  const form = page.getByRole("form", { name: "Catalog import" });
+  await form.getByLabel("Manifest JSON").fill(JSON.stringify({
+    format_version: 1,
+    features: [
+      { project: "A / B", feature_key: "C", name: "Tuple one", description: "unset" },
+      { project: "A", feature_key: "B / C", name: "Tuple two" },
+    ],
+    plans: [{
+      project: "DEFAULT", plan_key: "null-check", name: "Null check", description: "", status: "active", version: 1,
+      features: [{ project: "DEFAULT", feature_key: "core", feature_inclusion: "included", policy_id: "null", status: "active", display_order: 0 }],
+    }],
+  }));
+  await form.getByRole("button", { name: "Preview import" }).click();
+  await expect.poll(() => api.requests.catalogImports.length).toBe(1);
+
+  const importedFeatures = page.getByRole("heading", { name: "Imported features" }).locator("xpath=..");
+  const featureTargets = importedFeatures.locator('dl[aria-label="Catalog import target"]');
+  await expect(featureTargets).toHaveCount(2);
+  const firstTupleTarget = featureTargets.filter({ hasText: '"A / B"' });
+  const secondTupleTarget = featureTargets.filter({ hasText: '"A"' });
+  await expect(firstTupleTarget).toHaveCount(1);
+  await expect(secondTupleTarget).toHaveCount(1);
+  await expect(firstTupleTarget).toContainText("entity");
+  await expect(firstTupleTarget).toContainText("project");
+  await expect(firstTupleTarget).toContainText("feature_key");
+  await expect(firstTupleTarget).toContainText('"C"');
+  await expect(secondTupleTarget).toContainText('"B / C"');
+  expect(await firstTupleTarget.innerText()).not.toBe(await secondTupleTarget.innerText());
+
+  const absentVsUnset = firstTupleTarget.locator("xpath=ancestor::tr").locator("details");
+  await absentVsUnset.locator("summary").focus();
+  await page.keyboard.press("Enter");
+  const descriptionDelta = absentVsUnset.locator("li").filter({ hasText: "description" });
+  await expect(descriptionDelta).toHaveCount(1);
+  await expect(descriptionDelta).toContainText("<absent>");
+  await expect(descriptionDelta).toContainText('"unset"');
+
+  const importedPlanRows = page.getByRole("heading", { name: "Imported plan rows" }).locator("xpath=..");
+  const nullPolicyTarget = importedPlanRows.locator('dl[aria-label="Catalog import target"]').filter({ hasText: '"null-check"' });
+  await expect(nullPolicyTarget).toHaveCount(1);
+  const nullVsString = nullPolicyTarget.locator("xpath=ancestor::tr").locator("details");
+  await nullVsString.locator("summary").focus();
+  await page.keyboard.press("Enter");
+  const policyIdDelta = nullVsString.locator("li").filter({ hasText: "policy_id" });
+  await expect(policyIdDelta).toHaveCount(1);
+  await expect(policyIdDelta).toContainText("<null>");
+  await expect(policyIdDelta).toContainText('"null"');
+  expect(reactKeyWarnings).toEqual([]);
 });
 
 test("admin UI clears its bound preview for stale and fingerprint-conflict Apply responses", async ({ page }) => {

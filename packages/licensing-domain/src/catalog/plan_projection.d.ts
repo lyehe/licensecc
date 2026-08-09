@@ -1,6 +1,8 @@
 import type { EntitlementRecord } from "../entitlements/contracts";
 
 export const PLAN_PROJECTION_PREVIEW_ID_PATTERN: RegExp;
+/** 9999-12-31T23:59:59Z; the maximum accepted support_until epoch second. */
+export const MAX_SUPPORT_UNTIL_EPOCH_SECONDS: number;
 export function isPlanProjectionPreviewId(value: unknown): value is string;
 
 export interface PlanProjectionInput {

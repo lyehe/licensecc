@@ -16,6 +16,7 @@ import {
   okResponse,
   paginationErrorDescription,
   SYNC_SECURITY,
+  transitionOkResponse,
 } from "../components.js";
 
 export const customerPaths: LabeledPathFragment = {
@@ -66,7 +67,7 @@ export const customerPaths: LabeledPathFragment = {
         content: { "application/json": { schema: { $ref: "#/components/schemas/ReasonRequiredBody" } } },
       },
       responses: {
-        "200": okResponse("Customer disabled.", "#/components/schemas/CustomerRow", "customer_disabled"),
+        "200": transitionOkResponse("Customer disabled.", "#/components/schemas/CustomerRow", { required: ["id"], expectedStatus: "disabled" }, "customer_disabled"),
         "400": errorResponse("Invalid request / json / idempotency key, or missing reason.", "invalid_request", "invalid_idempotency_key", "invalid_json", "reason_required"),
         ...ADMIN_MUTATION_AUTH_ERRORS,
         "404": errorResponse("No customer with that id.", "not_found"),
@@ -89,7 +90,7 @@ export const customerPaths: LabeledPathFragment = {
         content: { "application/json": { schema: { $ref: "#/components/schemas/EmptyBody" } } },
       },
       responses: {
-        "200": okResponse("Customer re-enabled.", "#/components/schemas/CustomerRow", "customer_reenabled"),
+        "200": transitionOkResponse("Customer re-enabled.", "#/components/schemas/CustomerRow", { required: ["id"], expectedStatus: "active" }, "customer_reenabled"),
         "400": errorResponse("Invalid request / json / idempotency key.", "invalid_idempotency_key", "invalid_json", "invalid_request"),
         ...ADMIN_MUTATION_AUTH_ERRORS,
         "404": errorResponse("No customer with that id.", "not_found"),

@@ -10,11 +10,12 @@ export declare function readIdempotentResponse(
 ): Promise<string | null>;
 
 /** Inserts the cached response under (scope, key); a conflicting row wins (first
- *  writer). No-op when the key is null. */
+ *  writer), then returns that authoritative stored response. No-op when the key
+ *  is null. */
 export declare function writeIdempotentResponse(
   db: D1DatabaseLike,
   scope: string,
   key: string | null,
   responseJson: string,
   now: number,
-): Promise<void>;
+): Promise<string | null>;

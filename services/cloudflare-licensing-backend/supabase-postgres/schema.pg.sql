@@ -724,6 +724,31 @@ CREATE INDEX IF NOT EXISTS idx_license_plan_assignments_customer
 CREATE INDEX IF NOT EXISTS idx_license_plan_assignments_plan
   ON license_plan_assignments(project, plan_id, status);
 
+-- Migration 0032: append-only assignment history for plan projection. Catalog
+-- events cannot encode this entity because their constrained grammar covers
+-- only feature/plan/plan_feature records. No FK to the current assignment:
+-- this audit history must survive retirement of the current row.
+CREATE TABLE IF NOT EXISTS license_plan_assignment_events (
+  id                  BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  license_id          TEXT   NOT NULL,
+  project             TEXT   NOT NULL,
+  plan_id             TEXT   NOT NULL,
+  license_fingerprint TEXT   NOT NULL,
+  event_type          TEXT   NOT NULL CHECK (event_type IN ('create', 'update')),
+  actor               TEXT   NOT NULL DEFAULT '',
+  actor_type          TEXT   NOT NULL DEFAULT 'unknown' CHECK (actor_type IN ('access', 'dev', 'cli', 'sync', 'system', 'unknown')),
+  source              TEXT   NOT NULL DEFAULT 'admin',
+  request_id          TEXT   NOT NULL DEFAULT '',
+  prev_json           TEXT   NOT NULL DEFAULT '',
+  next_json           TEXT   NOT NULL DEFAULT '',
+  reason              TEXT   NOT NULL DEFAULT '',
+  idempotency_key     TEXT   NULL,
+  created_at          BIGINT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_license_plan_assignment_events_assignment
+  ON license_plan_assignment_events(license_id, project, id DESC);
+
 CREATE TABLE IF NOT EXISTS catalog_events (
   id          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   entity_type TEXT   NOT NULL CHECK (entity_type IN ('feature', 'plan', 'plan_feature')),
@@ -775,11 +800,39 @@ CREATE TABLE IF NOT EXISTS license_plan_projection_previews (
   created_at            BIGINT NOT NULL
 );
 
-CREATE INDEX IF NOT EXISTS idx_license_plan_projection_previews_expiry
-  ON license_plan_projection_previews(expires_at);
+-- Migration 0032: lazy cleanup is one bounded expiry range. Consumed previews
+-- retain their original five-minute expiration, so a separate consumed index
+-- would only encourage an unbounded OR/sort plan.
+DROP INDEX IF EXISTS idx_license_plan_projection_previews_expiry;
+DROP INDEX IF EXISTS idx_license_plan_projection_previews_consumed;
+CREATE INDEX IF NOT EXISTS idx_license_plan_projection_previews_expiry_id
+  ON license_plan_projection_previews(expires_at, id);
 
-CREATE INDEX IF NOT EXISTS idx_license_plan_projection_previews_consumed
-  ON license_plan_projection_previews(consumed_at)
+-- =====================================================================================
+-- server-bound catalog-import previews  (migration 0031)
+-- =====================================================================================
+CREATE TABLE IF NOT EXISTS catalog_import_previews (
+  id                       TEXT   PRIMARY KEY,
+  actor_subject            TEXT   NOT NULL,
+  source_generation        BIGINT NOT NULL,
+  normalized_manifest_json TEXT   NOT NULL,
+  manifest_digest          TEXT   NOT NULL,
+  preview_json             TEXT   NOT NULL,
+  actions_json             TEXT   NOT NULL,
+  effective_at             BIGINT NOT NULL,
+  expires_at               BIGINT NOT NULL,
+  claim_token              TEXT   NULL,
+  claimed_at               BIGINT NULL,
+  consumed_at              BIGINT NULL,
+  applied_response_json    TEXT   NULL,
+  created_at               BIGINT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_catalog_import_previews_expiry
+  ON catalog_import_previews(expires_at);
+
+CREATE INDEX IF NOT EXISTS idx_catalog_import_previews_consumed
+  ON catalog_import_previews(consumed_at)
   WHERE consumed_at IS NOT NULL;
 
 -- Keep the Postgres port semantically aligned with D1's conservative source

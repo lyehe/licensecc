@@ -158,27 +158,33 @@ function projectionBody() {
 test("admin catalog import and plan projection feed public verifier through worker boundaries", async () => {
   const { db, adapter } = createLocalSqliteDb({ path: ":memory:" });
   try {
-    seedPolicy(db, "pol_node");
+    seedPolicy(db, "pol_node", { assertion_ttl_seconds: 300 });
     seedPolicy(db, "pol_float", { type: "floating", pool_size: 6, max_active_devices: 6, max_borrow_sec: 172_800 });
     const env = adminEnv(adapter);
     const manifest = catalogManifest();
 
     const dryRun = await adminWorker.fetch(adminReq("/api/admin/catalog/import?dry_run=1", { method: "POST", body: JSON.stringify(manifest) }), env);
     assert.equal(dryRun.status, 200, await dryRun.clone().text());
-    assert.deepEqual((await responseBody(dryRun)).data, {
-      features: { created: 2, updated: 0, unchanged: 0 },
-      plans: { created: 1, updated: 0, unchanged: 0 },
-      plan_features: { created: 2, updated: 0, unchanged: 0 },
+    const catalogPreview = await responseBody(dryRun);
+    assert.equal(catalogPreview.code, "catalog_import_previewed");
+    assert.match(catalogPreview.data.preview_id, /^civ_[A-Za-z0-9_-]{1,124}$/);
+    assert.deepEqual(catalogPreview.data.effects.summary, {
+      features: { create: 2, update: 0, disable: 0, reenable: 0, unchanged: 0 },
+      plans: { create: 1, update: 0, disable: 0, reenable: 0, unchanged: 0 },
+      plan_features: { create: 2, update: 0, disable: 0, reenable: 0, unchanged: 0 },
     });
     assert.equal(db.prepare("SELECT COUNT(*) AS c FROM catalog_features").get().c, 0);
 
     const appliedImport = await adminWorker.fetch(adminReq("/api/admin/catalog/import", {
       method: "POST",
       headers: { "idempotency-key": "catalog-admin-worker-e2e-import" },
-      body: JSON.stringify(manifest),
+      body: JSON.stringify({ preview_id: catalogPreview.data.preview_id }),
     }), env);
     assert.equal(appliedImport.status, 200, await appliedImport.clone().text());
-    assert.equal((await responseBody(appliedImport)).code, "catalog_import_applied");
+    const appliedImportBody = await responseBody(appliedImport);
+    assert.equal(appliedImportBody.code, "catalog_import_applied");
+    assert.equal(appliedImportBody.data.preview_id, catalogPreview.data.preview_id);
+    assert.deepEqual(appliedImportBody.data.effects.summary, catalogPreview.data.effects.summary);
     assert.equal(db.prepare("SELECT COUNT(*) AS c FROM catalog_features").get().c, 2);
     assert.equal(db.prepare("SELECT COUNT(*) AS c FROM catalog_plan_features").get().c, 2);
 
@@ -211,6 +217,10 @@ test("admin catalog import and plan projection feed public verifier through work
     assert.equal(appliedBody.code, "license_plan_projection_applied");
     assert.equal(appliedBody.data.applied.created.length, 2);
 
+    assert.equal("cache_ttl_seconds" in appliedBody.data.applied.created[0], false, "private cache policy must not change the public Apply response shape");
+    const core = db.prepare("SELECT assertion_ttl_seconds, cache_ttl_seconds FROM entitlements WHERE project = 'DEFAULT' AND feature = 'core' AND license_fingerprint = ?").get(FP);
+    assert.equal(core.assertion_ttl_seconds, 300);
+    assert.equal(core.cache_ttl_seconds, 300, "plan projection must not retain a legacy long cache window");
     const team = db.prepare("SELECT license_id, customer_id, pool_size, max_active_devices, max_borrow_sec FROM entitlements WHERE project = 'DEFAULT' AND feature = 'team' AND license_fingerprint = ?").get(FP);
     assert.equal(team.license_id, "lic_catalog_e2e");
     assert.equal(team.customer_id, "cus_catalog_e2e");
@@ -224,6 +234,10 @@ test("admin catalog import and plan projection feed public verifier through work
     const allowedCoreBody = await responseBody(allowedCore);
     assert.equal(allowedCoreBody.ok, true);
     assert.match(allowedCoreBody.assertion, /^lccoa1\./);
+    const corePayload = Buffer.from(allowedCoreBody.assertion.split(".")[1], "base64").toString("utf8");
+    const issuedAt = Number(corePayload.match(/issued-at=(\d+)\n/)[1]);
+    const cacheUntil = Number(corePayload.match(/cache-until=(\d+)\n/)[1]);
+    assert.equal(cacheUntil - issuedAt, 300, "the signed C++-consumed cache authorization must not outlive the intended projection TTL");
 
     const allowedTeam = await verifierWorker.fetch(verifyReq("team"), verifier);
     assert.equal(allowedTeam.status, 200);

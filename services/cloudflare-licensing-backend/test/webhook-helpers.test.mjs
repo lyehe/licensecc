@@ -28,7 +28,7 @@ test("eventTypeMatches: '' filter matches all; csv is an exact allow-list", () =
   assert.equal(eventTypeMatches("create", "createx"), false, "no substring match");
 });
 
-test("buildWebhookPayload normalizes each source's BEFORE/AFTER state", () => {
+test("buildWebhookPayload preserves ordinary entitlement snapshots and normalizes each source", () => {
   const ent = buildWebhookPayload("entitlement", {
     event_id: 5,
     event_type: "update",
@@ -98,6 +98,75 @@ test("buildWebhookPayload normalizes each source's BEFORE/AFTER state", () => {
   });
   assert.equal(bad.data.prev, null);
   assert.equal(bad.data.next, null);
+});
+
+test("projection entitlement webhook payloads scrub private cache TTLs without changing stored audit JSON", async () => {
+  const prev = {
+    project: "P",
+    feature: "F",
+    license_fingerprint: "a".repeat(64),
+    status: "active",
+    assertion_ttl_seconds: 300,
+    cache_ttl_seconds: 86400,
+    valid_until: 2000,
+  };
+  const next = {
+    project: "P",
+    feature: "F",
+    license_fingerprint: "a".repeat(64),
+    status: "active",
+    assertion_ttl_seconds: 300,
+    cache_ttl_seconds: 300,
+    valid_until: 2000,
+  };
+  const row = {
+    event_id: 6,
+    event_type: "update",
+    occurred_at: 1001,
+    project: "P",
+    feature: "F",
+    license_fingerprint: "a".repeat(64),
+    status: "active",
+    detail: "plan_projection",
+    prev_json: JSON.stringify(prev),
+    next_json: JSON.stringify(next),
+  };
+  const storedAudit = { prev_json: row.prev_json, next_json: row.next_json };
+
+  const payload = buildWebhookPayload("entitlement", row);
+  assert.deepEqual(payload, {
+    id: 6,
+    type: "update",
+    source: "entitlement",
+    occurred_at: 1001,
+    data: {
+      project: "P",
+      feature: "F",
+      license_fingerprint: "a".repeat(64),
+      status: "active",
+      detail: "plan_projection",
+      prev: {
+        project: "P",
+        feature: "F",
+        license_fingerprint: "a".repeat(64),
+        status: "active",
+        assertion_ttl_seconds: 300,
+        valid_until: 2000,
+      },
+      next: {
+        project: "P",
+        feature: "F",
+        license_fingerprint: "a".repeat(64),
+        status: "active",
+        assertion_ttl_seconds: 300,
+        valid_until: 2000,
+      },
+    },
+  });
+  assert.deepEqual({ prev_json: row.prev_json, next_json: row.next_json }, storedAudit);
+  const body = JSON.stringify(payload);
+  const header = await signWebhookBody(SECRETS, "k1", body, 1001);
+  assert.equal(await verifyWebhookSignature(body, header, SECRETS, 1001), true);
 });
 
 test("nextBackoff is the documented increasing schedule, clamped at the tail", () => {

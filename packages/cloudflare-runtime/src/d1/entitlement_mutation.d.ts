@@ -102,7 +102,8 @@ export function writeEntitlementWithAudit(
   now: number,
   idempotency: IdempotencyCommit | null,
   extraStatements?: D1PreparedStatementLike[],
-): Promise<MutationResult<EntitlementRecord>>;
+  options?: { allowNoWrite?: boolean },
+): Promise<MutationResult<EntitlementRecord> | null>;
 
 export function createEntitlement(
   env: MutationEnv,
@@ -112,7 +113,7 @@ export function createEntitlement(
   eventTypeOverride?: EntitlementEventType,
   idempotency?: IdempotencyCommit | null,
   extraStatements?: D1PreparedStatementLike[],
-): Promise<MutationResult<EntitlementRecord>>;
+): Promise<MutationResult<EntitlementRecord> | null>;
 
 export function patchEntitlement(
   env: MutationEnv,

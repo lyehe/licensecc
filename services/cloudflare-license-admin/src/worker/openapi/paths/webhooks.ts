@@ -14,6 +14,7 @@ import {
   limitCursorParams,
   okResponse,
   SYNC_SECURITY,
+  transitionOkResponse,
 } from "../components.js";
 
 export const webhookPaths: LabeledPathFragment = {
@@ -85,7 +86,7 @@ export const webhookPaths: LabeledPathFragment = {
         content: { "application/json": { schema: { $ref: "#/components/schemas/EmptyBody" } } },
       },
       responses: {
-        "200": okResponse("Delivery reset to pending (next_attempt_at = now).", "#/components/schemas/WebhookDelivery", "webhook_delivery_redriven"),
+        "200": transitionOkResponse("Delivery reset to pending (next_attempt_at = now).", "#/components/schemas/WebhookDelivery", { required: ["id", "next_attempt_at"], expectedStatus: "pending" }, "webhook_delivery_redriven"),
         "400": errorResponse("Invalid request / json / idempotency key.", "invalid_idempotency_key", "invalid_json", "invalid_request"),
         ...ADMIN_MUTATION_AUTH_ERRORS,
         "404": errorResponse("No delivery with that id.", "not_found"),
@@ -141,7 +142,7 @@ export const webhookPaths: LabeledPathFragment = {
         content: { "application/json": { schema: { $ref: "#/components/schemas/ReasonRequiredBody" } } },
       },
       responses: {
-        "200": okResponse("Webhook endpoint disabled.", "#/components/schemas/WebhookEndpoint", "webhook_disabled"),
+        "200": transitionOkResponse("Webhook endpoint disabled.", "#/components/schemas/WebhookEndpoint", { required: ["id"], expectedStatus: "disabled" }, "webhook_disabled"),
         "400": errorResponse("Invalid request / json / idempotency key, or missing reason.", "invalid_idempotency_key", "invalid_json", "invalid_request", "reason_required"),
         ...ADMIN_MUTATION_AUTH_ERRORS,
         "404": errorResponse("No webhook endpoint with that id.", "not_found"),
@@ -164,7 +165,7 @@ export const webhookPaths: LabeledPathFragment = {
         content: { "application/json": { schema: { $ref: "#/components/schemas/EmptyBody" } } },
       },
       responses: {
-        "200": okResponse("Webhook endpoint re-enabled.", "#/components/schemas/WebhookEndpoint", "webhook_reenabled"),
+        "200": transitionOkResponse("Webhook endpoint re-enabled.", "#/components/schemas/WebhookEndpoint", { required: ["id"], expectedStatus: "active" }, "webhook_reenabled"),
         "400": errorResponse("Invalid request / json / idempotency key.", "invalid_idempotency_key", "invalid_json", "invalid_request"),
         ...ADMIN_MUTATION_AUTH_ERRORS,
         "404": errorResponse("No webhook endpoint with that id.", "not_found"),

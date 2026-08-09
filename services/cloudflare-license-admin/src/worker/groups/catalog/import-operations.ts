@@ -1,247 +1,63 @@
-import { INVALID_IDEMPOTENCY_KEY, mutationResponse, readIdempotencyKey } from "../../idempotency.js";
-import { envelope, json } from "../../responses.js";
+import { INVALID_IDEMPOTENCY_KEY, idempotentReplay, mutationResponse, readIdempotencyKey } from "../../idempotency.js";
+import { envelope } from "../../responses.js";
 import type { Actor, MutationContext } from "@licensecc/cloudflare-runtime/d1/entitlement_mutation";
 import type { Env } from "../../env.js";
 import { requireAdmin } from "../../auth.js";
 import { parseJsonBody } from "../../request.js";
-import { type CatalogFeatureInput, type CatalogImportInput, type CatalogPlanFeatureInput, type CatalogPlanInput, validateCatalogImportInput } from "./validation.js";
+import { type CatalogFeatureInput, isCatalogImportManifestPayload, validateCatalogImportApplyInput, validateCatalogImportInput } from "./validation.js";
 import { clientIp } from "../../support.js";
 import {
   CATALOG_FEATURE_COLUMNS,
-  CATALOG_PLAN_COLUMNS,
   CATALOG_PLAN_FEATURE_COLUMNS,
-  catalogFeatureAudit,
-  catalogFeatureInsertStatement,
-  catalogPlanAudit,
-  catalogPlanInsertStatement,
-  catalogPlanFeatureAudit,
-  catalogPlanFeatureUpsertStatement,
-  writeCatalogWithAudit,
 } from "./operations.js";
-import { findCatalogPlan, findCatalogPlanFeature, getCatalogPlanFeatureView } from "./plan-operations.js";
+import { findCatalogPlan } from "./plan-operations.js";
+import { CATALOG_IMPORT_TOO_LARGE_GUIDANCE } from "@licensecc/licensing-domain/catalog/import_preview";
+import { applyCatalogImport, MAX_ATOMIC_CATALOG_IMPORT_ACTIONS, previewCatalogImport as previewCatalogImportProtocol } from "./import-protocol.js";
 export async function findCatalogFeatureByKey(env: Env, project: string, featureKey: string): Promise<Record<string, unknown> | null> {
   return env.DB.prepare(`SELECT ${CATALOG_FEATURE_COLUMNS} FROM catalog_features WHERE project = ? AND feature_key = ? LIMIT 1`)
     .bind(project, featureKey)
     .first<Record<string, unknown>>();
 }
 
-export async function findCatalogPlanByKey(env: Env, project: string, planKey: string, version: number): Promise<Record<string, unknown> | null> {
-  return env.DB.prepare(`SELECT ${CATALOG_PLAN_COLUMNS} FROM catalog_plans WHERE project = ? AND plan_key = ? AND version = ? LIMIT 1`)
-    .bind(project, planKey, version)
-    .first<Record<string, unknown>>();
-}
-
-export type CatalogImportKind = "created" | "updated" | "unchanged";
-
-export interface CatalogImportResult {
-  features: Record<CatalogImportKind, number>;
-  plans: Record<CatalogImportKind, number>;
-  plan_features: Record<CatalogImportKind, number>;
-}
-
-export function emptyCatalogImportResult(): CatalogImportResult {
-  return {
-    features: { created: 0, updated: 0, unchanged: 0 },
-    plans: { created: 0, updated: 0, unchanged: 0 },
-    plan_features: { created: 0, updated: 0, unchanged: 0 },
-  };
-}
-
 export function catalogImportKey(...parts: Array<string | number>): string {
-  return parts.join("\u001f");
+  return JSON.stringify(parts);
 }
 
-export function catalogEventForStatus(
-  currentStatus: unknown,
-  nextStatus: "active" | "disabled",
-): "update" | "disable" | "reenable" {
-  if (currentStatus === "active" && nextStatus === "disabled") return "disable";
-  if (currentStatus === "disabled" && nextStatus === "active") return "reenable";
-  return "update";
-}
-
-export function catalogFeatureMatches(row: Record<string, unknown>, input: CatalogFeatureInput): boolean {
-  return row.name === input.name &&
-    row.description === input.description &&
-    row.category === input.category &&
-    row.status === input.status;
-}
-
-export function catalogPlanMatches(row: Record<string, unknown>, input: CatalogPlanInput): boolean {
-  return row.name === input.name &&
-    row.description === input.description &&
-    row.status === input.status;
-}
-
-export function catalogPlanFeatureMatches(row: Record<string, unknown>, input: CatalogPlanFeatureInput): boolean {
-  return row.project === input.project &&
-    row.feature_key === input.feature_key &&
-    row.feature_inclusion === input.feature_inclusion &&
-    (row.addon_key ?? null) === input.addon_key &&
-    (row.policy_id ?? null) === input.policy_id &&
-    row.status === input.status &&
-    row.display_order === input.display_order &&
-    (row.assertion_ttl_seconds ?? null) === input.assertion_ttl_seconds &&
-    (row.pool_size ?? null) === input.pool_size &&
-    (row.max_active_devices ?? null) === input.max_active_devices &&
-    (row.max_borrow_sec ?? null) === input.max_borrow_sec &&
-    (row.meter_quota ?? null) === input.meter_quota &&
-    (row.meter_period_sec ?? null) === input.meter_period_sec;
-}
-
-export async function preflightCatalogImport(env: Env, input: CatalogImportInput, requestIdValue: string): Promise<Response | null> {
-  const importedFeatures = new Set(input.features.map((feature) => catalogImportKey(feature.project, feature.feature_key)));
-  for (const plan of input.plans) {
-    for (const feature of plan.features ?? []) {
-      if (!importedFeatures.has(catalogImportKey(feature.project, feature.feature_key))) {
-        const existingFeature = await findCatalogFeatureByKey(env, feature.project, feature.feature_key);
-        if (existingFeature === null) {
-          return envelope(requestIdValue, "catalog_feature_not_found", { feature_key: feature.feature_key }, 404);
-        }
-      }
-      if (feature.policy_id !== null) {
-        const policy = await env.DB.prepare(
-          "SELECT project, status FROM entitlement_policies WHERE id = ? LIMIT 1",
-        ).bind(feature.policy_id).first<{ project: string; status: string }>();
-        if (policy === null) {
-          return envelope(requestIdValue, "policy_not_found", { policy_id: feature.policy_id }, 404);
-        }
-        if (policy.project !== feature.project) {
-          return envelope(requestIdValue, "invalid_plan_config", { policy_id: feature.policy_id }, 409);
-        }
-        if (policy.status !== "active") {
-          return envelope(requestIdValue, "policy_disabled", { policy_id: feature.policy_id }, 409);
-        }
-      }
-    }
+function catalogImportProtocolError(error: unknown, requestIdValue: string): Response {
+  const message = error instanceof Error ? error.message : "";
+  if (message === "catalog_import_idempotency_required") {
+    return envelope(requestIdValue, "idempotency_key_required", undefined, 400);
   }
-  return null;
-}
-
-export async function applyCatalogFeatureImport(
-  env: Env,
-  input: CatalogFeatureInput,
-  actor: Actor,
-  requestIdValue: string,
-  now: number,
-): Promise<{ kind: CatalogImportKind; row: Record<string, unknown> | null }> {
-  const existing = await findCatalogFeatureByKey(env, input.project, input.feature_key);
-  if (existing === null) {
-    const id = `feat_${crypto.randomUUID()}`;
-    const insert = catalogFeatureInsertStatement(env, id, input, now);
-    return {
-      kind: "created",
-      row: await writeCatalogWithAudit(env, insert, catalogFeatureAudit(env, id, input.project, "create", "", "catalog import", actor, requestIdValue, now)),
-    };
+  if (message.startsWith("invalid_plan_config:")) {
+    return envelope(requestIdValue, "invalid_plan_config", { policy_id: message.slice("invalid_plan_config:".length) }, 409);
   }
-  if (catalogFeatureMatches(existing, input)) {
-    return { kind: "unchanged", row: existing };
+  if (message === "invalid_preview_id" || message.startsWith("invalid_")) {
+    return envelope(requestIdValue, "invalid_request", undefined, 400);
   }
-  const update = env.DB.prepare(
-    `UPDATE catalog_features
-     SET name = ?, description = ?, category = ?, status = ?, updated_at = ?
-     WHERE id = ? RETURNING ${CATALOG_FEATURE_COLUMNS}`,
-  ).bind(input.name, input.description, input.category, input.status, now, existing.id);
-  const eventType = catalogEventForStatus(existing.status, input.status);
-  return {
-    kind: "updated",
-    row: await writeCatalogWithAudit(
-      env,
-      update,
-      catalogFeatureAudit(env, String(existing.id), input.project, eventType, JSON.stringify(existing), "catalog import", actor, requestIdValue, now),
-    ),
-  };
-}
-
-export async function applyCatalogPlanImport(
-  env: Env,
-  input: CatalogPlanInput,
-  actor: Actor,
-  requestIdValue: string,
-  now: number,
-): Promise<{ kind: CatalogImportKind; row: Record<string, unknown> | null }> {
-  const existing = await findCatalogPlanByKey(env, input.project, input.plan_key, input.version);
-  if (existing === null) {
-    const id = `plan_${crypto.randomUUID()}`;
-    const insert = catalogPlanInsertStatement(env, id, input, now);
-    return {
-      kind: "created",
-      row: await writeCatalogWithAudit(env, insert, catalogPlanAudit(env, id, input.project, "create", "", "catalog import", actor, requestIdValue, now)),
-    };
+  if (message.startsWith("catalog_feature_not_found:")) {
+    return envelope(requestIdValue, "catalog_feature_not_found", { feature_key: message.slice("catalog_feature_not_found:".length) }, 404);
   }
-  if (catalogPlanMatches(existing, input)) {
-    return { kind: "unchanged", row: existing };
+  if (message.startsWith("policy_not_found:")) {
+    return envelope(requestIdValue, "policy_not_found", { policy_id: message.slice("policy_not_found:".length) }, 404);
   }
-  const update = env.DB.prepare(
-    `UPDATE catalog_plans
-     SET name = ?, status = ?, description = ?, updated_at = ?
-     WHERE id = ? RETURNING ${CATALOG_PLAN_COLUMNS}`,
-  ).bind(input.name, input.status, input.description, now, existing.id);
-  const eventType = catalogEventForStatus(existing.status, input.status);
-  return {
-    kind: "updated",
-    row: await writeCatalogWithAudit(
-      env,
-      update,
-      catalogPlanAudit(env, String(existing.id), input.project, eventType, JSON.stringify(existing), "catalog import", actor, requestIdValue, now),
-    ),
-  };
-}
-
-export async function applyCatalogPlanFeatureImport(
-  env: Env,
-  planId: string,
-  input: CatalogPlanFeatureInput,
-  actor: Actor,
-  requestIdValue: string,
-  now: number,
-): Promise<{ kind: CatalogImportKind; row: Record<string, unknown> | null }> {
-  const existing = await findCatalogPlanFeature(env, planId, input.feature_key);
-  if (existing !== null && catalogPlanFeatureMatches(existing, input)) {
-    return { kind: "unchanged", row: existing };
+  if (message.startsWith("policy_disabled:")) {
+    return envelope(requestIdValue, "policy_disabled", { policy_id: message.slice("policy_disabled:".length) }, 409);
   }
-  const upsert = catalogPlanFeatureUpsertStatement(env, planId, input, now);
-  const eventType = existing === null ? "create" : catalogEventForStatus(existing.status, input.status);
-  return {
-    kind: existing === null ? "created" : "updated",
-    row: await writeCatalogWithAudit(
-      env,
-      upsert,
-      catalogPlanFeatureAudit(
-        env,
-        planId,
-        input.feature_key,
-        input.project,
-        eventType,
-        existing === null ? "" : JSON.stringify(existing),
-        "catalog import",
-        actor,
-        requestIdValue,
-        now,
-      ),
-    ),
-  };
-}
-
-export async function previewCatalogImport(env: Env, input: CatalogImportInput): Promise<CatalogImportResult> {
-  const result = emptyCatalogImportResult();
-  for (const feature of input.features) {
-    const existing = await findCatalogFeatureByKey(env, feature.project, feature.feature_key);
-    result.features[existing === null ? "created" : catalogFeatureMatches(existing, feature) ? "unchanged" : "updated"] += 1;
+  if (message === "catalog_import_too_large") {
+    return envelope(requestIdValue, message, {
+      max_mutable_actions: MAX_ATOMIC_CATALOG_IMPORT_ACTIONS,
+      guidance: CATALOG_IMPORT_TOO_LARGE_GUIDANCE,
+    }, 409);
   }
-  for (const plan of input.plans) {
-    const existing = await findCatalogPlanByKey(env, plan.project, plan.plan_key, plan.version);
-    result.plans[existing === null ? "created" : catalogPlanMatches(existing, plan) ? "unchanged" : "updated"] += 1;
-    for (const feature of plan.features ?? []) {
-      if (existing === null) {
-        result.plan_features.created += 1;
-        continue;
-      }
-      const existingFeature = await findCatalogPlanFeature(env, String(existing.id), feature.feature_key);
-      result.plan_features[existingFeature === null ? "created" : catalogPlanFeatureMatches(existingFeature, feature) ? "unchanged" : "updated"] += 1;
-    }
+  if ([
+    "catalog_import_snapshot_stale",
+    "stale_catalog_import_preview",
+    "expired_catalog_import_preview",
+    "claimed_catalog_import_preview",
+  ].includes(message)) {
+    return envelope(requestIdValue, message, undefined, 409);
   }
-  return result;
+  return envelope(requestIdValue, "catalog_mutation_failed", undefined, 500);
 }
 
 export async function importCatalog(request: Request, env: Env, actor: Actor, requestIdValue: string): Promise<Response> {
@@ -253,41 +69,36 @@ export async function importCatalog(request: Request, env: Env, actor: Actor, re
   if (idempotencyKey === INVALID_IDEMPOTENCY_KEY) return envelope(requestIdValue, "invalid_idempotency_key", undefined, 400);
   const body = await parseJsonBody(request, requestIdValue);
   if (body instanceof Response) return body;
-  const input = validateCatalogImportInput(body);
-  if (input === null) return envelope(requestIdValue, "invalid_request", undefined, 400);
-  const preflightError = await preflightCatalogImport(env, input, requestIdValue);
-  if (preflightError !== null) return preflightError;
   if (dryRun) {
-    return envelope(requestIdValue, "catalog_import_previewed", await previewCatalogImport(env, input));
-  }
-  const ctx: MutationContext = { actor, requestId: requestIdValue, ip: clientIp(request), idempotencyKey, source: "admin" };
-  return mutationResponse(request, env, ctx, "catalog_import_applied", async () => {
-    const result = emptyCatalogImportResult();
-    const now = Math.floor(Date.now() / 1000);
+    const input = validateCatalogImportInput(body);
+    if (input === null) return envelope(requestIdValue, "invalid_request", undefined, 400);
     try {
-      for (const feature of input.features) {
-        const applied = await applyCatalogFeatureImport(env, feature, actor, requestIdValue, now);
-        if (applied.row === null) return envelope(requestIdValue, "catalog_mutation_failed", undefined, 500);
-        result.features[applied.kind] += 1;
-      }
-      for (const plan of input.plans) {
-        const applied = await applyCatalogPlanImport(env, plan, actor, requestIdValue, now);
-        if (applied.row === null) return envelope(requestIdValue, "catalog_mutation_failed", undefined, 500);
-        result.plans[applied.kind] += 1;
-        const planId = String(applied.row.id);
-        for (const feature of plan.features ?? []) {
-          const featureApplied = await applyCatalogPlanFeatureImport(env, planId, feature, actor, requestIdValue, now);
-          if (featureApplied.row === null) return envelope(requestIdValue, "catalog_mutation_failed", undefined, 500);
-          result.plan_features[featureApplied.kind] += 1;
-        }
-      }
+      return envelope(requestIdValue, "catalog_import_previewed", await previewCatalogImportProtocol(env, input, actor.subject));
     } catch (error) {
-      if (error instanceof Error && /unique|constraint/i.test(error.message)) {
-        return envelope(requestIdValue, "catalog_import_conflict", undefined, 409);
-      }
-      return envelope(requestIdValue, "catalog_mutation_failed", undefined, 500);
+      return catalogImportProtocolError(error, requestIdValue);
     }
-    return { data: result, idempotencyRecorded: false };
+  }
+  if (isCatalogImportManifestPayload(body)) return envelope(requestIdValue, "preview_required", undefined, 409);
+  const apply = validateCatalogImportApplyInput(body);
+  if (apply === null) return envelope(requestIdValue, "invalid_request", undefined, 400);
+  if (idempotencyKey === null) return envelope(requestIdValue, "idempotency_key_required", undefined, 400);
+  const ctx: MutationContext = { actor, requestId: requestIdValue, ip: clientIp(request), idempotencyKey, source: "admin" };
+  return mutationResponse(request, env, ctx, "catalog_import_applied", async (idempotency) => {
+    try {
+      return {
+        data: await applyCatalogImport(env, apply.preview_id, ctx),
+        idempotencyRecorded: true,
+      };
+    } catch (error) {
+      // A same-key concurrent request may have read the replay cache before its
+      // winner committed. Its conditional claim remains write-free; re-check
+      // the persisted response so it becomes a normal idempotent replay.
+      if (error instanceof Error && error.message === "claimed_catalog_import_preview" && idempotency !== null) {
+        const replay = await idempotentReplay(env, idempotency.scope, ctx.idempotencyKey);
+        if (replay !== null) return replay;
+      }
+      return catalogImportProtocolError(error, requestIdValue);
+    }
   });
 }
 

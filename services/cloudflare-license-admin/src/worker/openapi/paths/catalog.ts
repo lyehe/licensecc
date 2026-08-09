@@ -3,6 +3,7 @@ import {
   ADMIN_AUTH_ERRORS,
   ADMIN_MUTATION_AUTH_ERRORS,
   ADMIN_SECURITY,
+  catalogImportConflictResponse,
   csvExportResponse,
   deviceKeyIdParam,
   errorResponse,
@@ -13,6 +14,7 @@ import {
   limitCursorParams,
   okResponse,
   SYNC_SECURITY,
+  transitionOkResponse,
 } from "../components.js";
 
 export const catalogPaths: LabeledPathFragment = {
@@ -91,7 +93,7 @@ export const catalogPaths: LabeledPathFragment = {
       parameters: [idParam, idempotencyKeyHeader],
       requestBody: { required: true, content: { "application/json": { schema: { $ref: "#/components/schemas/ReasonRequiredBody" } } } },
       responses: {
-        "200": okResponse("Catalog feature disabled.", "#/components/schemas/CatalogFeature", "catalog_feature_disabled"),
+        "200": transitionOkResponse("Catalog feature disabled.", "#/components/schemas/CatalogFeature", { required: ["id"], expectedStatus: "disabled" }, "catalog_feature_disabled"),
         "400": errorResponse("Invalid request / json / idempotency key, or missing reason.", "invalid_idempotency_key", "invalid_json", "invalid_request", "reason_required"),
         ...ADMIN_MUTATION_AUTH_ERRORS,
         "404": errorResponse("No catalog feature with that id.", "catalog_feature_not_found"),
@@ -110,7 +112,7 @@ export const catalogPaths: LabeledPathFragment = {
       parameters: [idParam, idempotencyKeyHeader],
       requestBody: { required: true, content: { "application/json": { schema: { $ref: "#/components/schemas/ReasonRequiredBody" } } } },
       responses: {
-        "200": okResponse("Catalog feature re-enabled.", "#/components/schemas/CatalogFeature", "catalog_feature_reenabled"),
+        "200": transitionOkResponse("Catalog feature re-enabled.", "#/components/schemas/CatalogFeature", { required: ["id"], expectedStatus: "active" }, "catalog_feature_reenabled"),
         "400": errorResponse("Invalid request / json / idempotency key.", "invalid_idempotency_key", "invalid_json", "invalid_request"),
         ...ADMIN_MUTATION_AUTH_ERRORS,
         "404": errorResponse("No catalog feature with that id.", "catalog_feature_not_found"),
@@ -157,20 +159,32 @@ export const catalogPaths: LabeledPathFragment = {
     ["/api/admin/catalog/import", {
     post: {
       tags: ["admin:plans"],
-      summary: "Preview or apply a portable catalog import manifest",
+      summary: "Persist a catalog import preview or atomically apply that preview",
       operationId: "importCatalog",
       security: ADMIN_SECURITY,
       parameters: [
-        idempotencyKeyHeader,
-        { name: "dry_run", in: "query", required: false, schema: { type: "string", enum: ["1", "true"] } },
+        { ...idempotencyKeyHeader, description: "Required when applying a preview. For dry_run Preview, a valid header is ignored, but a present empty or over-long header returns 400 invalid_idempotency_key. The same actor/key replay returns the committed Apply response." },
+        { name: "dry_run", in: "query", required: false, description: "Set to 1 or true to preview a manifest. Without it, the request body must contain only preview_id.", schema: { type: "string", enum: ["1", "true"] } },
       ],
-      requestBody: { required: true, content: { "application/json": { schema: { $ref: "#/components/schemas/CatalogImportManifest" } } } },
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              oneOf: [
+                { $ref: "#/components/schemas/CatalogImportManifest" },
+                { $ref: "#/components/schemas/CatalogImportApplyInput" },
+              ],
+            },
+          },
+        },
+      },
       responses: {
-        "200": okResponse("Catalog import previewed/applied.", "#/components/schemas/CatalogImportResult", "catalog_import_previewed", "catalog_import_applied"),
-        "400": errorResponse("Invalid request / json / idempotency key.", "invalid_idempotency_key", "invalid_json", "invalid_request"),
+        "200": okResponse("Server-bound preview or its atomically committed Apply result. The response always shows the exact preview effects.", "#/components/schemas/CatalogImportPreviewResponse", "catalog_import_previewed", "catalog_import_applied"),
+        "400": errorResponse("Invalid request / json / preview id / idempotency key. Apply requires an idempotency key.", "invalid_idempotency_key", "idempotency_key_required", "invalid_json", "invalid_request"),
         ...ADMIN_MUTATION_AUTH_ERRORS,
         "404": errorResponse("Referenced feature or policy was not found.", "catalog_feature_not_found", "policy_not_found"),
-        "409": errorResponse("Policy is disabled, from another project, or the import conflicts.", "policy_disabled", "invalid_plan_config", "catalog_import_conflict"),
+        "409": catalogImportConflictResponse("A direct manifest needs Preview first; policy/config validation failed; the Preview is stale, expired, or claimed; or the import has more than thirteen mutable actions and must be narrowed before previewing again. The thirteen-action cap keeps every Apply path below the D1 Workers Free 50-query limit without chunking.", "preview_required", "policy_disabled", "invalid_plan_config", "catalog_import_too_large", "catalog_import_snapshot_stale", "stale_catalog_import_preview", "expired_catalog_import_preview", "claimed_catalog_import_preview"),
         "413": errorResponse("Request body exceeds 8192 bytes.", "body_too_large"),
         "500": errorResponse("Catalog mutation failed.", "catalog_mutation_failed", "dev_bearer_forbidden_in_environment"),
       },
@@ -215,7 +229,7 @@ export const catalogPaths: LabeledPathFragment = {
       parameters: [idParam, idempotencyKeyHeader],
       requestBody: { required: true, content: { "application/json": { schema: { $ref: "#/components/schemas/ReasonRequiredBody" } } } },
       responses: {
-        "200": okResponse("Catalog plan disabled.", "#/components/schemas/CatalogPlan", "catalog_plan_disabled"),
+        "200": transitionOkResponse("Catalog plan disabled.", "#/components/schemas/CatalogPlan", { required: ["id"], expectedStatus: "disabled" }, "catalog_plan_disabled"),
         "400": errorResponse("Invalid request / json / idempotency key, or missing reason.", "invalid_idempotency_key", "invalid_json", "invalid_request", "reason_required"),
         ...ADMIN_MUTATION_AUTH_ERRORS,
         "404": errorResponse("No catalog plan with that id.", "catalog_plan_not_found"),
@@ -234,7 +248,7 @@ export const catalogPaths: LabeledPathFragment = {
       parameters: [idParam, idempotencyKeyHeader],
       requestBody: { required: true, content: { "application/json": { schema: { $ref: "#/components/schemas/ReasonRequiredBody" } } } },
       responses: {
-        "200": okResponse("Catalog plan re-enabled.", "#/components/schemas/CatalogPlan", "catalog_plan_reenabled"),
+        "200": transitionOkResponse("Catalog plan re-enabled.", "#/components/schemas/CatalogPlan", { required: ["id"], expectedStatus: "active" }, "catalog_plan_reenabled"),
         "400": errorResponse("Invalid request / json / idempotency key.", "invalid_idempotency_key", "invalid_json", "invalid_request"),
         ...ADMIN_MUTATION_AUTH_ERRORS,
         "404": errorResponse("No catalog plan with that id.", "catalog_plan_not_found"),
@@ -298,7 +312,7 @@ export const catalogPaths: LabeledPathFragment = {
       parameters: [idParam, featureKeyParam, idempotencyKeyHeader],
       requestBody: { required: true, content: { "application/json": { schema: { $ref: "#/components/schemas/ReasonRequiredBody" } } } },
       responses: {
-        "200": okResponse("Catalog plan feature disabled.", "#/components/schemas/CatalogPlanFeature", "catalog_plan_feature_disabled"),
+        "200": transitionOkResponse("Catalog plan feature disabled.", "#/components/schemas/CatalogPlanFeature", { required: ["plan_id", "feature_key"], expectedStatus: "disabled" }, "catalog_plan_feature_disabled"),
         "400": errorResponse("Invalid request / json / idempotency key, or missing reason.", "invalid_idempotency_key", "invalid_json", "invalid_request", "reason_required"),
         ...ADMIN_MUTATION_AUTH_ERRORS,
         "404": errorResponse("No feature row with that plan/feature key.", "catalog_plan_feature_not_found"),
@@ -317,7 +331,7 @@ export const catalogPaths: LabeledPathFragment = {
       parameters: [idParam, featureKeyParam, idempotencyKeyHeader],
       requestBody: { required: true, content: { "application/json": { schema: { $ref: "#/components/schemas/ReasonRequiredBody" } } } },
       responses: {
-        "200": okResponse("Catalog plan feature re-enabled.", "#/components/schemas/CatalogPlanFeature", "catalog_plan_feature_reenabled"),
+        "200": transitionOkResponse("Catalog plan feature re-enabled.", "#/components/schemas/CatalogPlanFeature", { required: ["plan_id", "feature_key"], expectedStatus: "active" }, "catalog_plan_feature_reenabled"),
         "400": errorResponse("Invalid request / json / idempotency key.", "invalid_idempotency_key", "invalid_json", "invalid_request"),
         ...ADMIN_MUTATION_AUTH_ERRORS,
         "404": errorResponse("No feature row with that plan/feature key.", "catalog_plan_feature_not_found"),
@@ -342,7 +356,7 @@ export const catalogPaths: LabeledPathFragment = {
         "400": errorResponse("Invalid request / json, or an unavailable add-on was requested.", "invalid_json", "invalid_request", "unknown_addon"),
         ...ADMIN_MUTATION_AUTH_ERRORS,
         "404": errorResponse("Plan or referenced policy was not found.", "plan_not_found", "policy_not_found"),
-        "409": errorResponse("Plan or referenced policy is disabled, the plan references a policy from another project, a different existing license fingerprint requires a deliberate transfer protocol, or `plan_projection_too_large` requires the operator to narrow the plan/add-on scope before previewing again. The nine-action bound keeps one Apply transaction below D1 Workers Free (50 query) and Paid (1,000 query) invocation limits.", "plan_disabled", "policy_disabled", "invalid_plan_config", "license_fingerprint_conflict", "plan_projection_too_large"),
+        "409": errorResponse("Plan or referenced policy is disabled, the plan references a policy from another project, an assignment-or-entitlement identity has a different license fingerprint and requires a deliberate transfer protocol, or `plan_projection_too_large` requires the operator to narrow the plan/add-on scope before previewing again. A nine-action Apply uses exactly 38 D1 batch statements; with replay lookup and preview decode, the successful idempotent request uses 40 (41 for a same-key stale contender that re-reads the replay), below Workers Free (50 query) and Paid (1,000 query) invocation limits.", "plan_disabled", "policy_disabled", "invalid_plan_config", "license_fingerprint_conflict", "plan_projection_too_large"),
         "413": errorResponse("Request body exceeds 8192 bytes.", "body_too_large"),
         "500": errorResponse("Projection failed, or dev bearer enabled outside development.", "plan_projection_failed", "dev_bearer_forbidden_in_environment"),
       },
@@ -363,7 +377,7 @@ export const catalogPaths: LabeledPathFragment = {
         "200": okResponse("Applied projection with created/updated/disabled entitlement records and assignment row.", "#/components/schemas/PlanProjectionApplyResult", "license_plan_projection_applied"),
         "400": errorResponse("Invalid request / json / idempotency key.", "invalid_idempotency_key", "invalid_json", "invalid_request"),
         ...ADMIN_MUTATION_AUTH_ERRORS,
-        "409": errorResponse("Preview expired, was consumed, belongs to a different actor, its source generation changed, its derived grant has expired, or an assignment now has a different license fingerprint; re-preview before Apply. A fingerprint transfer needs a separate deliberate protocol.", "stale_projection_preview", "projection_preview_grant_expired", "license_fingerprint_conflict", "plan_projection_blocked"),
+        "409": errorResponse("Preview expired, was consumed, belongs to a different actor, its source generation changed, its derived grant has expired, or an assignment-or-entitlement identity now has a different license fingerprint; re-preview before Apply. A fingerprint transfer needs a separate deliberate protocol.", "stale_projection_preview", "projection_preview_grant_expired", "license_fingerprint_conflict", "plan_projection_blocked"),
         "413": errorResponse("Request body exceeds 8192 bytes.", "body_too_large"),
         "500": errorResponse("Projection failed, mutation failed, or dev bearer enabled outside development.", "plan_projection_failed", "mutation_failed", "dev_bearer_forbidden_in_environment"),
       },

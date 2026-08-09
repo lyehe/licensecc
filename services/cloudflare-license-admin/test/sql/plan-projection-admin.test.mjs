@@ -568,16 +568,18 @@ test("catalog import/export manifests preview, apply, replay, and re-import unch
     env,
   );
   assert.equal(preview.status, 200, await preview.clone().text());
-  assert.deepEqual((await body(preview)).data, {
-    features: { created: 2, updated: 0, unchanged: 0 },
-    plans: { created: 1, updated: 0, unchanged: 0 },
-    plan_features: { created: 2, updated: 0, unchanged: 0 },
+  const previewData = (await body(preview)).data;
+  assert.match(previewData.preview_id, /^civ_[A-Za-z0-9_-]+$/);
+  assert.deepEqual(previewData.effects.summary, {
+    features: { create: 2, update: 0, disable: 0, reenable: 0, unchanged: 0 },
+    plans: { create: 1, update: 0, disable: 0, reenable: 0, unchanged: 0 },
+    plan_features: { create: 2, update: 0, disable: 0, reenable: 0, unchanged: 0 },
   });
 
   const request = {
     method: "POST",
     headers: { "idempotency-key": "catalog-import-1" },
-    body: JSON.stringify(manifest),
+    body: JSON.stringify({ preview_id: previewData.preview_id }),
   };
   const apply = await worker.fetch(devReq("/api/admin/catalog/import", request), env);
   assert.equal(apply.status, 200, await apply.clone().text());
@@ -604,10 +606,10 @@ test("catalog import/export manifests preview, apply, replay, and re-import unch
     env,
   );
   assert.equal(unchanged.status, 200, await unchanged.clone().text());
-  assert.deepEqual((await body(unchanged)).data, {
-    features: { created: 0, updated: 0, unchanged: 2 },
-    plans: { created: 0, updated: 0, unchanged: 1 },
-    plan_features: { created: 0, updated: 0, unchanged: 2 },
+  assert.deepEqual((await body(unchanged)).data.effects.summary, {
+    features: { create: 0, update: 0, disable: 0, reenable: 0, unchanged: 2 },
+    plans: { create: 0, update: 0, disable: 0, reenable: 0, unchanged: 1 },
+    plan_features: { create: 0, update: 0, disable: 0, reenable: 0, unchanged: 2 },
   });
 });
 
@@ -877,7 +879,7 @@ test("concurrent same-key Apply requests produce one committed result and one re
   assert.equal(db.prepare("SELECT COUNT(*) AS c FROM mutation_idempotency WHERE idempotency_key = 'plan-concurrent-1'").get().c, 1);
 });
 
-test("the nine-action Free-tier projection path has 45 batch statements, 47 winner queries, and 48 stale-loser replay queries", async () => {
+test("the nine-action Free-tier projection path has 38 batch statements, 40 winner queries, and 41 stale-loser replay queries", async () => {
   const winnerDb = freshDb();
   seedCatalog(winnerDb);
   addIncludedProjectionFeatures(winnerDb, 6); // core/export/team plus six = exactly nine creates.
@@ -899,8 +901,8 @@ test("the nine-action Free-tier projection path has 45 batch statements, 47 winn
     winnerEnv,
   );
   assert.equal(winner.status, 200, await winner.clone().text());
-  assert.equal(winnerD1.batchLengths.at(-1), 45);
-  assert.equal(winnerD1.queryCount, 47);
+  assert.equal(winnerD1.batchLengths.at(-1), 38);
+  assert.equal(winnerD1.queryCount, 40);
   assert.ok(winnerD1.queryCount <= 50);
 
   const loserDb = freshDb();
@@ -916,7 +918,7 @@ test("the nine-action Free-tier projection path has 45 batch statements, 47 winn
   // Model the only concurrent window that matters: the loser has already read
   // an empty replay cache, then the winner consumes the capability and writes
   // the replay row. The wrapper hides just that first lookup; its later replay
-  // lookup reads the real row while its 45-statement claimed batch stays gated.
+  // lookup reads the real row while its 38-statement claimed batch stays gated.
   loserDb.prepare("UPDATE license_plan_projection_previews SET consumed_at = ? WHERE id = ?").run(NOW, loserPreviewId);
   loserDb.prepare("INSERT INTO mutation_idempotency (scope, idempotency_key, response_json, created_at) VALUES (?, ?, ?, ?)").run(
     "POST:/api/admin/license-plans/apply:dev",
@@ -937,7 +939,7 @@ test("the nine-action Free-tier projection path has 45 batch statements, 47 winn
   );
   assert.equal(loser.status, 200, await loser.clone().text());
   assert.equal(loser.headers.get("x-idempotent-replay"), "1");
-  assert.equal(loserD1.batchLengths.at(-1), 45);
-  assert.equal(loserD1.queryCount, 48);
+  assert.equal(loserD1.batchLengths.at(-1), 38);
+  assert.equal(loserD1.queryCount, 41);
   assert.ok(loserD1.queryCount <= 50);
 });

@@ -1,4 +1,8 @@
 import type { LabeledComponentFragment } from "./assemble.js";
+import {
+  CATALOG_IMPORT_MAX_MUTABLE_ACTIONS,
+  CATALOG_IMPORT_TOO_LARGE_GUIDANCE,
+} from "@licensecc/licensing-domain/catalog/import_preview";
 import { DEFAULT_PAGINATION_OPTIONS } from "../query.js";
 import type { PaginationOptions } from "../query.js";
 
@@ -20,8 +24,18 @@ export function errorResponse(description: string, ...codes: ReadonlyArray<strin
   };
 }
 
-// A success envelope response carrying `data` of the referenced schema.
-export function okResponse(description: string, dataRef: string, ...codes: ReadonlyArray<string>): Record<string, unknown> {
+export interface TransitionDataContract {
+  /** Identity and transition-evidence fields the real handler always emits. */
+  readonly required: readonly string[];
+  /** The concrete state reached by a simple status transition, when the response emits one. */
+  readonly expectedStatus?: string;
+}
+
+function successResponse(
+  description: string,
+  dataSchema: Record<string, unknown>,
+  codes: ReadonlyArray<string>,
+): Record<string, unknown> {
   const codeSchema = codes.length === 1 ? { const: codes[0] } : { enum: codes };
   return {
     description,
@@ -30,12 +44,87 @@ export function okResponse(description: string, dataRef: string, ...codes: Reado
         schema: {
           allOf: [
             { $ref: "#/components/schemas/SuccessEnvelope" },
-            { type: "object", properties: { code: codeSchema, data: { $ref: dataRef } } },
+            {
+              type: "object",
+              required: ["data"],
+              properties: { code: codeSchema, data: dataSchema },
+            },
           ],
         },
       },
     },
   };
+}
+
+// The import capacity response carries required operational data. Its normal
+// conflicts explicitly exclude that code, making the documented `oneOf`
+// mutually exclusive instead of a generic ErrorEnvelope overlap.
+export function catalogImportConflictResponse(description: string, ...codes: ReadonlyArray<string>): Record<string, unknown> {
+  const ordinaryCodes = codes.filter((code) => code !== "catalog_import_too_large" && code !== "invalid_plan_config");
+  return {
+    description,
+    content: {
+      "application/json": {
+        schema: {
+          oneOf: [
+            {
+              allOf: [
+                { $ref: "#/components/schemas/ErrorEnvelope" },
+                {
+                  type: "object",
+                  required: ["code"],
+                  properties: { code: { enum: ordinaryCodes } },
+                },
+              ],
+            },
+            { $ref: "#/components/schemas/CatalogImportInvalidPlanConfigError" },
+            { $ref: "#/components/schemas/CatalogImportTooLargeError" },
+          ],
+        },
+        examples: Object.fromEntries(codes.map((code) => [code, {
+          value: code === "catalog_import_too_large"
+            ? {
+              ok: false,
+              code,
+              request_id: "1a2b3c-1",
+              data: {
+                max_mutable_actions: CATALOG_IMPORT_MAX_MUTABLE_ACTIONS,
+                guidance: CATALOG_IMPORT_TOO_LARGE_GUIDANCE,
+              },
+            }
+            : code === "invalid_plan_config"
+              ? { ok: false, code, request_id: "1a2b3c-1", data: { policy_id: "policy_example" } }
+            : { ok: false, code, request_id: "1a2b3c-1" },
+        }])),
+      },
+    },
+  };
+}
+
+// A success envelope response carrying `data` of the referenced schema. `data` is deliberately
+// required at the operation level: `envelope()` also serves error responses and keeps data optional.
+export function okResponse(description: string, dataRef: string, ...codes: ReadonlyArray<string>): Record<string, unknown> {
+  return successResponse(description, { $ref: dataRef }, codes);
+}
+
+// A state-transition success has to prove more than `{ ok: true }`: require the stable identity
+// fields plus the state/evidence that the real handler returns. This remains operation-local so a
+// read or create response is not tightened beyond its own runtime behavior.
+export function transitionOkResponse(
+  description: string,
+  dataRef: string,
+  contract: TransitionDataContract,
+  ...codes: ReadonlyArray<string>
+): Record<string, unknown> {
+  const required = contract.expectedStatus === undefined
+    ? [...contract.required]
+    : [...new Set([...contract.required, "status"])];
+  const evidence = {
+    type: "object",
+    required,
+    ...(contract.expectedStatus === undefined ? {} : { properties: { status: { const: contract.expectedStatus } } }),
+  };
+  return successResponse(description, { allOf: [{ $ref: dataRef }, evidence] }, codes);
 }
 
 export const idempotencyKeyHeader = {
@@ -250,7 +339,7 @@ export const openApiComponents: LabeledComponentFragment = {
           customer_id: { type: ["string", "null"], maxLength: 128 },
           plan_id: { type: ["string", "null"], maxLength: 128, description: "Catalog plan id. Required when plan_key is omitted." },
           plan_key: { type: ["string", "null"], maxLength: 128, description: "Catalog plan key. Required when plan_id is omitted." },
-          support_until: { type: ["integer", "null"], minimum: 0, description: "Optional support/subscription window override stamped onto desired entitlements." },
+          support_until: { type: ["integer", "null"], minimum: 0, maximum: 253_402_300_799, description: "Optional support/subscription window override stamped onto desired entitlements. Must be a safe epoch second no later than 9999-12-31T23:59:59Z." },
           addons: { type: "array", maxItems: 100, items: { type: "string", maxLength: 128 }, default: [], description: "Optional add-on keys exposed by the selected plan." },
           notes: { type: "string", maxLength: 1000, default: "" },
         },
@@ -494,20 +583,117 @@ export const openApiComponents: LabeledComponentFragment = {
           plans: { type: "array", maxItems: 200, items: { $ref: "#/components/schemas/CatalogPlanImport" } },
         },
       }],
-      ["CatalogImportCounter", {
+      ["CatalogImportEffectTarget", {
         type: "object",
+        required: ["entity", "project"],
         properties: {
-          created: { type: "integer", minimum: 0 },
-          updated: { type: "integer", minimum: 0 },
+          entity: { type: "string", enum: ["feature", "plan", "plan_feature"] },
+          project: { type: "string" },
+          feature_key: { type: "string" },
+          plan_key: { type: "string" },
+          plan_id: { type: "string" },
+        },
+      }],
+      ["CatalogImportEffect", {
+        type: "object",
+        required: ["target", "effect", "before", "after"],
+        properties: {
+          target: { $ref: "#/components/schemas/CatalogImportEffectTarget" },
+          effect: { type: "string", enum: ["create", "update", "disable", "reenable", "unchanged"] },
+          before: { type: ["object", "null"], additionalProperties: true },
+          after: { type: "object", additionalProperties: true },
+        },
+      }],
+      ["CatalogImportEffectCounter", {
+        type: "object",
+        required: ["create", "update", "disable", "reenable", "unchanged"],
+        properties: {
+          create: { type: "integer", minimum: 0 },
+          update: { type: "integer", minimum: 0 },
+          disable: { type: "integer", minimum: 0 },
+          reenable: { type: "integer", minimum: 0 },
           unchanged: { type: "integer", minimum: 0 },
         },
       }],
-      ["CatalogImportResult", {
+      ["CatalogImportEffects", {
         type: "object",
+        required: ["features", "plans", "plan_features", "summary"],
         properties: {
-          features: { $ref: "#/components/schemas/CatalogImportCounter" },
-          plans: { $ref: "#/components/schemas/CatalogImportCounter" },
-          plan_features: { $ref: "#/components/schemas/CatalogImportCounter" },
+          features: { type: "array", items: { $ref: "#/components/schemas/CatalogImportEffect" } },
+          plans: { type: "array", items: { $ref: "#/components/schemas/CatalogImportEffect" } },
+          plan_features: { type: "array", items: { $ref: "#/components/schemas/CatalogImportEffect" } },
+          summary: {
+            type: "object",
+            required: ["features", "plans", "plan_features"],
+            properties: {
+              features: { $ref: "#/components/schemas/CatalogImportEffectCounter" },
+              plans: { $ref: "#/components/schemas/CatalogImportEffectCounter" },
+              plan_features: { $ref: "#/components/schemas/CatalogImportEffectCounter" },
+            },
+          },
+        },
+      }],
+      ["CatalogImportTooLargeData", {
+        type: "object",
+        additionalProperties: false,
+        required: ["max_mutable_actions", "guidance"],
+        properties: {
+          max_mutable_actions: { const: CATALOG_IMPORT_MAX_MUTABLE_ACTIONS },
+          guidance: { const: CATALOG_IMPORT_TOO_LARGE_GUIDANCE },
+        },
+      }],
+      ["CatalogImportInvalidPlanConfigData", {
+        type: "object",
+        additionalProperties: false,
+        required: ["policy_id"],
+        properties: { policy_id: { type: "string" } },
+      }],
+      ["CatalogImportInvalidPlanConfigError", {
+        allOf: [
+          { $ref: "#/components/schemas/ErrorEnvelope" },
+          {
+            type: "object",
+            required: ["code", "data"],
+            properties: {
+              code: { const: "invalid_plan_config" },
+              data: { $ref: "#/components/schemas/CatalogImportInvalidPlanConfigData" },
+            },
+          },
+        ],
+      }],
+      ["CatalogImportTooLargeError", {
+        allOf: [
+          { $ref: "#/components/schemas/ErrorEnvelope" },
+          {
+            type: "object",
+            required: ["code", "data"],
+            properties: {
+              code: { const: "catalog_import_too_large" },
+              data: { $ref: "#/components/schemas/CatalogImportTooLargeData" },
+            },
+          },
+        ],
+      }],
+      ["CatalogImportPreviewResponse", {
+        type: "object",
+        required: ["preview_id", "manifest_digest", "manifest", "effects", "effective_at", "expires_at", "source_generation"],
+        properties: {
+          preview_id: { type: "string", maxLength: 128, pattern: "^civ_[A-Za-z0-9_-]{1,124}$", description: "Opaque, short-lived, actor-bound catalog import capability. Apply accepts this value only." },
+          manifest_digest: { type: "string", pattern: "^[0-9a-f]{64}$", description: "SHA-256 digest of the normalized manifest held by the server." },
+          manifest: { $ref: "#/components/schemas/CatalogImportManifest" },
+          effects: { $ref: "#/components/schemas/CatalogImportEffects" },
+          effective_at: { type: "integer", minimum: 0, description: "Single timestamp used for every imported catalog row and audit transition." },
+          expires_at: { type: "integer", minimum: 0 },
+          source_generation: { type: "integer", minimum: 0, description: "Conservative catalog generation that must still match at Apply." },
+        },
+      }],
+      ["CatalogImportApplyInput", {
+        type: "object",
+        additionalProperties: false,
+        required: ["preview_id"],
+        description: "Apply exactly one server-persisted catalog import preview. A manifest in an Apply request is rejected with preview_required.",
+        properties: {
+          preview_id: { type: "string", maxLength: 128, pattern: "^civ_[A-Za-z0-9_-]{1,124}$" },
         },
       }],
       ["EntitlementRecord", {
@@ -899,12 +1085,15 @@ export const openApiComponents: LabeledComponentFragment = {
       }],
       ["BatchResultData", {
         type: "object",
+        required: ["results"],
         properties: {
           results: {
             type: "array",
-            description: "One entry per input id (in input order). `ok:false` rows carry a per-row failure code (not_found, revoked_entitlement_is_terminal, invalid_entitlement_id, mutation_failed).",
+            minItems: 1,
+            description: "One entry per input id (in input order). `ok:false` rows carry a per-row failure code (not_found, revoked_entitlement_is_terminal, stale_transition, invalid_entitlement_id, mutation_failed).",
             items: {
               type: "object",
+              required: ["id", "ok", "code"],
               properties: {
                 id: { type: "string" },
                 ok: { type: "boolean" },
@@ -1005,8 +1194,8 @@ export const openApiComponents: LabeledComponentFragment = {
         type: "object",
         required: ["released", "seat_ids"],
         properties: {
-          released: { type: "integer", description: "Count of LIVE seats reclaimed (0 is a valid idempotent success)." },
-          seat_ids: { type: "array", items: { type: "string" }, description: "The reclaimed seat_ids (sorted)." },
+          released: { type: "integer", minimum: 0, description: "Count of LIVE seats reclaimed (0 is a valid idempotent success)." },
+          seat_ids: { type: "array", uniqueItems: true, items: { type: "string" }, description: "The reclaimed seat_ids (sorted; exactly one per released seat)." },
         },
       }],
       ["EntitlementDevice", {

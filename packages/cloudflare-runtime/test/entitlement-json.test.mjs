@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
@@ -114,7 +114,7 @@ function projectionProbe() {
     addon_key: null,
     feature_name: "Core",
   };
-  const action = { id: entitlementId("DEFAULT", "core", fingerprint), desired };
+  const action = { id: entitlementId("DEFAULT", "core", fingerprint), desired, cache_ttl_seconds: 600 };
   const projection = {
     plan: { id: "plan_probe", project: "DEFAULT", plan_key: "probe", name: "Probe", status: "active", version: 1 },
     assignment,
@@ -127,7 +127,7 @@ function projectionProbe() {
     summary: { create: 1, update: 0, disable: 0, blocked: 0, unchanged: 0 },
     preview_id: previewId, effective_at: now, expires_at: now + 300, source_generation: 1,
   };
-  const actions = { created: [action], updated: [], disabled: [], assignment, assignment_snapshot: null };
+  const actions = { projection_snapshot_version: 2, created: [action], updated: [], disabled: [], assignment, assignment_snapshot: null };
   const entitlement = {
     project: "DEFAULT", feature: "core", license_fingerprint: fingerprint, device_hash: "", status: "active",
     assertion_ttl_seconds: 600, cache_ttl_seconds: 600, revocation_seq: 1, valid_from: null, valid_until: null,
@@ -178,9 +178,13 @@ async function generatedStatements() {
   probe.claimToken = planBatch[0].params[0];
   probe.previewRow.claim_token = probe.claimToken;
   const planAudit = planBatch.find((statement) => statement.sql.startsWith("INSERT INTO entitlement_events"));
+  const planAssignmentAudit = planBatch.find((statement) => statement.sql.startsWith("INSERT INTO license_plan_assignment_events"));
   const planResponse = planBatch.find((statement) => statement.sql.includes("SET applied_response_json"));
   assert.ok(planAudit, "plan-projection must generate an entitlement audit statement");
+  assert.ok(planAssignmentAudit, "plan-projection must generate an assignment audit statement");
   assert.ok(planResponse, "plan-projection must generate an applied-response statement");
+  assert.match(planAudit.sql, /cache_ttl_seconds/, "projection audit must retain private cache policy");
+  assert.doesNotMatch(planResponse.sql, /cache_ttl_seconds/, "public projection response must not expose private cache policy");
 
   const mutationDb = new CapturingD1();
   const mutationCtx = {
@@ -200,7 +204,7 @@ async function generatedStatements() {
     probe.now,
   );
   assert.ok(mutationIdempotency, "entitlement mutation must generate its idempotency response statement");
-  return { probe, planAudit, planResponse, mutationAudit, mutationIdempotency };
+  return { probe, planAudit, planAssignmentAudit, planResponse, mutationAudit, mutationIdempotency };
 }
 
 function sqlLiteral(value) {
@@ -290,6 +294,12 @@ CREATE TABLE license_plan_assignments (
   customer_id TEXT, status TEXT, support_until INTEGER, addons_json TEXT,
   created_at INTEGER, updated_at INTEGER
 );
+CREATE TABLE license_plan_assignment_events (
+  id INTEGER PRIMARY KEY, license_id TEXT, project TEXT, plan_id TEXT,
+  license_fingerprint TEXT, event_type TEXT, actor TEXT, actor_type TEXT,
+  source TEXT, request_id TEXT, prev_json TEXT, next_json TEXT, reason TEXT,
+  idempotency_key TEXT, created_at INTEGER
+);
 """)
 
 for table, row in (("entitlements", payload["entitlement"]), ("license_plan_projection_previews", payload["preview"]), ("license_plan_assignments", payload["assignment"])):
@@ -299,7 +309,7 @@ for table, row in (("entitlements", payload["entitlement"]), ("license_plan_proj
         [row[column] for column in columns],
     )
 
-for name in ("plan_audit", "plan_response", "mutation_audit", "mutation_idempotency"):
+for name in ("plan_audit", "plan_assignment_audit", "plan_response", "mutation_audit", "mutation_idempotency"):
     statement = payload["statements"][name]
     connection.execute(statement["sql"], statement["params"])
 
@@ -308,6 +318,8 @@ if json.loads(response).get("code") != "license_plan_projection_applied":
     raise RuntimeError("exact plan response statement did not produce the applied envelope")
 if connection.execute("SELECT COUNT(*) FROM entitlement_events").fetchone()[0] != 2:
     raise RuntimeError("exact plan and entitlement-mutation audit statements did not both execute")
+if connection.execute("SELECT COUNT(*) FROM license_plan_assignment_events").fetchone()[0] != 1:
+    raise RuntimeError("exact plan assignment audit statement did not execute")
 if connection.execute("SELECT COUNT(*) FROM mutation_idempotency").fetchone()[0] != 1:
     raise RuntimeError("exact entitlement-mutation idempotency statement did not execute")
 print("sqlite_function_arg_32_exact_sql_green")
@@ -325,7 +337,12 @@ function runPythonFunctionLimitProbe(payload) {
 
 function runWranglerLocalD1Probe(payload) {
   const temp = mkdtempSync(join(tmpdir(), "licensecc-d1-json-"));
-  const wrangler = join(backendRoot, "node_modules", "wrangler", "bin", "wrangler.js");
+  // npm's documented hoisted workspace layout puts Wrangler at the repository
+  // root; retain the workspace-local fallback for isolated package installs.
+  const workspaceWrangler = join(backendRoot, "node_modules", "wrangler", "bin", "wrangler.js");
+  const wrangler = existsSync(workspaceWrangler)
+    ? workspaceWrangler
+    : join(repoRoot, "node_modules", "wrangler", "bin", "wrangler.js");
   const config = join(backendRoot, "wrangler.example.toml");
   const schema = join(backendRoot, "schema.sql");
   const probeSql = join(temp, "exact-generated-json.sql");
@@ -337,6 +354,7 @@ function runWranglerLocalD1Probe(payload) {
       insertSql("license_plan_projection_previews", payload.preview),
       insertSql("license_plan_assignments", payload.assignment),
       literalizeBoundSql(payload.statements.plan_audit.sql, payload.statements.plan_audit.params) + ";",
+      literalizeBoundSql(payload.statements.plan_assignment_audit.sql, payload.statements.plan_assignment_audit.params) + ";",
       literalizeBoundSql(payload.statements.plan_response.sql, payload.statements.plan_response.params) + ";",
       literalizeBoundSql(payload.statements.mutation_audit.sql, payload.statements.mutation_audit.params) + ";",
       literalizeBoundSql(payload.statements.mutation_idempotency.sql, payload.statements.mutation_idempotency.params) + ";",
@@ -362,6 +380,7 @@ test("D1-safe entitlement JSON keeps every generated audit/response function at 
     entitlementCurrentJsonSql("e", "?"),
     entitlementCurrentJsonSql("", "?", { includeCacheTtl: true }),
     generated.planAudit.sql,
+    generated.planAssignmentAudit.sql,
     generated.planResponse.sql,
     generated.mutationAudit.sql,
     generated.mutationIdempotency.sql,
@@ -385,6 +404,7 @@ test("exact generated plan and entitlement-mutation audit/response SQL executes 
     catalog_plan: generated.probe.catalogPlan,
     statements: {
       plan_audit: statement(generated.planAudit),
+      plan_assignment_audit: statement(generated.planAssignmentAudit),
       plan_response: statement(generated.planResponse),
       mutation_audit: statement(generated.mutationAudit),
       mutation_idempotency: statement(generated.mutationIdempotency),

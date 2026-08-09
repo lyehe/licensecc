@@ -46,6 +46,7 @@ import {
 } from "./webhooks.js";
 import { validatePolicyInput, validatePolicyPatch } from "./policy_validation.js";
 import { validateEntitlementInput, validateEntitlementPatch } from "./groups/entitlements/validation.js";
+import { validatePlanProjectionInput } from "./groups/catalog/validation.js";
 
 type BoundRun = (
   request: Request,
@@ -149,6 +150,7 @@ export const adminInternalsForTests = {
   decodeEntitlementId,
   validateEntitlementInput,
   validateEntitlementPatch,
+  validatePlanProjectionInput,
   validatePolicyInput,
   validatePolicyPatch,
   validateWebhookInput,

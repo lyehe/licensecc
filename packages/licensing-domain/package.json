@@ -12,6 +12,10 @@
       "types": "./src/catalog/plan_projection.d.ts",
       "default": "./src/catalog/plan_projection.mjs"
     },
+    "./catalog/import_preview": {
+      "types": "./src/catalog/import_preview.d.ts",
+      "default": "./src/catalog/import_preview.mjs"
+    },
     "./entitlements/contracts": {
       "types": "./src/entitlements/contracts.d.ts",
       "default": "./src/entitlements/contracts.mjs"

@@ -94,6 +94,17 @@ function parseJsonColumn(value) {
   }
 }
 
+// cache_ttl_seconds is deliberately private protocol state. Entitlement audits
+// retain it for forensic projection proof, but webhook subscribers receive the
+// public entitlement shape. Clone rather than mutate so the stored audit's
+// parsed snapshot stays intact for the rest of this delivery path.
+function publicEntitlementSnapshot(snapshot) {
+  if (snapshot === null || typeof snapshot !== "object" || Array.isArray(snapshot)) return snapshot;
+  const publicSnapshot = { ...snapshot };
+  delete publicSnapshot.cache_ttl_seconds;
+  return publicSnapshot;
+}
+
 /**
  * Build the NORMALIZED webhook payload object for one source event row. Shape:
  *   { id, type, source, occurred_at, data: { ...BEFORE/AFTER state } }
@@ -117,8 +128,8 @@ export function buildWebhookPayload(eventSource, row) {
         // Device transitions encode their action here ("device-revoke <keyId>: <reason>") on an
         // event_type='update' row; surface it so subscribers can attribute the change (audit R6.5).
         detail: row.detail ?? "",
-        prev: parseJsonColumn(row.prev_json),
-        next: parseJsonColumn(row.next_json),
+        prev: publicEntitlementSnapshot(parseJsonColumn(row.prev_json)),
+        next: publicEntitlementSnapshot(parseJsonColumn(row.next_json)),
       },
     };
   }

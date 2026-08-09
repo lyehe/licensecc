@@ -21,6 +21,11 @@ const ZERO_TRIAL = Object.freeze({
 // OpenAPI contract: no whitespace, `=`, or line breaks can enter any layer.
 export const PLAN_PROJECTION_PREVIEW_ID_PATTERN = /^ppv_[A-Za-z0-9_-]{1,124}$/;
 
+// 9999-12-31T23:59:59Z. This is safely representable by JavaScript and the
+// INTEGER/BIGINT storage used by the D1 and PostgreSQL schema ports, while
+// keeping an externally supplied support window within a practical epoch.
+export const MAX_SUPPORT_UNTIL_EPOCH_SECONDS = 253_402_300_799;
+
 export function isPlanProjectionPreviewId(value) {
   return typeof value === "string" && PLAN_PROJECTION_PREVIEW_ID_PATTERN.test(value);
 }
@@ -39,10 +44,10 @@ function optionalString(input, field) {
   return trimmed === "" ? null : trimmed;
 }
 
-function optionalInteger(input, field) {
+function optionalInteger(input, field, maximum = Number.MAX_SAFE_INTEGER) {
   const value = input?.[field];
   if (value === undefined || value === null) return null;
-  if (!Number.isInteger(value) || value < 0) throw new Error(`invalid_${field}`);
+  if (!Number.isSafeInteger(value) || value < 0 || value > maximum) throw new Error(`invalid_${field}`);
   return value;
 }
 
@@ -81,7 +86,7 @@ export function normalizePlanProjectionInput(input) {
     customer_id: optionalString(input, "customer_id"),
     plan_id: planId,
     plan_key: planKey,
-    support_until: optionalInteger(input, "support_until"),
+    support_until: optionalInteger(input, "support_until", MAX_SUPPORT_UNTIL_EPOCH_SECONDS),
     support_until_provided: Object.prototype.hasOwnProperty.call(input ?? {}, "support_until"),
     addons: normalizeAddons(input?.addons),
     notes: optionalString(input, "notes") ?? "",
@@ -224,6 +229,7 @@ export function planProjectionMatchesDesired(existing, desired) {
   return existing.status === "active" &&
     valuesEqual(existing.device_hash, input.device_hash ?? "") &&
     Number(existing.assertion_ttl_seconds) === Number(input.assertion_ttl_seconds) &&
+    Number(existing.cache_ttl_seconds) === Number(input.assertion_ttl_seconds) &&
     valuesEqual(existing.valid_from, input.valid_from) &&
     valuesEqual(existing.valid_until, input.valid_until) &&
     valuesEqual(existing.notes, input.notes ?? "") &&

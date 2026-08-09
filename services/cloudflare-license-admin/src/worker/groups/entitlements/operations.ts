@@ -293,11 +293,43 @@ export async function handleBatchTransition(request: Request, env: Env, actor: A
         continue;
       }
       if (!result.idempotencyRecorded) {
+        // A same-row concurrent winner can publish this key between the first
+        // replay lookup and our guarded no-op result. Treat it as the winner's
+        // replay rather than overwrite/duplicate the cache.
+        const racedReplay = await readIdempotentResponse(env.DB, scope, rowKey);
+        if (racedReplay !== null) {
+          results.push({ id, ok: true, code: `entitlement_${transition}d` });
+          continue;
+        }
         const rowBody = { ok: true, code: `entitlement_${transition}d`, request_id: requestIdValue, data: result.data };
-        await writeIdempotentResponse(env.DB, scope, rowKey, JSON.stringify(rowBody), Math.floor(Date.now() / 1000));
+        const stored = await writeIdempotentResponse(env.DB, scope, rowKey, JSON.stringify(rowBody), Math.floor(Date.now() / 1000));
+        if (stored !== null && stored !== JSON.stringify(rowBody)) {
+          results.push({ id, ok: true, code: `entitlement_${transition}d` });
+          continue;
+        }
       }
       results.push({ id, ok: true, code: `entitlement_${transition}d` });
     } catch (error) {
+      if (error instanceof Error && error.message === "idempotency_conflict") {
+        const racedReplay = await readIdempotentResponse(env.DB, scope, rowKey);
+        if (racedReplay !== null) {
+          results.push({ id, ok: true, code: `entitlement_${transition}d` });
+          continue;
+        }
+        results.push({ id, ok: false, code: "mutation_failed" });
+        continue;
+      }
+      if (error instanceof Error && error.message === "stale_transition") {
+        // Match mutationResponse's post-claim replay check for a same-key
+        // concurrent winner. A different mutation really is a row conflict.
+        const racedReplay = await readIdempotentResponse(env.DB, scope, rowKey);
+        if (racedReplay !== null) {
+          results.push({ id, ok: true, code: `entitlement_${transition}d` });
+          continue;
+        }
+        results.push({ id, ok: false, code: "stale_transition" });
+        continue;
+      }
       if (error instanceof Error && error.message === "revoked_terminal") {
         results.push({ id, ok: false, code: "revoked_entitlement_is_terminal" });
         continue;

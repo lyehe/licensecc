@@ -5,7 +5,10 @@ export function buildPolicyStampStatement(env, key, policyId, capacity, trial) {
     "UPDATE entitlements SET policy_id = ?, pool_size = ?, max_active_devices = ?, max_borrow_sec = ?, " +
       "meter_quota = ?, meter_period_sec = ?, " +
       "is_trial = ?, trial_expiration_basis = ?, trial_duration_sec = ?, trial_one_per_device = ?, trial_require_device_proof = ? " +
-      "WHERE project = ? AND feature = ? AND license_fingerprint = ?",
+      // createEntitlement's first batch statement is an optimistic claim. Keep
+      // this side-write contingent on that claim so a stale create/upsert cannot
+      // stamp a newer entitlement and accidentally enable its audit projection.
+      "WHERE project = ? AND feature = ? AND license_fingerprint = ? AND changes() = 1",
   ).bind(
     policyId,
     capacity.pool_size,

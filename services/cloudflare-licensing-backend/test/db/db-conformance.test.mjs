@@ -80,6 +80,34 @@ test("local SQLite adapter applies real migrations and persists a file-backed da
     assert.equal(row.value, "persisted");
     const entitlements = await opened.adapter.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'entitlements'").first();
     assert.equal(entitlements.name, "entitlements");
+    const catalogImportPreview = await opened.adapter.prepare(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'catalog_import_previews'",
+    ).first();
+    assert.equal(catalogImportPreview.name, "catalog_import_previews");
+    const previewColumns = await opened.adapter.prepare("PRAGMA table_info(catalog_import_previews)").all();
+    assert.deepEqual(
+      previewColumns.results.map((column) => column.name),
+      [
+        "id",
+        "actor_subject",
+        "source_generation",
+        "normalized_manifest_json",
+        "manifest_digest",
+        "preview_json",
+        "actions_json",
+        "effective_at",
+        "expires_at",
+        "claim_token",
+        "claimed_at",
+        "consumed_at",
+        "applied_response_json",
+        "created_at",
+      ],
+    );
+    const previewExpiryIndex = await opened.adapter.prepare(
+      "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_catalog_import_previews_expiry'",
+    ).first();
+    assert.equal(previewExpiryIndex.name, "idx_catalog_import_previews_expiry");
     opened.db.close();
 
     const readonly = openDatabase(dbPath, { readonly: true });

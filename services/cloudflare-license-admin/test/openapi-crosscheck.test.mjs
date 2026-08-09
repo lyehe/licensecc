@@ -14,10 +14,12 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { assembleComponents, assemblePaths, assertUniqueOperationIds } from "../dist-worker/worker/openapi/assemble.js";
 import { openApiDocument } from "../dist-worker/worker/openapi/document.js";
+import "./worker/transition-contracts.test.mjs";
 import { PAGINATION_ROUTE_OPTIONS } from "../dist-worker/worker/query.js";
 import { API_ROUTES, ALL_ROUTES, META_ROUTES } from "../dist-worker/worker/routes.js";
 import { API_BINDING_KEYS } from "../dist-worker/worker/index.js";
 import { POLICY_TYPES } from "@licensecc/licensing-domain/entitlements/policy";
+import { MAX_SUPPORT_UNTIL_EPOCH_SECONDS } from "@licensecc/licensing-domain/catalog/plan_projection";
 
 // Collect every `enum` array in the spec that describes the policy `type` field. The policy-type
 // enum is the only one carrying BOTH "node_locked" and "subscription" (the 3-value license-mode
@@ -103,6 +105,102 @@ test("plan projection Apply documents the canonical opaque preview-id grammar an
   const projectionErrors = JSON.stringify(apply.responses["409"]);
   assert.match(projectionErrors, /license_fingerprint_conflict/);
   assert.match(projectionErrors, /projection_preview_grant_expired/);
+  assert.match(projectionErrors, /assignment-or-entitlement identity/i);
+});
+
+test("plan projection documents the bounded epoch contract without exposing private cache policy", () => {
+  const input = openApiDocument.components.schemas.PlanProjectionInput;
+  assert.equal(input.properties.support_until.minimum, 0);
+  assert.equal(input.properties.support_until.maximum, MAX_SUPPORT_UNTIL_EPOCH_SECONDS);
+  assert.match(input.properties.support_until.description, /9999-12-31T23:59:59Z/);
+  assert.equal(Object.hasOwn(openApiDocument.components.schemas.PlanProjectionItem.properties, "cache_ttl_seconds"), false);
+});
+
+test("catalog import documents its server-bound Preview/Apply protocol", () => {
+  const input = openApiDocument.components.schemas.CatalogImportApplyInput;
+  assert.equal(input.properties.preview_id.pattern, "^civ_[A-Za-z0-9_-]{1,124}$");
+  const preview = openApiDocument.components.schemas.CatalogImportPreviewResponse;
+  assert.deepEqual(preview.required, ["preview_id", "manifest_digest", "manifest", "effects", "effective_at", "expires_at", "source_generation"]);
+  const operation = openApiDocument.paths["/api/admin/catalog/import"].post;
+  assert.deepEqual(
+    operation.requestBody.content["application/json"].schema.oneOf,
+    [
+      { $ref: "#/components/schemas/CatalogImportManifest" },
+      { $ref: "#/components/schemas/CatalogImportApplyInput" },
+    ],
+  );
+  const conflictSchema = operation.responses["409"].content["application/json"].schema;
+  assert.equal(conflictSchema.oneOf.length, 3);
+  assert.deepEqual(conflictSchema.oneOf[0], {
+    allOf: [
+      { $ref: "#/components/schemas/ErrorEnvelope" },
+      {
+        type: "object",
+        required: ["code"],
+        properties: {
+          code: {
+            enum: [
+              "preview_required",
+              "policy_disabled",
+              "catalog_import_snapshot_stale",
+              "stale_catalog_import_preview",
+              "expired_catalog_import_preview",
+              "claimed_catalog_import_preview",
+            ],
+          },
+        },
+      },
+    ],
+  });
+  assert.deepEqual(conflictSchema.oneOf[1], { $ref: "#/components/schemas/CatalogImportInvalidPlanConfigError" });
+  assert.deepEqual(conflictSchema.oneOf[2], { $ref: "#/components/schemas/CatalogImportTooLargeError" });
+  assert.deepEqual(openApiDocument.components.schemas.CatalogImportInvalidPlanConfigData, {
+    type: "object",
+    additionalProperties: false,
+    required: ["policy_id"],
+    properties: { policy_id: { type: "string" } },
+  });
+  assert.deepEqual(openApiDocument.components.schemas.CatalogImportInvalidPlanConfigError, {
+    allOf: [
+      { $ref: "#/components/schemas/ErrorEnvelope" },
+      {
+        type: "object",
+        required: ["code", "data"],
+        properties: {
+          code: { const: "invalid_plan_config" },
+          data: { $ref: "#/components/schemas/CatalogImportInvalidPlanConfigData" },
+        },
+      },
+    ],
+  });
+  assert.deepEqual(
+    operation.responses["409"].content["application/json"].examples.invalid_plan_config.value,
+    { ok: false, code: "invalid_plan_config", request_id: "1a2b3c-1", data: { policy_id: "policy_example" } },
+  );
+  assert.deepEqual(openApiDocument.components.schemas.CatalogImportTooLargeData, {
+    type: "object",
+    additionalProperties: false,
+    required: ["max_mutable_actions", "guidance"],
+    properties: {
+      max_mutable_actions: { const: 13 },
+      guidance: { const: "narrow the manifest and preview again" },
+    },
+  });
+  assert.deepEqual(openApiDocument.components.schemas.CatalogImportTooLargeError, {
+    allOf: [
+      { $ref: "#/components/schemas/ErrorEnvelope" },
+      {
+        type: "object",
+        required: ["code", "data"],
+        properties: {
+          code: { const: "catalog_import_too_large" },
+          data: { $ref: "#/components/schemas/CatalogImportTooLargeData" },
+        },
+      },
+    ],
+  });
+  const idempotency = operation.parameters.find((parameter) => parameter.name === "idempotency-key");
+  assert.equal(idempotency.description, "Required when applying a preview. For dry_run Preview, a valid header is ignored, but a present empty or over-long header returns 400 invalid_idempotency_key. The same actor/key replay returns the committed Apply response.");
 });
 
 test("spec operations equal the canonical route inventory exactly (no drift either way)", () => {

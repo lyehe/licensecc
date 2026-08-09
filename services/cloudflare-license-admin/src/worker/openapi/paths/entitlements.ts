@@ -15,6 +15,7 @@ import {
   limitCursorParams,
   okResponse,
   SYNC_SECURITY,
+  transitionOkResponse,
 } from "../components.js";
 
 export const entitlementPaths: LabeledPathFragment = {
@@ -54,7 +55,7 @@ export const entitlementPaths: LabeledPathFragment = {
         "400": errorResponse("Invalid request / json / id / idempotency key, or a policy_id was supplied while POLICY_STAMP_MODE is off.", "invalid_entitlement_id", "invalid_idempotency_key", "invalid_json", "invalid_request", "policy_stamping_disabled"),
         ...ADMIN_MUTATION_AUTH_ERRORS,
         "404": errorResponse("Referenced resource not found, or the policy_id is unknown/disabled.", "not_found", "policy_not_found"),
-        "409": errorResponse("Target entitlement is revoked (terminal).", "revoked_entitlement_is_terminal"),
+        "409": errorResponse("Target entitlement is revoked (terminal), or it changed after this request observed it; refetch and retry the latter.", "revoked_entitlement_is_terminal", "stale_transition"),
         "413": errorResponse("Request body exceeds 8192 bytes.", "body_too_large"),
         "500": errorResponse("Mutation failed, or dev bearer enabled outside development.", "mutation_failed", "dev_bearer_forbidden_in_environment"),
       },
@@ -90,7 +91,7 @@ export const entitlementPaths: LabeledPathFragment = {
         "400": errorResponse("Invalid request / json / id / idempotency key.", "invalid_entitlement_id", "invalid_idempotency_key", "invalid_json", "invalid_request"),
         ...ADMIN_MUTATION_AUTH_ERRORS,
         "404": errorResponse("No entitlement with that id.", "not_found"),
-        "409": errorResponse("Target entitlement is revoked (terminal).", "revoked_entitlement_is_terminal"),
+        "409": errorResponse("Target entitlement is revoked (terminal), or it changed after this request observed it; refetch and retry the latter.", "revoked_entitlement_is_terminal", "stale_transition"),
         "413": errorResponse("Request body exceeds 8192 bytes.", "body_too_large"),
         "500": errorResponse("Mutation failed, or dev bearer enabled outside development.", "mutation_failed", "dev_bearer_forbidden_in_environment"),
       },
@@ -99,7 +100,7 @@ export const entitlementPaths: LabeledPathFragment = {
     ["/api/admin/entitlements/{id}/disable", {
     post: {
       tags: ["admin:entitlements"],
-      summary: "Disable entitlement (admin-only, requires reason)",
+      summary: "Disable entitlement (admin-only, requires reason). An already-disabled entitlement is a successful no-op; a revoked source entitlement is terminal.",
       operationId: "disableEntitlement",
       security: ADMIN_SECURITY,
       parameters: [idParam, idempotencyKeyHeader],
@@ -108,11 +109,11 @@ export const entitlementPaths: LabeledPathFragment = {
         content: { "application/json": { schema: { $ref: "#/components/schemas/ReasonRequiredBody" } } },
       },
       responses: {
-        "200": okResponse("Entitlement disabled.", "#/components/schemas/EntitlementRecord", "entitlement_disabled"),
+        "200": transitionOkResponse("Entitlement is disabled. Returns the authoritative current record: status and revocation_seq change only from active; an already-disabled entitlement is returned unchanged.", "#/components/schemas/EntitlementRecord", { required: ["id", "revocation_seq"], expectedStatus: "disabled" }, "entitlement_disabled"),
         "400": errorResponse("Invalid request / json / id / idempotency key, or missing reason.", "invalid_entitlement_id", "invalid_idempotency_key", "invalid_json", "invalid_request", "reason_required"),
         ...ADMIN_MUTATION_AUTH_ERRORS,
         "404": errorResponse("No entitlement with that id.", "not_found"),
-        "409": errorResponse("Target entitlement is revoked (terminal).", "revoked_entitlement_is_terminal"),
+        "409": errorResponse("The source entitlement is revoked (terminal), so it cannot be disabled, or a different concurrent transition changed it after this request observed it; refetch and retry the latter.", "revoked_entitlement_is_terminal", "stale_transition"),
         "413": errorResponse("Request body exceeds 8192 bytes.", "body_too_large"),
         "500": errorResponse("Mutation failed, or dev bearer enabled outside development.", "mutation_failed", "dev_bearer_forbidden_in_environment"),
       },
@@ -121,7 +122,7 @@ export const entitlementPaths: LabeledPathFragment = {
     ["/api/admin/entitlements/{id}/reenable", {
     post: {
       tags: ["admin:entitlements"],
-      summary: "Re-enable entitlement (admin-only)",
+      summary: "Re-enable entitlement (admin-only). An already-active entitlement is a successful no-op; a revoked source entitlement is terminal.",
       operationId: "reenableEntitlement",
       security: ADMIN_SECURITY,
       parameters: [idParam, idempotencyKeyHeader],
@@ -131,11 +132,11 @@ export const entitlementPaths: LabeledPathFragment = {
         content: { "application/json": { schema: { $ref: "#/components/schemas/EmptyBody" } } },
       },
       responses: {
-        "200": okResponse("Entitlement re-enabled.", "#/components/schemas/EntitlementRecord", "entitlement_reenabled"),
+        "200": transitionOkResponse("Entitlement is active. Returns the authoritative current record: status and revocation_seq change only from disabled; an already-active entitlement is returned unchanged.", "#/components/schemas/EntitlementRecord", { required: ["id", "revocation_seq"], expectedStatus: "active" }, "entitlement_reenabled"),
         "400": errorResponse("Invalid request / json / id / idempotency key.", "invalid_entitlement_id", "invalid_idempotency_key", "invalid_json", "invalid_request"),
         ...ADMIN_MUTATION_AUTH_ERRORS,
         "404": errorResponse("No entitlement with that id.", "not_found"),
-        "409": errorResponse("Target entitlement is revoked (terminal).", "revoked_entitlement_is_terminal"),
+        "409": errorResponse("The source entitlement is revoked (terminal), so it cannot be re-enabled, or a different concurrent transition changed it after this request observed it; refetch and retry the latter.", "revoked_entitlement_is_terminal", "stale_transition"),
         "413": errorResponse("Request body exceeds 8192 bytes.", "body_too_large"),
         "500": errorResponse("Mutation failed, or dev bearer enabled outside development.", "mutation_failed", "dev_bearer_forbidden_in_environment"),
       },
@@ -144,7 +145,7 @@ export const entitlementPaths: LabeledPathFragment = {
     ["/api/admin/entitlements/{id}/revoke", {
     post: {
       tags: ["admin:entitlements"],
-      summary: "Revoke entitlement (admin-only, terminal state, requires reason)",
+      summary: "Revoke entitlement (admin-only, terminal state, requires reason). An already-revoked entitlement is a successful no-op.",
       operationId: "revokeEntitlement",
       security: ADMIN_SECURITY,
       parameters: [idParam, idempotencyKeyHeader],
@@ -153,11 +154,11 @@ export const entitlementPaths: LabeledPathFragment = {
         content: { "application/json": { schema: { $ref: "#/components/schemas/ReasonRequiredBody" } } },
       },
       responses: {
-        "200": okResponse("Entitlement revoked (terminal).", "#/components/schemas/EntitlementRecord", "entitlement_revoked"),
+        "200": transitionOkResponse("Entitlement is revoked. Returns the authoritative current record: status and revocation_seq change only from active or disabled; an already-revoked entitlement is returned unchanged.", "#/components/schemas/EntitlementRecord", { required: ["id", "revocation_seq"], expectedStatus: "revoked" }, "entitlement_revoked"),
         "400": errorResponse("Invalid request / json / id / idempotency key, or missing reason.", "invalid_entitlement_id", "invalid_idempotency_key", "invalid_json", "invalid_request", "reason_required"),
         ...ADMIN_MUTATION_AUTH_ERRORS,
         "404": errorResponse("No entitlement with that id.", "not_found"),
-        "409": errorResponse("Target entitlement is already revoked (terminal).", "revoked_entitlement_is_terminal"),
+        "409": errorResponse("A different concurrent transition changed the entitlement after this request observed it; refetch and retry. An already-revoked entitlement remains a 200 no-op.", "stale_transition"),
         "413": errorResponse("Request body exceeds 8192 bytes.", "body_too_large"),
         "500": errorResponse("Mutation failed, or dev bearer enabled outside development.", "mutation_failed", "dev_bearer_forbidden_in_environment"),
       },

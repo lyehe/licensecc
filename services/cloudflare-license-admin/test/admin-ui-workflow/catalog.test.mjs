@@ -127,6 +127,9 @@ test("admin UI workflow builds catalog paths and payloads", async () => {
   assert.equal(workflow.catalogPlanExportPath("plan/with space"), "/api/admin/catalog/plans/plan%2Fwith%20space/export");
   assert.equal(workflow.catalogImportPath(), "/api/admin/catalog/import");
   assert.equal(workflow.catalogImportPath(true), "/api/admin/catalog/import?dry_run=1");
+  assert.deepEqual(workflow.catalogImportApplyBody("civ_server_bound"), { preview_id: "civ_server_bound" });
+  assert.throws(() => workflow.catalogImportApplyBody("civ_not=safe"), /catalog_import_preview_id_required_or_invalid/);
+  assert.throws(() => workflow.catalogImportApplyBody("manifest-instead-of-preview"), /catalog_import_preview_id_required_or_invalid/);
   assert.equal(workflow.canRunCatalogAction("active", "disable"), true);
   assert.equal(workflow.canRunCatalogAction("disabled", "disable"), false);
   assert.equal(workflow.canRunCatalogAction("disabled", "reenable"), true);
@@ -243,4 +246,71 @@ test("admin UI workflow builds catalog paths and payloads", async () => {
     feature_key: "team",
     feature_inclusion: "addon",
   }), /addon_key_required/);
+});
+
+test("admin UI workflow binds catalog import Apply to a canonical manifest snapshot", async () => {
+  const workflow = await loadWorkflowModule("features/catalog/workflow.ts");
+  const firstOrder = {
+    format_version: 1,
+    features: [
+      { project: "DEFAULT", feature_key: "zeta", name: "Zeta" },
+      { project: "DEFAULT", feature_key: "alpha", name: "Alpha", category: "", status: "active" },
+    ],
+    plans: [{
+      project: "DEFAULT",
+      plan_key: "pro",
+      name: "Pro",
+      features: [
+        { project: "DEFAULT", feature_key: "zeta", feature_inclusion: "included" },
+        { project: "DEFAULT", feature_key: "alpha", feature_inclusion: "included" },
+      ],
+    }],
+  };
+  const reorderedDefaults = {
+    features: [
+      { name: "Alpha", feature_key: "alpha", project: "DEFAULT" },
+      { name: "Zeta", feature_key: "zeta", project: "DEFAULT", description: "", category: "", status: "active" },
+    ],
+    plans: [{
+      name: "Pro",
+      project: "DEFAULT",
+      plan_key: "pro",
+      description: "",
+      status: "active",
+      version: 1,
+      features: [
+        { project: "DEFAULT", feature_key: "alpha", feature_inclusion: "included" },
+        { project: "DEFAULT", feature_key: "zeta", feature_inclusion: "included" },
+      ],
+    }],
+  };
+  assert.equal(
+    workflow.catalogImportInputSnapshot(firstOrder),
+    workflow.catalogImportInputSnapshot(reorderedDefaults),
+  );
+  assert.equal(
+    await workflow.catalogImportInputDigest(firstOrder),
+    await workflow.catalogImportInputDigest(reorderedDefaults),
+  );
+});
+
+test("admin UI workflow preserves catalog-import target tuples and typed delta values", async () => {
+  const workflow = await loadWorkflowModule("features/catalog/workflow.ts");
+  const first = { entity: "feature", project: "A / B", feature_key: "C" };
+  const second = { entity: "feature", project: "A", feature_key: "B / C" };
+  assert.notEqual(workflow.catalogImportTargetKey(first), workflow.catalogImportTargetKey(second));
+  assert.deepEqual(workflow.catalogImportTargetFields(first), [
+    { label: "entity", value: "feature" },
+    { label: "project", value: "A / B" },
+    { label: "feature_key", value: "C" },
+  ]);
+  assert.deepEqual(workflow.catalogImportTargetFields(second), [
+    { label: "entity", value: "feature" },
+    { label: "project", value: "A" },
+    { label: "feature_key", value: "B / C" },
+  ]);
+  assert.equal(workflow.catalogImportEffectValueLabel(undefined), "<absent>");
+  assert.equal(workflow.catalogImportEffectValueLabel(null), "<null>");
+  assert.equal(workflow.catalogImportEffectValueLabel("null"), '"null"');
+  assert.equal(workflow.catalogImportEffectValueLabel("unset"), '"unset"');
 });

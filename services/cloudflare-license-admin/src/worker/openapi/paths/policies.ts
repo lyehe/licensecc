@@ -14,6 +14,7 @@ import {
   limitCursorParams,
   okResponse,
   SYNC_SECURITY,
+  transitionOkResponse,
 } from "../components.js";
 
 export const policyPaths: LabeledPathFragment = {
@@ -102,7 +103,7 @@ export const policyPaths: LabeledPathFragment = {
         content: { "application/json": { schema: { $ref: "#/components/schemas/ReasonRequiredBody" } } },
       },
       responses: {
-        "200": okResponse("Policy disabled.", "#/components/schemas/Policy", "policy_disabled"),
+        "200": transitionOkResponse("Policy disabled.", "#/components/schemas/Policy", { required: ["id"], expectedStatus: "disabled" }, "policy_disabled"),
         "400": errorResponse("Invalid request / json / idempotency key, or missing reason.", "invalid_idempotency_key", "invalid_json", "invalid_request", "reason_required"),
         ...ADMIN_MUTATION_AUTH_ERRORS,
         "404": errorResponse("No policy with that id.", "not_found"),
@@ -125,7 +126,7 @@ export const policyPaths: LabeledPathFragment = {
         content: { "application/json": { schema: { $ref: "#/components/schemas/EmptyBody" } } },
       },
       responses: {
-        "200": okResponse("Policy re-enabled.", "#/components/schemas/Policy", "policy_reenabled"),
+        "200": transitionOkResponse("Policy re-enabled.", "#/components/schemas/Policy", { required: ["id"], expectedStatus: "active" }, "policy_reenabled"),
         "400": errorResponse("Invalid request / json / idempotency key.", "invalid_idempotency_key", "invalid_json", "invalid_request"),
         ...ADMIN_MUTATION_AUTH_ERRORS,
         "404": errorResponse("No policy with that id.", "not_found"),

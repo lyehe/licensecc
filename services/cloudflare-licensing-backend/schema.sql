@@ -79,6 +79,23 @@ CREATE TABLE IF NOT EXISTS catalog_features (
   UNIQUE (project, feature_key)
 );
 
+CREATE TABLE IF NOT EXISTS catalog_import_previews (
+  id                       TEXT PRIMARY KEY,
+  actor_subject            TEXT NOT NULL,
+  source_generation        INTEGER NOT NULL,
+  normalized_manifest_json TEXT NOT NULL,
+  manifest_digest          TEXT NOT NULL,
+  preview_json             TEXT NOT NULL,
+  actions_json             TEXT NOT NULL,
+  effective_at             INTEGER NOT NULL,
+  expires_at               INTEGER NOT NULL,
+  claim_token              TEXT NULL,
+  claimed_at               INTEGER NULL,
+  consumed_at              INTEGER NULL,
+  applied_response_json    TEXT NULL,
+  created_at               INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS catalog_plan_features (
   project TEXT NOT NULL,
   plan_id TEXT NOT NULL,
@@ -230,6 +247,24 @@ CREATE TABLE IF NOT EXISTS lease_issuance (
   request_id TEXT NULL,
   FOREIGN KEY (project, feature, license_fingerprint)
     REFERENCES entitlements(project, feature, license_fingerprint) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS license_plan_assignment_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  license_id TEXT NOT NULL,
+  project TEXT NOT NULL,
+  plan_id TEXT NOT NULL,
+  license_fingerprint TEXT NOT NULL,
+  event_type TEXT NOT NULL CHECK (event_type IN ('create', 'update')),
+  actor TEXT NOT NULL DEFAULT '',
+  actor_type TEXT NOT NULL DEFAULT 'unknown' CHECK (actor_type IN ('access', 'dev', 'cli', 'sync', 'system', 'unknown')),
+  source TEXT NOT NULL DEFAULT 'admin',
+  request_id TEXT NOT NULL DEFAULT '',
+  prev_json TEXT NOT NULL DEFAULT '',
+  next_json TEXT NOT NULL DEFAULT '',
+  reason TEXT NOT NULL DEFAULT '',
+  idempotency_key TEXT NULL,
+  created_at INTEGER NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS license_plan_assignments (
@@ -510,6 +545,13 @@ CREATE INDEX IF NOT EXISTS idx_catalog_events_project
 CREATE INDEX IF NOT EXISTS idx_catalog_features_project_status
   ON catalog_features(project, status);
 
+CREATE INDEX IF NOT EXISTS idx_catalog_import_previews_consumed
+  ON catalog_import_previews(consumed_at)
+  WHERE consumed_at IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_catalog_import_previews_expiry
+  ON catalog_import_previews(expires_at);
+
 CREATE UNIQUE INDEX IF NOT EXISTS idx_catalog_plan_features_addon
   ON catalog_plan_features(plan_id, addon_key)
   WHERE addon_key IS NOT NULL;
@@ -567,18 +609,17 @@ CREATE INDEX IF NOT EXISTS idx_lease_issuance_entitlement
 CREATE INDEX IF NOT EXISTS idx_lease_issuance_issued_at
   ON lease_issuance(issued_at);
 
+CREATE INDEX IF NOT EXISTS idx_license_plan_assignment_events_assignment
+  ON license_plan_assignment_events(license_id, project, id DESC);
+
 CREATE INDEX IF NOT EXISTS idx_license_plan_assignments_customer
   ON license_plan_assignments(customer_id);
 
 CREATE INDEX IF NOT EXISTS idx_license_plan_assignments_plan
   ON license_plan_assignments(project, plan_id, status);
 
-CREATE INDEX IF NOT EXISTS idx_license_plan_projection_previews_consumed
-  ON license_plan_projection_previews(consumed_at)
-  WHERE consumed_at IS NOT NULL;
-
-CREATE INDEX IF NOT EXISTS idx_license_plan_projection_previews_expiry
-  ON license_plan_projection_previews(expires_at);
+CREATE INDEX IF NOT EXISTS idx_license_plan_projection_previews_expiry_id
+  ON license_plan_projection_previews(expires_at, id);
 
 CREATE INDEX IF NOT EXISTS idx_licenses_customer
   ON licenses(customer_id);

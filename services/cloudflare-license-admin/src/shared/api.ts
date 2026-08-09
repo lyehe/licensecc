@@ -14,6 +14,18 @@ export type {
 } from "@licensecc/licensing-domain/entitlements/contracts";
 
 export type {
+  CatalogImportApplyInput,
+  CatalogImportApplyResult,
+  CatalogImportEffect,
+  CatalogImportEffectCounter,
+  CatalogImportEffects,
+  CatalogImportManifest,
+  CatalogImportPreviewResponse,
+  CatalogImportStatus,
+  NormalizedCatalogImportManifest,
+} from "@licensecc/licensing-domain/catalog/import_preview";
+
+export type {
   PlanProjectionApplyInput,
   PlanProjectionApplyResult,
   PlanProjectionInput,
@@ -143,28 +155,6 @@ export interface CatalogPlanFeatureInput {
   max_borrow_sec?: number | null;
   meter_quota?: number | null;
   meter_period_sec?: number | null;
-}
-
-export interface CatalogPlanImport extends CatalogPlanInput {
-  features?: CatalogPlanFeatureInput[];
-}
-
-export interface CatalogImportManifest {
-  format_version?: 1;
-  features: CatalogFeatureInput[];
-  plans: CatalogPlanImport[];
-}
-
-export interface CatalogImportCounter {
-  created: number;
-  updated: number;
-  unchanged: number;
-}
-
-export interface CatalogImportResult {
-  features: CatalogImportCounter;
-  plans: CatalogImportCounter;
-  plan_features: CatalogImportCounter;
 }
 
 // ── License-policy templates (Stage 3) ───────────────────────────────────────

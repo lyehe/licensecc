@@ -72,7 +72,16 @@ export function idempotencyFromCurrentStatement(
     return null;
   }
   return env.DB.prepare(
-    `INSERT OR IGNORE INTO mutation_idempotency (scope, idempotency_key, response_json, created_at)
+    // This deliberately has NO conflict handler. A collection-level
+    // idempotency key is the final claim in the mutation batch: if another
+    // tuple published the key after this request's replay pre-read, the UNIQUE
+    // violation aborts and rolls back this write, its side statements, and its
+    // audit row together. `INSERT OR IGNORE` would instead let both tuples
+    // commit while silently keeping only the first response. The committed
+    // response is selected by the next (read-only) batch statement; avoiding
+    // INSERT...RETURNING here keeps this exact D1 statement usable by the
+    // local Wrangler SQL execution gate too.
+    `INSERT INTO mutation_idempotency (scope, idempotency_key, response_json, created_at)
      SELECT ?, ?,
        json_object(
          'ok', json('true'),
@@ -82,7 +91,8 @@ export function idempotencyFromCurrentStatement(
        ),
        ?
      FROM entitlements
-     WHERE project = ? AND feature = ? AND license_fingerprint = ?`,
+     WHERE project = ? AND feature = ? AND license_fingerprint = ?
+       AND changes() = 1`,
   ).bind(
     idempotency.scope,
     ctx.idempotencyKey,
@@ -94,6 +104,18 @@ export function idempotencyFromCurrentStatement(
     key.feature,
     key.license_fingerprint,
   );
+}
+
+function idempotencyResponseFromCurrentStatement(env, ctx, idempotency) {
+  if (ctx.idempotencyKey === null || idempotency === null) {
+    return null;
+  }
+  // `changes()` is the strict INSERT's count. A successful claim has exactly
+  // one immutable response row; a zero-row claim must not read a pre-existing
+  // response as if this mutation had published it.
+  return env.DB.prepare(
+    "SELECT response_json FROM mutation_idempotency WHERE scope = ? AND idempotency_key = ? AND changes() = 1 LIMIT 1",
+  ).bind(idempotency.scope, ctx.idempotencyKey);
 }
 
 export function eventFromCurrentStatement(
@@ -112,7 +134,8 @@ export function eventFromCurrentStatement(
        ${entitlementCurrentJsonSql("", "?", { includeCacheTtl: true })},
        ?, ?, ?
      FROM entitlements
-     WHERE project = ? AND feature = ? AND license_fingerprint = ?`,
+     WHERE project = ? AND feature = ? AND license_fingerprint = ?
+       AND changes() = 1`,
   ).bind(
     eventType,
     reason,
@@ -142,6 +165,41 @@ export function batchReturnedRow(result) {
   return rows[0];
 }
 
+function idempotencyConflict(error) {
+  const message = error instanceof Error ? error.message : String(error);
+  // D1 includes the failing table in its SQLite constraint error. Limit this
+  // mapping to the replay table so an unrelated integrity failure remains a
+  // normal write failure instead of accidentally replaying a stale response.
+  return /mutation_idempotency/i.test(message) && /(?:unique|constraint)/i.test(message);
+}
+
+function cachedMutationData(result) {
+  const row = batchReturnedRow(result);
+  if (row === null || typeof row.response_json !== "string") {
+    throw new Error("write_failed");
+  }
+  try {
+    const body = JSON.parse(row.response_json);
+    if (body === null || typeof body !== "object" || Array.isArray(body) || !("data" in body)) {
+      throw new Error("invalid_cached_response");
+    }
+    return body.data;
+  } catch {
+    throw new Error("write_failed");
+  }
+}
+
+function finalSnapshotStatement(env, key) {
+  // `changes()` is still the event INSERT's change count. This makes the
+  // snapshot contingent on a successful audited write, while keeping the
+  // returned row in the same transactional batch as any policy/device side
+  // statement. Never reread after commit: another request may have changed the
+  // row before the caller receives its initial success body.
+  return env.DB.prepare(
+    `${entitlementSelectSql("WHERE project = ? AND feature = ? AND license_fingerprint = ? AND changes() = 1")}`,
+  ).bind(key.project, key.feature, key.license_fingerprint);
+}
+
 export async function writeEntitlementWithAudit(
   env,
   key,
@@ -153,6 +211,7 @@ export async function writeEntitlementWithAudit(
   now,
   idempotency,
   extraStatements = [],
+  { allowNoWrite = false } = {},
 ) {
   // INVARIANT: the entitlement write, its audit event, and any idempotency record MUST commit atomically.
   // Real Cloudflare D1 always exposes batch(); a missing batch() means a degraded or mocked binding, so we
@@ -164,28 +223,110 @@ export async function writeEntitlementWithAudit(
   const statements = [writeStatement];
   // Extra statements (policy/capacity/trial stamps, device status writes) must run before the audit
   // and idempotency projections so those records describe the final committed state, not only the
-  // row returned by the first INSERT/UPDATE.
+  // row returned by the first INSERT/UPDATE. They must themselves carry `changes() = 1` in their
+  // WHERE predicate: the first guarded write is the batch claim, so a loser must not make an extra
+  // write which could otherwise make the later audit/idempotency INSERTs appear successful.
   for (const extra of extraStatements) {
     statements.push(extra);
   }
   statements.push(eventFromCurrentStatement(env, ctx, eventType, key, prev, reason, now));
   const idempotencyStatement = idempotencyFromCurrentStatement(env, ctx, key, idempotency, now);
+  let idempotencyResultIndex = -1;
+  let finalSnapshotResultIndex = -1;
   if (idempotencyStatement !== null) {
     statements.push(idempotencyStatement);
+    idempotencyResultIndex = statements.length;
+    statements.push(idempotencyResponseFromCurrentStatement(env, ctx, idempotency));
+  } else if (extraStatements.length > 0) {
+    finalSnapshotResultIndex = statements.length;
+    statements.push(finalSnapshotStatement(env, key));
   }
-  const results = await env.DB.batch(statements);
+  let results;
+  try {
+    results = await env.DB.batch(statements);
+  } catch (error) {
+    if (idempotencyStatement !== null && idempotencyConflict(error)) {
+      // The losing transaction was fully rolled back by D1. The admin wrapper
+      // rereads the now-authoritative winner cache and returns it as a replay.
+      throw new Error("idempotency_conflict");
+    }
+    throw error;
+  }
   const saved = batchReturnedRow(results[0]);
   if (saved === null) {
+    if (allowNoWrite) {
+      return null;
+    }
     throw new Error("write_failed");
   }
-  if (extraStatements.length > 0) {
-    const finalRow = await findEntitlement(env, key);
+  if (idempotencyResultIndex >= 0) {
+    // Return the exact payload source that was committed under the replay key.
+    // mutationResponse rebuilds the outer envelope in the same field order, so
+    // an initial response and a later replay are byte-for-byte stable even if a
+    // new mutation commits immediately after this batch.
+    return { data: cachedMutationData(results[idempotencyResultIndex]), idempotencyRecorded: true };
+  }
+  if (finalSnapshotResultIndex >= 0) {
+    const finalRow = batchReturnedRow(results[finalSnapshotResultIndex]);
     if (finalRow === null) {
       throw new Error("write_failed");
     }
-    return { data: finalRow, idempotencyRecorded: idempotencyStatement !== null };
+    return { data: withId(finalRow), idempotencyRecorded: false };
   }
-  return { data: withId(saved), idempotencyRecorded: idempotencyStatement !== null };
+  return { data: withId(saved), idempotencyRecorded: false };
+}
+
+async function classifyEntitlementGuardMiss(env, key) {
+  const current = await findEntitlement(env, key);
+  if (current === null) {
+    // The initial read found the row. A later absence is therefore a concurrent
+    // change, not the ordinary initial 404 path.
+    throw new Error("stale_transition");
+  }
+  if (current.status === "revoked") {
+    throw new Error("revoked_terminal");
+  }
+  throw new Error("stale_transition");
+}
+
+async function classifyEntitlementTransitionGuardMiss(env, key, targetStatus, eventType) {
+  const current = await findEntitlement(env, key);
+  if (current === null) {
+    throw new Error("stale_transition");
+  }
+  if (current.status === targetStatus) {
+    // A concurrent request already reached the same target. It is a no-op from the
+    // caller's perspective, but it did not write a second seq/audit/idempotency row.
+    return { data: current, idempotencyRecorded: false };
+  }
+  if (current.status === "revoked" && eventType !== "revoke") {
+    throw new Error("revoked_terminal");
+  }
+  throw new Error("stale_transition");
+}
+
+async function classifyDeviceTransitionGuardMiss(env, key, deviceKeyId, targetStatus) {
+  const current = await findEntitlement(env, key);
+  if (current === null) {
+    throw new Error("stale_transition");
+  }
+  const device = await env.DB.prepare(
+    "SELECT status FROM entitlement_devices WHERE project = ? AND feature = ? AND license_fingerprint = ? AND device_key_id = ? LIMIT 1",
+  )
+    .bind(key.project, key.feature, key.license_fingerprint, deviceKeyId)
+    .first();
+  if (device === null) {
+    // Like a deleted parent, this device existed at the initial read and was
+    // removed by a concurrent writer before the guarded batch could claim it.
+    throw new Error("stale_transition");
+  }
+  if (device.status === targetStatus) {
+    return { data: current, idempotencyRecorded: false };
+  }
+  if (device.status === "revoked" && targetStatus !== "revoked") {
+    throw new Error("device_revoked_terminal");
+  }
+  throw new Error("stale_transition");
 }
 
 export async function createEntitlement(
@@ -203,7 +344,12 @@ export async function createEntitlement(
     throw new Error("revoked_terminal");
   }
   const statement = env.DB.prepare(
-    `INSERT INTO entitlements (project, feature, license_fingerprint, device_hash, status, assertion_ttl_seconds, cache_ttl_seconds, revocation_seq, valid_from, valid_until, notes, customer_id, license_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT MAX(revocation_seq) + 1 FROM entitlement_events WHERE project = ? AND feature = ? AND license_fingerprint = ?), 1), ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(project, feature, license_fingerprint) DO UPDATE SET device_hash = excluded.device_hash, status = excluded.status, assertion_ttl_seconds = excluded.assertion_ttl_seconds, cache_ttl_seconds = excluded.cache_ttl_seconds, revocation_seq = max(entitlements.revocation_seq, COALESCE((SELECT MAX(revocation_seq) FROM entitlement_events WHERE project = entitlements.project AND feature = entitlements.feature AND license_fingerprint = entitlements.license_fingerprint), entitlements.revocation_seq)) + 1, valid_from = excluded.valid_from, valid_until = excluded.valid_until, notes = excluded.notes, customer_id = excluded.customer_id, license_id = excluded.license_id, updated_at = excluded.updated_at RETURNING ${ENTITLEMENT_COLUMNS}`,
+    // The conflict-update is an optimistic CAS against the row this invocation
+    // observed.  A concurrent writer must not be overwritten merely because it
+    // landed between findEntitlement() and this batch.  When the observation was
+    // "missing", a concurrent insert instead returns no row (never an implicit
+    // update of an unknown newer entitlement).
+    `INSERT INTO entitlements (project, feature, license_fingerprint, device_hash, status, assertion_ttl_seconds, cache_ttl_seconds, revocation_seq, valid_from, valid_until, notes, customer_id, license_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT MAX(revocation_seq) + 1 FROM entitlement_events WHERE project = ? AND feature = ? AND license_fingerprint = ?), 1), ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(project, feature, license_fingerprint) DO UPDATE SET device_hash = excluded.device_hash, status = excluded.status, assertion_ttl_seconds = excluded.assertion_ttl_seconds, cache_ttl_seconds = excluded.cache_ttl_seconds, revocation_seq = max(entitlements.revocation_seq, COALESCE((SELECT MAX(revocation_seq) FROM entitlement_events WHERE project = entitlements.project AND feature = entitlements.feature AND license_fingerprint = entitlements.license_fingerprint), entitlements.revocation_seq)) + 1, valid_from = excluded.valid_from, valid_until = excluded.valid_until, notes = excluded.notes, customer_id = excluded.customer_id, license_id = excluded.license_id, updated_at = excluded.updated_at WHERE ? IS NOT NULL AND entitlements.status = ? AND entitlements.revocation_seq = ? RETURNING ${ENTITLEMENT_COLUMNS}`,
   ).bind(
     input.project,
     input.feature,
@@ -222,8 +368,11 @@ export async function createEntitlement(
     input.license_id ?? null,
     prev?.created_at ?? now,
     now,
+    prev === null ? null : 1,
+    prev?.status ?? "",
+    prev?.revocation_seq ?? -1,
   );
-  return writeEntitlementWithAudit(
+  const result = await writeEntitlementWithAudit(
     env,
     input,
     statement,
@@ -236,7 +385,12 @@ export async function createEntitlement(
     // Optional extra statements committed in the SAME atomic batch as the INSERT (e.g. the policy
     // capacity/trial/provenance stamp). Default [] keeps every existing caller byte-identical.
     extraStatements,
+    { allowNoWrite: true },
   );
+  if (result !== null) {
+    return result;
+  }
+  return classifyEntitlementGuardMiss(env, input);
 }
 
 export async function patchEntitlement(env, key, patch, ctx, idempotency) {
@@ -255,7 +409,7 @@ export async function patchEntitlement(env, key, patch, ctx, idempotency) {
   }
   const now = Math.floor(Date.now() / 1000);
   const statement = env.DB.prepare(
-    `UPDATE entitlements SET device_hash = ?, assertion_ttl_seconds = ?, cache_ttl_seconds = ?, ${REVOCATION_SEQ_BUMP}, valid_from = ?, valid_until = ?, notes = ?, customer_id = ?, license_id = ?, updated_at = ? WHERE project = ? AND feature = ? AND license_fingerprint = ? RETURNING ${ENTITLEMENT_COLUMNS}`,
+    `UPDATE entitlements SET device_hash = ?, assertion_ttl_seconds = ?, cache_ttl_seconds = ?, ${REVOCATION_SEQ_BUMP}, valid_from = ?, valid_until = ?, notes = ?, customer_id = ?, license_id = ?, updated_at = ? WHERE project = ? AND feature = ? AND license_fingerprint = ? AND status = ? AND revocation_seq = ? RETURNING ${ENTITLEMENT_COLUMNS}`,
   ).bind(
     patch.device_hash ?? prev.device_hash,
     assertionTtl,
@@ -269,8 +423,14 @@ export async function patchEntitlement(env, key, patch, ctx, idempotency) {
     key.project,
     key.feature,
     key.license_fingerprint,
+    prev.status,
+    prev.revocation_seq,
   );
-  return writeEntitlementWithAudit(env, key, statement, ctx, "update", prev, "", now, idempotency);
+  const result = await writeEntitlementWithAudit(env, key, statement, ctx, "update", prev, "", now, idempotency, [], { allowNoWrite: true });
+  if (result !== null) {
+    return result;
+  }
+  return classifyEntitlementGuardMiss(env, key);
 }
 
 export async function transitionEntitlement(env, key, status, eventType, reason, ctx, idempotency) {
@@ -286,9 +446,13 @@ export async function transitionEntitlement(env, key, status, eventType, reason,
   }
   const now = Math.floor(Date.now() / 1000);
   const statement = env.DB.prepare(
-    `UPDATE entitlements SET status = ?, ${REVOCATION_SEQ_BUMP}, updated_at = ? WHERE project = ? AND feature = ? AND license_fingerprint = ? RETURNING ${ENTITLEMENT_COLUMNS}`,
-  ).bind(status, now, key.project, key.feature, key.license_fingerprint);
-  return writeEntitlementWithAudit(env, key, statement, ctx, eventType, prev, reason, now, idempotency);
+    `UPDATE entitlements SET status = ?, ${REVOCATION_SEQ_BUMP}, updated_at = ? WHERE project = ? AND feature = ? AND license_fingerprint = ? AND status = ? AND revocation_seq = ? RETURNING ${ENTITLEMENT_COLUMNS}`,
+  ).bind(status, now, key.project, key.feature, key.license_fingerprint, prev.status, prev.revocation_seq);
+  const result = await writeEntitlementWithAudit(env, key, statement, ctx, eventType, prev, reason, now, idempotency, [], { allowNoWrite: true });
+  if (result !== null) {
+    return result;
+  }
+  return classifyEntitlementTransitionGuardMiss(env, key, status, eventType);
 }
 
 // List the registered device keys for an entitlement (relay-resistance devices, table
@@ -342,17 +506,21 @@ export async function transitionEntitlementDevice(env, key, deviceKeyId, deviceS
   const detail = `${action} ${shortDeviceKeyId(deviceKeyId)}${reason === "" ? "" : `: ${reason}`}`;
   // The entitlement write is a pure revocation_seq bump (status unchanged); RETURNING feeds the
   // audit event's SELECT and the response row. The device UPDATE rides in the SAME atomic batch.
-  // The bump is guarded by a device-EXISTS clause (mirroring the CLI's deviceExistsWhere): if the
-  // device is deleted in the tiny window between the pre-read above and this batch, the UPDATE
-  // matches 0 rows -> RETURNING is empty -> writeEntitlementWithAudit fails closed (no phantom
-  // seq bump + audit event for a device that is gone).
+  // Both rows are compared with the exact observation made above. The parent claim also requires
+  // the observed device status, and the device write inherits that claim through changes() = 1.
+  // D1 batch statements are sequential and transactional, so no other write can enter between
+  // these two guarded statements; a loser executes no parent/device/event/idempotency write.
   const writeStatement = env.DB.prepare(
-    `UPDATE entitlements SET ${REVOCATION_SEQ_BUMP}, updated_at = ? WHERE project = ? AND feature = ? AND license_fingerprint = ? AND EXISTS (SELECT 1 FROM entitlement_devices WHERE project = ? AND feature = ? AND license_fingerprint = ? AND device_key_id = ?) RETURNING ${ENTITLEMENT_COLUMNS}`,
-  ).bind(now, key.project, key.feature, key.license_fingerprint, key.project, key.feature, key.license_fingerprint, deviceKeyId);
+    `UPDATE entitlements SET ${REVOCATION_SEQ_BUMP}, updated_at = ? WHERE project = ? AND feature = ? AND license_fingerprint = ? AND status = ? AND revocation_seq = ? AND EXISTS (SELECT 1 FROM entitlement_devices WHERE project = ? AND feature = ? AND license_fingerprint = ? AND device_key_id = ? AND status = ?) RETURNING ${ENTITLEMENT_COLUMNS}`,
+  ).bind(now, key.project, key.feature, key.license_fingerprint, prev.status, prev.revocation_seq, key.project, key.feature, key.license_fingerprint, deviceKeyId, device.status);
   const deviceStatement = env.DB.prepare(
-    "UPDATE entitlement_devices SET status = ?, updated_at = ? WHERE project = ? AND feature = ? AND license_fingerprint = ? AND device_key_id = ?",
-  ).bind(deviceStatus, now, key.project, key.feature, key.license_fingerprint, deviceKeyId);
-  return writeEntitlementWithAudit(env, key, writeStatement, ctx, "update", prev, detail, now, idempotency, [deviceStatement]);
+    "UPDATE entitlement_devices SET status = ?, updated_at = ? WHERE project = ? AND feature = ? AND license_fingerprint = ? AND device_key_id = ? AND status = ? AND changes() = 1",
+  ).bind(deviceStatus, now, key.project, key.feature, key.license_fingerprint, deviceKeyId, device.status);
+  const result = await writeEntitlementWithAudit(env, key, writeStatement, ctx, "update", prev, detail, now, idempotency, [deviceStatement], { allowNoWrite: true });
+  if (result !== null) {
+    return result;
+  }
+  return classifyDeviceTransitionGuardMiss(env, key, deviceKeyId, deviceStatus);
 }
 
 export async function syncEntitlement(env, input, reason, ctx, idempotency) {
@@ -438,13 +606,19 @@ export async function setEntitlementCapacity(env, key, capacity, ctx, idempotenc
     "updated_at = ?",
   ].join(", ");
   const statement = env.DB.prepare(
-    `UPDATE entitlements SET ${setClause} WHERE project = ? AND feature = ? AND license_fingerprint = ? RETURNING ${ENTITLEMENT_COLUMNS}`,
+    `UPDATE entitlements SET ${setClause} WHERE project = ? AND feature = ? AND license_fingerprint = ? AND status = ? AND revocation_seq = ? RETURNING ${ENTITLEMENT_COLUMNS}`,
   ).bind(
     ...values,
     now,
     key.project,
     key.feature,
     key.license_fingerprint,
+    prev.status,
+    prev.revocation_seq,
   );
-  return writeEntitlementWithAudit(env, key, statement, ctx, "update", prev, "", now, idempotency);
+  const result = await writeEntitlementWithAudit(env, key, statement, ctx, "update", prev, "", now, idempotency, [], { allowNoWrite: true });
+  if (result !== null) {
+    return result;
+  }
+  return classifyEntitlementGuardMiss(env, key);
 }

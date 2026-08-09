@@ -2,6 +2,9 @@ import type {
   CatalogFeature,
   CatalogFeatureInput,
   CatalogFeaturePatch,
+  CatalogImportApplyInput,
+  CatalogImportEffect,
+  CatalogImportManifest,
   CatalogPlan,
   CatalogPlanFeatureInput,
   CatalogPlanInput,
@@ -10,6 +13,7 @@ import type {
   PlanProjectionInput,
 } from "../../../shared/api";
 import { isPlanProjectionPreviewId } from "@licensecc/licensing-domain/catalog/plan_projection";
+import { catalogImportManifestDigest as domainCatalogImportManifestDigest, catalogImportManifestSnapshot, isCatalogImportPreviewId } from "@licensecc/licensing-domain/catalog/import_preview";
 import { dateInputToEpoch } from "../../shared/dates";
 
 export interface CatalogFilter {
@@ -155,6 +159,60 @@ export function catalogPlanExportPath(planId: string): string {
 
 export function catalogImportPath(dryRun = false): string {
   return `/api/admin/catalog/import${dryRun ? "?dry_run=1" : ""}`;
+}
+
+export function catalogImportApplyBody(previewId: string): CatalogImportApplyInput {
+  if (!isCatalogImportPreviewId(previewId)) {
+    throw new Error("catalog_import_preview_id_required_or_invalid");
+  }
+  return { preview_id: previewId };
+}
+
+export interface CatalogImportTargetField {
+  label: "entity" | "project" | "feature_key" | "plan_key" | "plan_id";
+  value: string;
+}
+
+/**
+ * Produces a positional JSON identity instead of a human-facing delimiter string.
+ * Catalog values are unrestricted enough that a display separator cannot be a safe
+ * identity boundary (for example, `A / B` + `C` versus `A` + `B / C`).
+ */
+export function catalogImportTargetKey(target: CatalogImportEffect["target"]): string {
+  return JSON.stringify([
+    target.entity,
+    target.project,
+    target.feature_key ?? null,
+    target.plan_key ?? null,
+    target.plan_id ?? null,
+  ]);
+}
+
+export function catalogImportTargetFields(target: CatalogImportEffect["target"]): CatalogImportTargetField[] {
+  const fields: CatalogImportTargetField[] = [
+    { label: "entity", value: target.entity },
+    { label: "project", value: target.project },
+  ];
+  if (target.feature_key !== undefined) fields.push({ label: "feature_key", value: target.feature_key });
+  if (target.plan_key !== undefined) fields.push({ label: "plan_key", value: target.plan_key });
+  if (target.plan_id !== undefined) fields.push({ label: "plan_id", value: target.plan_id });
+  return fields;
+}
+
+/** Makes JSON values visually distinct from missing fields and JSON null. */
+export function catalogImportEffectValueLabel(value: unknown): string {
+  if (value === undefined) return "<absent>";
+  if (value === null) return "<null>";
+  const encoded = JSON.stringify(value);
+  return encoded === undefined ? `<${typeof value}>` : encoded;
+}
+
+export function catalogImportInputSnapshot(manifest: CatalogImportManifest): string {
+  return catalogImportManifestSnapshot(manifest);
+}
+
+export async function catalogImportInputDigest(manifest: CatalogImportManifest): Promise<string> {
+  return domainCatalogImportManifestDigest(manifest);
 }
 
 export function canRunCatalogAction(status: string, action: CatalogAction): boolean {

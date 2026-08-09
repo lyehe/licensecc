@@ -88,7 +88,8 @@ test("admin create is audited and idempotent", async () => {
   assert.equal(db.events.length, 1);
   assert.equal(db.events[0].event_type, "create");
   assert.equal(JSON.parse(db.events[0].next_json).id, firstBody.data.id);
-  assert.equal(db.lastBatchSize, 3);
+  // write + audit + strict replay claim + in-batch cache snapshot
+  assert.equal(db.lastBatchSize, 4);
   assert.equal(db.idempotency.size, 1);
 
   const replay = await worker.fetch(authed("/api/admin/entitlements", {
@@ -113,7 +114,7 @@ test("admin mutation rolls back entitlement write when audit insert fails", asyn
   }), env);
   assert.equal(response.status, 500);
   assert.equal((await json(response)).code, "mutation_failed");
-  assert.equal(db.lastBatchSize, 3);
+  assert.equal(db.lastBatchSize, 4);
   assert.equal(db.entitlements.size, 0);
   assert.equal(db.events.length, 0);
   assert.equal(db.idempotency.size, 0);

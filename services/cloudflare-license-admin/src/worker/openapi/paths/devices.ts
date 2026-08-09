@@ -13,6 +13,7 @@ import {
   limitCursorParams,
   okResponse,
   SYNC_SECURITY,
+  transitionOkResponse,
 } from "../components.js";
 
 export const devicePaths: LabeledPathFragment = {
@@ -75,7 +76,7 @@ export const devicePaths: LabeledPathFragment = {
     ["/api/admin/entitlements/{id}/devices/{deviceKeyId}/revoke", {
     post: {
       tags: ["admin:entitlements"],
-      summary: "Revoke ONE device key (admin-only, terminal, requires reason). Bumps revocation_seq so the online-verify path refuses that device pre-TTL.",
+      summary: "Revoke ONE device key (admin-only, terminal, requires reason). A state change advances the parent entitlement revocation_seq so the online-verify path refuses that device pre-TTL; an already-revoked device is a successful no-op.",
       operationId: "revokeEntitlementDevice",
       security: ADMIN_SECURITY,
       parameters: [idParam, deviceKeyIdParam, idempotencyKeyHeader],
@@ -84,11 +85,11 @@ export const devicePaths: LabeledPathFragment = {
         content: { "application/json": { schema: { $ref: "#/components/schemas/ReasonRequiredBody" } } },
       },
       responses: {
-        "200": okResponse("Device revoked; entitlement revocation_seq bumped.", "#/components/schemas/EntitlementRecord", "device_revoked"),
+        "200": transitionOkResponse("Device is revoked. Returns the parent entitlement's authoritative revocation_seq: it advances only when the device state changed and is unchanged for an already-revoked device.", "#/components/schemas/EntitlementRecord", { required: ["id", "revocation_seq"] }, "device_revoked"),
         "400": errorResponse("Invalid entitlement id / device key id / json / idempotency key, or missing reason.", "invalid_entitlement_id", "invalid_device_key_id", "invalid_idempotency_key", "invalid_json", "reason_required"),
         ...ADMIN_MUTATION_AUTH_ERRORS,
         "404": errorResponse("No entitlement with that id, or no such device key.", "not_found", "device_not_found"),
-        "409": errorResponse("Device is already revoked (terminal).", "device_is_terminal"),
+        "409": errorResponse("A different concurrent device transition changed the source after this request observed it; refetch and retry. An already-revoked device remains a 200 no-op.", "stale_transition"),
         "413": errorResponse("Request body exceeds 8192 bytes.", "body_too_large"),
         "500": errorResponse("Mutation failed, or dev bearer enabled outside development.", "mutation_failed", "dev_bearer_forbidden_in_environment"),
       },
@@ -97,7 +98,7 @@ export const devicePaths: LabeledPathFragment = {
     ["/api/admin/entitlements/{id}/devices/{deviceKeyId}/disable", {
     post: {
       tags: ["admin:entitlements"],
-      summary: "Disable ONE device key (admin-only, reversible, requires reason). Bumps revocation_seq.",
+      summary: "Disable ONE device key (admin-only, reversible, requires reason). A state change advances the parent entitlement revocation_seq; an already-disabled device is a successful no-op.",
       operationId: "disableEntitlementDevice",
       security: ADMIN_SECURITY,
       parameters: [idParam, deviceKeyIdParam, idempotencyKeyHeader],
@@ -106,11 +107,11 @@ export const devicePaths: LabeledPathFragment = {
         content: { "application/json": { schema: { $ref: "#/components/schemas/ReasonRequiredBody" } } },
       },
       responses: {
-        "200": okResponse("Device disabled; entitlement revocation_seq bumped.", "#/components/schemas/EntitlementRecord", "device_disabled"),
+        "200": transitionOkResponse("Device is disabled. Returns the parent entitlement's authoritative revocation_seq: it advances only when the device state changed and is unchanged for an already-disabled device.", "#/components/schemas/EntitlementRecord", { required: ["id", "revocation_seq"] }, "device_disabled"),
         "400": errorResponse("Invalid entitlement id / device key id / json / idempotency key, or missing reason.", "invalid_entitlement_id", "invalid_device_key_id", "invalid_idempotency_key", "invalid_json", "reason_required"),
         ...ADMIN_MUTATION_AUTH_ERRORS,
         "404": errorResponse("No entitlement with that id, or no such device key.", "not_found", "device_not_found"),
-        "409": errorResponse("Device is revoked (terminal); cannot disable.", "device_is_terminal"),
+        "409": errorResponse("The source device is revoked (terminal), so it cannot be disabled, or a different concurrent transition changed it after this request observed it; refetch and retry the latter.", "device_is_terminal", "stale_transition"),
         "413": errorResponse("Request body exceeds 8192 bytes.", "body_too_large"),
         "500": errorResponse("Mutation failed, or dev bearer enabled outside development.", "mutation_failed", "dev_bearer_forbidden_in_environment"),
       },
@@ -119,16 +120,16 @@ export const devicePaths: LabeledPathFragment = {
     ["/api/admin/entitlements/{id}/devices/{deviceKeyId}/reenable", {
     post: {
       tags: ["admin:entitlements"],
-      summary: "Re-enable a disabled device key (admin-only). Bumps revocation_seq. Reason optional.",
+      summary: "Re-enable a disabled device key (admin-only). A state change advances the parent entitlement revocation_seq; an already-active device is a successful no-op. Reason optional.",
       operationId: "reenableEntitlementDevice",
       security: ADMIN_SECURITY,
       parameters: [idParam, deviceKeyIdParam, idempotencyKeyHeader],
       responses: {
-        "200": okResponse("Device re-enabled; entitlement revocation_seq bumped.", "#/components/schemas/EntitlementRecord", "device_reenabled"),
+        "200": transitionOkResponse("Device is active. Returns the parent entitlement's authoritative revocation_seq: it advances only when the device state changed and is unchanged for an already-active device.", "#/components/schemas/EntitlementRecord", { required: ["id", "revocation_seq"] }, "device_reenabled"),
         "400": errorResponse("Invalid entitlement id / device key id / json / idempotency key.", "invalid_entitlement_id", "invalid_device_key_id", "invalid_idempotency_key", "invalid_json"),
         ...ADMIN_MUTATION_AUTH_ERRORS,
         "404": errorResponse("No entitlement with that id, or no such device key.", "not_found", "device_not_found"),
-        "409": errorResponse("Device is revoked (terminal); cannot re-enable.", "device_is_terminal"),
+        "409": errorResponse("The source device is revoked (terminal), so it cannot be re-enabled, or a different concurrent transition changed it after this request observed it; refetch and retry the latter.", "device_is_terminal", "stale_transition"),
         "413": errorResponse("Request body exceeds 8192 bytes.", "body_too_large"),
         "500": errorResponse("Mutation failed, or dev bearer enabled outside development.", "mutation_failed", "dev_bearer_forbidden_in_environment"),
       },

@@ -2,8 +2,11 @@ import React, { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
 import type {
   CatalogFeature,
+  CatalogImportApplyInput,
+  CatalogImportApplyResult,
+  CatalogImportEffect,
   CatalogImportManifest,
-  CatalogImportResult,
+  CatalogImportPreviewResponse,
   CatalogPlan,
   CatalogPlanFeature,
   PlanProjectionApplyInput,
@@ -24,7 +27,13 @@ import {
   catalogFeaturePath,
   catalogFeaturesPath,
   catalogFeatureTransitionPath,
+  catalogImportApplyBody,
+  catalogImportEffectValueLabel,
+  catalogImportInputDigest,
+  catalogImportInputSnapshot,
   catalogImportPath,
+  catalogImportTargetFields,
+  catalogImportTargetKey,
   catalogPlanExportPath,
   catalogPlanFeatureTransitionPath,
   catalogPlanFeaturesPath,
@@ -59,6 +68,12 @@ interface PlanProjectionPreviewBinding {
   preview: PlanProjectionPreviewResponse;
 }
 
+interface CatalogImportPreviewBinding {
+  digest: string;
+  snapshot: string;
+  preview: CatalogImportPreviewResponse;
+}
+
 export function Catalog({ active }: { active: boolean }): React.ReactElement | null {
   const [catalogFeatures, setCatalogFeatures] = useState<CatalogFeature[]>([]);
   const [catalogFeatureFilter, setCatalogFeatureFilter] = useState<CatalogFilter>({ project: "", status: "" });
@@ -74,7 +89,9 @@ export function Catalog({ active }: { active: boolean }): React.ReactElement | n
   const [catalogPlanFeatures, setCatalogPlanFeatures] = useState<CatalogPlanFeature[]>([]);
   const [catalogPlanFeatureForm, setCatalogPlanFeatureForm] = useState(emptyCatalogPlanFeatureForm);
   const [catalogImportText, setCatalogImportText] = useState("");
-  const [catalogImportPreview, setCatalogImportPreview] = useState<CatalogImportResult | null>(null);
+  const [catalogImportPreviewBinding, setCatalogImportPreviewBinding] = useState<CatalogImportPreviewBinding | null>(null);
+  const [catalogImportApplyResult, setCatalogImportApplyResult] = useState<CatalogImportApplyResult | null>(null);
+  const catalogImportRevision = useRef(0);
   const [planForm, setPlanForm] = useState(emptyPlanProjectionForm);
   const [planPreviewBinding, setPlanPreviewBinding] = useState<PlanProjectionPreviewBinding | null>(null);
   const [planApplyResult, setPlanApplyResult] = useState<PlanProjectionApplyResult | null>(null);
@@ -124,6 +141,7 @@ export function Catalog({ active }: { active: boolean }): React.ReactElement | n
 
   useEffect(() => {
     invalidatePlanProjectionPreview();
+    invalidateCatalogImportPreview();
   }, [active]);
   useEffect(() => {
     if (active) void refreshCatalogFeatures();
@@ -146,6 +164,12 @@ export function Catalog({ active }: { active: boolean }): React.ReactElement | n
     planProjectionRevision.current += 1;
     setPlanPreviewBinding(null);
     setPlanApplyResult(null);
+  }
+
+  function invalidateCatalogImportPreview(clearResult = true): void {
+    catalogImportRevision.current += 1;
+    setCatalogImportPreviewBinding(null);
+    if (clearResult) setCatalogImportApplyResult(null);
   }
 
   function updatePlanProjectionForm(updater: (current: PlanProjectionFormState) => PlanProjectionFormState): void {
@@ -196,6 +220,7 @@ export function Catalog({ active }: { active: boolean }): React.ReactElement | n
       setMessage(`${result.code} (${result.request_id})`);
       if (result.ok) {
         invalidatePlanProjectionPreview();
+        invalidateCatalogImportPreview();
         cancelCatalogFeatureEdit();
         await refreshCatalogFeatures();
       }
@@ -208,6 +233,7 @@ export function Catalog({ active }: { active: boolean }): React.ReactElement | n
       setMessage(`${result.code} (${result.request_id})`);
       if (result.ok) {
         invalidatePlanProjectionPreview();
+        invalidateCatalogImportPreview();
         if (action === "disable") setReason("");
         await refreshCatalogFeatures();
       }
@@ -232,6 +258,7 @@ export function Catalog({ active }: { active: boolean }): React.ReactElement | n
       setMessage(`${result.code} (${result.request_id})`);
       if (result.ok && result.data) {
         invalidatePlanProjectionPreview();
+        invalidateCatalogImportPreview();
         cancelCatalogPlanEdit();
         selectCatalogPlan(result.data);
         await refreshCatalogPlans();
@@ -245,6 +272,7 @@ export function Catalog({ active }: { active: boolean }): React.ReactElement | n
       setMessage(`${result.code} (${result.request_id})`);
       if (result.ok) {
         invalidatePlanProjectionPreview();
+        invalidateCatalogImportPreview();
         if (action === "disable") setReason("");
         await refreshCatalogPlans();
       }
@@ -257,6 +285,7 @@ export function Catalog({ active }: { active: boolean }): React.ReactElement | n
       setMessage(`${result.code} (${result.request_id})`);
       if (result.ok) {
         invalidatePlanProjectionPreview();
+        invalidateCatalogImportPreview();
         if (action === "disable") setReason("");
         await refreshCatalogPlanFeatures(row.plan_id);
       }
@@ -284,23 +313,91 @@ export function Catalog({ active }: { active: boolean }): React.ReactElement | n
     });
   }
 
-  async function runCatalogImport(dryRun: boolean): Promise<void> {
+  async function previewCatalogImport(): Promise<void> {
     await runMutation(async () => {
-      let body: unknown;
+      const revision = catalogImportRevision.current;
+      let manifest: CatalogImportManifest;
+      let snapshot: string;
+      let digest: string;
       try {
-        body = JSON.parse(catalogImportText);
+        manifest = JSON.parse(catalogImportText) as CatalogImportManifest;
+        snapshot = catalogImportInputSnapshot(manifest);
+        digest = await catalogImportInputDigest(manifest);
       } catch {
-        setMessage("invalid_catalog_import_json");
+        invalidateCatalogImportPreview();
+        setMessage("invalid_catalog_import_manifest");
         return;
       }
-      const result = await api<CatalogImportResult>(catalogImportPath(dryRun), { method: "POST", headers: dryRun ? undefined : { "idempotency-key": crypto.randomUUID() }, body: JSON.stringify(body) });
+      if (revision !== catalogImportRevision.current) return;
+      const result = await api<CatalogImportPreviewResponse>(catalogImportPath(true), { method: "POST", body: JSON.stringify(manifest) });
+      if (revision !== catalogImportRevision.current) return;
+      if (!result.ok && result.code === "catalog_import_too_large") {
+        setMessage("catalog_import_too_large — narrow the manifest and preview again");
+        return;
+      }
       setMessage(`${result.code} (${result.request_id})`);
-      if (result.ok) {
-        if (!dryRun) invalidatePlanProjectionPreview();
-        setCatalogImportPreview(result.data ?? null);
-        await refreshCatalogFeatures(!dryRun);
-        await refreshCatalogPlans(!dryRun);
-        await refreshCatalogPlanFeatures(selectedCatalogPlanId, !dryRun);
+      if (result.ok && result.data) {
+        if (result.data.manifest_digest !== digest) {
+          invalidateCatalogImportPreview();
+          setMessage("catalog_import_manifest_digest_mismatch");
+          return;
+        }
+        setCatalogImportPreviewBinding({ digest, snapshot, preview: result.data });
+        setCatalogImportApplyResult(null);
+      }
+    });
+  }
+
+  async function applyCatalogImportFromPreview(): Promise<void> {
+    const binding = catalogImportPreviewBinding;
+    const revision = catalogImportRevision.current;
+    if (binding === null) {
+      setMessage("preview_required");
+      return;
+    }
+    try {
+      if (catalogImportInputSnapshot(JSON.parse(catalogImportText) as CatalogImportManifest) !== binding.snapshot) {
+        invalidateCatalogImportPreview();
+        setMessage("preview_required");
+        return;
+      }
+    } catch {
+      invalidateCatalogImportPreview();
+      setMessage("preview_required");
+      return;
+    }
+    await runMutation(async () => {
+      if (revision !== catalogImportRevision.current) {
+        setMessage("preview_required");
+        return;
+      }
+      let body: CatalogImportApplyInput;
+      try {
+        body = catalogImportApplyBody(binding.preview.preview_id);
+      } catch (error) {
+        setMessage(error instanceof Error ? error.message : "preview_required");
+        return;
+      }
+      const result = await api<CatalogImportApplyResult>(catalogImportPath(), {
+        method: "POST",
+        headers: { "idempotency-key": crypto.randomUUID() },
+        body: JSON.stringify(body),
+      });
+      if (revision !== catalogImportRevision.current) return;
+      if (!result.ok && ["stale_catalog_import_preview", "expired_catalog_import_preview", "claimed_catalog_import_preview"].includes(result.code)) {
+        invalidateCatalogImportPreview();
+        setMessage(`${result.code} — preview again`);
+        return;
+      }
+      setMessage(`${result.code} (${result.request_id})`);
+      if (result.ok && result.data) {
+        catalogImportRevision.current += 1;
+        setCatalogImportPreviewBinding(null);
+        setCatalogImportApplyResult(result.data);
+        invalidatePlanProjectionPreview();
+        await refreshCatalogFeatures(false);
+        await refreshCatalogPlans(false);
+        await refreshCatalogPlanFeatures(selectedCatalogPlanId, false);
       }
     });
   }
@@ -323,6 +420,7 @@ export function Catalog({ active }: { active: boolean }): React.ReactElement | n
       setMessage(`${result.code} (${result.request_id})`);
       if (result.ok) {
         invalidatePlanProjectionPreview();
+        invalidateCatalogImportPreview();
         setCatalogPlanFeatureForm((current) => ({ ...emptyCatalogPlanFeatureForm, project: current.project }));
         await refreshCatalogPlanFeatures(selectedCatalogPlanId);
       }
@@ -398,6 +496,27 @@ export function Catalog({ active }: { active: boolean }): React.ReactElement | n
     return <section className="deliveriesPane"><h3>{title}</h3><table><thead><tr><th>Feature</th><th>Mode</th><th>Policy</th><th>Window</th><th>Capacity</th><th>Source</th></tr></thead><tbody>{items.map((item) => <tr key={`${title}:${item.feature}`}><td>{item.feature}</td><td>{item.license_mode}</td><td>{item.policy_id ?? "-"}</td><td>{item.valid_until === null ? "open" : formatEpoch(item.valid_until)}</td><td>{item.pool_size > 0 ? `pool ${item.pool_size}` : `devices ${item.max_active_devices}`}</td><td>{item.addon_key ?? item.source}{item.reason ? ` / ${item.reason}` : ""}</td></tr>)}</tbody></table></section>;
   }
 
+  function catalogImportEffectSummary(label: string, summary: CatalogImportPreviewResponse["effects"]["summary"]["features"]): string {
+    return `${label}: ${summary.create} create, ${summary.update} update, ${summary.disable} disable, ${summary.reenable} reenable, ${summary.unchanged} unchanged`;
+  }
+
+  function catalogImportEffectChanges(effect: CatalogImportEffect): Array<{ field: string; before: unknown; after: unknown }> {
+    const before = effect.before ?? {};
+    return [...new Set([...Object.keys(before), ...Object.keys(effect.after)])]
+      .filter((field) => !["id", "created_at", "updated_at"].includes(field) && before[field] !== effect.after[field])
+      .sort()
+      .map((field) => ({ field, before: before[field], after: effect.after[field] }));
+  }
+
+  function catalogImportRows(title: string, effects: CatalogImportEffect[]): React.ReactElement | null {
+    if (effects.length === 0) return null;
+    return <section className="deliveriesPane"><h3>{title}</h3><table><thead><tr><th>Transition</th><th>Target</th><th>Delta</th></tr></thead><tbody>{effects.map((effect) => {
+      const changes = catalogImportEffectChanges(effect);
+      const targetFields = catalogImportTargetFields(effect.target);
+      return <tr key={JSON.stringify([title, catalogImportTargetKey(effect.target)])}><td>{effect.effect}</td><td><dl aria-label="Catalog import target">{targetFields.map((field) => <div key={field.label}><dt>{field.label}</dt><dd><code>{catalogImportEffectValueLabel(field.value)}</code></dd></div>)}</dl></td><td><details><summary>Before → after ({changes.length})</summary>{changes.length === 0 ? <span className="muted">No mutable field changes</span> : <ul>{changes.map((change) => <li key={change.field}><code>{change.field}</code>: {catalogImportEffectValueLabel(change.before)} → {catalogImportEffectValueLabel(change.after)}</li>)}</ul>}</details></td></tr>;
+    })}</tbody></table></section>;
+  }
+
   function catalogOverrideSummary(row: CatalogPlanFeature): string {
     const parts = [row.assertion_ttl_seconds === null ? "" : `TTL ${row.assertion_ttl_seconds}s`, row.pool_size === null ? "" : `pool ${row.pool_size}`, row.max_active_devices === null ? "" : `devices ${row.max_active_devices}`, row.max_borrow_sec === null ? "" : `borrow ${row.max_borrow_sec}s`, row.meter_quota === null ? "" : `meter ${row.meter_quota}`, row.meter_period_sec === null ? "" : `period ${row.meter_period_sec}s`].filter((item) => item !== "");
     return parts.length === 0 ? "-" : parts.join(" / ");
@@ -406,6 +525,7 @@ export function Catalog({ active }: { active: boolean }): React.ReactElement | n
   if (!active) return null;
   const selectedCatalogPlan = catalogPlans.find((plan) => plan.id === selectedCatalogPlanId) ?? null;
   const planPreview = planPreviewBinding?.preview ?? planApplyResult;
+  const catalogImportPreview = catalogImportPreviewBinding?.preview ?? catalogImportApplyResult;
   return (
     <section className="workspace">
       <aside>
@@ -418,7 +538,12 @@ export function Catalog({ active }: { active: boolean }): React.ReactElement | n
         <h2>Plan projection</h2>
         <form aria-label="Plan projection" onSubmit={(event) => void submitPlanPreview(event)}><label>Project<input value={planForm.project} onChange={(event) => updatePlanProjectionForm((current) => ({ ...current, project: event.target.value }))} /></label><label>License ID<input value={planForm.license_id} onChange={(event) => updatePlanProjectionForm((current) => ({ ...current, license_id: event.target.value }))} /></label><label>Fingerprint<input value={planForm.license_fingerprint} onChange={(event) => updatePlanProjectionForm((current) => ({ ...current, license_fingerprint: event.target.value }))} /></label><label>Customer ID<input value={planForm.customer_id} onChange={(event) => updatePlanProjectionForm((current) => ({ ...current, customer_id: event.target.value }))} /></label><label>Plan key<input placeholder="pro" value={planForm.plan_key} onChange={(event) => updatePlanProjectionForm((current) => ({ ...current, plan_key: event.target.value }))} /></label><label>Plan ID<input value={planForm.plan_id} onChange={(event) => updatePlanProjectionForm((current) => ({ ...current, plan_id: event.target.value }))} /></label><label>Support until<input type="date" value={planForm.support_until} onChange={(event) => updatePlanProjectionForm((current) => ({ ...current, support_until: event.target.value }))} /></label><label>Add-ons (csv)<input placeholder="team_seats,priority_support" value={planForm.addons} onChange={(event) => updatePlanProjectionForm((current) => ({ ...current, addons: event.target.value }))} /></label><label>Notes<textarea value={planForm.notes} onChange={(event) => updatePlanProjectionForm((current) => ({ ...current, notes: event.target.value }))} /></label><div className="actions"><button disabled={busy} type="submit">Preview</button><button disabled={busy || planPreviewBinding === null || planPreviewBinding.preview.blocked.length > 0} type="button" onClick={() => void applyPlanProjectionFromPreview()}>Apply</button></div></form>
         <h2>Catalog import</h2>
-        <form aria-label="Catalog import" onSubmit={(event) => { event.preventDefault(); void runCatalogImport(true); }}><label>Manifest JSON<textarea value={catalogImportText} onChange={(event) => setCatalogImportText(event.target.value)} /></label><div className="actions"><button type="submit" disabled={busy || catalogImportText.trim() === ""}>Preview import</button><button type="button" disabled={busy || catalogImportText.trim() === ""} onClick={() => void runCatalogImport(false)}>Apply import</button></div>{catalogImportPreview !== null && <div className="details"><span>Features {catalogImportPreview.features.created}/{catalogImportPreview.features.updated}/{catalogImportPreview.features.unchanged}</span><span>Plans {catalogImportPreview.plans.created}/{catalogImportPreview.plans.updated}/{catalogImportPreview.plans.unchanged}</span><span>Rows {catalogImportPreview.plan_features.created}/{catalogImportPreview.plan_features.updated}/{catalogImportPreview.plan_features.unchanged}</span></div>}</form>
+        <form aria-label="Catalog import" onSubmit={(event) => { event.preventDefault(); void previewCatalogImport(); }}>
+          <label>Manifest JSON<textarea value={catalogImportText} onChange={(event) => { setCatalogImportText(event.target.value); invalidateCatalogImportPreview(); }} /></label>
+          <div className="actions"><button type="submit" disabled={busy || catalogImportText.trim() === ""}>Preview import</button><button type="button" disabled={busy || catalogImportPreviewBinding === null} onClick={() => void applyCatalogImportFromPreview()}>Apply import</button></div>
+          {catalogImportPreview !== null && <div className="details"><span>{catalogImportEffectSummary("Features", catalogImportPreview.effects.summary.features)}</span><span>{catalogImportEffectSummary("Plans", catalogImportPreview.effects.summary.plans)}</span><span>{catalogImportEffectSummary("Plan rows", catalogImportPreview.effects.summary.plan_features)}</span>{catalogImportPreviewBinding === null ? <span>Applied; preview again before another Apply</span> : <><span>Server preview {catalogImportPreviewBinding.preview.preview_id}</span><span>Effective {formatEpoch(catalogImportPreviewBinding.preview.effective_at)}</span><span>Local manifest digest {catalogImportPreviewBinding.digest}</span></>}</div>}
+        </form>
+        {catalogImportPreview !== null && <><section className="deliveriesPane"><h3>Catalog import transitions</h3><p className="muted">Each target and transition is server-derived from the preview snapshot.</p></section>{catalogImportRows("Imported features", catalogImportPreview.effects.features)}{catalogImportRows("Imported plans", catalogImportPreview.effects.plans)}{catalogImportRows("Imported plan rows", catalogImportPreview.effects.plan_features)}</>}
       </aside>
       <section className="tablePane">
         <section className="deliveriesPane"><h3>Catalog plans</h3><div className="filters"><input placeholder="project" value={catalogPlanFilter.project} onChange={(event) => setCatalogPlanFilter({ ...catalogPlanFilter, project: event.target.value })} /><select value={catalogPlanFilter.status} onChange={(event) => setCatalogPlanFilter({ ...catalogPlanFilter, status: event.target.value })}><option value="">all</option><option value="active">active</option><option value="disabled">disabled</option></select></div><table><thead><tr><th>Plan</th><th>Project</th><th>Version</th><th>Status</th><th>Actions</th></tr></thead><tbody>{catalogPlans.map((plan) => <tr key={plan.id} className={plan.id === selectedCatalogPlanId ? "selectedRow" : ""}><td>{plan.name}<div className="muted">{plan.plan_key}</div></td><td>{plan.project}</td><td>{plan.version}</td><td><span className={`status ${plan.status}`}>{plan.status}</span></td><td className="actions"><button type="button" disabled={busy} onClick={() => selectCatalogPlan(plan)}>Use</button><button type="button" disabled={busy} onClick={() => beginCatalogPlanEdit(plan)}>Edit</button><button type="button" disabled={busy} onClick={() => void exportCatalogPlan(plan)}>Export</button><button className="danger" type="button" disabled={busy || !canRunCatalogAction(plan.status, "disable")} onClick={() => requestConfirm({ title: "Disable plan", body: disableCatalogPlanConfirm(plan), requiresReason: true, run: () => catalogPlanTransition(plan, "disable") })}>Disable</button><button type="button" disabled={busy || !canRunCatalogAction(plan.status, "reenable")} onClick={() => void catalogPlanTransition(plan, "reenable")}>Reenable</button></td></tr>)}</tbody></table><div className="tableFooter"><span className="muted">{catalogPlans.length} shown</span>{catalogPlansCursor !== null && <button type="button" disabled={busy} onClick={() => void loadMore(catalogPlansUrl, catalogPlansCursor, setCatalogPlans, setCatalogPlansCursor, setMessage)}>Load more</button>}</div></section>

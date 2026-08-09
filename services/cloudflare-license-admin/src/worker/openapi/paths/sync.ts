@@ -35,7 +35,7 @@ export const syncPaths: LabeledPathFragment = {
         "401": errorResponse("Sync token not configured on the Worker.", "sync_auth_not_configured"),
         "403": errorResponse("Bearer token did not match SYNC_API_TOKEN.", "invalid_sync_token"),
         "404": errorResponse("Referenced resource not found.", "not_found"),
-        "409": errorResponse("Target entitlement is revoked (terminal).", "revoked_entitlement_is_terminal"),
+        "409": errorResponse("Target entitlement is revoked (terminal), or it changed after this request observed it; refetch and retry the latter.", "revoked_entitlement_is_terminal", "stale_transition"),
         "413": errorResponse("Request body exceeds 8192 bytes.", "body_too_large"),
         "500": errorResponse("Mutation failed.", "mutation_failed"),
       },

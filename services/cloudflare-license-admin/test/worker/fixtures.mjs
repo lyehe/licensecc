@@ -265,6 +265,9 @@ class MockD1 {
         if (statement.sql.startsWith("INSERT INTO entitlements") || statement.sql.startsWith("UPDATE entitlements SET")) {
           const row = this.first(statement.sql, statement.values);
           results.push({ results: row === null ? [] : [row], meta: { changes: row === null ? 0 : 1 } });
+        } else if (statement.sql.startsWith("SELECT response_json FROM mutation_idempotency")) {
+          const row = this.first(statement.sql, statement.values);
+          results.push({ results: row === null ? [] : [row], meta: { changes: 0 } });
         } else {
           results.push(this.run(statement.sql, statement.values));
         }
@@ -356,10 +359,10 @@ class MockD1 {
       });
       return { meta: { changes: 1 } };
     }
-    // The plain replay-cache INSERT now lives in the backend idempotency_store
-    // (`INSERT INTO mutation_idempotency ... ON CONFLICT DO NOTHING`); the atomic
-    // idempotency-from-current-row write in entitlement_mutation.mjs keeps its
-    // `INSERT OR IGNORE ... SELECT` form. Match either shape here.
+    // The plain replay-cache INSERT lives in idempotency_store
+    // (`INSERT ... ON CONFLICT DO NOTHING`). The atomic current-row claim is a
+    // strict `INSERT ... SELECT`: a duplicate must
+    // fail the batch instead of silently committing a second tuple.
     if (sql.includes("INTO mutation_idempotency")) {
       const key = `${values[0]}\u0000${values[1]}`;
       let responseJson = values[2];
@@ -377,9 +380,14 @@ class MockD1 {
           data,
         });
       }
-      if (!this.idempotency.has(key)) {
+      if (sql.includes(" SELECT ")) {
+        if (this.idempotency.has(key)) {
+          throw new Error("UNIQUE constraint failed: mutation_idempotency.scope, mutation_idempotency.idempotency_key");
+        }
         this.idempotency.set(key, { response_json: responseJson });
+        return { meta: { changes: 1 } };
       }
+      if (!this.idempotency.has(key)) this.idempotency.set(key, { response_json: responseJson });
       return { meta: { changes: 1 } };
     }
     throw new Error(`unexpected run SQL: ${sql}`);

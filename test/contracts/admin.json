@@ -362,7 +362,7 @@
         "BatchResultData": {
           "properties": {
             "results": {
-              "description": "One entry per input id (in input order). `ok:false` rows carry a per-row failure code (not_found, revoked_entitlement_is_terminal, invalid_entitlement_id, mutation_failed).",
+              "description": "One entry per input id (in input order). `ok:false` rows carry a per-row failure code (not_found, revoked_entitlement_is_terminal, stale_transition, invalid_entitlement_id, mutation_failed).",
               "items": {
                 "properties": {
                   "code": {
@@ -376,11 +376,20 @@
                     "type": "boolean"
                   }
                 },
+                "required": [
+                  "id",
+                  "ok",
+                  "code"
+                ],
                 "type": "object"
               },
+              "minItems": 1,
               "type": "array"
             }
           },
+          "required": [
+            "results"
+          ],
           "type": "object"
         },
         "BatchTransitionInput": {
@@ -527,9 +536,67 @@
           },
           "type": "object"
         },
-        "CatalogImportCounter": {
+        "CatalogImportApplyInput": {
+          "additionalProperties": false,
+          "description": "Apply exactly one server-persisted catalog import preview. A manifest in an Apply request is rejected with preview_required.",
           "properties": {
-            "created": {
+            "preview_id": {
+              "maxLength": 128,
+              "pattern": "^civ_[A-Za-z0-9_-]{1,124}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "preview_id"
+          ],
+          "type": "object"
+        },
+        "CatalogImportEffect": {
+          "properties": {
+            "after": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "before": {
+              "additionalProperties": true,
+              "type": [
+                "object",
+                "null"
+              ]
+            },
+            "effect": {
+              "enum": [
+                "create",
+                "update",
+                "disable",
+                "reenable",
+                "unchanged"
+              ],
+              "type": "string"
+            },
+            "target": {
+              "$ref": "#/components/schemas/CatalogImportEffectTarget"
+            }
+          },
+          "required": [
+            "target",
+            "effect",
+            "before",
+            "after"
+          ],
+          "type": "object"
+        },
+        "CatalogImportEffectCounter": {
+          "properties": {
+            "create": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "disable": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "reenable": {
               "minimum": 0,
               "type": "integer"
             },
@@ -537,12 +604,130 @@
               "minimum": 0,
               "type": "integer"
             },
-            "updated": {
+            "update": {
               "minimum": 0,
               "type": "integer"
             }
           },
+          "required": [
+            "create",
+            "update",
+            "disable",
+            "reenable",
+            "unchanged"
+          ],
           "type": "object"
+        },
+        "CatalogImportEffects": {
+          "properties": {
+            "features": {
+              "items": {
+                "$ref": "#/components/schemas/CatalogImportEffect"
+              },
+              "type": "array"
+            },
+            "plan_features": {
+              "items": {
+                "$ref": "#/components/schemas/CatalogImportEffect"
+              },
+              "type": "array"
+            },
+            "plans": {
+              "items": {
+                "$ref": "#/components/schemas/CatalogImportEffect"
+              },
+              "type": "array"
+            },
+            "summary": {
+              "properties": {
+                "features": {
+                  "$ref": "#/components/schemas/CatalogImportEffectCounter"
+                },
+                "plan_features": {
+                  "$ref": "#/components/schemas/CatalogImportEffectCounter"
+                },
+                "plans": {
+                  "$ref": "#/components/schemas/CatalogImportEffectCounter"
+                }
+              },
+              "required": [
+                "features",
+                "plans",
+                "plan_features"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "features",
+            "plans",
+            "plan_features",
+            "summary"
+          ],
+          "type": "object"
+        },
+        "CatalogImportEffectTarget": {
+          "properties": {
+            "entity": {
+              "enum": [
+                "feature",
+                "plan",
+                "plan_feature"
+              ],
+              "type": "string"
+            },
+            "feature_key": {
+              "type": "string"
+            },
+            "plan_id": {
+              "type": "string"
+            },
+            "plan_key": {
+              "type": "string"
+            },
+            "project": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "entity",
+            "project"
+          ],
+          "type": "object"
+        },
+        "CatalogImportInvalidPlanConfigData": {
+          "additionalProperties": false,
+          "properties": {
+            "policy_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "policy_id"
+          ],
+          "type": "object"
+        },
+        "CatalogImportInvalidPlanConfigError": {
+          "allOf": [
+            {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            },
+            {
+              "properties": {
+                "code": {
+                  "const": "invalid_plan_config"
+                },
+                "data": {
+                  "$ref": "#/components/schemas/CatalogImportInvalidPlanConfigData"
+                }
+              },
+              "required": [
+                "code",
+                "data"
+              ],
+              "type": "object"
+            }
+          ]
         },
         "CatalogImportManifest": {
           "additionalProperties": false,
@@ -575,19 +760,88 @@
           ],
           "type": "object"
         },
-        "CatalogImportResult": {
+        "CatalogImportPreviewResponse": {
           "properties": {
-            "features": {
-              "$ref": "#/components/schemas/CatalogImportCounter"
+            "effective_at": {
+              "description": "Single timestamp used for every imported catalog row and audit transition.",
+              "minimum": 0,
+              "type": "integer"
             },
-            "plan_features": {
-              "$ref": "#/components/schemas/CatalogImportCounter"
+            "effects": {
+              "$ref": "#/components/schemas/CatalogImportEffects"
             },
-            "plans": {
-              "$ref": "#/components/schemas/CatalogImportCounter"
+            "expires_at": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "manifest": {
+              "$ref": "#/components/schemas/CatalogImportManifest"
+            },
+            "manifest_digest": {
+              "description": "SHA-256 digest of the normalized manifest held by the server.",
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "preview_id": {
+              "description": "Opaque, short-lived, actor-bound catalog import capability. Apply accepts this value only.",
+              "maxLength": 128,
+              "pattern": "^civ_[A-Za-z0-9_-]{1,124}$",
+              "type": "string"
+            },
+            "source_generation": {
+              "description": "Conservative catalog generation that must still match at Apply.",
+              "minimum": 0,
+              "type": "integer"
             }
           },
+          "required": [
+            "preview_id",
+            "manifest_digest",
+            "manifest",
+            "effects",
+            "effective_at",
+            "expires_at",
+            "source_generation"
+          ],
           "type": "object"
+        },
+        "CatalogImportTooLargeData": {
+          "additionalProperties": false,
+          "properties": {
+            "guidance": {
+              "const": "narrow the manifest and preview again"
+            },
+            "max_mutable_actions": {
+              "const": 13
+            }
+          },
+          "required": [
+            "max_mutable_actions",
+            "guidance"
+          ],
+          "type": "object"
+        },
+        "CatalogImportTooLargeError": {
+          "allOf": [
+            {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            },
+            {
+              "properties": {
+                "code": {
+                  "const": "catalog_import_too_large"
+                },
+                "data": {
+                  "$ref": "#/components/schemas/CatalogImportTooLargeData"
+                }
+              },
+              "required": [
+                "code",
+                "data"
+              ],
+              "type": "object"
+            }
+          ]
         },
         "CatalogPlan": {
           "properties": {
@@ -1992,7 +2246,8 @@
               "type": "string"
             },
             "support_until": {
-              "description": "Optional support/subscription window override stamped onto desired entitlements.",
+              "description": "Optional support/subscription window override stamped onto desired entitlements. Must be a safe epoch second no later than 9999-12-31T23:59:59Z.",
+              "maximum": 253402300799,
               "minimum": 0,
               "type": [
                 "integer",
@@ -2583,14 +2838,16 @@
           "properties": {
             "released": {
               "description": "Count of LIVE seats reclaimed (0 is a valid idempotent success).",
+              "minimum": 0,
               "type": "integer"
             },
             "seat_ids": {
-              "description": "The reclaimed seat_ids (sorted).",
+              "description": "The reclaimed seat_ids (sorted; exactly one per released seat).",
               "items": {
                 "type": "string"
               },
-              "type": "array"
+              "type": "array",
+              "uniqueItems": true
             }
           },
           "required": [
@@ -3138,6 +3395,9 @@
                             "$ref": "#/components/schemas/AuditChainData"
                           }
                         },
+                        "required": [
+                          "data"
+                        ],
                         "type": "object"
                       }
                     ]
@@ -3281,6 +3541,9 @@
                             "$ref": "#/components/schemas/CatalogFeaturesListData"
                           }
                         },
+                        "required": [
+                          "data"
+                        ],
                         "type": "object"
                       }
                     ]
@@ -3416,6 +3679,9 @@
                             "$ref": "#/components/schemas/CatalogFeature"
                           }
                         },
+                        "required": [
+                          "data"
+                        ],
                         "type": "object"
                       }
                     ]
@@ -3627,6 +3893,9 @@
                             "$ref": "#/components/schemas/CatalogFeature"
                           }
                         },
+                        "required": [
+                          "data"
+                        ],
                         "type": "object"
                       }
                     ]
@@ -3771,6 +4040,9 @@
                             "$ref": "#/components/schemas/CatalogFeature"
                           }
                         },
+                        "required": [
+                          "data"
+                        ],
                         "type": "object"
                       }
                     ]
@@ -3999,9 +4271,28 @@
                             "const": "catalog_feature_disabled"
                           },
                           "data": {
-                            "$ref": "#/components/schemas/CatalogFeature"
+                            "allOf": [
+                              {
+                                "$ref": "#/components/schemas/CatalogFeature"
+                              },
+                              {
+                                "properties": {
+                                  "status": {
+                                    "const": "disabled"
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "status"
+                                ],
+                                "type": "object"
+                              }
+                            ]
                           }
                         },
+                        "required": [
+                          "data"
+                        ],
                         "type": "object"
                       }
                     ]
@@ -4256,9 +4547,28 @@
                             "const": "catalog_feature_reenabled"
                           },
                           "data": {
-                            "$ref": "#/components/schemas/CatalogFeature"
+                            "allOf": [
+                              {
+                                "$ref": "#/components/schemas/CatalogFeature"
+                              },
+                              {
+                                "properties": {
+                                  "status": {
+                                    "const": "active"
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "status"
+                                ],
+                                "type": "object"
+                              }
+                            ]
                           }
                         },
+                        "required": [
+                          "data"
+                        ],
                         "type": "object"
                       }
                     ]
@@ -4462,7 +4772,7 @@
           "operationId": "importCatalog",
           "parameters": [
             {
-              "description": "Optional idempotency key (max 128 chars). Mutations with the same scope+key+actor are cached and replayed from D1. An invalid (over-long/empty) value returns 400 invalid_idempotency_key.",
+              "description": "Required when applying a preview. For dry_run Preview, a valid header is ignored, but a present empty or over-long header returns 400 invalid_idempotency_key. The same actor/key replay returns the committed Apply response.",
               "in": "header",
               "name": "idempotency-key",
               "required": false,
@@ -4472,6 +4782,7 @@
               }
             },
             {
+              "description": "Set to 1 or true to preview a manifest. Without it, the request body must contain only preview_id.",
               "in": "query",
               "name": "dry_run",
               "required": false,
@@ -4488,7 +4799,14 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CatalogImportManifest"
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/CatalogImportManifest"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CatalogImportApplyInput"
+                    }
+                  ]
                 }
               }
             },
@@ -4512,21 +4830,31 @@
                             ]
                           },
                           "data": {
-                            "$ref": "#/components/schemas/CatalogImportResult"
+                            "$ref": "#/components/schemas/CatalogImportPreviewResponse"
                           }
                         },
+                        "required": [
+                          "data"
+                        ],
                         "type": "object"
                       }
                     ]
                   }
                 }
               },
-              "description": "Catalog import previewed/applied."
+              "description": "Server-bound preview or its atomically committed Apply result. The response always shows the exact preview effects."
             },
             "400": {
               "content": {
                 "application/json": {
                   "examples": {
+                    "idempotency_key_required": {
+                      "value": {
+                        "code": "idempotency_key_required",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    },
                     "invalid_idempotency_key": {
                       "value": {
                         "code": "invalid_idempotency_key",
@@ -4554,7 +4882,7 @@
                   }
                 }
               },
-              "description": "Invalid request / json / idempotency key."
+              "description": "Invalid request / json / preview id / idempotency key. Apply requires an idempotency key."
             },
             "401": {
               "content": {
@@ -4645,9 +4973,34 @@
               "content": {
                 "application/json": {
                   "examples": {
-                    "catalog_import_conflict": {
+                    "catalog_import_snapshot_stale": {
                       "value": {
-                        "code": "catalog_import_conflict",
+                        "code": "catalog_import_snapshot_stale",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    },
+                    "catalog_import_too_large": {
+                      "value": {
+                        "code": "catalog_import_too_large",
+                        "data": {
+                          "guidance": "narrow the manifest and preview again",
+                          "max_mutable_actions": 13
+                        },
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    },
+                    "claimed_catalog_import_preview": {
+                      "value": {
+                        "code": "claimed_catalog_import_preview",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    },
+                    "expired_catalog_import_preview": {
+                      "value": {
+                        "code": "expired_catalog_import_preview",
                         "ok": false,
                         "request_id": "1a2b3c-1"
                       }
@@ -4655,6 +5008,9 @@
                     "invalid_plan_config": {
                       "value": {
                         "code": "invalid_plan_config",
+                        "data": {
+                          "policy_id": "policy_example"
+                        },
                         "ok": false,
                         "request_id": "1a2b3c-1"
                       }
@@ -4665,14 +5021,60 @@
                         "ok": false,
                         "request_id": "1a2b3c-1"
                       }
+                    },
+                    "preview_required": {
+                      "value": {
+                        "code": "preview_required",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    },
+                    "stale_catalog_import_preview": {
+                      "value": {
+                        "code": "stale_catalog_import_preview",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
                     }
                   },
                   "schema": {
-                    "$ref": "#/components/schemas/ErrorEnvelope"
+                    "oneOf": [
+                      {
+                        "allOf": [
+                          {
+                            "$ref": "#/components/schemas/ErrorEnvelope"
+                          },
+                          {
+                            "properties": {
+                              "code": {
+                                "enum": [
+                                  "preview_required",
+                                  "policy_disabled",
+                                  "catalog_import_snapshot_stale",
+                                  "stale_catalog_import_preview",
+                                  "expired_catalog_import_preview",
+                                  "claimed_catalog_import_preview"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "code"
+                            ],
+                            "type": "object"
+                          }
+                        ]
+                      },
+                      {
+                        "$ref": "#/components/schemas/CatalogImportInvalidPlanConfigError"
+                      },
+                      {
+                        "$ref": "#/components/schemas/CatalogImportTooLargeError"
+                      }
+                    ]
                   }
                 }
               },
-              "description": "Policy is disabled, from another project, or the import conflicts."
+              "description": "A direct manifest needs Preview first; policy/config validation failed; the Preview is stale, expired, or claimed; or the import has more than thirteen mutable actions and must be narrowed before previewing again. The thirteen-action cap keeps every Apply path below the D1 Workers Free 50-query limit without chunking."
             },
             "413": {
               "content": {
@@ -4728,7 +5130,7 @@
               "devBearer": []
             }
           ],
-          "summary": "Preview or apply a portable catalog import manifest",
+          "summary": "Persist a catalog import preview or atomically apply that preview",
           "tags": [
             "admin:plans"
           ]
@@ -4802,6 +5204,9 @@
                             "$ref": "#/components/schemas/CatalogPlansListData"
                           }
                         },
+                        "required": [
+                          "data"
+                        ],
                         "type": "object"
                       }
                     ]
@@ -4937,6 +5342,9 @@
                             "$ref": "#/components/schemas/CatalogPlan"
                           }
                         },
+                        "required": [
+                          "data"
+                        ],
                         "type": "object"
                       }
                     ]
@@ -5148,6 +5556,9 @@
                             "$ref": "#/components/schemas/CatalogPlan"
                           }
                         },
+                        "required": [
+                          "data"
+                        ],
                         "type": "object"
                       }
                     ]
@@ -5292,6 +5703,9 @@
                             "$ref": "#/components/schemas/CatalogPlan"
                           }
                         },
+                        "required": [
+                          "data"
+                        ],
                         "type": "object"
                       }
                     ]
@@ -5520,9 +5934,28 @@
                             "const": "catalog_plan_disabled"
                           },
                           "data": {
-                            "$ref": "#/components/schemas/CatalogPlan"
+                            "allOf": [
+                              {
+                                "$ref": "#/components/schemas/CatalogPlan"
+                              },
+                              {
+                                "properties": {
+                                  "status": {
+                                    "const": "disabled"
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "status"
+                                ],
+                                "type": "object"
+                              }
+                            ]
                           }
                         },
+                        "required": [
+                          "data"
+                        ],
                         "type": "object"
                       }
                     ]
@@ -5760,6 +6193,9 @@
                             "$ref": "#/components/schemas/CatalogImportManifest"
                           }
                         },
+                        "required": [
+                          "data"
+                        ],
                         "type": "object"
                       }
                     ]
@@ -5894,6 +6330,9 @@
                             "$ref": "#/components/schemas/CatalogPlanFeaturesListData"
                           }
                         },
+                        "required": [
+                          "data"
+                        ],
                         "type": "object"
                       }
                     ]
@@ -6019,6 +6458,9 @@
                             "$ref": "#/components/schemas/CatalogPlanFeature"
                           }
                         },
+                        "required": [
+                          "data"
+                        ],
                         "type": "object"
                       }
                     ]
@@ -6304,9 +6746,29 @@
                             "const": "catalog_plan_feature_disabled"
                           },
                           "data": {
-                            "$ref": "#/components/schemas/CatalogPlanFeature"
+                            "allOf": [
+                              {
+                                "$ref": "#/components/schemas/CatalogPlanFeature"
+                              },
+                              {
+                                "properties": {
+                                  "status": {
+                                    "const": "disabled"
+                                  }
+                                },
+                                "required": [
+                                  "plan_id",
+                                  "feature_key",
+                                  "status"
+                                ],
+                                "type": "object"
+                              }
+                            ]
                           }
                         },
+                        "required": [
+                          "data"
+                        ],
                         "type": "object"
                       }
                     ]
@@ -6571,9 +7033,29 @@
                             "const": "catalog_plan_feature_reenabled"
                           },
                           "data": {
-                            "$ref": "#/components/schemas/CatalogPlanFeature"
+                            "allOf": [
+                              {
+                                "$ref": "#/components/schemas/CatalogPlanFeature"
+                              },
+                              {
+                                "properties": {
+                                  "status": {
+                                    "const": "active"
+                                  }
+                                },
+                                "required": [
+                                  "plan_id",
+                                  "feature_key",
+                                  "status"
+                                ],
+                                "type": "object"
+                              }
+                            ]
                           }
                         },
+                        "required": [
+                          "data"
+                        ],
                         "type": "object"
                       }
                     ]
@@ -6821,9 +7303,28 @@
                             "const": "catalog_plan_reenabled"
                           },
                           "data": {
-                            "$ref": "#/components/schemas/CatalogPlan"
+                            "allOf": [
+                              {
+                                "$ref": "#/components/schemas/CatalogPlan"
+                              },
+                              {
+                                "properties": {
+                                  "status": {
+                                    "const": "active"
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "status"
+                                ],
+                                "type": "object"
+                              }
+                            ]
                           }
                         },
+                        "required": [
+                          "data"
+                        ],
                         "type": "object"
                       }
                     ]
@@ -7105,6 +7606,9 @@
                             "$ref": "#/components/schemas/CustomersListData"
                           }
                         },
+                        "required": [
+                          "data"
+                        ],
                         "type": "object"
                       }
                     ]
@@ -7231,6 +7735,9 @@
                             "$ref": "#/components/schemas/CustomerDetailData"
                           }
                         },
+                        "required": [
+                          "data"
+                        ],
                         "type": "object"
                       }
                     ]
@@ -7374,9 +7881,28 @@
                             "const": "customer_disabled"
                           },
                           "data": {
-                            "$ref": "#/components/schemas/CustomerRow"
+                            "allOf": [
+                              {
+                                "$ref": "#/components/schemas/CustomerRow"
+                              },
+                              {
+                                "properties": {
+                                  "status": {
+                                    "const": "disabled"
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "status"
+                                ],
+                                "type": "object"
+                              }
+                            ]
                           }
                         },
+                        "required": [
+                          "data"
+                        ],
                         "type": "object"
                       }
                     ]
@@ -7632,9 +8158,28 @@
                             "const": "customer_reenabled"
                           },
                           "data": {
-                            "$ref": "#/components/schemas/CustomerRow"
+                            "allOf": [
+                              {
+                                "$ref": "#/components/schemas/CustomerRow"
+                              },
+                              {
+                                "properties": {
+                                  "status": {
+                                    "const": "active"
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "status"
+                                ],
+                                "type": "object"
+                              }
+                            ]
                           }
                         },
+                        "required": [
+                          "data"
+                        ],
                         "type": "object"
                       }
                     ]
@@ -7925,6 +8470,9 @@
                             "$ref": "#/components/schemas/EntitlementsListData"
                           }
                         },
+                        "required": [
+                          "data"
+                        ],
                         "type": "object"
                       }
                     ]
@@ -8060,6 +8608,9 @@
                             "$ref": "#/components/schemas/EntitlementRecord"
                           }
                         },
+                        "required": [
+                          "data"
+                        ],
                         "type": "object"
                       }
                     ]
@@ -8210,6 +8761,13 @@
                         "ok": false,
                         "request_id": "1a2b3c-1"
                       }
+                    },
+                    "stale_transition": {
+                      "value": {
+                        "code": "stale_transition",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
                     }
                   },
                   "schema": {
@@ -8217,7 +8775,7 @@
                   }
                 }
               },
-              "description": "Target entitlement is revoked (terminal)."
+              "description": "Target entitlement is revoked (terminal), or it changed after this request observed it; refetch and retry the latter."
             },
             "413": {
               "content": {
@@ -8311,6 +8869,9 @@
                             "$ref": "#/components/schemas/EntitlementRecord"
                           }
                         },
+                        "required": [
+                          "data"
+                        ],
                         "type": "object"
                       }
                     ]
@@ -8474,6 +9035,9 @@
                             "$ref": "#/components/schemas/EntitlementRecord"
                           }
                         },
+                        "required": [
+                          "data"
+                        ],
                         "type": "object"
                       }
                     ]
@@ -8610,6 +9174,13 @@
                         "ok": false,
                         "request_id": "1a2b3c-1"
                       }
+                    },
+                    "stale_transition": {
+                      "value": {
+                        "code": "stale_transition",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
                     }
                   },
                   "schema": {
@@ -8617,7 +9188,7 @@
                   }
                 }
               },
-              "description": "Target entitlement is revoked (terminal)."
+              "description": "Target entitlement is revoked (terminal), or it changed after this request observed it; refetch and retry the latter."
             },
             "413": {
               "content": {
@@ -8711,6 +9282,9 @@
                             "$ref": "#/components/schemas/DevicesListData"
                           }
                         },
+                        "required": [
+                          "data"
+                        ],
                         "type": "object"
                       }
                     ]
@@ -8883,16 +9457,30 @@
                             "const": "device_disabled"
                           },
                           "data": {
-                            "$ref": "#/components/schemas/EntitlementRecord"
+                            "allOf": [
+                              {
+                                "$ref": "#/components/schemas/EntitlementRecord"
+                              },
+                              {
+                                "required": [
+                                  "id",
+                                  "revocation_seq"
+                                ],
+                                "type": "object"
+                              }
+                            ]
                           }
                         },
+                        "required": [
+                          "data"
+                        ],
                         "type": "object"
                       }
                     ]
                   }
                 }
               },
-              "description": "Device disabled; entitlement revocation_seq bumped."
+              "description": "Device is disabled. Returns the parent entitlement's authoritative revocation_seq: it advances only when the device state changed and is unchanged for an already-disabled device."
             },
             "400": {
               "content": {
@@ -9036,6 +9624,13 @@
                         "ok": false,
                         "request_id": "1a2b3c-1"
                       }
+                    },
+                    "stale_transition": {
+                      "value": {
+                        "code": "stale_transition",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
                     }
                   },
                   "schema": {
@@ -9043,7 +9638,7 @@
                   }
                 }
               },
-              "description": "Device is revoked (terminal); cannot disable."
+              "description": "The source device is revoked (terminal), so it cannot be disabled, or a different concurrent transition changed it after this request observed it; refetch and retry the latter."
             },
             "413": {
               "content": {
@@ -9099,7 +9694,7 @@
               "devBearer": []
             }
           ],
-          "summary": "Disable ONE device key (admin-only, reversible, requires reason). Bumps revocation_seq.",
+          "summary": "Disable ONE device key (admin-only, reversible, requires reason). A state change advances the parent entitlement revocation_seq; an already-disabled device is a successful no-op.",
           "tags": [
             "admin:entitlements"
           ]
@@ -9154,16 +9749,30 @@
                             "const": "device_reenabled"
                           },
                           "data": {
-                            "$ref": "#/components/schemas/EntitlementRecord"
+                            "allOf": [
+                              {
+                                "$ref": "#/components/schemas/EntitlementRecord"
+                              },
+                              {
+                                "required": [
+                                  "id",
+                                  "revocation_seq"
+                                ],
+                                "type": "object"
+                              }
+                            ]
                           }
                         },
+                        "required": [
+                          "data"
+                        ],
                         "type": "object"
                       }
                     ]
                   }
                 }
               },
-              "description": "Device re-enabled; entitlement revocation_seq bumped."
+              "description": "Device is active. Returns the parent entitlement's authoritative revocation_seq: it advances only when the device state changed and is unchanged for an already-active device."
             },
             "400": {
               "content": {
@@ -9300,6 +9909,13 @@
                         "ok": false,
                         "request_id": "1a2b3c-1"
                       }
+                    },
+                    "stale_transition": {
+                      "value": {
+                        "code": "stale_transition",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
                     }
                   },
                   "schema": {
@@ -9307,7 +9923,7 @@
                   }
                 }
               },
-              "description": "Device is revoked (terminal); cannot re-enable."
+              "description": "The source device is revoked (terminal), so it cannot be re-enabled, or a different concurrent transition changed it after this request observed it; refetch and retry the latter."
             },
             "413": {
               "content": {
@@ -9363,7 +9979,7 @@
               "devBearer": []
             }
           ],
-          "summary": "Re-enable a disabled device key (admin-only). Bumps revocation_seq. Reason optional.",
+          "summary": "Re-enable a disabled device key (admin-only). A state change advances the parent entitlement revocation_seq; an already-active device is a successful no-op. Reason optional.",
           "tags": [
             "admin:entitlements"
           ]
@@ -9428,16 +10044,30 @@
                             "const": "device_revoked"
                           },
                           "data": {
-                            "$ref": "#/components/schemas/EntitlementRecord"
+                            "allOf": [
+                              {
+                                "$ref": "#/components/schemas/EntitlementRecord"
+                              },
+                              {
+                                "required": [
+                                  "id",
+                                  "revocation_seq"
+                                ],
+                                "type": "object"
+                              }
+                            ]
                           }
                         },
+                        "required": [
+                          "data"
+                        ],
                         "type": "object"
                       }
                     ]
                   }
                 }
               },
-              "description": "Device revoked; entitlement revocation_seq bumped."
+              "description": "Device is revoked. Returns the parent entitlement's authoritative revocation_seq: it advances only when the device state changed and is unchanged for an already-revoked device."
             },
             "400": {
               "content": {
@@ -9575,9 +10205,9 @@
               "content": {
                 "application/json": {
                   "examples": {
-                    "device_is_terminal": {
+                    "stale_transition": {
                       "value": {
-                        "code": "device_is_terminal",
+                        "code": "stale_transition",
                         "ok": false,
                         "request_id": "1a2b3c-1"
                       }
@@ -9588,7 +10218,7 @@
                   }
                 }
               },
-              "description": "Device is already revoked (terminal)."
+              "description": "A different concurrent device transition changed the source after this request observed it; refetch and retry. An already-revoked device remains a 200 no-op."
             },
             "413": {
               "content": {
@@ -9644,7 +10274,7 @@
               "devBearer": []
             }
           ],
-          "summary": "Revoke ONE device key (admin-only, terminal, requires reason). Bumps revocation_seq so the online-verify path refuses that device pre-TTL.",
+          "summary": "Revoke ONE device key (admin-only, terminal, requires reason). A state change advances the parent entitlement revocation_seq so the online-verify path refuses that device pre-TTL; an already-revoked device is a successful no-op.",
           "tags": [
             "admin:entitlements"
           ]
@@ -9699,16 +10329,36 @@
                             "const": "entitlement_disabled"
                           },
                           "data": {
-                            "$ref": "#/components/schemas/EntitlementRecord"
+                            "allOf": [
+                              {
+                                "$ref": "#/components/schemas/EntitlementRecord"
+                              },
+                              {
+                                "properties": {
+                                  "status": {
+                                    "const": "disabled"
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "revocation_seq",
+                                  "status"
+                                ],
+                                "type": "object"
+                              }
+                            ]
                           }
                         },
+                        "required": [
+                          "data"
+                        ],
                         "type": "object"
                       }
                     ]
                   }
                 }
               },
-              "description": "Entitlement disabled."
+              "description": "Entitlement is disabled. Returns the authoritative current record: status and revocation_seq change only from active; an already-disabled entitlement is returned unchanged."
             },
             "400": {
               "content": {
@@ -9845,6 +10495,13 @@
                         "ok": false,
                         "request_id": "1a2b3c-1"
                       }
+                    },
+                    "stale_transition": {
+                      "value": {
+                        "code": "stale_transition",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
                     }
                   },
                   "schema": {
@@ -9852,7 +10509,7 @@
                   }
                 }
               },
-              "description": "Target entitlement is revoked (terminal)."
+              "description": "The source entitlement is revoked (terminal), so it cannot be disabled, or a different concurrent transition changed it after this request observed it; refetch and retry the latter."
             },
             "413": {
               "content": {
@@ -9908,7 +10565,7 @@
               "devBearer": []
             }
           ],
-          "summary": "Disable entitlement (admin-only, requires reason)",
+          "summary": "Disable entitlement (admin-only, requires reason). An already-disabled entitlement is a successful no-op; a revoked source entitlement is terminal.",
           "tags": [
             "admin:entitlements"
           ]
@@ -9946,6 +10603,9 @@
                             "$ref": "#/components/schemas/MeterStatusData"
                           }
                         },
+                        "required": [
+                          "data"
+                        ],
                         "type": "object"
                       }
                     ]
@@ -10109,16 +10769,36 @@
                             "const": "entitlement_reenabled"
                           },
                           "data": {
-                            "$ref": "#/components/schemas/EntitlementRecord"
+                            "allOf": [
+                              {
+                                "$ref": "#/components/schemas/EntitlementRecord"
+                              },
+                              {
+                                "properties": {
+                                  "status": {
+                                    "const": "active"
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "revocation_seq",
+                                  "status"
+                                ],
+                                "type": "object"
+                              }
+                            ]
                           }
                         },
+                        "required": [
+                          "data"
+                        ],
                         "type": "object"
                       }
                     ]
                   }
                 }
               },
-              "description": "Entitlement re-enabled."
+              "description": "Entitlement is active. Returns the authoritative current record: status and revocation_seq change only from disabled; an already-active entitlement is returned unchanged."
             },
             "400": {
               "content": {
@@ -10248,6 +10928,13 @@
                         "ok": false,
                         "request_id": "1a2b3c-1"
                       }
+                    },
+                    "stale_transition": {
+                      "value": {
+                        "code": "stale_transition",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
                     }
                   },
                   "schema": {
@@ -10255,7 +10942,7 @@
                   }
                 }
               },
-              "description": "Target entitlement is revoked (terminal)."
+              "description": "The source entitlement is revoked (terminal), so it cannot be re-enabled, or a different concurrent transition changed it after this request observed it; refetch and retry the latter."
             },
             "413": {
               "content": {
@@ -10311,7 +10998,7 @@
               "devBearer": []
             }
           ],
-          "summary": "Re-enable entitlement (admin-only)",
+          "summary": "Re-enable entitlement (admin-only). An already-active entitlement is a successful no-op; a revoked source entitlement is terminal.",
           "tags": [
             "admin:entitlements"
           ]
@@ -10369,6 +11056,9 @@
                             "$ref": "#/components/schemas/ReleaseSeatsData"
                           }
                         },
+                        "required": [
+                          "data"
+                        ],
                         "type": "object"
                       }
                     ]
@@ -10585,16 +11275,36 @@
                             "const": "entitlement_revoked"
                           },
                           "data": {
-                            "$ref": "#/components/schemas/EntitlementRecord"
+                            "allOf": [
+                              {
+                                "$ref": "#/components/schemas/EntitlementRecord"
+                              },
+                              {
+                                "properties": {
+                                  "status": {
+                                    "const": "revoked"
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "revocation_seq",
+                                  "status"
+                                ],
+                                "type": "object"
+                              }
+                            ]
                           }
                         },
+                        "required": [
+                          "data"
+                        ],
                         "type": "object"
                       }
                     ]
                   }
                 }
               },
-              "description": "Entitlement revoked (terminal)."
+              "description": "Entitlement is revoked. Returns the authoritative current record: status and revocation_seq change only from active or disabled; an already-revoked entitlement is returned unchanged."
             },
             "400": {
               "content": {
@@ -10725,9 +11435,9 @@
               "content": {
                 "application/json": {
                   "examples": {
-                    "revoked_entitlement_is_terminal": {
+                    "stale_transition": {
                       "value": {
-                        "code": "revoked_entitlement_is_terminal",
+                        "code": "stale_transition",
                         "ok": false,
                         "request_id": "1a2b3c-1"
                       }
@@ -10738,7 +11448,7 @@
                   }
                 }
               },
-              "description": "Target entitlement is already revoked (terminal)."
+              "description": "A different concurrent transition changed the entitlement after this request observed it; refetch and retry. An already-revoked entitlement remains a 200 no-op."
             },
             "413": {
               "content": {
@@ -10794,7 +11504,7 @@
               "devBearer": []
             }
           ],
-          "summary": "Revoke entitlement (admin-only, terminal state, requires reason)",
+          "summary": "Revoke entitlement (admin-only, terminal state, requires reason). An already-revoked entitlement is a successful no-op.",
           "tags": [
             "admin:entitlements"
           ]
@@ -10843,6 +11553,9 @@
                             "$ref": "#/components/schemas/BatchResultData"
                           }
                         },
+                        "required": [
+                          "data"
+                        ],
                         "type": "object"
                       }
                     ]
@@ -11058,6 +11771,9 @@
                             "$ref": "#/components/schemas/EventsListData"
                           }
                         },
+                        "required": [
+                          "data"
+                        ],
                         "type": "object"
                       }
                     ]
@@ -11195,6 +11911,9 @@
                             "$ref": "#/components/schemas/PlanProjectionApplyResult"
                           }
                         },
+                        "required": [
+                          "data"
+                        ],
                         "type": "object"
                       }
                     ]
@@ -11333,7 +12052,7 @@
                   }
                 }
               },
-              "description": "Preview expired, was consumed, belongs to a different actor, its source generation changed, its derived grant has expired, or an assignment now has a different license fingerprint; re-preview before Apply. A fingerprint transfer needs a separate deliberate protocol."
+              "description": "Preview expired, was consumed, belongs to a different actor, its source generation changed, its derived grant has expired, or an assignment-or-entitlement identity now has a different license fingerprint; re-preview before Apply. A fingerprint transfer needs a separate deliberate protocol."
             },
             "413": {
               "content": {
@@ -11433,6 +12152,9 @@
                             "$ref": "#/components/schemas/PlanProjectionPreviewResponse"
                           }
                         },
+                        "required": [
+                          "data"
+                        ],
                         "type": "object"
                       }
                     ]
@@ -11604,7 +12326,7 @@
                   }
                 }
               },
-              "description": "Plan or referenced policy is disabled, the plan references a policy from another project, a different existing license fingerprint requires a deliberate transfer protocol, or `plan_projection_too_large` requires the operator to narrow the plan/add-on scope before previewing again. The nine-action bound keeps one Apply transaction below D1 Workers Free (50 query) and Paid (1,000 query) invocation limits."
+              "description": "Plan or referenced policy is disabled, the plan references a policy from another project, an assignment-or-entitlement identity has a different license fingerprint and requires a deliberate transfer protocol, or `plan_projection_too_large` requires the operator to narrow the plan/add-on scope before previewing again. A nine-action Apply uses exactly 38 D1 batch statements; with replay lookup and preview decode, the successful idempotent request uses 40 (41 for a same-key stale contender that re-reads the replay), below Workers Free (50 query) and Paid (1,000 query) invocation limits."
             },
             "413": {
               "content": {
@@ -11742,6 +12464,9 @@
                             "$ref": "#/components/schemas/LicensesListData"
                           }
                         },
+                        "required": [
+                          "data"
+                        ],
                         "type": "object"
                       }
                     ]
@@ -11920,6 +12645,9 @@
                             "$ref": "#/components/schemas/OrdersListData"
                           }
                         },
+                        "required": [
+                          "data"
+                        ],
                         "type": "object"
                       }
                     ]
@@ -12099,6 +12827,9 @@
                             "$ref": "#/components/schemas/PoliciesListData"
                           }
                         },
+                        "required": [
+                          "data"
+                        ],
                         "type": "object"
                       }
                     ]
@@ -12234,6 +12965,9 @@
                             "$ref": "#/components/schemas/Policy"
                           }
                         },
+                        "required": [
+                          "data"
+                        ],
                         "type": "object"
                       }
                     ]
@@ -12445,6 +13179,9 @@
                             "$ref": "#/components/schemas/Policy"
                           }
                         },
+                        "required": [
+                          "data"
+                        ],
                         "type": "object"
                       }
                     ]
@@ -12589,6 +13326,9 @@
                             "$ref": "#/components/schemas/Policy"
                           }
                         },
+                        "required": [
+                          "data"
+                        ],
                         "type": "object"
                       }
                     ]
@@ -12817,9 +13557,28 @@
                             "const": "policy_disabled"
                           },
                           "data": {
-                            "$ref": "#/components/schemas/Policy"
+                            "allOf": [
+                              {
+                                "$ref": "#/components/schemas/Policy"
+                              },
+                              {
+                                "properties": {
+                                  "status": {
+                                    "const": "disabled"
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "status"
+                                ],
+                                "type": "object"
+                              }
+                            ]
                           }
                         },
+                        "required": [
+                          "data"
+                        ],
                         "type": "object"
                       }
                     ]
@@ -13075,9 +13834,28 @@
                             "const": "policy_reenabled"
                           },
                           "data": {
-                            "$ref": "#/components/schemas/Policy"
+                            "allOf": [
+                              {
+                                "$ref": "#/components/schemas/Policy"
+                              },
+                              {
+                                "properties": {
+                                  "status": {
+                                    "const": "active"
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "status"
+                                ],
+                                "type": "object"
+                              }
+                            ]
                           }
                         },
+                        "required": [
+                          "data"
+                        ],
                         "type": "object"
                       }
                     ]
@@ -13297,6 +14075,9 @@
                             "$ref": "#/components/schemas/ReportData"
                           }
                         },
+                        "required": [
+                          "data"
+                        ],
                         "type": "object"
                       }
                     ]
@@ -13432,6 +14213,9 @@
                             "$ref": "#/components/schemas/ExpiringData"
                           }
                         },
+                        "required": [
+                          "data"
+                        ],
                         "type": "object"
                       }
                     ]
@@ -13581,6 +14365,9 @@
                             "$ref": "#/components/schemas/TimeseriesData"
                           }
                         },
+                        "required": [
+                          "data"
+                        ],
                         "type": "object"
                       }
                     ]
@@ -13722,6 +14509,9 @@
                             "$ref": "#/components/schemas/SearchData"
                           }
                         },
+                        "required": [
+                          "data"
+                        ],
                         "type": "object"
                       }
                     ]
@@ -13837,6 +14627,9 @@
                             "$ref": "#/components/schemas/SettingsData"
                           }
                         },
+                        "required": [
+                          "data"
+                        ],
                         "type": "object"
                       }
                     ]
@@ -13933,6 +14726,9 @@
                             "$ref": "#/components/schemas/SummaryData"
                           }
                         },
+                        "required": [
+                          "data"
+                        ],
                         "type": "object"
                       }
                     ]
@@ -14069,6 +14865,9 @@
                             "$ref": "#/components/schemas/WebhooksListData"
                           }
                         },
+                        "required": [
+                          "data"
+                        ],
                         "type": "object"
                       }
                     ]
@@ -14204,6 +15003,9 @@
                             "$ref": "#/components/schemas/WebhookEndpoint"
                           }
                         },
+                        "required": [
+                          "data"
+                        ],
                         "type": "object"
                       }
                     ]
@@ -14403,6 +15205,9 @@
                             "$ref": "#/components/schemas/WebhookDetailData"
                           }
                         },
+                        "required": [
+                          "data"
+                        ],
                         "type": "object"
                       }
                     ]
@@ -14547,6 +15352,9 @@
                             "$ref": "#/components/schemas/WebhookEndpoint"
                           }
                         },
+                        "required": [
+                          "data"
+                        ],
                         "type": "object"
                       }
                     ]
@@ -14783,9 +15591,28 @@
                             "const": "webhook_disabled"
                           },
                           "data": {
-                            "$ref": "#/components/schemas/WebhookEndpoint"
+                            "allOf": [
+                              {
+                                "$ref": "#/components/schemas/WebhookEndpoint"
+                              },
+                              {
+                                "properties": {
+                                  "status": {
+                                    "const": "disabled"
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "status"
+                                ],
+                                "type": "object"
+                              }
+                            ]
                           }
                         },
+                        "required": [
+                          "data"
+                        ],
                         "type": "object"
                       }
                     ]
@@ -15041,9 +15868,28 @@
                             "const": "webhook_reenabled"
                           },
                           "data": {
-                            "$ref": "#/components/schemas/WebhookEndpoint"
+                            "allOf": [
+                              {
+                                "$ref": "#/components/schemas/WebhookEndpoint"
+                              },
+                              {
+                                "properties": {
+                                  "status": {
+                                    "const": "active"
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "status"
+                                ],
+                                "type": "object"
+                              }
+                            ]
                           }
                         },
+                        "required": [
+                          "data"
+                        ],
                         "type": "object"
                       }
                     ]
@@ -15314,6 +16160,9 @@
                             "$ref": "#/components/schemas/WebhookDeliveriesListData"
                           }
                         },
+                        "required": [
+                          "data"
+                        ],
                         "type": "object"
                       }
                     ]
@@ -15458,9 +16307,29 @@
                             "const": "webhook_delivery_redriven"
                           },
                           "data": {
-                            "$ref": "#/components/schemas/WebhookDelivery"
+                            "allOf": [
+                              {
+                                "$ref": "#/components/schemas/WebhookDelivery"
+                              },
+                              {
+                                "properties": {
+                                  "status": {
+                                    "const": "pending"
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "next_attempt_at",
+                                  "status"
+                                ],
+                                "type": "object"
+                              }
+                            ]
                           }
                         },
+                        "required": [
+                          "data"
+                        ],
                         "type": "object"
                       }
                     ]
@@ -15702,6 +16571,9 @@
                             "$ref": "#/components/schemas/EntitlementRecord"
                           }
                         },
+                        "required": [
+                          "data"
+                        ],
                         "type": "object"
                       }
                     ]
@@ -15817,6 +16689,13 @@
                         "ok": false,
                         "request_id": "1a2b3c-1"
                       }
+                    },
+                    "stale_transition": {
+                      "value": {
+                        "code": "stale_transition",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
                     }
                   },
                   "schema": {
@@ -15824,7 +16703,7 @@
                   }
                 }
               },
-              "description": "Target entitlement is revoked (terminal)."
+              "description": "Target entitlement is revoked (terminal), or it changed after this request observed it; refetch and retry the latter."
             },
             "413": {
               "content": {

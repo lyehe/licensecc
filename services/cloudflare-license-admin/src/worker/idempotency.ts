@@ -39,8 +39,8 @@ export async function rememberIdempotency(
   key: string | null,
   body: unknown,
   now: number,
-): Promise<void> {
-  await writeIdempotentResponse(env.DB, scope, key, JSON.stringify(body), now);
+): Promise<string | null> {
+  return writeIdempotentResponse(env.DB, scope, key, JSON.stringify(body), now);
 }
 
 export async function mutationResponse<T>(
@@ -68,12 +68,50 @@ export async function mutationResponse<T>(
     if (result instanceof Response) {
       return result;
     }
+    // A same-key request can observe an empty replay cache, lose the guarded
+    // mutation batch to its peer, and then receive the peer's replay entry
+    // before it gets here. Prefer that authoritative cached body over emitting
+    // a second, locally assembled success envelope (or an avoidable 409 from a
+    // stale optimistic claim).
+    if (!result.idempotencyRecorded) {
+      const racedReplay = await idempotentReplay(env, scope, ctx.idempotencyKey);
+      if (racedReplay !== null) {
+        return racedReplay;
+      }
+    }
     const body = { ok: true, code, request_id: ctx.requestId, data: result.data };
     if (!result.idempotencyRecorded) {
-      await rememberIdempotency(env, scope, ctx.idempotencyKey, body, Math.floor(Date.now() / 1000));
+      // No-op paths use the generic replay store after their read. If a peer
+      // claimed the same key between that read and this insert, the immutable
+      // stored body is the authoritative outcome too; never emit a locally
+      // assembled response for the losing request.
+      const stored = await rememberIdempotency(env, scope, ctx.idempotencyKey, body, Math.floor(Date.now() / 1000));
+      if (stored !== null && stored !== JSON.stringify(body)) {
+        return json(JSON.parse(stored), 200, { "x-idempotent-replay": "1" });
+      }
     }
     return json(body);
   } catch (error) {
+    if (error instanceof Error && error.message === "idempotency_conflict") {
+      // A strict in-batch replay claim lost after our initial lookup. D1 rolled
+      // back every loser write, including audit/side effects; publish the exact
+      // winner response instead of exposing a misleading conflict or success.
+      const racedReplay = await idempotentReplay(env, scope, ctx.idempotencyKey);
+      if (racedReplay !== null) {
+        return racedReplay;
+      }
+      return envelope(ctx.requestId, "mutation_failed", undefined, 500);
+    }
+    if (error instanceof Error && error.message === "stale_transition") {
+      // The winner may have committed the exact same idempotency key after the
+      // first replay lookup. Recheck before reporting a true concurrent-state
+      // conflict so retries retain their one-result replay semantics.
+      const racedReplay = await idempotentReplay(env, scope, ctx.idempotencyKey);
+      if (racedReplay !== null) {
+        return racedReplay;
+      }
+      return envelope(ctx.requestId, "stale_transition", undefined, 409);
+    }
     if (error instanceof Error && error.message === "revoked_terminal") {
       return envelope(ctx.requestId, "revoked_entitlement_is_terminal", undefined, 409);
     }

@@ -1,4 +1,10 @@
-import { isPlanProjectionPreviewId, type PlanProjectionApplyInput, type PlanProjectionInput } from "@licensecc/licensing-domain/catalog/plan_projection";
+import {
+  isPlanProjectionPreviewId,
+  MAX_SUPPORT_UNTIL_EPOCH_SECONDS,
+  type PlanProjectionApplyInput,
+  type PlanProjectionInput,
+} from "@licensecc/licensing-domain/catalog/plan_projection";
+import { isCatalogImportPreviewId, type CatalogImportApplyInput } from "@licensecc/licensing-domain/catalog/import_preview";
 import { safeString } from "@licensecc/cloudflare-runtime/http/kit";
 
 const HEX_64 = /^[0-9a-fA-F]{64}$/;
@@ -6,6 +12,7 @@ export const MAX_PROJECT_SIZE = 127;
 export const MAX_FEATURE_SIZE = 15;
 const MAX_NOTES_SIZE = 1000;
 export const MAX_NAME_SIZE = 127;
+const CATALOG_TUPLE_CONTROL = "\u001f";
 // A generous-but-bounded ceiling for the policy duration/offset/borrow integers
 // (~100 years in seconds). Keeps validators from accepting absurd or overflow values.
 export const MAX_DURATION_SECONDS = 3_153_600_000;
@@ -42,6 +49,21 @@ export function nullableSafeString(value: unknown, maxLength: number): string | 
   return safeString(value, maxLength);
 }
 
+function catalogIdentifier(value: unknown, maxLength: number): string | null {
+  const parsed = safeString(value, maxLength);
+  return parsed === null || parsed.includes(CATALOG_TUPLE_CONTROL) ? null : parsed;
+}
+
+function nullableCatalogIdentifier(value: unknown, maxLength: number): string | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null || value === "") return null;
+  return catalogIdentifier(value, maxLength);
+}
+
+function catalogTupleKey(...parts: string[]): string {
+  return JSON.stringify(parts);
+}
+
 export function boundedInt(value: unknown, min: number, max: number): number | undefined {
   if (value === undefined) {
     return undefined;
@@ -52,14 +74,14 @@ export function boundedInt(value: unknown, min: number, max: number): number | u
   return value;
 }
 
-export function nullableEpoch(value: unknown): number | null | undefined {
+export function nullableEpoch(value: unknown, maximum = Number.MAX_SAFE_INTEGER): number | null | undefined {
   if (value === undefined) {
     return undefined;
   }
   if (value === null) {
     return null;
   }
-  if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0 || value > maximum) {
     return undefined;
   }
   return value;
@@ -78,7 +100,7 @@ export function validatePlanProjectionInput(value: unknown): PlanProjectionInput
   const customerId = input.customer_id === undefined ? undefined : nullableSafeString(input.customer_id, 128);
   const planId = input.plan_id === undefined ? undefined : nullableSafeString(input.plan_id, 128);
   const planKey = input.plan_key === undefined ? undefined : nullableSafeString(input.plan_key, 128);
-  const supportUntil = input.support_until === undefined ? undefined : nullableEpoch(input.support_until);
+  const supportUntil = input.support_until === undefined ? undefined : nullableEpoch(input.support_until, MAX_SUPPORT_UNTIL_EPOCH_SECONDS);
   const notes = input.notes === undefined ? undefined : safeNotes(input.notes);
   if (
     project === null || licenseId === null || licenseFingerprint === null ||
@@ -184,9 +206,31 @@ export interface CatalogPlanFeatureInput {
 }
 
 export interface CatalogImportInput {
-  format_version?: 1;
+  format_version: 1;
   features: CatalogFeatureInput[];
   plans: Array<CatalogPlanInput & { features?: CatalogPlanFeatureInput[] }>;
+}
+
+export function validateCatalogImportApplyInput(value: unknown): CatalogImportApplyInput | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return null;
+  }
+  const input = value as Record<string, unknown>;
+  if (!hasOnlyKeys(input, new Set(["preview_id"]))) {
+    return null;
+  }
+  const previewId = safeString(input.preview_id, 128);
+  return previewId !== null && isCatalogImportPreviewId(previewId) ? { preview_id: previewId } : null;
+}
+
+export function isCatalogImportManifestPayload(value: unknown): boolean {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const input = value as Record<string, unknown>;
+  return Object.prototype.hasOwnProperty.call(input, "features") ||
+    Object.prototype.hasOwnProperty.call(input, "plans") ||
+    Object.prototype.hasOwnProperty.call(input, "format_version");
 }
 
 export function catalogStatus(value: unknown): "active" | "disabled" | null {
@@ -233,8 +277,8 @@ export function validateCatalogFeatureInput(value: unknown): CatalogFeatureInput
   if (!hasOnlyKeys(input, new Set(["project", "feature_key", "name", "description", "category", "status"]))) {
     return null;
   }
-  const project = safeString(input.project, MAX_PROJECT_SIZE);
-  const featureKey = safeString(input.feature_key, MAX_FEATURE_SIZE);
+  const project = catalogIdentifier(input.project, MAX_PROJECT_SIZE);
+  const featureKey = catalogIdentifier(input.feature_key, MAX_FEATURE_SIZE);
   const name = safeString(input.name, MAX_NAME_SIZE);
   const description = optionalNotes(input.description);
   const category = input.category === undefined ? "" : safeString(input.category, MAX_NAME_SIZE);
@@ -283,8 +327,8 @@ export function validateCatalogPlanInput(value: unknown, allowFeatures = false):
   if (!hasOnlyKeys(input, allowed)) {
     return null;
   }
-  const project = safeString(input.project, MAX_PROJECT_SIZE);
-  const planKey = safeString(input.plan_key, 128);
+  const project = catalogIdentifier(input.project, MAX_PROJECT_SIZE);
+  const planKey = catalogIdentifier(input.plan_key, 128);
   const name = safeString(input.name, MAX_NAME_SIZE);
   const description = optionalNotes(input.description);
   const status = catalogStatus(input.status);
@@ -339,11 +383,11 @@ export function validateCatalogPlanFeatureInput(value: unknown): CatalogPlanFeat
   ]))) {
     return null;
   }
-  const project = safeString(input.project, MAX_PROJECT_SIZE);
-  const featureKey = safeString(input.feature_key, MAX_FEATURE_SIZE);
+  const project = catalogIdentifier(input.project, MAX_PROJECT_SIZE);
+  const featureKey = catalogIdentifier(input.feature_key, MAX_FEATURE_SIZE);
   const inclusion = input.feature_inclusion === undefined ? "included" : input.feature_inclusion;
-  const addonKey = input.addon_key === undefined ? null : nullableSafeString(input.addon_key, 128);
-  const policyId = input.policy_id === undefined ? null : nullableSafeString(input.policy_id, 128);
+  const addonKey = input.addon_key === undefined ? null : nullableCatalogIdentifier(input.addon_key, 128);
+  const policyId = input.policy_id === undefined ? null : nullableCatalogIdentifier(input.policy_id, 128);
   const status = catalogStatus(input.status);
   const displayOrder = boundedInt(input.display_order ?? 0, 0, 1_000_000);
   const assertionTtl = readNullableNonNegativeInt(input, "assertion_ttl_seconds", 3600);
@@ -398,7 +442,7 @@ export function validateCatalogImportInput(value: unknown): CatalogImportInput |
   for (const feature of input.features) {
     const parsed = validateCatalogFeatureInput(feature);
     if (parsed === null) return null;
-    const key = `${parsed.project}:${parsed.feature_key}`;
+    const key = catalogTupleKey(parsed.project, parsed.feature_key);
     if (seenFeatures.has(key)) return null;
     seenFeatures.add(key);
     features.push(parsed);
@@ -411,7 +455,10 @@ export function validateCatalogImportInput(value: unknown): CatalogImportInput |
     if (parsedPlan === null || typeof rawPlan !== "object" || rawPlan === null || Array.isArray(rawPlan)) {
       return null;
     }
-    const planKey = `${parsedPlan.project}:${parsedPlan.plan_key}:${parsedPlan.version}`;
+    // `catalog_plans` is uniquely identified by (project, plan_key), not its
+    // mutable version. A manifest therefore cannot contain two transitions
+    // for the same server entity with differing versions.
+    const planKey = catalogTupleKey(parsedPlan.project, parsedPlan.plan_key);
     if (seenPlans.has(planKey)) return null;
     seenPlans.add(planKey);
     const rawFeatures = (rawPlan as Record<string, unknown>).features;
