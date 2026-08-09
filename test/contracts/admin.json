@@ -3187,7 +3187,8 @@
               }
             },
             {
-              "description": "Page size (default 50; explicit values must be safe integers from 1 through 100; malformed values return 400 invalid_request).",
+              "allowEmptyValue": true,
+              "description": "Page size (default 50 when omitted or empty; explicit values must be safe integers from 1 through 100; malformed values return 400 invalid_request).",
               "in": "query",
               "name": "limit",
               "required": false,
@@ -3199,7 +3200,8 @@
               }
             },
             {
-              "description": "Non-negative safe integer offset cursor (default 0). Use `next_cursor` from the previous page; malformed values return 400 invalid_request.",
+              "allowEmptyValue": true,
+              "description": "Non-negative safe integer offset cursor (default 0 when omitted or empty; use `next_cursor` from the previous page; malformed values return 400 invalid_request).",
               "in": "query",
               "name": "cursor",
               "required": false,
@@ -3253,7 +3255,7 @@
                   }
                 }
               },
-              "description": "Invalid filter or pagination bounds."
+              "description": "Invalid filter or limit/cursor pagination bounds."
             },
             "401": {
               "content": {
@@ -4706,7 +4708,8 @@
               }
             },
             {
-              "description": "Page size (default 50; explicit values must be safe integers from 1 through 100; malformed values return 400 invalid_request).",
+              "allowEmptyValue": true,
+              "description": "Page size (default 50 when omitted or empty; explicit values must be safe integers from 1 through 100; malformed values return 400 invalid_request).",
               "in": "query",
               "name": "limit",
               "required": false,
@@ -4718,7 +4721,8 @@
               }
             },
             {
-              "description": "Non-negative safe integer offset cursor (default 0). Use `next_cursor` from the previous page; malformed values return 400 invalid_request.",
+              "allowEmptyValue": true,
+              "description": "Non-negative safe integer offset cursor (default 0 when omitted or empty; use `next_cursor` from the previous page; malformed values return 400 invalid_request).",
               "in": "query",
               "name": "cursor",
               "required": false,
@@ -4772,7 +4776,7 @@
                   }
                 }
               },
-              "description": "Invalid filter or pagination bounds."
+              "description": "Invalid filter or limit/cursor pagination bounds."
             },
             "401": {
               "content": {
@@ -6995,7 +6999,8 @@
               }
             },
             {
-              "description": "Page size (default 50; explicit values must be safe integers from 1 through 100; malformed values return 400 invalid_request).",
+              "allowEmptyValue": true,
+              "description": "Page size (default 50 when omitted or empty; explicit values must be safe integers from 1 through 100; malformed values return 400 invalid_request).",
               "in": "query",
               "name": "limit",
               "required": false,
@@ -7007,7 +7012,8 @@
               }
             },
             {
-              "description": "Non-negative safe integer offset cursor (default 0). Use `next_cursor` from the previous page; malformed values return 400 invalid_request.",
+              "allowEmptyValue": true,
+              "description": "Non-negative safe integer offset cursor (default 0 when omitted or empty; use `next_cursor` from the previous page; malformed values return 400 invalid_request).",
               "in": "query",
               "name": "cursor",
               "required": false,
@@ -7073,7 +7079,7 @@
                   }
                 }
               },
-              "description": "Invalid query parameter, including pagination bounds (e.g. over-long search term)."
+              "description": "Invalid query parameter, including limit/cursor pagination bounds (e.g. over-long search term)."
             },
             "401": {
               "content": {
@@ -7813,7 +7819,8 @@
               }
             },
             {
-              "description": "Page size (default 50; explicit values must be safe integers from 1 through 100; malformed values return 400 invalid_request).",
+              "allowEmptyValue": true,
+              "description": "Page size (default 50 when omitted or empty; explicit values must be safe integers from 1 through 100; malformed values return 400 invalid_request).",
               "in": "query",
               "name": "limit",
               "required": false,
@@ -7825,7 +7832,8 @@
               }
             },
             {
-              "description": "Non-negative safe integer offset cursor (default 0). Use `next_cursor` from the previous page; malformed values return 400 invalid_request.",
+              "allowEmptyValue": true,
+              "description": "Non-negative safe integer offset cursor (default 0 when omitted or empty; use `next_cursor` from the previous page; malformed values return 400 invalid_request).",
               "in": "query",
               "name": "cursor",
               "required": false,
@@ -7891,7 +7899,7 @@
                   }
                 }
               },
-              "description": "Invalid limit or cursor query parameter; explicit values must be safe integers within the documented bounds."
+              "description": "Invalid limit or cursor query parameter (omitted or empty values use documented defaults; explicit values must be safe integers within the documented bounds)."
             },
             "401": {
               "content": {
@@ -10956,7 +10964,8 @@
           "operationId": "listEvents",
           "parameters": [
             {
-              "description": "Page size (default 50; explicit values must be safe integers from 1 through 100; malformed values return 400 invalid_request).",
+              "allowEmptyValue": true,
+              "description": "Page size (default 50 when omitted or empty; explicit values must be safe integers from 1 through 100; malformed values return 400 invalid_request).",
               "in": "query",
               "name": "limit",
               "required": false,
@@ -11023,7 +11032,7 @@
                   }
                 }
               },
-              "description": "Invalid limit or cursor query parameter; explicit values must be safe integers within the documented bounds."
+              "description": "Invalid limit query parameter (omitted or empty values use documented defaults; explicit values must be safe integers within the documented bounds)."
             },
             "401": {
               "content": {
@@ -11665,7 +11674,8 @@
               }
             },
             {
-              "description": "Page size (default 50; explicit values must be safe integers from 1 through 100; malformed values return 400 invalid_request).",
+              "allowEmptyValue": true,
+              "description": "Page size (default 50 when omitted or empty; explicit values must be safe integers from 1 through 100; malformed values return 400 invalid_request).",
               "in": "query",
               "name": "limit",
               "required": false,
@@ -11677,7 +11687,8 @@
               }
             },
             {
-              "description": "Non-negative safe integer offset cursor (default 0). Use `next_cursor` from the previous page; malformed values return 400 invalid_request.",
+              "allowEmptyValue": true,
+              "description": "Non-negative safe integer offset cursor (default 0 when omitted or empty; use `next_cursor` from the previous page; malformed values return 400 invalid_request).",
               "in": "query",
               "name": "cursor",
               "required": false,
@@ -11731,7 +11742,7 @@
                   }
                 }
               },
-              "description": "Invalid query parameter, including pagination bounds (e.g. over-long search term)."
+              "description": "Invalid query parameter, including limit/cursor pagination bounds (e.g. over-long search term)."
             },
             "401": {
               "content": {
@@ -11841,7 +11852,8 @@
               }
             },
             {
-              "description": "Page size (default 50; explicit values must be safe integers from 1 through 100; malformed values return 400 invalid_request).",
+              "allowEmptyValue": true,
+              "description": "Page size (default 50 when omitted or empty; explicit values must be safe integers from 1 through 100; malformed values return 400 invalid_request).",
               "in": "query",
               "name": "limit",
               "required": false,
@@ -11853,7 +11865,8 @@
               }
             },
             {
-              "description": "Non-negative safe integer offset cursor (default 0). Use `next_cursor` from the previous page; malformed values return 400 invalid_request.",
+              "allowEmptyValue": true,
+              "description": "Non-negative safe integer offset cursor (default 0 when omitted or empty; use `next_cursor` from the previous page; malformed values return 400 invalid_request).",
               "in": "query",
               "name": "cursor",
               "required": false,
@@ -11907,7 +11920,7 @@
                   }
                 }
               },
-              "description": "Invalid limit or cursor query parameter; explicit values must be safe integers within the documented bounds."
+              "description": "Invalid limit or cursor query parameter (omitted or empty values use documented defaults; explicit values must be safe integers within the documented bounds)."
             },
             "401": {
               "content": {
@@ -12018,7 +12031,8 @@
               }
             },
             {
-              "description": "Page size (default 50; explicit values must be safe integers from 1 through 100; malformed values return 400 invalid_request).",
+              "allowEmptyValue": true,
+              "description": "Page size (default 50 when omitted or empty; explicit values must be safe integers from 1 through 100; malformed values return 400 invalid_request).",
               "in": "query",
               "name": "limit",
               "required": false,
@@ -12030,7 +12044,8 @@
               }
             },
             {
-              "description": "Non-negative safe integer offset cursor (default 0). Use `next_cursor` from the previous page; malformed values return 400 invalid_request.",
+              "allowEmptyValue": true,
+              "description": "Non-negative safe integer offset cursor (default 0 when omitted or empty; use `next_cursor` from the previous page; malformed values return 400 invalid_request).",
               "in": "query",
               "name": "cursor",
               "required": false,
@@ -12084,7 +12099,7 @@
                   }
                 }
               },
-              "description": "Invalid limit or cursor query parameter; explicit values must be safe integers within the documented bounds."
+              "description": "Invalid limit or cursor query parameter (omitted or empty values use documented defaults; explicit values must be safe integers within the documented bounds)."
             },
             "401": {
               "content": {
@@ -13349,7 +13364,8 @@
               }
             },
             {
-              "description": "Page size (default 50; explicit values must be safe integers from 1 through 100; malformed values return 400 invalid_request).",
+              "allowEmptyValue": true,
+              "description": "Page size (default 50 when omitted or empty; explicit values must be safe integers from 1 through 100; malformed values return 400 invalid_request).",
               "in": "query",
               "name": "limit",
               "required": false,
@@ -13361,7 +13377,8 @@
               }
             },
             {
-              "description": "Non-negative safe integer offset cursor (default 0). Use `next_cursor` from the previous page; malformed values return 400 invalid_request.",
+              "allowEmptyValue": true,
+              "description": "Non-negative safe integer offset cursor (default 0 when omitted or empty; use `next_cursor` from the previous page; malformed values return 400 invalid_request).",
               "in": "query",
               "name": "cursor",
               "required": false,
@@ -13415,7 +13432,7 @@
                   }
                 }
               },
-              "description": "Invalid limit or cursor query parameter; explicit values must be safe integers within the documented bounds."
+              "description": "Invalid limit or cursor query parameter (omitted or empty values use documented defaults; explicit values must be safe integers within the documented bounds)."
             },
             "401": {
               "content": {
@@ -13649,7 +13666,8 @@
               }
             },
             {
-              "description": "Page size (default 10; explicit values must be safe integers from 1 through 10; malformed values return 400 invalid_request).",
+              "allowEmptyValue": true,
+              "description": "Page size (default 10 when omitted or empty; explicit values must be safe integers from 1 through 10; malformed values return 400 invalid_request).",
               "in": "query",
               "name": "limit",
               "required": false,
@@ -13704,7 +13722,7 @@
                   }
                 }
               },
-              "description": "Empty or over-long q, or invalid pagination bounds."
+              "description": "Empty or over-long q, or invalid limit query parameter (omitted or empty values use documented defaults; explicit values must be safe integers within the documented bounds)."
             },
             "401": {
               "content": {
@@ -13983,7 +14001,8 @@
               }
             },
             {
-              "description": "Page size (default 50; explicit values must be safe integers from 1 through 100; malformed values return 400 invalid_request).",
+              "allowEmptyValue": true,
+              "description": "Page size (default 50 when omitted or empty; explicit values must be safe integers from 1 through 100; malformed values return 400 invalid_request).",
               "in": "query",
               "name": "limit",
               "required": false,
@@ -13995,7 +14014,8 @@
               }
             },
             {
-              "description": "Non-negative safe integer offset cursor (default 0). Use `next_cursor` from the previous page; malformed values return 400 invalid_request.",
+              "allowEmptyValue": true,
+              "description": "Non-negative safe integer offset cursor (default 0 when omitted or empty; use `next_cursor` from the previous page; malformed values return 400 invalid_request).",
               "in": "query",
               "name": "cursor",
               "required": false,
@@ -14049,7 +14069,7 @@
                   }
                 }
               },
-              "description": "Invalid limit or cursor query parameter; explicit values must be safe integers within the documented bounds."
+              "description": "Invalid limit or cursor query parameter (omitted or empty values use documented defaults; explicit values must be safe integers within the documented bounds)."
             },
             "401": {
               "content": {
@@ -15226,7 +15246,8 @@
               }
             },
             {
-              "description": "Page size (default 50; explicit values must be safe integers from 1 through 100; malformed values return 400 invalid_request).",
+              "allowEmptyValue": true,
+              "description": "Page size (default 50 when omitted or empty; explicit values must be safe integers from 1 through 100; malformed values return 400 invalid_request).",
               "in": "query",
               "name": "limit",
               "required": false,
@@ -15238,7 +15259,8 @@
               }
             },
             {
-              "description": "Non-negative safe integer offset cursor (default 0). Use `next_cursor` from the previous page; malformed values return 400 invalid_request.",
+              "allowEmptyValue": true,
+              "description": "Non-negative safe integer offset cursor (default 0 when omitted or empty; use `next_cursor` from the previous page; malformed values return 400 invalid_request).",
               "in": "query",
               "name": "cursor",
               "required": false,
@@ -15292,7 +15314,7 @@
                   }
                 }
               },
-              "description": "Invalid status / endpoint_id filter or pagination bounds."
+              "description": "Invalid status / endpoint_id filter or limit/cursor pagination bounds."
             },
             "401": {
               "content": {

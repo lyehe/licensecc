@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { boundedCursor, csvField, toCsv } from "../../dist-worker/worker/query.js";
+import { boundedCursor, csvField, PAGINATION_ROUTE_OPTIONS, toCsv } from "../../dist-worker/worker/query.js";
 import { authed, baseEnv, MockD1, json, worker } from "./fixtures.mjs";
 
 const INVALID_LIMIT_VALUES = [
@@ -31,6 +31,17 @@ test("boundedCursor uses compatible defaults only for omitted or empty values", 
   });
 });
 
+test("limit-only pagination ignores the undocumented cursor parameter", () => {
+  assert.deepEqual(
+    boundedCursor(new URL("https://admin.example/api/admin/search?q=needle&cursor=-1"), { includeCursor: false }),
+    { limit: 50, cursor: 0 },
+  );
+  assert.deepEqual(
+    boundedCursor(new URL("https://admin.example/api/admin/events?cursor=1"), { includeCursor: false }),
+    { limit: 50, cursor: 0 },
+  );
+});
+
 test("boundedCursor rejects malformed, unsafe, and out-of-range explicit values", () => {
   for (const value of INVALID_LIMIT_VALUES) {
     assert.equal(boundedCursor(new URL(`https://admin.example/api/admin/customers?limit=${encodeURIComponent(value)}`)), null, `limit=${value}`);
@@ -43,22 +54,26 @@ test("boundedCursor rejects malformed, unsafe, and out-of-range explicit values"
   assert.equal(boundedCursor(new URL("https://admin.example/api/admin/customers?cursor= 1")), null);
 });
 
-const PAGINATED_LIMIT_ROUTES = [
-  "/api/admin/customers",
-  "/api/admin/licenses",
-  "/api/admin/orders",
-  "/api/admin/search?q=needle",
-  "/api/admin/entitlements",
-  "/api/admin/events",
-  "/api/admin/policies",
-  "/api/admin/catalog/features",
-  "/api/admin/catalog/plans",
-  "/api/admin/webhooks",
-  "/api/admin/webhooks/deliveries",
-  "/api/admin/report/expiring",
-];
+function routePath(routeKey) {
+  return routeKey.slice(routeKey.indexOf(" ") + 1);
+}
 
-const CURSOR_ROUTES = PAGINATED_LIMIT_ROUTES.filter((path) => !path.startsWith("/api/admin/events") && !path.startsWith("/api/admin/search"));
+const PAGINATED_LIMIT_ROUTES = Object.keys(PAGINATION_ROUTE_OPTIONS).map((routeKey) => {
+  const path = routePath(routeKey);
+  return path === "/api/admin/search" ? `${path}?q=needle` : path;
+});
+
+const CURSOR_ROUTES = Object.entries(PAGINATION_ROUTE_OPTIONS)
+  .filter(([, options]) => options.includeCursor !== false)
+  .map(([routeKey]) => routePath(routeKey));
+
+test("pagination options preserve documented empty defaults for every bounded route", () => {
+  for (const [routeKey, options] of Object.entries(PAGINATION_ROUTE_OPTIONS)) {
+    const path = routePath(routeKey);
+    const parsed = boundedCursor(new URL(`https://admin.example${path}?limit=&cursor=`), options);
+    assert.deepEqual(parsed, { limit: options.defaultLimit ?? 50, cursor: 0 }, routeKey);
+  }
+});
 
 async function assertInvalidQuery(path, name, value) {
   const response = await worker.fetch(authed(queryPath(path, name, value)), baseEnv(new MockD1()));
@@ -136,6 +151,18 @@ function rejectingDb() {
   };
 }
 
+test("limit-only route families ignore undocumented cursor values", async () => {
+  for (const path of ["/api/admin/search?q=needle", "/api/admin/events", "/api/admin/events?format=csv"]) {
+    for (const cursor of ["-1", "1"]) {
+      const db = recordingDb();
+      const requestPath = `${path}${path.includes("?") ? "&" : "?"}cursor=${cursor}`;
+      const response = await worker.fetch(authed(requestPath), baseEnv(db));
+      assert.equal(response.status, 200, requestPath);
+      assert.ok(db.prepareCalls > 0, `${requestPath} reaches its bounded query`);
+    }
+  }
+});
+
 test("CSV HTTP exports neutralize formula cells for customers, entitlements, and events", async () => {
   const cases = [
     ["/api/admin/customers?format=csv", [{ id: "c-1", name: "\n=SUM(\"A1\")", email: "customer@example.com", status: "active", external_ref: "ref", entitlement_count: 0, active_entitlement_count: 0, created_at: 1, updated_at: 1 }]],
@@ -155,7 +182,16 @@ test("CSV HTTP exports neutralize formula cells for customers, entitlements, and
 
 test("malformed pagination on CSV routes returns 400 without preparing D1", async () => {
   for (const path of ["/api/admin/customers?format=csv", "/api/admin/entitlements?format=csv", "/api/admin/events?format=csv"]) {
-    for (const query of ["limit=-1", "cursor=-1", "limit=Infinity"]) {
+    for (const query of ["limit=-1", "limit=Infinity"]) {
+      const db = rejectingDb();
+      const response = await worker.fetch(authed(`${path}&${query}`), baseEnv(db));
+      assert.equal(response.status, 400, `${path}&${query}`);
+      assert.equal((await json(response)).code, "invalid_request", `${path}&${query}`);
+      assert.equal(db.prepareCalls, 0, `${path}&${query}`);
+    }
+  }
+  for (const path of ["/api/admin/customers?format=csv", "/api/admin/entitlements?format=csv"]) {
+    for (const query of ["cursor=-1"]) {
       const db = rejectingDb();
       const response = await worker.fetch(authed(`${path}&${query}`), baseEnv(db));
       assert.equal(response.status, 400, `${path}&${query}`);

@@ -22,7 +22,7 @@ import { parseJsonBody, safeNotes } from "../../request.js";
 import { safeString } from "@licensecc/cloudflare-runtime/http/kit";
 import { MAX_FEATURE_SIZE, MAX_PROJECT_SIZE, boundedInt, nullableEpoch, nullableSafeString, validateEntitlementInput, validateEntitlementPatch } from "./validation.js";
 import { clientIp } from "../../support.js";
-import { CSV_ROW_CAP, boundedCursor, csvResponse, wantsCsv } from "../../query.js";
+import { CSV_ROW_CAP, LIMIT_ONLY_PAGINATION_OPTIONS, boundedCursor, csvResponse, wantsCsv } from "../../query.js";
 
 const HEX_64 = /^[0-9a-fA-F]{64}$/;
 const BATCH_MAX_IDS = 100;
@@ -75,7 +75,7 @@ export async function listEntitlements(request: Request, env: Env, requestIdValu
 
 export async function listEvents(request: Request, env: Env, requestIdValue: string): Promise<Response> {
   const url = new URL(request.url);
-  const pagination = boundedCursor(url);
+  const pagination = boundedCursor(url, LIMIT_ONLY_PAGINATION_OPTIONS);
   if (pagination === null) {
     return envelope(requestIdValue, "invalid_request", undefined, 400);
   }

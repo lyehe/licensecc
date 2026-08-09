@@ -1,5 +1,5 @@
 import type { LabeledPathFragment } from "../assemble.js";
-import { SEARCH_PER_TYPE_LIMIT } from "../../query.js";
+import { SEARCH_PAGINATION_OPTIONS } from "../../query.js";
 import {
   ADMIN_AUTH_ERRORS,
   ADMIN_MUTATION_AUTH_ERRORS,
@@ -14,6 +14,7 @@ import {
   invalidPaginationResponse,
   limitCursorParams,
   okResponse,
+  paginationErrorDescription,
   SYNC_SECURITY,
 } from "../components.js";
 
@@ -34,7 +35,7 @@ export const customerPaths: LabeledPathFragment = {
       ],
       responses: {
         "200": okResponse("Customer page (JSON), or a CSV attachment when ?format=csv.", "#/components/schemas/CustomersListData", "customers_listed"),
-        "400": errorResponse("Invalid query parameter, including pagination bounds (e.g. over-long search term).", "invalid_request"),
+        "400": errorResponse("Invalid query parameter, including limit/cursor pagination bounds (e.g. over-long search term).", "invalid_request"),
         ...ADMIN_AUTH_ERRORS,
       },
     },
@@ -112,7 +113,7 @@ export const customerPaths: LabeledPathFragment = {
       ],
       responses: {
         "200": okResponse("License page.", "#/components/schemas/LicensesListData", "licenses_listed"),
-        "400": errorResponse("Invalid query parameter, including pagination bounds (e.g. over-long search term).", "invalid_request"),
+        "400": errorResponse("Invalid query parameter, including limit/cursor pagination bounds (e.g. over-long search term).", "invalid_request"),
         ...ADMIN_AUTH_ERRORS,
       },
     },
@@ -150,11 +151,11 @@ export const searchPaths: LabeledPathFragment = {
       security: ADMIN_SECURITY,
       parameters: [
         { name: "q", in: "query", required: true, description: "Search term (1..128 chars). Contains-match (escaped LIKE) on customers (id/email/name/external_ref), licenses (id/label), orders (subscription_id); PREFIX-match on the hex entitlement license_fingerprint.", schema: { type: "string", minLength: 1, maxLength: 128 } },
-        ...limitCursorParams({ defaultLimit: SEARCH_PER_TYPE_LIMIT, maxLimit: SEARCH_PER_TYPE_LIMIT, includeCursor: false }),
+        ...limitCursorParams(SEARCH_PAGINATION_OPTIONS),
       ],
       responses: {
         "200": okResponse("Mixed-type search results for UI deep-linking.", "#/components/schemas/SearchData", "search_results"),
-        "400": errorResponse("Empty or over-long q, or invalid pagination bounds.", "invalid_request"),
+        "400": errorResponse(`Empty or over-long q, or ${paginationErrorDescription(SEARCH_PAGINATION_OPTIONS)}`, "invalid_request"),
         ...ADMIN_AUTH_ERRORS,
       },
     },

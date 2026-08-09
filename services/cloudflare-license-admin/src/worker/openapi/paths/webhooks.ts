@@ -67,7 +67,7 @@ export const webhookPaths: LabeledPathFragment = {
       ],
       responses: {
         "200": okResponse("Delivery page.", "#/components/schemas/WebhookDeliveriesListData", "webhook_deliveries_listed"),
-        "400": errorResponse("Invalid status / endpoint_id filter or pagination bounds.", "invalid_request"),
+        "400": errorResponse("Invalid status / endpoint_id filter or limit/cursor pagination bounds.", "invalid_request"),
         ...ADMIN_AUTH_ERRORS,
       },
     },

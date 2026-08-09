@@ -1,4 +1,5 @@
 import type { LabeledPathFragment } from "../assemble.js";
+import { LIMIT_ONLY_PAGINATION_OPTIONS } from "../../query.js";
 import {
   ADMIN_AUTH_ERRORS,
   ADMIN_MUTATION_AUTH_ERRORS,
@@ -169,12 +170,12 @@ export const entitlementPaths: LabeledPathFragment = {
       operationId: "listEvents",
       security: ADMIN_SECURITY,
       parameters: [
-        ...limitCursorParams({ includeCursor: false }),
+        ...limitCursorParams(LIMIT_ONLY_PAGINATION_OPTIONS),
         formatCsvParam,
       ],
       responses: {
         "200": okResponse("Audit-event list (JSON), or a CSV attachment when ?format=csv.", "#/components/schemas/EventsListData", "events_listed"),
-        "400": invalidPaginationResponse(),
+        "400": invalidPaginationResponse(LIMIT_ONLY_PAGINATION_OPTIONS),
         ...ADMIN_AUTH_ERRORS,
       },
     },

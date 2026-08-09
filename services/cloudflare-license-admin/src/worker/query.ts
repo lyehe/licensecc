@@ -16,11 +16,57 @@ export const SEARCH_PER_TYPE_LIMIT = 10;
 export interface PaginationOptions {
   readonly defaultLimit?: number;
   readonly maxLimit?: number;
+  readonly includeCursor?: boolean;
+  readonly allowEmptyValue?: boolean;
 }
 
-function parsePageInteger(raw: string | null, defaultValue: number, min: number, max: number): number | null {
-  if (raw === null || raw === "") {
+export const DEFAULT_PAGINATION_OPTIONS = Object.freeze({
+  defaultLimit: DEFAULT_LIMIT,
+  maxLimit: MAX_LIMIT,
+  includeCursor: true,
+  allowEmptyValue: true,
+} as const);
+
+export const LIMIT_ONLY_PAGINATION_OPTIONS = Object.freeze({
+  ...DEFAULT_PAGINATION_OPTIONS,
+  includeCursor: false,
+} as const);
+
+export const SEARCH_PAGINATION_OPTIONS = Object.freeze({
+  ...LIMIT_ONLY_PAGINATION_OPTIONS,
+  defaultLimit: SEARCH_PER_TYPE_LIMIT,
+  maxLimit: SEARCH_PER_TYPE_LIMIT,
+} as const);
+
+// The canonical route keys carrying bounded pagination. Keeping the options here lets the
+// Worker call sites, OpenAPI cross-check, and focused route tests consume one support matrix.
+export const PAGINATION_ROUTE_OPTIONS = {
+  "GET /api/admin/customers": DEFAULT_PAGINATION_OPTIONS,
+  "GET /api/admin/licenses": DEFAULT_PAGINATION_OPTIONS,
+  "GET /api/admin/orders": DEFAULT_PAGINATION_OPTIONS,
+  "GET /api/admin/search": SEARCH_PAGINATION_OPTIONS,
+  "GET /api/admin/entitlements": DEFAULT_PAGINATION_OPTIONS,
+  "GET /api/admin/events": LIMIT_ONLY_PAGINATION_OPTIONS,
+  "GET /api/admin/policies": DEFAULT_PAGINATION_OPTIONS,
+  "GET /api/admin/catalog/features": DEFAULT_PAGINATION_OPTIONS,
+  "GET /api/admin/catalog/plans": DEFAULT_PAGINATION_OPTIONS,
+  "GET /api/admin/webhooks": DEFAULT_PAGINATION_OPTIONS,
+  "GET /api/admin/webhooks/deliveries": DEFAULT_PAGINATION_OPTIONS,
+  "GET /api/admin/report/expiring": DEFAULT_PAGINATION_OPTIONS,
+} as const satisfies Readonly<Record<string, PaginationOptions>>;
+
+function parsePageInteger(
+  raw: string | null,
+  defaultValue: number,
+  min: number,
+  max: number,
+  allowEmptyValue: boolean,
+): number | null {
+  if (raw === null || (allowEmptyValue && raw === "")) {
     return defaultValue;
+  }
+  if (raw === "") {
+    return null;
   }
   if (!/^[0-9]+$/.test(raw)) {
     return null;
@@ -30,11 +76,14 @@ function parsePageInteger(raw: string | null, defaultValue: number, min: number,
 }
 
 /** Parse the shared offset pagination contract; null means an explicit value is malformed. */
-export function boundedCursor(url: URL, options: PaginationOptions = {}): { limit: number; cursor: number } | null {
+export function boundedCursor(url: URL, options: PaginationOptions = DEFAULT_PAGINATION_OPTIONS): { limit: number; cursor: number } | null {
   const defaultLimit = options.defaultLimit ?? DEFAULT_LIMIT;
   const maxLimit = options.maxLimit ?? MAX_LIMIT;
-  const limit = parsePageInteger(url.searchParams.get("limit"), defaultLimit, 1, maxLimit);
-  const cursor = parsePageInteger(url.searchParams.get("cursor"), 0, 0, Number.MAX_SAFE_INTEGER);
+  const allowEmptyValue = options.allowEmptyValue ?? true;
+  const limit = parsePageInteger(url.searchParams.get("limit"), defaultLimit, 1, maxLimit, allowEmptyValue);
+  const cursor = options.includeCursor === false
+    ? 0
+    : parsePageInteger(url.searchParams.get("cursor"), 0, 0, Number.MAX_SAFE_INTEGER, allowEmptyValue);
   return limit === null || cursor === null ? null : { limit, cursor };
 }
 

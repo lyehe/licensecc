@@ -1,4 +1,6 @@
 import type { LabeledComponentFragment } from "./assemble.js";
+import { DEFAULT_PAGINATION_OPTIONS } from "../query.js";
+import type { PaginationOptions } from "../query.js";
 
 // ── Reusable building blocks ────────────────────────────────────────────────
 
@@ -68,21 +70,20 @@ export const featureKeyParam = {
   schema: { type: "string", maxLength: 15 },
 } as const;
 
-export interface LimitCursorOptions {
-  readonly defaultLimit?: number;
-  readonly maxLimit?: number;
-  readonly includeCursor?: boolean;
-}
+export type LimitCursorOptions = PaginationOptions;
 
-export function limitCursorParams(options: LimitCursorOptions = {}): ReadonlyArray<Record<string, unknown>> {
-  const defaultLimit = options.defaultLimit ?? 50;
-  const maxLimit = options.maxLimit ?? 100;
+export function limitCursorParams(options: LimitCursorOptions = DEFAULT_PAGINATION_OPTIONS): ReadonlyArray<Record<string, unknown>> {
+  const defaultLimit = options.defaultLimit ?? DEFAULT_PAGINATION_OPTIONS.defaultLimit;
+  const maxLimit = options.maxLimit ?? DEFAULT_PAGINATION_OPTIONS.maxLimit;
+  const allowEmptyValue = options.allowEmptyValue ?? true;
+  const defaultWhen = allowEmptyValue ? "when omitted or empty" : "when omitted";
   const params: Array<Record<string, unknown>> = [
     {
       name: "limit",
       in: "query",
       required: false,
-      description: `Page size (default ${defaultLimit}; explicit values must be safe integers from 1 through ${maxLimit}; malformed values return 400 invalid_request).`,
+      allowEmptyValue,
+      description: `Page size (default ${defaultLimit} ${defaultWhen}; explicit values must be safe integers from 1 through ${maxLimit}; malformed values return 400 invalid_request).`,
       schema: { type: "integer", default: defaultLimit, minimum: 1, maximum: maxLimit },
     },
   ];
@@ -91,15 +92,24 @@ export function limitCursorParams(options: LimitCursorOptions = {}): ReadonlyArr
       name: "cursor",
       in: "query",
       required: false,
-      description: "Non-negative safe integer offset cursor (default 0). Use `next_cursor` from the previous page; malformed values return 400 invalid_request.",
+      allowEmptyValue,
+      description: `Non-negative safe integer offset cursor (default 0 ${defaultWhen}; use \`next_cursor\` from the previous page; malformed values return 400 invalid_request).`,
       schema: { type: "string", default: "0", pattern: "^[0-9]+$" },
     });
   }
   return params;
 }
 
-export function invalidPaginationResponse(): Record<string, unknown> {
-  return errorResponse("Invalid limit or cursor query parameter; explicit values must be safe integers within the documented bounds.", "invalid_request");
+export function paginationErrorDescription(options: LimitCursorOptions = DEFAULT_PAGINATION_OPTIONS): string {
+  const parameter = options.includeCursor === false ? "limit" : "limit or cursor";
+  const allowEmptyValue = options.allowEmptyValue ?? true;
+  const defaultRule = allowEmptyValue ? "omitted or empty values use documented defaults" : "omitted values use documented defaults";
+  return `invalid ${parameter} query parameter (${defaultRule}; explicit values must be safe integers within the documented bounds).`;
+}
+
+export function invalidPaginationResponse(options: LimitCursorOptions = DEFAULT_PAGINATION_OPTIONS): Record<string, unknown> {
+  const description = paginationErrorDescription(options);
+  return errorResponse(`${description[0]!.toUpperCase()}${description.slice(1)}`, "invalid_request");
 }
 
 // CSV export rides the existing list path: `?format=csv` streams a text/csv attachment of

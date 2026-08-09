@@ -7,7 +7,7 @@ import { requireAdmin } from "../../auth.js";
 import { parseJsonBody, safeNotes } from "../../request.js";
 import { clientIp } from "../../support.js";
 import { transitionWithGuard } from "../../transitions.js";
-import { CSV_ROW_CAP, SEARCH_PER_TYPE_LIMIT, boundedCursor, csvResponse, likeContains, likePrefix, wantsCsv } from "../../query.js";
+import { CSV_ROW_CAP, SEARCH_PAGINATION_OPTIONS, boundedCursor, csvResponse, likeContains, likePrefix, wantsCsv } from "../../query.js";
 export async function listCustomers(request: Request, env: Env, requestIdValue: string): Promise<Response> {
   const url = new URL(request.url);
   const filters: string[] = [];
@@ -241,7 +241,7 @@ export async function globalSearch(request: Request, env: Env, requestIdValue: s
   if (like === null || prefix === null) {
     return envelope(requestIdValue, "invalid_request", undefined, 400);
   }
-  const pagination = boundedCursor(url, { defaultLimit: SEARCH_PER_TYPE_LIMIT, maxLimit: SEARCH_PER_TYPE_LIMIT });
+  const pagination = boundedCursor(url, SEARCH_PAGINATION_OPTIONS);
   if (pagination === null) {
     return envelope(requestIdValue, "invalid_request", undefined, 400);
   }

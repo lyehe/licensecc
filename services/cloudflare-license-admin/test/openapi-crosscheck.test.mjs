@@ -14,6 +14,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { assembleComponents, assemblePaths, assertUniqueOperationIds } from "../dist-worker/worker/openapi/assemble.js";
 import { openApiDocument } from "../dist-worker/worker/openapi/document.js";
+import { PAGINATION_ROUTE_OPTIONS } from "../dist-worker/worker/query.js";
 import { API_ROUTES, ALL_ROUTES, META_ROUTES } from "../dist-worker/worker/routes.js";
 import { API_BINDING_KEYS } from "../dist-worker/worker/index.js";
 import { POLICY_TYPES } from "@licensecc/licensing-domain/entitlements/policy";
@@ -170,22 +171,12 @@ test("operation identifiers and auth declarations are unique and match route own
   assert.deepEqual(sync.security, [{ syncBearer: [] }]);
 });
 
-test("every bounded route documents strict pagination bounds and invalid_request", () => {
-  const boundedRoutes = [
-    ["GET", "/api/admin/customers", true],
-    ["GET", "/api/admin/licenses", true],
-    ["GET", "/api/admin/orders", true],
-    ["GET", "/api/admin/search", false],
-    ["GET", "/api/admin/entitlements", true],
-    ["GET", "/api/admin/events", false],
-    ["GET", "/api/admin/policies", true],
-    ["GET", "/api/admin/catalog/features", true],
-    ["GET", "/api/admin/catalog/plans", true],
-    ["GET", "/api/admin/webhooks", true],
-    ["GET", "/api/admin/webhooks/deliveries", true],
-    ["GET", "/api/admin/report/expiring", true],
-  ];
-  const expected = new Set(boundedRoutes.map(([method, path]) => `${method} ${path}`));
+test("pagination option matrix matches the route inventory and OpenAPI parameter support", () => {
+  const expected = new Set(Object.keys(PAGINATION_ROUTE_OPTIONS));
+  const inventory = new Set(API_ROUTES.map((route) => `${route.method} ${route.path}`));
+  for (const key of expected) {
+    assert.ok(inventory.has(key), `${key} pagination option is not in the canonical route inventory`);
+  }
   const documented = new Set();
   for (const [path, item] of Object.entries(openApiDocument.paths)) {
     for (const method of ["get", "post", "patch"]) {
@@ -195,17 +186,24 @@ test("every bounded route documents strict pagination bounds and invalid_request
       if (!parameterNames.includes("limit")) continue;
       const key = `${method.toUpperCase()} ${path}`;
       documented.add(key);
-      assert.ok(expected.has(key), `${key} is not in the bounded route contract`);
+      const options = PAGINATION_ROUTE_OPTIONS[key];
+      assert.ok(options, `${key} has documented pagination but no runtime pagination options`);
       assert.ok(operation.responses?.["400"], `${key} must document HTTP 400`);
       const examples = operation.responses["400"].content?.["application/json"]?.examples ?? {};
       assert.ok(examples.invalid_request, `${key} must document invalid_request`);
+      assert.equal(/\bcursor\b/i.test(operation.responses["400"].description ?? ""), options.includeCursor !== false, `${key} 400 cursor wording`);
       const limit = operation.parameters.find((parameter) => parameter.name === "limit");
       assert.equal(limit.schema?.minimum, 1, `${key} limit minimum`);
-      assert.equal(limit.schema?.maximum, key === "GET /api/admin/search" ? 10 : 100, `${key} limit maximum`);
-      assert.equal(limit.schema?.default, key === "GET /api/admin/search" ? 10 : 50, `${key} limit default`);
-      const expectedCursor = boundedRoutes.find(([routeMethod, routePath]) => `${routeMethod} ${routePath}` === key)?.[2];
+      assert.equal(limit.schema?.maximum, options.maxLimit ?? 100, `${key} limit maximum`);
+      assert.equal(limit.schema?.default, options.defaultLimit ?? 50, `${key} limit default`);
+      assert.equal(limit.allowEmptyValue, options.allowEmptyValue ?? true, `${key} limit empty-value support`);
+      const expectedCursor = options.includeCursor !== false;
       assert.equal(parameterNames.includes("cursor"), expectedCursor, `${key} cursor parameter`);
+      if (expectedCursor) {
+        const cursor = operation.parameters.find((parameter) => parameter.name === "cursor");
+        assert.equal(cursor.allowEmptyValue, options.allowEmptyValue ?? true, `${key} cursor empty-value support`);
+      }
     }
   }
-  assert.deepEqual(documented, expected, "every runtime bounded route must be documented exactly once");
+  assert.deepEqual(documented, expected, "every runtime bounded route option must be documented exactly once");
 });
