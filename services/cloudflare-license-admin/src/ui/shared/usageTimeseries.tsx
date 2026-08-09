@@ -1,8 +1,10 @@
 import React, { ReactNode, createContext, useContext, useEffect, useMemo, useState } from "react";
 
 import type { TimeseriesBucket } from "../../shared/api";
-import { api } from "./api";
+import { api, apiFailureMessage, parseExactApiSuccess } from "./api";
 import { useOperatorControls } from "./controls";
+import { hasTimeseriesData } from "./mutationGuards";
+import { useRequestFence } from "./requestFence";
 import type { TimeseriesRange } from "./timeseries";
 import { timeseriesPath } from "./timeseries";
 
@@ -44,20 +46,24 @@ export function useUsageTimeseries(active: boolean): UsageTimeseriesControls {
   if (controls === null) {
     throw new Error("usage_timeseries_provider_required");
   }
+  const timeseriesFence = useRequestFence(`${active ? "active" : "inactive"}\u0000${controls.timeseriesRange}`);
 
   useEffect(() => {
     if (!active) {
       return;
     }
     void (async () => {
+      const ticket = timeseriesFence.begin();
       const response = await api<UsageTimeseriesData>(timeseriesPath(controls.timeseriesRange));
-      if (response.ok && response.data) {
-        controls.setTimeseries(response.data);
+      if (!timeseriesFence.isCurrent(ticket)) return;
+      const parsed = parseExactApiSuccess<UsageTimeseriesData>(response, "report_timeseries", hasTimeseriesData);
+      if (parsed !== null) {
+        if (timeseriesFence.settle(ticket)) controls.setTimeseries(parsed.data);
       } else {
-        setMessage(`${response.code} (${response.request_id})`);
+        setMessage(apiFailureMessage(response));
       }
     })();
-  }, [active, controls.setTimeseries, controls.timeseriesRange, setMessage]);
+  }, [active, controls.setTimeseries, controls.timeseriesRange, setMessage, timeseriesFence]);
 
-  return controls;
+  return { ...controls, timeseries: timeseriesFence.isSettled() ? controls.timeseries : null };
 }

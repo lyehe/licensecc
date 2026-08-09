@@ -1,24 +1,26 @@
 import React, { useEffect, useMemo, useState } from "react";
 
 import type { NavigationIntent } from "../../app/types";
-import { api } from "../../shared/api";
+import { api, apiFailureMessage, parseExactApiSuccess } from "../../shared/api";
 import { BarSparkChart } from "../../shared/charts";
 import { useOperatorControls } from "../../shared/controls";
 import { formatEpoch } from "../../shared/format";
-import { withCursor } from "../../shared/pagination";
+import { hasOrdersListData } from "../../shared/mutationGuards";
+import { isRetryableAppendFailure, pageAppendError, withCursor } from "../../shared/pagination";
+import { useRequestFence } from "../../shared/requestFence";
 import { TIMESERIES_RANGE_DAYS } from "../../shared/timeseries";
 import { useUsageTimeseries } from "../../shared/usageTimeseries";
 import { OrderListFilter, ordersPath } from "./workflow";
 
 interface OrderEventItem {
-  event_id: number;
+  event_id: string;
   subscription_id: string;
   project: string;
   feature: string;
   order_epoch: number;
   seq: number;
   intent: string;
-  key_id: string;
+  key_id: string | null;
   status: string;
   received_at: number;
   processed_at: number | null;
@@ -45,11 +47,13 @@ export function Fulfillment({ active, navigationIntent, onNavigationHandled }: {
   navigationIntent: NavigationIntent | null;
   onNavigationHandled: (intent: NavigationIntent) => void;
 }): React.ReactElement | null {
-  const [orders, setOrders] = useState<OrdersResponse | null>(null);
+  const [ordersSnapshot, setOrders] = useState<OrdersResponse | null>(null);
   const [orderFilter, setOrderFilter] = useState<OrderListFilter>({ status: "", subscription_id: "" });
-  const { busy, setMessage } = useOperatorControls();
+  const { busy: requestBusy, operationLocked, setMessage } = useOperatorControls();
+  const busy = requestBusy || operationLocked;
   const { timeseries, timeseriesRange, setTimeseriesRange } = useUsageTimeseries(active);
   const ordersUrl = useMemo(() => ordersPath(orderFilter), [orderFilter]);
+  const ordersFence = useRequestFence(`${active ? "active" : "inactive"}\u0000${ordersUrl}`);
 
   useEffect(() => {
     if (navigationIntent?.tab !== "fulfillment") return;
@@ -60,22 +64,59 @@ export function Fulfillment({ active, navigationIntent, onNavigationHandled }: {
   useEffect(() => {
     if (!active) return;
     void (async () => {
+      const ticket = ordersFence.begin();
       const response = await api<OrdersResponse>(ordersUrl);
-      if (response.ok && response.data) setOrders(response.data);
-      else setMessage(`${response.code} (${response.request_id})`);
+      if (!ordersFence.isCurrent(ticket)) return;
+      const parsed = parseExactApiSuccess<OrdersResponse>(response, "orders_listed", hasOrdersListData);
+      if (parsed !== null) {
+        if (ordersFence.settle(ticket, parsed.data.next_cursor ?? null)) setOrders(parsed.data);
+      }
+      else setMessage(apiFailureMessage(response));
     })();
-  }, [active, ordersUrl, setMessage]);
+  }, [active, ordersFence, ordersUrl, setMessage]);
 
   async function loadMoreOrders(): Promise<void> {
-    if (orders === null || orders.next_cursor === null) return;
-    const response = await api<OrdersResponse>(withCursor(ordersUrl, orders.next_cursor));
-    const data = response.data;
-    if (response.ok && data) {
-      setOrders((previous) => previous === null ? data : { ...data, items: [...previous.items, ...data.items] });
-    } else {
-      setMessage(`${response.code} (${response.request_id})`);
+    const settledOrders = ordersFence.canLoadMore() ? ordersSnapshot : null;
+    const cursor = settledOrders?.next_cursor ?? null;
+    if (cursor === null) return;
+    if (settledOrders === null) return;
+    const baseItems = settledOrders.items;
+    const ticket = ordersFence.beginLoadMore(cursor);
+    if (ticket === null) return;
+    let applied = false;
+    try {
+      const response = await api<OrdersResponse>(withCursor(ordersUrl, cursor));
+      if (!ordersFence.isLoadMoreCurrent(ticket)) return;
+      const parsed = parseExactApiSuccess<OrdersResponse>(response, "orders_listed", hasOrdersListData);
+      if (parsed !== null) {
+        const nextCursor = parsed.data.next_cursor ?? null;
+        const appendError = pageAppendError(baseItems, parsed.data.items, (item) => item.event_id);
+        if (appendError !== null) {
+          setMessage(`invalid_api_response (${appendError})`);
+          setOrders((previous) => ordersFence.isLoadMoreCurrent(ticket) && previous !== null && previous.next_cursor === cursor ? { ...previous, next_cursor: null } : previous);
+          ordersFence.retireLoadMore(ticket);
+        } else if (!ordersFence.acceptsNextCursor(ticket, nextCursor)) {
+          setMessage("invalid_api_response (repeated_cursor)");
+          setOrders((previous) => ordersFence.isLoadMoreCurrent(ticket) && previous !== null && previous.next_cursor === cursor ? { ...previous, next_cursor: null } : previous);
+          ordersFence.retireLoadMore(ticket);
+        } else {
+          setOrders((previous) => ordersFence.isLoadMoreCurrent(ticket) && previous !== null && previous.next_cursor === cursor ? { ...parsed.data, items: [...previous.items, ...parsed.data.items] } : previous);
+          applied = true;
+          ordersFence.finishLoadMore(ticket, true, nextCursor);
+        }
+      } else {
+        setMessage(apiFailureMessage(response));
+        if (!isRetryableAppendFailure(response)) {
+          setOrders((previous) => ordersFence.isLoadMoreCurrent(ticket) && previous !== null && previous.next_cursor === cursor ? { ...previous, next_cursor: null } : previous);
+          ordersFence.retireLoadMore(ticket);
+        }
+      }
+    } finally {
+      if (!applied) ordersFence.finishLoadMore(ticket, false);
     }
   }
+
+  const orders = ordersFence.isSettled() ? ordersSnapshot : null;
 
   if (!active) return null;
   return (
@@ -112,7 +153,7 @@ export function Fulfillment({ active, navigationIntent, onNavigationHandled }: {
           </tr>
         ))}</tbody>
       </table>
-      <div className="tableFooter"><span className="muted">{(orders?.items ?? []).length} shown</span>{orders?.next_cursor != null && <button type="button" disabled={busy} onClick={() => void loadMoreOrders()}>Load more</button>}</div>
+      <div className="tableFooter"><span className="muted">{(orders?.items ?? []).length} shown</span>{ordersFence.canLoadMore() && orders?.next_cursor != null && <button type="button" disabled={busy || operationLocked} onClick={() => void loadMoreOrders()}>Load more</button>}</div>
     </section>
   );
 }

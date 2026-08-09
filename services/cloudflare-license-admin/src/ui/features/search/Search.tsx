@@ -1,15 +1,18 @@
 import React, { FormEvent, useState } from "react";
 
 import type { NavigationTarget } from "../../app/types";
-import { api } from "../../shared/api";
+import { api, apiFailureMessage, parseExactApiSuccess } from "../../shared/api";
 import { useOperatorControls } from "../../shared/controls";
 import { shortHash } from "../../shared/format";
+import { hasSearchData } from "../../shared/mutationGuards";
+import { useRequestFence } from "../../shared/requestFence";
 import { navigationForResult, searchPath, SearchResult } from "./workflow";
 
 export function Search({ onNavigate }: { onNavigate: (target: NavigationTarget) => void }): React.ReactElement {
   const [searchQuery, setSearchQuery] = useState("");
-  const [searchResults, setSearchResults] = useState<SearchResult[] | null>(null);
+  const [searchResultsSnapshot, setSearchResults] = useState<SearchResult[] | null>(null);
   const { setMessage } = useOperatorControls();
+  const searchFence = useRequestFence(searchQuery);
 
   async function submitSearch(event: FormEvent): Promise<void> {
     event.preventDefault();
@@ -18,12 +21,15 @@ export function Search({ onNavigate }: { onNavigate: (target: NavigationTarget) 
       setSearchResults(null);
       return;
     }
+    const ticket = searchFence.begin();
     const response = await api<{ results: SearchResult[] }>(searchPath(q));
-    if (response.ok && response.data) {
-      setSearchResults(response.data.results);
+    if (!searchFence.isCurrent(ticket)) return;
+    const parsed = parseExactApiSuccess<{ results: SearchResult[] }>(response, "search_results", hasSearchData);
+    if (parsed !== null) {
+      if (searchFence.settle(ticket)) setSearchResults(parsed.data.results);
     } else {
       setSearchResults([]);
-      setMessage(`${response.code} (${response.request_id})`);
+      setMessage(apiFailureMessage(response));
     }
   }
 
@@ -32,6 +38,8 @@ export function Search({ onNavigate }: { onNavigate: (target: NavigationTarget) 
     setSearchResults(null);
     setSearchQuery("");
   }
+
+  const searchResults = searchFence.isSettled() ? searchResultsSnapshot : null;
 
   return (
     <form className="globalSearch" onSubmit={(event) => void submitSearch(event)}>

@@ -72,6 +72,11 @@ export function entitlementsPath(filter: EntitlementFilter): string {
   return `/api/admin/entitlements${params.size === 0 ? "" : `?${params.toString()}`}`;
 }
 
+/** Exact target read used to reconcile a release-seat mutation. */
+export function entitlementDetailPath(id: string): string {
+  return `/api/admin/entitlements/${encodeURIComponent(id)}`;
+}
+
 export function normalizeEntitlementForm(form: EntitlementFormState): EntitlementInput {
   return {
     project: form.project,

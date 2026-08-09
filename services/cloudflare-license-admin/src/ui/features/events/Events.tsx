@@ -1,10 +1,12 @@
 import React, { useCallback, useEffect, useState } from "react";
 
-import { api } from "../../shared/api";
-import { useOperatorControls } from "../../shared/controls";
+import { api, apiFailureDetails, apiFailureMessage, parseExactApiSuccess } from "../../shared/api";
+import { ConfirmRefreshFailure, EXACT_READ_PROOF, type ExactReadProof, useOperatorControls } from "../../shared/controls";
 import { useCoreRefresh } from "../../shared/coreRefresh";
 import { shortHash } from "../../shared/format";
 import { downloadCsv } from "../../shared/pagination";
+import { hasEventListData } from "../../shared/mutationGuards";
+import { useRequestFence } from "../../shared/requestFence";
 
 interface EventItem {
   id: number;
@@ -21,26 +23,41 @@ interface EventItem {
 }
 
 export function Events({ active }: { active: boolean }): React.ReactElement | null {
-  const [events, setEvents] = useState<EventItem[]>([]);
-  const { busy, runMutation, setMessage } = useOperatorControls();
+  const [eventsSnapshot, setEvents] = useState<EventItem[]>([]);
+  const { busy: requestBusy, operationLocked, runMutation, setMessage } = useOperatorControls();
+  const busy = requestBusy || operationLocked;
   const { registerCoreRefresh } = useCoreRefresh();
+  const eventsFence = useRequestFence(active ? "events:active" : "events:inactive");
 
-  const refresh = useCallback(async (): Promise<void> => {
+  const refresh = useCallback(async (strict = false, isCurrent: () => boolean = () => true): Promise<ExactReadProof | null> => {
+    if (!isCurrent()) return null;
+    const ticket = eventsFence.begin();
     const response = await api<{ items: EventItem[] }>("/api/admin/events");
-    if (response.ok && response.data) {
-      setEvents(response.data.items);
+    if (!isCurrent() || !eventsFence.isCurrent(ticket)) return null;
+    const parsed = parseExactApiSuccess<{ items: EventItem[] }>(response, "events_listed", hasEventListData);
+    if (parsed !== null) {
+      if (eventsFence.settle(ticket)) {
+        setEvents(parsed.data.items);
+        return EXACT_READ_PROOF;
+      }
+    } else if (strict) {
+      const failure = apiFailureDetails(response);
+      throw new ConfirmRefreshFailure(failure.code, failure.requestId);
     } else {
-      setMessage(`${response.code} (${response.request_id})`);
+      setMessage(apiFailureMessage(response));
     }
-  }, [setMessage]);
+    return null;
+  }, [eventsFence, setMessage]);
 
   useEffect(() => {
     return registerCoreRefresh(refresh);
   }, [refresh, registerCoreRefresh]);
 
   useEffect(() => {
-    void refresh();
-  }, [refresh]);
+    if (active) void refresh();
+  }, [active, refresh]);
+
+  const events = eventsFence.isSettled() ? eventsSnapshot : [];
 
   if (!active) {
     return null;
@@ -48,7 +65,7 @@ export function Events({ active }: { active: boolean }): React.ReactElement | nu
   return (
     <section className="tablePane full">
       <div className="filters eventsToolbar">
-        <button type="button" disabled={busy} onClick={() => void downloadCsv("/api/admin/events", "events.csv", runMutation, setMessage)}>Export CSV</button>
+        <button type="button" disabled={busy || operationLocked} onClick={() => void downloadCsv("/api/admin/events", "events.csv", runMutation, setMessage)}>Export CSV</button>
       </div>
       <table>
         <thead><tr><th>Time</th><th>Event</th><th>Project</th><th>Feature</th><th>Fingerprint</th><th>Source</th><th>Actor</th><th>Detail</th><th>Seq</th></tr></thead>

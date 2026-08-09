@@ -1,9 +1,11 @@
 import React, { ReactNode, createContext, useCallback, useContext, useRef } from "react";
 
-type CoreRefreshHandler = () => Promise<void>;
+import { EXACT_READ_PROOF, type ExactReadProof } from "./controls";
+
+type CoreRefreshHandler = (strict?: boolean, isCurrent?: () => boolean) => Promise<ExactReadProof | null>;
 
 interface CoreRefreshControls {
-  refreshCore: () => Promise<void>;
+  refreshCore: (strict?: boolean, isCurrent?: () => boolean) => Promise<ExactReadProof | null>;
   registerCoreRefresh: (handler: CoreRefreshHandler) => () => void;
 }
 
@@ -18,8 +20,9 @@ export function CoreRefreshProvider({ children }: { children: ReactNode }): Reac
     handlersRef.current.add(handler);
     return () => handlersRef.current.delete(handler);
   }, []);
-  const refreshCore = useCallback(async (): Promise<void> => {
-    await Promise.all([...handlersRef.current].map((handler) => handler()));
+  const refreshCore = useCallback(async (strict = false, isCurrent: () => boolean = () => true): Promise<ExactReadProof | null> => {
+    const results = await Promise.all([...handlersRef.current].map((handler) => handler(strict, isCurrent)));
+    return results.length > 0 && results.every((result) => result === EXACT_READ_PROOF) ? EXACT_READ_PROOF : null;
   }, []);
 
   return <CoreRefreshContext.Provider value={{ refreshCore, registerCoreRefresh }}>{children}</CoreRefreshContext.Provider>;
