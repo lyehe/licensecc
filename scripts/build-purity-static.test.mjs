@@ -347,3 +347,78 @@ test("Ubuntu TPM2 capability probe is isolated, exact-digest, and simulator-scop
     assert.ok(presets.testPresets.some((preset) => preset.name === name && preset.configurePreset === name));
   }
 });
+
+test("Ubuntu TPM2 production integration is explicit and remains opt-in", () => {
+  const provider = source("src/library/device_identity/providers/tpm2_openssl.cpp");
+  const presets = JSON.parse(source("CMakePresets.json"));
+  const consumer = source("test/consumer/device_identity/CMakeLists.txt");
+  const consumerSource = source("test/consumer/device_identity/cpp_link_smoke.cpp");
+  const runner = source("scripts/ci/run-installed-device-identity-consumer.ps1");
+  const swtpm = source("scripts/ci/run-swtpm-device-identity.sh");
+  const example = source("examples/device_identity/CMakeLists.txt");
+  const exampleReadme = source("examples/device_identity/README.md");
+  const productionTest = source("test/library/device_identity/tpm2_openssl_test.cpp");
+  const workflow = source(".github/workflows/linux.yml");
+
+  for (const name of ["ci-linux-debug", "ci-linux-release", "ci-linux-core"]) {
+    const configure = presets.configurePresets.find((preset) => preset.name === name);
+    assert.equal(configure.cacheVariables.LCC_ENABLE_TPM2_OPENSSL, "FALSE", `${name} TPM2 OFF pin`);
+  }
+  for (const [name, configuration] of [["ci-linux-debug-tpm2", "Debug"], ["ci-linux-release-tpm2", "Release"]]) {
+    const configure = presets.configurePresets.find((preset) => preset.name === name);
+    assert.ok(configure, `${name} configure preset`);
+    assert.equal(configure.cacheVariables.LCC_ENABLE_DEVICE_IDENTITY, "TRUE");
+    assert.equal(configure.cacheVariables.LCC_ENABLE_WINDOWS_TPM, "FALSE");
+    assert.equal(configure.cacheVariables.LCC_ENABLE_TPM2_OPENSSL, "TRUE");
+    assert.equal(configure.cacheVariables.LCC_BUILD_DEVICE_IDENTITY_TEST_PROVIDER, "FALSE");
+    assert.equal(configure.cacheVariables.LCC_BUILD_TPM2_OPENSSL_CAPABILITY_TEST, "FALSE");
+    assert.ok(presets.buildPresets.some((preset) =>
+      preset.name === name && preset.configurePreset === name && preset.configuration === configuration));
+    assert.ok(presets.testPresets.some((preset) =>
+      preset.name === name && preset.configurePreset === name && preset.configuration === configuration));
+  }
+  assert.match(consumer, /LCC_DEVICE_IDENTITY_EXPECT_TPM2_OPENSSL/u);
+  assert.match(consumer, /LCC_DEVICE_IDENTITY_TPM2_STORAGE_DIRECTORY/u);
+  assert.match(consumerSource, /LCC_DEVICE_BACKEND_TPM2_OPENSSL/u);
+  assert.match(consumerSource, /tpm2-openssl/u);
+  assert.match(runner, /ExpectTpm2OpenSsl/u);
+  assert.match(runner, /BuildTpm2OpenSslExample/u);
+  assert.match(swtpm, /--real/u);
+  assert.match(swtpm, /TPM2OPENSSL_TCTI=/u);
+  assert.match(example, /LCC_ENABLE_TPM2_OPENSSL/u);
+  assert.match(example, /licensecc_tpm2_openssl/u);
+  assert.match(workflow, /build-linux-tpm2:/u);
+  assert.match(workflow, /preset: ci-linux-debug-tpm2/u);
+  assert.match(workflow, /preset: ci-linux-release-tpm2/u);
+  assert.match(workflow, /run-swtpm-device-identity\.sh build\/\$\{\{ matrix\.preset \}\} build\/\$\{\{ matrix\.preset \}\}\/install/u);
+  assert.doesNotMatch(provider, /std::getenv|std::system|tpm2-tools/u);
+  assert.match(provider, /md_fetch\(libctx_, "SHA256", "provider=default"\)/u);
+  assert.match(provider, /store_eof\(store\.get\(\)\) == 1/u);
+  assert.match(provider, /AT_SYMLINK_FOLLOW/u);
+  assert.match(provider, /\/proc\/self\/fd\//u);
+  assert.match(provider, /store_open_ex\(uri\.c_str\(\), libctx_, nullptr/u);
+  assert.match(provider, /PrivateKeyInfo/u);
+  assert.match(provider, /clear_free\(data_, size_\)/u);
+  assert.match(provider, /d2i_public_key\(libctx_/u);
+  assert.doesNotMatch(provider, /sha256\(spki\.data\(\)/u);
+  assert.doesNotMatch(provider, /verify_p256_p1363\(spki/u);
+  assert.match(provider, /cleanup_temporary\(directory, temporary, expected_identity\)/u);
+  assert.match(provider, /ERR_GET_RFLAGS/u);
+  assert.match(provider, /out of memory for object contexts/u);
+  assert.match(provider, /O_NONBLOCK/u);
+  assert.match(provider, /valid_tss2_private_pem/u);
+  const packageConfig = source("src/cmake/licensecc-config.cmake");
+  assert.match(packageConfig, /find_package\(OpenSSL 3\.0 REQUIRED COMPONENTS Crypto\)/u);
+  assert.match(packageConfig, /elseif\("HAS_OPENSSL" IN_LIST COMPILE_DEF/u);
+  assert.match(consumer, /NOT LCC_ENABLE_TPM2_OPENSSL/u);
+  assert.match(swtpm, /script_directory=/u);
+  assert.match(exampleReadme, /TPM2OPENSSL_TCTI/u);
+  assert.match(exampleReadme, /TPM2OPENSSL_PARENT_AUTH/u);
+  assert.match(exampleReadme, /\/dev\/tpmrm0/u);
+  assert.match(exampleReadme, /tpm2-abrmd/u);
+  assert.match(exampleReadme, /not cryptographic erasure/u);
+  assert.match(exampleReadme, /`tpm2-tools`\s+and `swtpm` are diagnostic\/CI-only/u);
+  assert.match(exampleReadme, /\/proc\/self\/fd/u);
+  assert.match(productionTest, /LCC_RUN_REAL_TPM2_TESTS/u);
+  assert.match(source("test/library/device_identity/CMakeLists.txt"), /device_identity_tpm2_openssl_real/u);
+});

@@ -72,4 +72,24 @@ if(LCC_ENABLE_TPM2_OPENSSL)
         COMMAND device_identity_tpm2_openssl_shim_test --shim)
     set_tests_properties(device_identity_tpm2_openssl_shim
         PROPERTIES LABELS "security;device_identity;ubuntu_tpm2")
+
+    set(_lcc_tpm2_real_storage_directory
+        "${CMAKE_CURRENT_BINARY_DIR}/tpm2-real-keyrefs")
+    file(MAKE_DIRECTORY "${_lcc_tpm2_real_storage_directory}")
+    if(UNIX)
+        execute_process(COMMAND chmod 700 "${_lcc_tpm2_real_storage_directory}"
+            RESULT_VARIABLE _lcc_tpm2_chmod_result)
+        if(NOT _lcc_tpm2_chmod_result EQUAL 0)
+            message(FATAL_ERROR "Unable to set the real TPM2 test directory mode to 0700")
+        endif()
+        unset(_lcc_tpm2_chmod_result)
+    endif()
+    add_test(NAME device_identity_tpm2_openssl_real
+        COMMAND device_identity_tpm2_openssl_shim_test --real
+                "${_lcc_tpm2_real_storage_directory}")
+    set_tests_properties(device_identity_tpm2_openssl_real
+        PROPERTIES
+            LABELS "security;device_identity;ubuntu_tpm2;real_hardware"
+            SKIP_RETURN_CODE 77)
+    unset(_lcc_tpm2_real_storage_directory)
 endif()
