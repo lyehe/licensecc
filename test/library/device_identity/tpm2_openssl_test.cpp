@@ -47,6 +47,7 @@ void tpm2_openssl_store_diagnostic_for_test(int* clean_eof,
                                             int* pkey_count,
                                             int* load_error,
                                             int* close_error) noexcept;
+const char* tpm2_openssl_store_status_error_text_for_test() noexcept;
 }  // namespace device_identity
 }  // namespace license
 
@@ -1763,6 +1764,8 @@ int run_real(const char* storage_directory) {
                   << " pkeys=" << pkey_count
                   << " load_error=" << load_error
                   << " close_error=" << close_error << '\n';
+        std::cerr << "TPM2 provider store status error="
+                  << license::device_identity::tpm2_openssl_store_status_error_text_for_test() << '\n';
     }
     require(create_result == LCC_DEVICE_OK, "TPM2 provider create");
     license::device_identity::P256Spki spki{};
