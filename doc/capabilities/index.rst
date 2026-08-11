@@ -8,6 +8,8 @@ for capability status. A capability is ``shipped`` only when its implementation
 and automated evidence are present in the accepted repository; it does not mean
 that a service is deployed or an SDK is published.
 
+:download:`Download the capability registry <registry.json>`.
+
 The platform is at **0.1.0 prerelease**. Remote CI and Ubuntu release evidence
 are intentionally not claimed by this registry. Deployment, Cloudflare account
 configuration, signing keys, and package publication remain operator or release

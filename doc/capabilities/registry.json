@@ -6,13 +6,13 @@
       "title": "C++ local license verification",
       "status": "shipped",
       "owner": "C++ ABI and core maintainer",
-      "surfaces": ["C++ public API", "local license files"],
+      "surfaces": ["C++ public API"],
       "availability": {"release": "C++ 2.1.0 lineage; platform 0.1.0 prerelease", "platforms": ["Windows", "Linux"], "limitations": ["Implemented and covered in the accepted repository; it is not a deployed service or published platform release."]},
       "replaces": [],
       "public_docs": ["doc/capabilities/index.rst", "doc/usage/concepts.rst"],
       "evidence": [
-        {"kind": "implementation", "path": "include/licensecc/licensecc.h", "selector": "LCC_EVENT_TYPE acquire_license(", "assertion": "The public C++ header exposes local license acquisition."},
-        {"kind": "automated_test", "path": "test/library/public_api_test.cpp", "selector": "BOOST_CHECK_NO_THROW(result = acquire_license(&caller, nullptr, &info));", "assertion": "The accepted test suite exercises the local acquisition API."}
+        {"kind": "implementation", "surface": "C++ public API", "path": "include/licensecc/licensecc.h", "selector": "LCC_EVENT_TYPE acquire_license(", "assertion": "The public C++ header exposes local license acquisition."},
+        {"kind": "automated_test", "surface": "C++ public API", "path": "test/library/public_api_test.cpp", "selector": "BOOST_CHECK_NO_THROW(result = acquire_license(&caller, nullptr, &info));", "assertion": "The accepted test suite exercises the local acquisition API."}
       ]
     },
     {
@@ -20,13 +20,13 @@
       "title": "Hardware identifier binding",
       "status": "shipped",
       "owner": "C++ ABI and core maintainer",
-      "surfaces": ["C++ public API", "hardware identifiers"],
+      "surfaces": ["C++ public API"],
       "availability": {"release": "C++ 2.1.0 lineage; platform 0.1.0 prerelease", "platforms": ["Windows", "Linux"], "limitations": ["Hardware identifiers are environment-dependent; weak bindings remain opt-in."]},
       "replaces": [],
       "public_docs": ["doc/capabilities/index.rst", "doc/usage/Hardware-identifiers.rst"],
       "evidence": [
-        {"kind": "implementation", "path": "include/licensecc/licensecc.h", "selector": "bool identify_pc(LCC_API_HW_IDENTIFICATION_STRATEGY", "assertion": "The public API provides hardware identification."},
-        {"kind": "automated_test", "path": "test/library/public_api_test.cpp", "selector": "BOOST_AUTO_TEST_CASE(identify_pc_rejects_null_and_short_buffers_without_throwing)", "assertion": "The public hardware-identification API has automated coverage."}
+        {"kind": "implementation", "surface": "C++ public API", "path": "include/licensecc/licensecc.h", "selector": "bool identify_pc(LCC_API_HW_IDENTIFICATION_STRATEGY", "assertion": "The public API provides hardware identification."},
+        {"kind": "automated_test", "surface": "C++ public API", "path": "test/library/public_api_test.cpp", "selector": "BOOST_AUTO_TEST_CASE(identify_pc_rejects_null_and_short_buffers_without_throwing)", "assertion": "The public hardware-identification API has automated coverage."}
       ]
     },
     {
@@ -39,10 +39,10 @@
       "replaces": [],
       "public_docs": ["doc/capabilities/index.rst", "doc/usage/Hardware-identifiers.rst"],
       "evidence": [
-        {"kind": "implementation", "path": "src/templates/licensecc_properties.h.in", "selector": "#define LCC_DOCKER_STRATEGIES { STRATEGY_NONE }", "assertion": "The generated configuration gives containers an explicit no-binding default."},
-        {"kind": "platform", "path": "src/templates/licensecc_properties.h.in", "selector": "#define LCC_CLOUD_STRATEGIES { STRATEGY_NONE }", "assertion": "The generated configuration gives cloud environments an explicit no-binding default."},
-        {"kind": "automated_test", "path": "test/library/public_api_test.cpp", "selector": "BOOST_AUTO_TEST_CASE(identify_pc_rejects_null_and_short_buffers_without_throwing)", "assertion": "The environment-aware public identification API has automated coverage."},
-        {"kind": "limitation", "path": "src/templates/licensecc_properties.h.in", "selector": "STRATEGY_CPU_SIZE = 3", "assertion": "The CPU-size strategy is marked as not implemented in the accepted source."}
+        {"kind": "implementation", "surface": "C++ generated project configuration", "path": "src/templates/licensecc_properties.h.in", "selector": "#define LCC_DOCKER_STRATEGIES { STRATEGY_NONE }", "assertion": "The generated configuration gives containers an explicit no-binding default."},
+        {"kind": "platform", "surface": "C++ generated project configuration", "path": "src/templates/licensecc_properties.h.in", "selector": "#define LCC_CLOUD_STRATEGIES { STRATEGY_NONE }", "assertion": "The generated configuration gives cloud environments an explicit no-binding default."},
+        {"kind": "automated_test", "surface": "C++ generated project configuration", "path": "test/library/hw_identifier/hw_identifier_facade_test.cpp", "selector": "BOOST_AUTO_TEST_CASE(public_identify_pc_fails_closed_for_malformed_env_strategy)", "assertion": "Environment-selected identification has an automated fail-closed test."},
+        {"kind": "limitation", "surface": "C++ generated project configuration", "path": "src/templates/licensecc_properties.h.in", "selector": "STRATEGY_CPU_SIZE = 3", "assertion": "The CPU-size strategy is marked as not implemented in the accepted source."}
       ]
     },
     {
@@ -50,13 +50,13 @@
       "title": "License version limits",
       "status": "shipped",
       "owner": "C++ ABI and core maintainer",
-      "surfaces": ["C++ public API", "license format"],
+      "surfaces": ["C++ public API"],
       "availability": {"release": "C++ 2.1.0 lineage; platform 0.1.0 prerelease", "platforms": ["Windows", "Linux"], "limitations": ["The caller must supply a valid version when a license applies start-version or end-version limits."]},
       "replaces": [],
       "public_docs": ["doc/capabilities/index.rst", "doc/analysis/features.rst"],
       "evidence": [
-        {"kind": "implementation", "path": "include/licensecc/licensecc.h", "selector": "bool lcc_set_caller_version(CallerInformations* callerInformation, const char* version);", "assertion": "The C++ API exposes caller-version input."},
-        {"kind": "automated_test", "path": "test/library/public_api_test.cpp", "selector": "BOOST_CHECK(lcc_set_caller_version(&caller, max_version.c_str()));", "assertion": "Caller-version behavior is exercised by an automated test."}
+        {"kind": "implementation", "surface": "C++ public API", "path": "include/licensecc/licensecc.h", "selector": "bool lcc_set_caller_version(CallerInformations* callerInformation, const char* version);", "assertion": "The C++ API exposes caller-version input."},
+        {"kind": "automated_test", "surface": "C++ public API", "path": "test/library/public_api_test.cpp", "selector": "BOOST_CHECK(lcc_set_caller_version(&caller, max_version.c_str()));", "assertion": "Caller-version behavior is exercised by an automated test."}
       ]
     },
     {
@@ -69,9 +69,11 @@
       "replaces": [],
       "public_docs": ["doc/capabilities/index.rst", "sdks/dotnet/README.md"],
       "evidence": [
-        {"kind": "implementation", "path": "include/licensecc/licensecc.h", "selector": "LCC_EVENT_TYPE lcc_acquire_license_decision(", "assertion": "The accepted C++ API contains the fail-closed decision entry point."},
-        {"kind": "route_contract", "path": "test/contracts/backend.json", "selector": "POST /v1/verify", "assertion": "The canonical backend contract exposes verification."},
-        {"kind": "automated_test", "path": "test/library/online_verification_test.cpp", "selector": "#define BOOST_TEST_MODULE online_verification_test", "assertion": "The accepted C++ online-verification suite is automated."}
+        {"kind": "implementation", "surface": "C++ callback contract", "path": "include/licensecc/licensecc.h", "selector": "LCC_EVENT_TYPE lcc_acquire_license_decision(", "assertion": "The accepted C++ API contains the fail-closed decision entry point."},
+        {"kind": "automated_test", "surface": "C++ callback contract", "path": "test/library/online_verification_test.cpp", "selector": "#define BOOST_TEST_MODULE online_verification_test", "assertion": "The accepted C++ online-verification suite is automated."},
+        {"kind": "implementation", "surface": "licensing backend", "path": "services/cloudflare-licensing-backend/src/routes/verify.ts", "selector": "export async function handleVerify", "assertion": "The backend implements the verification handler."},
+        {"kind": "automated_test", "surface": "licensing backend", "path": "services/cloudflare-licensing-backend/test/contexts/entitlement.test.mjs", "selector": "test(\"unknown entitlement returns unsigned denial by default\"", "assertion": "Backend verification decisions have automated coverage."},
+        {"kind": "route_contract", "surface": "licensing backend", "path": "test/contracts/backend.json", "selector": "POST /v1/verify", "assertion": "The canonical backend contract exposes verification."}
       ]
     },
     {
@@ -79,13 +81,17 @@
       "title": "Signed configuration attestation",
       "status": "shipped",
       "owner": "C++ ABI and core maintainer",
-      "surfaces": ["C++ public API", "Python SDK", ".NET SDK"],
+      "surfaces": ["C++ config API", "Python config verifier", ".NET config verifier"],
       "availability": {"release": "Platform 0.1.0 prerelease", "platforms": ["Windows", "Linux", "Python", ".NET 8"], "limitations": ["The SDKs verify the token contract; binary enforcement stays in the C++ runtime."]},
       "replaces": [],
       "public_docs": ["doc/capabilities/index.rst", "sdks/dotnet/README.md"],
       "evidence": [
-        {"kind": "implementation", "path": "sdks/python/src/licensecc/config_attestation.py", "selector": "def verify_config_token(", "assertion": "The Python SDK implements config-token verification."},
-        {"kind": "automated_test", "path": "sdks/python/tests/test_config_attestation.py", "selector": "def test_golden_config_token_verifies", "assertion": "The config-token verifier has golden-vector tests."}
+        {"kind": "implementation", "surface": "C++ config API", "path": "include/licensecc/licensecc.h", "selector": "LCC_EVENT_TYPE lcc_verify_config_decision(", "assertion": "The C++ public API exposes config-token verification."},
+        {"kind": "automated_test", "surface": "C++ config API", "path": "test/library/config_public_api_test.cpp", "selector": "BOOST_AUTO_TEST_CASE(verify_config_allows_valid_token_and_denies_tamper)", "assertion": "The C++ config API has an automated verification test."},
+        {"kind": "implementation", "surface": "Python config verifier", "path": "sdks/python/src/licensecc/config_attestation.py", "selector": "def verify_config_token(", "assertion": "The Python SDK implements config-token verification."},
+        {"kind": "automated_test", "surface": "Python config verifier", "path": "sdks/python/tests/test_config_attestation.py", "selector": "def test_golden_config_token_verifies", "assertion": "The Python config-token verifier has golden-vector tests."},
+        {"kind": "implementation", "surface": ".NET config verifier", "path": "sdks/dotnet/src/Licensecc.Client/ConfigToken.cs", "selector": "public static VerifyResult<ConfigTokenClaims> Verify", "assertion": "The .NET SDK implements config-token verification."},
+        {"kind": "automated_test", "surface": ".NET config verifier", "path": "sdks/dotnet/test/Licensecc.Client.Tests/ConfigTokenTests.cs", "selector": "public void Positive_GoldenConfigTokenVerifies()", "assertion": "The .NET config-token verifier has golden-vector tests."}
       ]
     },
     {
@@ -93,14 +99,16 @@
       "title": "Floating-seat lifecycle",
       "status": "shipped",
       "owner": "Backend deployable maintainer",
-      "surfaces": ["licensing backend", "C++ callback contract", "SDK HTTP clients"],
+      "surfaces": ["C++ callback contract", "licensing backend"],
       "availability": {"release": "Platform 0.1.0 prerelease", "platforms": ["Cloudflare Workers", "C++ hosts", "Python", ".NET 8"], "limitations": ["A host owns HTTP transport and seat identifiers; no remote deployment claim is made."]},
       "replaces": ["legacy-remote-license-type"],
       "public_docs": ["doc/capabilities/index.rst", "sdks/dotnet/README.md"],
       "evidence": [
-        {"kind": "implementation", "path": "include/licensecc/datatypes.h", "selector": "#define LCC_ONLINE_FLAG_PURPOSE_HEARTBEAT 0x00000001u", "assertion": "The C++ callback contract carries the heartbeat lifecycle purpose."},
-        {"kind": "route_contract", "path": "test/contracts/backend.json", "selector": "POST /v1/checkout", "assertion": "The canonical backend contract includes checkout."},
-        {"kind": "automated_test", "path": "test/library/public_api_test.cpp", "selector": "BOOST_CHECK_EQUAL(static_cast<uint32_t>(LCC_ONLINE_FLAG_PURPOSE_HEARTBEAT), 1U);", "assertion": "The C++ lifecycle callback flags have automated ABI coverage."}
+        {"kind": "implementation", "surface": "C++ callback contract", "path": "include/licensecc/datatypes.h", "selector": "#define LCC_ONLINE_FLAG_PURPOSE_HEARTBEAT 0x00000001u", "assertion": "The C++ callback contract carries the heartbeat lifecycle purpose."},
+        {"kind": "automated_test", "surface": "C++ callback contract", "path": "test/library/public_api_test.cpp", "selector": "BOOST_CHECK_EQUAL(static_cast<uint32_t>(LCC_ONLINE_FLAG_PURPOSE_HEARTBEAT), 1U);", "assertion": "The C++ lifecycle callback flags have automated ABI coverage."},
+        {"kind": "implementation", "surface": "licensing backend", "path": "services/cloudflare-licensing-backend/src/routes/seats.ts", "selector": "export async function handleSeatCheckout", "assertion": "The backend implements seat checkout."},
+        {"kind": "automated_test", "surface": "licensing backend", "path": "services/cloudflare-licensing-backend/test/device-proof.test.mjs", "selector": "test(\"seat checkout with a valid device proof is granted\"", "assertion": "The backend seat checkout has an automated test."},
+        {"kind": "route_contract", "surface": "licensing backend", "path": "test/contracts/backend.json", "selector": "POST /v1/checkout", "assertion": "The canonical backend contract includes checkout."}
       ]
     },
     {
@@ -113,8 +121,8 @@
       "replaces": [],
       "public_docs": ["doc/capabilities/index.rst"],
       "evidence": [
-        {"kind": "limitation", "path": "include/licensecc/datatypes.h", "selector": "LCC_REMOTE  // remote licenses are not supported now.", "assertion": "The legacy remote license type is explicitly unsupported."},
-        {"kind": "automated_test", "path": "test/library/public_api_test.cpp", "selector": "BOOST_CHECK_EQUAL(static_cast<int>(LCC_REMOTE), 1);", "assertion": "The compatibility enum remains covered by the public-API test."}
+        {"kind": "limitation", "surface": "C++ compatibility enum", "path": "include/licensecc/datatypes.h", "selector": "LCC_REMOTE  // remote licenses are not supported now.", "assertion": "The legacy remote license type is explicitly unsupported."},
+        {"kind": "automated_test", "surface": "C++ compatibility enum", "path": "test/library/public_api_test.cpp", "selector": "BOOST_CHECK_EQUAL(static_cast<int>(LCC_REMOTE), 1);", "assertion": "The compatibility enum remains covered by the public-API test."}
       ]
     },
     {
@@ -127,9 +135,9 @@
       "replaces": [],
       "public_docs": ["doc/capabilities/index.rst"],
       "evidence": [
-        {"kind": "implementation", "path": "services/cloudflare-licensing-backend/src/routes/verify.ts", "selector": "input.request_signature_version", "assertion": "The verification route consumes request-proof fields."},
-        {"kind": "automated_test", "path": "services/cloudflare-licensing-backend/test/contexts/request-proof.test.mjs", "selector": "test(\"canonical request proof payload is byte exact\"", "assertion": "The backend has automated request-proof coverage."},
-        {"kind": "limitation", "path": "services/cloudflare-licensing-backend/README.md", "selector": "Windows/Ubuntu TPM-provider/request-proof", "assertion": "The service documentation keeps TPM-provider integration explicitly plan-only."}
+        {"kind": "implementation", "surface": "licensing backend", "path": "services/cloudflare-licensing-backend/src/routes/verify.ts", "selector": "export function parseRequestProofFields", "assertion": "The verification route implements request-proof parsing."},
+        {"kind": "automated_test", "surface": "licensing backend", "path": "services/cloudflare-licensing-backend/test/contexts/request-proof.test.mjs", "selector": "test(\"canonical request proof payload is byte exact\"", "assertion": "The backend has automated request-proof coverage."},
+        {"kind": "limitation", "surface": "licensing backend", "path": "services/cloudflare-licensing-backend/README.md", "selector": "Windows/Ubuntu TPM-provider/request-proof", "assertion": "The service documentation keeps TPM-provider integration explicitly plan-only."}
       ]
     },
     {
@@ -137,14 +145,14 @@
       "title": "Backend usage metering",
       "status": "shipped",
       "owner": "Backend deployable maintainer",
-      "surfaces": ["licensing backend", "admin control plane"],
+      "surfaces": ["licensing backend"],
       "availability": {"release": "Platform 0.1.0 prerelease", "platforms": ["Cloudflare Workers"], "limitations": ["Implemented locally with automated tests; operating a remote service remains deployer responsibility."]},
       "replaces": [],
       "public_docs": ["doc/capabilities/index.rst"],
       "evidence": [
-        {"kind": "implementation", "path": "services/cloudflare-licensing-backend/src/routes/metering.ts", "selector": "/v1/meter is gated by a valid per-customer account token", "assertion": "The backend implements account-scoped metering."},
-        {"kind": "route_contract", "path": "test/contracts/backend.json", "selector": "POST /v1/meter", "assertion": "The canonical backend contract exposes metering."},
-        {"kind": "automated_test", "path": "services/cloudflare-licensing-backend/test/sql/metering.test.mjs", "selector": "POST /v1/meter", "assertion": "Metering SQL behavior is covered by automated tests."}
+        {"kind": "implementation", "surface": "licensing backend", "path": "services/cloudflare-licensing-backend/src/routes/metering.ts", "selector": "export async function handleMeter", "assertion": "The backend implements account-scoped metering."},
+        {"kind": "route_contract", "surface": "licensing backend", "path": "test/contracts/backend.json", "selector": "POST /v1/meter", "assertion": "The canonical backend contract exposes metering."},
+        {"kind": "automated_test", "surface": "licensing backend", "path": "services/cloudflare-licensing-backend/test/sql/metering.test.mjs", "selector": "test(\"units accumulate within a rolling period (R6.3)\"", "assertion": "Metering behavior is covered by an automated test."}
       ]
     },
     {
@@ -157,8 +165,8 @@
       "replaces": [],
       "public_docs": ["doc/capabilities/index.rst"],
       "evidence": [
-        {"kind": "implementation", "path": "services/cloudflare-licensing-backend/src/fulfillment/order_ingest.mjs", "selector": "POST /v1/orders", "assertion": "The backend contains an order-ingest implementation."},
-        {"kind": "automated_test", "path": "services/cloudflare-licensing-backend/test/fulfillment/order_ingest_exactly_once.test.mjs", "selector": "exactly", "assertion": "Order-ingest exactly-once behavior has automated coverage."}
+        {"kind": "implementation", "surface": "licensing backend", "path": "services/cloudflare-licensing-backend/src/fulfillment/order_ingest.mjs", "selector": "export async function handleOrderIngest", "assertion": "The backend contains an order-ingest implementation."},
+        {"kind": "automated_test", "surface": "licensing backend", "path": "services/cloudflare-licensing-backend/test/fulfillment/order_ingest_exactly_once.test.mjs", "selector": "Slice 1 order-ingest — the exactly-once accept/apply integration matrix", "assertion": "Order-ingest exactly-once behavior has automated coverage."}
       ]
     },
     {
@@ -166,14 +174,14 @@
       "title": "Administrative control plane",
       "status": "shipped",
       "owner": "Admin deployable maintainer",
-      "surfaces": ["admin Worker", "admin UI"],
+      "surfaces": ["admin Worker"],
       "availability": {"release": "Platform 0.1.0 prerelease", "platforms": ["Cloudflare Workers", "browser"], "limitations": ["The repository contains route, UI, and test coverage; it does not claim a hosted production console."]},
       "replaces": [],
       "public_docs": ["doc/capabilities/index.rst"],
       "evidence": [
-        {"kind": "implementation", "path": "services/cloudflare-license-admin/src/worker/groups/entitlements.ts", "selector": "operationDescriptor(\"entitlements\", \"admin\", \"POST\", \"/api/admin/entitlements\")", "assertion": "The admin Worker implements entitlement administration."},
-        {"kind": "route_contract", "path": "test/contracts/admin.json", "selector": "POST /api/admin/entitlements", "assertion": "The canonical admin contract exposes entitlement administration."},
-        {"kind": "automated_test", "path": "services/cloudflare-license-admin/test/admin-ui.e2e.mjs", "selector": "path === \"/api/admin/entitlements\"", "assertion": "The admin UI test exercises entitlement interactions."}
+        {"kind": "implementation", "surface": "admin Worker", "path": "services/cloudflare-license-admin/src/worker/groups/entitlements.ts", "selector": "operationDescriptor(\"entitlements\", \"admin\", \"POST\", \"/api/admin/entitlements\")", "assertion": "The admin Worker implements entitlement administration."},
+        {"kind": "route_contract", "surface": "admin Worker", "path": "test/contracts/admin.json", "selector": "POST /api/admin/entitlements", "assertion": "The canonical admin contract exposes entitlement administration."},
+        {"kind": "automated_test", "surface": "admin Worker", "path": "services/cloudflare-license-admin/test/worker/transition-contracts.test.mjs", "selector": "entitlements", "assertion": "The admin Worker entitlement transitions have automated coverage."}
       ]
     },
     {
@@ -181,14 +189,14 @@
       "title": "Customer self-service portal",
       "status": "shipped",
       "owner": "Customer-portal deployable maintainer",
-      "surfaces": ["customer portal Worker", "portal UI"],
+      "surfaces": ["customer portal Worker"],
       "availability": {"release": "Platform 0.1.0 prerelease", "platforms": ["Cloudflare Workers", "browser"], "limitations": ["Email delivery and remote deployment require deployer configuration."]},
       "replaces": [],
       "public_docs": ["doc/capabilities/index.rst"],
       "evidence": [
-        {"kind": "implementation", "path": "services/cloudflare-customer-portal/src/worker/routes/self-service.ts", "selector": "\"GET /api/portal/entitlements\":", "assertion": "The portal Worker implements entitlement self-service."},
-        {"kind": "route_contract", "path": "test/contracts/portal.json", "selector": "GET /api/portal/entitlements", "assertion": "The canonical portal contract exposes entitlement self-service."},
-        {"kind": "automated_test", "path": "services/cloudflare-customer-portal/test/portal-worker-self-service.test.mjs", "selector": "returns ONLY A's entitlements", "assertion": "Portal self-service isolation has automated coverage."}
+        {"kind": "implementation", "surface": "customer portal Worker", "path": "services/cloudflare-customer-portal/src/worker/routes/self-service.ts", "selector": "\"GET /api/portal/entitlements\":", "assertion": "The portal Worker implements entitlement self-service."},
+        {"kind": "route_contract", "surface": "customer portal Worker", "path": "test/contracts/portal.json", "selector": "GET /api/portal/entitlements", "assertion": "The canonical portal contract exposes entitlement self-service."},
+        {"kind": "automated_test", "surface": "customer portal Worker", "path": "services/cloudflare-customer-portal/test/portal-worker-self-service.test.mjs", "selector": "test(\"A's /api/portal/entitlements returns ONLY A's entitlements\"", "assertion": "Portal self-service isolation has automated coverage."}
       ]
     },
     {
@@ -196,13 +204,13 @@
       "title": "D1 backup and restore drill",
       "status": "shipped",
       "owner": "D1-backup deployable maintainer",
-      "surfaces": ["backup Worker", "Cloudflare Workflow", "R2"],
+      "surfaces": ["backup Worker"],
       "availability": {"release": "Platform 0.1.0 prerelease", "platforms": ["Cloudflare Workers", "Cloudflare D1", "Cloudflare R2"], "limitations": ["A restore drill is a controlled scratch-database procedure; no production backup deployment is asserted."]},
       "replaces": [],
       "public_docs": ["doc/capabilities/index.rst"],
       "evidence": [
-        {"kind": "implementation", "path": "services/cloudflare-d1-backup/src/index.ts", "selector": "export class D1BackupWorkflow", "assertion": "The backup deployable implements a Workflow export."},
-        {"kind": "automated_test", "path": "services/cloudflare-d1-backup/test/backup-restore-drill.test.mjs", "selector": "restore drill", "assertion": "The restore-drill behavior has automated coverage."}
+        {"kind": "implementation", "surface": "backup Worker", "path": "services/cloudflare-d1-backup/src/index.ts", "selector": "export class D1BackupWorkflow", "assertion": "The backup deployable implements a Workflow export."},
+        {"kind": "automated_test", "surface": "backup Worker", "path": "services/cloudflare-d1-backup/test/backup-restore-drill.test.mjs", "selector": "test(\"restore drill arguments require explicit scratch confirmation\"", "assertion": "The restore-drill behavior has automated coverage."}
       ]
     },
     {
@@ -210,13 +218,15 @@
       "title": "Python SDK token verification and HTTP client",
       "status": "shipped",
       "owner": "SDK maintainer",
-      "surfaces": ["Python SDK"],
+      "surfaces": ["Python token verifier", "Python HTTP client"],
       "availability": {"release": "Platform 0.1.0 prerelease", "platforms": ["Python"], "limitations": ["The package is repository-installable and not published to PyPI; it does not provide C++ binary enforcement."]},
       "replaces": [],
       "public_docs": ["doc/capabilities/index.rst", "sdks/python/README.md"],
       "evidence": [
-        {"kind": "implementation", "path": "sdks/python/src/licensecc/online_assertion.py", "selector": "def verify_online_assertion(", "assertion": "The Python SDK implements online-assertion verification."},
-        {"kind": "automated_test", "path": "sdks/python/tests/test_online_assertion.py", "selector": "def test_golden_assertion_verifies", "assertion": "Python golden-vector verification is automated."}
+        {"kind": "implementation", "surface": "Python token verifier", "path": "sdks/python/src/licensecc/online_assertion.py", "selector": "def verify_online_assertion(", "assertion": "The Python SDK implements online-assertion verification."},
+        {"kind": "automated_test", "surface": "Python token verifier", "path": "sdks/python/tests/test_online_assertion.py", "selector": "def test_golden_assertion_verifies", "assertion": "Python golden-vector verification is automated."},
+        {"kind": "implementation", "surface": "Python HTTP client", "path": "sdks/python/src/licensecc/http_client.py", "selector": "class HttpClient:", "assertion": "The Python SDK implements a backend HTTP client."},
+        {"kind": "automated_test", "surface": "Python HTTP client", "path": "sdks/python/tests/test_http_client.py", "selector": "def test_verify_builds_body_and_parses_envelope", "assertion": "The Python HTTP client has an automated request test."}
       ]
     },
     {
@@ -224,13 +234,15 @@
       "title": ".NET SDK token verification and HTTP client",
       "status": "shipped",
       "owner": "SDK maintainer",
-      "surfaces": [".NET SDK"],
+      "surfaces": [".NET token verifier", ".NET HTTP client"],
       "availability": {"release": "Platform 0.1.0 prerelease", "platforms": [".NET 8"], "limitations": ["The package is project-reference/local-package ready and not published to NuGet; it does not provide C++ binary enforcement."]},
       "replaces": [],
       "public_docs": ["doc/capabilities/index.rst", "sdks/dotnet/README.md"],
       "evidence": [
-        {"kind": "implementation", "path": "sdks/dotnet/src/Licensecc.Client/LicensingBackendClient.cs", "selector": "public sealed class LicensingBackendClient", "assertion": "The .NET SDK implements a backend HTTP client."},
-        {"kind": "automated_test", "path": "sdks/dotnet/test/Licensecc.Client.Tests/HttpClientTests.cs", "selector": "new LicensingBackendClient", "assertion": "The .NET backend client has automated tests."}
+        {"kind": "implementation", "surface": ".NET token verifier", "path": "sdks/dotnet/src/Licensecc.Client/OnlineAssertion.cs", "selector": "public static class OnlineAssertionVerifier", "assertion": "The .NET SDK implements online-assertion verification."},
+        {"kind": "automated_test", "surface": ".NET token verifier", "path": "sdks/dotnet/test/Licensecc.Client.Tests/OnlineAssertionTests.cs", "selector": "public sealed class OnlineAssertionTests", "assertion": "The .NET online-assertion verifier has automated tests."},
+        {"kind": "implementation", "surface": ".NET HTTP client", "path": "sdks/dotnet/src/Licensecc.Client/LicensingBackendClient.cs", "selector": "public sealed class LicensingBackendClient", "assertion": "The .NET SDK implements a backend HTTP client."},
+        {"kind": "automated_test", "surface": ".NET HTTP client", "path": "sdks/dotnet/test/Licensecc.Client.Tests/HttpClientTests.cs", "selector": "public async Task VerifyAsync_PostsToV1Verify_ParsesAssertion()", "assertion": "The .NET backend client has an automated request test."}
       ]
     },
     {
@@ -242,7 +254,7 @@
       "availability": {"release": "Not scheduled", "platforms": ["Not available"], "limitations": ["No accepted implementation or automated platform evidence exists."]},
       "replaces": [],
       "public_docs": ["doc/capabilities/index.rst"],
-      "evidence": [{"kind": "plan", "path": "doc/capabilities/index.rst", "selector": "ARM support", "assertion": "The capability is recorded as planned, not shipped."}]
+      "evidence": [{"kind": "plan", "surface": "C++ runtime", "path": "doc/capabilities/index.rst", "selector": "ARM support", "assertion": "The capability is recorded as planned, not shipped."}]
     },
     {
       "id": "custom-execution-limits",
@@ -253,7 +265,7 @@
       "availability": {"release": "Not scheduled", "platforms": ["Not available"], "limitations": ["CPU-size and similar additional limit types are not implemented."]},
       "replaces": [],
       "public_docs": ["doc/capabilities/index.rst", "doc/analysis/features.rst"],
-      "evidence": [{"kind": "plan", "path": "doc/capabilities/index.rst", "selector": "additional execution-limit types", "assertion": "The capability is recorded as planned, not shipped."}]
+      "evidence": [{"kind": "plan", "surface": "C++ runtime", "path": "doc/capabilities/index.rst", "selector": "additional execution-limit types", "assertion": "The capability is recorded as planned, not shipped."}]
     },
     {
       "id": "tpm-request-proof-provider",
@@ -264,7 +276,7 @@
       "availability": {"release": "Not scheduled", "platforms": ["Not available"], "limitations": ["No universal TPM provider or published client integration is included."]},
       "replaces": [],
       "public_docs": ["doc/capabilities/index.rst"],
-      "evidence": [{"kind": "plan", "path": "doc/capabilities/index.rst", "selector": "TPM-backed request-proof provider", "assertion": "The capability is recorded as planned, not shipped."}]
+      "evidence": [{"kind": "plan", "surface": "Windows and Ubuntu client integration", "path": "doc/capabilities/index.rst", "selector": "TPM-backed request-proof provider", "assertion": "The capability is recorded as planned, not shipped."}]
     },
     {
       "id": "java-sdk",
@@ -275,7 +287,7 @@
       "availability": {"release": "Not scheduled", "platforms": ["Not available"], "limitations": ["No Java SDK source or automated tests are in the accepted repository."]},
       "replaces": [],
       "public_docs": ["doc/capabilities/index.rst"],
-      "evidence": [{"kind": "plan", "path": "doc/capabilities/index.rst", "selector": "Java SDK", "assertion": "The capability is recorded as planned, not shipped."}]
+      "evidence": [{"kind": "plan", "surface": "Java", "path": "doc/capabilities/index.rst", "selector": "Java SDK", "assertion": "The capability is recorded as planned, not shipped."}]
     }
   ]
 }
