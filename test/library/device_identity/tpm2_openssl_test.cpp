@@ -349,13 +349,20 @@ public:
         return full_state_machine_ && !store_expect_failure ? 1 : 0;
     }
     OSSL_STORE_INFO* store_load(OSSL_STORE_CTX*) noexcept override {
-        if (!full_state_machine_ || store_loaded_count >= store_item_count || store_error_on_load) {
+        if (!full_state_machine_ || store_loaded_count >= store_item_count || store_error_on_load ||
+            (store_terminal_error && store_loaded_count >= store_item_count)) {
             if (store_error_on_load) {
                 store_error_code = 1;
                 ERR_raise_data(ERR_LIB_USER,
                                ERR_R_INTERNAL_ERROR,
                                "%s",
                                store_error_reason.empty() ? "input corrupted" : store_error_reason.c_str());
+            }
+            if (store_terminal_error && store_loaded_count >= store_item_count) {
+                store_error_code = 1;
+                if (store_terminal_error_queue) {
+                    ERR_raise_data(ERR_LIB_USER, ERR_R_INTERNAL_ERROR, "%s", "input corrupted");
+                }
             }
             return nullptr;
         }
@@ -364,6 +371,9 @@ public:
         return reinterpret_cast<OSSL_STORE_INFO*>(static_cast<std::uintptr_t>(11U));
     }
     int store_eof(OSSL_STORE_CTX*) noexcept override {
+        if (full_state_machine_ && store_terminal_error && store_loaded_count >= store_item_count) {
+            return 1;
+        }
         return full_state_machine_ && !force_unclean_eof && !store_error_on_load &&
                        store_loaded_count >= store_item_count ?
                    1 :
@@ -429,6 +439,8 @@ public:
     bool store_expect_failure = false;
     bool store_non_pkey = false;
     bool store_error_on_load = false;
+    bool store_terminal_error = false;
+    bool store_terminal_error_queue = false;
     bool store_close_failure = false;
     bool store_first_pkey_null = false;
     bool fail_keygen = false;
@@ -1342,6 +1354,24 @@ void test_store_terminal_and_provider_failure_matrix() {
     expect_store_error("input corrupted", LCC_DEVICE_KEY_CORRUPT);
     expect_store_error("cannot load key", LCC_DEVICE_KEY_LOST);
     expect_store_error("out of memory for object contexts", LCC_DEVICE_BUSY);
+
+    auto terminal_openssl_error = std::make_shared<FakeOpenSsl3Api>(true, false, true);
+    terminal_openssl_error->store_terminal_error = true;
+    auto terminal_storage = std::make_shared<LockReachPosixStorageApi>(true);
+    terminal_storage->reference_present = true;
+    auto terminal_provider = license::device_identity::make_tpm2_openssl_provider(
+        terminal_openssl_error, terminal_storage);
+    require(terminal_provider->open(request_for("/safe")) == LCC_DEVICE_OK,
+            "clean terminal STORE probe was not accepted after one PKEY");
+
+    auto dirty_terminal = std::make_shared<FakeOpenSsl3Api>(true, false, true);
+    dirty_terminal->store_terminal_error = true;
+    dirty_terminal->store_terminal_error_queue = true;
+    auto dirty_storage = std::make_shared<LockReachPosixStorageApi>(true);
+    dirty_storage->reference_present = true;
+    auto dirty_provider = license::device_identity::make_tpm2_openssl_provider(dirty_terminal, dirty_storage);
+    require(dirty_provider->open(request_for("/safe")) == LCC_DEVICE_KEY_CORRUPT,
+            "terminal STORE probe with a provider error queue was accepted");
 
     auto openssl = std::make_shared<FakeOpenSsl3Api>(true, false, true);
     openssl->store_close_failure = true;
