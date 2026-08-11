@@ -38,6 +38,15 @@ const maintainedPlatformDocPaths = [
 ];
 const capabilityRegistryPath = "doc/capabilities/registry.json";
 const cppPaths = ["CMakeLists.txt", "include/licensecc/licensecc.h", "doc/conf.py"];
+/**
+ * The only machine-readable platform authority.  Consumers that need release
+ * names must use `readVersionAuthorities` below instead of recreating a
+ * permissive version parser beside their packaging logic.
+ */
+export const versionContractSchema = Object.freeze({
+  schemaVersion: 1,
+  fields: Object.freeze(["platform_version", "schema_version"]),
+});
 const requiredVersionPaths = [
   contractPath,
   ...nodeManifestPaths,
@@ -279,14 +288,62 @@ function pythonLockVersion(source) {
   return null;
 }
 
-function cppVersion(root, errors) {
-  const source = sourceAt(root, "CMakeLists.txt");
+function cppVersionFromSource(source, errors) {
   const projectCalls = [...maskCmakeNonCode(source).matchAll(/\bproject\s*\(([^)]*)\)/giu)];
   const licenseccCalls = projectCalls.filter((match) => /^\s*licensecc(?:\s|$)/iu.test(match[1]));
   const versions = licenseccCalls.map((match) => /\bVERSION\s+(\d+\.\d+\.\d+)\b/iu.exec(match[1])?.[1]).filter(Boolean);
   const version = licenseccCalls.length === 1 && versions.length === 1 ? versions[0] : null;
   if (version === null) errors.push({ code: "invalid_version_source", path: "CMakeLists.txt", expected: null, actual: null });
   return version;
+}
+
+function cppVersion(root, errors) {
+  return cppVersionFromSource(sourceAt(root, "CMakeLists.txt"), errors);
+}
+
+/**
+ * Read the three independent release authorities with the same strict grammar
+ * used by the repository-wide contract checker.  `readSource` lets release
+ * tooling supply canonical Git blobs rather than a mutable worktree.
+ */
+export function readVersionAuthorities({ root = repositoryRoot, readSource = (path) => sourceAt(root, path) } = {}) {
+  const errors = [];
+  let contract;
+  try {
+    contract = JSON.parse(readSource(contractPath));
+  } catch {
+    errors.push({ code: "invalid_version_source", path: contractPath, expected: null, actual: null });
+    return { versions: null, errors };
+  }
+
+  const fields = contract && typeof contract === "object" && !Array.isArray(contract) ? Object.keys(contract).sort() : [];
+  const platformVersion = contract?.platform_version;
+  if (contract?.schema_version !== versionContractSchema.schemaVersion || fields.join(",") !== versionContractSchema.fields.join(",") || typeof platformVersion !== "string" || !semverPattern.test(platformVersion)) {
+    errors.push({ code: "invalid_contract", path: contractPath, expected: "schema 1 supported platform SemVer", actual: platformVersion ?? null });
+    return { versions: null, errors };
+  }
+
+  const pythonVersion = pythonVersionFor(platformVersion);
+  let pyproject;
+  try {
+    pyproject = readSource("sdks/python/pyproject.toml");
+  } catch {
+    errors.push({ code: "invalid_version_source", path: "sdks/python/pyproject.toml", expected: null, actual: null });
+  }
+  mismatch(errors, "sdks/python/pyproject.toml", pythonVersion, pyproject === undefined ? null : assignment(tomlSection(pyproject, "project"), "version"));
+
+  let cppSource;
+  try {
+    cppSource = readSource("CMakeLists.txt");
+  } catch {
+    errors.push({ code: "invalid_version_source", path: "CMakeLists.txt", expected: null, actual: null });
+  }
+  const cpp = cppSource === undefined ? null : cppVersionFromSource(cppSource, errors);
+  // Keep a valid platform authority available even when an independent
+  // projection drifts.  The repository checker must still report every other
+  // platform projection in that situation; release assembly rejects any
+  // returned authority errors below.
+  return { versions: { platformVersion, pythonVersion, cppVersion: cpp }, errors };
 }
 
 function checkCppProjections(root, errors) {
@@ -359,15 +416,10 @@ export function checkVersionContract({ root = repositoryRoot, trackedPaths = tra
     return { errors: missing.map((path) => ({ code: "untracked_version_source", path, expected: null, actual: null })) };
   }
 
-  const errors = [];
-  const contract = parsedJson(root, contractPath, errors);
-  const fields = contract && typeof contract === "object" && !Array.isArray(contract) ? Object.keys(contract).sort() : [];
-  const platformVersion = contract?.platform_version;
-  if (contract?.schema_version !== 1 || fields.join(",") !== "platform_version,schema_version" || typeof platformVersion !== "string" || !semverPattern.test(platformVersion)) {
-    errors.push({ code: "invalid_contract", path: contractPath, expected: "schema 1 supported platform SemVer", actual: platformVersion ?? null });
-    return { errors };
-  }
-  const pythonVersion = pythonVersionFor(platformVersion);
+  const authority = readVersionAuthorities({ root });
+  const errors = [...authority.errors];
+  if (!authority.versions) return { errors };
+  const { platformVersion, pythonVersion, cppVersion: authoritativeCppVersion } = authority.versions;
 
   const expectedWorkspaces = nodeManifestPaths.slice(1).map((path) => path.slice(0, path.lastIndexOf("/"))).sort();
   const manifests = new Map();
@@ -432,6 +484,12 @@ export function checkVersionContract({ root = repositoryRoot, trackedPaths = tra
   mismatch(errors, dotnetPath, platformVersion, dotnetVersion);
   anchoredPlatformProjections(root, platformVersion, pythonVersion, errors);
 
+  // The authority reader above is deliberately the only CMake grammar used by
+  // release consumers.  Keep these projection checks, which validate the
+  // public C++ surfaces against that already-parsed independent value.
+  if (cppVersion(root, []) !== authoritativeCppVersion) {
+    errors.push({ code: "invalid_version_source", path: "CMakeLists.txt", expected: null, actual: null });
+  }
   checkCppProjections(root, errors);
   return { errors };
 }

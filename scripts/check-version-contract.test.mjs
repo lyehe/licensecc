@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
 
-import { checkVersionContract } from "./check-version-contract.mjs";
+import { checkVersionContract, readVersionAuthorities, versionContractSchema } from "./check-version-contract.mjs";
 
 const platformVersion = "0.1.0-rc.1";
 const pythonVersion = "0.1.0rc1";
@@ -96,6 +96,19 @@ test("accepts every aligned platform projection and the independent C++ stream",
   const sample = fixture();
   try {
     assert.deepEqual(checkVersionContract(sample).errors, []);
+  } finally {
+    sample.close();
+  }
+});
+
+test("exports the strict release authority reader used by artifact assembly", () => {
+  const sample = fixture();
+  try {
+    assert.deepEqual(versionContractSchema, { schemaVersion: 1, fields: ["platform_version", "schema_version"] });
+    assert.deepEqual(readVersionAuthorities({ root: sample.root }), {
+      versions: { platformVersion, pythonVersion, cppVersion: "2.1.0" },
+      errors: [],
+    });
   } finally {
     sample.close();
   }
