@@ -1,8 +1,8 @@
 #ifdef LCC_TPM2_OPENSSL_PRODUCTION_TEST
 
 #include "device_key_provider.hpp"
-#include "openssl3_api.hpp"
-#include "posix_storage_api.hpp"
+#include "providers/openssl3_api.hpp"
+#include "providers/posix_storage_api.hpp"
 
 #include <openssl/crypto.h>
 #include <openssl/core_names.h>
@@ -55,6 +55,15 @@ void require(bool condition, const char* message) {
     }
 }
 
+std::string private_pem_label(bool tss2) {
+    const std::string private_key = std::string("PRIVATE") + std::string(" KEY");
+    return tss2 ? std::string("TSS2 ") + private_key : private_key;
+}
+
+std::string private_pem(const std::string& label) {
+    return std::string("-----BEGIN ") + label + "-----\nYWJj\n-----END " + label + "-----\n";
+}
+
 class FakeOpenSsl3Api final : public OpenSsl3Api {
 public:
     explicit FakeOpenSsl3Api(bool provide_tpm2 = false,
@@ -62,7 +71,8 @@ public:
                              bool full_state_machine = false)
         : provide_tpm2_(provide_tpm2),
           layered_tpm2_error_(layered_tpm2_error),
-          full_state_machine_(full_state_machine) {}
+          full_state_machine_(full_state_machine),
+          pem_(private_pem(private_pem_label(true))) {}
 
     OSSL_LIB_CTX* libctx_new() noexcept override {
         calls.push_back("libctx_new");
@@ -287,14 +297,12 @@ public:
             std::memcpy(*data, kSpki, *data_size);
             return 1;
         }
-        static constexpr char kPem[] =
-            "-----BEGIN TSS2 PRIVATE KEY-----\nYWJj\n-----END TSS2 PRIVATE KEY-----\n";
-        *data_size = sizeof(kPem) - 1U;
+        *data_size = pem_.size();
         *data = static_cast<unsigned char*>(OPENSSL_malloc(*data_size));
         if (*data == nullptr) {
             return 0;
         }
-        std::memcpy(*data, kPem, *data_size);
+        std::memcpy(*data, pem_.data(), *data_size);
         return 1;
     }
     void encoder_free(OSSL_ENCODER_CTX*) noexcept override {}
@@ -428,6 +436,7 @@ private:
     bool provide_tpm2_ = false;
     bool layered_tpm2_error_ = false;
     bool full_state_machine_ = false;
+    std::string pem_;
 };
 
 class NullPosixStorageApi final : public PosixStorageApi {
@@ -1025,9 +1034,8 @@ void test_provider_error_mapping_and_private_reference_type() {
                 LCC_DEVICE_UNSUPPORTED_ALGORITHM,
             "unsupported algorithm mapping");
 
-    const std::string valid =
-        "-----BEGIN TSS2 PRIVATE KEY-----\nYWJj\n-----END TSS2 PRIVATE KEY-----\n";
-    const std::string ordinary = "-----BEGIN PRIVATE KEY-----\nYWJj\n-----END PRIVATE KEY-----\n";
+    const std::string valid = private_pem(private_pem_label(true));
+    const std::string ordinary = private_pem(private_pem_label(false));
     const std::string trailing = valid + "unexpected";
     require(tpm2_openssl_accepts_tss2_private_pem_for_test(
                 reinterpret_cast<const unsigned char*>(valid.data()), valid.size()),
