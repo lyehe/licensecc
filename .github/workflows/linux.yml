@@ -38,3 +38,45 @@ jobs:
       -  name: On failure print logs
          if: ${{ failure() }}
          run: cat /tmp/open-license.log || true
+
+   build-linux-tpm2-capability:
+      runs-on: ${{ matrix.os }}
+      strategy:
+        fail-fast: false
+        matrix:
+          include:
+            - os: ubuntu-22.04
+              preset: ci-linux-debug-tpm2-capability
+            - os: ubuntu-22.04
+              preset: ci-linux-release-tpm2-capability
+            - os: ubuntu-24.04
+              preset: ci-linux-debug-tpm2-capability
+            - os: ubuntu-24.04
+              preset: ci-linux-release-tpm2-capability
+
+      steps:
+      -  uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      -  name: Install dependencies
+         run: |
+            sudo apt-get update
+            sudo apt-get install -y software-properties-common
+            sudo add-apt-repository --yes universe
+            sudo apt-get update
+            sudo apt-get install -y cmake libssl-dev zlib1g-dev \
+              libboost-dev libboost-test-dev libboost-filesystem-dev \
+              libboost-iostreams-dev libboost-program-options-dev \
+              libboost-system-dev libboost-thread-dev libboost-date-time-dev \
+              valgrind tpm2-openssl tpm2-tools swtpm
+      -  name: Record TPM2 package and provider versions
+         run: |
+            dpkg-query -W -f='${binary:Package} ${Version}\n' tpm2-openssl tpm2-tools swtpm libtss2-esys-3.0.2 || true
+            openssl version -a
+      -  name: Bootstrap preflight
+         run: pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/bootstrap.ps1 -CheckOnly
+      -  name: Capability build purity
+         run: pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/check-build-purity.ps1 -Preset ${{ matrix.preset }}
+      -  name: OpenSSL TPM2 exact-digest simulator capability
+         run: scripts/ci/run-swtpm-device-identity.sh build/${{ matrix.preset }}
+      -  name: On failure print simulator logs
+         if: ${{ failure() }}
+         run: find build/${{ matrix.preset }} -name swtpm.log -type f -print -exec cat {} \; || true
