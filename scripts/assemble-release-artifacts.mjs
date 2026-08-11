@@ -568,7 +568,11 @@ function readSdistArchive(archivePath, label) {
     }
     offset = dataOffset + padded;
   }
-  if (pendingPax || offset + 1024 !== archive.length || !archive.subarray(offset, offset + 1024).every((byte) => byte === 0) || files.size === 0) throw tarDistributionError(label);
+  // POSIX requires two zero blocks; Python's tarfile also commonly pads the
+  // final record to 10 KiB.  Accept only an all-zero tail of at least two
+  // blocks, never arbitrary trailing bytes.
+  const tail = archive.subarray(offset);
+  if (pendingPax || tail.length < 1024 || !tail.every((byte) => byte === 0) || files.size === 0) throw tarDistributionError(label);
   return files;
 }
 

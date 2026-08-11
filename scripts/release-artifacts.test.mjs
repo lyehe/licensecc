@@ -102,8 +102,8 @@ function tarHeader(name, contents) {
   return [header, data, Buffer.alloc((512 - (data.length % 512)) % 512)];
 }
 
-function tarGzip(entries) {
-  return gzipSync(Buffer.concat([...entries.flatMap(({ name, contents }) => tarHeader(name, contents)), Buffer.alloc(1024)]));
+function tarGzip(entries, { trailingZeroBlocks = 2 } = {}) {
+  return gzipSync(Buffer.concat([...entries.flatMap(({ name, contents }) => tarHeader(name, contents)), Buffer.alloc(512 * trailingZeroBlocks)]));
 }
 
 function wheelArtifact({ version = PYTHON_VERSION, name = "licensecc", metadataName = name } = {}) {
@@ -116,12 +116,12 @@ function wheelArtifact({ version = PYTHON_VERSION, name = "licensecc", metadataN
   ]);
 }
 
-function sdistArtifact({ version = PYTHON_VERSION, name = "licensecc", metadataName = name } = {}) {
+function sdistArtifact({ version = PYTHON_VERSION, name = "licensecc", metadataName = name, trailingZeroBlocks } = {}) {
   const root = `${name}-${version}`;
   return tarGzip([
     { name: `${root}/PKG-INFO`, contents: `Metadata-Version: 2.3\nName: ${metadataName}\nVersion: ${version}\n` },
     { name: `${root}/pyproject.toml`, contents: `[project]\nname = "${name}"\nversion = "${version}"\n` },
-  ]);
+  ], { trailingZeroBlocks });
 }
 
 function nuspec({ id = "Licensecc.Client", version = PLATFORM_VERSION, symbols = false } = {}) {
@@ -195,7 +195,7 @@ function valueAfter(args, flag) {
   return args[index + 1];
 }
 
-function fakeRun(commands, { symbols = true, failLabel, wrongSymbol = false, wrongPython = false, invalidArtifact, workerVariant = false, pythonAuxiliaryFile = false } = {}) {
+function fakeRun(commands, { symbols = true, failLabel, wrongSymbol = false, wrongPython = false, invalidArtifact, workerVariant = false, pythonAuxiliaryFile = false, standardTarPadding = false } = {}) {
   return (entry) => {
     commands.push(entry);
     if (entry.label === failLabel) throw new Error(`intentional ${failLabel} failure`);
@@ -215,7 +215,7 @@ function fakeRun(commands, { symbols = true, failLabel, wrongSymbol = false, wro
       const out = valueAfter(entry.args, "--out-dir");
       const distribution = wrongPython ? "other" : "licensecc";
       const wheel = invalidArtifact === "wheel-empty" ? Buffer.alloc(0) : invalidArtifact === "wheel-truncated" ? wheelArtifact({ name: distribution }).subarray(0, 8) : wheelArtifact({ name: distribution, metadataName: invalidArtifact === "wheel-metadata" ? "other" : distribution });
-      const sdist = invalidArtifact === "sdist-empty" ? Buffer.alloc(0) : invalidArtifact === "sdist-truncated" ? sdistArtifact({ name: distribution }).subarray(0, 8) : sdistArtifact({ name: distribution, metadataName: invalidArtifact === "sdist-metadata" ? "other" : distribution });
+      const sdist = invalidArtifact === "sdist-empty" ? Buffer.alloc(0) : invalidArtifact === "sdist-truncated" ? sdistArtifact({ name: distribution }).subarray(0, 8) : sdistArtifact({ name: distribution, metadataName: invalidArtifact === "sdist-metadata" ? "other" : distribution, trailingZeroBlocks: standardTarPadding ? 20 : undefined });
       if (pythonAuxiliaryFile) put(join(out, ".gitignore"), "# tool-private output\n");
       put(join(out, `${distribution}-${PYTHON_VERSION}-py3-none-any.whl`), wheel);
       put(join(out, `${distribution}-${PYTHON_VERSION}.tar.gz`), sdist);
@@ -324,7 +324,7 @@ test("assembly uses a sanitized canonical install, four pinned Worker dry-runs, 
       consumerId: "acme",
       expectedPlatformVersion: PLATFORM_VERSION,
       expectedPythonVersion: PYTHON_VERSION,
-      run: fakeRun(commands, { pythonAuxiliaryFile: true }),
+      run: fakeRun(commands, { pythonAuxiliaryFile: true, standardTarPadding: true }),
       toolAvailable: () => true,
       verifyArchive: (entry) => {
         verification.push(entry);
