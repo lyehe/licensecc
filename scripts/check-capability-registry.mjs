@@ -222,8 +222,10 @@ function regexLiteralStartsAt(source, offset) {
 }
 
 /** Return true when a selector starts in a comment, string, or Python docstring. */
-function selectorStartsInNonCode(source, offset, path) {
+function selectorStartsInNonCode(source, offset, selector, path) {
   const python = /\.pyi?$/iu.test(path);
+  const selectorEnd = offset + selector.length;
+  while (offset < selectorEnd && /\s/u.test(source[offset])) offset += 1;
   let state = "code";
   let cursor = 0;
   while (cursor < offset) {
@@ -298,6 +300,7 @@ function selectorStartsInNonCode(source, offset, path) {
   const triple = source.slice(offset, offset + 3);
   return python && source[offset] === "#"
     || !python && (source.startsWith("//", offset) || source.startsWith("/*", offset))
+    || !python && source.startsWith("{/*", offset)
     || python && (triple === "'''" || triple === '"""')
     || source[offset] === "'" || source[offset] === '"' || source[offset] === "`";
 }
@@ -344,7 +347,7 @@ function validateEvidence(root, trackedPaths, capability, errors) {
       const offsets = selectorOffsets(source, selector);
       if (offsets.length === 0) addError(errors, "missing_selector", capability, selector);
       else if (offsets.length > 1) addError(errors, "duplicate_selector", capability, selector);
-      else if ((kind === "implementation" || kind === "automated_test") && selectorStartsInNonCode(source, offsets[0], path)) addError(errors, "comment_only_selector", capability, selector);
+      else if ((kind === "implementation" || kind === "automated_test") && selectorStartsInNonCode(source, offsets[0], selector, path)) addError(errors, "comment_only_selector", capability, selector);
     } catch {
       addError(errors, "unreadable_evidence_path", capability, path);
     }

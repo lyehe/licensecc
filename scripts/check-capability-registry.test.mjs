@@ -29,13 +29,19 @@ function fixture(mutator = (registry) => registry) {
       "const inlineComment = true; // inline slash marker",
       "const jsxComment = <div>{/* jsx block marker */}</div>;",
       "const stringLiteral = \"string literal marker\";",
+      "    // indented slash marker",
+      "    /* indented block marker */",
+      "    {/* indented jsx marker */}",
+      "    \"indented string marker\";",
     ].join("\n"),
     "test/comment-cases.py": [
       "value = 1 # python inline marker",
       "\"\"\"python docstring marker\"\"\"",
+      "    # indented python marker",
+      "    \"\"\"indented docstring marker\"\"\"",
     ].join("\n"),
-    "src/control.h": "#define REAL_MACRO_MARKER 1",
-    "test/control.test.mjs": "test(\"real test marker\", () => {});",
+    "src/control.h": "#define REAL_MACRO_MARKER 1\n    #define INDENTED_MACRO_MARKER 1",
+    "test/control.test.mjs": "test(\"real test marker\", () => {});\n    test(\"indented test marker\", () => {});",
     "doc/platform.rst": "platform marker",
     "doc/limitation.rst": "limitation marker",
     "docs/plan.md": "plan marker",
@@ -293,6 +299,40 @@ test("rejects selectors beginning in lexical comments or literals while acceptin
     capability.evidence = [
       { kind: "implementation", path: "src/control.h", selector: "#define REAL_MACRO_MARKER 1", surface: "public API", assertion: "preprocessor macro" },
       { kind: "automated_test", path: "test/control.test.mjs", selector: "test(\"real test marker\"", surface: "public API", assertion: "test declaration" },
+    ];
+    return registry;
+  });
+  t.after(() => rmSync(comments.root, { recursive: true, force: true }));
+  t.after(() => rmSync(controls.root, { recursive: true, force: true }));
+  assert.deepEqual(errors(check(comments)), [
+    "comment_only_selector",
+    "comment_only_selector",
+    "comment_only_selector",
+    "comment_only_selector",
+    "comment_only_selector",
+    "comment_only_selector",
+  ]);
+  assert.deepEqual(check(controls).errors, []);
+});
+
+test("classifies an indented selector by its first non-whitespace token", (t) => {
+  const comments = fixture((registry) => {
+    const capability = registry.capabilities[0];
+    capability.evidence = [
+      { kind: "implementation", path: "src/comment-cases.ts", selector: "    // indented slash marker", surface: "public API", assertion: "indented slash" },
+      { kind: "automated_test", path: "test/comment-cases.py", selector: "    # indented python marker", surface: "public API", assertion: "indented Python" },
+      { kind: "automated_test", path: "src/comment-cases.ts", selector: "    \"indented string marker\"", surface: "public API", assertion: "indented string" },
+      { kind: "automated_test", path: "test/comment-cases.py", selector: "    \"\"\"indented docstring marker\"\"\"", surface: "public API", assertion: "indented docstring" },
+      { kind: "automated_test", path: "src/comment-cases.ts", selector: "    /* indented block marker */", surface: "public API", assertion: "indented block" },
+      { kind: "automated_test", path: "src/comment-cases.ts", selector: "    {/* indented jsx marker */}", surface: "public API", assertion: "indented JSX" },
+    ];
+    return registry;
+  });
+  const controls = fixture((registry) => {
+    const capability = registry.capabilities[0];
+    capability.evidence = [
+      { kind: "implementation", path: "src/control.h", selector: "    #define INDENTED_MACRO_MARKER 1", surface: "public API", assertion: "indented macro" },
+      { kind: "automated_test", path: "test/control.test.mjs", selector: "    test(\"indented test marker\"", surface: "public API", assertion: "indented test declaration" },
     ];
     return registry;
   });
