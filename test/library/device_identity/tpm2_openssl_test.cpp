@@ -1230,7 +1230,8 @@ void test_store_open_clears_stale_errno_and_rejects_default_password_ui() {
     require(storage->reference_checked, "stale-errno test did not reach the reference file");
     require(openssl->store_libctx != nullptr, "store did not use the dedicated library context");
     require(openssl->store_uri.rfind("file:/proc/self/fd/", 0U) == 0U, "store URI was not fd-relative");
-    require(openssl->store_properties.empty(), "file store must not be restricted to the tpm2 provider");
+    require(openssl->store_properties == "?provider=tpm2",
+            "file store must prefer the tpm2 decoder while retaining the default file loader");
     require(openssl->store_ui_method != nullptr, "store must fail closed if rejecting UI setup fails");
     require(openssl->ui_prompt_rejected, "fake STORE did not exercise the rejecting password UI");
     UI* ui = UI_new_method(openssl->store_ui_method);
@@ -1262,8 +1263,8 @@ void test_fake_provider_reaches_generation_store_and_dedicated_self_test() {
     require(openssl->verify_properties == "provider=default" && openssl->digest_properties == "provider=default",
             "self-test verification did not use the dedicated default provider");
     require(openssl->stage == 13, "self-test did not reach default-provider verification");
-    require(openssl->store_properties.empty() && openssl->store_ui_method != nullptr,
-            "reference load did not permit the default file loader with a rejecting UI");
+    require(openssl->store_properties == "?provider=tpm2" && openssl->store_ui_method != nullptr,
+            "reference load did not prefer the tpm2 decoder with a rejecting UI");
     require(storage->temporary_opened && storage->reference_present,
             "temporary publication did not reach the final reference");
 }

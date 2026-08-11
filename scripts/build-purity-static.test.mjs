@@ -396,7 +396,7 @@ test("Ubuntu TPM2 production integration is explicit and remains opt-in", () => 
   assert.match(provider, /store_eof\(store\.get\(\)\) == 1/u);
   assert.match(provider, /AT_SYMLINK_FOLLOW/u);
   assert.match(provider, /\/proc\/self\/fd\//u);
-  assert.match(provider, /store_open_ex\(uri\.c_str\(\), libctx_, nullptr/u);
+  assert.match(provider, /store_open_ex\(uri\.c_str\(\), libctx_, "\?provider=tpm2"/u);
   assert.match(provider, /PrivateKeyInfo/u);
   assert.match(provider, /clear_free\(data_, size_\)/u);
   assert.match(provider, /d2i_public_key\(libctx_/u);
