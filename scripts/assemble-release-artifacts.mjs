@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
+  copyFileSync,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -899,6 +900,34 @@ function canonicalPythonBuildConstraint(root) {
   return constraint;
 }
 
+/** Copy only the two expected Python distributions out of tool-private output. */
+function stagePythonArtifacts({ canonicalRoot, toolOutput, stagingOutput, pythonVersion }) {
+  const source = resolve(toolOutput);
+  const destination = resolve(stagingOutput, "python");
+  if (!pathWithin(source, canonicalRoot)) throw new Error("Python tool output escaped the canonical source tree");
+  if (!pathWithin(destination, stagingOutput)) throw new Error("Python release artifacts escaped release staging");
+  if (!existsSync(source) || lstatSync(source).isSymbolicLink() || !lstatSync(source).isDirectory()) throw new Error("Python tool output is missing or unsafe");
+  assertNoReparseComponents(source);
+  const expectedNames = [
+    `licensecc-${pythonVersion}-py3-none-any.whl`,
+    `licensecc-${pythonVersion}.tar.gz`,
+  ];
+  const expected = new Set(expectedNames);
+  for (const entry of readdirSync(source, { withFileTypes: true })) {
+    // uv may add this VCS hygiene marker to a user-selected output directory.
+    // It remains tool-private and is never copied into the release payload.
+    if (entry.name === ".gitignore" && entry.isFile()) continue;
+    if (!entry.isFile() || entry.isSymbolicLink() || !expected.has(entry.name)) throw new Error(`Python tool output contains an unexpected entry: ${entry.name}`);
+  }
+  mkdirSync(destination, { recursive: true });
+  assertNoReparseComponents(destination);
+  for (const name of expectedNames) {
+    const artifact = join(source, name);
+    if (!existsSync(artifact) || lstatSync(artifact).isSymbolicLink() || !lstatSync(artifact).isFile()) throw new Error(`Python tool output is missing expected artifact: ${name}`);
+    copyFileSync(artifact, join(destination, name));
+  }
+}
+
 function planWorkerAssembly(outputDirectory, root = repositoryRoot) {
   const work = join(outputDirectory, ".release-work");
   const plan = [];
@@ -1212,7 +1241,9 @@ function assembleReleaseArtifacts({ root = repositoryRoot, outputDirectory, cons
       // project lock first, then constrain and hash-check the isolated PEP 517
       // backend resolution used for the wheel and sdist.
       run({ executable: "uv", args: ["lock", "--check", "--directory", join(canonical, "sdks/python")], cwd: canonical, env, label: "locked Python dependency check" });
-      run({ executable: "uv", args: ["build", "--directory", join(canonical, "sdks/python"), "--build-constraint", canonicalPythonBuildConstraint(canonical), "--require-hashes", "--wheel", "--sdist", "--out-dir", join(staging.output, "python")], cwd: canonical, env, label: "locked Python wheel and sdist" });
+      const pythonToolOutput = join(canonical, ".release-python-output");
+      run({ executable: "uv", args: ["build", "--directory", join(canonical, "sdks/python"), "--build-constraint", canonicalPythonBuildConstraint(canonical), "--require-hashes", "--wheel", "--sdist", "--out-dir", pythonToolOutput], cwd: canonical, env, label: "locked Python wheel and sdist" });
+      stagePythonArtifacts({ canonicalRoot: canonical, toolOutput: pythonToolOutput, stagingOutput: staging.output, pythonVersion: versions.pythonVersion });
       hasDotnet = toolAvailable("dotnet");
       if (!hasDotnet && !allowPartial) throw new Error("dotnet is required; use --allow-partial only for an explicitly incomplete manifest");
       if (hasDotnet) {

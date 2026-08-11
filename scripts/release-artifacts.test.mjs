@@ -195,7 +195,7 @@ function valueAfter(args, flag) {
   return args[index + 1];
 }
 
-function fakeRun(commands, { symbols = true, failLabel, wrongSymbol = false, wrongPython = false, invalidArtifact, workerVariant = false } = {}) {
+function fakeRun(commands, { symbols = true, failLabel, wrongSymbol = false, wrongPython = false, invalidArtifact, workerVariant = false, pythonAuxiliaryFile = false } = {}) {
   return (entry) => {
     commands.push(entry);
     if (entry.label === failLabel) throw new Error(`intentional ${failLabel} failure`);
@@ -216,6 +216,7 @@ function fakeRun(commands, { symbols = true, failLabel, wrongSymbol = false, wro
       const distribution = wrongPython ? "other" : "licensecc";
       const wheel = invalidArtifact === "wheel-empty" ? Buffer.alloc(0) : invalidArtifact === "wheel-truncated" ? wheelArtifact({ name: distribution }).subarray(0, 8) : wheelArtifact({ name: distribution, metadataName: invalidArtifact === "wheel-metadata" ? "other" : distribution });
       const sdist = invalidArtifact === "sdist-empty" ? Buffer.alloc(0) : invalidArtifact === "sdist-truncated" ? sdistArtifact({ name: distribution }).subarray(0, 8) : sdistArtifact({ name: distribution, metadataName: invalidArtifact === "sdist-metadata" ? "other" : distribution });
+      if (pythonAuxiliaryFile) put(join(out, ".gitignore"), "# tool-private output\n");
       put(join(out, `${distribution}-${PYTHON_VERSION}-py3-none-any.whl`), wheel);
       put(join(out, `${distribution}-${PYTHON_VERSION}.tar.gz`), sdist);
     }
@@ -323,7 +324,7 @@ test("assembly uses a sanitized canonical install, four pinned Worker dry-runs, 
       consumerId: "acme",
       expectedPlatformVersion: PLATFORM_VERSION,
       expectedPythonVersion: PYTHON_VERSION,
-      run: fakeRun(commands),
+      run: fakeRun(commands, { pythonAuxiliaryFile: true }),
       toolAvailable: () => true,
       verifyArchive: (entry) => {
         verification.push(entry);
@@ -347,6 +348,9 @@ test("assembly uses a sanitized canonical install, four pinned Worker dry-runs, 
     assert.ok(npmInstall);
     assert.match(npmInstall.cwd, /\.canonical-head$/);
     assert.ok(npmInstall.args.includes("--include=dev"), "the canonical install retains pinned workspace build tools such as Wrangler");
+    const pythonBuildOutput = commands.find((entry) => entry.label === "locked Python wheel and sdist");
+    assert.match(valueAfter(pythonBuildOutput.args, "--out-dir"), /\.canonical-head[\\/]\.release-python-output$/);
+    assert.ok(!existsSync(join(output, "python", ".gitignore")), "tool-private Python auxiliary files never enter the release inventory");
     assert.ok(!Object.keys(npmInstall.env).some((key) => /(?:token|secret|password|cloudflare)/iu.test(key)));
     assert.match(npmInstall.env.DOTNET_CLI_HOME, /\.canonical-head[\\/]\.release-tool-home$/);
     assert.match(npmInstall.env.NUGET_PACKAGES, /\.canonical-head[\\/]\.release-tool-home[\\/]nuget-packages$/);
@@ -467,7 +471,7 @@ test("dotnet is mandatory by default, records an explicit boolean partial manife
     assert.equal(manifest.incomplete, true);
     assert.equal(typeof manifest.incomplete, "boolean");
     assert.throws(() => assembleReleaseArtifacts({ root, outputDirectory: wrongSymbols, consumerId: "acme", run: fakeRun([], { wrongSymbol: true }), verifyArchive: () => {}, toolAvailable: () => true }), /NuGet primary and symbols artifacts/);
-    assert.throws(() => assembleReleaseArtifacts({ root, outputDirectory: wrongPython, consumerId: "acme", run: fakeRun([], { wrongPython: true }), verifyArchive: () => {}, toolAvailable: () => true }), /python artifacts do not carry the exact expected identity/);
+    assert.throws(() => assembleReleaseArtifacts({ root, outputDirectory: wrongPython, consumerId: "acme", run: fakeRun([], { wrongPython: true }), verifyArchive: () => {}, toolAvailable: () => true }), /Python tool output contains an unexpected entry/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
