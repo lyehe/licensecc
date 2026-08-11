@@ -1539,6 +1539,7 @@ private:
         }
         errno = 0;
         clear_provider_error_queue();
+        set_tpm2_openssl_test_stage("load_store_open");
         StoreContext store(openssl_, openssl_->store_open_ex(uri.c_str(), libctx_, nullptr, ui_method, nullptr));
         const int store_errno = errno;
         if (store.get() == nullptr) {
@@ -1550,11 +1551,13 @@ private:
         std::size_t pkey_count = 0U;
         std::string load_error;
         clear_provider_error_queue();
+        set_tpm2_openssl_test_stage("load_store_expect");
         if (openssl_->store_expect(store.get(), OSSL_STORE_INFO_PKEY) != 1) {
             return LCC_DEVICE_KEY_CORRUPT;
         }
         while (!openssl_->store_eof(store.get())) {
             clear_provider_error_queue();
+            set_tpm2_openssl_test_stage("load_store_entry");
             OSSL_STORE_INFO* info = openssl_->store_load(store.get());
             if (info == nullptr) {
                 load_error = provider_error_text();
@@ -1580,6 +1583,7 @@ private:
         const bool clean_eof = openssl_->store_eof(store.get()) == 1;
         const int store_error = openssl_->store_error(store.get());
         clear_provider_error_queue();
+        set_tpm2_openssl_test_stage("load_store_close");
         const int close_result = store.close();
         const std::string close_error = provider_error_text();
         if (!clean_eof) {
@@ -1595,14 +1599,17 @@ private:
         if (store_error != 0) {
             return map_provider_error(0, true);
         }
+        set_tpm2_openssl_test_stage("load_store_cardinality");
         if (duplicate || null_pkey || pkey_count != 1U || key.get() == nullptr) {
             return LCC_DEVICE_KEY_CORRUPT;
         }
         P256Spki spki{};
+        set_tpm2_openssl_test_stage("load_validate_key");
         const LCC_DEVICE_RESULT validated = validate_key(key.get(), spki);
         if (validated != LCC_DEVICE_OK) {
             return validated;
         }
+        set_tpm2_openssl_test_stage("load_self_test");
         const LCC_DEVICE_RESULT usable = self_test(key.get(), spki);
         if (usable != LCC_DEVICE_OK) {
             return usable;
