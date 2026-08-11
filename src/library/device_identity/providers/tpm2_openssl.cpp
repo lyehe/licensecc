@@ -251,32 +251,6 @@ constexpr const char* kErrorQueueSentinel = "licensecc-tpm2-error-queue-sentinel
 constexpr std::size_t kErrorQueueTextCapacity = ERR_MAX_DATA_SIZE;
 thread_local unsigned long g_error_queue_sentinel = 0U;
 thread_local unsigned int g_error_queue_scope_depth = 0U;
-thread_local const char* g_tpm2_openssl_test_stage = "idle";
-thread_local int g_tpm2_openssl_store_clean_eof = -1;
-thread_local int g_tpm2_openssl_store_error = -1;
-thread_local int g_tpm2_openssl_store_close_result = -1;
-thread_local int g_tpm2_openssl_store_pkey_count = -1;
-thread_local int g_tpm2_openssl_store_load_error = -1;
-thread_local int g_tpm2_openssl_store_close_error = -1;
-thread_local std::array<char, 1024> g_tpm2_openssl_store_status_error_text{};
-
-void set_tpm2_openssl_test_stage(const char* stage) noexcept {
-    g_tpm2_openssl_test_stage = stage == nullptr ? "unknown" : stage;
-}
-
-void set_tpm2_openssl_store_status_error_text(const std::string& text) noexcept {
-    std::size_t output = 0U;
-    for (const unsigned char value : text) {
-        if (output + 1U >= g_tpm2_openssl_store_status_error_text.size()) {
-            break;
-        }
-        const bool safe = (value >= 'a' && value <= 'z') || (value >= 'A' && value <= 'Z') ||
-                          (value >= '0' && value <= '9') || value == ' ' || value == ':' || value == ',' ||
-                          value == '-' || value == '_' || value == '.' || value == '(' || value == ')';
-        g_tpm2_openssl_store_status_error_text[output++] = safe ? static_cast<char>(value) : '?';
-    }
-    g_tpm2_openssl_store_status_error_text[output] = '\0';
-}
 
 class ErrorQueueScope final {
 public:
@@ -829,33 +803,27 @@ public:
     LCC_DEVICE_RESULT create(const ProviderOpenRequest& request) noexcept override {
         ErrorQueueScope errors;
         try {
-            set_tpm2_openssl_test_stage("reset");
             reset_key();
-            set_tpm2_openssl_test_stage("validate_request");
             const LCC_DEVICE_RESULT validated = validate_request(request);
             if (validated != LCC_DEVICE_OK) {
                 return validated;
             }
-            set_tpm2_openssl_test_stage("ensure_context");
             const LCC_DEVICE_RESULT context_result = ensure_context();
             if (context_result != LCC_DEVICE_OK) {
                 return context_result;
             }
             DirectoryHandle directory;
-            set_tpm2_openssl_test_stage("open_storage");
             LCC_DEVICE_RESULT result = open_storage_directory(posix_, request.storage_directory, directory);
             if (result != LCC_DEVICE_OK) {
                 return result;
             }
             NamespaceLock lock(posix_, directory.descriptor, request.lock_timeout_ms);
-            set_tpm2_openssl_test_stage("acquire_lock");
             result = lock.acquire(directory.descriptor, request.device_namespace.lock_name);
             if (result != LCC_DEVICE_OK) {
                 return result;
             }
 
             LoadedReference existing;
-            set_tpm2_openssl_test_stage("load_existing");
             result = load_reference(directory.descriptor, request.device_namespace.linux_filename, existing);
             if (result == LCC_DEVICE_OK) {
                 adopt_loaded(std::move(existing), request.scope);
@@ -866,17 +834,14 @@ public:
             }
 
             EVP_PKEY* generated_raw = nullptr;
-            set_tpm2_openssl_test_stage("generate_key");
             result = generate_key(&generated_raw);
             if (result != LCC_DEVICE_OK) {
                 return result;
             }
             PkeyHandle generated(openssl_, generated_raw);
             LoadedReference generated_reference;
-            set_tpm2_openssl_test_stage("validate_generated_key");
             result = validate_key(generated.get(), generated_reference.spki);
             if (result == LCC_DEVICE_OK) {
-                set_tpm2_openssl_test_stage("self_test");
                 result = self_test(generated.get(), generated_reference.spki);
             }
             if (result != LCC_DEVICE_OK) {
@@ -884,7 +849,6 @@ public:
             }
 
             SensitiveVector pem;
-            set_tpm2_openssl_test_stage("encode_private_reference");
             result = encode_private_reference(generated.get(), pem.value);
             if (result != LCC_DEVICE_OK) {
                 return result;
@@ -892,7 +856,6 @@ public:
 
             FileIdentity temp_identity;
             std::string temporary_name;
-            set_tpm2_openssl_test_stage("write_temporary");
             result = write_temporary(directory.descriptor,
                                       request.device_namespace.linux_filename,
                                       pem.value,
@@ -941,7 +904,6 @@ public:
             };
 
             try {
-                set_tpm2_openssl_test_stage("publish_temporary");
                 result = publish_temporary(directory.descriptor,
                                             temporary_name,
                                             request.device_namespace.linux_filename,
@@ -953,7 +915,6 @@ public:
                     return rollback_result == LCC_DEVICE_OK ? result : rollback_result;
                 }
                 if (!published) {
-                    set_tpm2_openssl_test_stage("adopt_race_winner");
                     result = load_reference(directory.descriptor, request.device_namespace.linux_filename, existing);
                     if (result == LCC_DEVICE_OK) {
                         adopt_loaded(std::move(existing), request.scope);
@@ -965,7 +926,6 @@ public:
                 }
 
                 LoadedReference reopened;
-                set_tpm2_openssl_test_stage("reopen_published");
                 result = load_reference(directory.descriptor, request.device_namespace.linux_filename, reopened);
                 if (result == LCC_DEVICE_OK && !same_file(temp_identity, reopened.identity)) {
                     result = LCC_DEVICE_KEY_CORRUPT;
@@ -977,15 +937,12 @@ public:
                 }
                 adopt_loaded(std::move(reopened), request.scope);
                 transaction_active = false;
-                set_tpm2_openssl_test_stage("success");
                 return LCC_DEVICE_OK;
             } catch (...) {
-                set_tpm2_openssl_test_stage("transaction_exception");
                 const LCC_DEVICE_RESULT rollback_result = rollback_transaction();
                 return rollback_result == LCC_DEVICE_OK ? LCC_DEVICE_INTERNAL_ERROR : rollback_result;
             }
         } catch (...) {
-            set_tpm2_openssl_test_stage("outer_exception");
             reset_key();
             return LCC_DEVICE_INTERNAL_ERROR;
         }
@@ -1535,13 +1492,6 @@ private:
     LCC_DEVICE_RESULT load_reference(int directory,
                                      const std::string& filename,
                                      LoadedReference& out) {
-        g_tpm2_openssl_store_clean_eof = -1;
-        g_tpm2_openssl_store_error = -1;
-        g_tpm2_openssl_store_close_result = -1;
-        g_tpm2_openssl_store_pkey_count = -1;
-        g_tpm2_openssl_store_load_error = -1;
-        g_tpm2_openssl_store_close_error = -1;
-        g_tpm2_openssl_store_status_error_text[0] = '\0';
         const int raw_descriptor = posix_->openat(directory, filename.c_str(), kReferenceOpenFlags, 0U);
         if (raw_descriptor < 0) {
             if (errno == ENOENT) {
@@ -1567,7 +1517,6 @@ private:
         }
         errno = 0;
         clear_provider_error_queue();
-        set_tpm2_openssl_test_stage("load_store_open");
         StoreContext store(
             openssl_, openssl_->store_open_ex(uri.c_str(), libctx_, "?provider=tpm2", ui_method, nullptr));
         const int store_errno = errno;
@@ -1581,13 +1530,11 @@ private:
         std::size_t pkey_count = 0U;
         std::string load_error;
         clear_provider_error_queue();
-        set_tpm2_openssl_test_stage("load_store_expect");
         if (openssl_->store_expect(store.get(), OSSL_STORE_INFO_PKEY) != 1) {
             return LCC_DEVICE_KEY_CORRUPT;
         }
         while (!openssl_->store_eof(store.get())) {
             clear_provider_error_queue();
-            set_tpm2_openssl_test_stage("load_store_entry");
             OSSL_STORE_INFO* info = openssl_->store_load(store.get());
             if (info == nullptr) {
                 load_error = provider_error_text();
@@ -1618,45 +1565,31 @@ private:
         }
         const bool clean_eof = openssl_->store_eof(store.get()) == 1;
         const int store_error = openssl_->store_error(store.get());
-        set_tpm2_openssl_store_status_error_text(provider_error_text());
         clear_provider_error_queue();
-        set_tpm2_openssl_test_stage("load_store_close");
         const int close_result = store.close();
         const std::string close_error = provider_error_text();
-        g_tpm2_openssl_store_clean_eof = clean_eof ? 1 : 0;
-        g_tpm2_openssl_store_error = store_error;
-        g_tpm2_openssl_store_close_result = close_result;
-        g_tpm2_openssl_store_pkey_count = static_cast<int>(pkey_count);
-        g_tpm2_openssl_store_load_error = load_error.empty() ? 0 : 1;
-        g_tpm2_openssl_store_close_error = close_error.empty() ? 0 : 1;
         if (!clean_eof) {
-            set_tpm2_openssl_test_stage("load_store_unclean_eof");
             if (!load_error.empty()) {
                 return map_provider_error_text(0, true, load_error);
             }
             return store_error != 0 ? map_provider_error(0, true) : LCC_DEVICE_KEY_CORRUPT;
         }
         if (close_result != 1) {
-            set_tpm2_openssl_test_stage("load_store_close_failed");
             return close_error.empty() ? LCC_DEVICE_INTERNAL_ERROR :
                                          map_provider_error_text(0, true, close_error);
         }
-        set_tpm2_openssl_test_stage("load_store_cardinality");
         if (duplicate || null_pkey || pkey_count != 1U || key.get() == nullptr) {
             return LCC_DEVICE_KEY_CORRUPT;
         }
         if (store_error != 0 && !terminal_store_probe) {
-            set_tpm2_openssl_test_stage("load_store_error");
             return load_error.empty() ? map_provider_error(0, true) :
                                         map_provider_error_text(0, true, load_error);
         }
         P256Spki spki{};
-        set_tpm2_openssl_test_stage("load_validate_key");
         const LCC_DEVICE_RESULT validated = validate_key(key.get(), spki);
         if (validated != LCC_DEVICE_OK) {
             return validated;
         }
-        set_tpm2_openssl_test_stage("load_self_test");
         const LCC_DEVICE_RESULT usable = self_test(key.get(), spki);
         if (usable != LCC_DEVICE_OK) {
             return usable;
@@ -2191,40 +2124,6 @@ bool tpm2_openssl_error_queue_segments_for_test() noexcept {
         ERR_clear_error();
         return false;
     }
-}
-
-const char* tpm2_openssl_test_stage_for_test() noexcept {
-    return g_tpm2_openssl_test_stage;
-}
-
-void tpm2_openssl_store_diagnostic_for_test(int* clean_eof,
-                                            int* store_error,
-                                            int* close_result,
-                                            int* pkey_count,
-                                            int* load_error,
-                                            int* close_error) noexcept {
-    if (clean_eof != nullptr) {
-        *clean_eof = g_tpm2_openssl_store_clean_eof;
-    }
-    if (store_error != nullptr) {
-        *store_error = g_tpm2_openssl_store_error;
-    }
-    if (close_result != nullptr) {
-        *close_result = g_tpm2_openssl_store_close_result;
-    }
-    if (pkey_count != nullptr) {
-        *pkey_count = g_tpm2_openssl_store_pkey_count;
-    }
-    if (load_error != nullptr) {
-        *load_error = g_tpm2_openssl_store_load_error;
-    }
-    if (close_error != nullptr) {
-        *close_error = g_tpm2_openssl_store_close_error;
-    }
-}
-
-const char* tpm2_openssl_store_status_error_text_for_test() noexcept {
-    return g_tpm2_openssl_store_status_error_text.data();
 }
 
 }  // namespace device_identity
