@@ -356,6 +356,10 @@ test("assembly uses a sanitized canonical install, four pinned Worker dry-runs, 
     assert.match(npmInstall.env["ProgramFiles(x86)"], /\.canonical-head[\\/]\.release-tool-home[\\/]appdata[\\/]programfiles-x86$/);
     assert.match(npmInstall.env.ProgramFiles, /\.canonical-head[\\/]\.release-tool-home[\\/]appdata[\\/]programfiles$/);
     assert.match(npmInstall.env.NUGET_HTTP_CACHE_PATH, /\.canonical-head[\\/]\.release-tool-home[\\/]nuget-http-cache$/);
+    if (process.platform === "win32") {
+      assert.equal(npmInstall.env.LIB, process.env.LIB, "the Windows C++ verifier keeps its explicit library search path");
+      assert.equal(npmInstall.env.INCLUDE, process.env.INCLUDE, "the Windows C++ verifier keeps its explicit include search path");
+    }
     assert.equal(commands.filter((entry) => entry.label.includes("isolated UI build")).length, 2);
     const workerCommands = commands.filter((entry) => entry.label.includes("Worker dry-run"));
     assert.equal(workerCommands.length, 4);

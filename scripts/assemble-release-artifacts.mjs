@@ -820,7 +820,15 @@ function sanitizedEnvironment(canonicalRoot, sourceDateEpoch) {
     NUGET_XMLDOC_MODE: "skip",
     CI: "true",
   };
-  for (const key of ["SystemRoot", "SYSTEMROOT", "ComSpec", "COMSPEC", "PATHEXT", "WINDIR", "PROCESSOR_ARCHITECTURE", "NUMBER_OF_PROCESSORS"]) {
+  const hostRuntimeVariables = ["SystemRoot", "SYSTEMROOT", "ComSpec", "COMSPEC", "PATHEXT", "WINDIR", "PROCESSOR_ARCHITECTURE", "NUMBER_OF_PROCESSORS"];
+  if (process.platform === "win32") {
+    // CMake's Ninja generator invokes the already-selected MSVC compiler
+    // directly, so it needs this explicit, non-secret SDK/toolchain lookup
+    // set.  All source, profile, cache, and NuGet configuration paths remain
+    // canonical-local above.
+    hostRuntimeVariables.push("LIB", "INCLUDE", "VCINSTALLDIR", "VCToolsInstallDir", "WindowsSdkDir", "WindowsSDKVersion", "UniversalCRTSdkDir", "UCRTVersion", "VSCMD_ARG_TGT_ARCH", "VSCMD_ARG_HOST_ARCH", "ExtensionSdkDir", "WindowsLibPath");
+  }
+  for (const key of hostRuntimeVariables) {
     if (process.env[key]) env[key] = process.env[key];
   }
   if (process.platform === "win32") env.Path = inheritedPath;
