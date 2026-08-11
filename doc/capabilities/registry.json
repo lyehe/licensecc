@@ -85,7 +85,7 @@
       "public_docs": ["doc/capabilities/index.rst", "sdks/dotnet/README.md"],
       "evidence": [
         {"kind": "implementation", "path": "sdks/python/src/licensecc/config_attestation.py", "selector": "def verify_config_token(", "assertion": "The Python SDK implements config-token verification."},
-        {"kind": "automated_test", "path": "sdks/python/tests/test_config_attestation.py", "selector": "def test_golden_config_verifies", "assertion": "The config-token verifier has golden-vector tests."}
+        {"kind": "automated_test", "path": "sdks/python/tests/test_config_attestation.py", "selector": "def test_golden_config_token_verifies", "assertion": "The config-token verifier has golden-vector tests."}
       ]
     },
     {
@@ -128,7 +128,7 @@
       "public_docs": ["doc/capabilities/index.rst"],
       "evidence": [
         {"kind": "implementation", "path": "services/cloudflare-licensing-backend/src/routes/verify.ts", "selector": "input.request_signature_version", "assertion": "The verification route consumes request-proof fields."},
-        {"kind": "automated_test", "path": "services/cloudflare-licensing-backend/test/device-proof.test.mjs", "selector": "request proof", "assertion": "The backend has automated request-proof coverage."},
+        {"kind": "automated_test", "path": "services/cloudflare-licensing-backend/test/contexts/request-proof.test.mjs", "selector": "test(\"canonical request proof payload is byte exact\"", "assertion": "The backend has automated request-proof coverage."},
         {"kind": "limitation", "path": "services/cloudflare-licensing-backend/README.md", "selector": "Windows/Ubuntu TPM-provider/request-proof", "assertion": "The service documentation keeps TPM-provider integration explicitly plan-only."}
       ]
     },
@@ -142,6 +142,7 @@
       "replaces": [],
       "public_docs": ["doc/capabilities/index.rst"],
       "evidence": [
+        {"kind": "implementation", "path": "services/cloudflare-licensing-backend/src/routes/metering.ts", "selector": "/v1/meter is gated by a valid per-customer account token", "assertion": "The backend implements account-scoped metering."},
         {"kind": "route_contract", "path": "test/contracts/backend.json", "selector": "POST /v1/meter", "assertion": "The canonical backend contract exposes metering."},
         {"kind": "automated_test", "path": "services/cloudflare-licensing-backend/test/sql/metering.test.mjs", "selector": "POST /v1/meter", "assertion": "Metering SQL behavior is covered by automated tests."}
       ]
@@ -170,6 +171,7 @@
       "replaces": [],
       "public_docs": ["doc/capabilities/index.rst"],
       "evidence": [
+        {"kind": "implementation", "path": "services/cloudflare-license-admin/src/worker/groups/entitlements.ts", "selector": "operationDescriptor(\"entitlements\", \"admin\", \"POST\", \"/api/admin/entitlements\")", "assertion": "The admin Worker implements entitlement administration."},
         {"kind": "route_contract", "path": "test/contracts/admin.json", "selector": "POST /api/admin/entitlements", "assertion": "The canonical admin contract exposes entitlement administration."},
         {"kind": "automated_test", "path": "services/cloudflare-license-admin/test/admin-ui.e2e.mjs", "selector": "path === \"/api/admin/entitlements\"", "assertion": "The admin UI test exercises entitlement interactions."}
       ]
@@ -184,6 +186,7 @@
       "replaces": [],
       "public_docs": ["doc/capabilities/index.rst"],
       "evidence": [
+        {"kind": "implementation", "path": "services/cloudflare-customer-portal/src/worker/routes/self-service.ts", "selector": "\"GET /api/portal/entitlements\":", "assertion": "The portal Worker implements entitlement self-service."},
         {"kind": "route_contract", "path": "test/contracts/portal.json", "selector": "GET /api/portal/entitlements", "assertion": "The canonical portal contract exposes entitlement self-service."},
         {"kind": "automated_test", "path": "services/cloudflare-customer-portal/test/portal-worker-self-service.test.mjs", "selector": "returns ONLY A's entitlements", "assertion": "Portal self-service isolation has automated coverage."}
       ]
@@ -250,7 +253,7 @@
       "availability": {"release": "Not scheduled", "platforms": ["Not available"], "limitations": ["CPU-size and similar additional limit types are not implemented."]},
       "replaces": [],
       "public_docs": ["doc/capabilities/index.rst", "doc/analysis/features.rst"],
-      "evidence": [{"kind": "limitation", "path": "src/templates/licensecc_properties.h.in", "selector": "STRATEGY_CPU_SIZE = 3", "assertion": "The source marks CPU-size identification as not implemented."}]
+      "evidence": [{"kind": "plan", "path": "doc/capabilities/index.rst", "selector": "additional execution-limit types", "assertion": "The capability is recorded as planned, not shipped."}]
     },
     {
       "id": "tpm-request-proof-provider",
@@ -261,7 +264,7 @@
       "availability": {"release": "Not scheduled", "platforms": ["Not available"], "limitations": ["No universal TPM provider or published client integration is included."]},
       "replaces": [],
       "public_docs": ["doc/capabilities/index.rst"],
-      "evidence": [{"kind": "limitation", "path": "services/cloudflare-licensing-backend/README.md", "selector": "Windows/Ubuntu TPM-provider/request-proof", "assertion": "The backend documentation states that this integration remains plan-only."}]
+      "evidence": [{"kind": "plan", "path": "doc/capabilities/index.rst", "selector": "TPM-backed request-proof provider", "assertion": "The capability is recorded as planned, not shipped."}]
     },
     {
       "id": "java-sdk",

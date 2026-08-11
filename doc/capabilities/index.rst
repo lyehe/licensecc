@@ -57,8 +57,8 @@ SDKs and planned work
 
 * The **Python SDK** and **.NET SDK** are shipped and tested from the repository.
   Neither is published to its public package registry.
-* **ARM support**, **additional execution-limit types**, a **TPM-backed
-  request-proof provider**, and a **Java SDK** are planned.
+* **ARM support**, **additional execution-limit types**, a **TPM-backed request-proof provider**,
+  and a **Java SDK** are planned.
 
 For exact ownership, release availability, limitations, public-document links,
 and evidence selectors, consult ``registry.json``. Historical feature prose is
