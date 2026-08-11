@@ -773,7 +773,11 @@ function xmlDecode(value, label) {
     }
     return String.fromCodePoint(numeric);
   });
-  if (invalid || /[\u0000-\u0008\u000b\u000c\u000e-\u001f]/u.test(decoded)) throw new Error(`${label} has invalid XML text`);
+  const hasInvalidXmlControl = Array.from(decoded).some((character) => {
+    const codePoint = character.codePointAt(0);
+    return codePoint <= 0x1f && codePoint !== 0x09 && codePoint !== 0x0a && codePoint !== 0x0d;
+  });
+  if (invalid || hasInvalidXmlControl) throw new Error(`${label} has invalid XML text`);
   return decoded;
 }
 
