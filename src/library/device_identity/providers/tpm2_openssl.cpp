@@ -1524,6 +1524,8 @@ private:
         }
         PkeyHandle key(openssl_, nullptr);
         bool duplicate = false;
+        bool null_pkey = false;
+        std::size_t pkey_count = 0U;
         std::string load_error;
         clear_provider_error_queue();
         if (openssl_->store_expect(store.get(), OSSL_STORE_INFO_PKEY) != 1) {
@@ -1538,10 +1540,18 @@ private:
             }
             if (openssl_->store_info_type(info) != OSSL_STORE_INFO_PKEY) {
                 duplicate = true;
-            } else if (key.get() != nullptr) {
-                duplicate = true;
             } else {
-                key.reset(openssl_->store_info_get1_pkey(info));
+                ++pkey_count;
+                if (key.get() != nullptr) {
+                    duplicate = true;
+                } else {
+                    EVP_PKEY* loaded = openssl_->store_info_get1_pkey(info);
+                    if (loaded == nullptr) {
+                        null_pkey = true;
+                    } else {
+                        key.reset(loaded);
+                    }
+                }
             }
             openssl_->store_info_free(info);
         }
@@ -1563,7 +1573,7 @@ private:
         if (store_error != 0) {
             return map_provider_error(0, true);
         }
-        if (duplicate || key.get() == nullptr) {
+        if (duplicate || null_pkey || pkey_count != 1U || key.get() == nullptr) {
             return LCC_DEVICE_KEY_CORRUPT;
         }
         P256Spki spki{};
