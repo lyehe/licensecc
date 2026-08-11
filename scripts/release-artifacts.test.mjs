@@ -1,131 +1,96 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import test from "node:test";
-import {
-  assertReleaseAllowlist,
-  assertSafeRelativePath,
-  createCppSourceArchive,
-  inspectReleaseDirectory,
-  planWorkerDryRuns,
-  runWorkerDryRuns,
-  writeReleaseMetadata,
-} from "./assemble-release-artifacts.mjs";
+import { assembleReleaseArtifacts, createCppSourceArchive, inspectReleaseDirectory, planWorkerAssembly } from "./assemble-release-artifacts.mjs";
 
-test("release artifact assembly uses the pinned local Wrangler dry-run bundle ceremony", () => {
-  const plan = planWorkerDryRuns("C:/release-stage");
+const PLATFORM_VERSION = "0.1.0-rc.1";
+const PYTHON_VERSION = "0.1.0rc1";
 
-  assert.equal(plan.length, 4);
-  for (const command of plan) {
-    assert.equal(command.executable, process.execPath);
-    assert.equal(command.args[0], "<local-wrangler-bin>");
-    assert.ok(command.args.includes("deploy"));
-    assert.ok(command.args.includes("--dry-run"));
-    assert.ok(command.args.includes("--outdir"));
-    assert.ok(command.args.includes("--config"));
-    assert.match(command.args[command.args.indexOf("--config") + 1], /wrangler\.example\.(toml|jsonc)$/);
-    assert.doesNotMatch(command.args.join(" "), /wrangler\.(toml|jsonc)(?:\s|$)/);
-  }
+function command(executable, args, cwd) {
+  const result = spawnSync(executable, args, { cwd, encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr || `${executable} ${args.join(" ")}`);
+}
+
+function write(root, path, contents) {
+  mkdirSync(join(root, path, ".."), { recursive: true });
+  writeFileSync(join(root, path), contents);
+}
+
+function releaseFixture() {
+  const root = join(tmpdir(), `licensecc-release-fixture-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+  mkdirSync(root, { recursive: true });
+  for (const [path, contents] of [
+    ["package.json", "{}"], ["package-lock.json", JSON.stringify({ packages: { "node_modules/wrangler": { version: "4.120.0" } } })], ["node_modules/wrangler/bin/wrangler.js", "// local wrangler\n"],
+    ["CMakeLists.txt", "cmake_minimum_required(VERSION 3.16)\nproject(licensecc)\n"], ["LICENSE", "AGPL"], ["cmake/config.cmake", "# cmake"], ["include/licensecc/licensecc.h", "// header"], ["src/library/runtime.cpp", "// committed runtime"],
+    ["extern/license-generator/CMakeLists.txt", "cmake_minimum_required(VERSION 3.16)\nproject(lccgen)\n"], ["extern/license-generator/LICENSE", "BSD 3-Clause License"], ["extern/license-generator/PROVENANCE.md", "reviewed vendor provenance"], ["extern/license-generator/cmake/lccgen-config.cmake", "# config"], ["extern/license-generator/src/license_generator/main.cpp", "// generator"],
+    ["sdks/python/LICENSE", "AGPL"], ["sdks/dotnet/src/Licensecc.Client/LICENSE", "AGPL"], ["sdks/dotnet/Licensecc.Client.sln", "solution"], ["sdks/dotnet/src/Licensecc.Client/Licensecc.Client.csproj", "project"],
+  ]) write(root, path, contents);
+  command("git", ["init", "--quiet"], root); command("git", ["config", "user.email", "release@test.invalid"], root); command("git", ["config", "user.name", "Release Test"], root); command("git", ["add", "--", "."], root); command("git", ["commit", "--quiet", "-m", "fixture"], root);
+  return root;
+}
+
+function stagedRunner(commands) {
+  return (entry) => {
+    commands.push(entry);
+    const valueAfter = (flag) => entry.args[entry.args.indexOf(flag) + 1];
+    const put = (path, contents) => { mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, contents); };
+    if (entry.label.includes("UI build")) put(join(valueAfter("--outDir"), "index.html"), "ui");
+    if (entry.label.includes("Worker dry-run")) put(join(valueAfter("--outdir"), "worker.js"), "bundle");
+    if (entry.label.includes("Python")) { const out = valueAfter("--out-dir"); put(join(out, `licensecc-${PYTHON_VERSION}-py3-none-any.whl`), "wheel"); put(join(out, `licensecc-${PYTHON_VERSION}.tar.gz`), "sdist"); }
+    if (entry.label.includes("NuGet package")) { const out = valueAfter("--output"); put(join(out, `Licensecc.Client.${PLATFORM_VERSION}.nupkg`), "package"); put(join(out, `Licensecc.Client.${PLATFORM_VERSION}.snupkg`), "symbols"); }
+    return { status: 0 };
+  };
+}
+
+test("release source archive uses only canonical tracked blobs, vendor dependency closure, and deterministic headers", () => {
+  const root = releaseFixture(); const first = join(root, "stage-a"); const second = join(root, "stage-b");
+  try {
+    const archiveOne = createCppSourceArchive({ root, outputDirectory: first, consumerId: "acme", platformVersion: PLATFORM_VERSION });
+    writeFileSync(join(root, "src/library/runtime.cpp"), "// working tree mutation");
+    const archiveTwo = createCppSourceArchive({ root, outputDirectory: second, consumerId: "acme", platformVersion: PLATFORM_VERSION });
+    assert.deepEqual(readFileSync(archiveOne), readFileSync(archiveTwo));
+    const contents = readFileSync(archiveTwo).toString("utf8");
+    assert.match(contents, /extern\/license-generator\/PROVENANCE\.md/);
+    assert.match(contents, /committed runtime/);
+    assert.doesNotMatch(contents, /working tree mutation/);
+    write(root, "src/untracked-sentinel.cpp", "must reject");
+    assert.throws(() => createCppSourceArchive({ root, outputDirectory: join(root, "stage-c"), consumerId: "acme", platformVersion: PLATFORM_VERSION }), /untracked C\+\+ release input/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test("release artifact paths reject traversal, keys, real Wrangler config, databases, and build output", () => {
-  for (const path of [
-    "../escape.txt",
-    "workers/../escape.js",
-    "workers/license-admin/.dev.vars",
-    "workers/license-admin/wrangler.jsonc",
-    "workers/license-admin/wrangler.toml",
-    "workers/license-admin/production.pem",
-    "workers/license-admin/private_key.rsa",
-    "workers/license-admin/state.sqlite",
-    "workers/license-admin/build/worker.js",
-    "workers/license-admin/.wrangler/state",
-  ]) {
-    assert.throws(() => assertSafeRelativePath(path), /unsafe artifact path/, path);
-  }
-
-  const root = mkdtempSync(join(tmpdir(), "licensecc-release-allowlist-"));
+test("assembly stages clean UI assets, four pinned local Worker bundles, locked SDK packages, and exact SPDX inspection", () => {
+  const root = releaseFixture(); const output = join(root, "release-stage"); const commands = [];
   try {
-    assert.equal(assertReleaseAllowlist(root, join(root, "cpp/licensecc-cpp-sdk-consumer-1.0.0.tar")), "cpp/licensecc-cpp-sdk-consumer-1.0.0.tar");
-    assert.throws(() => assertReleaseAllowlist(root, join(root, "dotnet/worker.exe")), /outside the allowlist/);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
+    const manifest = assembleReleaseArtifacts({ root, outputDirectory: output, consumerId: "acme", platformVersion: PLATFORM_VERSION, pythonVersion: PYTHON_VERSION, run: stagedRunner(commands), toolAvailable: () => true });
+    assert.equal(manifest.incomplete, false);
+    assert.equal(commands.filter((entry) => entry.label.includes("UI build")).length, 2);
+    assert.equal(commands.filter((entry) => entry.label.includes("Worker dry-run")).length, 4);
+    assert.ok(commands.filter((entry) => entry.label.includes("Worker dry-run")).every((entry) => entry.args[0] === join(root, "node_modules/wrangler/bin/wrangler.js") && entry.args.includes("--dry-run") && entry.args.includes("--outdir")));
+    assert.ok(commands.some((entry) => entry.label.includes("Python") && entry.args.includes("--locked")));
+    assert.ok(commands.some((entry) => entry.label.includes("NuGet restore") && entry.args.includes("--locked-mode")));
+    assert.ok(commands.some((entry) => entry.label.includes("NuGet package") && entry.args.includes(`-p:PackageVersion=${PLATFORM_VERSION}`)));
+    assert.ok(!existsSync(join(output, ".release-work")));
+    writeFileSync(join(output, "workers/licensing-backend/unlisted.js"), "extra");
+    assert.throws(() => inspectReleaseDirectory(output, { root }), /payload set does not exactly match staging/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test("Worker dry-runs resolve the pinned Wrangler binary from the local workspace", () => {
-  const root = mkdtempSync(join(tmpdir(), "licensecc-release-wrangler-"));
-  const output = join(root, "release-output");
+test("dotnet is mandatory unless allow-partial records an incomplete release", () => {
+  const root = releaseFixture(); const blocked = join(root, "blocked"); const partial = join(root, "partial");
   try {
-    mkdirSync(join(root, "node_modules/wrangler/bin"), { recursive: true });
-    writeFileSync(join(root, "package.json"), "{}");
-    writeFileSync(join(root, "package-lock.json"), JSON.stringify({ packages: { "node_modules/wrangler": { version: "4.120.0" } } }));
-    writeFileSync(join(root, "node_modules/wrangler/bin/wrangler.js"), "// local test binary\n");
-    const commands = [];
-
-    runWorkerDryRuns({ root, outputDirectory: output, run: (command) => commands.push(command) });
-
-    assert.equal(commands.length, 4);
-    assert.ok(commands.every((command) => command.args[0] === join(root, "node_modules/wrangler/bin/wrangler.js")));
-    assert.ok(commands.every((command) => command.args.includes("--dry-run") && command.args.includes("--outdir")));
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
+    assert.throws(() => assembleReleaseArtifacts({ root, outputDirectory: blocked, consumerId: "acme", platformVersion: PLATFORM_VERSION, pythonVersion: PYTHON_VERSION, run: stagedRunner([]), toolAvailable: () => false }), /dotnet is required/);
+    assert.ok(!existsSync(blocked));
+    const manifest = assembleReleaseArtifacts({ root, outputDirectory: partial, consumerId: "acme", platformVersion: PLATFORM_VERSION, pythonVersion: PYTHON_VERSION, allowPartial: true, run: stagedRunner([]), toolAvailable: () => false });
+    assert.equal(manifest.incomplete, true);
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test("C++ release archive is deterministic source-only and consumer-keyed", () => {
-  const root = mkdtempSync(join(tmpdir(), "licensecc-release-source-"));
-  const output = mkdtempSync(join(tmpdir(), "licensecc-release-output-"));
-  try {
-    for (const directory of ["cmake", "include/licensecc", "src/library", "build", "install", "projects/default"]) {
-      mkdirSync(join(root, directory), { recursive: true });
-    }
-    writeFileSync(join(root, "CMakeLists.txt"), "project(licensecc)\n");
-    writeFileSync(join(root, "LICENSE"), "AGPL-3.0-or-later\n");
-    writeFileSync(join(root, "cmake/config.cmake"), "# source\n");
-    writeFileSync(join(root, "include/licensecc/licensecc.h"), "// public header\n");
-    writeFileSync(join(root, "src/library/runtime.cpp"), "// source\n");
-    writeFileSync(join(root, "build/ci-binary.exe"), "binary");
-    writeFileSync(join(root, "install/private_key.rsa"), "private");
-    writeFileSync(join(root, "projects/default/private_key.rsa"), "generated");
-
-    const archive = createCppSourceArchive({ root, outputDirectory: output, consumerKey: "acme", version: "1.0.0" });
-    const contents = readFileSync(archive).toString("utf8");
-    assert.match(archive, /licensecc-cpp-sdk-acme-1\.0\.0\.tar$/);
-    assert.match(contents, /licensecc-cpp-sdk-acme-1\.0\.0\/include\/licensecc\/licensecc\.h/);
-    assert.match(contents, /licensecc-cpp-sdk-acme-1\.0\.0\/src\/library\/runtime\.cpp/);
-    assert.doesNotMatch(contents, /ci-binary|private_key|generated/);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-    rmSync(output, { recursive: true, force: true });
-  }
-});
-
-test("release manifest records checksums and SPDX inputs for only allowlisted artifacts", () => {
-  const root = mkdtempSync(join(tmpdir(), "licensecc-release-manifest-source-"));
-  const output = mkdtempSync(join(tmpdir(), "licensecc-release-manifest-output-"));
-  try {
-    for (const directory of ["sdks/python", "sdks/dotnet/src/Licensecc.Client", "workers/licensing-backend", "python", "dotnet", "cpp"]) {
-      mkdirSync(join(directory.startsWith("workers") || ["python", "dotnet", "cpp"].includes(directory) ? output : root, directory), { recursive: true });
-    }
-    writeFileSync(join(root, "LICENSE"), "AGPL");
-    writeFileSync(join(root, "sdks/python/LICENSE"), "AGPL");
-    writeFileSync(join(root, "sdks/dotnet/src/Licensecc.Client/LICENSE"), "AGPL");
-    writeFileSync(join(output, "workers/licensing-backend/worker.js"), "export default {};");
-    writeFileSync(join(output, "python/licensecc-1.0.0.whl"), "wheel");
-    writeFileSync(join(output, "python/licensecc-1.0.0.tar.gz"), "sdist");
-    writeFileSync(join(output, "dotnet/Licensecc.Client.1.0.0.nupkg"), "nupkg");
-    writeFileSync(join(output, "dotnet/Licensecc.Client.1.0.0.symbols.nupkg"), "symbols");
-    writeFileSync(join(output, "cpp/licensecc-cpp-sdk-acme-1.0.0.tar"), "source");
-
-    const manifest = writeReleaseMetadata({ root, outputDirectory: output, version: "1.0.0" });
-    assert.equal(manifest.SPDXVersion, "SPDX-2.3");
-    assert.equal(manifest.artifacts.length, 6);
-    assert.equal(inspectReleaseDirectory(output).name, "licensecc-release-1.0.0");
-    assert.match(readFileSync(join(output, "checksums.sha256"), "utf8"), /licensecc-cpp-sdk-acme-1\.0\.0\.tar/);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-    rmSync(output, { recursive: true, force: true });
-  }
+test("worker plan uses only example configs and isolated UI output", () => {
+  const plan = planWorkerAssembly("C:/release-stage");
+  assert.equal(plan.filter((entry) => entry.label.includes("Worker dry-run")).length, 4);
+  assert.equal(plan.filter((entry) => entry.label.includes("UI build")).length, 2);
+  assert.ok(plan.filter((entry) => entry.label.includes("Worker dry-run")).every((entry) => /wrangler\.example\.(toml|jsonc)$/.test(entry.args[entry.args.indexOf("--config") + 1])));
 });
