@@ -5,9 +5,8 @@
 **A-level status: CONDITIONAL / PENDING.** The repository is well organized at
 the reviewed implementation tip and its local deterministic gates are strong.
 It is not yet an unconditional A because the final generator candidate is not
-published and pinned, native Ubuntu and remote-CI evidence has not been
-collected, and this Windows host cannot complete the documentation gate without
-Doxygen.
+published and pinned, and native Ubuntu and remote-CI evidence has not been
+collected. The supported Windows documentation gate is now complete.
 
 | Dimension | Evidence at the reviewed tip | Assessment |
 | --- | --- | --- |
@@ -17,7 +16,7 @@ Doxygen.
 | Operator UX | Consequence-led dialogs, immutable replay, exact response proof, current-read recovery, focus, and pagination fences have browser coverage | A |
 | Supply-chain hygiene | npm and workflow pins are exact; the 2026-08-09 audit attestation reports zero vulnerabilities | A |
 | Release provenance | Reviewed generator candidate remains unpublished/unpinned | Pending |
-| Cross-platform/documentation evidence | Windows is green; Ubuntu, Doxygen, and remote run identifiers are absent | Pending |
+| Cross-platform/documentation evidence | Windows and the Doxygen/Sphinx documentation gate are green; Ubuntu and remote run identifiers are absent | Pending |
 
 This is an evidence grade for organization and release readiness, not a claim
 that every planned product feature exists. In particular, Windows/Ubuntu TPM
@@ -187,7 +186,7 @@ continuously prove these historical command results.
 | `npm run test:sdks` | Attested green: Python 70/70; .NET 43/43 |
 | `npm audit --json` | Attested 0 total vulnerabilities at all severities |
 | `pwsh -NoProfile -File scripts/check-build-purity.ps1 -Preset dev-debug` | Attested green: configure/build, CTest 34/34, and unchanged source fingerprints |
-| `npm run check:docs` | Attested fail-closed prerequisite result because Doxygen is absent; no stale XML was consumed |
+| `npm run check:docs` | Green on 2026-08-10 with Doxygen 1.17.0; Doxygen XML and Sphinx HTML were freshly generated |
 | Ubuntu native CMake | Not run; no Ubuntu CMake evidence collected |
 | Remote CI | Not collected; no run link or identifier is claimed |
 
@@ -208,11 +207,9 @@ plans.
    update the superproject gitlink in a dedicated reviewed change.
 2. Run Debug and Release native CMake/CTest on Ubuntu against the published
    candidate and retain CI run identifiers/artifacts.
-3. Install Doxygen in the supported documentation environment and run the full
-   `npm run check:docs` gate so Sphinx consumes freshly generated XML.
-4. Capture green remote CI links/run IDs for the deterministic PR, SDK, E2E,
+3. Capture green remote CI links/run IDs for the deterministic PR, SDK, E2E,
    dry-run, docs, and native matrix.
-5. Treat TPM providers as a separate product implementation: define, build,
+4. Treat TPM providers as a separate product implementation: define, build,
    test, and document Windows/Ubuntu providers before advertising TPM support.
 
 Non-blocking maintenance remains: modernize the generator's CMake minimum and
@@ -222,4 +219,4 @@ any historical queued webhook bodies created before private-field scrubbing.
 
 The project is therefore organized at an A-level standard in the reviewed
 local implementation, while the release grade remains honestly
-**CONDITIONAL / PENDING** until the five promotion items above are evidenced.
+**CONDITIONAL / PENDING** until the four promotion items above are evidenced.
