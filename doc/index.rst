@@ -58,7 +58,9 @@ How to contribute
 ********************
 Open issues and pull requests on the `repository <https://github.com/lyehe/licensecc>`_.
 Pull requests target the ``main`` branch. See ``CONTRIBUTING.md`` for guidelines and
-run ``scripts/dev-check.ps1`` before submitting.
+run ``npm run check:pr`` before submitting. For C++ core changes, also run
+``pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/check-build-purity.ps1
+-Preset dev-debug``.
 
 * :ref:`genindex`
 * :ref:`modindex`

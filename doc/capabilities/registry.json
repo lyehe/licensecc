@@ -12,7 +12,7 @@
       "public_docs": ["doc/capabilities/index.rst", "doc/usage/concepts.rst"],
       "evidence": [
         {"kind": "implementation", "surface": "C++ public API", "path": "include/licensecc/licensecc.h", "selector": "LCC_EVENT_TYPE acquire_license(", "assertion": "The public C++ header exposes local license acquisition."},
-        {"kind": "automated_test", "surface": "C++ public API", "path": "test/library/public_api_test.cpp", "selector": "BOOST_CHECK_NO_THROW(result = acquire_license(&caller, nullptr, &info));", "assertion": "The accepted test suite exercises the local acquisition API."}
+        {"kind": "automated_test", "surface": "C++ public API", "path": "test/library/public_api_test.cpp", "selector": "BOOST_AUTO_TEST_CASE(acquire_license_rejects_unterminated_feature_name_without_throwing)", "assertion": "The accepted test suite exercises the local acquisition API."}
       ]
     },
     {
@@ -56,7 +56,7 @@
       "public_docs": ["doc/capabilities/index.rst", "doc/analysis/features.rst"],
       "evidence": [
         {"kind": "implementation", "surface": "C++ public API", "path": "include/licensecc/licensecc.h", "selector": "bool lcc_set_caller_version(CallerInformations* callerInformation, const char* version);", "assertion": "The C++ API exposes caller-version input."},
-        {"kind": "automated_test", "surface": "C++ public API", "path": "test/library/public_api_test.cpp", "selector": "BOOST_CHECK(lcc_set_caller_version(&caller, max_version.c_str()));", "assertion": "Caller-version behavior is exercised by an automated test."}
+        {"kind": "automated_test", "surface": "C++ public API", "path": "test/library/public_api_test.cpp", "selector": "BOOST_AUTO_TEST_CASE(public_helpers_bound_fixed_buffer_setters)", "assertion": "Caller-version behavior is exercised by an automated test."}
       ]
     },
     {
@@ -70,7 +70,7 @@
       "public_docs": ["doc/capabilities/index.rst", "sdks/dotnet/README.md"],
       "evidence": [
         {"kind": "implementation", "surface": "C++ callback contract", "path": "include/licensecc/licensecc.h", "selector": "LCC_EVENT_TYPE lcc_acquire_license_decision(", "assertion": "The accepted C++ API contains the fail-closed decision entry point."},
-        {"kind": "automated_test", "surface": "C++ callback contract", "path": "test/library/online_verification_test.cpp", "selector": "#define BOOST_TEST_MODULE online_verification_test", "assertion": "The accepted C++ online-verification suite is automated."},
+        {"kind": "automated_test", "surface": "C++ callback contract", "path": "test/library/online_verification_test.cpp", "selector": "BOOST_AUTO_TEST_CASE(verifier_accepts_valid_assertion)", "assertion": "The accepted C++ online-verification suite is automated."},
         {"kind": "implementation", "surface": "licensing backend", "path": "services/cloudflare-licensing-backend/src/routes/verify.ts", "selector": "export async function handleVerify", "assertion": "The backend implements the verification handler."},
         {"kind": "automated_test", "surface": "licensing backend", "path": "services/cloudflare-licensing-backend/test/contexts/entitlement.test.mjs", "selector": "test(\"unknown entitlement returns unsigned denial by default\"", "assertion": "Backend verification decisions have automated coverage."},
         {"kind": "route_contract", "surface": "licensing backend", "path": "test/contracts/backend.json", "selector": "POST /v1/verify", "assertion": "The canonical backend contract exposes verification."}
@@ -99,16 +99,20 @@
       "title": "Floating-seat lifecycle",
       "status": "shipped",
       "owner": "Backend deployable maintainer",
-      "surfaces": ["C++ callback contract", "licensing backend"],
+      "surfaces": ["C++ callback contract", "licensing backend", "Python HTTP client", ".NET HTTP client"],
       "availability": {"release": "Platform 0.1.0 prerelease", "platforms": ["Cloudflare Workers", "C++ hosts", "Python", ".NET 8"], "limitations": ["A host owns HTTP transport and seat identifiers; no remote deployment claim is made."]},
       "replaces": ["legacy-remote-license-type"],
       "public_docs": ["doc/capabilities/index.rst", "sdks/dotnet/README.md"],
       "evidence": [
         {"kind": "implementation", "surface": "C++ callback contract", "path": "include/licensecc/datatypes.h", "selector": "#define LCC_ONLINE_FLAG_PURPOSE_HEARTBEAT 0x00000001u", "assertion": "The C++ callback contract carries the heartbeat lifecycle purpose."},
-        {"kind": "automated_test", "surface": "C++ callback contract", "path": "test/library/public_api_test.cpp", "selector": "BOOST_CHECK_EQUAL(static_cast<uint32_t>(LCC_ONLINE_FLAG_PURPOSE_HEARTBEAT), 1U);", "assertion": "The C++ lifecycle callback flags have automated ABI coverage."},
+        {"kind": "automated_test", "surface": "C++ callback contract", "path": "test/library/public_api_test.cpp", "selector": "BOOST_AUTO_TEST_CASE(public_abi_enum_values_are_stable)", "assertion": "The C++ lifecycle callback flags have automated ABI coverage."},
         {"kind": "implementation", "surface": "licensing backend", "path": "services/cloudflare-licensing-backend/src/routes/seats.ts", "selector": "export async function handleSeatCheckout", "assertion": "The backend implements seat checkout."},
         {"kind": "automated_test", "surface": "licensing backend", "path": "services/cloudflare-licensing-backend/test/device-proof.test.mjs", "selector": "test(\"seat checkout with a valid device proof is granted\"", "assertion": "The backend seat checkout has an automated test."},
-        {"kind": "route_contract", "surface": "licensing backend", "path": "test/contracts/backend.json", "selector": "POST /v1/checkout", "assertion": "The canonical backend contract includes checkout."}
+        {"kind": "route_contract", "surface": "licensing backend", "path": "test/contracts/backend.json", "selector": "POST /v1/checkout", "assertion": "The canonical backend contract includes checkout."},
+        {"kind": "implementation", "surface": "Python HTTP client", "path": "sdks/python/src/licensecc/http_client.py", "selector": "    def checkout(self, body: Mapping[str, Any]) -> ApiResponse:", "assertion": "The Python HTTP client implements seat checkout."},
+        {"kind": "automated_test", "surface": "Python HTTP client", "path": "sdks/python/tests/test_http_client.py", "selector": "def test_seat_endpoints_paths(capture):", "assertion": "The Python HTTP client tests seat endpoint paths."},
+        {"kind": "implementation", "surface": ".NET HTTP client", "path": "sdks/dotnet/src/Licensecc.Client/LicensingBackendClient.cs", "selector": "public Task<BackendResponse> CheckoutAsync(IReadOnlyDictionary<string, object?> body, CancellationToken ct = default) =>", "assertion": "The .NET HTTP client implements seat checkout."},
+        {"kind": "automated_test", "surface": ".NET HTTP client", "path": "sdks/dotnet/test/Licensecc.Client.Tests/HttpClientTests.cs", "selector": "public async Task AllSeatEndpoints_RouteToDocumentedPaths()", "assertion": "The .NET HTTP client tests all documented seat endpoint paths."}
       ]
     },
     {
@@ -122,7 +126,7 @@
       "public_docs": ["doc/capabilities/index.rst"],
       "evidence": [
         {"kind": "limitation", "surface": "C++ compatibility enum", "path": "include/licensecc/datatypes.h", "selector": "LCC_REMOTE  // remote licenses are not supported now.", "assertion": "The legacy remote license type is explicitly unsupported."},
-        {"kind": "automated_test", "surface": "C++ compatibility enum", "path": "test/library/public_api_test.cpp", "selector": "BOOST_CHECK_EQUAL(static_cast<int>(LCC_REMOTE), 1);", "assertion": "The compatibility enum remains covered by the public-API test."}
+        {"kind": "automated_test", "surface": "C++ compatibility enum", "path": "test/library/public_api_test.cpp", "selector": "BOOST_AUTO_TEST_CASE(public_api_symbols_are_linkable)", "assertion": "The compatibility enum remains covered by the public-API test."}
       ]
     },
     {
@@ -166,7 +170,7 @@
       "public_docs": ["doc/capabilities/index.rst"],
       "evidence": [
         {"kind": "implementation", "surface": "licensing backend", "path": "services/cloudflare-licensing-backend/src/fulfillment/order_ingest.mjs", "selector": "export async function handleOrderIngest", "assertion": "The backend contains an order-ingest implementation."},
-        {"kind": "automated_test", "surface": "licensing backend", "path": "services/cloudflare-licensing-backend/test/fulfillment/order_ingest_exactly_once.test.mjs", "selector": "Slice 1 order-ingest — the exactly-once accept/apply integration matrix", "assertion": "Order-ingest exactly-once behavior has automated coverage."}
+        {"kind": "automated_test", "surface": "licensing backend", "path": "services/cloudflare-licensing-backend/test/fulfillment/order_ingest_exactly_once.test.mjs", "selector": "test(\"case 1: fresh subscription.active apply (active, clamp, fingerprint, floor seq)\"", "assertion": "Order-ingest exactly-once behavior has automated coverage."}
       ]
     },
     {
@@ -174,14 +178,16 @@
       "title": "Administrative control plane",
       "status": "shipped",
       "owner": "Admin deployable maintainer",
-      "surfaces": ["admin Worker"],
+      "surfaces": ["admin Worker", "admin UI"],
       "availability": {"release": "Platform 0.1.0 prerelease", "platforms": ["Cloudflare Workers", "browser"], "limitations": ["The repository contains route, UI, and test coverage; it does not claim a hosted production console."]},
       "replaces": [],
       "public_docs": ["doc/capabilities/index.rst"],
       "evidence": [
         {"kind": "implementation", "surface": "admin Worker", "path": "services/cloudflare-license-admin/src/worker/groups/entitlements.ts", "selector": "operationDescriptor(\"entitlements\", \"admin\", \"POST\", \"/api/admin/entitlements\")", "assertion": "The admin Worker implements entitlement administration."},
         {"kind": "route_contract", "surface": "admin Worker", "path": "test/contracts/admin.json", "selector": "POST /api/admin/entitlements", "assertion": "The canonical admin contract exposes entitlement administration."},
-        {"kind": "automated_test", "surface": "admin Worker", "path": "services/cloudflare-license-admin/test/worker/transition-contracts.test.mjs", "selector": "entitlements", "assertion": "The admin Worker entitlement transitions have automated coverage."}
+        {"kind": "automated_test", "surface": "admin Worker", "path": "services/cloudflare-license-admin/test/worker/transition-contracts.test.mjs", "selector": "test(\"compiled device transition state matrix distinguishes changes, no-ops, and terminal conflicts\"", "assertion": "The admin Worker entitlement transitions have automated coverage."},
+        {"kind": "implementation", "surface": "admin UI", "path": "services/cloudflare-license-admin/src/ui/app/App.tsx", "selector": "export function App(): React.ReactElement {", "assertion": "The admin UI application component is implemented."},
+        {"kind": "automated_test", "surface": "admin UI", "path": "services/cloudflare-license-admin/test/admin-ui.e2e.mjs", "selector": "test(\"admin UI completes entitlement lifecycle and blocks duplicate create submissions\"", "assertion": "The admin UI entitlement lifecycle is covered by browser automation."}
       ]
     },
     {
@@ -189,14 +195,16 @@
       "title": "Customer self-service portal",
       "status": "shipped",
       "owner": "Customer-portal deployable maintainer",
-      "surfaces": ["customer portal Worker"],
+      "surfaces": ["customer portal Worker", "portal UI"],
       "availability": {"release": "Platform 0.1.0 prerelease", "platforms": ["Cloudflare Workers", "browser"], "limitations": ["Email delivery and remote deployment require deployer configuration."]},
       "replaces": [],
       "public_docs": ["doc/capabilities/index.rst"],
       "evidence": [
         {"kind": "implementation", "surface": "customer portal Worker", "path": "services/cloudflare-customer-portal/src/worker/routes/self-service.ts", "selector": "\"GET /api/portal/entitlements\":", "assertion": "The portal Worker implements entitlement self-service."},
         {"kind": "route_contract", "surface": "customer portal Worker", "path": "test/contracts/portal.json", "selector": "GET /api/portal/entitlements", "assertion": "The canonical portal contract exposes entitlement self-service."},
-        {"kind": "automated_test", "surface": "customer portal Worker", "path": "services/cloudflare-customer-portal/test/portal-worker-self-service.test.mjs", "selector": "test(\"A's /api/portal/entitlements returns ONLY A's entitlements\"", "assertion": "Portal self-service isolation has automated coverage."}
+        {"kind": "automated_test", "surface": "customer portal Worker", "path": "services/cloudflare-customer-portal/test/portal-worker-self-service.test.mjs", "selector": "test(\"A's /api/portal/entitlements returns ONLY A's entitlements\"", "assertion": "Portal self-service isolation has automated coverage."},
+        {"kind": "implementation", "surface": "portal UI", "path": "services/cloudflare-customer-portal/src/ui/main.tsx", "selector": "function App(): React.ReactElement {", "assertion": "The portal UI application component is implemented."},
+        {"kind": "automated_test", "surface": "portal UI", "path": "services/cloudflare-customer-portal/test/portal-ui.e2e.mjs", "selector": "test(\"customer portal signs in with an 8-digit code and walks every screen without leaking secrets\"", "assertion": "The portal walkthrough is covered by browser automation."}
       ]
     },
     {
@@ -204,13 +212,15 @@
       "title": "D1 backup and restore drill",
       "status": "shipped",
       "owner": "D1-backup deployable maintainer",
-      "surfaces": ["backup Worker"],
+      "surfaces": ["backup Workflow/R2", "restore drill CLI"],
       "availability": {"release": "Platform 0.1.0 prerelease", "platforms": ["Cloudflare Workers", "Cloudflare D1", "Cloudflare R2"], "limitations": ["A restore drill is a controlled scratch-database procedure; no production backup deployment is asserted."]},
       "replaces": [],
       "public_docs": ["doc/capabilities/index.rst"],
       "evidence": [
-        {"kind": "implementation", "surface": "backup Worker", "path": "services/cloudflare-d1-backup/src/index.ts", "selector": "export class D1BackupWorkflow", "assertion": "The backup deployable implements a Workflow export."},
-        {"kind": "automated_test", "surface": "backup Worker", "path": "services/cloudflare-d1-backup/test/backup-restore-drill.test.mjs", "selector": "test(\"restore drill arguments require explicit scratch confirmation\"", "assertion": "The restore-drill behavior has automated coverage."}
+        {"kind": "implementation", "surface": "backup Workflow/R2", "path": "services/cloudflare-d1-backup/src/index.ts", "selector": "export class D1BackupWorkflow", "assertion": "The backup deployable implements a Workflow export."},
+        {"kind": "automated_test", "surface": "backup Workflow/R2", "path": "services/cloudflare-d1-backup/test/backup-core.test.mjs", "selector": "test(\"R2 save writes SQL stream and metadata manifest\"", "assertion": "The Workflow/R2 backup path has automated coverage."},
+        {"kind": "implementation", "surface": "restore drill CLI", "path": "services/cloudflare-d1-backup/scripts/restore-drill.mjs", "selector": "function restoreToScratch(options, sqlFile)", "assertion": "The restore drill implements scratch-database restoration."},
+        {"kind": "automated_test", "surface": "restore drill CLI", "path": "services/cloudflare-d1-backup/test/backup-restore-drill.test.mjs", "selector": "test(\"restore drill supports remote R2 source and optional source comparison\"", "assertion": "The remote-R2 restore drill has automated coverage."}
       ]
     },
     {
