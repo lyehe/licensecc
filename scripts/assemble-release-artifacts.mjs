@@ -681,8 +681,7 @@ function pythonSourceClosure(root) {
   for (const entry of gitHeadEntries(root)) {
     if (entry.type !== "blob" || entry.mode === "120000" || !entry.path.startsWith(sourcePrefix)) continue;
     const rest = entry.path.slice(sourcePrefix.length);
-    if (rest === "uv.lock") continue; // lock is verified before build but is not an sdist member.
-    if (topLevel.has(rest)) {
+    if (rest === "uv.lock" || topLevel.has(rest)) {
       entries.push({ source: entry.path, sdist: rest });
     } else if (rest.startsWith("src/licensecc/") && rest.length > "src/licensecc/".length) {
       entries.push({ source: entry.path, wheel: rest.slice("src/".length), sdist: rest });
@@ -700,7 +699,7 @@ function pythonSourceClosure(root) {
 function exactMemberSet(files, expectedMembers, label) {
   const actual = [...files.keys()].sort(ordinal);
   const expected = [...expectedMembers].sort(ordinal);
-  if (JSON.stringify(actual) !== JSON.stringify(expected)) throw new Error(`${label} member closure is not exact (expected ${expected.length}, got ${actual.length})`);
+  if (JSON.stringify(actual) !== JSON.stringify(expected)) throw new Error(`${label} member closure is not exact (expected ${expected.length}, got ${actual.length}; actual=${actual.join(",")})`);
 }
 
 function assertCanonicalPackageBytes(files, expected, root, label) {
@@ -1558,7 +1557,31 @@ function workerTokens(source) {
   return tokens;
 }
 
+/** Ask Node's module parser for exports without evaluating the bundle. */
+function moduleExportsDefault(source) {
+  const inspector = [
+    'import vm from "node:vm";',
+    'import { readFileSync } from "node:fs";',
+    'const source = readFileSync(0, "utf8");',
+    'const module = new vm.SourceTextModule(source);',
+    'await module.link(() => { throw new Error("static import is not expected in a Worker bundle"); });',
+    'process.stdout.write(JSON.stringify(Object.getOwnPropertyNames(module.namespace)));',
+  ].join("");
+  const parsed = spawnSync(process.execPath, ["--experimental-vm-modules", "--input-type=module", "-e", inspector], {
+    input: source,
+    encoding: "utf8",
+    windowsHide: true,
+  });
+  if (parsed.error || parsed.status !== 0) return false;
+  try {
+    return JSON.parse(parsed.stdout).includes("default");
+  } catch {
+    return false;
+  }
+}
+
 function hasWorkerEntrypoint(source) {
+  if (moduleExportsDefault(source)) return true;
   const tokens = workerTokens(source);
   let depth = 0;
   for (let index = 0; index < tokens.length; index += 1) {

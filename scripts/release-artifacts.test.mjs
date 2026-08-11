@@ -142,6 +142,7 @@ function sdistArtifact({ version = PYTHON_VERSION, name = "licensecc", metadataN
     { name: `${root}/README.md`, contents: "# fixture\n" },
     { name: `${root}/build-constraints.txt`, contents: "hatchling==1.27.0 --hash=sha256:0000000000000000000000000000000000000000000000000000000000000000\n" },
     { name: `${root}/pyproject.toml`, contents: `[project]\nname = "${name}"\nversion = "${version}"\n\n[build-system]\nrequires = ["hatchling==1.27.0"]\nbuild-backend = "hatchling.build"\n` },
+    { name: `${root}/uv.lock`, contents: `version = 1\n\n[[package]]\nname = "${name}"\nversion = "${version}"\n` },
     { name: `${root}/src/${name}/__init__.py`, contents: `__version__ = "${version}"\n` },
     { name: `${root}/src/${name}/http_client.py`, contents: `user_agent: str = "licensecc-python-sdk/${version}"\n` },
     { name: `${root}/tests/test_http_client.py`, contents: "def test_fixture():\n    assert True\n" },
