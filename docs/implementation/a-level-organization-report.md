@@ -86,7 +86,7 @@ generic dumping-ground package:
 
 | Boundary | Files | Lines |
 | --- | ---: | ---: |
-| Admin | 90 | 16,432 |
+| Admin | 90 | 16,437 |
 | Licensing backend | 36 | 6,590 |
 | Customer portal | 25 | 4,464 |
 | D1 backup | 5 | 637 |
