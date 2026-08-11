@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
-import { assembleReleaseArtifacts, createCppSourceArchive, inspectReleaseDirectory, parseArgs, planWorkerAssembly } from "./assemble-release-artifacts.mjs";
+import { assembleReleaseArtifacts, createCppSourceArchive, inspectReleaseDirectory, parseArgs, planWorkerAssembly, validateArchiveMembers } from "./assemble-release-artifacts.mjs";
 
 const PLATFORM_VERSION = "0.1.0-rc.1";
 const PYTHON_VERSION = "0.1.0rc1";
@@ -118,5 +118,18 @@ test("release output boundary and CLI reject unsafe authority bypasses", () => {
     assert.throws(() => assembleReleaseArtifacts({ root, outputDirectory: join(root, "not-build"), consumerId: "acme" }), /release output/);
     assert.throws(() => parseArgs(["node", "script", "--unknown", "x"]), /invalid argument/);
     assert.throws(() => parseArgs(["node", "script", "--output", "a", "--output", "b"]), /invalid argument/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("archive verifier rejects traversal, nonregular, duplicate, checksum, and truncation attacks", () => {
+  const root = releaseFixture(); const output = join(root, "stage");
+  try {
+    const archive = createCppSourceArchive({ root, outputDirectory: output, consumerId: "acme" });
+    const original = readFileSync(archive);
+    const mutate = (name, change, pattern) => { const target = join(output, name); const bytes = Buffer.from(original); change(bytes); writeFileSync(target, bytes); assert.throws(() => validateArchiveMembers(target), pattern); };
+    mutate("bad-checksum.tar", (bytes) => { bytes[0] = 47; }, /checksum/);
+    mutate("nonregular.tar", (bytes) => { bytes[156] = 50; }, /checksum|non-regular/);
+    mutate("truncated.tar", (bytes) => { bytes.fill(0, bytes.length - 1024); }, /truncated|checksum/);
+    const duplicate = Buffer.concat([original.subarray(0, original.length - 1024), original.subarray(0, 512), Buffer.alloc(1024)]); writeFileSync(join(output, "duplicate.tar"), duplicate); assert.throws(() => validateArchiveMembers(join(output, "duplicate.tar")), /duplicate|checksum/);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

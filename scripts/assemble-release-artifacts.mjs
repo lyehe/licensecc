@@ -79,8 +79,8 @@ function createCppSourceArchive({ root = repositoryRoot, outputDirectory, consum
   chunks.push(Buffer.alloc(1024)); mkdirSync(dirname(archivePath), { recursive: true }); writeFileSync(archivePath, Buffer.concat(chunks)); return archivePath;
 }
 function validateArchiveMembers(archivePath) {
-  const archive = readFileSync(archivePath); let offset = 0;
-  while (offset + 512 <= archive.length) { const header = archive.subarray(offset, offset + 512); if (header.every((byte) => byte === 0)) break; const name = header.subarray(0, 100).toString("utf8").replace(/\0.*$/, ""); const prefix = header.subarray(345, 500).toString("utf8").replace(/\0.*$/, ""); const type = header[156]; const sizeText = header.subarray(124, 136).toString("ascii").replace(/\0.*$/, "").trim(); const size = Number.parseInt(sizeText || "0", 8); if (type !== 0 && type !== 48 || !Number.isSafeInteger(size) || size < 0) throw new Error("release archive contains a non-regular or malformed entry"); assertSafeRelativePath(prefix ? `${prefix}/${name}` : name); offset += 512 + Math.ceil(size / 512) * 512; }
+  const archive = readFileSync(archivePath); let offset = 0; const members = new Set();
+  while (offset + 512 <= archive.length) { const header = archive.subarray(offset, offset + 512); if (header.every((byte) => byte === 0)) break; const stored = Number.parseInt(header.subarray(148, 156).toString("ascii").replace(/\0.*$/, "").trim(), 8); const copy = Buffer.from(header); copy.fill(0x20, 148, 156); if (!Number.isInteger(stored) || copy.reduce((sum, byte) => sum + byte, 0) !== stored) throw new Error("release archive has an invalid header checksum"); const name = header.subarray(0, 100).toString("utf8").replace(/\0.*$/, ""); const prefix = header.subarray(345, 500).toString("utf8").replace(/\0.*$/, ""); const type = header[156]; const sizeText = header.subarray(124, 136).toString("ascii").replace(/\0.*$/, "").trim(); const size = Number.parseInt(sizeText || "0", 8); if (type !== 0 && type !== 48 || !Number.isSafeInteger(size) || size < 0) throw new Error("release archive contains a non-regular or malformed entry"); const member = assertSafeRelativePath(prefix ? `${prefix}/${name}` : name); if (members.has(member)) throw new Error("release archive contains duplicate members"); members.add(member); offset += 512 + Math.ceil(size / 512) * 512; }
   if (offset > archive.length || archive.length - offset < 1024) throw new Error("release archive is truncated");
 }
 function verifyArchiveGenerator({ archivePath, tempParent = tmpdir(), run = commandResult }) {
@@ -93,6 +93,10 @@ function verifyArchiveGenerator({ archivePath, tempParent = tmpdir(), run = comm
     if (!source || !source.startsWith(`${probe}${sep}`) || !build.startsWith(`${probe}${sep}`)) throw new Error("archive probe paths escaped temporary root");
     run({ executable: "cmake", args: ["-S", join(source, "extern/license-generator"), "-B", build, "-DBUILD_TESTING=OFF"], cwd: probe, label: "configure embedded generator from archive" });
     run({ executable: "cmake", args: ["--build", build, "--target", "lccgen"], cwd: probe, label: "build embedded generator from archive" });
+    const rootBuild = join(probe, "runtime-build"); const projects = join(probe, "runtime-projects");
+    if (!rootBuild.startsWith(`${probe}${sep}`) || !projects.startsWith(`${probe}${sep}`)) throw new Error("runtime probe paths escaped temporary root");
+    run({ executable: "cmake", args: ["-S", source, "-B", rootBuild, "-DBUILD_TESTING=OFF", `-Dlccgen_DIR=${build}`, `-DLCC_PROJECTS_BASE_DIR=${projects}`], cwd: probe, label: "configure extracted runtime from archive" });
+    run({ executable: "cmake", args: ["--build", rootBuild, "--target", "licensecc_static"], cwd: probe, label: "build extracted runtime from archive" });
   } finally { rmSync(probe, { recursive: true, force: true }); }
 }
 function localWranglerBinary(root) {
