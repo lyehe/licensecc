@@ -49,6 +49,10 @@ public:
                             std::size_t signature_size,
                             const unsigned char* digest,
                             std::size_t digest_size) noexcept = 0;
+    virtual EVP_MD* md_fetch(OSSL_LIB_CTX* libctx,
+                             const char* name,
+                             const char* properties) noexcept = 0;
+    virtual void md_free(EVP_MD* digest) noexcept = 0;
     virtual void pkey_free(EVP_PKEY* key) noexcept = 0;
     virtual const OSSL_PROVIDER* pkey_get0_provider(const EVP_PKEY* key) noexcept = 0;
     virtual const char* provider_name(const OSSL_PROVIDER* provider) noexcept = 0;
