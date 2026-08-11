@@ -27,7 +27,7 @@ No external NuGet dependencies in the library: it uses only `System.Security.Cry
 ```
 sdks/dotnet/
   Licensecc.Client.sln
-  src/Licensecc.Client/            # the library (PackageId Licensecc.Client, 0.1.0)
+  src/Licensecc.Client/            # the library (PackageId Licensecc.Client, 0.1.0-rc.1)
     SignedTokenCore.cs             #   shared: envelope split, canonical base64, RSA verify, field parse
     OnlineAssertion.cs             #   lccoa1 verifier  -> OnlineAssertionVerifier.Verify
     ConfigToken.cs                 #   lcccfg1 verifier -> ConfigTokenVerifier.Verify

@@ -11,9 +11,13 @@ Licensecc helps applications verify local license files, bind licenses to machin
 
 The repository is licensed under the [GNU Affero General Public License v3.0 or later](https://www.gnu.org/licenses/agpl-3.0.html). See [LICENSE](LICENSE) for the full license text.
 
-**Versioning:** no tagged release yet. The C++ library carries the upstream 2.x lineage version
-(`2.1.0` in CMake); the platform packages (services, SDKs, root tooling) are `0.1.0` pre-release and
-versioned independently until the first platform release. See [CHANGELOG.md](CHANGELOG.md).
+**Versioning:** no namespaced release has been tagged yet. The C++ library carries the upstream 2.x
+lineage version (`2.1.0` in CMake); the platform packages (services, SDKs, and root/workspace Node
+packages) are `0.1.0-rc.1` and versioned independently. [`version.json`](version.json) is the
+machine-readable platform source, and `npm run check:versions` verifies every projection. Platform
+tags use `platform-v*`; future independent C++ tags use `cpp-v*`; new bare `v*` tags are forbidden.
+See [CHANGELOG.md](CHANGELOG.md) and
+[ADR 0005](doc/architecture/decisions/0005-platform-version-and-release-tags.md).
 
 ## Repository Map
 
@@ -92,6 +96,7 @@ The root command surface is intentionally explicit:
 | `npm run lint` | Source lint for packages, services, and scripts. |
 | `npm run typecheck` | Production TypeScript/JavaScript type-check coverage. |
 | `npm run check:architecture` | Dependency direction, composition roots, and repository hygiene. |
+| `npm run check:versions` | Platform/C++ version contract and release-projection consistency. |
 | `npm run test:contracts` | Canonical route/OpenAPI contract checks. |
 | `npm run test:services` | Package, Worker, SQL, UI workflow, and schema-parity tests. |
 | `npm run test:sdks` | Python and .NET SDK tests. |

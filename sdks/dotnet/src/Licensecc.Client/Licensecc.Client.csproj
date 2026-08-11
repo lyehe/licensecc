@@ -19,7 +19,7 @@
 
     <!-- NuGet packaging metadata -->
     <PackageId>Licensecc.Client</PackageId>
-    <Version>0.1.0</Version>
+    <Version>0.1.0-rc.1</Version>
     <Authors>licensecc</Authors>
     <Description>
       .NET client SDK for the licensecc online licensing backend: a fail-closed offline verifier

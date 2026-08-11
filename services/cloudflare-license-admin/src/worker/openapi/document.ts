@@ -47,7 +47,7 @@ export const openApiDocument: OpenApiDocument = {
   openapi: "3.1.0",
   info: {
     title: "Cloudflare License Admin API",
-    version: "0.1.0",
+    version: "0.1.0-rc.1",
     description:
       "Operator back-office API for managing entitlements, customers, licenses, and orders. " +
       "All /api/admin/* routes require Cloudflare Access JWT (reader or admin RBAC); mutations require the admin role. " +

@@ -2,16 +2,24 @@
 
 Notable changes to this repository. The format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
-**This fork has made no tagged release yet.** The newest reachable tag (`v1.0.0`) is inherited upstream
-lineage, hundreds of commits behind `main`. Current versioning scheme until the first platform release:
+**This fork has made no namespaced release yet.** The newest reachable bare tag (`v1.0.0`) is
+inherited upstream lineage, hundreds of commits behind `main`, and remains legacy history. Current
+release streams are:
 
 - **C++ library** (`CMakeLists.txt`): `2.1.0` — continues the upstream `licensecc` 2.x lineage.
-- **Platform packages** (root `package.json`, the four Cloudflare services, the Python and .NET SDKs):
-  `0.1.0` — pre-release, versioned independently of the C++ core and not yet published to any registry.
+- **Platform packages** (root/workspace Node packages, the four Cloudflare services, OpenAPI
+  documents, and the Python and .NET SDKs): `0.1.0-rc.1` (Python `0.1.0rc1`) — versioned
+  independently of the C++ core and not yet published to any registry.
+
+Platform release tags use `platform-v<version>`; future independent C++ release tags use
+`cpp-v<version>`. New bare `v*` tags are forbidden. The version contract and compatibility rules
+are recorded in [ADR 0005](doc/architecture/decisions/0005-platform-version-and-release-tags.md).
 
 ## [Unreleased] — everything on `main`
 
 ### Added
+- Machine-readable platform version contract, deterministic projection checker, and disjoint
+  platform/C++ release tag namespaces.
 - Cloudflare licensing platform: licensing backend (online verification with signed `lccoa1`
   assertions, node-locked/floating/trial/subscription entitlements, leases and seats, metering,
   order ingest with HMAC + exactly-once semantics, webhooks with a transactional outbox, emergency

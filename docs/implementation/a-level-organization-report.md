@@ -157,9 +157,9 @@ Current canonical fixture hashes are:
 
 | Contract | Routes / operations | SHA-256 |
 | --- | --- | --- |
-| Backend | 19 / 19 | `9c93750cb71fced5cdca781285c0899cd9e1824be85d13a78720c758c2ddf728` |
-| Admin | 65 / 65 | `357421e2b07b50d8e51489f5894f2b78d48f6766bc5c600b93d55899bd156f41` |
-| Portal | 18 routes / 16 operations | `c15e7c99ac393a0539071c186205da86a15c82cf351f4c0248ba12c260927400` |
+| Backend | 19 / 19 | `4c4dbc4ffc10a0f1705f5b1518b783db657d849a332309f03667920fbbf211a9` |
+| Admin | 65 / 65 | `e6ff7475d0fc2ac15203743827867ecddaaba87c72a8dea5e46f7cdaf2f9ba4f` |
+| Portal | 18 routes / 16 operations | `9b5934c053ca80d417e7e46a7557d24481eda5ea58ccff0b05a4c8ffb8926ad7` |
 | Backup | fetch, scheduled, workflow | `afe7676c22c35f5ca89f4e2882065b542018b1fd286b45e1fddff193d38705bf` |
 
 The integrated schema includes migration 0031 for catalog-import previews and
