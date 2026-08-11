@@ -8,6 +8,7 @@ import {
   readdirSync,
   readFileSync,
   realpathSync,
+  renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -670,13 +671,14 @@ function assertVerificationCommand(command, probe) {
   }
 }
 
-function planArchiveVerification({ archivePath, tempParent, probeDirectory, generatorExecutable } = {}) {
+function planArchiveVerification({ archivePath, tempParent, probeDirectory, sourceDirectory, generatorExecutable } = {}) {
   const archive = resolve(archivePath);
   const parent = resolve(tempParent ?? dirname(archive));
   const archiveRoot = archive.replace(/\.tar$/iu, "").slice(archive.lastIndexOf(sep) + 1);
   const probe = resolve(probeDirectory ?? join(parent, "licensecc-release-cpp-probe-plan"));
   if (!pathWithin(probe, parent)) throw new Error("release verifier probe is not beneath its temporary parent");
-  const source = join(probe, archiveRoot);
+  const source = resolve(sourceDirectory ?? join(probe, archiveRoot));
+  if (!pathWithin(source, probe)) throw new Error("release verifier source is not beneath its temporary probe");
   const generatorBuild = join(probe, "generator-build");
   const runtimeBuild = join(probe, "runtime-build");
   const projects = join(runtimeBuild, "projects");
@@ -706,14 +708,22 @@ function verifyArchiveGenerator({ archivePath, tempParent = dirname(archivePath)
   if (expectedSha256 !== undefined && sha256(readFileSync(archive)) !== expectedSha256) throw new Error("release archive changed before verification");
   const archiveRoot = archive.replace(/\.tar$/iu, "").slice(archive.lastIndexOf(sep) + 1);
   if (!/^licensecc-cpp-sdk-[a-z0-9][a-z0-9-]*-cpp-[0-9A-Za-z.+_-]+-platform-[0-9A-Za-z.+_-]+$/u.test(archiveRoot)) throw new Error("archive path is not an explicit release archive");
-  const probe = mkdtempSync(join(parent, "licensecc-release-cpp-probe-"));
+  const probe = mkdtempSync(join(parent, "p-"));
   if (!pathWithin(probe, parent)) throw new Error("release verifier probe escaped its temporary parent");
   try {
     extractValidatedArchive({ archivePath: archive, destination: probe, expectedRoot: archiveRoot, expectedMembers });
-    const initial = planArchiveVerification({ archivePath: archive, tempParent: parent, probeDirectory: probe });
+    // Keep the archive's explicit release identity in the tar, but shorten the
+    // extracted root before CMake creates nested probe paths on Windows.
+    const extractedSource = join(probe, archiveRoot);
+    const source = join(probe, "src");
+    if (!existsSync(extractedSource) || lstatSync(extractedSource).isSymbolicLink() || !lstatSync(extractedSource).isDirectory()) throw new Error("validated release archive did not extract a regular source root");
+    renameSync(extractedSource, source);
+    if (!existsSync(source) || lstatSync(source).isSymbolicLink() || !lstatSync(source).isDirectory()) throw new Error("validated release archive source root could not be safely shortened");
+    assertNoReparseComponents(source);
+    const initial = planArchiveVerification({ archivePath: archive, tempParent: parent, probeDirectory: probe, sourceDirectory: source });
     for (const command of initial.slice(0, 2)) run({ ...command, env });
     const generator = findBuiltGenerator(join(probe, "generator-build"));
-    const finalPlan = planArchiveVerification({ archivePath: archive, tempParent: parent, probeDirectory: probe, generatorExecutable: generator });
+    const finalPlan = planArchiveVerification({ archivePath: archive, tempParent: parent, probeDirectory: probe, sourceDirectory: source, generatorExecutable: generator });
     for (const command of finalPlan.slice(2)) run({ ...command, env });
   } finally {
     // `probe` was freshly created below the already-validated parent; no

@@ -625,6 +625,11 @@ test("archive verification uses only contained no-install command arrays and LCC
     assert.equal(plan.length, 4);
     assert.ok(plan.every((entry) => entry.executable === "cmake" && !entry.args.includes("--install") && !entry.args.some((arg) => /(?:^|[\\/])(?:bin|cmake|lib)(?:[\\/]|$)/iu.test(String(arg).replace(/^[A-Za-z]:/u, "")))));
     if (process.platform === "win32") assert.ok(plan.filter((entry) => entry.label.startsWith("configure")).every((entry) => entry.args.includes("Ninja")));
+    const shortProbe = join(parent, "p");
+    const shortSource = join(shortProbe, "src");
+    const shortPlan = planArchiveVerification({ archivePath: archive, tempParent: parent, probeDirectory: shortProbe, sourceDirectory: shortSource });
+    assert.equal(shortPlan[0].args[shortPlan[0].args.indexOf("-S") + 1], join(shortSource, "extern", "license-generator"));
+    assert.equal(shortPlan[2].args[shortPlan[2].args.indexOf("-S") + 1], shortSource);
     verifyArchiveGenerator({ archivePath: archive, tempParent: parent, run: fakeRun(commands) });
     const runtime = commands.find((entry) => entry.label === "configure extracted runtime from archive");
     assert.ok(runtime.args.some((arg) => String(arg).startsWith("-DLCC_LOCATION=")));
