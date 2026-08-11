@@ -158,17 +158,20 @@ function alignFour(value) {
   return (value + 3) & ~3;
 }
 
-function managedMetadata({ portablePdb = false, missingPdbStream = false, truncatedTables = false, trailingTableBytes = 0, pdbTrailingBytes = 0, metadataTable = 0, metadataRows = 1, tableDataBytes = metadataTable === 0 ? 10 : 4, typeSystemRows = [] } = {}) {
+function managedMetadata({ portablePdb = false, missingPdbStream = false, truncatedTables = false, trailingTableBytes = 0, pdbTrailingBytes = 0, metadataTable = 0, metadataRows = 1, tableDataBytes = metadataTable === 0 ? 10 : 4, metadataTables, typeSystemRows = [] } = {}) {
   const version = Buffer.from(`${portablePdb ? "PDB v1.0" : "v4.0.30319"}\0`, "ascii");
   const versionLength = alignFour(version.length);
+  const tables = [...(metadataTables ?? [{ table: metadataTable, rows: metadataRows, bytes: tableDataBytes }])].sort((left, right) => left.table - right.table);
   const streams = [
     { name: "#~", contents: (() => {
-      const table = Buffer.alloc(truncatedTables ? 28 : 28 + tableDataBytes + trailingTableBytes);
+      const tableHeaderBytes = 24 + tables.length * 4;
+      const rowBytes = tables.reduce((total, entry) => total + entry.bytes, 0);
+      const table = Buffer.alloc(truncatedTables ? tableHeaderBytes : tableHeaderBytes + rowBytes + trailingTableBytes);
       table[4] = 2;
       table[7] = 1;
-      table.writeBigUInt64LE(1n << BigInt(metadataTable), 8);
-      table.writeUInt32LE(metadataRows, 24);
-      if (trailingTableBytes > 0) table.fill(0x7f, 28 + tableDataBytes);
+      table.writeBigUInt64LE(tables.reduce((mask, entry) => mask | (1n << BigInt(entry.table)), 0n), 8);
+      tables.forEach((entry, index) => table.writeUInt32LE(entry.rows, 24 + index * 4));
+      if (trailingTableBytes > 0) table.fill(0x7f, tableHeaderBytes + rowBytes);
       return table;
     })() },
     { name: "#Strings", contents: Buffer.from([0]) },
@@ -209,8 +212,11 @@ function managedMetadata({ portablePdb = false, missingPdbStream = false, trunca
   return bytes;
 }
 
-function fakePeDll({ missingClr = false, invalidSection = false, truncatedTables = false, trailingTableBytes = 0, metadataTable = 32, tableDataBytes = 22 } = {}) {
-  const metadata = managedMetadata({ truncatedTables, trailingTableBytes, metadataTable, tableDataBytes });
+function fakePeDll({ missingClr = false, invalidSection = false, truncatedTables = false, trailingTableBytes = 0, metadataTable = 32, metadataRows = 1, tableDataBytes = 22, metadataTables } = {}) {
+  const tables = metadataTables ?? (metadataTable === 32
+    ? [{ table: 0, rows: 1, bytes: 10 }, { table: 32, rows: metadataRows, bytes: tableDataBytes }]
+    : [{ table: metadataTable, rows: metadataRows, bytes: tableDataBytes }]);
+  const metadata = managedMetadata({ truncatedTables, trailingTableBytes, metadataTables: tables });
   const bytes = Buffer.alloc(0x1200);
   bytes.write("MZ", 0, "ascii");
   bytes.writeUInt32LE(0x80, 0x3c);
@@ -730,6 +736,8 @@ test("inner archive inspection rejects comment decoys, incomplete RECORD data, t
     [primaryPath, nugetArtifact({ binaryContents: fakePeDll({ truncatedTables: true }) }), /tables|metadata|truncated/i],
     [primaryPath, nugetArtifact({ binaryContents: fakePeDll({ trailingTableBytes: 5 }) }), /tables|metadata|trailing/i],
     [primaryPath, nugetArtifact({ binaryContents: fakePeDll({ metadataTable: 0, tableDataBytes: 10 }) }), /Assembly|netmodule|metadata/i],
+    [primaryPath, nugetArtifact({ binaryContents: fakePeDll({ metadataTables: [{ table: 32, rows: 1, bytes: 22 }] }) }), /Module|metadata|DLL/i],
+    [primaryPath, nugetArtifact({ binaryContents: fakePeDll({ metadataTables: [{ table: 0, rows: 1, bytes: 10 }, { table: 32, rows: 2, bytes: 44 }] }) }), /Assembly|metadata|DLL/i],
     [primaryPath, nugetArtifact({ extraEntries: [{ name: "private-key.pem", contents: "never package this" }] }), /unsafe|forbidden|NuGet package/i],
     [symbolsPath, nugetArtifact({ symbols: true, binaryContents: "plain text is not a PDB" }), /PDB|NuGet symbols/i],
     [symbolsPath, nugetArtifact({ symbols: true, binaryContents: fakePortablePdb({ missingPdbStream: true }) }), /PDB|stream|metadata/i],

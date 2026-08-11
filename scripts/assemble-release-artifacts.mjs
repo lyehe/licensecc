@@ -1394,7 +1394,7 @@ function validatePeDll(contents, label) {
   if (metadataRva === 0 || metadataSize === 0 || metadataSize > MAX_ARCHIVE_MEMBER_BYTES) throw new Error(`${label} CLR metadata directory is invalid`);
   const metadataOffset = rvaToOffset(metadataRva, metadataSize, `${label} CLR metadata`);
   const metadata = parseManagedMetadata(boundedSlice(contents, metadataOffset, metadataSize, `${label} CLR metadata`), `${label} CLR metadata`);
-  if (metadata.tableRows[32] === 0) throw new Error(`${label} is a managed netmodule without an Assembly metadata table`);
+  if (metadata.tableRows[0] !== 1 || metadata.tableRows[32] !== 1) throw new Error(`${label} must contain exactly one Module and exactly one Assembly metadata row`);
 }
 
 function validatePortablePdb(contents, label) {
