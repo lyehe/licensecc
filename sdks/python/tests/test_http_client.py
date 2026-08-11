@@ -116,8 +116,22 @@ def test_account_token_sets_authorization_header(capture):
     assert headers["authorization"] == "Bearer lcca_secret"
 
 
-def test_meter_posts_exact_body_and_parses_soft_denial(capture):
-    capture["response"] = {"ok": False, "code": "quota_exceeded", "units_consumed": 5, "quota": 5}
+def test_meter_posts_exact_body_and_parses_429_without_retry(monkeypatch):
+    captured = {}
+    calls = {"n": 0}
+
+    def fake_urlopen(request, timeout=None):
+        calls["n"] += 1
+        captured["url"] = request.full_url
+        captured["method"] = request.get_method()
+        captured["headers"] = dict(request.header_items())
+        captured["body"] = request.data.decode("utf-8") if request.data else None
+        body = json.dumps({"ok": False, "code": "quota_exceeded", "units_consumed": 5, "quota": 5}).encode("utf-8")
+        raise urllib.error.HTTPError(
+            url=request.full_url, code=429, msg="Too Many Requests", hdrs=None, fp=io.BytesIO(body)
+        )
+
+    monkeypatch.setattr(hc.urllib.request, "urlopen", fake_urlopen)
     client = HttpClient("https://verifier.example.com", account_token="lcca_secret")
     resp = client.meter(
         {
@@ -128,19 +142,39 @@ def test_meter_posts_exact_body_and_parses_soft_denial(capture):
         }
     )
 
-    assert capture["url"] == "https://verifier.example.com/v1/meter"
-    assert capture["method"] == "POST"
-    assert json.loads(capture["body"]) == {
+    assert calls["n"] == 1
+    assert captured["url"] == "https://verifier.example.com/v1/meter"
+    assert captured["method"] == "POST"
+    assert json.loads(captured["body"]) == {
         "project": "DEFAULT",
         "feature": "EXPORT",
         "license_fingerprint": "a" * 64,
         "units": 3,
     }
-    headers = {k.lower(): v for k, v in capture["headers"].items()}
+    headers = {k.lower(): v for k, v in captured["headers"].items()}
     assert headers["authorization"] == "Bearer lcca_secret"
-    assert resp.status == 200
+    assert resp.status == 429
     assert not resp.ok
     assert resp.code == "quota_exceeded"
+    assert resp.data["units_consumed"] == 5
+    assert resp.data["quota"] == 5
+
+
+def test_meter_does_not_retry_after_transport_loss(monkeypatch):
+    calls = {"n": 0}
+
+    def fake_urlopen(request, timeout=None):
+        calls["n"] += 1
+        raise urllib.error.URLError("connection lost after server commit")
+
+    monkeypatch.setattr(hc.urllib.request, "urlopen", fake_urlopen)
+    resp = HttpClient("https://verifier.example.com").meter(
+        {"project": "DEFAULT", "feature": "EXPORT", "license_fingerprint": "a" * 64, "units": 3}
+    )
+    assert calls["n"] == 1
+    assert resp.status == 0
+    assert not resp.ok
+    assert resp.error == "connection lost after server commit"
 
 
 def test_report_gets_exact_query_and_applies_bearer(capture):
@@ -170,6 +204,21 @@ def test_report_gets_exact_query_and_applies_bearer(capture):
     assert headers["authorization"] == "Bearer lcca_secret"
     assert resp.ok
     assert resp.data["peak_concurrent"] == 2
+
+
+def test_report_escapes_reserved_and_unicode_query_values(capture):
+    project = "Project / ? # ☃"
+    feature = "Feature & +"
+    fingerprint = "finger /?#+雪"
+    client = HttpClient("https://verifier.example.com")
+    client.report(project, feature, fingerprint)
+
+    parsed = urllib.parse.urlsplit(capture["url"])
+    assert urllib.parse.parse_qs(parsed.query) == {
+        "project": [project],
+        "feature": [feature],
+        "license_fingerprint": [fingerprint],
+    }
 
 
 def test_report_omits_optional_window_query(capture):

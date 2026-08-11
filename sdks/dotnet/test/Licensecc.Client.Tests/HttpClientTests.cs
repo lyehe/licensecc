@@ -43,6 +43,19 @@ namespace Licensecc.Client.Tests
             }
         }
 
+        private static Dictionary<string, string> ParseQuery(Uri uri)
+        {
+            var values = new Dictionary<string, string>();
+            foreach (string part in uri.Query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries))
+            {
+                int equals = part.IndexOf('=');
+                string key = equals < 0 ? part : part.Substring(0, equals);
+                string value = equals < 0 ? string.Empty : part.Substring(equals + 1);
+                values[Uri.UnescapeDataString(key)] = Uri.UnescapeDataString(value);
+            }
+            return values;
+        }
+
         [TestMethod]
         public async Task VerifyAsync_PostsToV1Verify_ParsesAssertion()
         {
@@ -109,9 +122,9 @@ namespace Licensecc.Client.Tests
         }
 
         [TestMethod]
-        public async Task MeterAsync_PostsExactBody_AppliesBearer_AndParsesSoftDenial()
+        public async Task MeterAsync_PostsExactBody_AppliesBearer_AndParses429WithoutRetry()
         {
-            var handler = new StubHandler(_ => (HttpStatusCode.OK,
+            var handler = new StubHandler(_ => (HttpStatusCode.TooManyRequests,
                 "{\"ok\":false,\"code\":\"quota_exceeded\",\"units_consumed\":5,\"quota\":5}"));
             using var http = new HttpClient(handler);
             var client = new LicensingBackendClient(http, "https://verifier.example.com")
@@ -140,8 +153,12 @@ namespace Licensecc.Client.Tests
             }
             Assert.IsTrue(handler.LastRequest.Headers.TryGetValues("Authorization", out IEnumerable<string>? auth));
             Assert.AreEqual("Bearer lcca_secret", System.Linq.Enumerable.First(auth!));
+            Assert.AreEqual(1, handler.Calls);
+            Assert.AreEqual(429, response.HttpStatus);
             Assert.IsFalse(response.Ok);
             Assert.AreEqual("quota_exceeded", response.Code);
+            Assert.AreEqual(5L, response.GetInt64("units_consumed"));
+            Assert.AreEqual(5L, response.GetInt64("quota"));
         }
 
         [TestMethod]
@@ -166,6 +183,30 @@ namespace Licensecc.Client.Tests
             Assert.AreEqual("Bearer lcca_secret", System.Linq.Enumerable.First(auth!));
             Assert.IsTrue(response.Ok);
             Assert.AreEqual(2L, response.GetInt64("peak_concurrent"));
+        }
+
+        [TestMethod]
+        public async Task ReportAsync_EncodesReservedAndUnicodeQueryValues()
+        {
+            const string project = "Project / ? # ☃";
+            const string feature = "Feature & +";
+            const string fingerprint = "finger /?#+雪";
+            var handler = new StubHandler(_ => (HttpStatusCode.OK, "{\"ok\":true}"));
+            using var http = new HttpClient(handler);
+            var client = new LicensingBackendClient(http, "https://verifier.example.com");
+
+            await client.ReportAsync(project, feature, fingerprint);
+
+            CollectionAssert.AreEqual(
+                new Dictionary<string, string>
+                {
+                    ["project"] = project,
+                    ["feature"] = feature,
+                    ["license_fingerprint"] = fingerprint,
+                },
+                ParseQuery(handler.LastRequest!.RequestUri!));
+            Assert.AreEqual(HttpMethod.Get, handler.LastRequest!.Method);
+            Assert.IsNull(handler.LastBody);
         }
 
         [TestMethod]

@@ -157,7 +157,9 @@ if (r.Ok && r.Code == "entitlement_ok")
 Metering and usage reports use the configured account bearer. Metering sends
 the `MeterRequest` body; reports send the required entitlement query and
 optional Unix-second `from`/`to` window. Both return the same flat
-`BackendResponse`, with report fields available through `Fields`:
+`BackendResponse`, with report fields available through `Fields`. Metering is
+intentionally a single attempt because the backend counter has no idempotency
+key; this .NET wrapper does not retry other operations either.
 
 ```csharp
 BackendResponse meter = await client.MeterAsync(RequestBody.New()

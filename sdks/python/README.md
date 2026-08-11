@@ -145,7 +145,9 @@ Metering and usage reports use the same account bearer. `meter()` sends the
 `MeterRequest` JSON body; `report()` sends the required entitlement query and
 optionally the `from`/`to` Unix-second window. Both return the generic
 `ApiResponse`, so report fields remain available in `resp.data` without a
-second response contract:
+second response contract. Metering is intentionally a single attempt because
+the backend counter has no idempotency key; the other Python operations retain
+the client's configured bounded retry behavior:
 
 ```python
 client.meter({"project": "DEFAULT", "feature": "EXPORT",

@@ -138,7 +138,7 @@ class HttpClient:
 
     # -- transport -------------------------------------------------------------
 
-    def _post(self, path: str, body: Mapping[str, Any]) -> ApiResponse:
+    def _post(self, path: str, body: Mapping[str, Any], *, max_retries: int | None = None) -> ApiResponse:
         url = self.base_url + path
         payload = json.dumps(body).encode("utf-8")
         headers = {
@@ -149,6 +149,7 @@ class HttpClient:
         if self.account_token:
             headers["Authorization"] = f"Bearer {self.account_token}"
         request = urllib.request.Request(url, data=payload, headers=headers, method="POST")
+        retry_limit = self.max_retries if max_retries is None else max(0, int(max_retries))
 
         attempt = 0
         while True:
@@ -158,15 +159,15 @@ class HttpClient:
                     return _parse_response(response.getcode(), response.read())
             except urllib.error.HTTPError as exc:
                 # The Worker returns the FLAT envelope even on 4xx/5xx — parse it.
-                if exc.code in RETRYABLE_STATUSES and attempt < self.max_retries:
+                if exc.code in RETRYABLE_STATUSES and attempt < retry_limit:
                     retry_after = _parse_retry_after(exc.headers.get("Retry-After") if exc.headers else None)
                 else:
                     return _parse_response(exc.code, exc.read())
             except urllib.error.URLError as exc:
-                if attempt >= self.max_retries:
+                if attempt >= retry_limit:
                     return ApiResponse(status=0, ok=False, code=None, data={}, error=str(exc.reason))
             except Exception as exc:  # noqa: BLE001 - surface transport errors, never raise
-                if attempt >= self.max_retries:
+                if attempt >= retry_limit:
                     return ApiResponse(status=0, ok=False, code=None, data={}, error=str(exc))
             # Retryable outcome: back off (Retry-After, else exponential) and try again.
             delay = retry_after if retry_after is not None else self.retry_backoff * (2 ** attempt)
@@ -331,7 +332,10 @@ class HttpClient:
         integer and defaults to one. The account bearer, when configured, is
         applied just as it is for the lease/seat endpoints.
         """
-        return self._post("/v1/meter", body)
+        # Metering mutates a counter and has no idempotency key; a lost response
+        # must not cause a second increment. Other POST operations retain the
+        # client's configured bounded-retry behavior.
+        return self._post("/v1/meter", body, max_retries=0)
 
     def report(
         self,
