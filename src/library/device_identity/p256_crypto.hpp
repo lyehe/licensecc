@@ -19,59 +19,44 @@ void secure_zero(void* data, std::size_t size) noexcept;
 template <std::size_t N>
 class SensitiveArray {
 public:
-    SensitiveArray() = default;
-    ~SensitiveArray() {
-        clear();
-    }
+	SensitiveArray() = default;
+	~SensitiveArray() { clear(); }
 
-    SensitiveArray(const SensitiveArray&) = delete;
-    SensitiveArray& operator=(const SensitiveArray&) = delete;
-    SensitiveArray(SensitiveArray&&) = delete;
-    SensitiveArray& operator=(SensitiveArray&&) = delete;
+	SensitiveArray(const SensitiveArray&) = delete;
+	SensitiveArray& operator=(const SensitiveArray&) = delete;
+	SensitiveArray(SensitiveArray&&) = delete;
+	SensitiveArray& operator=(SensitiveArray&&) = delete;
 
-    void clear() noexcept {
-        secure_zero(value.data(), value.size());
-    }
+	void clear() noexcept { secure_zero(value.data(), value.size()); }
 
-    std::array<std::uint8_t, N> value{};
+	std::array<std::uint8_t, N> value{};
 };
 
 class SensitiveVector {
 public:
-    SensitiveVector() = default;
-    explicit SensitiveVector(std::size_t size) : value(size) {}
-    ~SensitiveVector() {
-        clear();
-    }
+	SensitiveVector() = default;
+	explicit SensitiveVector(std::size_t size) : value(size) {}
+	~SensitiveVector() { clear(); }
 
-    SensitiveVector(const SensitiveVector&) = delete;
-    SensitiveVector& operator=(const SensitiveVector&) = delete;
-    SensitiveVector(SensitiveVector&&) = delete;
-    SensitiveVector& operator=(SensitiveVector&&) = delete;
+	SensitiveVector(const SensitiveVector&) = delete;
+	SensitiveVector& operator=(const SensitiveVector&) = delete;
+	SensitiveVector(SensitiveVector&&) = delete;
+	SensitiveVector& operator=(SensitiveVector&&) = delete;
 
-    void clear() noexcept {
-        secure_zero(value.data(), value.size());
-    }
+	void clear() noexcept { secure_zero(value.data(), value.size()); }
 
-    std::vector<std::uint8_t> value;
+	std::vector<std::uint8_t> value;
 };
 
 bool sha256(const std::uint8_t* data, std::size_t size, P256Digest& out) noexcept;
 bool canonicalize_p256_spki(const std::uint8_t* encoded, std::size_t size, P256Spki& out) noexcept;
-bool verify_p256_p1363(const P256Spki& spki,
-                       const P256Digest& digest,
-                       const P256Signature& signature) noexcept;
-bool verify_p256_p1363(const P256Spki& spki,
-                       const P256Digest& digest,
-                       const std::uint8_t* signature,
-                       std::size_t signature_size) noexcept;
+bool verify_p256_p1363(const P256Spki& spki, const P256Digest& digest, const P256Signature& signature) noexcept;
+bool verify_p256_p1363(const P256Spki& spki, const P256Digest& digest, const std::uint8_t* signature,
+					   std::size_t signature_size) noexcept;
 std::string device_key_id(const P256Spki& spki) noexcept;
 
-bool der_signature_to_p1363(const std::uint8_t* der,
-                            std::size_t size,
-                            P256Signature& out) noexcept;
-bool p1363_signature_to_der(const P256Signature& signature,
-                            std::vector<std::uint8_t>& out) noexcept;
+bool der_signature_to_p1363(const std::uint8_t* der, std::size_t size, P256Signature& out) noexcept;
+bool p1363_signature_to_der(const P256Signature& signature, std::vector<std::uint8_t>& out) noexcept;
 bool p1363_signature_in_range(const P256Signature& signature) noexcept;
 
 std::string encode_canonical_base64(const std::uint8_t* data, std::size_t size) noexcept;
@@ -81,9 +66,8 @@ bool parse_lowercase_hex(const std::string& encoded, std::vector<std::uint8_t>& 
 
 namespace detail {
 bool platform_validate_p256_spki(const P256Spki& spki) noexcept;
-bool platform_verify_p256_p1363(const P256Spki& spki,
-                                const P256Digest& digest,
-                                const P256Signature& signature) noexcept;
+bool platform_verify_p256_p1363(const P256Spki& spki, const P256Digest& digest,
+								const P256Signature& signature) noexcept;
 }  // namespace detail
 
 }  // namespace device_identity

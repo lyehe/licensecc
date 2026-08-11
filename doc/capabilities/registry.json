@@ -125,7 +125,7 @@
       "replaces": [],
       "public_docs": ["doc/capabilities/index.rst"],
       "evidence": [
-        {"kind": "limitation", "surface": "C++ compatibility enum", "path": "include/licensecc/datatypes.h", "selector": "LCC_REMOTE  // remote licenses are not supported now.", "assertion": "The legacy remote license type is explicitly unsupported."},
+        {"kind": "limitation", "surface": "C++ compatibility enum", "path": "include/licensecc/datatypes.h", "selector": "LCC_REMOTE\t// remote licenses are not supported now.", "assertion": "The legacy remote license type is explicitly unsupported."},
         {"kind": "automated_test", "surface": "C++ compatibility enum", "path": "test/library/public_api_test.cpp", "selector": "BOOST_AUTO_TEST_CASE(public_abi_enum_values_are_stable)", "assertion": "The compatibility enum remains covered by the public-API test."}
       ]
     },

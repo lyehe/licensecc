@@ -27,7 +27,8 @@ extern "C" {
 // projects/<LCC_PROJECT_NAME>/include/...; it is not checked into the repository.
 // Consumers should get this definition from the licensecc CMake target.
 #ifndef LCC_PROJECT_CONFIG_HEADER
-#error "LCC_PROJECT_CONFIG_HEADER is not defined. Link against licensecc::licensecc_static or define the project-scoped generated properties header."
+#error \
+	"LCC_PROJECT_CONFIG_HEADER is not defined. Link against licensecc::licensecc_static or define the project-scoped generated properties header."
 #endif
 #include LCC_PROJECT_CONFIG_HEADER
 
@@ -36,45 +37,42 @@ extern "C" {
 typedef struct LccDeviceIdentity LccDeviceIdentity;
 
 typedef enum {
-	LICENSE_OK = 0,  // OK
-	LICENSE_FILE_NOT_FOUND = 1,  // license file not found
+	LICENSE_OK = 0,	 // OK
+	LICENSE_FILE_NOT_FOUND = 1,	 // license file not found
 	LICENSE_SERVER_NOT_FOUND = 2,  // license server can't be contacted
 	ENVIRONMENT_VARIABLE_NOT_DEFINED = 3,  // environment variable not defined
-	FILE_FORMAT_NOT_RECOGNIZED = 4,  // license file has invalid format (not .ini file)
-	LICENSE_MALFORMED = 5,  // some mandatory field are missing, or data can't be fully read.
+	FILE_FORMAT_NOT_RECOGNIZED = 4,	 // license file has invalid format (not .ini file)
+	LICENSE_MALFORMED = 5,	// some mandatory field are missing, or data can't be fully read.
 	PRODUCT_NOT_LICENSED = 6,  // this product was not licensed
-	PRODUCT_EXPIRED = 7,    //!< PRODUCT_EXPIRED
-	LICENSE_CORRUPTED = 8,  // License signature didn't match with current license
+	PRODUCT_EXPIRED = 7,  //!< PRODUCT_EXPIRED
+	LICENSE_CORRUPTED = 8,	// License signature didn't match with current license
 	IDENTIFIERS_MISMATCH = 9,  // Calculated identifier and the one provided in license didn't match
 	LICENSE_TAMPER_DETECTED = 10,  // Runtime tamper signal detected
 	LICENSE_ONLINE_REQUIRED = 11,  // Online verification is required but not available
 	LICENSE_ONLINE_VERIFICATION_FAILED = 12,  // Online entitlement verification failed
-	LICENSE_ONLINE_ASSERTION_INVALID = 13,  // Online assertion was malformed, expired, or not authentic
-	LICENSE_ONLINE_CACHE_EXPIRED = 14,  // Reserved for future persistent-cache APIs
+	LICENSE_ONLINE_ASSERTION_INVALID = 13,	// Online assertion was malformed, expired, or not authentic
+	LICENSE_ONLINE_CACHE_EXPIRED = 14,	// Reserved for future persistent-cache APIs
 
-	LICENSE_CONFIG_TOKEN_INVALID = 15,     // config token envelope, signature, or metadata invalid
+	LICENSE_CONFIG_TOKEN_INVALID = 15,	// config token envelope, signature, or metadata invalid
 	LICENSE_CONFIG_BINDING_MISMATCH = 16,  // config token not bound to this project/feature/license/device
-	LICENSE_CONFIG_HASH_MISMATCH = 17,     // config bytes do not match the signed config-hash
-	LICENSE_CONFIG_EXPIRED = 18,           // config token outside its issued/expires window
-	LICENSE_CONFIG_ROLLBACK = 19,          // config-seq below the accepted minimum
+	LICENSE_CONFIG_HASH_MISMATCH = 17,	// config bytes do not match the signed config-hash
+	LICENSE_CONFIG_EXPIRED = 18,  // config token outside its issued/expires window
+	LICENSE_CONFIG_ROLLBACK = 19,  // config-seq below the accepted minimum
 
 	LICENSE_SPECIFIED = 100,  // license location was specified
 	LICENSE_FOUND = 101,  // License file has been found or license data has been located
 	PRODUCT_FOUND = 102,  // License has been loaded and the declared product has been found
-	SIGNATURE_VERIFIED = 103//!< SIGNATURE_VERIFIED
+	SIGNATURE_VERIFIED = 103  //!< SIGNATURE_VERIFIED
 } LCC_EVENT_TYPE;
 
 typedef enum {
 	LCC_LOCAL,
-	LCC_REMOTE  // remote licenses are not supported now.
+	LCC_REMOTE	// remote licenses are not supported now.
 } LCC_LICENSE_TYPE;
 
 typedef enum { SVRT_INFO, SVRT_WARN, SVRT_ERROR } LCC_SEVERITY;
 
-typedef enum {
-	LCC_TAMPER_DISABLED = 0,
-	LCC_TAMPER_ENFORCE = 2
-} LCC_TAMPER_POLICY;
+typedef enum { LCC_TAMPER_DISABLED = 0, LCC_TAMPER_ENFORCE = 2 } LCC_TAMPER_POLICY;
 
 #define LCC_TAMPER_FLAG_NONE 0u
 #define LCC_TAMPER_FLAG_STRICT_SOURCE_SHADOWING 0x00000001u
@@ -130,10 +128,7 @@ typedef enum {
  */
 typedef bool (*LCC_HOST_INTEGRITY_CHECK)(void* user_data, char* detail_out, size_t detail_out_size);
 
-typedef enum {
-	LCC_ONLINE_DISABLED = 0,
-	LCC_ONLINE_REQUIRE = 2
-} LCC_ONLINE_POLICY;
+typedef enum { LCC_ONLINE_DISABLED = 0, LCC_ONLINE_REQUIRE = 2 } LCC_ONLINE_POLICY;
 
 typedef enum {
 	LCC_ONLINE_CB_OK = 0,
@@ -155,7 +150,7 @@ typedef struct LccOnlineRequest {
 	LCC_ONLINE_POLICY policy;
 	uint32_t flags;
 	uint32_t timeout_ms;
-	uint32_t client_hardening;  // bitset of LCC_CLIENT_HARDENING_*; client configuration posture, telemetry only
+	uint32_t client_hardening;	// bitset of LCC_CLIENT_HARDENING_*; client configuration posture, telemetry only
 } LccOnlineRequest;
 
 /**
@@ -185,10 +180,7 @@ typedef struct LicenseCheckOptions {
 	char online_device_hash[LCC_API_ONLINE_DEVICE_HASH_SIZE + 1];
 } LicenseCheckOptions;
 
-typedef enum {
-	LCC_LICENSE_DECISION_DENY = 0,
-	LCC_LICENSE_DECISION_ALLOW = 1
-} LCC_LICENSE_DECISION;
+typedef enum { LCC_LICENSE_DECISION_DENY = 0, LCC_LICENSE_DECISION_ALLOW = 1 } LCC_LICENSE_DECISION;
 
 typedef struct LccRevocationFloorRecord {
 	/** Structure size, set by ::lcc_init_revocation_floor_record. */
@@ -453,7 +445,7 @@ typedef struct {
 	unsigned int days_left;
 	bool has_expiry;
 	bool linked_to_pc;
-	LCC_LICENSE_TYPE license_type;  // Local or Remote
+	LCC_LICENSE_TYPE license_type;	// Local or Remote
 	/* A string of character inserted into the license understood
 	 * by the calling application.
 	 * '\0' if the application didn't specify one */
