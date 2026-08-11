@@ -60,6 +60,16 @@ std::string narrow(LPCWSTR text) {
 	return result;
 }
 
+enum class PointerState {
+	unrecorded,
+	null_pointer,
+	non_null_pointer,
+};
+
+PointerState pointer_state(const void* pointer) noexcept {
+	return pointer == nullptr ? PointerState::null_pointer : PointerState::non_null_pointer;
+}
+
 struct Call {
 	std::string name;
 	NCRYPT_HANDLE object = 0U;
@@ -71,6 +81,9 @@ struct Call {
 	DWORD input_size = 0U;
 	DWORD output_size = 0U;
 	DWORD input_dword = 0U;
+	PointerState input_pointer = PointerState::unrecorded;
+	PointerState output_pointer = PointerState::unrecorded;
+	PointerState result_pointer = PointerState::unrecorded;
 	bool null_parameters = false;
 	bool null_padding = false;
 	std::vector<std::uint8_t> digest;
@@ -213,6 +226,7 @@ public:
 			call.text = property_name;
 			call.flags = flags;
 			call.input_size = input_size;
+			call.input_pointer = pointer_state(input);
 			if (input != nullptr && input_size >= sizeof(DWORD)) {
 				std::memcpy(&call.input_dword, input, sizeof(DWORD));
 			}
@@ -256,6 +270,8 @@ public:
 			call.text = property_name;
 			call.flags = flags;
 			call.output_size = output_size;
+			call.output_pointer = pointer_state(output);
+			call.result_pointer = pointer_state(result_size);
 			calls.push_back(call);
 			const SECURITY_STATUS status = next(call_name, ERROR_SUCCESS);
 			if (status != ERROR_SUCCESS) {
@@ -309,6 +325,8 @@ public:
 			call.text = narrow(blob_type);
 			call.flags = flags;
 			call.output_size = output_size;
+			call.output_pointer = pointer_state(output);
+			call.result_pointer = pointer_state(result_size);
 			call.null_parameters = parameters == nullptr;
 			calls.push_back(call);
 			const SECURITY_STATUS status = next(call.name, ERROR_SUCCESS);
@@ -344,6 +362,9 @@ public:
 			call.flags = flags;
 			call.input_size = digest_size;
 			call.output_size = signature_size;
+			call.input_pointer = pointer_state(digest);
+			call.output_pointer = pointer_state(signature);
+			call.result_pointer = pointer_state(result_size);
 			call.null_padding = padding_info == nullptr;
 			if (digest != nullptr) {
 				call.digest.assign(digest, digest + digest_size);
@@ -474,6 +495,74 @@ std::vector<std::string> call_names(const FakeCngApi& api) {
 	return result;
 }
 
+void require_validation_call_evidence(const FakeCngApi& api, NCRYPT_KEY_HANDLE expected_key) {
+	for (const std::string& name : {"get_provider", "get_algorithm", "get_usage", "get_export"}) {
+		const Call& call = api.nth(name);
+		require_equal(call.object, static_cast<NCRYPT_HANDLE>(expected_key), name + " key handle");
+		require(call.output_pointer == PointerState::non_null_pointer, name + " non-null property output");
+		require(call.result_pointer == PointerState::non_null_pointer, name + " non-null property result size");
+	}
+	for (const std::string& name : {"export_size", "export_output"}) {
+		const Call& call = api.nth(name);
+		require_equal(call.object, static_cast<NCRYPT_HANDLE>(expected_key), name + " key handle");
+		require(call.output_pointer ==
+					(name == "export_size" ? PointerState::null_pointer : PointerState::non_null_pointer),
+				name + " output pointer state");
+		require(call.result_pointer == PointerState::non_null_pointer, name + " non-null result size");
+	}
+}
+
+void require_sign_call_evidence(const FakeCngApi& api, NCRYPT_KEY_HANDLE expected_key) {
+	for (const std::string& name : {"sign_size", "sign_output"}) {
+		const Call& call = api.nth(name);
+		require_equal(call.object, static_cast<NCRYPT_HANDLE>(expected_key), name + " key handle");
+		require(call.input_pointer == PointerState::non_null_pointer, name + " non-null digest");
+		require(
+			call.output_pointer == (name == "sign_size" ? PointerState::null_pointer : PointerState::non_null_pointer),
+			name + " output pointer state");
+		require(call.result_pointer == PointerState::non_null_pointer, name + " non-null result size");
+	}
+}
+
+void test_fake_distinguishes_property_pointer_states() {
+	FakeCngApi api;
+	DWORD zero = 0U;
+	(void)api.set_property(kCreatedKeyHandle, NCRYPT_EXPORT_POLICY_PROPERTY, nullptr, sizeof(DWORD),
+						   NCRYPT_PERSIST_FLAG | NCRYPT_SILENT_FLAG);
+	(void)api.set_property(kCreatedKeyHandle, NCRYPT_EXPORT_POLICY_PROPERTY, reinterpret_cast<PBYTE>(&zero),
+						   sizeof(zero), NCRYPT_PERSIST_FLAG | NCRYPT_SILENT_FLAG);
+	const Call& null_input = api.nth("set_export");
+	const Call& zero_input = api.nth("set_export", 1U);
+	require_equal(null_input.object, static_cast<NCRYPT_HANDLE>(kCreatedKeyHandle),
+				  "null-input property call key handle");
+	require_equal(zero_input.object, static_cast<NCRYPT_HANDLE>(kCreatedKeyHandle),
+				  "non-null-input property call key handle");
+	require_equal(null_input.input_dword, 0UL, "null input retains zero-valued recorder storage");
+	require_equal(zero_input.input_dword, 0UL, "real DWORD zero is recorded as zero");
+	require(null_input.input_pointer == PointerState::null_pointer, "null property input is recorded distinctly");
+	require(zero_input.input_pointer == PointerState::non_null_pointer,
+			"non-null zero property input is recorded distinctly");
+
+	DWORD output = 0U;
+	DWORD result_size = 0U;
+	(void)api.get_property(kReopenedKeyHandle, NCRYPT_EXPORT_POLICY_PROPERTY, nullptr, 0U, nullptr, NCRYPT_SILENT_FLAG);
+	(void)api.get_property(kReopenedKeyHandle, NCRYPT_EXPORT_POLICY_PROPERTY, reinterpret_cast<PBYTE>(&output),
+						   sizeof(output), &result_size, NCRYPT_SILENT_FLAG);
+	const Call& null_output = api.nth("get_export");
+	const Call& real_output = api.nth("get_export", 1U);
+	require_equal(null_output.object, static_cast<NCRYPT_HANDLE>(kReopenedKeyHandle),
+				  "null-output property call key handle");
+	require_equal(real_output.object, static_cast<NCRYPT_HANDLE>(kReopenedKeyHandle),
+				  "non-null-output property call key handle");
+	require(null_output.output_pointer == PointerState::null_pointer, "null property output is recorded distinctly");
+	require(null_output.result_pointer == PointerState::null_pointer,
+			"null property result-size pointer is recorded distinctly");
+	require(real_output.output_pointer == PointerState::non_null_pointer,
+			"non-null property output is recorded distinctly");
+	require(real_output.result_pointer == PointerState::non_null_pointer,
+			"non-null property result-size pointer is recorded distinctly");
+}
+
 void test_error_map_is_operation_aware_and_fail_closed() {
 	struct Case {
 		SECURITY_STATUS status;
@@ -553,6 +642,7 @@ void test_open_scope_properties_spki_and_signing() {
 		for (const std::string& property_call : {"get_provider", "get_algorithm", "get_usage", "get_export"}) {
 			require_equal(api->nth(property_call).flags, NCRYPT_SILENT_FLAG, property_call + " silent flag");
 		}
+		require_validation_call_evidence(*api, kExistingKeyHandle);
 		for (const std::string& export_call : {"export_size", "export_output"}) {
 			const Call& call = api->nth(export_call);
 			require_equal(call.text, narrow(BCRYPT_ECCPUBLIC_BLOB), "public blob type");
@@ -571,6 +661,7 @@ void test_open_scope_properties_spki_and_signing() {
 			require(std::equal(call.digest.begin(), call.digest.end(), digest.begin()),
 					"caller digest reaches CNG exactly once");
 		}
+		require_sign_call_evidence(*api, kExistingKeyHandle);
 		require_equal(api->nth("sign_size").output_size, 0UL, "signature size query");
 		require_equal(api->nth("sign_output").output_size, 64UL, "exact P1363 output width");
 		require_equal(api->count("set_other"), std::size_t{0U}, "no UI/DACL property write");
@@ -607,15 +698,22 @@ void test_create_order_policy_reopen_and_self_test() {
 	const Call& usage = api->nth("set_usage");
 	const Call& export_policy = api->nth("set_export");
 	require_equal(usage.object, static_cast<NCRYPT_HANDLE>(kCreatedKeyHandle), "usage set on owned key");
+	require(usage.input_pointer == PointerState::non_null_pointer, "usage property has a non-null DWORD input");
 	require_equal(usage.input_size, static_cast<DWORD>(sizeof(DWORD)), "usage DWORD width");
 	require_equal(usage.input_dword, static_cast<DWORD>(NCRYPT_ALLOW_SIGNING_FLAG), "signing-only usage");
 	require_equal(usage.flags, NCRYPT_PERSIST_FLAG | NCRYPT_SILENT_FLAG, "persist+silent usage flags");
 	require_equal(export_policy.input_size, static_cast<DWORD>(sizeof(DWORD)), "export DWORD width");
 	require_equal(export_policy.input_dword, 0UL, "private export/archive policy is zero");
+	require_equal(export_policy.object, static_cast<NCRYPT_HANDLE>(kCreatedKeyHandle),
+				  "export policy set on owned key");
+	require(export_policy.input_pointer == PointerState::non_null_pointer,
+			"export policy zero comes from a non-null DWORD input");
 	require_equal(export_policy.flags, NCRYPT_PERSIST_FLAG | NCRYPT_SILENT_FLAG, "persist+silent export flags");
 	require_equal(api->nth("finalize").flags, NCRYPT_SILENT_FLAG, "silent finalize");
 	require_equal(api->nth("open_key", 1U).flags, NCRYPT_MACHINE_KEY_FLAG | NCRYPT_SILENT_FLAG,
 				  "silent post-create reopen");
+	require_validation_call_evidence(*api, kReopenedKeyHandle);
+	require_sign_call_evidence(*api, kReopenedKeyHandle);
 	require_equal(api->nth("free").object, static_cast<NCRYPT_HANDLE>(kCreatedKeyHandle),
 				  "release creator handle only after self-test");
 	require_equal(api->count("set_other"), std::size_t{0U}, "no UI/DACL write during creation");
@@ -825,6 +923,7 @@ void test_nte_exists_reopens_and_preserves_race_winner() {
 		require_equal(api->count("set_usage"), std::size_t{0U}, "never modify race winner");
 		require_equal(api->count("set_export"), std::size_t{0U}, "never modify race winner export policy");
 		require_equal(api->count("finalize"), std::size_t{0U}, "never finalize race winner");
+		require_validation_call_evidence(*api, kExistingKeyHandle);
 		if (returns_handle) {
 			require(api->freed(kCreatedKeyHandle), "release only returned unfinalized race handle");
 		}
@@ -872,6 +971,12 @@ void test_signature_boundaries_and_delete_ownership() {
 		P256Signature signature{};
 		require_equal(provider->sign_digest(digest, signature), LCC_DEVICE_SIGN_FAILED,
 					  "reject non-64-byte signature size");
+		const Call& sizing = api->nth("sign_size");
+		require_equal(sizing.object, static_cast<NCRYPT_HANDLE>(kExistingKeyHandle),
+					  "bad-size sign uses existing key handle");
+		require(sizing.input_pointer == PointerState::non_null_pointer, "bad-size sign records digest pointer");
+		require(sizing.output_pointer == PointerState::null_pointer, "bad-size sign records sizing output");
+		require(sizing.result_pointer == PointerState::non_null_pointer, "bad-size sign records result pointer");
 		require_equal(api->count("sign_output"), std::size_t{0U}, "no output call after bad size");
 	}
 	{
@@ -883,6 +988,7 @@ void test_signature_boundaries_and_delete_ownership() {
 		P256Signature signature{};
 		require_equal(provider->sign_digest(digest, signature), LCC_DEVICE_SIGN_FAILED,
 					  "reject short signature output");
+		require_sign_call_evidence(*api, kExistingKeyHandle);
 	}
 	{
 		auto api = std::make_shared<FakeCngApi>();
@@ -893,6 +999,7 @@ void test_signature_boundaries_and_delete_ownership() {
 		P256Signature signature{};
 		require_equal(provider->sign_digest(digest, signature), LCC_DEVICE_SIGN_FAILED,
 					  "reject out-of-range P1363 scalars");
+		require_sign_call_evidence(*api, kExistingKeyHandle);
 	}
 
 	auto mismatch_api = std::make_shared<FakeCngApi>();
@@ -904,6 +1011,7 @@ void test_signature_boundaries_and_delete_ownership() {
 	mismatch.back() = mismatch.back() == '0' ? '1' : '0';
 	require_equal(mismatch_provider->delete_with_expected_id(request, mismatch), LCC_DEVICE_POLICY_VIOLATION,
 				  "expected-id mismatch blocks delete");
+	require_validation_call_evidence(*mismatch_api, kExistingKeyHandle);
 	require_equal(mismatch_api->count("delete"), std::size_t{0U}, "mismatch never reaches delete");
 	require(mismatch_api->freed(kExistingKeyHandle), "mismatched delete releases open key");
 
@@ -912,6 +1020,7 @@ void test_signature_boundaries_and_delete_ownership() {
 	const std::string delete_expected = license::device_identity::device_key_id(delete_api->expected_spki());
 	require_equal(delete_provider->delete_with_expected_id(request, delete_expected), LCC_DEVICE_OK,
 				  "expected-id delete");
+	require_validation_call_evidence(*delete_api, kExistingKeyHandle);
 	require_equal(delete_api->count("delete"), std::size_t{1U}, "one exact delete");
 	require_equal(delete_api->nth("delete").flags, NCRYPT_SILENT_FLAG, "delete uses only silent flag");
 	delete_provider.reset();
@@ -924,6 +1033,7 @@ void test_signature_boundaries_and_delete_ownership() {
 	const std::string failure_expected = license::device_identity::device_key_id(failure_api->expected_spki());
 	require_equal(failure_provider->delete_with_expected_id(request, failure_expected), LCC_DEVICE_ACCESS_DENIED,
 				  "delete native failure mapping");
+	require_validation_call_evidence(*failure_api, kExistingKeyHandle);
 	require(failure_api->freed(kExistingKeyHandle), "failed delete retains then frees key handle");
 
 	auto missing_api = std::make_shared<FakeCngApi>();
@@ -935,6 +1045,7 @@ void test_signature_boundaries_and_delete_ownership() {
 }
 
 void run_shim() {
+	test_fake_distinguishes_property_pointer_states();
 	test_error_map_is_operation_aware_and_fail_closed();
 	test_open_scope_properties_spki_and_signing();
 	test_create_order_policy_reopen_and_self_test();
@@ -950,6 +1061,13 @@ template <std::size_t N>
 void set_field(char (&field)[N], const std::string& value) {
 	require(value.size() < N, "fixed field overflow");
 	std::memcpy(field, value.c_str(), value.size() + 1U);
+}
+
+bool private_export_policy_denied(SECURITY_STATUS status) noexcept {
+	return status == static_cast<SECURITY_STATUS>(NTE_PERM) ||
+		   status == static_cast<SECURITY_STATUS>(NTE_BAD_KEY_STATE) ||
+		   status == static_cast<SECURITY_STATUS>(ERROR_ACCESS_DENIED) ||
+		   status == static_cast<SECURITY_STATUS>(HRESULT_FROM_WIN32(ERROR_ACCESS_DENIED));
 }
 
 std::string uuid_v4() {
@@ -986,12 +1104,47 @@ void require_private_export_denied(const ProviderOpenRequest& request) {
 		NCryptFreeObject(provider);
 		throw std::runtime_error("real private-export key reopen");
 	}
-	DWORD size = 0U;
-	const SECURITY_STATUS exported =
-		NCryptExportKey(key, 0U, NCRYPT_PKCS8_PRIVATE_KEY_BLOB, nullptr, nullptr, 0U, &size, NCRYPT_SILENT_FLAG);
+
+	auto attempt_output = [key](LPCWSTR blob_type, DWORD reported_size) {
+		const DWORD capacity = reported_size == 0U ? 1U : reported_size;
+		std::vector<std::uint8_t> unexpected_private_blob(capacity);
+		DWORD written = 0U;
+		const SECURITY_STATUS status = NCryptExportKey(key, 0U, blob_type, nullptr, unexpected_private_blob.data(),
+													   capacity, &written, NCRYPT_SILENT_FLAG);
+		SecureZeroMemory(unexpected_private_blob.data(), unexpected_private_blob.size());
+		return status;
+	};
+
+	SECURITY_STATUS raw_private_status = NTE_FAIL;
+	SECURITY_STATUS pkcs8_output_status = NTE_FAIL;
+	SECURITY_STATUS pkcs8_size_status = NTE_FAIL;
+	try {
+		DWORD raw_private_size = 0U;
+		raw_private_status = NCryptExportKey(key, 0U, BCRYPT_ECCPRIVATE_BLOB, nullptr, nullptr, 0U, &raw_private_size,
+											 NCRYPT_SILENT_FLAG);
+		if (raw_private_status == ERROR_SUCCESS) {
+			raw_private_status = attempt_output(BCRYPT_ECCPRIVATE_BLOB, raw_private_size);
+		}
+
+		DWORD pkcs8_size = 0U;
+		pkcs8_size_status = NCryptExportKey(key, 0U, NCRYPT_PKCS8_PRIVATE_KEY_BLOB, nullptr, nullptr, 0U, &pkcs8_size,
+											NCRYPT_SILENT_FLAG);
+		if (pkcs8_size_status == ERROR_SUCCESS) {
+			pkcs8_output_status = attempt_output(NCRYPT_PKCS8_PRIVATE_KEY_BLOB, pkcs8_size);
+		}
+	} catch (...) {
+		NCryptFreeObject(key);
+		NCryptFreeObject(provider);
+		throw;
+	}
 	NCryptFreeObject(key);
 	NCryptFreeObject(provider);
-	require(exported != ERROR_SUCCESS, "direct private export must be denied");
+	require(private_export_policy_denied(raw_private_status),
+			"algorithm-valid BCRYPT_ECCPRIVATE_BLOB private export must be policy-denied");
+	if (pkcs8_size_status == ERROR_SUCCESS) {
+		require(private_export_policy_denied(pkcs8_output_status),
+				"PKCS#8 private export output must be policy-denied when sizing works");
+	}
 }
 
 void fill_real_proof_input(LccDeviceProofInput& input) {
