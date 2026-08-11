@@ -25,7 +25,7 @@ This repository contains:
 
 * ``licensecc``      : the C++ library with a C API (the part you integrate in your software), with minimal external dependencies.
 * ``lccinspector``   : a license debugger for end customers, to diagnose licensing problems or calculate the hardware id before issuing a license.
-* ``lccgen``         : the license generator (vendored as the ``extern/license-generator`` submodule), used to initialize projects and issue licenses.
+* ``lccgen``         : the license generator (vendored under ``extern/license-generator``), used to initialize projects and issue licenses.
 * ``examples/minimal``: a standalone integration example.
 * ``services/``      : Cloudflare Workers for online licensing (backend, operator console, customer portal, D1 backup).
 * ``sdks/``          : Python and .NET client SDKs for token verification and backend HTTP calls.
@@ -37,7 +37,7 @@ commands. In short, with CMake ≥ 3.21 and a C++17 compiler:
 
 .. code-block:: console
 
-  git clone --recursive https://github.com/lyehe/licensecc.git
+  git clone https://github.com/lyehe/licensecc.git
   cd licensecc
   cmake --preset dev-debug
   cmake --build --preset dev-debug

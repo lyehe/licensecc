@@ -194,37 +194,6 @@ function Get-DirectoryFingerprint {
     }
 }
 
-function Test-NestedGitCheckout {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$Path
-    )
-
-    $gitMarker = Join-Path $Path ".git"
-    if (-not (Test-Path -LiteralPath $Path -PathType Container) -or -not (
-        (Test-Path -LiteralPath $gitMarker -PathType Leaf) -or
-        (Test-Path -LiteralPath $gitMarker -PathType Container)
-    )) {
-        return $false
-    }
-
-    try {
-        $topLevel = Get-GitText -Repository $Path -Arguments @("rev-parse", "--show-toplevel")
-        $resolvedTopLevel = (Resolve-Path -LiteralPath $topLevel).Path
-        $resolvedPath = (Resolve-Path -LiteralPath $Path).Path
-        $comparison = if ($IsWindows) {
-            [System.StringComparison]::OrdinalIgnoreCase
-        } else {
-            [System.StringComparison]::Ordinal
-        }
-        return $resolvedTopLevel.TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar).Equals(
-            $resolvedPath.TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar),
-            $comparison)
-    } catch {
-        return $false
-    }
-}
-
 function Get-SourceSnapshot {
     param(
         [Parameter(Mandatory = $true)]
@@ -232,16 +201,8 @@ function Get-SourceSnapshot {
     )
 
     $root = (Resolve-Path -LiteralPath $RepositoryRoot).Path
-    $generatorPath = Join-Path $root "extern/license-generator"
-    $generator = if (Test-NestedGitCheckout -Path $generatorPath) {
-        Get-RepositoryFingerprint -Repository $generatorPath
-    } else {
-        [pscustomobject]@{ Missing = $true }
-    }
-
     return [pscustomobject]@{
         Root = Get-RepositoryFingerprint -Repository $root
-        Generator = $generator
         Projects = Get-DirectoryFingerprint -Path (Join-Path $root "projects")
         Install = Get-DirectoryFingerprint -Path (Join-Path $root "install")
     }
@@ -260,13 +221,6 @@ function Compare-RepositoryFingerprints {
     )
 
     $changes = [System.Collections.Generic.List[string]]::new()
-    if ($Before.PSObject.Properties.Name -contains "Missing" -or $After.PSObject.Properties.Name -contains "Missing") {
-        if (($Before.PSObject.Properties.Name -contains "Missing") -ne ($After.PSObject.Properties.Name -contains "Missing")) {
-            $changes.Add("$Name checkout presence changed")
-        }
-        return $changes.ToArray()
-    }
-
     foreach ($field in @("Head", "StatusHash", "StagedDiffHash", "UnstagedDiffHash")) {
         if ($Before.$field -ne $After.$field) {
             $changes.Add("$Name $field fingerprint changed")
@@ -289,9 +243,6 @@ function Compare-SourceSnapshots {
 
     $changes = [System.Collections.Generic.List[string]]::new()
     foreach ($change in (Compare-RepositoryFingerprints -Name "root" -Before $Before.Root -After $After.Root)) {
-        $changes.Add($change)
-    }
-    foreach ($change in (Compare-RepositoryFingerprints -Name "generator" -Before $Before.Generator -After $After.Generator)) {
         $changes.Add($change)
     }
     foreach ($tree in @("Projects", "Install")) {

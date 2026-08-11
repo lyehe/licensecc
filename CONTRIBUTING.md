@@ -19,7 +19,7 @@ Good bug reports include:
 - A minimal test case or example when possible.
 - Crash logs, stack traces, or `open-license.log` output when relevant.
 
-Before reporting a build issue, inspect the pinned generator checkout:
+Before reporting a build issue, validate the vendored generator source:
 
 ```powershell
 pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/bootstrap.ps1 -CheckOnly
@@ -58,7 +58,7 @@ npm run test:contracts
 npm run check:architecture
 ```
 
-For C++ changes, first inspect the pinned generator and then run the
+For C++ changes, first validate the vendored generator and then run the
 non-mutating source-purity gate:
 
 ```powershell
@@ -75,11 +75,10 @@ cmake --build --preset dev-debug
 ctest --preset dev-debug
 ```
 
-Do not repair, reset, or patch the generator checkout from a build command. Use
-`scripts/bootstrap.ps1` only for the explicit bootstrap action, after
-preserving any local generator work; `-CheckOnly` is safe for inspection.
-
-The tracked generator compatibility patch is transitional and must be removed only with its reviewed replacement generator revision and gitlink update.
+Do not fetch, overwrite, or patch vendored generator source from a build
+command. `scripts/bootstrap.ps1 -CheckOnly` is a read-only source-presence
+check. Update `extern/license-generator` only through a reviewed repository
+change that preserves its license and provenance record.
 
 Manual fallback without presets:
 

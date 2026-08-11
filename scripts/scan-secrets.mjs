@@ -6,11 +6,13 @@ import { checkTokenGuards } from "../services/cloudflare-licensing-backend/scrip
 const REPOSITORY_ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
 
 // These are source fixtures that construct a transient keypair at runtime.  The
-// scanner still reads every other tracked file in the superproject; a submodule
-// gitlink is skipped by the scanner because it is a directory, not a source file.
+// scanner reads every other tracked file in the superproject, including the
+// vendored generator source.
 const REPOSITORY_EXCLUSIONS = [
   "scripts/secret-lint.mjs",
   "scripts/secret-lint.test.mjs",
+  "extern/license-generator/test/cryptohelper_test.cpp",
+  "extern/license-generator/test/data/private_key.rsa",
   "services/cloudflare-licensing-backend/test/fulfillment/account_isolation.test.mjs",
   "services/cloudflare-licensing-backend/test/sql/trial-activation.test.mjs",
 ];

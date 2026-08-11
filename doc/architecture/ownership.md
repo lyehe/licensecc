@@ -24,6 +24,6 @@ individuals or teams that have not been confirmed.
 * Shared code must have a named purpose and at least two consumers. A package
   must not become a catch-all for service implementation.
 * Route and OpenAPI ownership stay together in the serving deployable.
-* The generator submodule is pinned external state. Its nested worktree is
-  user-owned when dirty and is never cleaned, reset, staged, or patched by
-  documentation work.
+* `extern/license-generator` is repository-owned vendored source. Its license
+  and `PROVENANCE.md` are part of the review boundary; build and documentation
+  work never fetch, patch, or overwrite it.

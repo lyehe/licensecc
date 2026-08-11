@@ -92,9 +92,9 @@ Verified in this pass:
 - `npm --prefix services/cloudflare-licensing-backend run schema:parity:pg` passes.
 
 The original implementation pass is complete for this plan's scope. Any
-remaining generator promotion, native Ubuntu evidence, or release-readiness
-work is tracked by the current A-level plan and its evidence report; the
-generator submodule remains an independently protected external input.
+remaining native Ubuntu evidence or release-readiness work is tracked by the
+current A-level plan and its evidence report; the reviewed generator snapshot
+is now vendored as repository-owned source.
 
 ## Phase 0: Preserve and Classify Current Local State
 
@@ -255,7 +255,7 @@ Implementation steps:
    - `ci-linux-core`: mirrors Linux core CI options.
    - `ci-windows-msvc`: mirrors Windows MSVC CI options where practical.
 2. Add `scripts/dev-check.ps1` with focused checks:
-   - verify submodule availability,
+   - validate vendored generator-source availability,
    - configure via preset,
    - build core library and tests,
    - run `ctest`,

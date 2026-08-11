@@ -21,7 +21,7 @@ test("CMake generator discovery is read-only and has one recovery path", () => {
   }
   assert.match(finder, /LCC_LOCATION/);
   assert.match(finder, /extern\/license-generator\/CMakeLists\.txt/);
-  assert.match(finder, /bootstrap\.ps1/);
+  assert.doesNotMatch(finder, /bootstrap\.ps1/);
   assert.match(root, /add_custom_command\s*\(\s*OUTPUT\s+"\$\{LCC_PROJECT_PUBLIC_KEY\}"/s);
   assert.match(root, /add_custom_target\s*\(\s*project_public_header\s+DEPENDS\s+"\$\{LCC_PROJECT_PUBLIC_KEY\}"/s);
   assert.match(root, /DEPENDS\s+license_generator::lccgen/s);
@@ -81,8 +81,9 @@ test("purity and bootstrap scripts retain the explicit operational boundaries", 
   const purity = source("scripts/check-build-purity.ps1");
 
   assert.match(bootstrap, /CheckOnly/);
-  assert.match(bootstrap, /submodule\s+update\s+--init\s+--recursive/);
-  assert.doesNotMatch(bootstrap, /--remote/);
+  assert.match(bootstrap, /Generator vendored/);
+  assert.doesNotMatch(bootstrap, /\bsubmodule\b/i);
+  assert.doesNotMatch(bootstrap, /\bgit\b/i);
   assert.match(purity, /finally/i);
   assert.match(purity, /--untracked-files=all/);
   assert.match(purity, /projects/i);
@@ -97,6 +98,7 @@ test("CI uses purity checks and local preset installation paths", () => {
     assert.match(workflow, /check-build-purity\.ps1/);
     assert.match(workflow, /bootstrap\.ps1 -CheckOnly/);
     assert.doesNotMatch(workflow, /C:\/licensecc/i);
+    assert.doesNotMatch(workflow, /\bsubmodules\s*:/i);
   }
   assert.match(windows, /\.\/build\/\$\{\{ matrix\.preset \}\}\/install\/bin\/test\/lccinspector\.exe/);
 });

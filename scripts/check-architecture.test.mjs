@@ -364,6 +364,24 @@ test("hygiene rejects private keys even when a path is under test/vectors", () =
   assert.deepEqual(errorCodes(result), ["ARCH_GENERATED_PRIVATE_KEY"]);
 });
 
+test("hygiene permits only the reviewed vendored generator fixture paths", () => {
+  const allowed = fixture({
+    trackedPaths: [
+      "extern/license-generator/build/.gitkeep",
+      "extern/license-generator/test/data/private_key.rsa",
+      "extern/license-generator/test/data/v200/legacy_append_noncanonical.lic",
+      "extern/license-generator/test/data/v200/legacy_fixed_key.lic",
+    ],
+  });
+  assert.equal(allowed.exitCode, 0, allowed.diagnostics.join("\n"));
+
+  const rejected = fixture({
+    trackedPaths: ["extern/license-generator/test/data/v200/unreviewed.lic"],
+  });
+  assert.equal(rejected.exitCode, 1);
+  assert.deepEqual(errorCodes(rejected), ["ARCH_GENERATED_LICENSE"]);
+});
+
 test("hygiene debt also fails when it is expired or unused", () => {
   const expired = fixture({
     trackedPaths: ["pyvenv.cfg"],

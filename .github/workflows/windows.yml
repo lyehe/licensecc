@@ -20,8 +20,6 @@ jobs:
 
       steps:
       -  uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-         with:
-            submodules: recursive
       -  name: Cache Boost (msvc 14.3 / VS2022)
          id: cache-boost
          uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4

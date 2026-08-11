@@ -21,10 +21,10 @@ rewrite.
 | `sdks/` | Python and .NET client surfaces. | Client SDK packages. |
 | `test/` | C++/service tests and deterministic public golden vectors. | Test-only fixtures and suites. |
 
-`extern/license-generator` is a pinned submodule. `scripts/bootstrap.ps1
--CheckOnly` reports its expected revision without mutation; initialization is an
-explicit bootstrap action and build/check commands never patch or update the
-submodule.
+`extern/license-generator` is repository-owned vendored source. Its
+`PROVENANCE.md` records the reviewed upstream import and BSD-3-Clause license.
+`scripts/bootstrap.ps1 -CheckOnly` validates source presence without mutation;
+build/check commands never fetch, patch, or update that source.
 
 ## Current TypeScript dependency direction
 

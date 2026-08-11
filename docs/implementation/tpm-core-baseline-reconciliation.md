@@ -18,11 +18,12 @@ Only the Task 0 allowlist is brought forward: root and source CMake support,
 approved vectors, examples, and this manifest. All other tracked paths are
 restored to the main parent byte-for-byte. In particular, this reconciliation
 does not advance services, SDKs, workflow files, package metadata, presets,
-or the `extern/license-generator` gitlink.
+or the then-pinned `extern/license-generator` gitlink.
 
-The user-owned `extern/license-generator` worktree, its generated `.lic`
+The then-user-owned `extern/license-generator` worktree, its generated `.lic`
 files, and the untracked planning documents under `docs/superpowers/plans/`
-were deliberately left untouched.
+were deliberately left untouched. The generator is now vendored repository
+source; this report preserves the historical topology of that reconciliation.
 
 ## Merge conflicts and resolutions
 
@@ -107,9 +108,11 @@ lease-ring manifest is applied by default.
 
 ## Validation record
 
-Windows validation used an isolated ignored build directory and
-`-DGIT_SUBMODULE=OFF`; this avoids mutating the protected dirty submodule or a
-pre-existing `dev-debug` directory while exercising the same CMake/C++ graph.
+Windows validation used an isolated ignored build directory and the historical
+`-DGIT_SUBMODULE=OFF` cache variable; this avoided mutating the then-protected
+dirty submodule or a pre-existing `dev-debug` directory while exercising the
+same CMake/C++ graph. The current repository vendors that source and has no
+submodule build path.
 MSVC configured without OpenSSL, built successfully, and the following passed:
 
 ```text

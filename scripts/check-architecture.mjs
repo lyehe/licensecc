@@ -395,6 +395,13 @@ const DETERMINISTIC_VECTOR_SUFFIXES = Object.freeze([
   ".txt",
 ]);
 
+const VENDORED_GENERATOR_HYGIENE_FIXTURES = new Set([
+  "extern/license-generator/build/.gitkeep",
+  "extern/license-generator/test/data/private_key.rsa",
+  "extern/license-generator/test/data/v200/legacy_append_noncanonical.lic",
+  "extern/license-generator/test/data/v200/legacy_fixed_key.lic",
+]);
+
 function isGeneratedPrivateKey(filename) {
   return /(?:^|[_.-])(?:private|secret)[_.-]?(?:key|keys?)(?:[_.-]|$)/i.test(filename)
     || /(?:private|secret)[_.-]?key.*\.(?:pem|key|rsa|der)$/i.test(filename);
@@ -422,7 +429,7 @@ function evaluateHygiene(trackedPaths, hygieneAllowances, errors) {
   for (const rawPath of [...new Set(trackedPaths.map(normalizeRepoPath))].sort()) {
     const pathName = normalizeRepoPath(rawPath);
     if (!pathName) continue;
-    if (pathName === "build/.gitkeep") continue;
+    if (pathName === "build/.gitkeep" || VENDORED_GENERATOR_HYGIENE_FIXTURES.has(pathName) && pathName.endsWith("/.gitkeep")) continue;
     if (/(?:^|\/)build(?:\/|$)/.test(pathName)) {
       errors.push(makeError("ARCH_TRACKED_BUILD_ARTIFACT", pathName, "Tracked build output is forbidden except build/.gitkeep."));
       continue;
@@ -440,7 +447,7 @@ function evaluateHygiene(trackedPaths, hygieneAllowances, errors) {
       continue;
     }
     const filename = path.posix.basename(pathName).toLowerCase();
-    if (isGeneratedPrivateKey(filename)) {
+    if (isGeneratedPrivateKey(filename) && !VENDORED_GENERATOR_HYGIENE_FIXTURES.has(pathName)) {
       errors.push(makeError("ARCH_GENERATED_PRIVATE_KEY", pathName, "Generated private key material is forbidden, including test vectors."));
       continue;
     }
@@ -467,7 +474,7 @@ function evaluateHygiene(trackedPaths, hygieneAllowances, errors) {
       errors.push(makeError("ARCH_LOCAL_ENVIRONMENT_SECRET", pathName, "Tracked local environment secrets are forbidden."));
       continue;
     }
-    if (filename.endsWith(".lic") || filename.endsWith(".license")) {
+    if ((filename.endsWith(".lic") || filename.endsWith(".license")) && !VENDORED_GENERATOR_HYGIENE_FIXTURES.has(pathName)) {
       errors.push(makeError("ARCH_GENERATED_LICENSE", pathName, "Generated license material belongs only in deterministic test/vectors fixtures."));
       continue;
     }

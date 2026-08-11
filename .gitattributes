@@ -24,3 +24,8 @@ CMakeLists.txt text eol=lf
 
 # Byte-sensitive cross-language fixtures.
 test/vectors/** text eol=lf
+
+# The reviewed generator snapshot is preserved byte-for-byte, including its
+# historical formatting. Keep that formatting from producing unrelated diff
+# hygiene noise when generator source is updated deliberately.
+extern/license-generator/** whitespace=-trailing-space,-space-before-tab,-blank-at-eof

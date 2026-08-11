@@ -116,9 +116,8 @@ export function runSecretLint({
   const needles = [...BASE_NEEDLES, ...extraNeedles];
   let failed = false;
   for (const file of listTrackedFiles(root)) {
-    // Git lists submodule gitlinks too.  They are tracked repository entries,
-    // but not files belonging to this scanner's worktree and must never be
-    // descended into or read as part of the superproject scan.
+    // Git lists every vendored generator source file as a normal tracked file,
+    // so directories are the only non-file entries the scanner skips.
     if (statSync(file).isDirectory()) continue;
     const norm = file.replace(/\\/g, "/");
     // Skip only documented, path-specific legitimate fixtures.

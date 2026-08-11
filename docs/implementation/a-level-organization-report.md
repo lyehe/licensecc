@@ -4,9 +4,9 @@
 
 **A-level status: CONDITIONAL / PENDING.** The repository is well organized at
 the reviewed implementation tip and its local deterministic gates are strong.
-It is not yet an unconditional A because the final generator candidate is not
-published and pinned, and native Ubuntu and remote-CI evidence has not been
-collected. The supported Windows documentation gate is now complete.
+It is not yet an unconditional A because native Ubuntu and remote-CI evidence
+has not been collected. The reviewed generator source is now owned and tracked
+in this repository, and the supported Windows documentation gate is complete.
 
 | Dimension | Evidence at the reviewed tip | Assessment |
 | --- | --- | --- |
@@ -15,7 +15,7 @@ collected. The supported Windows documentation gate is now complete.
 | Mutation safety | Catalog/projection capabilities, CAS transitions, atomic idempotency, and Free-tier query caps are migration-backed | A |
 | Operator UX | Consequence-led dialogs, immutable replay, exact response proof, current-read recovery, focus, and pagination fences have browser coverage | A |
 | Supply-chain hygiene | npm and workflow pins are exact; the 2026-08-09 audit attestation reports zero vulnerabilities | A |
-| Release provenance | Reviewed generator candidate remains unpublished/unpinned | Pending |
+| Release provenance | Generator source is vendored with exact reviewed provenance and its BSD-3-Clause license | A |
 | Cross-platform/documentation evidence | Windows and the Doxygen/Sphinx documentation gate are green; Ubuntu and remote run identifiers are absent | Pending |
 
 This is an evidence grade for organization and release readiness, not a claim
@@ -40,13 +40,12 @@ The final integrated implementation tip is
 | Generated Wrangler binding-to-Env enforcement | `8b2343719b1c517a0d9789a518d22971424ab7f3` |
 | Generated binding-kind compatibility enforcement | `4f33243b09f27db83e090b914f2fb0d776c34302` |
 
-The final reviewed generator candidate
-`74996a7d345df7b9a7cb46a08d423cb738217ed1` remains
-unpublished/unpinned. The superproject gitlink `0227a3e` was not moved, while
-the protected WIP `dbbaed0` and its 15 existing untracked `.lic` fixtures were
-preserved. Publication and pinning are conditional on maintainer approval and
-publication/pinning. The 3 untracked `docs/superpowers/plans/**` execution
-plans were likewise preserved.
+The reviewed generator snapshot
+`74996a7d345df7b9a7cb46a08d423cb738217ed1` is now ordinary tracked source at
+`extern/license-generator`. Its `PROVENANCE.md` records the upstream import and
+the vendored directory retains its BSD-3-Clause `LICENSE`; no `.gitmodules`
+entry, generator gitlink, or build-time source fetch remains. The 3 untracked
+`docs/superpowers/plans/**` execution plans were preserved.
 
 The documentation split is intentional:
 
@@ -170,10 +169,10 @@ and PostgreSQL structural parity are green at 38 tables.
 ## Final local command attestations
 
 All results below are timestamped command attestations measured on the final
-integrated Windows tree on 2026-08-09 unless explicitly labeled accepted
-candidate evidence. The docs-accuracy gate independently recomputes stable tree
+integrated Windows tree on 2026-08-09, with the vendored-generator and
+documentation results refreshed on 2026-08-10. The docs-accuracy gate independently recomputes stable tree
 facts (contract hashes and inventories, schema table sets, source counts,
-gitlink state, and non-running E2E inventory); it does not pretend to rerun or
+vendored generator provenance, and non-running E2E inventory); it does not pretend to rerun or
 continuously prove these historical command results.
 
 | Command / surface | Result |
@@ -185,31 +184,28 @@ continuously prove these historical command results.
 | `npm run test:e2e` | Attested green; current non-running inventory is backend 2, admin 68, portal 1 |
 | `npm run test:sdks` | Attested green: Python 70/70; .NET 43/43 |
 | `npm audit --json` | Attested 0 total vulnerabilities at all severities |
-| `pwsh -NoProfile -File scripts/check-build-purity.ps1 -Preset dev-debug` | Attested green: configure/build, CTest 34/34, and unchanged source fingerprints |
+| `pwsh -NoProfile -File scripts/check-build-purity.ps1 -Preset dev-debug` | Green on 2026-08-10: vendored generator configure/build, CTest 37/37, and unchanged source fingerprints |
 | `npm run check:docs` | Green on 2026-08-10 with Doxygen 1.17.0; Doxygen XML and Sphinx HTML were freshly generated |
 | Ubuntu native CMake | Not run; no Ubuntu CMake evidence collected |
 | Remote CI | Not collected; no run link or identifier is claimed |
 
-Accepted generator-candidate evidence remains separate from the protected
-superproject state: candidate `74996a7` passed its standalone Debug suite 9/9,
-Release build/install, external `find_package` consumer, and ZIP packaging; a
-disposable superproject with that nested candidate passed Debug CTest 37/37.
-This proves the candidate but does not publish or pin it.
+The vendored generator snapshot `74996a7` passed its standalone Debug suite
+9/9, Release build/install, external `find_package` consumer, and ZIP
+packaging; a disposable superproject with that source passed Debug CTest
+37/37. The exact source and its provenance are now reviewable in the same
+repository as the C++ consumer.
 
 No tracked `node_modules`, `.wrangler`, `dist`, SDK `bin`/`obj`, or virtual
-environment output is present. The final working tree still contains only the
-protected dirty generator gitlink state and protected untracked execution
-plans.
+environment output is present. The protected untracked execution plans remain
+outside normal implementation commits.
 
 ## Remaining gaps and promotion gate
 
-1. Publish the reviewed generator candidate, obtain maintainer approval, and
-   update the superproject gitlink in a dedicated reviewed change.
-2. Run Debug and Release native CMake/CTest on Ubuntu against the published
-   candidate and retain CI run identifiers/artifacts.
-3. Capture green remote CI links/run IDs for the deterministic PR, SDK, E2E,
+1. Run Debug and Release native CMake/CTest on Ubuntu against the vendored
+   generator source and retain CI run identifiers/artifacts.
+2. Capture green remote CI links/run IDs for the deterministic PR, SDK, E2E,
    dry-run, docs, and native matrix.
-4. Treat TPM providers as a separate product implementation: define, build,
+3. Treat TPM providers as a separate product implementation: define, build,
    test, and document Windows/Ubuntu providers before advertising TPM support.
 
 Non-blocking maintenance remains: modernize the generator's CMake minimum and
@@ -219,4 +215,5 @@ any historical queued webhook bodies created before private-field scrubbing.
 
 The project is therefore organized at an A-level standard in the reviewed
 local implementation, while the release grade remains honestly
-**CONDITIONAL / PENDING** until the four promotion items above are evidenced.
+**CONDITIONAL / PENDING** until the three remaining evidence items above are
+completed.

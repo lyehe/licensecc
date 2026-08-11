@@ -1,0 +1,11 @@
+if(NOT DEFINED LCCGEN_LOCAL_VECTOR_DIR OR NOT DEFINED LCCGEN_CROSS_CONTRACT_DIR)
+  message(FATAL_ERROR "LCCGEN_LOCAL_VECTOR_DIR and LCCGEN_CROSS_CONTRACT_DIR are required")
+endif()
+
+foreach(vector minimal.payload.hex full.payload.hex)
+  file(READ "${LCCGEN_LOCAL_VECTOR_DIR}/${vector}" local_contents)
+  file(READ "${LCCGEN_CROSS_CONTRACT_DIR}/${vector}" contract_contents)
+  if(NOT local_contents STREQUAL contract_contents)
+    message(FATAL_ERROR "v201 canonical contract drift: ${vector}")
+  endif()
+endforeach()

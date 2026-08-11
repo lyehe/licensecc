@@ -23,19 +23,18 @@ vendored inputs:
 * `scripts/check-build-purity.ps1` snapshots tracked and untracked source
   fingerprints before configure/build/CTest and fails when the command changes
   them. It does not clean or reset a pre-existing user change.
-* `scripts/bootstrap.ps1 -CheckOnly` reports the pinned
-  `extern/license-generator` revision and local state. Initialization is an
-  explicit bootstrap action, never an implicit configure/check step; no build
-  command applies `patches/` or mutates the submodule.
+* `scripts/bootstrap.ps1 -CheckOnly` validates the vendored
+  `extern/license-generator` source tree. It never fetches or initializes
+  source; no build command applies `patches/` or mutates vendored input.
 * Node uses one root `npm ci`; generated `dist/`, `.wrangler/`, and type output
   remain ignored local/build artifacts. Documentation output remains under
   ignored `doc/_build/` and `doc/_doxygen/` trees.
 * Real Wrangler configurations, secrets, local databases, SDK build output,
   and browser caches remain local. Only example configuration is tracked.
 
-The pinned generator revision and its bootstrap policy are repository state.
-Any dirty nested generator worktree is user-owned concurrent state and is
-preserved; it is not an input that documentation or build work may repair.
+The vendored generator source, its BSD-3-Clause license, and its provenance
+record are repository state. It is not an input that documentation or build
+work may fetch, overwrite, or repair.
 
 ## Consequences
 
@@ -43,7 +42,7 @@ preserved; it is not an input that documentation or build work may repair.
   rewriting source, generated inputs, or vendored code.
 * Purity failures identify a command or tool that crossed the source/build
   boundary and must be fixed at that boundary rather than hidden by cleanup.
-* A clean clone requires an explicit submodule bootstrap before a core build,
-  while an existing checkout can use `-CheckOnly` to inspect state safely.
+* A clean clone already contains generator source; `-CheckOnly` verifies the
+  expected files before a core build without any network or source mutation.
 * CI can use the same local purity and bootstrap commands on Windows and Ubuntu;
   platform tool availability is evidence, not an implicit mutation step.

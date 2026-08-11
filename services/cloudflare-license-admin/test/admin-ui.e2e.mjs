@@ -2248,6 +2248,7 @@ test("admin UI replays a retained catalog-import Apply after a tab round-trip wi
   expect(replay.idempotency_key).toBe(first.idempotency_key);
   expect(replay.body).toEqual(first.body);
   await expect(page.locator(".operatorNotice")).toHaveCount(0);
+  await page.evaluate(() => new Promise((resolve) => window.requestAnimationFrame(() => resolve())));
   // The focused recovery control unmounts. Because the original Catalog
   // generation is stale, restoration must land on a live shell target rather
   // than the stale catalog heading or browser <body>.

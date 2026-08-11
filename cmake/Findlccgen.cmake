@@ -2,9 +2,9 @@
 Findlccgen
 ----------
 
-Resolve the lccgen executable without changing the source checkout.  This
-module deliberately does not initialize or update the bundled source tree:
-that is the explicit responsibility of ``scripts/bootstrap.ps1``.
+Resolve the lccgen executable without changing the source checkout. The
+bundled generator is vendored source, so this module never fetches, initializes,
+or updates it.
 
 Input variables
 ^^^^^^^^^^^^^^^
@@ -36,7 +36,7 @@ Result variables
 #]=======================================================================]
 
 set(_lccgen_failure_message
-	"Unable to locate lccgen. Run scripts/bootstrap.ps1 to initialize the pinned generator, or configure with -DLCC_LOCATION=<lccgen executable or installation prefix>.")
+	"Unable to locate lccgen. Restore the vendored extern/license-generator source, or configure with -DLCC_LOCATION=<lccgen executable or installation prefix>.")
 set(LCCGEN_TEST_SUPPORT_TARGET "")
 set(LCCGEN_TEST_SUPPORT_AVAILABLE FALSE)
 
@@ -79,6 +79,7 @@ if(LCC_LOCATION)
 	_lccgen_require_target()
 else()
 	if(EXISTS "${CMAKE_SOURCE_DIR}/extern/license-generator/CMakeLists.txt")
+		# The repository owns this source tree; configure it in the build tree.
 		add_subdirectory(
 			"${CMAKE_SOURCE_DIR}/extern/license-generator"
 			"${CMAKE_BINARY_DIR}/extern/license-generator")

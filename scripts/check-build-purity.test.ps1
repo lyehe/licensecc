@@ -42,17 +42,16 @@ try {
     Invoke-FixtureGit -Repository $fixtureRoot -Arguments @("config", "user.email", "fixture@example.invalid")
     Invoke-FixtureGit -Repository $fixtureRoot -Arguments @("config", "user.name", "Build Purity Fixture")
 
-    Set-Content -LiteralPath (Join-Path $fixtureRoot ".gitignore") -Value "extern/license-generator/`nprojects/`ninstall/" -NoNewline
+    Set-Content -LiteralPath (Join-Path $fixtureRoot ".gitignore") -Value "projects/`ninstall/" -NoNewline
     Set-Content -LiteralPath (Join-Path $fixtureRoot "tracked.txt") -Value "base" -NoNewline
     Set-Content -LiteralPath (Join-Path $fixtureRoot "already-dirty.txt") -Value "base" -NoNewline
     Set-Content -LiteralPath (Join-Path $fixtureRoot "staged.txt") -Value "base" -NoNewline
     Set-Content -LiteralPath (Join-Path $fixtureRoot "unstaged.txt") -Value "base" -NoNewline
+    $generatorRoot = Join-Path $fixtureRoot "extern/license-generator"
+    New-Item -ItemType Directory -Force -Path $generatorRoot | Out-Null
+    Set-Content -LiteralPath (Join-Path $generatorRoot "tracked-generator.txt") -Value "generator base" -NoNewline
     Invoke-FixtureGit -Repository $fixtureRoot -Arguments @("add", ".")
     Invoke-FixtureGit -Repository $fixtureRoot -Arguments @("commit", "--quiet", "-m", "fixture")
-
-    $uninitializedGenerator = Join-Path $fixtureRoot "uninitialized-generator"
-    New-Item -ItemType Directory -Path $uninitializedGenerator | Out-Null
-    Assert-Condition -Condition (-not (Test-NestedGitCheckout -Path $uninitializedGenerator)) -Message "an empty nested directory was treated as a Git checkout"
 
     Set-Content -LiteralPath (Join-Path $fixtureRoot "already-dirty.txt") -Value "pre-existing dirty bytes" -NoNewline
     Set-Content -LiteralPath (Join-Path $fixtureRoot "staged.txt") -Value "staged bytes" -NoNewline
@@ -60,14 +59,6 @@ try {
     Set-Content -LiteralPath (Join-Path $fixtureRoot "unstaged.txt") -Value "unstaged bytes" -NoNewline
     Set-Content -LiteralPath (Join-Path $fixtureRoot "root-untracked.txt") -Value "root untracked bytes" -NoNewline
 
-    $generatorRoot = Join-Path $fixtureRoot "extern/license-generator"
-    New-Item -ItemType Directory -Force -Path $generatorRoot | Out-Null
-    Invoke-FixtureGit -Repository $generatorRoot -Arguments @("init", "--quiet")
-    Invoke-FixtureGit -Repository $generatorRoot -Arguments @("config", "user.email", "fixture@example.invalid")
-    Invoke-FixtureGit -Repository $generatorRoot -Arguments @("config", "user.name", "Build Purity Fixture")
-    Set-Content -LiteralPath (Join-Path $generatorRoot "tracked-generator.txt") -Value "generator base" -NoNewline
-    Invoke-FixtureGit -Repository $generatorRoot -Arguments @("add", ".")
-    Invoke-FixtureGit -Repository $generatorRoot -Arguments @("commit", "--quiet", "-m", "fixture")
     Set-Content -LiteralPath (Join-Path $generatorRoot "nested-untracked.lic") -Value "license bytes" -NoNewline
 
     $projectsRoot = Join-Path $fixtureRoot "projects"
@@ -78,7 +69,7 @@ try {
 
     $before = Get-SourceSnapshot -RepositoryRoot $fixtureRoot
     Assert-Condition -Condition $before.Root.Untracked.Entries.Contains("root-untracked.txt") -Message "root untracked fixture was not fingerprinted"
-    Assert-Condition -Condition $before.Generator.Untracked.Entries.Contains("nested-untracked.lic") -Message "nested generator license fixture was not fingerprinted"
+    Assert-Condition -Condition $before.Root.Untracked.Entries.Contains("extern/license-generator/nested-untracked.lic") -Message "vendored generator license fixture was not fingerprinted"
     Assert-Condition -Condition (-not [string]::IsNullOrEmpty($before.Root.StagedDiffHash)) -Message "staged diff was not fingerprinted"
     Assert-Condition -Condition (-not [string]::IsNullOrEmpty($before.Root.UnstagedDiffHash)) -Message "unstaged diff was not fingerprinted"
 

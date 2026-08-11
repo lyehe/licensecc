@@ -18,8 +18,6 @@ param(
 
     [switch]$SkipTests,
 
-    [switch]$AllowDirtyGeneratorSubmodule,
-
     [switch]$IncludeBackend,
 
     [switch]$IncludeServices,
@@ -135,9 +133,6 @@ function Invoke-NpmScript {
 Push-Location $repoRoot
 try {
     if (-not $SkipCore) {
-        if ($AllowDirtyGeneratorSubmodule) {
-            Write-Host "==> -AllowDirtyGeneratorSubmodule is retained for compatibility; the core checker preserves its initial source snapshot."
-        }
         $purityScript = Join-Path $PSScriptRoot "check-build-purity.ps1"
         Invoke-Step "Core build purity $Preset" {
             & $purityScript -Preset $Preset -SkipTests:$SkipTests

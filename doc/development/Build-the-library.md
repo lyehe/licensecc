@@ -83,15 +83,15 @@ Optional prerequisites:
 ## Download and compile
 
 ### Download:
-This project has a submodule (the license generator). Remember to add the option `--recursive` to clone it.
+The repository already contains the vendored license-generator source.
 
 ```console
-git clone --recursive https://github.com/open-license-manager/licensecc.git
+git clone https://github.com/open-license-manager/licensecc.git
 ```
 
 ### Configure:
 
-Use PowerShell 7 to inspect or initialize the pinned generator checkout. Configure/build commands themselves never run source-control operations.
+Use PowerShell 7 to validate the vendored generator source. Configure/build commands themselves never run source-control operations.
 
 ```powershell
 pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/bootstrap.ps1 -CheckOnly

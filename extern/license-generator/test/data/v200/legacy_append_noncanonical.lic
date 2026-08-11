@@ -1,0 +1,4 @@
+[legacy.feature]
+lic_ver = 200
+legacy-custom-key = preserve-me
+sig = historical-signature-encoding

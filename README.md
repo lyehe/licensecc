@@ -22,7 +22,7 @@ versioned independently until the first platform release. See [CHANGELOG.md](CHA
 - `test/`: C++ unit and functional tests.
 - `examples/`: minimal integration examples.
 - `cmake/`: CMake find modules and build helpers.
-- `extern/`: pinned license-generator submodule; `scripts/bootstrap.ps1` is the only workflow that initializes it.
+- `extern/`: repository-owned, vendored license-generator source; `scripts/bootstrap.ps1` validates that the source is present without fetching it.
 - `doc/`: documentation source and architecture notes.
 - `doc/architecture/`: system map, change guide, role ownership, and architecture decisions.
 - `docs/implementation/`: implementation evidence reports; `docs/superpowers/plans/` contains protected execution plans.
@@ -45,7 +45,7 @@ Generated project material is written under the CMake build tree by default, not
 - CMake 3.16 or newer for manual builds.
 - CMake 3.21 or newer for `CMakePresets.json`.
 - A C++17 compiler.
-- Git with submodule support.
+- Git for clone and source history operations.
 - PowerShell 7 (`pwsh`) on any platform for bootstrap, build-purity checks, `scripts/dev-check.ps1`, and the root npm shortcuts (CI uses the same binary; Windows PowerShell 5.1 is not targeted).
 - Linux: OpenSSL, Zlib where required by the OpenSSL version, and Boost development packages for the bundled generator/tests.
 - Windows: Visual Studio 2022 or another supported C++ toolchain. Boost is required for tests and for building the bundled license generator during configuration. If Boost is not in a default CMake search path, set `BOOST_ROOT` to the Boost install directory.
@@ -55,11 +55,12 @@ Boost is not linked into the final `licensecc` runtime library.
 ## Clone
 
 ```console
-git clone --recursive https://github.com/lyehe/licensecc.git
+git clone https://github.com/lyehe/licensecc.git
 cd licensecc
 ```
 
-If the repository was cloned without submodules, initialize the pinned checkout explicitly:
+The generator source is already part of the clone. Validate that vendored
+source before a native build:
 
 ```powershell
 pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/bootstrap.ps1

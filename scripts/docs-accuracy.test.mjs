@@ -88,7 +88,7 @@ test("backend documentation tracks the accepted C++ online API", () => {
   assert.match(backendReadme, /does not\s+claim TPM support/i);
 });
 
-test("organization evidence tracks the current unpublished candidate", () => {
+test("organization evidence tracks the repository-owned generator snapshot", () => {
   const report = source("docs/implementation/a-level-organization-report.md");
 
   let implementationTipAvailable = false;
@@ -108,37 +108,22 @@ test("organization evidence tracks the current unpublished candidate", () => {
   }
 
   assert.match(report, /final integrated implementation tip is\s+`4f33243b09f27db83e090b914f2fb0d776c34302`/i);
-  assert.match(
-    report,
-    /final reviewed generator candidate\s+`74996a7d345df7b9a7cb46a08d423cb738217ed1`\s+remains\s+unpublished\/unpinned/is,
-  );
-  assert.match(report, /unpublished\/unpinned/i);
-  const gitlink = git(["ls-tree", "HEAD", "extern/license-generator"]).split(/\s+/u)[2];
-  assert.match(report, new RegExp(`superproject gitlink \`${gitlink.slice(0, 7)}\``, "i"));
+  const generatorRoot = "extern/license-generator";
+  const provenance = source(`${generatorRoot}/PROVENANCE.md`);
+  const trackedGeneratorFiles = git(["ls-files", "--stage", "--", generatorRoot])
+    .split(/\r?\n/u)
+    .filter(Boolean);
 
-  const nestedPath = resolve(repositoryRoot, "extern", "license-generator");
-  let nestedRoot = "";
-  try {
-    nestedRoot = git(["-C", nestedPath, "rev-parse", "--show-toplevel"]);
-  } catch {
-    // An uninitialized submodule has no local WIP state to verify.
-  }
-  if (nestedRoot.toLowerCase() === nestedPath.toLowerCase()) {
-    const nestedHead = git(["-C", nestedPath, "rev-parse", "HEAD"]);
-    if (nestedHead !== gitlink) {
-      assert.match(report, new RegExp(`protected (?:WIP|nested revision) \`${nestedHead.slice(0, 7)}\``, "i"));
-      const fixtures = git([
-        "-C",
-        nestedPath,
-        "ls-files",
-        "--others",
-        "--exclude-standard",
-        "--",
-        "*.lic",
-      ]).split(/\r?\n/u).filter(Boolean);
-      assert.match(report, new RegExp(`${fixtures.length} existing untracked \`\\.lic\``, "i"));
-    }
-  }
+  assert.ok(trackedGeneratorFiles.length > 0, "generator source must be normal tracked files");
+  assert.ok(
+    trackedGeneratorFiles.every((entry) => entry.startsWith("100")),
+    "generator source must not be a gitlink",
+  );
+  assert.equal(git(["ls-files", "--", ".gitmodules"]), "", "the repository must not retain submodule metadata");
+  assert.match(provenance, /74996a7d345df7b9a7cb46a08d423cb738217ed1/);
+  assert.match(provenance, /BSD 3-Clause/i);
+  assert.match(report, /reviewed generator snapshot\s+`74996a7d345df7b9a7cb46a08d423cb738217ed1`\s+is now ordinary tracked source/is);
+  assert.match(report, /no `\.gitmodules`\s+entry, generator gitlink, or build-time source fetch remains/is);
 
   const protectedPlans = git([
     "ls-files",
@@ -151,12 +136,12 @@ test("organization evidence tracks the current unpublished candidate", () => {
     assert.match(report, new RegExp(`the ${protectedPlans.length} untracked .*execution\\s+plans`, "is"));
   }
 
-  assert.match(report, /conditional on maintainer approval and\s+publication\/pinning/is);
+  assert.match(report, /until the three remaining evidence items above are\s+completed/is);
   assert.match(report, /timestamped command attestations/i);
   assert.match(report, /does not pretend to rerun or\s+continuously prove these historical command results/is);
   assert.doesNotMatch(
     report,
-    /(?:reviewed generator candidate|embedded final reviewed candidate)[^\n]*`(?:f969e5f40bae55d61a98c208d6198b75cfb86fb3|dbe2601f9bc0f55a386a14140d4b722b53348df6|4a716a5(?:93748d205a67dabf789c6fb39da9a975e)?)`/i,
+    /(?:reviewed generator snapshot|embedded reviewed generator source)[^\n]*`(?:f969e5f40bae55d61a98c208d6198b75cfb86fb3|dbe2601f9bc0f55a386a14140d4b722b53348df6|4a716a5(?:93748d205a67dabf789c6fb39da9a975e)?)`/i,
   );
 });
 
