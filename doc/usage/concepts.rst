@@ -13,14 +13,14 @@ Since we're open source the keys can't be generated once and committed to github
 compilation of the library. 
 
 A ``project`` in `licensecc` terms refers to a folder containing a private key, a public key and a file containing customizations. 
-Licensecc source tree can host multiple projects simultaneously, but can compile only one project at once.
-
-Projects are stored by default in the ``licensecc\projects`` folder, though you can place them elsewhere.
-Below the structure that is automatically created for you at compile time: there is one project named 'DEFAULT' used to compile and run tests.
+Licensecc configures one project into each build. Project material is generated
+outside the source checkout (or under the active build directory); the source
+tree does not carry a pre-generated ``projects`` directory. A development build
+can generate a ``DEFAULT`` project for its selected build tree.
 
 ::
     
-	projects
+	<generated project base>
 	└── DEFAULT       #(your project name)
 	    ├── include
 	    │   └── licensecc
@@ -31,7 +31,10 @@ Below the structure that is automatically created for you at compile time: there
 	    │   └── test.lic
 	    └── private_key.rsa
 
-If you want to use or create a new project in the configure phase of cmake specify the parameter '-DLCC_PROJECT_NAME'.
+If you want to use or create a new project in the configure phase of CMake,
+specify ``-DLCC_PROJECT_NAME`` and, when needed, an external
+``-DLCC_PROJECTS_BASE_DIR``. See :doc:`../development/Build-the-library` for
+the source-tree purity constraint.
 
 A `licensecc-project` corresponds to one executable it has to be licensed. So for instance suppose you have two executables "Foo" and "Bar"
 and you want to issue licenses separately (licenses of "Foo" incompatible with "Bar") you need to: 
@@ -78,6 +81,6 @@ examples project.
 Versions
 ================
 
-.. TODO::
-   
-   Versions are not yet implemented.
+Caller-version input and license version limits are implemented in the C++
+runtime. See the :doc:`capability registry <../capabilities/index>` for the
+current evidence and limitations.

@@ -92,7 +92,7 @@ else
 }
 ```
 
-The verifier mirrors the C++ online-verification client (in progress; not yet on `main`) exactly,
+The verifier mirrors the accepted C++ online-verification contract,
 with parity pinned by the shared golden vectors: 3-part envelope,
 exact prefix, **canonical standard base64** (url-safe / unpadded / whitespace rejected),
 RSA-PKCS1-SHA256 over the payload bytes against the **key-id-selected** trusted key (unknown key-id →
