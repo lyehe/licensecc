@@ -11,6 +11,8 @@ param(
         "ci-linux-device-identity-test",
         "ci-linux-debug-tpm2-capability",
         "ci-linux-release-tpm2-capability",
+        "ci-linux-debug-tpm2",
+        "ci-linux-release-tpm2",
         "ci-windows-msvc-debug-dynamic",
         "ci-windows-msvc-debug-static",
         "ci-windows-msvc-release-dynamic",

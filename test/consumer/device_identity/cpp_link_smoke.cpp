@@ -64,6 +64,44 @@ int main() {
         default:
             return 2;
     }
+#elif defined(LCC_DEVICE_IDENTITY_EXPECT_TPM2_OPENSSL)
+    options.backend = LCC_DEVICE_BACKEND_TPM2_OPENSSL;
+    options.policy = LCC_DEVICE_POLICY_HARDWARE_REQUIRED;
+    options.flags = LCC_DEVICE_OPEN_CREATE_IF_MISSING;
+    if (!set_field(options.application_id, "licensecc.test.installed-consumer.tpm2") ||
+        !set_field(options.project, "DEFAULT") ||
+        !set_field(options.storage_directory, LCC_DEVICE_IDENTITY_TPM2_STORAGE_DIRECTORY)) {
+        return 1;
+    }
+    LccDeviceIdentity* identity = nullptr;
+    const LCC_DEVICE_RESULT open_result = lcc_device_identity_open(&options, &identity);
+    if (open_result != LCC_DEVICE_OK || identity == nullptr) {
+#ifdef LCC_DEVICE_IDENTITY_TPM2_ALLOW_SKIP
+        switch (open_result) {
+            case LCC_DEVICE_PROVIDER_UNAVAILABLE:
+            case LCC_DEVICE_HARDWARE_UNAVAILABLE:
+            case LCC_DEVICE_ACCESS_DENIED:
+            case LCC_DEVICE_BUSY:
+                return 77;
+            default:
+                break;
+        }
+#endif
+        return 2;
+    }
+    LccDeviceIdentityMetadata metadata;
+    lcc_init_device_identity_metadata(&metadata);
+    const LCC_DEVICE_RESULT metadata_result = lcc_device_identity_get_metadata(identity, &metadata);
+    const std::string key_id = metadata.device_key_id;
+    lcc_device_identity_close(identity);
+    if (metadata_result != LCC_DEVICE_OK || metadata.backend != LCC_DEVICE_BACKEND_TPM2_OPENSSL ||
+        metadata.assurance != LCC_DEVICE_ASSURANCE_REPORTED_HARDWARE ||
+        std::string(metadata.provider) != "tpm2-openssl" ||
+        std::string(metadata.algorithm) != "ecdsa-p256-sha256") {
+        return 3;
+    }
+    options.flags = 0U;
+    return lcc_device_identity_delete_key(&options, key_id.c_str()) == LCC_DEVICE_OK ? 0 : 4;
 #else
     options.backend = LCC_DEVICE_BACKEND_SOFTWARE_TEST;
     options.policy = LCC_DEVICE_POLICY_SOFTWARE_EXPLICIT;
