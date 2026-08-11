@@ -90,6 +90,13 @@ run ``npm run check:pr`` before submitting. For C++ core changes, also run
 
    capabilities/index
 
+.. toctree::
+   :maxdepth: 2
+   :hidden:
+   :caption: Release and packaging:
+
+   release-artifacts
+
 
 .. toctree::
    :maxdepth: 2
