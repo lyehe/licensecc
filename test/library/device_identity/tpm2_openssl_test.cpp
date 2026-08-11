@@ -1736,7 +1736,11 @@ int run_real(const char* storage_directory) {
     ProviderOpenRequest request = request_for(storage_directory);
     auto provider = license::device_identity::make_tpm2_openssl_provider();
     require(provider != nullptr, "TPM2 provider factory");
-    require(provider->create(request) == LCC_DEVICE_OK, "TPM2 provider create");
+    const LCC_DEVICE_RESULT create_result = provider->create(request);
+    if (create_result != LCC_DEVICE_OK) {
+        std::cerr << "TPM2 provider create result=" << static_cast<int>(create_result) << '\n';
+    }
+    require(create_result == LCC_DEVICE_OK, "TPM2 provider create");
     license::device_identity::P256Spki spki{};
     require(provider->public_spki(spki) == LCC_DEVICE_OK, "TPM2 public SPKI");
     const std::string key_id = license::device_identity::device_key_id(spki);
