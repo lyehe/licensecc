@@ -263,12 +263,17 @@ function Get-NormalizedToolCandidates {
     $uniquePaths = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
     $normalizedPaths = [System.Collections.Generic.List[string]]::new()
     foreach ($candidate in $Candidates) {
-        $path = if ($candidate -is [string]) {
-            $candidate
-        } elseif (-not [string]::IsNullOrWhiteSpace([string]$candidate.Source)) {
-            [string]$candidate.Source
-        } else {
-            [string]$candidate.Path
+        $path = $null
+        if ($candidate -is [string]) {
+            $path = $candidate
+        } elseif ($null -ne $candidate) {
+            foreach ($propertyName in @("Source", "Path")) {
+                $property = $candidate.PSObject.Properties[$propertyName]
+                if ($null -ne $property -and -not [string]::IsNullOrWhiteSpace([string]$property.Value)) {
+                    $path = [string]$property.Value
+                    break
+                }
+            }
         }
 
         if ([string]::IsNullOrWhiteSpace($path) -or -not (Test-Path -LiteralPath $path -PathType Leaf)) {
@@ -286,7 +291,6 @@ function Get-NormalizedToolCandidates {
         }
     }
 
-    $normalizedPaths.Sort([System.StringComparer]::Ordinal)
     return $normalizedPaths.ToArray()
 }
 
@@ -304,6 +308,25 @@ function Test-CmakeTool {
     }
 }
 
+function Get-VisualStudioCmakeCandidates {
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateSet("cmake", "ctest")]
+        [string]$Name
+    )
+
+    if (-not $IsWindows) {
+        return @()
+    }
+
+    $programFiles = [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::ProgramFiles)
+    $candidates = [System.Collections.Generic.List[string]]::new()
+    foreach ($edition in @("Community", "Professional", "Enterprise", "BuildTools")) {
+        $candidates.Add((Join-Path $programFiles "Microsoft Visual Studio/2022/$edition/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/$Name.exe"))
+    }
+    return $candidates.ToArray()
+}
+
 function Resolve-CmakeTool {
     param(
         [Parameter(Mandatory = $true)]
@@ -312,33 +335,26 @@ function Resolve-CmakeTool {
 
         [scriptblock]$CommandResolver = {
             param([string]$CommandName)
-            Get-Command $CommandName -CommandType Application -ErrorAction SilentlyContinue
+            Get-Command $CommandName -CommandType Application -All -ErrorAction SilentlyContinue
         },
 
-        [scriptblock]$ToolValidator = {
-            param([string]$ToolPath)
-            Test-CmakeTool -Tool $ToolPath
+        [scriptblock]$VisualStudioCandidateResolver = {
+            param([string]$CommandName)
+            Get-VisualStudioCmakeCandidates -Name $CommandName
         }
     )
 
     $onPathCandidates = Get-NormalizedToolCandidates -Candidates @(& $CommandResolver $Name)
     foreach ($candidate in $onPathCandidates) {
-        if (& $ToolValidator $candidate) {
+        if (Test-CmakeTool -Tool $candidate) {
             return [string]$candidate
         }
     }
 
-    if ($IsWindows) {
-        $programFiles = [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::ProgramFiles)
-        $visualStudioCandidates = [System.Collections.Generic.List[string]]::new()
-        foreach ($edition in @("Community", "Professional", "Enterprise", "BuildTools")) {
-            $candidate = Join-Path $programFiles "Microsoft Visual Studio/2022/$edition/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/$Name.exe"
-            $visualStudioCandidates.Add($candidate)
-        }
-        foreach ($candidate in (Get-NormalizedToolCandidates -Candidates $visualStudioCandidates.ToArray())) {
-            if (& $ToolValidator $candidate) {
-                return [string]$candidate
-            }
+    $visualStudioCandidates = Get-NormalizedToolCandidates -Candidates @(& $VisualStudioCandidateResolver $Name)
+    foreach ($candidate in $visualStudioCandidates) {
+        if (Test-CmakeTool -Tool $candidate) {
+            return [string]$candidate
         }
     }
 
