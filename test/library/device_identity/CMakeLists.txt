@@ -1,3 +1,4 @@
+if(LCC_ENABLE_DEVICE_IDENTITY)
 set(_lcc_device_identity_tests
     device_identity_abi_test
     device_identity_vectors_test)
@@ -48,3 +49,13 @@ endif()
 
 unset(_lcc_device_identity_test)
 unset(_lcc_device_identity_tests)
+endif()
+
+if(LCC_BUILD_TPM2_OPENSSL_CAPABILITY_TEST)
+    add_executable(device_identity_tpm2_openssl_test tpm2_openssl_test.cpp)
+    target_compile_features(device_identity_tpm2_openssl_test PRIVATE cxx_std_17)
+    target_link_libraries(device_identity_tpm2_openssl_test PRIVATE OpenSSL::Crypto)
+    add_test(NAME device_identity_tpm2_openssl COMMAND device_identity_tpm2_openssl_test)
+    set_tests_properties(device_identity_tpm2_openssl
+        PROPERTIES LABELS "security;device_identity;ubuntu_tpm2" SKIP_RETURN_CODE 77)
+endif()

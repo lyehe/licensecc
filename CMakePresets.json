@@ -106,6 +106,38 @@
       }
     },
     {
+      "name": "ci-linux-debug-tpm2-capability",
+      "inherits": "ci-linux-debug",
+      "displayName": "CI Linux Debug TPM2 OpenSSL Capability",
+      "description": "Linux CI capability probe for the packaged OpenSSL tpm2 provider; no Licensecc TPM2 provider is built.",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/ci-linux-debug-tpm2-capability",
+      "cacheVariables": {
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/build/ci-linux-debug-tpm2-capability/install",
+        "LCC_ENABLE_DEVICE_IDENTITY": "FALSE",
+        "LCC_ENABLE_WINDOWS_TPM": "FALSE",
+        "LCC_ENABLE_TPM2_OPENSSL": "FALSE",
+        "LCC_BUILD_DEVICE_IDENTITY_TEST_PROVIDER": "FALSE",
+        "LCC_BUILD_TPM2_OPENSSL_CAPABILITY_TEST": "TRUE"
+      }
+    },
+    {
+      "name": "ci-linux-release-tpm2-capability",
+      "inherits": "ci-linux-release",
+      "displayName": "CI Linux Release TPM2 OpenSSL Capability",
+      "description": "Linux CI release capability probe for the packaged OpenSSL tpm2 provider; no Licensecc TPM2 provider is built.",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/ci-linux-release-tpm2-capability",
+      "cacheVariables": {
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/build/ci-linux-release-tpm2-capability/install",
+        "LCC_ENABLE_DEVICE_IDENTITY": "FALSE",
+        "LCC_ENABLE_WINDOWS_TPM": "FALSE",
+        "LCC_ENABLE_TPM2_OPENSSL": "FALSE",
+        "LCC_BUILD_DEVICE_IDENTITY_TEST_PROVIDER": "FALSE",
+        "LCC_BUILD_TPM2_OPENSSL_CAPABILITY_TEST": "TRUE"
+      }
+    },
+    {
       "name": "ci-windows-msvc-debug-dynamic",
       "displayName": "CI Windows MSVC Debug Dynamic",
       "description": "Windows MSVC CI debug configure shape with dynamic runtime.",
@@ -314,6 +346,16 @@
       "targets": ["install"]
     },
     {
+      "name": "ci-linux-debug-tpm2-capability",
+      "configurePreset": "ci-linux-debug-tpm2-capability",
+      "configuration": "Debug"
+    },
+    {
+      "name": "ci-linux-release-tpm2-capability",
+      "configurePreset": "ci-linux-release-tpm2-capability",
+      "configuration": "Release"
+    },
+    {
       "name": "ci-windows-msvc-debug-dynamic",
       "configurePreset": "ci-windows-msvc-debug-dynamic",
       "configuration": "Debug",
@@ -456,6 +498,28 @@
       "name": "ci-linux-device-identity-test",
       "configurePreset": "ci-linux-device-identity-test",
       "configuration": "Debug",
+      "output": {
+        "outputOnFailure": true
+      },
+      "environment": {
+        "VIRTUAL_ENV": "VM"
+      }
+    },
+    {
+      "name": "ci-linux-debug-tpm2-capability",
+      "configurePreset": "ci-linux-debug-tpm2-capability",
+      "configuration": "Debug",
+      "output": {
+        "outputOnFailure": true
+      },
+      "environment": {
+        "VIRTUAL_ENV": "VM"
+      }
+    },
+    {
+      "name": "ci-linux-release-tpm2-capability",
+      "configurePreset": "ci-linux-release-tpm2-capability",
+      "configuration": "Release",
       "output": {
         "outputOnFailure": true
       },

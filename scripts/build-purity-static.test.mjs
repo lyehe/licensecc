@@ -141,6 +141,8 @@ test("device-identity presets are accepted by both PowerShell entrypoints", () =
     "dev-device-identity-off",
     "dev-device-identity-test",
     "ci-linux-device-identity-test",
+    "ci-linux-debug-tpm2-capability",
+    "ci-linux-release-tpm2-capability",
     "ci-windows-device-identity-test",
   ];
   for (const script of [source("scripts/check-build-purity.ps1"), source("scripts/dev-check.ps1")]) {
@@ -306,4 +308,41 @@ test("Windows TPM shim, real-test skip, consumers, and example remain explicit",
   assert.match(consumerCmake, /LCC_DEVICE_IDENTITY_EXPECT_WINDOWS_TPM/u);
   assert.match(exampleCmake, /find_package\(licensecc CONFIG REQUIRED\)/u);
   assert.match(exampleCmake, /LCC_ENABLE_WINDOWS_TPM/u);
+});
+
+test("Ubuntu TPM2 capability probe is isolated, exact-digest, and simulator-scoped", () => {
+  const capability = source("test/library/device_identity/tpm2_openssl_test.cpp");
+  const testCmake = source("test/library/device_identity/CMakeLists.txt");
+  const script = source("scripts/ci/run-swtpm-device-identity.sh");
+  const workflow = source(".github/workflows/linux.yml");
+  const presets = JSON.parse(source("CMakePresets.json"));
+
+  assert.match(capability, /OSSL_LIB_CTX_new\(\)/u);
+  assert.match(capability, /OSSL_PROVIDER_load\([^\n]*"default"/u);
+  assert.match(capability, /OSSL_PROVIDER_load\([^\n]*"tpm2"/u);
+  assert.match(capability, /EVP_PKEY_sign\(/u);
+  assert.doesNotMatch(capability, /EVP_DigestSign/u);
+  assert.match(capability, /der_to_p1363/u);
+  assert.match(capability, /SHA256\(digest\)/u);
+  assert.match(capability, /return\s+77/u);
+  assert.match(testCmake, /LCC_BUILD_TPM2_OPENSSL_CAPABILITY_TEST/u);
+  assert.match(testCmake, /tpm2_openssl_test/u);
+  assert.match(script, /^set -euo pipefail/mu);
+  assert.match(script, /swtpm\s+socket/u);
+  assert.match(script, /TPM2OPENSSL_TCTI=/u);
+  assert.match(script, /trap\s+/u);
+  assert.match(workflow, /ubuntu-22\.04/u);
+  assert.match(workflow, /ubuntu-24\.04/u);
+  assert.match(workflow, /tpm2-openssl/u);
+  assert.match(workflow, /run-swtpm-device-identity\.sh/u);
+
+  for (const name of ["ci-linux-debug-tpm2-capability", "ci-linux-release-tpm2-capability"]) {
+    const configure = presets.configurePresets.find((preset) => preset.name === name);
+    assert.ok(configure, `${name} configure preset`);
+    assert.equal(configure.cacheVariables.LCC_BUILD_TPM2_OPENSSL_CAPABILITY_TEST, "TRUE");
+    assert.equal(configure.cacheVariables.LCC_ENABLE_TPM2_OPENSSL, "FALSE");
+    assert.equal(configure.cacheVariables.LCC_ENABLE_WINDOWS_TPM, "FALSE");
+    assert.ok(presets.buildPresets.some((preset) => preset.name === name && preset.configurePreset === name));
+    assert.ok(presets.testPresets.some((preset) => preset.name === name && preset.configurePreset === name));
+  }
 });
