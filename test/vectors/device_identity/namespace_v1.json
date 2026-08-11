@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "application_id": "licensecc.test",
+  "project": "DEFAULT",
+  "vectors": [
+    {
+      "scope": "user",
+      "namespace_payload_hex": "6c6963656e736563632d6465766963652d6b65792d6e616d6573706163652d76310a6170706c69636174696f6e2d69643d6c6963656e736563632e746573740a70726f6a6563743d44454641554c540a73636f70653d757365720a",
+      "namespace_hash": "51188ccce492998491ae0f25256c211279cfe36c52307c8190580b39e98da028",
+      "windows_name": "licensecc-v1-51188ccce492998491ae0f25256c211279cfe36c52307c8190580b39e98da028",
+      "linux_filename": "licensecc-v1-51188ccce492998491ae0f25256c211279cfe36c52307c8190580b39e98da028.tss2.pem",
+      "lock_name": "licensecc-v1-51188ccce492998491ae0f25256c211279cfe36c52307c8190580b39e98da028.tss2.pem.lock"
+    },
+    {
+      "scope": "machine",
+      "namespace_payload_hex": "6c6963656e736563632d6465766963652d6b65792d6e616d6573706163652d76310a6170706c69636174696f6e2d69643d6c6963656e736563632e746573740a70726f6a6563743d44454641554c540a73636f70653d6d616368696e650a",
+      "namespace_hash": "68669b6e36bc6429ba34ec4fdd3c8f15175f261d16fdc88ccb596803e6d3ef42",
+      "windows_name": "licensecc-v1-68669b6e36bc6429ba34ec4fdd3c8f15175f261d16fdc88ccb596803e6d3ef42",
+      "linux_filename": "licensecc-v1-68669b6e36bc6429ba34ec4fdd3c8f15175f261d16fdc88ccb596803e6d3ef42.tss2.pem",
+      "lock_name": "licensecc-v1-68669b6e36bc6429ba34ec4fdd3c8f15175f261d16fdc88ccb596803e6d3ef42.tss2.pem.lock"
+    }
+  ]
+}

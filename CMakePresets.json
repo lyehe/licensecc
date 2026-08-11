@@ -18,6 +18,36 @@
       }
     },
     {
+      "name": "dev-device-identity-off",
+      "inherits": "dev-debug",
+      "displayName": "Developer Device Identity Off",
+      "description": "Debug build with all device-identity features fixed off.",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/dev-device-identity-off",
+      "cacheVariables": {
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/build/dev-device-identity-off/install",
+        "LCC_ENABLE_DEVICE_IDENTITY": "FALSE",
+        "LCC_ENABLE_WINDOWS_TPM": "FALSE",
+        "LCC_ENABLE_TPM2_OPENSSL": "FALSE",
+        "LCC_BUILD_DEVICE_IDENTITY_TEST_PROVIDER": "FALSE"
+      }
+    },
+    {
+      "name": "dev-device-identity-test",
+      "inherits": "dev-debug",
+      "displayName": "Developer Device Identity Software Test",
+      "description": "Debug build with the portable device-identity core and test-only software provider.",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/dev-device-identity-test",
+      "cacheVariables": {
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/build/dev-device-identity-test/install",
+        "LCC_ENABLE_DEVICE_IDENTITY": "TRUE",
+        "LCC_ENABLE_WINDOWS_TPM": "FALSE",
+        "LCC_ENABLE_TPM2_OPENSSL": "FALSE",
+        "LCC_BUILD_DEVICE_IDENTITY_TEST_PROVIDER": "TRUE"
+      }
+    },
+    {
       "name": "dev-release",
       "displayName": "Developer Release",
       "description": "Default local release build with generated license project files under the build tree.",
@@ -144,6 +174,16 @@
       "configuration": "Debug"
     },
     {
+      "name": "dev-device-identity-off",
+      "configurePreset": "dev-device-identity-off",
+      "configuration": "Debug"
+    },
+    {
+      "name": "dev-device-identity-test",
+      "configurePreset": "dev-device-identity-test",
+      "configuration": "Debug"
+    },
+    {
       "name": "dev-release",
       "configurePreset": "dev-release",
       "configuration": "Release"
@@ -201,6 +241,28 @@
     {
       "name": "dev-debug",
       "configurePreset": "dev-debug",
+      "configuration": "Debug",
+      "output": {
+        "outputOnFailure": true
+      },
+      "environment": {
+        "VIRTUAL_ENV": "VM"
+      }
+    },
+    {
+      "name": "dev-device-identity-off",
+      "configurePreset": "dev-device-identity-off",
+      "configuration": "Debug",
+      "output": {
+        "outputOnFailure": true
+      },
+      "environment": {
+        "VIRTUAL_ENV": "VM"
+      }
+    },
+    {
+      "name": "dev-device-identity-test",
+      "configurePreset": "dev-device-identity-test",
       "configuration": "Debug",
       "output": {
         "outputOnFailure": true

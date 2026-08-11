@@ -31,6 +31,10 @@ extern "C" {
 #endif
 #include LCC_PROJECT_CONFIG_HEADER
 
+/* Opaque device-identity handle. The forward declaration is always available;
+ * the device-identity implementation remains an opt-in library feature. */
+typedef struct LccDeviceIdentity LccDeviceIdentity;
+
 typedef enum {
 	LICENSE_OK = 0,  // OK
 	LICENSE_FILE_NOT_FOUND = 1,  // license file not found
