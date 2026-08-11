@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
-import { assembleReleaseArtifacts, createCppSourceArchive, inspectReleaseDirectory, planWorkerAssembly } from "./assemble-release-artifacts.mjs";
+import { assembleReleaseArtifacts, createCppSourceArchive, inspectReleaseDirectory, parseArgs, planWorkerAssembly } from "./assemble-release-artifacts.mjs";
 
 const PLATFORM_VERSION = "0.1.0-rc.1";
 const PYTHON_VERSION = "0.1.0rc1";
@@ -62,9 +62,9 @@ test("release source archive uses only canonical tracked blobs, vendor dependenc
 });
 
 test("assembly stages clean UI assets, four pinned local Worker bundles, locked SDK packages, and exact SPDX inspection", () => {
-  const root = releaseFixture(); const output = join(root, "release-stage"); const commands = [];
+  const root = releaseFixture(); const output = join(root, "build", "release-artifacts", "release-stage"); const commands = [];
   try {
-    const manifest = assembleReleaseArtifacts({ root, outputDirectory: output, consumerId: "acme", expectedPlatformVersion: PLATFORM_VERSION, expectedPythonVersion: PYTHON_VERSION, run: stagedRunner(commands), toolAvailable: () => true });
+    const verified = []; const manifest = assembleReleaseArtifacts({ root, outputDirectory: output, consumerId: "acme", expectedPlatformVersion: PLATFORM_VERSION, expectedPythonVersion: PYTHON_VERSION, run: stagedRunner(commands), verifyArchive: (entry) => verified.push(entry), toolAvailable: () => true });
     assert.equal(manifest.incomplete, false);
     assert.equal(commands.filter((entry) => entry.label.includes("UI build")).length, 2);
     assert.equal(commands.filter((entry) => entry.label.includes("Worker dry-run")).length, 4);
@@ -74,6 +74,7 @@ test("assembly stages clean UI assets, four pinned local Worker bundles, locked 
     assert.ok(commands.some((entry) => entry.label.includes("NuGet package") && entry.args.includes(`-p:PackageVersion=${PLATFORM_VERSION}`)));
     assert.equal(manifest.cpp_version, "2.1.0");
     assert.equal(manifest.consumer_id, "acme");
+    assert.equal(verified.length, 1); assert.match(verified[0].archivePath, /cpp-2\.1\.0-platform/);
     assert.ok(!existsSync(join(output, ".release-work")));
     writeFileSync(join(output, "workers/licensing-backend/unlisted.js"), "extra");
     assert.throws(() => inspectReleaseDirectory(output, { root }), /payload set does not exactly match staging/);
@@ -81,21 +82,21 @@ test("assembly stages clean UI assets, four pinned local Worker bundles, locked 
 });
 
 test("dotnet is mandatory unless allow-partial records an incomplete release", () => {
-  const root = releaseFixture(); const blocked = join(root, "blocked"); const partial = join(root, "partial");
+  const root = releaseFixture(); const blocked = join(root, "build", "release-artifacts", "blocked"); const partial = join(root, "build", "release-artifacts", "partial");
   try {
-    assert.throws(() => assembleReleaseArtifacts({ root, outputDirectory: blocked, consumerId: "acme", run: stagedRunner([]), toolAvailable: () => false }), /dotnet is required/);
+    assert.throws(() => assembleReleaseArtifacts({ root, outputDirectory: blocked, consumerId: "acme", run: stagedRunner([]), verifyArchive: () => {}, toolAvailable: () => false }), /dotnet is required/);
     assert.ok(!existsSync(blocked));
-    const manifest = assembleReleaseArtifacts({ root, outputDirectory: partial, consumerId: "acme", allowPartial: true, run: stagedRunner([]), toolAvailable: () => false });
+    const manifest = assembleReleaseArtifacts({ root, outputDirectory: partial, consumerId: "acme", allowPartial: true, run: stagedRunner([]), verifyArchive: () => {}, toolAvailable: () => false });
     assert.equal(manifest.incomplete, true);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
 test("version authority, NuGet symbols, and SPDX package identity fail closed", () => {
-  const root = releaseFixture(); const wrongVersion = join(root, "wrong-version"); const noSymbols = join(root, "no-symbols"); const output = join(root, "spdx");
+  const root = releaseFixture(); const wrongVersion = join(root, "build", "release-artifacts", "wrong-version"); const noSymbols = join(root, "build", "release-artifacts", "no-symbols"); const output = join(root, "build", "release-artifacts", "spdx");
   try {
-    assert.throws(() => assembleReleaseArtifacts({ root, outputDirectory: wrongVersion, consumerId: "acme", expectedPlatformVersion: "9.9.9", run: stagedRunner([]), toolAvailable: () => true }), /does not match tracked version authority/);
-    assert.throws(() => assembleReleaseArtifacts({ root, outputDirectory: noSymbols, consumerId: "acme", run: stagedRunner([], { symbols: false }), toolAvailable: () => true }), /NuGet primary and symbols artifacts/);
-    assembleReleaseArtifacts({ root, outputDirectory: output, consumerId: "acme", run: stagedRunner([]), toolAvailable: () => true });
+    assert.throws(() => assembleReleaseArtifacts({ root, outputDirectory: wrongVersion, consumerId: "acme", expectedPlatformVersion: "9.9.9", run: stagedRunner([]), verifyArchive: () => {}, toolAvailable: () => true }), /does not match tracked version authority/);
+    assert.throws(() => assembleReleaseArtifacts({ root, outputDirectory: noSymbols, consumerId: "acme", run: stagedRunner([], { symbols: false }), verifyArchive: () => {}, toolAvailable: () => true }), /NuGet primary and symbols artifacts/);
+    assembleReleaseArtifacts({ root, outputDirectory: output, consumerId: "acme", run: stagedRunner([]), verifyArchive: () => {}, toolAvailable: () => true });
     const spdxPath = join(output, "spdx.json"); const spdx = JSON.parse(readFileSync(spdxPath, "utf8"));
     assert.match(spdx.documentNamespace, /acme/); assert.match(spdx.documentNamespace, /2\.1\.0/); assert.ok(spdx.packages.some((entry) => entry.name.startsWith("cpp/") && entry.versionInfo === "2.1.0"));
     spdx.packages[0].checksums[0].checksumValue = "0".repeat(64); writeFileSync(spdxPath, JSON.stringify(spdx));
@@ -108,4 +109,14 @@ test("worker plan uses only example configs and isolated UI output", () => {
   assert.equal(plan.filter((entry) => entry.label.includes("Worker dry-run")).length, 4);
   assert.equal(plan.filter((entry) => entry.label.includes("UI build")).length, 2);
   assert.ok(plan.filter((entry) => entry.label.includes("Worker dry-run")).every((entry) => /wrangler\.example\.(toml|jsonc)$/.test(entry.args[entry.args.indexOf("--config") + 1])));
+});
+
+test("release output boundary and CLI reject unsafe authority bypasses", () => {
+  const root = releaseFixture();
+  try {
+    assert.throws(() => assembleReleaseArtifacts({ root, outputDirectory: root, consumerId: "acme" }), /release output/);
+    assert.throws(() => assembleReleaseArtifacts({ root, outputDirectory: join(root, "not-build"), consumerId: "acme" }), /release output/);
+    assert.throws(() => parseArgs(["node", "script", "--unknown", "x"]), /invalid argument/);
+    assert.throws(() => parseArgs(["node", "script", "--output", "a", "--output", "b"]), /invalid argument/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });
