@@ -52,8 +52,9 @@ internals: wheel/sdist metadata, primary NuGet `.nuspec`/DLL, and symbol
 is never sufficient.
 
 The Python PEP 517 backend is pinned to Hatchling 1.27.0 in `pyproject.toml`.
-The canonical `uv build` receives the tracked hash-constrained
-`sdks/python/build-constraints.txt` and `--require-hashes`. NuGet packaging
+The assembler first checks the canonical `uv.lock`, then invokes `uv build`
+with the tracked hash-constrained `sdks/python/build-constraints.txt` and
+`--require-hashes`. NuGet packaging
 sets `SymbolPackageFormat=snupkg` both in the SDK project and the pack command.
 
 The assembler derives `SOURCE_DATE_EPOCH` from the exact Git commit timestamp

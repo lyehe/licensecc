@@ -1152,7 +1152,11 @@ function assembleReleaseArtifacts({ root = repositoryRoot, outputDirectory, cons
       const env = sanitizedEnvironment(canonical, versions.sourceDateEpoch);
       const npm = runCanonicalNpmInstall({ root: canonical, run, env });
       runWorkerAssembly({ root: canonical, outputDirectory: staging.output, run, env, staging, npm });
-      run({ executable: "uv", args: ["build", "--locked", "--directory", join(canonical, "sdks/python"), "--build-constraint", canonicalPythonBuildConstraint(canonical), "--require-hashes", "--wheel", "--sdist", "--out-dir", join(staging.output, "python")], cwd: canonical, env, label: "locked Python wheel and sdist" });
+      // `uv build` deliberately has no --locked mode.  Validate the canonical
+      // project lock first, then constrain and hash-check the isolated PEP 517
+      // backend resolution used for the wheel and sdist.
+      run({ executable: "uv", args: ["lock", "--check", "--directory", join(canonical, "sdks/python")], cwd: canonical, env, label: "locked Python dependency check" });
+      run({ executable: "uv", args: ["build", "--directory", join(canonical, "sdks/python"), "--build-constraint", canonicalPythonBuildConstraint(canonical), "--require-hashes", "--wheel", "--sdist", "--out-dir", join(staging.output, "python")], cwd: canonical, env, label: "locked Python wheel and sdist" });
       hasDotnet = toolAvailable("dotnet");
       if (!hasDotnet && !allowPartial) throw new Error("dotnet is required; use --allow-partial only for an explicitly incomplete manifest");
       if (hasDotnet) {

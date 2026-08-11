@@ -364,7 +364,10 @@ test("assembly uses a sanitized canonical install, four pinned Worker dry-runs, 
     const uiCommands = commands.filter((entry) => entry.label.includes("isolated UI build"));
     const npmPrefix = npmVersion.args.slice(0, -1);
     assert.ok(uiCommands.every((entry) => entry.executable === npmVersion.executable && JSON.stringify(entry.args.slice(0, npmPrefix.length)) === JSON.stringify(npmPrefix) && !entry.args.some((argument) => String(argument).includes(".canonical-head") && String(argument).includes("npm-cli"))));
-    assert.ok(commands.some((entry) => entry.label.includes("Python wheel") && entry.args.includes("--locked") && entry.args.some((arg) => String(arg).includes(".canonical-head"))));
+    const pythonLock = commands.find((entry) => entry.label === "locked Python dependency check");
+    assert.ok(pythonLock, "the canonical Python lock is checked before building distributions");
+    assert.deepEqual(pythonLock.args.slice(0, 2), ["lock", "--check"]);
+    assert.ok(pythonLock.args.some((arg) => String(arg).includes(".canonical-head")));
     const pythonBuild = commands.find((entry) => entry.label.includes("Python wheel"));
     assert.ok(pythonBuild.args.includes("--build-constraint"));
     assert.ok(pythonBuild.args.includes("--require-hashes"));
