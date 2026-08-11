@@ -51,6 +51,8 @@ Generated project material is written under the CMake build tree by default, not
 - A C++17 compiler.
 - Git for clone and source history operations.
 - PowerShell 7 (`pwsh`) on any platform for bootstrap, build-purity checks, `scripts/dev-check.ps1`, and the root npm shortcuts (CI uses the same binary; Windows PowerShell 5.1 is not targeted).
+- Python 3.12 and uv 0.5.15. The repository-level `uv.toml` pins uv, and the
+  Python SDK and PostgreSQL parity tools each use a checked-in `uv.lock`.
 - Linux: OpenSSL, Zlib where required by the OpenSSL version, and Boost development packages for the bundled generator/tests.
 - Windows: Visual Studio 2022 or another supported C++ toolchain. Boost is required for tests and for building the bundled license generator during configuration. If Boost is not in a default CMake search path, set `BOOST_ROOT` to the Boost install directory.
 

@@ -17,7 +17,7 @@ trigger covering INSERT/UPDATE/DELETE. Any new exception must be reviewed here
 rather than silently weakening parity.
 
 Run via:
-  uv run --no-project --with sqlglot==30.15.0 python scripts/check-pg-parity.py
+  uv run --directory scripts/pg-parity --locked python ../check-pg-parity.py
 """
 from __future__ import annotations
 
