@@ -88,9 +88,11 @@ function yamlMapping(line) {
       }
       break;
     }
-    if (end >= source.length || source[end + 1] !== ":") return null;
+    let separator = end + 1;
+    while (/\s/u.test(source[separator] ?? "")) separator += 1;
+    if (end >= source.length || source[separator] !== ":") return null;
     key = yamlScalar(source.slice(0, end + 1));
-    remainder = source.slice(end + 2).trim();
+    remainder = source.slice(separator + 1).trim();
   } else {
     const match = /^([A-Za-z0-9_.-]+):(?:\s*(.*))?$/u.exec(source);
     if (!match) return null;
@@ -317,6 +319,58 @@ function assertExactSetupPins(job, toolchains, label) {
     assert.ok(configured, `${label}: ${action} must configure ${withKey} in its direct with mapping`);
     assert.equal(configured.value, expected, `${label}: ${action} must configure ${withKey} from the tracked authority`);
   }
+}
+
+function namedWorkflowStep(job, stepName, label) {
+  const matches = job.steps.filter((step) => step.properties.get("name")?.value === stepName);
+  assert.equal(matches.length, 1, `${label}: requires exactly one ${stepName} step`);
+  return matches[0];
+}
+
+function assertExactCriticalRun(step, expected, label) {
+  const controls = [...step.properties.keys()].filter((key) => workflowGuardKeys.has(key));
+  assert.deepEqual(controls, [], `${label}: critical step must not use execution controls`);
+  const run = step.properties.get("run");
+  assert.ok(run, `${label}: critical step is missing its run command`);
+  assert.equal(run.value, expected, `${label}: critical step command drifted`);
+}
+
+function assertPostgresWorkflowContract(workflow, relativePath = ".github/workflows/postgres-conformance.yml") {
+  assertNoTopLevelWorkflowDefaults(workflow, relativePath);
+  assert.match(workflow, /^\s*schedule:\s*$/mu);
+  assert.match(workflow, /^\s*workflow_dispatch:\s*$/mu);
+  assert.doesNotMatch(workflow, /^\s*(?:push|pull_request):\s*$/mu);
+  assert.match(
+    workflow,
+    /^\s*image:\s*postgres:16-alpine@sha256:[0-9a-f]{64}\s*$/mu,
+    "PostgreSQL service image must be immutable",
+  );
+
+  const job = workflowJobLinesFromSource(workflow, "postgres-conformance");
+  assert.deepEqual(activeWorkflowDirectives(job), [], `${relativePath}: postgres-conformance must not use execution controls`);
+
+  const install = namedWorkflowStep(job, "Install locked workspace", relativePath);
+  assertExactCriticalRun(install, "npm ci", "Install locked workspace");
+
+  const schema = namedWorkflowStep(job, "Apply fresh disposable PostgreSQL schema", relativePath);
+  assertExactCriticalRun(
+    schema,
+    'docker exec -i "${{ job.services.postgres.id }}" psql --username postgres --dbname licensecc --set ON_ERROR_STOP=on < services/cloudflare-licensing-backend/supabase-postgres/schema.pg.sql',
+    "Apply fresh disposable PostgreSQL schema",
+  );
+
+  const conformance = namedWorkflowStep(job, "Run actual Worker, adapter, nonce, CLI, and transaction conformance", relativePath);
+  assertExactCriticalRun(
+    conformance,
+    "npm run test:pg:real --workspace @licensecc/cloudflare-licensing-backend",
+    "PostgreSQL conformance",
+  );
+  const environment = conformance.children.get("env");
+  assert.ok(environment, "PostgreSQL conformance requires a direct env mapping");
+  assert.deepEqual(
+    Object.fromEntries([...environment].map(([key, property]) => [key, property.value])),
+    { DATABASE_URL: "postgresql://postgres:conformance-only@127.0.0.1:5432/licensecc" },
+  );
 }
 
 function workflowReferences() {
@@ -561,4 +615,63 @@ test("capability evidence remains a PR gate locally and in repository-quality", 
     1,
     "repository-quality must invoke check:capabilities exactly once",
   );
+});
+
+test("scheduled PostgreSQL 16 conformance runs the real fenced implementations", () => {
+  const workflow = source(".github/workflows/postgres-conformance.yml");
+  assertPostgresWorkflowContract(workflow);
+});
+
+test("PostgreSQL workflow commands cannot be replaced by inactive or bypassed YAML", () => {
+  const workflow = source(".github/workflows/postgres-conformance.yml");
+  const decoys = [
+    workflow.replace("run: npm ci", "run: '# npm ci'"),
+    workflow.replace(
+      'docker exec -i "${{ job.services.postgres.id }}"',
+      '# docker exec -i "${{ job.services.postgres.id }}"',
+    ),
+    workflow.replace(
+      "run: npm run test:pg:real --workspace @licensecc/cloudflare-licensing-backend",
+      "run: echo 'npm run test:pg:real --workspace @licensecc/cloudflare-licensing-backend'",
+    ),
+    workflow.replace(
+      "DATABASE_URL: postgresql://postgres:conformance-only@127.0.0.1:5432/licensecc",
+      "# DATABASE_URL: postgresql://postgres:conformance-only@127.0.0.1:5432/licensecc",
+    ),
+    workflow.replace(
+      "- name: Run actual Worker, adapter, nonce, CLI, and transaction conformance",
+      "- name: Run actual Worker, adapter, nonce, CLI, and transaction conformance\n        if: ${{ false }}",
+    ),
+    workflow.replace(
+      "- name: Run actual Worker, adapter, nonce, CLI, and transaction conformance",
+      "- name: Run actual Worker, adapter, nonce, CLI, and transaction conformance\n        continue-on-error: true",
+    ),
+    workflow.replace(
+      "  postgres-conformance:\n    runs-on:",
+      "  postgres-conformance:\n    if: ${{ false }}\n    runs-on:",
+    ),
+    workflow.replace(
+      "  postgres-conformance:\n    runs-on:",
+      "  postgres-conformance:\n    continue-on-error: true\n    runs-on:",
+    ),
+    workflow.replace(
+      "- name: Run actual Worker, adapter, nonce, CLI, and transaction conformance",
+      '- name: Run actual Worker, adapter, nonce, CLI, and transaction conformance\n        "if" : false',
+    ),
+    workflow.replace(
+      "  postgres-conformance:\n    runs-on:",
+      "  postgres-conformance:\n    'continue-on-error' : true\n    runs-on:",
+    ),
+    workflow.replace(
+      "jobs:",
+      "'defaults' :\n  run:\n    shell: bash -c 'exit 0' {0}\n\njobs:",
+    ),
+  ];
+  for (const [index, decoy] of decoys.entries()) {
+    assert.throws(
+      () => assertPostgresWorkflowContract(decoy, `postgres-decoy-${index}.yml`),
+      /critical step|direct env mapping|execution controls|top-level defaults|strictly deep-equal/u,
+      `PostgreSQL workflow decoy ${index} must fail closed`,
+    );
+  }
 });
