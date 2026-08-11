@@ -50,6 +50,7 @@ jobs:
           npm run test:clean-checkout
           npm run test:workflow-pins
           npm run test:versions
+          npm run test:release-artifacts
           npm run check:versions
           npm run lint
           npm run typecheck

@@ -197,10 +197,41 @@ test("lint repository-quality runs the clean-checkout regression gate", () => {
     "repository-quality must invoke test:versions exactly once",
   );
   assert.equal(
+    jobLines.filter((line) => line.trim() === "npm run test:release-artifacts").length,
+    1,
+    "repository-quality must invoke test:release-artifacts exactly once",
+  );
+  assert.equal(
     jobLines.filter((line) => line.trim() === "npm run check:versions").length,
     1,
     "repository-quality must invoke check:versions exactly once",
   );
+});
+
+test("release artifact evidence is an exact-once local and repository-quality gate", () => {
+  const packageJson = JSON.parse(source("package.json"));
+  assert.equal(packageJson.scripts["test:release-artifacts"], "node --test scripts/release-artifacts.test.mjs");
+  assert.equal(
+    packageJson.scripts["check:pr"].split(" && ").filter((command) => command === "npm run test:release-artifacts").length,
+    1,
+    "check:pr must invoke test:release-artifacts exactly once",
+  );
+  const jobLines = workflowJobLines(".github/workflows/lint.yml", "repository-quality");
+  assert.equal(
+    jobLines.filter((line) => line.trim() === "npm run test:release-artifacts").length,
+    1,
+    "repository-quality must invoke test:release-artifacts exactly once",
+  );
+});
+
+test("the release-candidate workflow is manual and performs only local dry-run assembly", () => {
+  const workflow = source(".github/workflows/release-artifacts.yml");
+  assert.match(workflow, /^\s*workflow_dispatch:\s*$/mu);
+  assert.match(workflow, /node scripts\/assemble-release-artifacts\.mjs/);
+  assert.match(workflow, /--consumer-id/);
+  assert.match(workflow, /--output/);
+  assert.doesNotMatch(workflow, /(?:^|\s)(?:git\s+tag|gh\s+release|npm\s+publish|dotnet\s+nuget\s+push|wrangler\s+deploy)(?:\s|$)/imu);
+  assert.doesNotMatch(workflow, /upload-artifact/iu);
 });
 
 test("capability evidence remains a PR gate locally and in repository-quality", () => {
