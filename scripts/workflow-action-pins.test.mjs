@@ -270,6 +270,23 @@ function activeWorkflowDirectives(job) {
   return [job.properties, ...job.steps.map((step) => step.properties)].flatMap((properties) => [...properties.values()].filter((property) => workflowGuardKeys.has(property.key)).map((property) => ({ key: property.key, line: property.line })));
 }
 
+function assertNoTopLevelWorkflowDefaults(content, label) {
+  for (const line of content.split(/\r?\n/)) {
+    const mapping = yamlMapping(line);
+    if (mapping && !mapping.listItem && mapping.indent === 0 && mapping.key === "defaults") throw new Error(`${label}: must not use top-level defaults`);
+  }
+}
+
+function assertExactReleaseAssemblyInvocation(job, expected, label) {
+  const candidates = job.steps
+    .map((step) => step.properties.get("run"))
+    .filter((run) => run?.value.includes("scripts/assemble-release-artifacts.mjs"));
+  assert.equal(candidates.length, 1, `${label}: requires exactly one direct release assembly invocation`);
+  const [run] = candidates;
+  assert.notEqual(run.style, "literal", `${label}: release assembly must be one reconstructed scalar`);
+  assert.equal(run.value, expected, `${label}: requires an exact release assembly invocation`);
+}
+
 function assertNoCommandsAfterUnconditionalExit(job, label) {
   for (const [stepIndex, step] of job.steps.entries()) {
     const run = step.properties.get("run");
@@ -386,12 +403,11 @@ test("release artifact evidence is an exact-once local and repository-quality ga
 
 test("the release-candidate workflow is manual and performs only local dry-run assembly", () => {
   const workflow = source(".github/workflows/release-artifacts.yml");
-  const commands = executionRunCommands(workflowJobLines(".github/workflows/release-artifacts.yml", "assemble"));
+  const job = workflowJobLines(".github/workflows/release-artifacts.yml", "assemble");
+  const commands = executionRunCommands(job);
+  assertNoTopLevelWorkflowDefaults(workflow, ".github/workflows/release-artifacts.yml");
   assert.match(workflow, /^\s*workflow_dispatch:\s*$/mu);
-  assert.ok(commands.some((command) => command.startsWith("node scripts/assemble-release-artifacts.mjs")));
-  assert.ok(commands.some((command) => command.includes("--consumer-id \"$CONSUMER_ID\"")));
-  assert.ok(commands.some((command) => command.includes("--output ")));
-  assert.ok(commands.some((command) => command.includes("--repeat-output ")));
+  assertExactReleaseAssemblyInvocation(job, "node scripts/assemble-release-artifacts.mjs --output \"$RUNNER_TEMP/licensecc-release-artifacts\" --repeat-output \"$RUNNER_TEMP/licensecc-release-artifacts-repeat\" --consumer-id \"$CONSUMER_ID\"", ".github/workflows/release-artifacts.yml:assemble");
   assert.doesNotMatch(commands.join("\n"), /(?:^|\s)(?:git\s+tag|gh\s+release|npm\s+publish|dotnet\s+nuget\s+push|wrangler\s+deploy)(?:\s|$)/imu);
   assert.doesNotMatch(workflow, /upload-artifact/iu);
 });
@@ -407,8 +423,8 @@ test("pull requests run a clean, toolchain-backed double assembly rather than on
   const toolchains = JSON.parse(source("release-toolchains.json"));
   assertExactSetupPins(job, toolchains, ".github/workflows/lint.yml:release-artifact-integration");
   const commands = executionRunCommands(job);
-  assert.equal(commands.filter((command) => command.startsWith("node scripts/assemble-release-artifacts.mjs")).length, 1);
-  assert.equal(commands.filter((command) => command.includes("--repeat-output \"$RUNNER_TEMP/licensecc-release-artifacts-b\"")).length, 1);
+  assertNoTopLevelWorkflowDefaults(workflow, ".github/workflows/lint.yml");
+  assertExactReleaseAssemblyInvocation(job, "node scripts/assemble-release-artifacts.mjs --output \"$RUNNER_TEMP/licensecc-release-artifacts-a\" --repeat-output \"$RUNNER_TEMP/licensecc-release-artifacts-b\" --consumer-id release-candidate", ".github/workflows/lint.yml:release-artifact-integration");
   assert.match(jobSource, /cmake ninja-build/u);
   assert.doesNotMatch(commands.join("\n"), /(?:^|\s)(?:git\s+tag|gh\s+release|npm\s+publish|dotnet\s+nuget\s+push|wrangler\s+deploy)(?:\s|$)/imu);
   assertNoCommandsAfterUnconditionalExit(job, ".github/workflows/lint.yml:release-artifact-integration");
@@ -422,6 +438,7 @@ test("release workflows use exact toolchain pins and cannot bypass the real asse
   ];
   for (const [path, job] of jobs) {
     const parsed = workflowJobLines(path, job);
+    assertNoTopLevelWorkflowDefaults(source(path), path);
     assertExactSetupPins(parsed, toolchains, `${path}:${job}`);
     assert.deepEqual(activeWorkflowDirectives(parsed), [], `${path}:${job} must not use if/continue-on-error/shell/working-directory/defaults`);
     assertNoCommandsAfterUnconditionalExit(parsed, `${path}:${job}`);
@@ -498,6 +515,37 @@ test("workflow structural checks reject inert pin decoys, quoted guards, and com
     "",
   ].join("\n"), "release");
   assert.deepEqual(activeWorkflowDirectives(quotedGuard).map(({ key }) => key).sort(), ["if", "shell"]);
+});
+
+test("release assembly is one exact scalar and workflow-level defaults are rejected", () => {
+  const expected = "node scripts/assemble-release-artifacts.mjs --output \"$RUNNER_TEMP/licensecc-release-artifacts-a\" --repeat-output \"$RUNNER_TEMP/licensecc-release-artifacts-b\" --consumer-id release-candidate";
+  const bypasses = [
+    "true && exit 0 && node scripts/assemble-release-artifacts.mjs --output \"$RUNNER_TEMP/licensecc-release-artifacts-a\" --repeat-output \"$RUNNER_TEMP/licensecc-release-artifacts-b\" --consumer-id release-candidate",
+    "exec true; node scripts/assemble-release-artifacts.mjs --output \"$RUNNER_TEMP/licensecc-release-artifacts-a\" --repeat-output \"$RUNNER_TEMP/licensecc-release-artifacts-b\" --consumer-id release-candidate",
+    "node scripts/assemble-release-artifacts.mjs --output \"$RUNNER_TEMP/licensecc-release-artifacts-a\" --repeat-output \"$RUNNER_TEMP/licensecc-release-artifacts-b\" --consumer-id release-candidate && true",
+  ];
+  for (const command of bypasses) {
+    const job = workflowJobLinesFromSource([
+      "jobs:",
+      "  release:",
+      "    steps:",
+      "      - run: >-",
+      `          ${command}`,
+      "",
+    ].join("\n"), "release");
+    assert.throws(() => assertExactReleaseAssemblyInvocation(job, expected, "fixture"), /exact release assembly invocation/i);
+  }
+  const workflowDefaults = [
+    "\"defaults\":",
+    "  run:",
+    "    shell: bash",
+    "jobs:",
+    "  release:",
+    "    steps:",
+    "      - run: node scripts/assemble-release-artifacts.mjs",
+    "",
+  ].join("\n");
+  assert.throws(() => assertNoTopLevelWorkflowDefaults(workflowDefaults, "fixture"), /top-level defaults/i);
 });
 
 test("capability evidence remains a PR gate locally and in repository-quality", () => {

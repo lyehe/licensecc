@@ -209,8 +209,8 @@ function managedMetadata({ portablePdb = false, missingPdbStream = false, trunca
   return bytes;
 }
 
-function fakePeDll({ missingClr = false, invalidSection = false, truncatedTables = false, trailingTableBytes = 0 } = {}) {
-  const metadata = managedMetadata({ truncatedTables, trailingTableBytes });
+function fakePeDll({ missingClr = false, invalidSection = false, truncatedTables = false, trailingTableBytes = 0, metadataTable = 32, tableDataBytes = 22 } = {}) {
+  const metadata = managedMetadata({ truncatedTables, trailingTableBytes, metadataTable, tableDataBytes });
   const bytes = Buffer.alloc(0x1200);
   bytes.write("MZ", 0, "ascii");
   bytes.writeUInt32LE(0x80, 0x3c);
@@ -239,7 +239,7 @@ function fakePeDll({ missingClr = false, invalidSection = false, truncatedTables
 }
 
 function fakePortablePdb(options) {
-  return managedMetadata({ portablePdb: true, ...options });
+  return managedMetadata({ portablePdb: true, metadataTable: 48, tableDataBytes: 8, ...options });
 }
 
 function contentTypes(files) {
@@ -710,6 +710,14 @@ test("inner archive inspection rejects comment decoys, incomplete RECORD data, t
   const sdistPath = join(output, "python", `licensecc-${PYTHON_VERSION}.tar.gz`);
   const primaryPath = join(output, "dotnet", `Licensecc.Client.${PLATFORM_VERSION}.nupkg`);
   const symbolsPath = join(output, "dotnet", `Licensecc.Client.${PLATFORM_VERSION}.snupkg`);
+  const primaryContentTypes = contentTypes([
+    { name: "_rels/.rels" },
+    { name: "Licensecc.Client.nuspec" },
+    { name: "package/services/metadata/core-properties/licensecc.release.psmdcp" },
+    { name: "lib/net8.0/Licensecc.Client.dll" },
+    { name: "lib/net8.0/Licensecc.Client.xml" },
+    { name: "README.md" },
+  ]);
   const cases = [
     [wheelPath, wheelArtifact({ recordContents: "licensecc/__init__.py,sha256=not-a-real-hash,1\nlicensecc-0.1.0rc1.dist-info/RECORD,,\n" }), /RECORD|wheel/i],
     [wheelPath, wheelArtifact({ recordTransform: (record) => record.replace(/sha256=[^,]+/u, "sha256=AAAA") }), /RECORD|hash|wheel/i],
@@ -721,22 +729,28 @@ test("inner archive inspection rejects comment decoys, incomplete RECORD data, t
     [primaryPath, nugetArtifact({ binaryContents: fakePeDll({ invalidSection: true }) }), /section|PE|metadata/i],
     [primaryPath, nugetArtifact({ binaryContents: fakePeDll({ truncatedTables: true }) }), /tables|metadata|truncated/i],
     [primaryPath, nugetArtifact({ binaryContents: fakePeDll({ trailingTableBytes: 5 }) }), /tables|metadata|trailing/i],
+    [primaryPath, nugetArtifact({ binaryContents: fakePeDll({ metadataTable: 0, tableDataBytes: 10 }) }), /Assembly|netmodule|metadata/i],
     [primaryPath, nugetArtifact({ extraEntries: [{ name: "private-key.pem", contents: "never package this" }] }), /unsafe|forbidden|NuGet package/i],
     [symbolsPath, nugetArtifact({ symbols: true, binaryContents: "plain text is not a PDB" }), /PDB|NuGet symbols/i],
     [symbolsPath, nugetArtifact({ symbols: true, binaryContents: fakePortablePdb({ missingPdbStream: true }) }), /PDB|stream|metadata/i],
     [symbolsPath, nugetArtifact({ symbols: true, binaryContents: fakePortablePdb({ truncatedTables: true }) }), /tables|metadata|truncated/i],
     [symbolsPath, nugetArtifact({ symbols: true, binaryContents: fakePortablePdb({ trailingTableBytes: 5 }) }), /tables|metadata|trailing/i],
     [symbolsPath, nugetArtifact({ symbols: true, binaryContents: fakePortablePdb({ pdbTrailingBytes: 4 }) }), /PDB|stream|trailing/i],
+    [symbolsPath, nugetArtifact({ symbols: true, binaryContents: fakePortablePdb({ metadataTable: 0, tableDataBytes: 10 }) }), /debug|PDB|metadata/i],
     [symbolsPath, nugetArtifact({ symbols: true, binaryContents: fakePortablePdb({ metadataTable: 54, typeSystemRows: [[6, 0x10000]], tableDataBytes: 4 }) }), /tables|metadata|truncated/i],
     [symbolsPath, nugetArtifact({ symbols: true, extraEntries: [{ name: "private-key.pem", contents: "never package this" }] }), /unsafe|forbidden|NuGet symbols/i],
     [primaryPath, nugetArtifact({ nuspecContents: "<?xml version=\"1.0\"?><package><metadata><!-- <id>Licensecc.Client</id><version>0.1.0-rc.1</version> --></metadata></package>" }), /metadata|NuGet package/i],
     [primaryPath, nugetArtifact({ nuspecContents: "<?xml version=\"1.0\"?><package><metadata><id>Licensecc.Client</id><version>0.1.0-rc.1</version></metadata></package>" }), /nuspec root|NuGet package/i],
     [primaryPath, nugetArtifact({ contentTypesContents: "<?xml version=\"1.0\"?><Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"><Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/></Types>" }), /content.types|OPC|NuGet package/i],
     [primaryPath, nugetArtifact({ contentTypesContents: "<?xml version=\"1.0\"?><Types xmlns=\"urn:wrong\"><Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/></Types>" }), /content.types|OPC|NuGet package/i],
+    [primaryPath, nugetArtifact({ contentTypesContents: primaryContentTypes.replace("<Default ", "<Default xmlns=\"urn:wrong\" ") }), /namespace|content.types|OPC|NuGet package/i],
     [primaryPath, nugetArtifact({ nuspecContents: "<?xml version=\"1.0\"?><package xmlns=\"urn:wrong\"><metadata><id>Licensecc.Client</id><version>0.1.0-rc.1</version></metadata></package>" }), /nuspec|metadata|NuGet package/i],
+    [primaryPath, nugetArtifact({ nuspecContents: "<?xml version=\"1.0\"?><package xmlns=\"http://schemas.microsoft.com/packaging/2012/06/nuspec.xsd\"><metadata xmlns=\"urn:wrong\"><id>Licensecc.Client</id><version>0.1.0-rc.1</version></metadata></package>" }), /namespace|nuspec|metadata|NuGet package/i],
     [primaryPath, nugetArtifact({ coreContents: "<?xml version=\"1.0\"?><coreProperties xmlns:dc=\"http://purl.org/dc/elements/1.1/\"><dc:identifier>Licensecc.Client</dc:identifier><version>0.1.0-rc.1</version></coreProperties>" }), /core metadata|NuGet package/i],
     [primaryPath, nugetArtifact({ coreContents: "<?xml version=\"1.0\"?><coreProperties xmlns=\"urn:wrong\" xmlns:dc=\"http://purl.org/dc/elements/1.1/\"><dc:identifier>Licensecc.Client</dc:identifier><version>0.1.0-rc.1</version></coreProperties>" }), /core metadata|NuGet package/i],
+    [primaryPath, nugetArtifact({ coreContents: "<?xml version=\"1.0\"?><coreProperties xmlns=\"http://schemas.openxmlformats.org/package/2006/metadata/core-properties\" xmlns:dc=\"http://purl.org/dc/elements/1.1/\"><dc:identifier xmlns:dc=\"urn:wrong\">Licensecc.Client</dc:identifier><version>0.1.0-rc.1</version></coreProperties>" }), /namespace|core metadata|NuGet package/i],
     [primaryPath, nugetArtifact({ relationshipsContents: "<?xml version=\"1.0\"?><Relationships xmlns=\"urn:wrong\"><Relationship Type=\"http://schemas.microsoft.com/packaging/2010/07/manifest\" Target=\"/Licensecc.Client.nuspec\" Id=\"manifest\"/><Relationship Type=\"http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties\" Target=\"/package/services/metadata/core-properties/licensecc.release.psmdcp\" Id=\"core\"/></Relationships>" }), /relationships|OPC|NuGet package/i],
+    [primaryPath, nugetArtifact({ relationshipsContents: "<?xml version=\"1.0\"?><Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship xmlns=\"urn:wrong\" Type=\"http://schemas.microsoft.com/packaging/2010/07/manifest\" Target=\"/Licensecc.Client.nuspec\" Id=\"manifest\"/><Relationship Type=\"http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties\" Target=\"/package/services/metadata/core-properties/licensecc.release.psmdcp\" Id=\"core\"/></Relationships>" }), /namespace|relationships|OPC|NuGet package/i],
   ];
   try {
     assembleReleaseArtifacts({ root, outputDirectory: output, consumerId: "acme", run: fakeRun([]), verifyArchive: () => {}, toolAvailable: () => true });

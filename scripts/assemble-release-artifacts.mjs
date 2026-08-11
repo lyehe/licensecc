@@ -989,15 +989,53 @@ const NUGET_NUSPEC_2012_NAMESPACE = "http://schemas.microsoft.com/packaging/2012
 const NUGET_NUSPEC_NAMESPACE = "http://schemas.microsoft.com/packaging/2013/05/nuspec.xsd";
 const NUGET_CORE_PROPERTIES_NAMESPACE = "http://schemas.openxmlformats.org/package/2006/metadata/core-properties";
 const DUBLIN_CORE_ELEMENTS_NAMESPACE = "http://purl.org/dc/elements/1.1/";
+const DUBLIN_CORE_TERMS_NAMESPACE = "http://purl.org/dc/terms/";
+const XML_SCHEMA_INSTANCE_NAMESPACE = "http://www.w3.org/2001/XMLSchema-instance";
 // The pinned SDK emits the 2012/06 nuspec schema.  Only that native schema
 // and the current published schema are accepted; a missing/foreign namespace
 // is not a valid release package.
 const NUGET_NUSPEC_ROOT_NAMESPACES = new Set([NUGET_NUSPEC_2012_NAMESPACE, NUGET_NUSPEC_NAMESPACE]);
 const NUGET_CORE_ROOT_NAMESPACES = new Set([NUGET_CORE_PROPERTIES_NAMESPACE]);
+const NUGET_CORE_PREFIX_NAMESPACES = new Map([
+  ["dc", DUBLIN_CORE_ELEMENTS_NAMESPACE],
+  ["dcterms", DUBLIN_CORE_TERMS_NAMESPACE],
+  ["xsi", XML_SCHEMA_INSTANCE_NAMESPACE],
+]);
 const NUGET_RELATIONSHIP_TYPES = Object.freeze({
   manifest: "http://schemas.microsoft.com/packaging/2010/07/manifest",
   core: "http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties",
 });
+
+function xmlPrefix(name) {
+  const separator = name.indexOf(":");
+  return separator === -1 ? "" : name.slice(0, separator);
+}
+
+/** Require every relevant element to inherit the root's declared XML namespace bindings. */
+function assertXmlNamespaceTree(root, { defaultNamespaces, prefixNamespaces = new Map(), label }) {
+  const defaultNamespace = root.attributes.get("xmlns") ?? "";
+  if (!defaultNamespaces.has(defaultNamespace)) throw new Error(`${label} has an invalid XML default namespace`);
+  const bindings = new Map([["", defaultNamespace]]);
+  for (const [name, value] of root.attributes) {
+    if (!name.startsWith("xmlns:")) continue;
+    const prefix = name.slice("xmlns:".length);
+    if (prefixNamespaces.get(prefix) !== value) throw new Error(`${label} has an invalid XML namespace binding for ${prefix}`);
+    bindings.set(prefix, value);
+  }
+  const visit = (node, rootNode) => {
+    if (!rootNode) {
+      for (const name of node.attributes.keys()) {
+        if (name === "xmlns" || name.startsWith("xmlns:")) throw new Error(`${label} changes XML namespace bindings below the root`);
+      }
+    }
+    const prefix = xmlPrefix(node.name);
+    const namespace = bindings.get(prefix);
+    if (!namespace) throw new Error(`${label} has an element with an unbound XML namespace prefix`);
+    if (prefix === "" ? !defaultNamespaces.has(namespace) : prefixNamespaces.get(prefix) !== namespace) throw new Error(`${label} has an element in an unexpected XML namespace`);
+    for (const child of node.children) visit(child, false);
+  };
+  visit(root, true);
+}
 
 function packageExtension(member) {
   const name = member.slice(member.lastIndexOf("/") + 1);
@@ -1012,6 +1050,7 @@ function normalizeOpcTarget(value, label) {
 
 function validateOpcContentTypes(files, label) {
   const root = parseXml(requiredArchiveMember(files, "[Content_Types].xml", label), `${label} [Content_Types].xml`);
+  assertXmlNamespaceTree(root, { defaultNamespaces: new Set([NUGET_CONTENT_TYPES_NAMESPACE]), label: `${label} [Content_Types].xml` });
   if (root.name !== "Types" || root.attributes.get("xmlns") !== NUGET_CONTENT_TYPES_NAMESPACE || root.text.join("").trim()) throw new Error(`${label} has an invalid OPC content-types root`);
   const defaults = new Map();
   const overrides = new Map();
@@ -1042,6 +1081,7 @@ function validateOpcContentTypes(files, label) {
 
 function validateNugetRelationships(files, packageId, coreMember, label) {
   const root = parseXml(requiredArchiveMember(files, "_rels/.rels", label), `${label} relationships`);
+  assertXmlNamespaceTree(root, { defaultNamespaces: new Set([NUGET_RELATIONSHIP_NAMESPACE]), label: `${label} relationships` });
   if (root.name !== "Relationships" || root.attributes.get("xmlns") !== NUGET_RELATIONSHIP_NAMESPACE || root.text.join("").trim()) throw new Error(`${label} relationships have an invalid OPC root`);
   const relationships = root.children.filter((child) => child.name === "Relationship");
   if (relationships.length !== 2 || root.children.length !== relationships.length) throw new Error(`${label} relationships must contain exactly manifest and core bindings`);
@@ -1191,7 +1231,7 @@ function metadataColumnSize(column, rows, heapSizes, label) {
   throw new Error(`${label} has an unsupported metadata column`);
 }
 
-function validateMetadataTables(bytes, label, { typeSystemRows } = {}) {
+function validateMetadataTables(bytes, label, { typeSystemRows, allowedTables } = {}) {
   if (bytes.length < 24) throw new Error(`${label} metadata tables stream is truncated`);
   if (bytes[4] === 0 || bytes[7] !== 1 || (bytes[6] & ~0x07) !== 0) throw new Error(`${label} metadata tables stream has an invalid header`);
   const valid = readU64(bytes, 8, `${label} metadata tables`);
@@ -1215,6 +1255,7 @@ function validateMetadataTables(bytes, label, { typeSystemRows } = {}) {
   const indexRows = rows.map((rowCount, table) => rowCount || typeSystemRows?.[table] || 0);
   for (let table = 0; table < 64; table += 1) {
     if ((valid & (1n << BigInt(table))) === 0n) continue;
+    if (allowedTables && !allowedTables.has(table)) throw new Error(`${label} metadata tables contain a disallowed local table ${table}`);
     const schema = METADATA_TABLE_SCHEMAS.get(table);
     if (!schema) throw new Error(`${label} metadata tables contain an unsupported table`);
     const rowSize = schema.reduce((size, column) => size + metadataColumnSize(column, indexRows, bytes[6], `${label} metadata tables`), 0);
@@ -1226,6 +1267,7 @@ function validateMetadataTables(bytes, label, { typeSystemRows } = {}) {
   // The pinned Portable-PDB writer preserves one 4-byte stream-alignment tail
   // after table data.  It is not a table row and must remain tightly bounded.
   if (trailing > 4) throw new Error(`${label} metadata tables stream has an oversized trailing region`);
+  return rows;
 }
 
 function validatePortablePdbStream(bytes, label) {
@@ -1292,8 +1334,11 @@ function parseManagedMetadata(bytes, label, { portablePdb = false } = {}) {
     if (!streams.has("#Pdb")) throw new Error(`${label} is missing its portable PDB stream`);
     typeSystemRows = validatePortablePdbStream(streams.get("#Pdb"), label);
   }
-  validateMetadataTables(streams.get(tableStreams[0]), label, { typeSystemRows });
-  return streams;
+  const tableRows = validateMetadataTables(streams.get(tableStreams[0]), label, {
+    typeSystemRows,
+    allowedTables: portablePdb ? new Set([48, 49, 50, 51, 52, 53, 54, 55]) : undefined,
+  });
+  return { streams, tableRows };
 }
 
 function validatePeDll(contents, label) {
@@ -1348,7 +1393,8 @@ function validatePeDll(contents, label) {
   const metadataSize = readU32(clrHeader, 12, `${label} CLR metadata`);
   if (metadataRva === 0 || metadataSize === 0 || metadataSize > MAX_ARCHIVE_MEMBER_BYTES) throw new Error(`${label} CLR metadata directory is invalid`);
   const metadataOffset = rvaToOffset(metadataRva, metadataSize, `${label} CLR metadata`);
-  parseManagedMetadata(boundedSlice(contents, metadataOffset, metadataSize, `${label} CLR metadata`), `${label} CLR metadata`);
+  const metadata = parseManagedMetadata(boundedSlice(contents, metadataOffset, metadataSize, `${label} CLR metadata`), `${label} CLR metadata`);
+  if (metadata.tableRows[32] === 0) throw new Error(`${label} is a managed netmodule without an Assembly metadata table`);
 }
 
 function validatePortablePdb(contents, label) {
@@ -1372,6 +1418,7 @@ function validateNugetArtifact({ archivePath, packageId, platformVersion, symbol
 
   const packageRoot = parseXml(requiredArchiveMember(files, `${packageId}.nuspec`, label), `${label} metadata`);
   const nuspecNamespace = packageRoot.attributes.get("xmlns") ?? "";
+  assertXmlNamespaceTree(packageRoot, { defaultNamespaces: NUGET_NUSPEC_ROOT_NAMESPACES, label: `${label} metadata` });
   if (packageRoot.name !== "package" || !NUGET_NUSPEC_ROOT_NAMESPACES.has(nuspecNamespace) || packageRoot.text.join("").trim()) throw new Error(`${label} metadata has an invalid nuspec root (${packageRoot.name}, ${JSON.stringify(nuspecNamespace)})`);
   const metadata = packageRoot.children.filter((child) => child.name === "metadata");
   if (metadata.length !== 1 || packageRoot.children.length !== 1) throw new Error(`${label} metadata has an invalid nuspec metadata element`);
@@ -1381,6 +1428,7 @@ function validateNugetArtifact({ archivePath, packageId, platformVersion, symbol
   if (symbols ? symbolTypes.length !== 1 : packageTypes.length !== 0) throw new Error(symbols ? "NuGet symbols metadata does not declare exactly one SymbolsPackage" : "NuGet package metadata must not declare a symbols package type");
 
   const core = parseXml(requiredArchiveMember(files, coreMember, label), `${label} core metadata`);
+  assertXmlNamespaceTree(core, { defaultNamespaces: NUGET_CORE_ROOT_NAMESPACES, prefixNamespaces: NUGET_CORE_PREFIX_NAMESPACES, label: `${label} core metadata` });
   if (core.name !== "coreProperties" || !NUGET_CORE_ROOT_NAMESPACES.has(core.attributes.get("xmlns") ?? "") || core.attributes.get("xmlns:dc") !== DUBLIN_CORE_ELEMENTS_NAMESPACE || core.text.join("").trim() || xmlSingleDirectText(core, "dc:identifier", `${label} core metadata`) !== packageId || xmlSingleDirectText(core, "version", `${label} core metadata`) !== platformVersion) throw new Error(`${label} core metadata does not carry the expected identity`);
   if (symbols) validatePortablePdb(requiredArchiveMember(files, "lib/net8.0/Licensecc.Client.pdb", label), `${label} PDB`);
   else validatePeDll(requiredArchiveMember(files, "lib/net8.0/Licensecc.Client.dll", label), `${label} DLL`);
