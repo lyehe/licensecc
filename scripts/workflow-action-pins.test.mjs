@@ -21,6 +21,19 @@ function source(relativePath) {
   return readFileSync(resolve(repositoryRoot, relativePath), "utf8");
 }
 
+function workflowJobLines(relativePath, jobName) {
+  const lines = source(relativePath).split(/\r?\n/);
+  const start = lines.indexOf(`  ${jobName}:`);
+  assert.ok(start >= 0, `${relativePath}: missing ${jobName} job`);
+
+  const end = lines.findIndex((line, index) => {
+    if (index <= start) return false;
+    const indentation = line.length - line.trimStart().length;
+    return indentation === 2 && line.trimEnd().endsWith(":");
+  });
+  return lines.slice(start, end === -1 ? lines.length : end);
+}
+
 function workflowReferences() {
   return trackedWorkflowPaths().flatMap((path) => {
     const content = source(path);
@@ -52,4 +65,13 @@ test("Dependabot keeps GitHub Actions SHA pins maintainable", () => {
   assert.match(dependabot, /package-ecosystem:\s*github-actions/);
   assert.match(dependabot, /directory:\s*["']?\/["']?/);
   assert.match(dependabot, /schedule:\s*\r?\n\s+interval:\s*weekly/);
+});
+
+test("lint repository-quality runs the clean-checkout regression gate", () => {
+  const jobLines = workflowJobLines(".github/workflows/lint.yml", "repository-quality");
+  assert.equal(
+    jobLines.filter((line) => line.trim() === "npm run test:clean-checkout").length,
+    1,
+    "repository-quality must invoke test:clean-checkout exactly once",
+  );
 });
