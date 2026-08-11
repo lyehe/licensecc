@@ -37,7 +37,7 @@ import { webcrypto } from "node:crypto";
 
 import { createPostgresDatabase, closePool } from "./db-postgres.mjs";
 import { CLIENT_IP_HEADERS, clientIpFromRequest, assertSafeBind } from "../host-common.mjs";
-import { isSupportedPgRoute } from "./pg-route-guard.mjs";
+import { createPgHttpHandler, readNodeBody } from "./pg-http-handler.mjs";
 
 // --- Node <20 crypto shim (the Worker uses crypto.subtle for RSA sign / ECDSA verify) ---
 if (typeof globalThis.crypto === "undefined") {
@@ -144,22 +144,19 @@ function nodeRequestToWeb(req) {
   headers.set("cf-connecting-ip", clientIpFromRequest(req));
 
   return new Promise((resolveReq, rejectReq) => {
-    const chunks = [];
-    req.on("data", (chunk) => chunks.push(chunk));
-    req.on("error", rejectReq);
-    req.on("end", () => {
-      const hasBody = req.method !== "GET" && req.method !== "HEAD" && chunks.length > 0;
+    readNodeBody(req).then((body) => {
+      const hasBody = req.method !== "GET" && req.method !== "HEAD" && body.length > 0;
       const init = {
         method: req.method,
         headers,
-        body: hasBody ? Buffer.concat(chunks) : undefined,
+        body: hasBody ? body : undefined,
       };
       try {
         resolveReq(new Request(url, init));
       } catch (error) {
         rejectReq(error);
       }
-    });
+    }, rejectReq);
   });
 }
 
@@ -174,32 +171,7 @@ async function webResponseToNode(response, res) {
   res.end(buffer);
 }
 
-const server = createServer(async (req, res) => {
-  try {
-    const request = await nodeRequestToWeb(req);
-    // R3.2: this adapter supports ONLY the verify path; fence everything else so a misdirected
-    // request fails fast and clearly instead of hitting untranslatable order/webhook/mutator SQL.
-    const pathname = new URL(request.url).pathname;
-    if (!isSupportedPgRoute(request.method, pathname)) {
-      res.writeHead(501, { "content-type": "application/json" });
-      res.end(
-        JSON.stringify({
-          ok: false,
-          code: "not_supported_on_postgres_adapter",
-          error: "the Postgres adapter serves only GET /health and POST /v1/verify; other routes are D1-only",
-        }),
-      );
-      return;
-    }
-    const response = await worker.fetch(request, buildEnv());
-    await webResponseToNode(response, res);
-  } catch (error) {
-    // The Worker maps its own errors to JSON 500s; this only catches node<->WHATWG bridge failures.
-    const message = error instanceof Error ? error.message : "host bridge error";
-    res.writeHead(500, { "content-type": "application/json" });
-    res.end(JSON.stringify({ ok: false, code: "host_error", error: message }));
-  }
-});
+const server = createServer(createPgHttpHandler({ worker, buildEnv, nodeRequestToWeb, webResponseToNode }));
 
 // Close the pool on shutdown so the process exits cleanly.
 for (const signal of ["SIGINT", "SIGTERM"]) {
