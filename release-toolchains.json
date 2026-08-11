@@ -1,0 +1,6 @@
+{
+  "schema_version": 1,
+  "python_version": "3.12.8",
+  "uv_version": "0.5.15",
+  "dotnet_sdk_version": "8.0.423"
+}

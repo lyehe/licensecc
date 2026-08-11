@@ -22,6 +22,12 @@ Versions come from the same hardened readers used by
 `scripts/check-version-contract.mjs`: tracked `version.json` is the sole
 platform authority, the Python PEP 440 form is derived and checked, and the
 CMake `project(licensecc VERSION ...)` remains the independent C++ authority.
+The separately tracked `release-toolchains.json` pins Python **3.12.8**, uv
+**0.5.15**, and the .NET SDK **8.0.423**; `global.json` repeats the exact .NET
+SDK with roll-forward disabled. These are build-tool authorities, not package
+version authorities. The assembler checks all three executable version outputs
+before any dependency install, and both release workflows use the same exact
+setup-action values.
 Before any install or build command, the canonical tree also runs the complete
 repository version contract over every tracked projection (workspace and lock
 inventory, OpenAPI and snapshots, SDK runtime metadata, maintained prose, the
@@ -46,19 +52,29 @@ field while omitting all NuGet payloads. The manifest records platform, Python,
 C++, consumer, and exact HEAD identities plus the C++ archive hash. The
 inspector recomputes the exact payload records, checksums, manifest, and SPDX
 2.3 object, including the vendored generator BSD license and provenance. It
-also syntax-checks non-empty Worker module entrypoints and parses ZIP/tar
-internals: wheel/sdist metadata, primary NuGet `.nuspec`/DLL, and symbol
-`.nuspec`/PDB must all carry the expected identities. A matching filename alone
-is never sufficient.
+requires nonempty `index.html` plus built UI assets before the two UI-backed
+Workers are bundled, and lexically checks nonempty Worker module entrypoints
+without treating comment or string decoys as handlers. It parses ZIP/tar
+internals: wheel/sdist member closure is derived from canonical HEAD and their
+tracked member bytes are compared; wheel `RECORD` must cover every member with
+the correct SHA-256 and size; generated metadata is parsed as RFC 822 headers.
+Primary NuGet and `snupkg` archives have exact allowed member closure and a
+valid OPC `[Content_Types].xml`/relationship/core-properties structure; their
+`.nuspec` identities are XML-parsed, not regex-matched, and the managed DLL
+and portable PDB require PE/`BSJB` signatures. The secret/forbidden-member
+policy applies inside every package archive. A matching filename alone is
+never sufficient.
 
 The Python PEP 517 backend is pinned to Hatchling 1.27.0 in `pyproject.toml`.
 The assembler first checks the canonical `uv.lock`, then invokes `uv build`
 with the tracked hash-constrained `sdks/python/build-constraints.txt` and
 `--require-hashes`. NuGet packaging
 sets `SymbolPackageFormat=snupkg` both in the SDK project and the pack command.
-Its locked restore uses a generated canonical-only NuGet configuration, package
-caches, and disabled persistent build servers, so host-level NuGet settings do
-not influence the staged payload.
+Its locked restore targets only
+`sdks/dotnet/src/Licensecc.Client/Licensecc.Client.csproj` and its tracked
+`packages.lock.json`, using a generated canonical-only NuGet configuration,
+package caches, and disabled persistent build servers so host-level NuGet
+settings do not influence the staged payload.
 
 The assembler derives `SOURCE_DATE_EPOCH` from the exact Git commit timestamp
 and sets UTC, deterministic Python, and .NET reproducibility inputs in its

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
 
-import { checkVersionContract, readVersionAuthorities, versionContractSchema } from "./check-version-contract.mjs";
+import { checkVersionContract, readReleaseToolchainAuthorities, readVersionAuthorities, releaseToolchainSchema, versionContractSchema } from "./check-version-contract.mjs";
 
 const platformVersion = "0.1.0-rc.1";
 const pythonVersion = "0.1.0rc1";
@@ -40,6 +40,8 @@ function alignedFiles() {
   }, null, 2)}\n`;
   return {
     "version.json": `${JSON.stringify({ schema_version: 1, platform_version: platformVersion }, null, 2)}\n`,
+    "release-toolchains.json": `${JSON.stringify({ schema_version: 1, python_version: "3.12.8", uv_version: "0.5.15", dotnet_sdk_version: "8.0.423" }, null, 2)}\n`,
+    "global.json": `${JSON.stringify({ sdk: { version: "8.0.423", rollForward: "disable", allowPrerelease: false } }, null, 2)}\n`,
     ...manifests,
     "package-lock.json": `${JSON.stringify({ name: "licensecc", version: platformVersion, lockfileVersion: 3, packages }, null, 2)}\n`,
     "services/cloudflare-licensing-backend/src/openapi/document.ts": `export const openApiSpec: OpenApiDocument = { info: { version: "${platformVersion}" } };\n`,
@@ -109,8 +111,29 @@ test("exports the strict release authority reader used by artifact assembly", ()
       versions: { platformVersion, pythonVersion, cppVersion: "2.1.0" },
       errors: [],
     });
+    assert.deepEqual(releaseToolchainSchema, { schemaVersion: 1, fields: ["dotnet_sdk_version", "python_version", "schema_version", "uv_version"] });
+    assert.deepEqual(readReleaseToolchainAuthorities({ root: sample.root }), {
+      toolchains: { pythonVersion: "3.12.8", uvVersion: "0.5.15", dotnetSdkVersion: "8.0.423" },
+      errors: [],
+    });
   } finally {
     sample.close();
+  }
+});
+
+test("rejects missing, floating, or inconsistent release toolchain authorities", () => {
+  const cases = [
+    ["missing uv exact version", (files) => { files["release-toolchains.json"] = `${JSON.stringify({ schema_version: 1, python_version: "3.12", uv_version: "0.5.15", dotnet_sdk_version: "8.0.423" })}\n`; }, "release-toolchains.json"],
+    ["global SDK mismatch", (files) => { files["global.json"] = `${JSON.stringify({ sdk: { version: "8.0.424", rollForward: "disable", allowPrerelease: false } })}\n`; }, "global.json"],
+    ["floating SDK roll forward", (files) => { files["global.json"] = `${JSON.stringify({ sdk: { version: "8.0.423", rollForward: "latestFeature", allowPrerelease: false } })}\n`; }, "global.json"],
+  ];
+  for (const [name, mutate, path] of cases) {
+    const sample = fixture(mutate);
+    try {
+      assert.ok(checkVersionContract(sample).errors.some((error) => error.path === path), name);
+    } finally {
+      sample.close();
+    }
   }
 });
 

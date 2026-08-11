@@ -18,7 +18,7 @@ import { dirname, isAbsolute, join, parse, relative, resolve, sep } from "node:p
 import { fileURLToPath } from "node:url";
 import { deflateRawSync, gunzipSync, inflateRawSync } from "node:zlib";
 
-import { checkVersionContract, readVersionAuthorities } from "./check-version-contract.mjs";
+import { checkVersionContract, readReleaseToolchainAuthorities, readVersionAuthorities } from "./check-version-contract.mjs";
 
 const repositoryRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const LOCAL_WRANGLER_VERSION = "4.120.0";
@@ -133,13 +133,16 @@ function readDotnetPackageId(readSource) {
 
 function repositoryVersions(root) {
   const authority = readVersionAuthorities({ root, readSource: (path) => gitBlob(root, path).toString("utf8") });
-  if (!authority.versions || authority.errors.length > 0 || !authority.versions.cppVersion) throw new Error(`tracked release version authority is invalid: ${authority.errors.map((error) => error.path).join(", ")}`);
+  const toolchainAuthority = readReleaseToolchainAuthorities({ root, readSource: (path) => gitBlob(root, path).toString("utf8") });
+  const authorityErrors = [...authority.errors, ...toolchainAuthority.errors];
+  if (!authority.versions || !toolchainAuthority.toolchains || authorityErrors.length > 0 || !authority.versions.cppVersion) throw new Error(`tracked release version authority is invalid: ${authorityErrors.map((error) => error.path).join(", ")}`);
   const commit = git(root, ["rev-parse", "HEAD"]).toString("utf8").trim();
   if (!/^[0-9a-f]{40}$/iu.test(commit)) throw new Error("release assembly requires a full Git HEAD commit");
   const seconds = Number(git(root, ["show", "-s", "--format=%ct", "HEAD"]).toString("utf8").trim());
   if (!Number.isSafeInteger(seconds) || seconds < 0) throw new Error("Git commit timestamp is invalid");
   return {
     ...authority.versions,
+    toolchains: toolchainAuthority.toolchains,
     dotnetPackageId: readDotnetPackageId((path) => gitBlob(root, path).toString("utf8")),
     commit,
     sourceDate: new Date(seconds * 1000).toISOString(),
@@ -407,7 +410,7 @@ function assertSafePackageMemberPath(value, label) {
   if (typeof value !== "string" || !value || value.includes("\0") || value.includes("\\") || isAbsolute(value) || /^[A-Za-z]:\//u.test(value)) throw new Error(`${label} has an unsafe member path`);
   const directory = value.endsWith("/");
   const normalized = directory ? value.slice(0, -1) : value;
-  if (!normalized || normalized.split("/").some((part) => !part || part === "." || part === "..")) throw new Error(`${label} has an unsafe member path`);
+  if (!normalized || normalized.split("/").some((part) => !part || part === "." || part === ".." || FORBIDDEN_SEGMENTS.has(part.toLowerCase()) || FORBIDDEN_ARTIFACT_NAME.test(part))) throw new Error(`${label} has an unsafe or forbidden member path`);
   return directory ? `${normalized}/` : normalized;
 }
 
@@ -582,39 +585,325 @@ function requiredArchiveMember(files, member, label) {
   return contents;
 }
 
-function metadataHeader(contents, field, label) {
-  const values = strictUtf8(contents, label)
-    .replaceAll("\r\n", "\n")
-    .split("\n")
-    .filter((line) => line.startsWith(`${field}:`))
-    .map((line) => line.slice(field.length + 1).trim());
-  if (values.length !== 1 || !values[0]) throw new Error(`${label} has invalid ${field} metadata`);
-  return values[0];
+/** Parse the RFC 822-style core metadata header section, not comments/body text. */
+function metadataHeaders(contents, label) {
+  const source = strictUtf8(contents, label).replaceAll("\r\n", "\n");
+  if (source.includes("\r")) throw new Error(`${label} has invalid line endings`);
+  const headerBlock = source.split("\n\n", 1)[0];
+  if (!headerBlock) throw new Error(`${label} has no metadata headers`);
+  const headers = new Map();
+  let previous = null;
+  for (const line of headerBlock.split("\n")) {
+    if (line === "") break;
+    if (/^[ \t]/u.test(line)) {
+      if (!previous) throw new Error(`${label} has an invalid metadata continuation`);
+      headers.get(previous).at(-1).push(line.trim());
+      continue;
+    }
+    const match = /^([A-Za-z0-9][A-Za-z0-9-]*):[ \t]*(.*)$/u.exec(line);
+    if (!match) throw new Error(`${label} has invalid metadata syntax`);
+    const field = match[1].toLowerCase();
+    const values = headers.get(field) ?? [];
+    values.push([match[2].trim()]);
+    headers.set(field, values);
+    previous = field;
+  }
+  return headers;
 }
 
-function validatePythonArtifacts({ wheelPath, sdistPath, pythonVersion }) {
+function metadataHeader(contents, field, label) {
+  const values = metadataHeaders(contents, label).get(field.toLowerCase()) ?? [];
+  if (values.length !== 1) throw new Error(`${label} has invalid ${field} metadata`);
+  const value = values[0].join("\n").trim();
+  if (!value) throw new Error(`${label} has invalid ${field} metadata`);
+  return value;
+}
+
+function csvRows(contents, label) {
+  const source = strictUtf8(contents, label);
+  if (source.includes("\0")) throw new Error(`${label} contains NUL`);
+  const rows = [];
+  let row = [];
+  let field = "";
+  let quoted = false;
+  let justClosedQuote = false;
+  const finishField = () => {
+    row.push(field);
+    field = "";
+    justClosedQuote = false;
+  };
+  const finishRow = () => {
+    finishField();
+    if (row.length > 1 || row[0] !== "") rows.push(row);
+    row = [];
+  };
+  for (let index = 0; index < source.length; index += 1) {
+    const character = source[index];
+    if (quoted) {
+      if (character === '"') {
+        if (source[index + 1] === '"') {
+          field += '"';
+          index += 1;
+        } else {
+          quoted = false;
+          justClosedQuote = true;
+        }
+      } else {
+        field += character;
+      }
+      continue;
+    }
+    if (character === '"') {
+      if (field || justClosedQuote) throw new Error(`${label} has invalid CSV quoting`);
+      quoted = true;
+    } else if (character === ",") {
+      finishField();
+    } else if (character === "\n") {
+      finishRow();
+    } else if (character === "\r") {
+      if (source[index + 1] !== "\n") throw new Error(`${label} has invalid CSV line endings`);
+      finishRow();
+      index += 1;
+    } else {
+      if (justClosedQuote) throw new Error(`${label} has invalid CSV quoting`);
+      field += character;
+    }
+  }
+  if (quoted) throw new Error(`${label} has unterminated CSV quoting`);
+  if (field || row.length > 0) finishRow();
+  return rows;
+}
+
+function pythonSourceClosure(root) {
+  const sourcePrefix = "sdks/python/";
+  const topLevel = new Set([".gitignore", "LICENSE", "README.md", "build-constraints.txt", "pyproject.toml"]);
+  const entries = [];
+  for (const entry of gitHeadEntries(root)) {
+    if (entry.type !== "blob" || entry.mode === "120000" || !entry.path.startsWith(sourcePrefix)) continue;
+    const rest = entry.path.slice(sourcePrefix.length);
+    if (rest === "uv.lock") continue; // lock is verified before build but is not an sdist member.
+    if (topLevel.has(rest)) {
+      entries.push({ source: entry.path, sdist: rest });
+    } else if (rest.startsWith("src/licensecc/") && rest.length > "src/licensecc/".length) {
+      entries.push({ source: entry.path, wheel: rest.slice("src/".length), sdist: rest });
+    } else if (rest.startsWith("tests/") && rest.length > "tests/".length) {
+      entries.push({ source: entry.path, sdist: rest });
+    } else {
+      throw new Error(`tracked Python release input is outside the explicit package closure: ${entry.path}`);
+    }
+  }
+  const required = ["LICENSE", "README.md", "build-constraints.txt", "pyproject.toml", "src/licensecc/__init__.py"];
+  if (!required.every((path) => entries.some((entry) => entry.sdist === path))) throw new Error("tracked Python release input closure is incomplete");
+  return entries.sort((left, right) => ordinal(left.source, right.source));
+}
+
+function exactMemberSet(files, expectedMembers, label) {
+  const actual = [...files.keys()].sort(ordinal);
+  const expected = [...expectedMembers].sort(ordinal);
+  if (JSON.stringify(actual) !== JSON.stringify(expected)) throw new Error(`${label} member closure is not exact (expected ${expected.length}, got ${actual.length})`);
+}
+
+function assertCanonicalPackageBytes(files, expected, root, label) {
+  for (const [member, source] of expected) {
+    const actual = requiredArchiveMember(files, member, label);
+    const canonical = gitBlob(root, source);
+    if (!actual.equals(canonical)) throw new Error(`${label} member differs from canonical HEAD: ${member}`);
+  }
+}
+
+function validateWheelRecord(wheel, recordMember, label) {
+  const rows = csvRows(requiredArchiveMember(wheel, recordMember, label), `${label} RECORD`);
+  const seen = new Set();
+  for (const row of rows) {
+    if (row.length !== 3 || !row[0]) throw new Error(`${label} RECORD has an invalid row`);
+    const member = assertSafePackageMemberPath(row[0], `${label} RECORD`);
+    if (!wheel.has(member) || seen.has(member)) throw new Error(`${label} RECORD is incomplete or declares an unknown member`);
+    seen.add(member);
+    if (member === recordMember) {
+      if (row[1] !== "" || row[2] !== "") throw new Error(`${label} RECORD must omit its own hash and size`);
+      continue;
+    }
+    const match = /^sha256=([A-Za-z0-9_-]+)$/u.exec(row[1]);
+    const contents = wheel.get(member);
+    if (!match || row[2] !== String(contents.length) || createHash("sha256").update(contents).digest("base64url") !== match[1]) throw new Error(`${label} RECORD hash or size is invalid for ${member}`);
+  }
+  if (seen.size !== wheel.size || !seen.has(recordMember)) throw new Error(`${label} RECORD does not cover every wheel member`);
+}
+
+function validatePythonArtifacts({ wheelPath, sdistPath, pythonVersion, repositoryRoot: canonicalRoot = repositoryRoot }) {
+  const closure = pythonSourceClosure(canonicalRoot);
   const wheelLabel = "Python wheel";
   const wheel = readZipArchive(wheelPath, wheelLabel);
   const distInfo = `licensecc-${pythonVersion}.dist-info`;
+  const wheelExpected = new Map(closure.filter((entry) => entry.wheel).map((entry) => [entry.wheel, entry.source]));
+  wheelExpected.set(`${distInfo}/licenses/LICENSE`, "sdks/python/LICENSE");
+  const recordMember = `${distInfo}/RECORD`;
+  exactMemberSet(wheel, [...wheelExpected.keys(), `${distInfo}/METADATA`, `${distInfo}/WHEEL`, recordMember], wheelLabel);
+  assertCanonicalPackageBytes(wheel, wheelExpected, canonicalRoot, wheelLabel);
   const wheelMetadata = requiredArchiveMember(wheel, `${distInfo}/METADATA`, wheelLabel);
   if (metadataHeader(wheelMetadata, "Name", `${wheelLabel} metadata`) !== "licensecc" || metadataHeader(wheelMetadata, "Version", `${wheelLabel} metadata`) !== pythonVersion) throw new Error("Python wheel metadata does not carry the expected identity");
-  requiredArchiveMember(wheel, `${distInfo}/WHEEL`, wheelLabel);
-  requiredArchiveMember(wheel, `${distInfo}/RECORD`, wheelLabel);
-  requiredArchiveMember(wheel, "licensecc/__init__.py", wheelLabel);
+  const wheelHeaders = metadataHeaders(requiredArchiveMember(wheel, `${distInfo}/WHEEL`, wheelLabel), `${wheelLabel} WHEEL`);
+  const wheelValue = (field) => (wheelHeaders.get(field.toLowerCase()) ?? []).map((value) => value.join("\n").trim());
+  if (JSON.stringify(wheelValue("Wheel-Version")) !== JSON.stringify(["1.0"]) || JSON.stringify(wheelValue("Root-Is-Purelib")) !== JSON.stringify(["true"]) || JSON.stringify(wheelValue("Tag")) !== JSON.stringify(["py3-none-any"])) throw new Error("Python wheel WHEEL metadata is invalid");
+  validateWheelRecord(wheel, recordMember, wheelLabel);
 
   const sdistLabel = "Python sdist";
   const sdist = readSdistArchive(sdistPath, sdistLabel);
   const root = `licensecc-${pythonVersion}`;
+  const sdistExpected = new Map(closure.map((entry) => [`${root}/${entry.sdist}`, entry.source]));
+  exactMemberSet(sdist, [...sdistExpected.keys(), `${root}/PKG-INFO`], sdistLabel);
+  assertCanonicalPackageBytes(sdist, sdistExpected, canonicalRoot, sdistLabel);
   const sdistMetadata = requiredArchiveMember(sdist, `${root}/PKG-INFO`, sdistLabel);
   if (metadataHeader(sdistMetadata, "Name", `${sdistLabel} metadata`) !== "licensecc" || metadataHeader(sdistMetadata, "Version", `${sdistLabel} metadata`) !== pythonVersion) throw new Error("Python sdist metadata does not carry the expected identity");
-  requiredArchiveMember(sdist, `${root}/pyproject.toml`, sdistLabel);
 }
 
-function xmlValue(contents, field, label) {
-  const source = strictUtf8(contents, label);
-  const values = [...source.matchAll(new RegExp(`<${field}>\\s*([^<\\s][^<]*?)\\s*</${field}>`, "giu"))].map((match) => match[1].trim());
-  if (values.length !== 1) throw new Error(`${label} has invalid ${field} metadata`);
-  return values[0];
+function xmlDecode(value, label) {
+  let invalid = false;
+  if (/&(?!amp;|lt;|gt;|quot;|apos;|#\d+;|#x[0-9a-fA-F]+;)/gu.test(value)) throw new Error(`${label} has invalid XML text`);
+  const decoded = value.replace(/&(?:amp|lt|gt|quot|apos|#\d+|#x[0-9a-fA-F]+);/gu, (entity) => {
+    const body = entity.slice(1, -1);
+    if (body === "amp") return "&";
+    if (body === "lt") return "<";
+    if (body === "gt") return ">";
+    if (body === "quot") return '"';
+    if (body === "apos") return "'";
+    const numeric = body.startsWith("#x") ? Number.parseInt(body.slice(2), 16) : Number.parseInt(body.slice(1), 10);
+    if (!Number.isInteger(numeric) || numeric <= 0 || numeric > 0x10ffff || (numeric >= 0xd800 && numeric <= 0xdfff)) {
+      invalid = true;
+      return "";
+    }
+    return String.fromCodePoint(numeric);
+  });
+  if (invalid || /[\u0000-\u0008\u000b\u000c\u000e-\u001f]/u.test(decoded)) throw new Error(`${label} has invalid XML text`);
+  return decoded;
+}
+
+function xmlName(value, label) {
+  if (!/^[A-Za-z_][A-Za-z0-9_.:-]*$/u.test(value)) throw new Error(`${label} has an invalid XML name`);
+  return value;
+}
+
+function xmlTagEnd(source, start, label) {
+  let quote = null;
+  for (let cursor = start; cursor < source.length; cursor += 1) {
+    const character = source[cursor];
+    if (quote) {
+      if (character === quote) quote = null;
+    } else if (character === '"' || character === "'") {
+      quote = character;
+    } else if (character === ">") {
+      return cursor;
+    }
+  }
+  throw new Error(`${label} has an unterminated XML tag`);
+}
+
+/** Minimal fail-closed XML parser for package metadata. Comments never become elements. */
+function parseXml(contents, label) {
+  let source = strictUtf8(contents, label);
+  if (source.startsWith("\ufeff")) source = source.slice(1);
+  if (!source.trim() || /<!DOCTYPE|<!ENTITY/iu.test(source)) throw new Error(`${label} has unsafe XML syntax`);
+  const roots = [];
+  const stack = [];
+  const appendText = (value) => {
+    if (!value) return;
+    const decoded = xmlDecode(value, label);
+    if (stack.length === 0) {
+      if (decoded.trim()) throw new Error(`${label} has XML text outside its root`);
+    } else {
+      stack.at(-1).text.push(decoded);
+    }
+  };
+  let cursor = 0;
+  while (cursor < source.length) {
+    const opening = source.indexOf("<", cursor);
+    if (opening === -1) {
+      appendText(source.slice(cursor));
+      break;
+    }
+    appendText(source.slice(cursor, opening));
+    if (source.startsWith("<!--", opening)) {
+      const end = source.indexOf("-->", opening + 4);
+      if (end === -1 || source.slice(opening + 4, end).includes("--")) throw new Error(`${label} has invalid XML comment syntax`);
+      cursor = end + 3;
+      continue;
+    }
+    if (source.startsWith("<?", opening)) {
+      const end = source.indexOf("?>", opening + 2);
+      if (end === -1) throw new Error(`${label} has unterminated XML processing instruction`);
+      cursor = end + 2;
+      continue;
+    }
+    if (source.startsWith("<![CDATA[", opening)) {
+      const end = source.indexOf("]]>", opening + 9);
+      if (end === -1) throw new Error(`${label} has unterminated XML CDATA`);
+      appendText(source.slice(opening + 9, end));
+      cursor = end + 3;
+      continue;
+    }
+    if (source.startsWith("<!", opening)) throw new Error(`${label} has unsupported XML declaration`);
+    const end = xmlTagEnd(source, opening + 1, label);
+    const raw = source.slice(opening + 1, end).trim();
+    if (raw.startsWith("/")) {
+      const name = xmlName(raw.slice(1).trim(), label);
+      const current = stack.pop();
+      if (!current || current.name !== name) throw new Error(`${label} has mismatched XML closing tags`);
+      cursor = end + 1;
+      continue;
+    }
+    const selfClosing = raw.endsWith("/");
+    const body = (selfClosing ? raw.slice(0, -1) : raw).trim();
+    const nameMatch = /^([^\s/>]+)/u.exec(body);
+    if (!nameMatch) throw new Error(`${label} has invalid XML element syntax`);
+    const name = xmlName(nameMatch[1], label);
+    const attributes = new Map();
+    let offset = nameMatch[0].length;
+    while (offset < body.length) {
+      const whitespace = /^\s+/u.exec(body.slice(offset));
+      if (!whitespace) throw new Error(`${label} has invalid XML attribute syntax`);
+      offset += whitespace[0].length;
+      if (offset >= body.length) break;
+      const attribute = /^([A-Za-z_][A-Za-z0-9_.:-]*)\s*=\s*(["'])/u.exec(body.slice(offset));
+      if (!attribute) throw new Error(`${label} has invalid XML attribute syntax`);
+      const attributeName = xmlName(attribute[1], label);
+      offset += attribute[0].length;
+      const quote = attribute[2];
+      const closing = body.indexOf(quote, offset);
+      if (closing === -1) throw new Error(`${label} has unterminated XML attribute`);
+      if (attributes.has(attributeName)) throw new Error(`${label} has duplicate XML attribute`);
+      attributes.set(attributeName, xmlDecode(body.slice(offset, closing), label));
+      offset = closing + 1;
+    }
+    const node = { name, attributes, children: [], text: [] };
+    if (stack.length > 0) stack.at(-1).children.push(node);
+    else roots.push(node);
+    if (!selfClosing) stack.push(node);
+    cursor = end + 1;
+  }
+  if (stack.length !== 0 || roots.length !== 1) throw new Error(`${label} does not contain exactly one complete XML root`);
+  return roots[0];
+}
+
+function xmlLocalName(name) {
+  return name.slice(name.lastIndexOf(":") + 1);
+}
+
+function xmlChildren(node, localName) {
+  return node.children.filter((child) => xmlLocalName(child.name) === localName);
+}
+
+function xmlSingleText(node, localName, label) {
+  const values = xmlChildren(node, localName);
+  if (values.length !== 1 || values[0].children.length !== 0) throw new Error(`${label} has invalid ${localName} metadata`);
+  const value = values[0].text.join("").trim();
+  if (!value) throw new Error(`${label} has invalid ${localName} metadata`);
+  return value;
+}
+
+function xmlAttribute(node, name, label) {
+  const value = node.attributes.get(name);
+  if (!value) throw new Error(`${label} is missing XML attribute ${name}`);
+  return value;
 }
 
 function zipDosTimestamp(sourceDateEpoch) {
@@ -686,39 +975,146 @@ function canonicalNugetRelationships(packageId, corePath) {
   return `<?xml version="1.0" encoding="utf-8"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">\n  <Relationship Type="http://schemas.microsoft.com/packaging/2010/07/manifest" Target="/${packageId}.nuspec" Id="Rmanifest" />\n  <Relationship Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="/${corePath}" Id="Rcore" />\n</Relationships>\n`;
 }
 
+const NUGET_CORE_MEMBER = "package/services/metadata/core-properties/licensecc.release.psmdcp";
+const NUGET_RELATIONSHIP_NAMESPACE = "http://schemas.openxmlformats.org/package/2006/relationships";
+const NUGET_RELATIONSHIP_TYPES = Object.freeze({
+  manifest: "http://schemas.microsoft.com/packaging/2010/07/manifest",
+  core: "http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties",
+});
+
+function packageExtension(member) {
+  const name = member.slice(member.lastIndexOf("/") + 1);
+  const index = name.lastIndexOf(".");
+  return index >= 0 && index < name.length - 1 ? name.slice(index + 1).toLowerCase() : null;
+}
+
+function normalizeOpcTarget(value, label) {
+  if (typeof value !== "string" || !value.startsWith("/") || value.includes("\\")) throw new Error(`${label} has an unsafe OPC relationship target`);
+  return assertSafePackageMemberPath(value.slice(1), label);
+}
+
+function validateOpcContentTypes(files, label) {
+  const root = parseXml(requiredArchiveMember(files, "[Content_Types].xml", label), `${label} [Content_Types].xml`);
+  if (xmlLocalName(root.name) !== "Types") throw new Error(`${label} has an invalid OPC content-types root`);
+  const defaults = new Map();
+  const overrides = new Map();
+  for (const child of root.children) {
+    const local = xmlLocalName(child.name);
+    if (local !== "Default" && local !== "Override" || child.children.length !== 0 || child.text.join("").trim()) throw new Error(`${label} has an invalid OPC content-types entry`);
+    const contentType = xmlAttribute(child, "ContentType", `${label} OPC content types`);
+    if (local === "Default") {
+      const extension = xmlAttribute(child, "Extension", `${label} OPC content types`).toLowerCase();
+      if (!/^[A-Za-z0-9][A-Za-z0-9+.-]*$/u.test(extension) || defaults.has(extension)) throw new Error(`${label} has invalid or duplicate OPC default content type`);
+      defaults.set(extension, contentType);
+    } else {
+      const part = normalizeOpcTarget(xmlAttribute(child, "PartName", `${label} OPC content types`), `${label} OPC content types`);
+      if (!files.has(part) || overrides.has(part)) throw new Error(`${label} has invalid or duplicate OPC content-type override`);
+      overrides.set(part, contentType);
+    }
+  }
+  for (const member of files.keys()) {
+    if (member === "[Content_Types].xml") continue;
+    const type = overrides.get(member) ?? defaults.get(packageExtension(member));
+    if (!type || /[\r\n]/u.test(type)) throw new Error(`${label} OPC content types do not describe ${member}`);
+  }
+  for (const member of overrides.keys()) {
+    if (!files.has(member)) throw new Error(`${label} OPC content types reference a missing member`);
+  }
+  if (defaults.get("rels") !== "application/vnd.openxmlformats-package.relationships+xml" || defaults.get("psmdcp") !== "application/vnd.openxmlformats-package.core-properties+xml") throw new Error(`${label} has invalid OPC relationship/core content types`);
+}
+
+function validateNugetRelationships(files, packageId, coreMember, label) {
+  const root = parseXml(requiredArchiveMember(files, "_rels/.rels", label), `${label} relationships`);
+  if (xmlLocalName(root.name) !== "Relationships" || root.attributes.get("xmlns") !== NUGET_RELATIONSHIP_NAMESPACE || root.text.join("").trim()) throw new Error(`${label} relationships have an invalid OPC root`);
+  const relationships = xmlChildren(root, "Relationship");
+  if (relationships.length !== 2 || root.children.length !== relationships.length) throw new Error(`${label} relationships must contain exactly manifest and core bindings`);
+  const expected = new Map([
+    [NUGET_RELATIONSHIP_TYPES.manifest, `${packageId}.nuspec`],
+    [NUGET_RELATIONSHIP_TYPES.core, coreMember],
+  ]);
+  const seenTypes = new Set();
+  const seenIds = new Set();
+  for (const relationship of relationships) {
+    if (relationship.children.length !== 0 || relationship.text.join("").trim()) throw new Error(`${label} has an invalid OPC relationship`);
+    const type = xmlAttribute(relationship, "Type", `${label} relationship`);
+    const target = normalizeOpcTarget(xmlAttribute(relationship, "Target", `${label} relationship`), `${label} relationship`);
+    const id = xmlAttribute(relationship, "Id", `${label} relationship`);
+    if (!expected.has(type) || expected.get(type) !== target || seenTypes.has(type) || seenIds.has(id) || relationship.attributes.has("TargetMode")) throw new Error(`${label} relationships do not bind the expected package metadata`);
+    seenTypes.add(type);
+    seenIds.add(id);
+  }
+  if (seenTypes.size !== expected.size) throw new Error(`${label} relationships do not bind the expected package metadata`);
+}
+
+function nugetExpectedMembers(packageId, symbols, coreMember) {
+  const common = ["[Content_Types].xml", "_rels/.rels", `${packageId}.nuspec`, coreMember];
+  return symbols
+    ? [...common, "lib/net8.0/Licensecc.Client.pdb"]
+    : [...common, "README.md", "lib/net8.0/Licensecc.Client.dll", "lib/net8.0/Licensecc.Client.xml"];
+}
+
+function validatePeDll(contents, label) {
+  if (!Buffer.isBuffer(contents) || contents.length < 0xa0 || contents.subarray(0, 2).toString("ascii") !== "MZ") throw new Error(`${label} is not a PE DLL`);
+  const offset = contents.readUInt32LE(0x3c);
+  if (!Number.isSafeInteger(offset) || offset < 0x40 || offset + 24 > contents.length || contents.subarray(offset, offset + 4).toString("ascii") !== "PE\0\0") throw new Error(`${label} is not a PE DLL`);
+  const machine = contents.readUInt16LE(offset + 4);
+  const sections = contents.readUInt16LE(offset + 6);
+  const optionalSize = contents.readUInt16LE(offset + 20);
+  const characteristics = contents.readUInt16LE(offset + 22);
+  if (![0x14c, 0x8664, 0xaa64].includes(machine) || sections === 0 || optionalSize < 2 || offset + 24 + optionalSize > contents.length || (characteristics & 0x2000) === 0 || ![0x10b, 0x20b].includes(contents.readUInt16LE(offset + 24))) throw new Error(`${label} is not a PE DLL`);
+}
+
+function validatePortablePdb(contents, label) {
+  if (!Buffer.isBuffer(contents) || contents.length < 24 || contents.subarray(0, 4).toString("ascii") !== "BSJB") throw new Error(`${label} is not a portable PDB`);
+  const versionBytes = contents.readUInt32LE(12);
+  if (!Number.isSafeInteger(versionBytes) || versionBytes === 0 || 16 + versionBytes > contents.length || !/^PDB v\d+\.\d+/u.test(contents.subarray(16, 16 + versionBytes).toString("ascii").replace(/\0+$/u, ""))) throw new Error(`${label} is not a portable PDB`);
+}
+
+function nugetCoreMember(files, label, requireCanonicalCore) {
+  const members = [...files.keys()].filter((path) => /^package\/services\/metadata\/core-properties\/[^/]+\.psmdcp$/u.test(path));
+  if (members.length !== 1) throw new Error(`${label} must contain exactly one core-properties document`);
+  if (requireCanonicalCore && members[0] !== NUGET_CORE_MEMBER) throw new Error(`${label} core-properties member is not canonical`);
+  return members[0];
+}
+
+function validateNugetArtifact({ archivePath, packageId, platformVersion, symbols, requireCanonicalCore = true }) {
+  const label = symbols ? "NuGet symbols" : "NuGet package";
+  const files = readZipArchive(archivePath, label);
+  const coreMember = nugetCoreMember(files, label, requireCanonicalCore);
+  exactMemberSet(files, nugetExpectedMembers(packageId, symbols, coreMember), label);
+  validateOpcContentTypes(files, label);
+  validateNugetRelationships(files, packageId, coreMember, label);
+
+  const packageRoot = parseXml(requiredArchiveMember(files, `${packageId}.nuspec`, label), `${label} metadata`);
+  if (xmlLocalName(packageRoot.name) !== "package") throw new Error(`${label} metadata has an invalid nuspec root`);
+  const metadata = xmlChildren(packageRoot, "metadata");
+  if (metadata.length !== 1) throw new Error(`${label} metadata has an invalid nuspec metadata element`);
+  if (xmlSingleText(metadata[0], "id", `${label} metadata`) !== packageId || xmlSingleText(metadata[0], "version", `${label} metadata`) !== platformVersion) throw new Error(`${label} metadata does not carry the expected identity`);
+  const packageTypes = xmlChildren(metadata[0], "packageTypes");
+  const symbolTypes = packageTypes.flatMap((node) => xmlChildren(node, "packageType")).filter((node) => node.attributes.get("name") === "SymbolsPackage");
+  if (symbols ? symbolTypes.length !== 1 : packageTypes.length !== 0) throw new Error(symbols ? "NuGet symbols metadata does not declare exactly one SymbolsPackage" : "NuGet package metadata must not declare a symbols package type");
+
+  const core = parseXml(requiredArchiveMember(files, coreMember, label), `${label} core metadata`);
+  if (xmlLocalName(core.name) !== "coreProperties" || xmlSingleText(core, "identifier", `${label} core metadata`) !== packageId || xmlSingleText(core, "version", `${label} core metadata`) !== platformVersion) throw new Error(`${label} core metadata does not carry the expected identity`);
+  if (symbols) validatePortablePdb(requiredArchiveMember(files, "lib/net8.0/Licensecc.Client.pdb", label), `${label} PDB`);
+  else validatePeDll(requiredArchiveMember(files, "lib/net8.0/Licensecc.Client.dll", label), `${label} DLL`);
+  return { files, coreMember };
+}
+
 /** Normalize only NuGet's generated relationship names and ZIP container metadata. */
 function canonicalizeNugetArtifact({ archivePath, packageId, platformVersion, symbols, sourceDateEpoch }) {
   const label = symbols ? "NuGet symbols" : "NuGet package";
   if (!existsSync(archivePath) || lstatSync(archivePath).isSymbolicLink() || !lstatSync(archivePath).isFile()) throw new Error(`${label} output is missing its expected artifact`);
-  validateNugetArtifact({ archivePath, packageId, platformVersion, symbols });
-  const files = readZipArchive(archivePath, label);
-  const coreMembers = [...files.keys()].filter((path) => /^package\/services\/metadata\/core-properties\/[^/]+\.psmdcp$/u.test(path));
-  if (coreMembers.length !== 1) throw new Error(`${label} must contain exactly one core-properties document`);
-  const coreMember = coreMembers[0];
+  const validated = validateNugetArtifact({ archivePath, packageId, platformVersion, symbols, requireCanonicalCore: false });
+  const { files, coreMember } = validated;
   const core = requiredArchiveMember(files, coreMember, label);
-  if (xmlValue(core, "dc:identifier", `${label} core metadata`) !== packageId || xmlValue(core, "version", `${label} core metadata`) !== platformVersion) throw new Error(`${label} core metadata does not carry the expected identity`);
-  const relationships = requiredArchiveMember(files, "_rels/.rels", label);
-  const relationshipSource = strictUtf8(relationships, `${label} relationships`);
-  const relationshipElements = [...relationshipSource.matchAll(/<Relationship\b[^>]*\/?\s*>/giu)];
-  if (relationshipElements.length !== 2 || !relationshipSource.includes(`Target="/${packageId}.nuspec"`) || !relationshipSource.includes(`Target="/${coreMember}"`)) throw new Error(`${label} relationships do not bind the expected package metadata`);
-  const canonicalCore = "package/services/metadata/core-properties/licensecc.release.psmdcp";
   files.delete(coreMember);
-  files.set(canonicalCore, core);
-  files.set("_rels/.rels", Buffer.from(canonicalNugetRelationships(packageId, canonicalCore), "utf8"));
+  files.set(NUGET_CORE_MEMBER, core);
+  files.set("_rels/.rels", Buffer.from(canonicalNugetRelationships(packageId, NUGET_CORE_MEMBER), "utf8"));
   writeDeterministicZip(archivePath, files, sourceDateEpoch);
   validateNugetArtifact({ archivePath, packageId, platformVersion, symbols });
   const normalized = readZipArchive(archivePath, label);
-  if (!normalized.has(canonicalCore) || !normalized.get("_rels/.rels").equals(Buffer.from(canonicalNugetRelationships(packageId, canonicalCore), "utf8"))) throw new Error(`${label} deterministic normalization did not persist expected metadata`);
-}
-
-function validateNugetArtifact({ archivePath, packageId, platformVersion, symbols }) {
-  const label = symbols ? "NuGet symbols" : "NuGet package";
-  const files = readZipArchive(archivePath, label);
-  const metadata = requiredArchiveMember(files, `${packageId}.nuspec`, label);
-  if (xmlValue(metadata, "id", `${label} metadata`) !== packageId || xmlValue(metadata, "version", `${label} metadata`) !== platformVersion) throw new Error(`${label} metadata does not carry the expected identity`);
-  if (symbols && !/<packageType\s+name\s*=\s*["']SymbolsPackage["']\s*\/?\s*>/iu.test(strictUtf8(metadata, `${label} metadata`))) throw new Error("NuGet symbols metadata does not declare SymbolsPackage");
-  const expected = symbols ? "lib/net8.0/Licensecc.Client.pdb" : "lib/net8.0/Licensecc.Client.dll";
-  requiredArchiveMember(files, expected, label);
+  if (!normalized.has(NUGET_CORE_MEMBER) || !normalized.get("_rels/.rels").equals(Buffer.from(canonicalNugetRelationships(packageId, NUGET_CORE_MEMBER), "utf8"))) throw new Error(`${label} deterministic normalization did not persist expected metadata`);
 }
 
 function extractValidatedArchive({ archivePath, destination, expectedRoot, expectedMembers }) {
@@ -965,6 +1361,19 @@ function runCanonicalNpmInstall({ root, run, env }) {
   return npm;
 }
 
+function assertExactToolVersion({ executable, args = ["--version"], expected, prefix, label, root, run, env }) {
+  const result = run({ executable, args, cwd: root, env, label });
+  const output = typeof result?.stdout === "string" ? result.stdout.trim() : "";
+  const expression = prefix ? new RegExp(`^${prefix.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}\\s+${expected.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}(?:\\s|$)`, "u") : new RegExp(`^${expected.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}$`, "u");
+  if (!expression.test(output)) throw new Error(`${label} must be exactly ${expected}; received ${output || "<no version output>"}`);
+}
+
+function assertReleaseToolchains({ root, run, env, toolchains, hasDotnet }) {
+  assertExactToolVersion({ executable: "python", expected: toolchains.pythonVersion, prefix: "Python", label: "release Python version", root, run, env });
+  assertExactToolVersion({ executable: "uv", expected: toolchains.uvVersion, prefix: "uv", label: "release uv version", root, run, env });
+  if (hasDotnet) assertExactToolVersion({ executable: "dotnet", expected: toolchains.dotnetSdkVersion, label: "release .NET SDK version", root, run, env });
+}
+
 function resolveLocalModule(root, request, label) {
   try {
     return createRequire(join(root, "package.json")).resolve(request);
@@ -1031,7 +1440,10 @@ function planWorkerAssembly(outputDirectory, root = repositoryRoot) {
   const plan = [];
   for (const worker of WORKERS) {
     const outdir = join(outputDirectory, "workers", worker.name);
-    if (worker.ui) plan.push({ executable: process.execPath, args: ["<resolved-npm-cli>", "run", "build:ui", "--workspace", worker.workspace, "--", "--outDir", join(work, "ui", worker.name)], cwd: root, label: `${worker.name} isolated UI build` });
+    if (worker.ui) {
+      const uiOutdir = join(work, "ui", worker.name);
+      plan.push({ executable: process.execPath, args: ["<resolved-npm-cli>", "run", "build:ui", "--workspace", worker.workspace, "--", "--outDir", uiOutdir], cwd: root, label: `${worker.name} isolated UI build`, uiOutdir });
+    }
     const args = ["<local-wrangler-bin>", "deploy"];
     if (worker.entry) args.push(worker.entry);
     args.push("--dry-run", "--outdir", outdir, "--config", join(root, worker.directory, worker.config));
@@ -1043,6 +1455,26 @@ function planWorkerAssembly(outputDirectory, root = repositoryRoot) {
 
 function directoryHasFiles(directory) {
   return existsSync(directory) && readdirSync(directory, { recursive: true, withFileTypes: true }).some((entry) => entry.isFile());
+}
+
+/** Require a nonempty HTML entry and actual built UI asset before Wrangler sees it. */
+function validateUiAssets(directory, label) {
+  if (!existsSync(directory) || lstatSync(directory).isSymbolicLink() || !lstatSync(directory).isDirectory()) throw new Error(`${label} output directory is missing or unsafe`);
+  const files = [];
+  const visit = (current) => {
+    for (const entry of readdirSync(current, { withFileTypes: true }).sort((left, right) => ordinal(left.name, right.name))) {
+      const child = join(current, entry.name);
+      if (entry.isSymbolicLink()) throw new Error(`${label} output contains a symbolic link`);
+      if (entry.isDirectory()) visit(child);
+      else if (entry.isFile()) {
+        const member = assertSafePackageMemberPath(relative(directory, child).split(sep).join("/"), `${label} output`);
+        if (readFileSync(child).length === 0) throw new Error(`${label} output contains an empty file: ${member}`);
+        files.push(member);
+      } else throw new Error(`${label} output contains an unsupported filesystem entry`);
+    }
+  };
+  visit(directory);
+  if (!files.includes("index.html") || !files.some((member) => /^assets\/[^/]+\.(?:css|js|mjs)$/iu.test(member))) throw new Error(`${label} output must contain nonempty index.html and a built CSS or JavaScript asset`);
 }
 
 function strictUtf8(bytes, label) {
@@ -1070,10 +1502,90 @@ function parseWorkerModule(bytes, label) {
   return source;
 }
 
+function workerTokens(source) {
+  const tokens = [];
+  const regexMayStartAfter = new Set(["(", "[", "{", ",", ";", ":", "=", "!", "?", "&", "|", "+", "-", "*", "%", "^", "~", "<", ">", "return", "throw", "case", "delete", "void", "typeof", "new", "in", "of", "yield", "await"]);
+  const skipQuoted = (cursor, quote) => {
+    for (let index = cursor + 1; index < source.length; index += 1) {
+      if (source[index] === "\\") {
+        index += 1;
+      } else if (source[index] === quote) {
+        return index + 1;
+      }
+    }
+    return source.length;
+  };
+  let cursor = 0;
+  while (cursor < source.length) {
+    const character = source[cursor];
+    const next = source[cursor + 1];
+    if (/\s/u.test(character)) {
+      cursor += 1;
+    } else if (character === "/" && next === "/") {
+      const end = source.indexOf("\n", cursor + 2);
+      cursor = end === -1 ? source.length : end + 1;
+    } else if (character === "/" && next === "*") {
+      const end = source.indexOf("*/", cursor + 2);
+      cursor = end === -1 ? source.length : end + 2;
+    } else if (character === '"' || character === "'") {
+      let value = "";
+      let index = cursor + 1;
+      for (; index < source.length; index += 1) {
+        if (source[index] === "\\") {
+          value += source[index + 1] ?? "";
+          index += 1;
+        } else if (source[index] === character) {
+          index += 1;
+          break;
+        } else value += source[index];
+      }
+      tokens.push({ kind: "string", value });
+      cursor = index;
+    } else if (character === "`") {
+      cursor = skipQuoted(cursor, "`");
+    } else if (character === "/" && regexMayStartAfter.has(tokens.at(-1)?.value)) {
+      cursor = skipQuoted(cursor, "/");
+      while (/[A-Za-z]/u.test(source[cursor] ?? "")) cursor += 1;
+    } else if (/[A-Za-z_$]/u.test(character)) {
+      const match = /^[A-Za-z_$][\w$]*/u.exec(source.slice(cursor));
+      tokens.push({ kind: "identifier", value: match[0] });
+      cursor += match[0].length;
+    } else {
+      tokens.push({ kind: "punctuator", value: character });
+      cursor += 1;
+    }
+  }
+  return tokens;
+}
+
 function hasWorkerEntrypoint(source) {
-  return /\bexport\s+default\b/u.test(source)
-    || /\bexport\s*\{[^}]*\b(?:default|as\s+default)\b[^}]*\}/su.test(source)
-    || /\baddEventListener\s*\(\s*["']fetch["']/u.test(source);
+  const tokens = workerTokens(source);
+  let depth = 0;
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    if (token.value === "{") {
+      depth += 1;
+      continue;
+    }
+    if (token.value === "}") {
+      depth = Math.max(0, depth - 1);
+      continue;
+    }
+    if (depth !== 0) continue;
+    if (token.value === "export" && tokens[index + 1]?.value === "default") return true;
+    if (token.value === "export" && tokens[index + 1]?.value === "{") {
+      let braceDepth = 0;
+      for (let cursor = index + 1; cursor < tokens.length; cursor += 1) {
+        if (tokens[cursor].value === "{") braceDepth += 1;
+        else if (tokens[cursor].value === "}") {
+          braceDepth -= 1;
+          if (braceDepth === 0) break;
+        } else if (braceDepth === 1 && (tokens[cursor].value === "default" || (tokens[cursor].value === "as" && tokens[cursor + 1]?.value === "default"))) return true;
+      }
+    }
+    if (token.value === "addEventListener" && tokens[index + 1]?.value === "(" && tokens[index + 2]?.kind === "string" && tokens[index + 2]?.value === "fetch") return true;
+  }
+  return false;
 }
 
 /** Require a parsed non-empty JavaScript bundle and an explicit Worker fetch/module entrypoint. */
@@ -1133,6 +1645,7 @@ function runWorkerAssembly({ root, outputDirectory, run, env, staging, npm }) {
         const args = command.args.map((argument) => argument === "<local-wrangler-bin>" ? localWrangler : argument);
         run({ ...command, args, env });
       }
+      if (command.uiOutdir) validateUiAssets(command.uiOutdir, `${command.label} UI`);
       if (command.outdir) {
         if (!directoryHasFiles(command.outdir)) throw new Error(`${command.label} produced no bundle files`);
         normalizeWorkerBundle(command.outdir, staging);
@@ -1222,6 +1735,7 @@ function verifyPackageVersions(records, versions, consumerId, { incomplete = fal
       wheelPath: join(payloadRoot, identity.python[0]),
       sdistPath: join(payloadRoot, identity.python[1]),
       pythonVersion: versions.pythonVersion,
+      repositoryRoot: canonicalRepositoryRoot,
     });
     if (!incomplete) {
       validateNugetArtifact({ archivePath: join(payloadRoot, identity.dotnet[0]), packageId: versions.dotnetPackageId, platformVersion: versions.platformVersion, symbols: false });
@@ -1356,11 +1870,13 @@ function assembleReleaseArtifacts({ root = repositoryRoot, outputDirectory, cons
   safeConsumerId(consumerId);
   const staging = prepareOwnedOutput({ root, outputDirectory });
   try {
-    let hasDotnet;
+    const hasDotnet = toolAvailable("dotnet");
+    if (!hasDotnet && !allowPartial) throw new Error("dotnet is required; use --allow-partial only for an explicitly incomplete manifest");
     const canonical = createCanonicalHeadTree({ root, destination: join(staging.output, ".canonical-head") });
     try {
       assertCanonicalVersionContract({ sourceRoot: root, canonicalRoot: canonical });
       const env = sanitizedEnvironment(canonical, versions.sourceDateEpoch);
+      assertReleaseToolchains({ root: canonical, run, env, toolchains: versions.toolchains, hasDotnet });
       const npm = runCanonicalNpmInstall({ root: canonical, run, env });
       runWorkerAssembly({ root: canonical, outputDirectory: staging.output, run, env, staging, npm });
       // `uv build` deliberately has no --locked mode.  Validate the canonical
@@ -1370,12 +1886,13 @@ function assembleReleaseArtifacts({ root = repositoryRoot, outputDirectory, cons
       const pythonToolOutput = join(canonical, ".release-python-output");
       run({ executable: "uv", args: ["build", "--directory", join(canonical, "sdks/python"), "--build-constraint", canonicalPythonBuildConstraint(canonical), "--require-hashes", "--wheel", "--sdist", "--out-dir", pythonToolOutput], cwd: canonical, env, label: "locked Python wheel and sdist" });
       stagePythonArtifacts({ canonicalRoot: canonical, toolOutput: pythonToolOutput, stagingOutput: staging.output, pythonVersion: versions.pythonVersion });
-      hasDotnet = toolAvailable("dotnet");
-      if (!hasDotnet && !allowPartial) throw new Error("dotnet is required; use --allow-partial only for an explicitly incomplete manifest");
       if (hasDotnet) {
-        run({ executable: "dotnet", args: ["restore", join(canonical, "sdks/dotnet/Licensecc.Client.sln"), "--locked-mode", "--disable-build-servers", "--configfile", env.NUGET_CONFIG_FILE, "--packages", env.NUGET_PACKAGES], cwd: canonical, env, label: "locked NuGet restore" });
+        const dotnetProject = join(canonical, "sdks/dotnet/src/Licensecc.Client/Licensecc.Client.csproj");
+        const dotnetLock = join(dirname(dotnetProject), "packages.lock.json");
+        if (!existsSync(dotnetProject) || lstatSync(dotnetProject).isSymbolicLink() || !lstatSync(dotnetProject).isFile() || !existsSync(dotnetLock) || lstatSync(dotnetLock).isSymbolicLink() || !lstatSync(dotnetLock).isFile()) throw new Error("canonical NuGet pack target or its tracked packages.lock.json is missing or unsafe");
+        run({ executable: "dotnet", args: ["restore", dotnetProject, "--locked-mode", "--disable-build-servers", "--configfile", env.NUGET_CONFIG_FILE, "--packages", env.NUGET_PACKAGES], cwd: canonical, env, label: "locked NuGet restore" });
         const dotnetOutput = join(staging.output, "dotnet");
-        run({ executable: "dotnet", args: ["pack", join(canonical, "sdks/dotnet/src/Licensecc.Client/Licensecc.Client.csproj"), "--configuration", "Release", "--no-restore", "--disable-build-servers", "--include-symbols", "--include-source", `-p:PackageVersion=${versions.platformVersion}`, "-p:SymbolPackageFormat=snupkg", "-p:ContinuousIntegrationBuild=true", "-p:Deterministic=true", "-p:DeterministicSourcePaths=true", `-p:PathMap=${canonical}=/src`, `-p:SourceRevisionId=${versions.commit}`, "--output", dotnetOutput], cwd: canonical, env, label: "NuGet package and symbols" });
+        run({ executable: "dotnet", args: ["pack", dotnetProject, "--configuration", "Release", "--no-restore", "--disable-build-servers", "--include-symbols", `-p:PackageVersion=${versions.platformVersion}`, "-p:SymbolPackageFormat=snupkg", "-p:ContinuousIntegrationBuild=true", "-p:Deterministic=true", "-p:DeterministicSourcePaths=true", `-p:PathMap=${canonical}=/src`, `-p:SourceRevisionId=${versions.commit}`, "--output", dotnetOutput], cwd: canonical, env, label: "NuGet package and symbols" });
         canonicalizeNugetArtifact({ archivePath: join(dotnetOutput, `${versions.dotnetPackageId}.${versions.platformVersion}.nupkg`), packageId: versions.dotnetPackageId, platformVersion: versions.platformVersion, symbols: false, sourceDateEpoch: versions.sourceDateEpoch });
         canonicalizeNugetArtifact({ archivePath: join(dotnetOutput, `${versions.dotnetPackageId}.${versions.platformVersion}.snupkg`), packageId: versions.dotnetPackageId, platformVersion: versions.platformVersion, symbols: true, sourceDateEpoch: versions.sourceDateEpoch });
       }

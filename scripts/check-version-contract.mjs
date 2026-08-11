@@ -5,6 +5,8 @@ import { fileURLToPath } from "node:url";
 
 const repositoryRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const contractPath = "version.json";
+const releaseToolchainsPath = "release-toolchains.json";
+const globalJsonPath = "global.json";
 const nodeManifestPaths = [
   "package.json",
   "packages/cloudflare-runtime/package.json",
@@ -47,8 +49,15 @@ export const versionContractSchema = Object.freeze({
   schemaVersion: 1,
   fields: Object.freeze(["platform_version", "schema_version"]),
 });
+/** Exact release-toolchain authority; platform version remains version.json only. */
+export const releaseToolchainSchema = Object.freeze({
+  schemaVersion: 1,
+  fields: Object.freeze(["dotnet_sdk_version", "python_version", "schema_version", "uv_version"]),
+});
 const requiredVersionPaths = [
   contractPath,
+  releaseToolchainsPath,
+  globalJsonPath,
   ...nodeManifestPaths,
   "package-lock.json",
   ...openApiSourcePaths,
@@ -64,6 +73,7 @@ const requiredVersionPaths = [
   ...cppPaths,
 ];
 const semverPattern = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(alpha|beta|rc)\.(0|[1-9]\d*))?$/u;
+const exactToolVersionPattern = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u;
 
 function normalize(path) {
   return path.replaceAll("\\", "/");
@@ -346,6 +356,43 @@ export function readVersionAuthorities({ root = repositoryRoot, readSource = (pa
   return { versions: { platformVersion, pythonVersion, cppVersion: cpp }, errors };
 }
 
+/**
+ * Read the exact release toolchain authority and its independent .NET SDK
+ * selector.  This is intentionally separate from version.json: tools are
+ * build inputs, not package-version authorities.
+ */
+export function readReleaseToolchainAuthorities({ root = repositoryRoot, readSource = (path) => sourceAt(root, path) } = {}) {
+  const errors = [];
+  let contract;
+  let global;
+  try {
+    contract = JSON.parse(readSource(releaseToolchainsPath));
+  } catch {
+    errors.push({ code: "invalid_toolchain_source", path: releaseToolchainsPath, expected: null, actual: null });
+  }
+  try {
+    global = JSON.parse(readSource(globalJsonPath));
+  } catch {
+    errors.push({ code: "invalid_toolchain_source", path: globalJsonPath, expected: null, actual: null });
+  }
+  if (!contract || !global) return { toolchains: null, errors };
+  const fields = typeof contract === "object" && !Array.isArray(contract) ? Object.keys(contract).sort() : [];
+  const pythonVersion = contract.python_version;
+  const uvVersion = contract.uv_version;
+  const dotnetSdkVersion = contract.dotnet_sdk_version;
+  if (contract.schema_version !== releaseToolchainSchema.schemaVersion || fields.join(",") !== releaseToolchainSchema.fields.join(",") || ![pythonVersion, uvVersion, dotnetSdkVersion].every((value) => typeof value === "string" && exactToolVersionPattern.test(value))) {
+    errors.push({ code: "invalid_toolchain_contract", path: releaseToolchainsPath, expected: "schema 1 with exact Python, uv, and .NET x.y.z versions", actual: null });
+    return { toolchains: null, errors };
+  }
+  const globalFields = typeof global === "object" && !Array.isArray(global) ? Object.keys(global).sort() : [];
+  const sdk = global.sdk;
+  const sdkFields = sdk && typeof sdk === "object" && !Array.isArray(sdk) ? Object.keys(sdk).sort() : [];
+  if (globalFields.join(",") !== "sdk" || sdkFields.join(",") !== "allowPrerelease,rollForward,version" || sdk.version !== dotnetSdkVersion || sdk.rollForward !== "disable" || sdk.allowPrerelease !== false) {
+    errors.push({ code: "dotnet_sdk_authority_mismatch", path: globalJsonPath, expected: `${dotnetSdkVersion} with rollForward=disable`, actual: sdk?.version ?? null });
+  }
+  return { toolchains: { pythonVersion, uvVersion, dotnetSdkVersion }, errors };
+}
+
 function checkCppProjections(root, errors) {
   const version = cppVersion(root, errors);
   if (version === null) return;
@@ -418,6 +465,8 @@ export function checkVersionContract({ root = repositoryRoot, trackedPaths = tra
 
   const authority = readVersionAuthorities({ root });
   const errors = [...authority.errors];
+  const toolchainAuthority = readReleaseToolchainAuthorities({ root });
+  errors.push(...toolchainAuthority.errors);
   if (!authority.versions) return { errors };
   const { platformVersion, pythonVersion, cppVersion: authoritativeCppVersion } = authority.versions;
 

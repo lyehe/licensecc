@@ -21,25 +21,58 @@ function source(relativePath) {
   return readFileSync(resolve(repositoryRoot, relativePath), "utf8");
 }
 
-function workflowJobLinesFromText(contents, relativePath, jobName) {
-  const lines = contents.split(/\r?\n/);
-  const start = lines.indexOf(`  ${jobName}:`);
-  assert.ok(start >= 0, `${relativePath}: missing ${jobName} job`);
+function yamlWithoutComment(line) {
+  let quote = null;
+  let output = "";
+  for (let index = 0; index < line.length; index += 1) {
+    const character = line[index];
+    if (quote) {
+      output += character;
+      if (character === "\\" && quote === '"') {
+        output += line[index + 1] ?? "";
+        index += 1;
+      } else if (character === quote) {
+        quote = null;
+      }
+    } else if (character === '"' || character === "'") {
+      quote = character;
+      output += character;
+    } else if (character === "#") {
+      break;
+    } else {
+      output += character;
+    }
+  }
+  return output;
+}
+
+function indentation(line) {
+  return line.length - line.trimStart().length;
+}
+
+function workflowJobLinesFromSource(content, jobName) {
+  const lines = content.split(/\r?\n/);
+  const start = lines.findIndex((line) => indentation(line) === 2 && yamlWithoutComment(line).trim() === `${jobName}:`);
+  assert.ok(start >= 0, `missing ${jobName} job`);
 
   const end = lines.findIndex((line, index) => {
     if (index <= start) return false;
-    const indentation = line.length - line.trimStart().length;
-    return indentation === 2 && line.trimEnd().endsWith(":");
+    return indentation(line) === 2 && yamlWithoutComment(line).trimEnd().endsWith(":");
   });
   return lines.slice(start, end === -1 ? lines.length : end);
 }
 
 function workflowJobLines(relativePath, jobName) {
-  return workflowJobLinesFromText(source(relativePath), relativePath, jobName);
+  const lines = source(relativePath);
+  const job = workflowJobLinesFromSource(lines, jobName);
+  assert.ok(job.length > 0, `${relativePath}: missing ${jobName} job`);
+  return job;
 }
 
-function indentation(line) {
-  return line.length - line.trimStart().length;
+function workflowJobLinesFromText(contents, relativePath, jobName) {
+  const job = workflowJobLinesFromSource(contents, jobName);
+  assert.ok(job.length > 0, `${relativePath}: missing ${jobName} job`);
+  return job;
 }
 
 function workflowNamedStep(contents, relativePath, jobName, stepName) {
@@ -141,6 +174,48 @@ function assertPostgresWorkflowContract(workflow, relativePath = ".github/workfl
   );
 }
 
+function executionRunCommands(lines) {
+  const commands = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const active = yamlWithoutComment(lines[index]);
+    const match = /^(\s*)run:\s*(.*?)\s*$/u.exec(active);
+    if (!match) continue;
+    const baseIndent = match[1].length;
+    const value = match[2];
+    if (!/^(?:\||>)[+-]?$/u.test(value)) {
+      if (value) commands.push(value.replace(/^(["'])(.*)\1$/u, "$2"));
+      continue;
+    }
+    for (index += 1; index < lines.length; index += 1) {
+      const candidate = lines[index];
+      if (candidate.trim() && indentation(candidate) <= baseIndent) {
+        index -= 1;
+        break;
+      }
+      const command = yamlWithoutComment(candidate).trim();
+      if (command) commands.push(command);
+    }
+  }
+  return commands;
+}
+
+function activeWorkflowDirectives(lines) {
+  const found = [];
+  let runBlockIndent = null;
+  for (const line of lines) {
+    if (runBlockIndent !== null && line.trim() && indentation(line) <= runBlockIndent) runBlockIndent = null;
+    if (runBlockIndent !== null) continue;
+    const active = yamlWithoutComment(line);
+    const match = /^(\s*)(?:-\s+)?([A-Za-z][A-Za-z0-9_-]*):(?:\s|$)/u.exec(active);
+    if (!match) continue;
+    const key = match[2];
+    const remainder = active.slice(match[0].length).trim();
+    if (key === "run" && /^(?:\||>)[+-]?$/u.test(remainder)) runBlockIndent = match[1].length;
+    if (["if", "continue-on-error", "shell", "working-directory", "defaults"].includes(key)) found.push({ key, line: active.trim() });
+  }
+  return found;
+}
+
 function workflowReferences() {
   return trackedWorkflowPaths().flatMap((path) => {
     const content = source(path);
@@ -175,34 +250,34 @@ test("Dependabot keeps GitHub Actions SHA pins maintainable", () => {
 });
 
 test("lint repository-quality runs the clean-checkout regression gate", () => {
-  const jobLines = workflowJobLines(".github/workflows/lint.yml", "repository-quality");
+  const commands = executionRunCommands(workflowJobLines(".github/workflows/lint.yml", "repository-quality"));
   assert.equal(
-    jobLines.filter((line) => line.trim() === "npm run test:workflow-pins").length,
-    1,
-    "repository-quality must invoke its workflow contract exactly once",
-  );
-  assert.equal(
-    jobLines.filter((line) => line.trim() === "npm run test:capabilities").length,
+    commands.filter((command) => command === "npm run test:capabilities").length,
     1,
     "repository-quality must invoke test:capabilities exactly once",
   );
   assert.equal(
-    jobLines.filter((line) => line.trim() === "npm run test:clean-checkout").length,
+    commands.filter((command) => command === "npm run test:clean-checkout").length,
     1,
     "repository-quality must invoke test:clean-checkout exactly once",
   );
   assert.equal(
-    jobLines.filter((line) => line.trim() === "npm run test:versions").length,
+    commands.filter((command) => command === "npm run test:workflow-pins").length,
+    1,
+    "repository-quality must invoke test:workflow-pins exactly once",
+  );
+  assert.equal(
+    commands.filter((command) => command === "npm run test:versions").length,
     1,
     "repository-quality must invoke test:versions exactly once",
   );
   assert.equal(
-    jobLines.filter((line) => line.trim() === "npm run test:release-artifacts").length,
+    commands.filter((command) => command === "npm run test:release-artifacts").length,
     1,
     "repository-quality must invoke test:release-artifacts exactly once",
   );
   assert.equal(
-    jobLines.filter((line) => line.trim() === "npm run check:versions").length,
+    commands.filter((command) => command === "npm run check:versions").length,
     1,
     "repository-quality must invoke check:versions exactly once",
   );
@@ -216,9 +291,9 @@ test("release artifact evidence is an exact-once local and repository-quality ga
     1,
     "check:pr must invoke test:release-artifacts exactly once",
   );
-  const jobLines = workflowJobLines(".github/workflows/lint.yml", "repository-quality");
+  const commands = executionRunCommands(workflowJobLines(".github/workflows/lint.yml", "repository-quality"));
   assert.equal(
-    jobLines.filter((line) => line.trim() === "npm run test:release-artifacts").length,
+    commands.filter((command) => command === "npm run test:release-artifacts").length,
     1,
     "repository-quality must invoke test:release-artifacts exactly once",
   );
@@ -226,12 +301,13 @@ test("release artifact evidence is an exact-once local and repository-quality ga
 
 test("the release-candidate workflow is manual and performs only local dry-run assembly", () => {
   const workflow = source(".github/workflows/release-artifacts.yml");
+  const commands = executionRunCommands(workflowJobLines(".github/workflows/release-artifacts.yml", "assemble"));
   assert.match(workflow, /^\s*workflow_dispatch:\s*$/mu);
-  assert.match(workflow, /node scripts\/assemble-release-artifacts\.mjs/);
-  assert.match(workflow, /--consumer-id/);
-  assert.match(workflow, /--output/);
-  assert.match(workflow, /--repeat-output/);
-  assert.doesNotMatch(workflow, /(?:^|\s)(?:git\s+tag|gh\s+release|npm\s+publish|dotnet\s+nuget\s+push|wrangler\s+deploy)(?:\s|$)/imu);
+  assert.ok(commands.includes("node scripts/assemble-release-artifacts.mjs"));
+  assert.ok(commands.includes("--consumer-id \"$CONSUMER_ID\""));
+  assert.ok(commands.some((command) => command.startsWith("--output ")));
+  assert.ok(commands.some((command) => command.startsWith("--repeat-output ")));
+  assert.doesNotMatch(commands.join("\n"), /(?:^|\s)(?:git\s+tag|gh\s+release|npm\s+publish|dotnet\s+nuget\s+push|wrangler\s+deploy)(?:\s|$)/imu);
   assert.doesNotMatch(workflow, /upload-artifact/iu);
 });
 
@@ -242,10 +318,51 @@ test("pull requests run a clean, toolchain-backed double assembly rather than on
   assert.match(jobLines.join("\n"), /actions\/setup-python@/u);
   assert.match(jobLines.join("\n"), /astral-sh\/setup-uv@/u);
   assert.match(jobLines.join("\n"), /actions\/setup-dotnet@/u);
-  assert.equal(jobLines.filter((line) => line.trim() === "node scripts/assemble-release-artifacts.mjs").length, 1);
-  assert.equal(jobLines.filter((line) => line.trim() === "--repeat-output \"$RUNNER_TEMP/licensecc-release-artifacts-b\"").length, 1);
+  const toolchains = JSON.parse(source("release-toolchains.json"));
+  assert.match(jobLines.join("\n"), new RegExp(`python-version: "${toolchains.python_version}"`, "u"));
+  assert.match(jobLines.join("\n"), new RegExp(`version: "${toolchains.uv_version}"`, "u"));
+  assert.match(jobLines.join("\n"), new RegExp(`dotnet-version: "${toolchains.dotnet_sdk_version}"`, "u"));
+  const commands = executionRunCommands(jobLines);
+  assert.equal(commands.filter((command) => command === "node scripts/assemble-release-artifacts.mjs").length, 1);
+  assert.equal(commands.filter((command) => command === "--repeat-output \"$RUNNER_TEMP/licensecc-release-artifacts-b\"").length, 1);
   assert.match(jobLines.join("\n"), /cmake ninja-build/u);
   assert.doesNotMatch(jobLines.join("\n"), /(?:^|\s)(?:git\s+tag|gh\s+release|npm\s+publish|dotnet\s+nuget\s+push|wrangler\s+deploy)(?:\s|$)/imu);
+});
+
+test("release workflows use exact toolchain pins and cannot bypass the real assembly", () => {
+  const toolchains = JSON.parse(source("release-toolchains.json"));
+  const jobs = [
+    [".github/workflows/lint.yml", "release-artifact-integration"],
+    [".github/workflows/release-artifacts.yml", "assemble"],
+  ];
+  for (const [path, job] of jobs) {
+    const lines = workflowJobLines(path, job);
+    const active = lines.map(yamlWithoutComment).join("\n");
+    assert.match(active, new RegExp(`python-version: "${toolchains.python_version}"`, "u"), `${path} must pin Python exactly`);
+    assert.match(active, new RegExp(`version: "${toolchains.uv_version}"`, "u"), `${path} must pin uv exactly`);
+    assert.match(active, new RegExp(`dotnet-version: "${toolchains.dotnet_sdk_version}"`, "u"), `${path} must pin .NET exactly`);
+    assert.deepEqual(activeWorkflowDirectives(lines), [], `${path}:${job} must not use if/continue-on-error/shell/working-directory/defaults`);
+  }
+});
+
+test("workflow execution scanning ignores comments and quoted display decoys", () => {
+  const job = workflowJobLinesFromSource([
+    "jobs:",
+    "  release:",
+    "    steps:",
+    "      - name: 'node scripts/assemble-release-artifacts.mjs'",
+    "        run: |",
+    "          # node scripts/assemble-release-artifacts.mjs",
+    "          echo 'node scripts/assemble-release-artifacts.mjs'",
+    "      - name: real command",
+    "        run: node scripts/assemble-release-artifacts.mjs # actual command",
+    "      # if: false",
+    "      # continue-on-error: true",
+    "",
+  ].join("\n"), "release");
+  const commands = executionRunCommands(job);
+  assert.equal(commands.filter((command) => command === "node scripts/assemble-release-artifacts.mjs").length, 1);
+  assert.deepEqual(activeWorkflowDirectives(job), []);
 });
 
 test("capability evidence remains a PR gate locally and in repository-quality", () => {
@@ -255,9 +372,9 @@ test("capability evidence remains a PR gate locally and in repository-quality", 
   assert.equal(packageJson.scripts["test:capabilities"], "node --test scripts/check-capability-registry.test.mjs");
   assert.equal(packageJson.scripts["check:capabilities"], "node scripts/check-capability-registry.mjs");
 
-  const jobLines = workflowJobLines(".github/workflows/lint.yml", "repository-quality");
+  const commands = executionRunCommands(workflowJobLines(".github/workflows/lint.yml", "repository-quality"));
   assert.equal(
-    jobLines.filter((line) => line.trim() === "npm run check:capabilities").length,
+    commands.filter((command) => command === "npm run check:capabilities").length,
     1,
     "repository-quality must invoke check:capabilities exactly once",
   );
