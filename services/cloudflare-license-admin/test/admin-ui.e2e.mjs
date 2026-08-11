@@ -2225,6 +2225,11 @@ test("admin UI replays a retained catalog-import Apply after a tab round-trip wi
   const first = api.requests.catalogImports[1];
   await expect(dialog.locator(".modalError")).toContainText("Mutation outcome unknown; do not retry.");
   await dialog.getByRole("button", { name: "Cancel" }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Reconcile catalog import" })).toBeVisible();
+  await page.evaluate(() => new Promise((resolve) => {
+    window.requestAnimationFrame(() => window.requestAnimationFrame(resolve));
+  }));
 
   // The screen that captured the dialog is now stale. Its immutable same-key
   // replay is still required to settle the retained server mutation, but may
