@@ -98,6 +98,7 @@ public:
 };
 
 std::unique_ptr<DeviceKeyProvider> make_software_test_provider() noexcept;
+std::unique_ptr<DeviceKeyProvider> make_windows_tpm_provider() noexcept;
 
 bool derive_namespace_v1(const std::string& application_id,
                          const std::string& project,

@@ -215,6 +215,47 @@ test("platform identity CI presets pin isolated feature-enabled builds", () => {
   assert.equal(windows.cacheVariables.CMAKE_DISABLE_FIND_PACKAGE_OpenSSL, "TRUE");
 });
 
+test("Windows TPM presets are isolated and matching non-TPM presets stay dependency-free", () => {
+  const presets = JSON.parse(source("CMakePresets.json"));
+  const variants = [
+    ["ci-windows-msvc-debug-dynamic", "ci-windows-msvc-debug-dynamic-tpm", "Debug"],
+    ["ci-windows-msvc-debug-static", "ci-windows-msvc-debug-static-tpm", "Debug"],
+    ["ci-windows-msvc-release-dynamic", "ci-windows-msvc-release-dynamic-tpm", "Release"],
+    ["ci-windows-msvc-release-static", "ci-windows-msvc-release-static-tpm", "Release"],
+  ];
+  for (const [offName, tpmName, configuration] of variants) {
+    const off = presets.configurePresets.find((preset) => preset.name === offName);
+    const tpm = presets.configurePresets.find((preset) => preset.name === tpmName);
+    assert.ok(off, `${offName} configure preset`);
+    assert.ok(tpm, `${tpmName} configure preset`);
+    assert.equal(off.cacheVariables.LCC_ENABLE_DEVICE_IDENTITY, "FALSE");
+    assert.equal(off.cacheVariables.LCC_ENABLE_WINDOWS_TPM, "FALSE");
+    assert.equal(off.cacheVariables.LCC_ENABLE_TPM2_OPENSSL, "FALSE");
+    assert.equal(off.cacheVariables.LCC_BUILD_DEVICE_IDENTITY_TEST_PROVIDER, "FALSE");
+    assert.equal(tpm.inherits, offName);
+    assert.equal(tpm.binaryDir, `\${sourceDir}/build/${tpmName}`);
+    assert.equal(tpm.cacheVariables.CMAKE_INSTALL_PREFIX, `\${sourceDir}/build/${tpmName}/install`);
+    assert.equal(tpm.cacheVariables.LCC_ENABLE_DEVICE_IDENTITY, "TRUE");
+    assert.equal(tpm.cacheVariables.LCC_ENABLE_WINDOWS_TPM, "TRUE");
+    assert.equal(tpm.cacheVariables.LCC_ENABLE_TPM2_OPENSSL, "FALSE");
+    assert.equal(tpm.cacheVariables.LCC_BUILD_DEVICE_IDENTITY_TEST_PROVIDER, "FALSE");
+    assert.ok(presets.buildPresets.some((preset) =>
+      preset.name === tpmName && preset.configurePreset === tpmName && preset.configuration === configuration));
+    assert.ok(presets.testPresets.some((preset) =>
+      preset.name === tpmName && preset.configurePreset === tpmName && preset.configuration === configuration));
+  }
+
+  for (const script of [source("scripts/check-build-purity.ps1"), source("scripts/dev-check.ps1")]) {
+    for (const [, tpmName] of variants) assert.match(script, new RegExp(`"${tpmName}"`, "u"));
+  }
+
+  const library = source("src/library/CMakeLists.txt");
+  const providerCmake = source("src/library/device_identity/CMakeLists.txt");
+  assert.match(library, /if\(LCC_ENABLE_WINDOWS_TPM\)[\s\S]*target_link_libraries\(licensecc_static PUBLIC ncrypt\)/u);
+  assert.match(providerCmake, /if\(LCC_ENABLE_WINDOWS_TPM\)[\s\S]*providers\/windows_tpm\.cpp/u);
+  assert.match(providerCmake, /if\(LCC_ENABLE_WINDOWS_TPM\)[\s\S]*target_link_libraries\(device_identity PRIVATE ncrypt\)/u);
+});
+
 test("device-identity sensitive state and provider metadata use centralized contracts", () => {
   const crypto = source("src/library/device_identity/p256_crypto.hpp");
   const provider = source("src/library/device_identity/device_key_provider.hpp");
@@ -237,4 +278,32 @@ test("installed C smoke is linked into and called by the C++ consumer", () => {
   assert.match(cmake, /LCC_DEVICE_IDENTITY_C_SMOKE_LINKED=1/);
   assert.match(consumer, /extern\s+"C"\s+int\s+lcc_device_identity_c_header_smoke\(void\)/);
   assert.match(consumer, /if\s*\(lcc_device_identity_c_header_smoke\(\)\s*!=\s*0\)/);
+});
+
+test("Windows TPM shim, real-test skip, consumers, and example remain explicit", () => {
+  const provider = source("src/library/device_identity/providers/windows_tpm.cpp");
+  const seam = source("src/library/device_identity/providers/windows_cng_api.hpp");
+  const tests = source("test/library/device_identity/CMakeLists.txt");
+  const runner = source("scripts/ci/run-installed-device-identity-consumer.ps1");
+  const consumerCmake = source("test/consumer/device_identity/CMakeLists.txt");
+  const exampleCmake = source("examples/device_identity/CMakeLists.txt");
+
+  assert.match(seam, /make_windows_tpm_provider\(\s*std::shared_ptr<WindowsCngApi>/u);
+  assert.doesNotMatch(provider, /static\s+.*WindowsCngApi/u);
+  assert.match(provider, /MS_PLATFORM_CRYPTO_PROVIDER/u);
+  assert.doesNotMatch(provider, /NCRYPT_OVERWRITE_KEY_FLAG/u);
+  assert.doesNotMatch(provider, /NCRYPT_SECURITY_DESCR_PROPERTY|NCRYPT_UI_POLICY_PROPERTY/u);
+  assert.match(tests, /add_test\(NAME device_identity_windows_shim/u);
+  assert.match(tests, /add_test\(NAME device_identity_windows_real/u);
+  assert.match(tests, /device_identity_windows_real PROPERTIES SKIP_RETURN_CODE 77/u);
+  assert.match(runner, /\[ValidateSet\("Debug", "Release"\)\]/u);
+  assert.match(runner, /\[string\]\$BuildDirectory/u);
+  assert.match(runner, /\[switch\]\$ExpectWindowsTpm/u);
+  assert.match(runner, /\[switch\]\$BuildWindowsTpmExample/u);
+  assert.match(runner, /\[switch\]\$StaticRuntime/u);
+  assert.match(runner, /CMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDebug/u);
+  assert.match(runner, /CMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded/u);
+  assert.match(consumerCmake, /LCC_DEVICE_IDENTITY_EXPECT_WINDOWS_TPM/u);
+  assert.match(exampleCmake, /find_package\(licensecc CONFIG REQUIRED\)/u);
+  assert.match(exampleCmake, /LCC_ENABLE_WINDOWS_TPM/u);
 });

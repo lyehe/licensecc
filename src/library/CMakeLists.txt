@@ -56,6 +56,9 @@ ENDIF(UNIX OR OPENSSL_FOUND)
 
 if(WIN32)
 	target_link_libraries(licensecc_static PUBLIC bcrypt)
+	if(LCC_ENABLE_WINDOWS_TPM)
+		target_link_libraries(licensecc_static PUBLIC ncrypt)
+	endif()
 endif()
 
 #set_property(TARGET licensecc_static PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")

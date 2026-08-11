@@ -29,6 +29,42 @@ int main() {
 #endif
     LccDeviceIdentityOptions options;
     lcc_init_device_identity_options(&options);
+#ifdef LCC_DEVICE_IDENTITY_EXPECT_WINDOWS_TPM
+    options.backend = LCC_DEVICE_BACKEND_WINDOWS_TPM;
+    options.policy = LCC_DEVICE_POLICY_HARDWARE_REQUIRED;
+    options.flags = 0U;
+    if (!set_field(options.application_id, "licensecc.test.installed-consumer.windows-tpm") ||
+        !set_field(options.project, "DEFAULT")) {
+        return 1;
+    }
+    LccDeviceIdentity* identity = nullptr;
+    const LCC_DEVICE_RESULT open_result = lcc_device_identity_open(&options, &identity);
+    if (open_result == LCC_DEVICE_OK) {
+        LccDeviceIdentityMetadata metadata;
+        lcc_init_device_identity_metadata(&metadata);
+        const LCC_DEVICE_RESULT metadata_result = lcc_device_identity_get_metadata(identity, &metadata);
+        lcc_device_identity_close(identity);
+        return metadata_result == LCC_DEVICE_OK &&
+                       metadata.backend == LCC_DEVICE_BACKEND_WINDOWS_TPM &&
+                       std::string(metadata.provider) == "windows-platform-ksp" &&
+                       std::string(metadata.algorithm) == "ecdsa-p256-sha256" ?
+                   0 : 3;
+    }
+    lcc_device_identity_close(identity);
+    switch (open_result) {
+        case LCC_DEVICE_PROVIDER_UNAVAILABLE:
+        case LCC_DEVICE_HARDWARE_UNAVAILABLE:
+        case LCC_DEVICE_ACCESS_DENIED:
+        case LCC_DEVICE_KEY_NOT_FOUND:
+        case LCC_DEVICE_KEY_CORRUPT:
+        case LCC_DEVICE_KEY_LOST:
+        case LCC_DEVICE_UNSUPPORTED_ALGORITHM:
+        case LCC_DEVICE_BUSY:
+            return 0;
+        default:
+            return 2;
+    }
+#else
     options.backend = LCC_DEVICE_BACKEND_SOFTWARE_TEST;
     options.policy = LCC_DEVICE_POLICY_SOFTWARE_EXPLICIT;
     options.flags = LCC_DEVICE_OPEN_CREATE_IF_MISSING;
@@ -49,4 +85,5 @@ int main() {
     }
     options.flags = 0U;
     return lcc_device_identity_delete_key(&options, metadata.device_key_id) == LCC_DEVICE_OK ? 0 : 4;
+#endif
 }

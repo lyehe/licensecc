@@ -13,6 +13,10 @@ param(
         "ci-windows-msvc-debug-static",
         "ci-windows-msvc-release-dynamic",
         "ci-windows-msvc-release-static",
+        "ci-windows-msvc-debug-dynamic-tpm",
+        "ci-windows-msvc-debug-static-tpm",
+        "ci-windows-msvc-release-dynamic-tpm",
+        "ci-windows-msvc-release-static-tpm",
         "ci-windows-msvc",
         "ci-windows-device-identity-test"
     )]

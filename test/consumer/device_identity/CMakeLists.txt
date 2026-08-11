@@ -5,6 +5,9 @@ include(CheckLanguage)
 option(LCC_DEVICE_IDENTITY_REQUIRE_C99
     "Fail configuration when the installed C99 header smoke cannot be built"
     OFF)
+option(LCC_DEVICE_IDENTITY_EXPECT_WINDOWS_TPM
+    "Require the installed package to contain the Windows Platform KSP provider"
+    OFF)
 set(LCC_PROJECT_NAME "test" CACHE STRING "Installed Licensecc project component")
 find_package(licensecc CONFIG REQUIRED)
 
@@ -13,6 +16,9 @@ if(NOT TARGET licensecc::licensecc_static)
 endif()
 if(NOT LCC_ENABLE_DEVICE_IDENTITY)
     message(FATAL_ERROR "The installed package does not contain the device-identity core")
+endif()
+if(LCC_DEVICE_IDENTITY_EXPECT_WINDOWS_TPM AND NOT LCC_ENABLE_WINDOWS_TPM)
+    message(FATAL_ERROR "The installed package does not contain the Windows Platform KSP provider")
 endif()
 
 check_language(C)
@@ -31,6 +37,10 @@ endif()
 add_executable(device_identity_cpp_link_smoke cpp_link_smoke.cpp)
 set_target_properties(device_identity_cpp_link_smoke PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED YES)
 target_link_libraries(device_identity_cpp_link_smoke PRIVATE licensecc::licensecc_static)
+if(LCC_DEVICE_IDENTITY_EXPECT_WINDOWS_TPM)
+    target_compile_definitions(device_identity_cpp_link_smoke
+        PRIVATE LCC_DEVICE_IDENTITY_EXPECT_WINDOWS_TPM=1)
+endif()
 if(TARGET device_identity_c_header_smoke)
     target_sources(device_identity_cpp_link_smoke
         PRIVATE $<TARGET_OBJECTS:device_identity_c_header_smoke>)

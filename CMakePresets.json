@@ -117,6 +117,10 @@
         "CMAKE_DISABLE_FIND_PACKAGE_OpenSSL": "TRUE",
         "CMAKE_INSTALL_PREFIX": "${sourceDir}/build/ci-windows-msvc-debug-dynamic/install",
         "LCC_PROJECT_NAME": "test",
+        "LCC_ENABLE_DEVICE_IDENTITY": "FALSE",
+        "LCC_ENABLE_WINDOWS_TPM": "FALSE",
+        "LCC_ENABLE_TPM2_OPENSSL": "FALSE",
+        "LCC_BUILD_DEVICE_IDENTITY_TEST_PROVIDER": "FALSE",
         "STATIC_RUNTIME": "FALSE"
       }
     },
@@ -132,6 +136,10 @@
         "CMAKE_DISABLE_FIND_PACKAGE_OpenSSL": "TRUE",
         "CMAKE_INSTALL_PREFIX": "${sourceDir}/build/ci-windows-msvc-debug-static/install",
         "LCC_PROJECT_NAME": "test",
+        "LCC_ENABLE_DEVICE_IDENTITY": "FALSE",
+        "LCC_ENABLE_WINDOWS_TPM": "FALSE",
+        "LCC_ENABLE_TPM2_OPENSSL": "FALSE",
+        "LCC_BUILD_DEVICE_IDENTITY_TEST_PROVIDER": "FALSE",
         "STATIC_RUNTIME": "TRUE"
       }
     },
@@ -147,6 +155,10 @@
         "CMAKE_DISABLE_FIND_PACKAGE_OpenSSL": "TRUE",
         "CMAKE_INSTALL_PREFIX": "${sourceDir}/build/ci-windows-msvc-release-dynamic/install",
         "LCC_PROJECT_NAME": "test",
+        "LCC_ENABLE_DEVICE_IDENTITY": "FALSE",
+        "LCC_ENABLE_WINDOWS_TPM": "FALSE",
+        "LCC_ENABLE_TPM2_OPENSSL": "FALSE",
+        "LCC_BUILD_DEVICE_IDENTITY_TEST_PROVIDER": "FALSE",
         "STATIC_RUNTIME": "FALSE"
       }
     },
@@ -162,7 +174,67 @@
         "CMAKE_DISABLE_FIND_PACKAGE_OpenSSL": "TRUE",
         "CMAKE_INSTALL_PREFIX": "${sourceDir}/build/ci-windows-msvc-release-static/install",
         "LCC_PROJECT_NAME": "test",
+        "LCC_ENABLE_DEVICE_IDENTITY": "FALSE",
+        "LCC_ENABLE_WINDOWS_TPM": "FALSE",
+        "LCC_ENABLE_TPM2_OPENSSL": "FALSE",
+        "LCC_BUILD_DEVICE_IDENTITY_TEST_PROVIDER": "FALSE",
         "STATIC_RUNTIME": "TRUE"
+      }
+    },
+    {
+      "name": "ci-windows-msvc-debug-dynamic-tpm",
+      "inherits": "ci-windows-msvc-debug-dynamic",
+      "displayName": "CI Windows MSVC Debug Dynamic Windows TPM",
+      "description": "Windows MSVC debug/dynamic build with the Platform KSP provider only.",
+      "binaryDir": "${sourceDir}/build/ci-windows-msvc-debug-dynamic-tpm",
+      "cacheVariables": {
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/build/ci-windows-msvc-debug-dynamic-tpm/install",
+        "LCC_ENABLE_DEVICE_IDENTITY": "TRUE",
+        "LCC_ENABLE_WINDOWS_TPM": "TRUE",
+        "LCC_ENABLE_TPM2_OPENSSL": "FALSE",
+        "LCC_BUILD_DEVICE_IDENTITY_TEST_PROVIDER": "FALSE"
+      }
+    },
+    {
+      "name": "ci-windows-msvc-debug-static-tpm",
+      "inherits": "ci-windows-msvc-debug-static",
+      "displayName": "CI Windows MSVC Debug Static Windows TPM",
+      "description": "Windows MSVC debug/static build with the Platform KSP provider only.",
+      "binaryDir": "${sourceDir}/build/ci-windows-msvc-debug-static-tpm",
+      "cacheVariables": {
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/build/ci-windows-msvc-debug-static-tpm/install",
+        "LCC_ENABLE_DEVICE_IDENTITY": "TRUE",
+        "LCC_ENABLE_WINDOWS_TPM": "TRUE",
+        "LCC_ENABLE_TPM2_OPENSSL": "FALSE",
+        "LCC_BUILD_DEVICE_IDENTITY_TEST_PROVIDER": "FALSE"
+      }
+    },
+    {
+      "name": "ci-windows-msvc-release-dynamic-tpm",
+      "inherits": "ci-windows-msvc-release-dynamic",
+      "displayName": "CI Windows MSVC Release Dynamic Windows TPM",
+      "description": "Windows MSVC release/dynamic build with the Platform KSP provider only.",
+      "binaryDir": "${sourceDir}/build/ci-windows-msvc-release-dynamic-tpm",
+      "cacheVariables": {
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/build/ci-windows-msvc-release-dynamic-tpm/install",
+        "LCC_ENABLE_DEVICE_IDENTITY": "TRUE",
+        "LCC_ENABLE_WINDOWS_TPM": "TRUE",
+        "LCC_ENABLE_TPM2_OPENSSL": "FALSE",
+        "LCC_BUILD_DEVICE_IDENTITY_TEST_PROVIDER": "FALSE"
+      }
+    },
+    {
+      "name": "ci-windows-msvc-release-static-tpm",
+      "inherits": "ci-windows-msvc-release-static",
+      "displayName": "CI Windows MSVC Release Static Windows TPM",
+      "description": "Windows MSVC release/static build with the Platform KSP provider only.",
+      "binaryDir": "${sourceDir}/build/ci-windows-msvc-release-static-tpm",
+      "cacheVariables": {
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/build/ci-windows-msvc-release-static-tpm/install",
+        "LCC_ENABLE_DEVICE_IDENTITY": "TRUE",
+        "LCC_ENABLE_WINDOWS_TPM": "TRUE",
+        "LCC_ENABLE_TPM2_OPENSSL": "FALSE",
+        "LCC_BUILD_DEVICE_IDENTITY_TEST_PROVIDER": "FALSE"
       }
     },
     {
@@ -262,6 +334,30 @@
     {
       "name": "ci-windows-msvc-release-static",
       "configurePreset": "ci-windows-msvc-release-static",
+      "configuration": "Release",
+      "targets": ["install"]
+    },
+    {
+      "name": "ci-windows-msvc-debug-dynamic-tpm",
+      "configurePreset": "ci-windows-msvc-debug-dynamic-tpm",
+      "configuration": "Debug",
+      "targets": ["install"]
+    },
+    {
+      "name": "ci-windows-msvc-debug-static-tpm",
+      "configurePreset": "ci-windows-msvc-debug-static-tpm",
+      "configuration": "Debug",
+      "targets": ["install"]
+    },
+    {
+      "name": "ci-windows-msvc-release-dynamic-tpm",
+      "configurePreset": "ci-windows-msvc-release-dynamic-tpm",
+      "configuration": "Release",
+      "targets": ["install"]
+    },
+    {
+      "name": "ci-windows-msvc-release-static-tpm",
+      "configurePreset": "ci-windows-msvc-release-static-tpm",
       "configuration": "Release",
       "targets": ["install"]
     },
@@ -403,6 +499,50 @@
     {
       "name": "ci-windows-msvc-release-static",
       "configurePreset": "ci-windows-msvc-release-static",
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true
+      },
+      "environment": {
+        "VIRTUAL_ENV": "VM"
+      }
+    },
+    {
+      "name": "ci-windows-msvc-debug-dynamic-tpm",
+      "configurePreset": "ci-windows-msvc-debug-dynamic-tpm",
+      "configuration": "Debug",
+      "output": {
+        "outputOnFailure": true
+      },
+      "environment": {
+        "VIRTUAL_ENV": "VM"
+      }
+    },
+    {
+      "name": "ci-windows-msvc-debug-static-tpm",
+      "configurePreset": "ci-windows-msvc-debug-static-tpm",
+      "configuration": "Debug",
+      "output": {
+        "outputOnFailure": true
+      },
+      "environment": {
+        "VIRTUAL_ENV": "VM"
+      }
+    },
+    {
+      "name": "ci-windows-msvc-release-dynamic-tpm",
+      "configurePreset": "ci-windows-msvc-release-dynamic-tpm",
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true
+      },
+      "environment": {
+        "VIRTUAL_ENV": "VM"
+      }
+    },
+    {
+      "name": "ci-windows-msvc-release-static-tpm",
+      "configurePreset": "ci-windows-msvc-release-static-tpm",
       "configuration": "Release",
       "output": {
         "outputOnFailure": true

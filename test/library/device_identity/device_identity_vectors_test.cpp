@@ -331,6 +331,7 @@ BOOST_AUTO_TEST_CASE(strict_p256_negative_corpus_fails_closed) {
     BOOST_TEST(!license::device_identity::decode_canonical_base64("AA_-", decoded));
 }
 
+#if LCC_BUILD_DEVICE_IDENTITY_TEST_PROVIDER
 BOOST_AUTO_TEST_CASE(software_provider_builds_a_valid_randomized_proof) {
     boost::property_tree::ptree manifest;
     boost::property_tree::read_json(
@@ -372,3 +373,4 @@ BOOST_AUTO_TEST_CASE(software_provider_builds_a_valid_randomized_proof) {
     options.flags = 0U;
     BOOST_TEST(lcc_device_identity_delete_key(&options, metadata.device_key_id) == LCC_DEVICE_OK);
 }
+#endif

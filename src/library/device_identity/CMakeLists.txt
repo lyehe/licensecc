@@ -13,6 +13,10 @@ if(LCC_BUILD_DEVICE_IDENTITY_TEST_PROVIDER)
     list(APPEND _lcc_device_identity_sources providers/software_test.cpp)
 endif()
 
+if(LCC_ENABLE_WINDOWS_TPM)
+    list(APPEND _lcc_device_identity_sources providers/windows_tpm.cpp)
+endif()
+
 add_library(device_identity OBJECT ${_lcc_device_identity_sources})
 add_dependencies(device_identity project_public_header)
 target_include_directories(device_identity
@@ -28,6 +32,9 @@ target_compile_definitions(device_identity
 
 if(WIN32)
     target_link_libraries(device_identity PRIVATE bcrypt)
+    if(LCC_ENABLE_WINDOWS_TPM)
+        target_link_libraries(device_identity PRIVATE ncrypt)
+    endif()
 else()
     target_link_libraries(device_identity PRIVATE OpenSSL::Crypto)
 endif()

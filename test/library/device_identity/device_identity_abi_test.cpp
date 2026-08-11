@@ -232,6 +232,7 @@ BOOST_AUTO_TEST_CASE(size_version_and_two_call_spki_contract) {
     BOOST_TEST(lcc_device_identity_open(&options, &handle) == LCC_DEVICE_UNSUPPORTED_VERSION);
     BOOST_TEST(handle == nullptr);
 
+#if LCC_BUILD_DEVICE_IDENTITY_TEST_PROVIDER
     struct ExtendedOptions {
         LccDeviceIdentityOptions value;
         unsigned char trailing[8];
@@ -270,6 +271,7 @@ BOOST_AUTO_TEST_CASE(size_version_and_two_call_spki_contract) {
     lcc_device_identity_close(handle);
     extended.value.flags = 0U;
     BOOST_TEST(lcc_device_identity_delete_key(&extended.value, metadata.device_key_id) == LCC_DEVICE_OK);
+#endif
     lcc_device_identity_close(nullptr);
 }
 

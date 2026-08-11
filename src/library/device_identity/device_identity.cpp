@@ -245,6 +245,14 @@ LCC_DEVICE_RESULT validate_options(const LccDeviceIdentityOptions* options,
 
 LCC_DEVICE_RESULT select_provider(const ValidatedOptions& options,
                                   std::unique_ptr<DeviceKeyProvider>& provider) {
+    if (options.request.backend == LCC_DEVICE_BACKEND_WINDOWS_TPM) {
+#if defined(_WIN32) && LCC_ENABLE_WINDOWS_TPM
+        provider = make_windows_tpm_provider();
+        return provider ? LCC_DEVICE_OK : LCC_DEVICE_INTERNAL_ERROR;
+#else
+        return LCC_DEVICE_PROVIDER_UNAVAILABLE;
+#endif
+    }
     if (options.request.backend == LCC_DEVICE_BACKEND_SOFTWARE_TEST) {
 #if LCC_BUILD_DEVICE_IDENTITY_TEST_PROVIDER
         provider = make_software_test_provider();
@@ -254,8 +262,8 @@ LCC_DEVICE_RESULT select_provider(const ValidatedOptions& options,
 #endif
     }
 
-    /* Task 2 deliberately supplies fail-closed unavailable stubs for the two
-     * native providers. Tasks 3 and 4 replace only these selections. */
+    /* The OpenSSL TPM2 provider remains a fail-closed unavailable stub until
+     * its owning task supplies the native implementation. */
     return LCC_DEVICE_PROVIDER_UNAVAILABLE;
 }
 
