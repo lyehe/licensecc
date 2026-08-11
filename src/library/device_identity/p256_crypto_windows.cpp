@@ -47,14 +47,14 @@ public:
 };
 
 bool import_public_key(BCRYPT_ALG_HANDLE algorithm, const P256Spki& spki, KeyHandle& key) {
-    std::vector<std::uint8_t> blob(sizeof(BCRYPT_ECCKEY_BLOB) + 64U);
+    SensitiveVector blob(sizeof(BCRYPT_ECCKEY_BLOB) + 64U);
     BCRYPT_ECCKEY_BLOB header{};
     header.dwMagic = BCRYPT_ECDSA_PUBLIC_P256_MAGIC;
     header.cbKey = 32U;
-    std::memcpy(blob.data(), &header, sizeof(header));
-    std::copy(spki.begin() + 27U, spki.end(), blob.begin() + sizeof(header));
-    return NT_SUCCESS(BCryptImportKeyPair(algorithm, nullptr, BCRYPT_ECCPUBLIC_BLOB, &key.value, blob.data(),
-                                          static_cast<ULONG>(blob.size()), 0));
+    std::memcpy(blob.value.data(), &header, sizeof(header));
+    std::copy(spki.begin() + 27U, spki.end(), blob.value.begin() + sizeof(header));
+    return NT_SUCCESS(BCryptImportKeyPair(algorithm, nullptr, BCRYPT_ECCPUBLIC_BLOB, &key.value,
+                                          blob.value.data(), static_cast<ULONG>(blob.value.size()), 0));
 }
 
 }  // namespace
@@ -78,20 +78,21 @@ bool sha256(const std::uint8_t* data, std::size_t size, P256Digest& out) noexcep
             hash_size != out.size()) {
             return false;
         }
-        std::vector<std::uint8_t> object(object_size);
+        SensitiveVector object(object_size);
         HashHandle hash;
-        if (!NT_SUCCESS(BCryptCreateHash(algorithm.value, &hash.value, object.data(), object_size, nullptr, 0U, 0))) {
+        if (!NT_SUCCESS(BCryptCreateHash(
+                algorithm.value, &hash.value, object.value.data(), object_size, nullptr, 0U, 0))) {
             return false;
         }
         if (size != 0U && !NT_SUCCESS(BCryptHashData(hash.value, const_cast<PUCHAR>(data), static_cast<ULONG>(size), 0))) {
             return false;
         }
-        P256Digest candidate{};
-        if (!NT_SUCCESS(BCryptFinishHash(hash.value, candidate.data(), static_cast<ULONG>(candidate.size()), 0))) {
+        SensitiveArray<32> candidate;
+        if (!NT_SUCCESS(BCryptFinishHash(
+                hash.value, candidate.value.data(), static_cast<ULONG>(candidate.value.size()), 0))) {
             return false;
         }
-        out = candidate;
-        secure_zero(object.data(), object.size());
+        out = candidate.value;
         return true;
     } catch (...) {
         return false;

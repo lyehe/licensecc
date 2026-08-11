@@ -92,6 +92,20 @@
       }
     },
     {
+      "name": "ci-linux-device-identity-test",
+      "inherits": "ci-linux-debug",
+      "displayName": "CI Linux Device Identity Software Test",
+      "description": "Linux CI build for the portable identity core and software-test provider.",
+      "binaryDir": "${sourceDir}/build/ci-linux-device-identity-test",
+      "cacheVariables": {
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/build/ci-linux-device-identity-test/install",
+        "LCC_ENABLE_DEVICE_IDENTITY": "TRUE",
+        "LCC_ENABLE_WINDOWS_TPM": "FALSE",
+        "LCC_ENABLE_TPM2_OPENSSL": "FALSE",
+        "LCC_BUILD_DEVICE_IDENTITY_TEST_PROVIDER": "TRUE"
+      }
+    },
+    {
       "name": "ci-windows-msvc-debug-dynamic",
       "displayName": "CI Windows MSVC Debug Dynamic",
       "description": "Windows MSVC CI debug configure shape with dynamic runtime.",
@@ -165,6 +179,21 @@
         "LCC_PROJECT_NAME": "test",
         "STATIC_RUNTIME": "FALSE"
       }
+    },
+    {
+      "name": "ci-windows-device-identity-test",
+      "inherits": "ci-windows-msvc-debug-dynamic",
+      "displayName": "CI Windows Device Identity Software Test",
+      "description": "Windows CI build for the BCrypt-only identity core and software-test provider.",
+      "binaryDir": "${sourceDir}/build/ci-windows-device-identity-test",
+      "cacheVariables": {
+        "CMAKE_DISABLE_FIND_PACKAGE_OpenSSL": "TRUE",
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/build/ci-windows-device-identity-test/install",
+        "LCC_ENABLE_DEVICE_IDENTITY": "TRUE",
+        "LCC_ENABLE_WINDOWS_TPM": "FALSE",
+        "LCC_ENABLE_TPM2_OPENSSL": "FALSE",
+        "LCC_BUILD_DEVICE_IDENTITY_TEST_PROVIDER": "TRUE"
+      }
     }
   ],
   "buildPresets": [
@@ -207,6 +236,12 @@
       "targets": ["install"]
     },
     {
+      "name": "ci-linux-device-identity-test",
+      "configurePreset": "ci-linux-device-identity-test",
+      "configuration": "Debug",
+      "targets": ["install"]
+    },
+    {
       "name": "ci-windows-msvc-debug-dynamic",
       "configurePreset": "ci-windows-msvc-debug-dynamic",
       "configuration": "Debug",
@@ -233,6 +268,12 @@
     {
       "name": "ci-windows-msvc",
       "configurePreset": "ci-windows-msvc",
+      "configuration": "Debug",
+      "targets": ["install"]
+    },
+    {
+      "name": "ci-windows-device-identity-test",
+      "configurePreset": "ci-windows-device-identity-test",
       "configuration": "Debug",
       "targets": ["install"]
     }
@@ -316,6 +357,17 @@
       }
     },
     {
+      "name": "ci-linux-device-identity-test",
+      "configurePreset": "ci-linux-device-identity-test",
+      "configuration": "Debug",
+      "output": {
+        "outputOnFailure": true
+      },
+      "environment": {
+        "VIRTUAL_ENV": "VM"
+      }
+    },
+    {
       "name": "ci-windows-msvc-debug-dynamic",
       "configurePreset": "ci-windows-msvc-debug-dynamic",
       "configuration": "Debug",
@@ -362,6 +414,17 @@
     {
       "name": "ci-windows-msvc",
       "configurePreset": "ci-windows-msvc",
+      "configuration": "Debug",
+      "output": {
+        "outputOnFailure": true
+      },
+      "environment": {
+        "VIRTUAL_ENV": "VM"
+      }
+    },
+    {
+      "name": "ci-windows-device-identity-test",
+      "configurePreset": "ci-windows-device-identity-test",
       "configuration": "Debug",
       "output": {
         "outputOnFailure": true

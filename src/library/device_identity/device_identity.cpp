@@ -155,19 +155,6 @@ bool is_proof_name(const std::string& value, std::size_t maximum) {
     return true;
 }
 
-bool is_provider_name(const std::string& value) {
-    if (value.empty() || value.size() > LCC_DEVICE_PROVIDER_NAME_MAX ||
-        !((value[0] >= 'a' && value[0] <= 'z') || (value[0] >= '0' && value[0] <= '9'))) {
-        return false;
-    }
-    for (const unsigned char ch : value) {
-        if (!((ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '.' || ch == '_' || ch == '-')) {
-            return false;
-        }
-    }
-    return true;
-}
-
 bool is_canonical_key_id(const std::string& value) {
     if (value.size() != LCC_DEVICE_KEY_ID_MAX || value.compare(0U, 7U, "sha256:") != 0) {
         return false;
@@ -292,21 +279,6 @@ LCC_DEVICE_RESULT validate_output(const LccDeviceProof* output) {
     return output->reserved == 0U ? LCC_DEVICE_OK : LCC_DEVICE_INVALID_ARGUMENT;
 }
 
-bool valid_provider_metadata(const ProviderMetadata& metadata, const ProviderOpenRequest& request) {
-    return metadata.backend == request.backend && metadata.scope == request.scope &&
-           (metadata.assurance == LCC_DEVICE_ASSURANCE_SOFTWARE ||
-            metadata.assurance == LCC_DEVICE_ASSURANCE_REPORTED_HARDWARE) &&
-           is_provider_name(metadata.provider) && metadata.algorithm == kP256Algorithm;
-}
-
-template <std::size_t N>
-struct SensitiveArray {
-    ~SensitiveArray() {
-        secure_zero(value.data(), value.size());
-    }
-    std::array<std::uint8_t, N> value{};
-};
-
 }  // namespace
 }  // namespace device_identity
 }  // namespace license
@@ -393,7 +365,7 @@ LCC_DEVICE_RESULT lcc_device_identity_open(const LccDeviceIdentityOptions* optio
         if (result != LCC_DEVICE_OK) {
             return result;
         }
-        if (!valid_provider_metadata(metadata, validated.request)) {
+        if (!provider_metadata_matches_contract(metadata, validated.request)) {
             return metadata.algorithm == kP256Algorithm ? LCC_DEVICE_KEY_CORRUPT :
                                                          LCC_DEVICE_UNSUPPORTED_ALGORITHM;
         }
@@ -527,7 +499,15 @@ LCC_DEVICE_RESULT lcc_device_identity_delete_key(const LccDeviceIdentityOptions*
         if (expected_device_key_id == nullptr) {
             return LCC_DEVICE_INVALID_ARGUMENT;
         }
-        const std::string expected(expected_device_key_id);
+        constexpr std::size_t expected_size = LCC_DEVICE_KEY_ID_MAX;
+        std::size_t expected_length = 0U;
+        while (expected_length <= expected_size && expected_device_key_id[expected_length] != '\0') {
+            ++expected_length;
+        }
+        if (expected_length != expected_size) {
+            return LCC_DEVICE_INVALID_ARGUMENT;
+        }
+        const std::string expected(expected_device_key_id, expected_size);
         if (!is_canonical_key_id(expected)) {
             return LCC_DEVICE_INVALID_ARGUMENT;
         }

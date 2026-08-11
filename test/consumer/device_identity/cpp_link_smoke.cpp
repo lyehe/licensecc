@@ -3,6 +3,10 @@
 #include <cstring>
 #include <string>
 
+#ifdef LCC_DEVICE_IDENTITY_C_SMOKE_LINKED
+extern "C" int lcc_device_identity_c_header_smoke(void);
+#endif
+
 namespace {
 
 template <std::size_t N>
@@ -18,6 +22,11 @@ bool set_field(char (&field)[N], const char* value) {
 }  // namespace
 
 int main() {
+#ifdef LCC_DEVICE_IDENTITY_C_SMOKE_LINKED
+    if (lcc_device_identity_c_header_smoke() != 0) {
+        return 5;
+    }
+#endif
     LccDeviceIdentityOptions options;
     lcc_init_device_identity_options(&options);
     options.backend = LCC_DEVICE_BACKEND_SOFTWARE_TEST;

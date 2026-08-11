@@ -14,7 +14,9 @@
 #include <cstring>
 #include <fstream>
 #include <iterator>
+#include <new>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 namespace {
@@ -23,6 +25,21 @@ using license::device_identity::DeviceNamespace;
 using license::device_identity::P256Digest;
 using license::device_identity::P256Signature;
 using license::device_identity::P256Spki;
+using license::device_identity::SensitiveArray;
+using license::device_identity::SensitiveVector;
+
+static_assert(!std::is_copy_constructible<SensitiveArray<32>>::value,
+              "sensitive arrays must not create untracked digest copies");
+static_assert(!std::is_move_constructible<SensitiveArray<32>>::value,
+              "sensitive arrays must not move without wiping their source");
+static_assert(!std::is_trivially_destructible<SensitiveArray<32>>::value,
+              "sensitive arrays require a wiping destructor");
+static_assert(!std::is_copy_constructible<SensitiveVector>::value,
+              "sensitive vectors must not create untracked scratch copies");
+static_assert(!std::is_move_constructible<SensitiveVector>::value,
+              "sensitive vectors must not move without wiping their source");
+static_assert(!std::is_trivially_destructible<SensitiveVector>::value,
+              "sensitive vectors require a wiping destructor");
 
 std::string read_binary(const std::string& relative_path) {
     const std::string path = std::string(LCC_DEVICE_IDENTITY_VECTOR_ROOT) + "/" + relative_path;
@@ -59,6 +76,75 @@ LccDeviceProofInput input_from_manifest(const boost::property_tree::ptree& manif
 }
 
 }  // namespace
+
+BOOST_AUTO_TEST_CASE(sensitive_scratch_buffers_share_the_destructor_wipe_primitive) {
+    using DigestScratch = SensitiveArray<32>;
+    static_assert(sizeof(DigestScratch) == 32U, "digest wrapper has unexpected padding");
+    alignas(DigestScratch) std::array<unsigned char, sizeof(DigestScratch)> storage{};
+    auto* digest = new (storage.data()) DigestScratch();
+    std::fill(digest->value.begin(), digest->value.end(), 0xa5U);
+    digest->~DigestScratch();
+    BOOST_TEST(std::all_of(storage.begin(), storage.end(), [](unsigned char value) {
+        return value == 0U;
+    }));
+
+    SensitiveVector scratch(47U);
+    std::fill(scratch.value.begin(), scratch.value.end(), 0x5aU);
+    scratch.clear();
+    BOOST_TEST(std::all_of(scratch.value.begin(), scratch.value.end(), [](std::uint8_t value) {
+        return value == 0U;
+    }));
+}
+
+BOOST_AUTO_TEST_CASE(provider_metadata_contract_table_is_exact_and_rejects_substitutions) {
+    struct Expected {
+        std::uint32_t backend;
+        std::uint32_t assurance;
+        const char* provider;
+    };
+    const Expected expected[] = {
+        {LCC_DEVICE_BACKEND_WINDOWS_TPM, LCC_DEVICE_ASSURANCE_REPORTED_HARDWARE, "windows-platform-ksp"},
+        {LCC_DEVICE_BACKEND_TPM2_OPENSSL, LCC_DEVICE_ASSURANCE_REPORTED_HARDWARE, "tpm2-openssl"},
+        {LCC_DEVICE_BACKEND_SOFTWARE_TEST, LCC_DEVICE_ASSURANCE_SOFTWARE, "software-test"},
+    };
+    for (const Expected& item : expected) {
+        const auto* contract = license::device_identity::provider_contract_for_backend(item.backend);
+        BOOST_REQUIRE(contract != nullptr);
+        BOOST_TEST(contract->backend == item.backend);
+        BOOST_TEST(contract->assurance == item.assurance);
+        BOOST_TEST(std::string(contract->provider) == item.provider);
+        BOOST_TEST(std::string(contract->algorithm) == "ecdsa-p256-sha256");
+
+        license::device_identity::ProviderMetadata metadata;
+        metadata.backend = item.backend;
+        metadata.scope = LCC_DEVICE_SCOPE_USER;
+        metadata.assurance = item.assurance;
+        metadata.provider = item.provider;
+        metadata.algorithm = contract->algorithm;
+        license::device_identity::ProviderOpenRequest request;
+        request.backend = item.backend;
+        request.scope = LCC_DEVICE_SCOPE_USER;
+        BOOST_TEST(license::device_identity::provider_metadata_matches_contract(metadata, request));
+        const license::device_identity::ProviderMetadata canonical = metadata;
+        metadata.provider += "-substitute";
+        BOOST_TEST(!license::device_identity::provider_metadata_matches_contract(metadata, request));
+        metadata = canonical;
+        metadata.algorithm += "-substitute";
+        BOOST_TEST(!license::device_identity::provider_metadata_matches_contract(metadata, request));
+        metadata = canonical;
+        metadata.assurance = item.assurance == LCC_DEVICE_ASSURANCE_SOFTWARE ?
+                                 LCC_DEVICE_ASSURANCE_REPORTED_HARDWARE :
+                                 LCC_DEVICE_ASSURANCE_SOFTWARE;
+        BOOST_TEST(!license::device_identity::provider_metadata_matches_contract(metadata, request));
+        metadata = canonical;
+        metadata.backend = LCC_DEVICE_BACKEND_AUTO;
+        BOOST_TEST(!license::device_identity::provider_metadata_matches_contract(metadata, request));
+        metadata = canonical;
+        metadata.scope = LCC_DEVICE_SCOPE_MACHINE;
+        BOOST_TEST(!license::device_identity::provider_metadata_matches_contract(metadata, request));
+    }
+    BOOST_TEST(license::device_identity::provider_contract_for_backend(LCC_DEVICE_BACKEND_AUTO) == nullptr);
+}
 
 BOOST_AUTO_TEST_CASE(namespace_v1_table_matches_normative_bytes_and_names) {
     boost::property_tree::ptree root;
@@ -155,6 +241,14 @@ BOOST_AUTO_TEST_CASE(strict_p256_negative_corpus_fails_closed) {
     malformed[6] ^= 1U;
     P256Spki ignored{};
     BOOST_TEST(!license::device_identity::canonicalize_p256_spki(malformed.data(), malformed.size(), ignored));
+    P256Spki wrong_curve = spki;
+    wrong_curve[22] = 0x01U;
+    BOOST_TEST(!license::device_identity::canonicalize_p256_spki(
+        wrong_curve.data(), wrong_curve.size(), ignored));
+    P256Spki compressed_point = spki;
+    compressed_point[26] = 0x02U;
+    BOOST_TEST(!license::device_identity::canonicalize_p256_spki(
+        compressed_point.data(), compressed_point.size(), ignored));
     P256Spki invalid_point = spki;
     std::fill(invalid_point.begin() + 27U, invalid_point.end(), 0U);
     BOOST_TEST(!license::device_identity::canonicalize_p256_spki(
@@ -176,6 +270,17 @@ BOOST_AUTO_TEST_CASE(strict_p256_negative_corpus_fails_closed) {
         0xbc, 0xe6, 0xfa, 0xad, 0xa7, 0x17, 0x9e, 0x84, 0xf3, 0xb9, 0xca, 0xc2, 0xfc, 0x63, 0x25, 0x51}};
     std::copy(order.begin(), order.end(), order_r.begin());
     BOOST_TEST(!license::device_identity::verify_p256_p1363(spki, digest, order_r));
+    P256Signature order_s = signature;
+    std::copy(order.begin(), order.end(), order_s.begin() + 32U);
+    BOOST_TEST(!license::device_identity::verify_p256_p1363(spki, digest, order_s));
+    std::array<std::uint8_t, 32> above_order = order;
+    ++above_order.back();
+    P256Signature above_order_r = signature;
+    std::copy(above_order.begin(), above_order.end(), above_order_r.begin());
+    BOOST_TEST(!license::device_identity::verify_p256_p1363(spki, digest, above_order_r));
+    P256Signature above_order_s = signature;
+    std::copy(above_order.begin(), above_order.end(), above_order_s.begin() + 32U);
+    BOOST_TEST(!license::device_identity::verify_p256_p1363(spki, digest, above_order_s));
     BOOST_TEST(!license::device_identity::verify_p256_p1363(
         spki, digest, signature.data(), signature.size() - 1U));
     std::array<std::uint8_t, 65> long_signature{};
@@ -196,6 +301,24 @@ BOOST_AUTO_TEST_CASE(strict_p256_negative_corpus_fails_closed) {
     const std::uint8_t redundant_zero[] = {0x30, 0x07, 0x02, 0x02, 0x00, 0x01, 0x02, 0x01, 0x01};
     BOOST_TEST(!license::device_identity::der_signature_to_p1363(
         redundant_zero, sizeof(redundant_zero), round_trip));
+    const std::uint8_t zero_length_integer[] = {0x30, 0x05, 0x02, 0x00, 0x02, 0x01, 0x01};
+    BOOST_TEST(!license::device_identity::der_signature_to_p1363(
+        zero_length_integer, sizeof(zero_length_integer), round_trip));
+    std::array<std::uint8_t, 40> oversized_integer{};
+    oversized_integer[0] = 0x30U;
+    oversized_integer[1] = 0x26U;
+    oversized_integer[2] = 0x02U;
+    oversized_integer[3] = 0x21U;
+    oversized_integer[4] = 0x01U;
+    oversized_integer[37] = 0x02U;
+    oversized_integer[38] = 0x01U;
+    oversized_integer[39] = 0x01U;
+    BOOST_TEST(!license::device_identity::der_signature_to_p1363(
+        oversized_integer.data(), oversized_integer.size(), round_trip));
+    const std::uint8_t nonminimal_sequence_length[] = {
+        0x30, 0x81, 0x06, 0x02, 0x01, 0x01, 0x02, 0x01, 0x01};
+    BOOST_TEST(!license::device_identity::der_signature_to_p1363(
+        nonminimal_sequence_length, sizeof(nonminimal_sequence_length), round_trip));
 
     P256Digest double_digest{};
     BOOST_REQUIRE(license::device_identity::sha256(digest.data(), digest.size(), double_digest));
@@ -203,6 +326,9 @@ BOOST_AUTO_TEST_CASE(strict_p256_negative_corpus_fails_closed) {
     std::vector<std::uint8_t> decoded;
     BOOST_TEST(!license::device_identity::decode_canonical_base64("AB==", decoded));
     BOOST_TEST(!license::device_identity::decode_canonical_base64("AAAA\n", decoded));
+    BOOST_TEST(!license::device_identity::decode_canonical_base64("AA=A", decoded));
+    BOOST_TEST(!license::device_identity::decode_canonical_base64("A===", decoded));
+    BOOST_TEST(!license::device_identity::decode_canonical_base64("AA_-", decoded));
 }
 
 BOOST_AUTO_TEST_CASE(software_provider_builds_a_valid_randomized_proof) {

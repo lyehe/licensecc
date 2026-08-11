@@ -17,6 +17,7 @@ jobs:
             - "ci-windows-msvc-debug-static"
             - "ci-windows-msvc-release-dynamic"
             - "ci-windows-msvc-release-static"
+            - "ci-windows-device-identity-test"
 
       steps:
       -  uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -69,6 +70,30 @@ jobs:
       -  name: Core build purity
          shell: pwsh
          run: pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/check-build-purity.ps1 -Preset ${{ matrix.preset }}
+      -  name: Exact device-identity suite
+         if: matrix.preset == 'ci-windows-device-identity-test'
+         shell: pwsh
+         run: ctest --preset ci-windows-device-identity-test --no-tests=error -R "^device_identity_(abi|vectors|policy|concurrency)_test$"
+      -  name: Install device-identity package
+         if: matrix.preset == 'ci-windows-device-identity-test'
+         shell: pwsh
+         run: cmake --install build/ci-windows-device-identity-test --config Debug --prefix build/ci-windows-device-identity-test/install
+      -  name: Installed C99 and C++ device-identity consumer
+         if: matrix.preset == 'ci-windows-device-identity-test'
+         shell: pwsh
+         run: pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/ci/run-installed-device-identity-consumer.ps1 -InstallPrefix build/ci-windows-device-identity-test/install
+      -  name: Reject OpenSSL from the Windows identity package
+         if: matrix.preset == 'ci-windows-device-identity-test'
+         shell: pwsh
+         run: |
+            $consumer = "build/installed-device-identity-consumer/Debug/device_identity_cpp_link_smoke.exe"
+            $imports = & dumpbin.exe /dependents $consumer
+            if ($LASTEXITCODE -ne 0) { throw "dumpbin dependency inspection failed" }
+            if ($imports -match '(?i)(?:lib)?(?:ssl|crypto)[^\s]*\.dll') { throw "OpenSSL DLL dependency detected" }
+            $archive = "build/ci-windows-device-identity-test/src/library/Debug/licensecc_static.lib"
+            $directives = & dumpbin.exe /directives $archive
+            if ($LASTEXITCODE -ne 0) { throw "dumpbin archive inspection failed" }
+            if ($directives -match '(?i)(?:libcrypto|libssl|crypto|ssl)\.lib') { throw "OpenSSL archive directive detected" }
       -  name: Inspector
          shell: bash
          run: ./build/${{ matrix.preset }}/install/bin/test/lccinspector.exe

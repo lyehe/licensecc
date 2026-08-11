@@ -2,15 +2,19 @@
 param(
     [ValidateSet(
         "dev-debug",
+        "dev-device-identity-off",
+        "dev-device-identity-test",
         "dev-release",
         "ci-linux-debug",
         "ci-linux-release",
         "ci-linux-core",
+        "ci-linux-device-identity-test",
         "ci-windows-msvc-debug-dynamic",
         "ci-windows-msvc-debug-static",
         "ci-windows-msvc-release-dynamic",
         "ci-windows-msvc-release-static",
-        "ci-windows-msvc"
+        "ci-windows-msvc",
+        "ci-windows-device-identity-test"
     )]
     [string]$Preset = "dev-debug",
 

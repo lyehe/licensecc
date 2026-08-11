@@ -39,6 +39,50 @@ struct ProviderMetadata {
     std::string algorithm;
 };
 
+struct ProviderContract {
+    std::uint32_t backend;
+    std::uint32_t assurance;
+    const char* provider;
+    const char* algorithm;
+};
+
+constexpr ProviderContract kWindowsTpmProviderContract = {
+    LCC_DEVICE_BACKEND_WINDOWS_TPM,
+    LCC_DEVICE_ASSURANCE_REPORTED_HARDWARE,
+    "windows-platform-ksp",
+    kP256Algorithm};
+constexpr ProviderContract kTpm2OpenSslProviderContract = {
+    LCC_DEVICE_BACKEND_TPM2_OPENSSL,
+    LCC_DEVICE_ASSURANCE_REPORTED_HARDWARE,
+    "tpm2-openssl",
+    kP256Algorithm};
+constexpr ProviderContract kSoftwareTestProviderContract = {
+    LCC_DEVICE_BACKEND_SOFTWARE_TEST,
+    LCC_DEVICE_ASSURANCE_SOFTWARE,
+    "software-test",
+    kP256Algorithm};
+
+constexpr const ProviderContract* provider_contract_for_backend(std::uint32_t backend) noexcept {
+    switch (backend) {
+        case LCC_DEVICE_BACKEND_WINDOWS_TPM:
+            return &kWindowsTpmProviderContract;
+        case LCC_DEVICE_BACKEND_TPM2_OPENSSL:
+            return &kTpm2OpenSslProviderContract;
+        case LCC_DEVICE_BACKEND_SOFTWARE_TEST:
+            return &kSoftwareTestProviderContract;
+        default:
+            return nullptr;
+    }
+}
+
+inline bool provider_metadata_matches_contract(const ProviderMetadata& metadata,
+                                               const ProviderOpenRequest& request) {
+    const ProviderContract* contract = provider_contract_for_backend(request.backend);
+    return contract != nullptr && metadata.backend == contract->backend && metadata.scope == request.scope &&
+           metadata.assurance == contract->assurance && metadata.provider == contract->provider &&
+           metadata.algorithm == contract->algorithm;
+}
+
 /* Internal v1 provider surface. It deliberately accepts only a pre-hashed,
  * fixed-width digest; arbitrary-byte signing is not part of this contract. */
 class DeviceKeyProvider {

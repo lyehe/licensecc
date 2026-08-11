@@ -38,6 +38,8 @@ struct SoftwareKey {
     BCRYPT_KEY_HANDLE key = nullptr;
 };
 #else
+using PkeyContextPtr = std::unique_ptr<EVP_PKEY_CTX, decltype(&EVP_PKEY_CTX_free)>;
+
 struct SoftwareKey {
     ~SoftwareKey() {
         if (key != nullptr) {
@@ -98,15 +100,15 @@ LCC_DEVICE_RESULT generate_key(std::shared_ptr<SoftwareKey>& out) {
         }
         candidate->key = key;
 #else
-        EVP_PKEY_CTX* context = EVP_PKEY_CTX_new_id(EVP_PKEY_EC, nullptr);
-        if (context == nullptr) {
+        PkeyContextPtr context(EVP_PKEY_CTX_new_id(EVP_PKEY_EC, nullptr), EVP_PKEY_CTX_free);
+        if (!context) {
             return LCC_DEVICE_PROVIDER_UNAVAILABLE;
         }
         EVP_PKEY* key = nullptr;
-        const bool generated = EVP_PKEY_keygen_init(context) > 0 &&
-                               EVP_PKEY_CTX_set_ec_paramgen_curve_nid(context, NID_X9_62_prime256v1) > 0 &&
-                               EVP_PKEY_keygen(context, &key) > 0;
-        EVP_PKEY_CTX_free(context);
+        const bool generated = EVP_PKEY_keygen_init(context.get()) > 0 &&
+                               EVP_PKEY_CTX_set_ec_paramgen_curve_nid(
+                                   context.get(), NID_X9_62_prime256v1) > 0 &&
+                               EVP_PKEY_keygen(context.get(), &key) > 0;
         if (!generated || key == nullptr) {
             if (key != nullptr) {
                 EVP_PKEY_free(key);
@@ -133,13 +135,20 @@ LCC_DEVICE_RESULT export_spki(const std::shared_ptr<SoftwareKey>& key, P256Spki&
             required != sizeof(BCRYPT_ECCKEY_BLOB) + 64U) {
             return LCC_DEVICE_KEY_CORRUPT;
         }
-        std::vector<std::uint8_t> blob(required);
+        SensitiveVector blob(required);
         ULONG written = 0U;
-        if (!NT_SUCCESS(BCryptExportKey(key->key, nullptr, BCRYPT_ECCPUBLIC_BLOB, blob.data(), required, &written, 0)) ||
+        if (!NT_SUCCESS(BCryptExportKey(key->key,
+                                        nullptr,
+                                        BCRYPT_ECCPUBLIC_BLOB,
+                                        blob.value.data(),
+                                        required,
+                                        &written,
+                                        0)) ||
             written != required) {
             return LCC_DEVICE_KEY_CORRUPT;
         }
-        const BCRYPT_ECCKEY_BLOB* header = reinterpret_cast<const BCRYPT_ECCKEY_BLOB*>(blob.data());
+        const BCRYPT_ECCKEY_BLOB* header =
+            reinterpret_cast<const BCRYPT_ECCKEY_BLOB*>(blob.value.data());
         if (header->dwMagic != BCRYPT_ECDSA_PUBLIC_P256_MAGIC || header->cbKey != 32U) {
             return LCC_DEVICE_KEY_CORRUPT;
         }
@@ -148,7 +157,9 @@ LCC_DEVICE_RESULT export_spki(const std::shared_ptr<SoftwareKey>& key, P256Spki&
             0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07, 0x03, 0x42, 0x00, 0x04}};
         P256Spki candidate{};
         std::copy(prefix.begin(), prefix.end(), candidate.begin());
-        std::copy(blob.begin() + sizeof(BCRYPT_ECCKEY_BLOB), blob.end(), candidate.begin() + prefix.size());
+        std::copy(blob.value.begin() + sizeof(BCRYPT_ECCKEY_BLOB),
+                  blob.value.end(),
+                  candidate.begin() + prefix.size());
 #else
         const int required = i2d_PUBKEY(key->key, nullptr);
         if (required != 91) {
@@ -183,38 +194,39 @@ LCC_DEVICE_RESULT sign_with_key(const std::shared_ptr<SoftwareKey>& key,
     }
     try {
 #ifdef _WIN32
-        P256Signature candidate{};
+        SensitiveArray<64> candidate;
         ULONG written = 0U;
         if (!NT_SUCCESS(BCryptSignHash(key->key, nullptr, const_cast<PUCHAR>(digest.data()),
-                                      static_cast<ULONG>(digest.size()), candidate.data(),
-                                      static_cast<ULONG>(candidate.size()), &written, 0)) ||
-            written != candidate.size() || !p1363_signature_in_range(candidate)) {
-            secure_zero(candidate.data(), candidate.size());
+                                      static_cast<ULONG>(digest.size()), candidate.value.data(),
+                                      static_cast<ULONG>(candidate.value.size()), &written, 0)) ||
+            written != candidate.value.size() || !p1363_signature_in_range(candidate.value)) {
             return LCC_DEVICE_SIGN_FAILED;
         }
 #else
-        EVP_PKEY_CTX* context = EVP_PKEY_CTX_new(key->key, nullptr);
-        if (context == nullptr) {
+        PkeyContextPtr context(EVP_PKEY_CTX_new(key->key, nullptr), EVP_PKEY_CTX_free);
+        if (!context) {
             return LCC_DEVICE_SIGN_FAILED;
         }
         std::size_t der_size = 0U;
-        const bool initialized = EVP_PKEY_sign_init(context) > 0 &&
-                                 EVP_PKEY_CTX_set_signature_md(context, EVP_sha256()) > 0 &&
-                                 EVP_PKEY_sign(context, nullptr, &der_size, digest.data(), digest.size()) > 0;
-        std::vector<std::uint8_t> der(initialized ? der_size : 0U);
-        const bool signed_digest = initialized && der_size >= 8U && der_size <= 72U &&
-                                   EVP_PKEY_sign(context, der.data(), &der_size, digest.data(), digest.size()) > 0;
-        EVP_PKEY_CTX_free(context);
-        P256Signature candidate{};
-        if (!signed_digest || !der_signature_to_p1363(der.data(), der_size, candidate)) {
-            secure_zero(candidate.data(), candidate.size());
-            secure_zero(der.data(), der.size());
+        const bool initialized = EVP_PKEY_sign_init(context.get()) > 0 &&
+                                 EVP_PKEY_CTX_set_signature_md(context.get(), EVP_sha256()) > 0 &&
+                                 EVP_PKEY_sign(
+                                     context.get(), nullptr, &der_size, digest.data(), digest.size()) > 0;
+        const bool der_size_valid = initialized && der_size >= 8U && der_size <= 72U;
+        SensitiveVector der(der_size_valid ? der_size : 0U);
+        const bool signed_digest = der_size_valid &&
+                                   EVP_PKEY_sign(context.get(),
+                                                 der.value.data(),
+                                                 &der_size,
+                                                 digest.data(),
+                                                 digest.size()) > 0;
+        SensitiveArray<64> candidate;
+        if (!signed_digest ||
+            !der_signature_to_p1363(der.value.data(), der_size, candidate.value)) {
             return LCC_DEVICE_SIGN_FAILED;
         }
-        secure_zero(der.data(), der.size());
 #endif
-        out = candidate;
-        secure_zero(candidate.data(), candidate.size());
+        out = candidate.value;
         return LCC_DEVICE_OK;
     } catch (...) {
         return LCC_DEVICE_SIGN_FAILED;
@@ -259,20 +271,19 @@ public:
                 return result;
             }
             P256Spki generated_spki{};
-            P256Digest self_test_digest{};
-            P256Signature self_test_signature{};
+            SensitiveArray<32> self_test_digest;
+            SensitiveArray<64> self_test_signature;
             const LCC_DEVICE_RESULT exported = export_spki(generated, generated_spki);
             const bool digest_ready =
                 exported == LCC_DEVICE_OK &&
                 sha256(reinterpret_cast<const std::uint8_t*>(request.device_namespace.payload.data()),
-                       request.device_namespace.payload.size(), self_test_digest);
+                       request.device_namespace.payload.size(), self_test_digest.value);
             const LCC_DEVICE_RESULT signed_result =
-                digest_ready ? sign_with_key(generated, self_test_digest, self_test_signature) :
+                digest_ready ? sign_with_key(generated, self_test_digest.value, self_test_signature.value) :
                                LCC_DEVICE_INTERNAL_ERROR;
             const bool verified = signed_result == LCC_DEVICE_OK &&
-                                  verify_p256_p1363(generated_spki, self_test_digest, self_test_signature);
-            secure_zero(self_test_digest.data(), self_test_digest.size());
-            secure_zero(self_test_signature.data(), self_test_signature.size());
+                                  verify_p256_p1363(
+                                      generated_spki, self_test_digest.value, self_test_signature.value);
             if (!verified) {
                 return exported != LCC_DEVICE_OK ? exported :
                        signed_result != LCC_DEVICE_OK ? signed_result : LCC_DEVICE_SIGN_FAILED;
@@ -302,12 +313,17 @@ public:
             if (!key_) {
                 return LCC_DEVICE_KEY_LOST;
             }
+            const ProviderContract* contract =
+                provider_contract_for_backend(LCC_DEVICE_BACKEND_SOFTWARE_TEST);
+            if (contract == nullptr) {
+                return LCC_DEVICE_INTERNAL_ERROR;
+            }
             ProviderMetadata candidate;
-            candidate.backend = LCC_DEVICE_BACKEND_SOFTWARE_TEST;
+            candidate.backend = contract->backend;
             candidate.scope = scope_;
-            candidate.assurance = LCC_DEVICE_ASSURANCE_SOFTWARE;
-            candidate.provider = "software-test";
-            candidate.algorithm = kP256Algorithm;
+            candidate.assurance = contract->assurance;
+            candidate.provider = contract->provider;
+            candidate.algorithm = contract->algorithm;
             out = std::move(candidate);
             return LCC_DEVICE_OK;
         } catch (...) {

@@ -60,14 +60,19 @@ bool sha256(const std::uint8_t* data, std::size_t size, P256Digest& out) noexcep
     if (data == nullptr && size != 0U) {
         return false;
     }
-    P256Digest candidate{};
+    SensitiveArray<32> candidate;
     unsigned int written = 0U;
     const unsigned char empty = 0U;
-    if (EVP_Digest(size == 0U ? &empty : data, size, candidate.data(), &written, EVP_sha256(), nullptr) != 1 ||
-        written != candidate.size()) {
+    if (EVP_Digest(size == 0U ? &empty : data,
+                   size,
+                   candidate.value.data(),
+                   &written,
+                   EVP_sha256(),
+                   nullptr) != 1 ||
+        written != candidate.value.size()) {
         return false;
     }
-    out = candidate;
+    out = candidate.value;
     return true;
 }
 
@@ -94,8 +99,8 @@ bool platform_verify_p256_p1363(const P256Spki& spki,
         if (!key || !has_p256_group(key.get())) {
             return false;
         }
-        std::vector<std::uint8_t> der;
-        if (!p1363_signature_to_der(signature, der)) {
+        SensitiveVector der;
+        if (!p1363_signature_to_der(signature, der.value)) {
             return false;
         }
         PkeyContextPtr context(EVP_PKEY_CTX_new(key.get(), nullptr), EVP_PKEY_CTX_free);
@@ -103,7 +108,8 @@ bool platform_verify_p256_p1363(const P256Spki& spki,
             EVP_PKEY_CTX_set_signature_md(context.get(), EVP_sha256()) <= 0) {
             return false;
         }
-        return EVP_PKEY_verify(context.get(), der.data(), der.size(), digest.data(), digest.size()) == 1;
+        return EVP_PKEY_verify(
+                   context.get(), der.value.data(), der.value.size(), digest.data(), digest.size()) == 1;
     } catch (...) {
         return false;
     }

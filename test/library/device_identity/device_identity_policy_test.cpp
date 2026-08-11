@@ -4,9 +4,17 @@
 #include <licensecc/device_identity.h>
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <cstring>
 #include <string>
+
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <sys/mman.h>
+#include <unistd.h>
+#endif
 
 namespace {
 
@@ -125,6 +133,8 @@ BOOST_AUTO_TEST_CASE(expected_id_deletion_is_guarded_and_close_is_non_destructiv
     lcc_device_identity_close(handle);
 
     BOOST_TEST(lcc_device_identity_delete_key(&options, nullptr) == LCC_DEVICE_INVALID_ARGUMENT);
+    const char early_terminator[] = "sha256:";
+    BOOST_TEST(lcc_device_identity_delete_key(&options, early_terminator) == LCC_DEVICE_INVALID_ARGUMENT);
     BOOST_TEST(lcc_device_identity_delete_key(
                    &options, "sha256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA") ==
                LCC_DEVICE_INVALID_ARGUMENT);
@@ -135,8 +145,60 @@ BOOST_AUTO_TEST_CASE(expected_id_deletion_is_guarded_and_close_is_non_destructiv
     BOOST_TEST(lcc_device_identity_delete_key(&options, key_id.c_str()) == LCC_DEVICE_INVALID_ARGUMENT);
 
     options.flags = 0U;
-    BOOST_TEST(lcc_device_identity_delete_key(&options, key_id.c_str()) == LCC_DEVICE_OK);
+    std::array<char, LCC_DEVICE_KEY_ID_MAX + 2U> exact_id_with_ignored_trailing_byte{};
+    std::memcpy(exact_id_with_ignored_trailing_byte.data(), key_id.data(), key_id.size());
+    exact_id_with_ignored_trailing_byte[LCC_DEVICE_KEY_ID_MAX] = '\0';
+    exact_id_with_ignored_trailing_byte[LCC_DEVICE_KEY_ID_MAX + 1U] = 'x';
+    BOOST_TEST(lcc_device_identity_delete_key(&options, exact_id_with_ignored_trailing_byte.data()) ==
+               LCC_DEVICE_OK);
     BOOST_TEST(lcc_device_identity_delete_key(&options, key_id.c_str()) == LCC_DEVICE_KEY_NOT_FOUND);
+}
+
+BOOST_AUTO_TEST_CASE(expected_id_nontermination_is_bounded_at_max_plus_one) {
+    LccDeviceIdentityOptions options = options_for("guard-page");
+    constexpr std::size_t scan_size = LCC_DEVICE_KEY_ID_MAX + 1U;
+#ifdef _WIN32
+    SYSTEM_INFO system_info{};
+    GetSystemInfo(&system_info);
+    const std::size_t page_size = system_info.dwPageSize;
+    void* allocation = VirtualAlloc(nullptr, page_size * 2U, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+    BOOST_REQUIRE(allocation != nullptr);
+    DWORD old_protection = 0U;
+    BOOST_REQUIRE(VirtualProtect(static_cast<unsigned char*>(allocation) + page_size,
+                                 page_size,
+                                 PAGE_NOACCESS,
+                                 &old_protection) != 0);
+    char* early_terminator =
+        reinterpret_cast<char*>(static_cast<unsigned char*>(allocation) + page_size - sizeof("sha256:"));
+    std::memcpy(early_terminator, "sha256:", sizeof("sha256:"));
+    BOOST_TEST(lcc_device_identity_delete_key(&options, early_terminator) ==
+               LCC_DEVICE_INVALID_ARGUMENT);
+    char* unterminated = reinterpret_cast<char*>(static_cast<unsigned char*>(allocation) + page_size - scan_size);
+    std::memset(unterminated, 'a', scan_size);
+    BOOST_TEST(lcc_device_identity_delete_key(&options, unterminated) == LCC_DEVICE_INVALID_ARGUMENT);
+    BOOST_TEST(VirtualFree(allocation, 0U, MEM_RELEASE) != 0);
+#else
+    const long configured_page_size = ::sysconf(_SC_PAGESIZE);
+    BOOST_REQUIRE(configured_page_size > 0);
+    const std::size_t page_size = static_cast<std::size_t>(configured_page_size);
+    void* allocation = ::mmap(nullptr,
+                              page_size * 2U,
+                              PROT_READ | PROT_WRITE,
+                              MAP_PRIVATE | MAP_ANONYMOUS,
+                              -1,
+                              0);
+    BOOST_REQUIRE(allocation != MAP_FAILED);
+    BOOST_REQUIRE(::mprotect(static_cast<unsigned char*>(allocation) + page_size, page_size, PROT_NONE) == 0);
+    char* early_terminator =
+        reinterpret_cast<char*>(static_cast<unsigned char*>(allocation) + page_size - sizeof("sha256:"));
+    std::memcpy(early_terminator, "sha256:", sizeof("sha256:"));
+    BOOST_TEST(lcc_device_identity_delete_key(&options, early_terminator) ==
+               LCC_DEVICE_INVALID_ARGUMENT);
+    char* unterminated = reinterpret_cast<char*>(static_cast<unsigned char*>(allocation) + page_size - scan_size);
+    std::memset(unterminated, 'a', scan_size);
+    BOOST_TEST(lcc_device_identity_delete_key(&options, unterminated) == LCC_DEVICE_INVALID_ARGUMENT);
+    BOOST_TEST(::munmap(allocation, page_size * 2U) == 0);
+#endif
 }
 
 BOOST_AUTO_TEST_CASE(proof_inputs_and_outputs_are_strict_and_transactional) {

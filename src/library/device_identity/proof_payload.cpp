@@ -97,12 +97,13 @@ bool derive_namespace_v1(const std::string& application_id,
         candidate.payload.append(project);
         candidate.payload.append("\nscope=");
         candidate.payload.append(scope == LCC_DEVICE_SCOPE_USER ? "user\n" : "machine\n");
-        P256Digest digest{};
-        if (!sha256(reinterpret_cast<const std::uint8_t*>(candidate.payload.data()), candidate.payload.size(), digest)) {
+        SensitiveArray<32> digest;
+        if (!sha256(reinterpret_cast<const std::uint8_t*>(candidate.payload.data()),
+                    candidate.payload.size(),
+                    digest.value)) {
             return false;
         }
-        candidate.hash = lowercase_hex(digest.data(), digest.size());
-        secure_zero(digest.data(), digest.size());
+        candidate.hash = lowercase_hex(digest.value.data(), digest.value.size());
         if (candidate.hash.size() != 64U) {
             return false;
         }

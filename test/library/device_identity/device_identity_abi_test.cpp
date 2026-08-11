@@ -46,6 +46,14 @@ static_assert(LCC_DEVICE_ASSURANCE_UNKNOWN == 0 && LCC_DEVICE_ASSURANCE_SOFTWARE
 static_assert(LCC_DEVICE_PROOF_AUDIENCE_UNSPECIFIED == 0 && LCC_DEVICE_PROOF_AUDIENCE_VERIFY == 1 &&
                   LCC_DEVICE_PROOF_AUDIENCE_LEASE == 2 && LCC_DEVICE_PROOF_AUDIENCE_SEAT == 3,
               "audience ABI drift");
+static_assert(LCC_DEVICE_IDENTITY_VERSION == 1U, "identity version ABI drift");
+static_assert(LCC_DEVICE_PROOF_VERSION == 1U, "proof version ABI drift");
+static_assert(LCC_DEVICE_OPEN_CREATE_IF_MISSING == 0x00000001U, "open flag ABI drift");
+static_assert(LCC_DEVICE_APPLICATION_ID_MAX == 128U, "application-id maximum ABI drift");
+static_assert(LCC_DEVICE_PROVIDER_NAME_MAX == 63U, "provider-name maximum ABI drift");
+static_assert(LCC_DEVICE_ALGORITHM_MAX == 31U, "algorithm maximum ABI drift");
+static_assert(LCC_DEVICE_KEY_ID_MAX == 71U, "key-id maximum ABI drift");
+static_assert(LCC_DEVICE_SIGNATURE_BASE64_MAX == 88U, "signature maximum ABI drift");
 
 static_assert(std::is_standard_layout<LccDeviceIdentityOptions>::value, "public ABI must be standard-layout");
 static_assert(alignof(LccDeviceIdentityOptions) == alignof(std::uint32_t), "options alignment drift");

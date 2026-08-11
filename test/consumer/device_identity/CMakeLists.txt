@@ -27,7 +27,10 @@ add_executable(device_identity_cpp_link_smoke cpp_link_smoke.cpp)
 set_target_properties(device_identity_cpp_link_smoke PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED YES)
 target_link_libraries(device_identity_cpp_link_smoke PRIVATE licensecc::licensecc_static)
 if(TARGET device_identity_c_header_smoke)
-    add_dependencies(device_identity_cpp_link_smoke device_identity_c_header_smoke)
+    target_sources(device_identity_cpp_link_smoke
+        PRIVATE $<TARGET_OBJECTS:device_identity_c_header_smoke>)
+    target_compile_definitions(device_identity_cpp_link_smoke
+        PRIVATE LCC_DEVICE_IDENTITY_C_SMOKE_LINKED=1)
 endif()
 
 enable_testing()

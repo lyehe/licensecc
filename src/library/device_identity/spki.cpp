@@ -131,10 +131,10 @@ bool verify_p256_p1363(const P256Spki& spki,
     if (signature == nullptr || signature_size != P256Signature{}.size()) {
         return false;
     }
-    P256Signature candidate{};
-    std::copy(signature, signature + signature_size, candidate.begin());
-    return p1363_signature_in_range(candidate) && detail::platform_validate_p256_spki(spki) &&
-           detail::platform_verify_p256_p1363(spki, digest, candidate);
+    SensitiveArray<64> candidate;
+    std::copy(signature, signature + signature_size, candidate.value.begin());
+    return p1363_signature_in_range(candidate.value) && detail::platform_validate_p256_spki(spki) &&
+           detail::platform_verify_p256_p1363(spki, digest, candidate.value);
 }
 
 std::string device_key_id(const P256Spki& spki) noexcept {
@@ -142,12 +142,11 @@ std::string device_key_id(const P256Spki& spki) noexcept {
         if (!detail::platform_validate_p256_spki(spki)) {
             return {};
         }
-        P256Digest digest{};
-        if (!sha256(spki.data(), spki.size(), digest)) {
+        SensitiveArray<32> digest;
+        if (!sha256(spki.data(), spki.size(), digest.value)) {
             return {};
         }
-        std::string result = "sha256:" + lowercase_hex(digest.data(), digest.size());
-        secure_zero(digest.data(), digest.size());
+        std::string result = "sha256:" + lowercase_hex(digest.value.data(), digest.value.size());
         return result.size() == 71U ? result : std::string();
     } catch (...) {
         return {};
@@ -170,13 +169,13 @@ bool der_signature_to_p1363(const std::uint8_t* der,
         offset != size) {
         return false;
     }
-    P256Signature candidate{};
-    std::copy(r, r + r_size, candidate.begin() + (32U - r_size));
-    std::copy(s, s + s_size, candidate.begin() + 32U + (32U - s_size));
-    if (!p1363_signature_in_range(candidate)) {
+    SensitiveArray<64> candidate;
+    std::copy(r, r + r_size, candidate.value.begin() + (32U - r_size));
+    std::copy(s, s + s_size, candidate.value.begin() + 32U + (32U - s_size));
+    if (!p1363_signature_in_range(candidate.value)) {
         return false;
     }
-    out = candidate;
+    out = candidate.value;
     return true;
 }
 
@@ -185,16 +184,16 @@ bool p1363_signature_to_der(const P256Signature& signature, std::vector<std::uin
         if (!p1363_signature_in_range(signature)) {
             return false;
         }
-        std::vector<std::uint8_t> body;
-        body.reserve(70U);
-        append_der_integer(body, signature.data());
-        append_der_integer(body, signature.data() + 32U);
-        std::vector<std::uint8_t> candidate;
-        candidate.reserve(body.size() + 2U);
-        candidate.push_back(0x30U);
-        candidate.push_back(static_cast<std::uint8_t>(body.size()));
-        candidate.insert(candidate.end(), body.begin(), body.end());
-        out.swap(candidate);
+        SensitiveVector body;
+        body.value.reserve(70U);
+        append_der_integer(body.value, signature.data());
+        append_der_integer(body.value, signature.data() + 32U);
+        SensitiveVector candidate;
+        candidate.value.reserve(body.value.size() + 2U);
+        candidate.value.push_back(0x30U);
+        candidate.value.push_back(static_cast<std::uint8_t>(body.value.size()));
+        candidate.value.insert(candidate.value.end(), body.value.begin(), body.value.end());
+        out.swap(candidate.value);
         return true;
     } catch (...) {
         return false;
