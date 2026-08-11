@@ -358,6 +358,9 @@ public:
         return store_non_pkey ? OSSL_STORE_INFO_CERT : store_expected_type;
     }
     EVP_PKEY* store_info_get1_pkey(const OSSL_STORE_INFO*) noexcept override {
+        if (store_first_pkey_null && store_loaded_count == 1) {
+            return nullptr;
+        }
         return reinterpret_cast<EVP_PKEY*>(static_cast<std::uintptr_t>(8U));
     }
     void store_info_free(OSSL_STORE_INFO*) noexcept override {}
@@ -411,6 +414,7 @@ public:
     bool store_non_pkey = false;
     bool store_error_on_load = false;
     bool store_close_failure = false;
+    bool store_first_pkey_null = false;
     bool fail_keygen = false;
     int parent_auth_failure = 0;
     bool fail_sign = false;
@@ -1550,6 +1554,15 @@ void test_store_cardinality_and_clean_eof_are_required() {
     provider = license::device_identity::make_tpm2_openssl_provider(openssl, storage);
     require(provider->open(request_for("/safe")) == LCC_DEVICE_KEY_CORRUPT,
             "STORE without a clean EOF was accepted");
+
+    openssl = std::make_shared<FakeOpenSsl3Api>(true, false, true);
+    openssl->store_item_count = 2;
+    openssl->store_first_pkey_null = true;
+    storage = std::make_shared<LockReachPosixStorageApi>(true);
+    storage->reference_present = true;
+    provider = license::device_identity::make_tpm2_openssl_provider(openssl, storage);
+    require(provider->open(request_for("/safe")) == LCC_DEVICE_KEY_CORRUPT,
+            "first-null then second-valid PKEY STORE sequence was accepted");
 }
 
 void test_no_replace_fallback_winner_and_publish_rollback() {
@@ -1654,6 +1667,11 @@ void test_shim_successful_open_sign_close_1000_cycles() {
         require(openssl->provider_unload_count == 2 && openssl->libctx_free_count == 1 &&
                     openssl->pkey_free_count >= 2,
                 "successful shim cycle leaked provider context or key handles");
+        require(openssl->calls.size() >= 3U &&
+                    openssl->calls[openssl->calls.size() - 3U] == "provider_unload:tpm2" &&
+                    openssl->calls[openssl->calls.size() - 2U] == "provider_unload:default" &&
+                    openssl->calls[openssl->calls.size() - 1U] == "libctx_free",
+                "successful shim cycle teardown order changed");
     }
 }
 
