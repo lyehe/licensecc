@@ -13,6 +13,9 @@
 namespace license {
 namespace device_identity {
 
+class OpenSsl3Api;
+class PosixStorageApi;
+
 constexpr const char* kP256Algorithm = "ecdsa-p256-sha256";
 
 struct DeviceNamespace {
@@ -99,6 +102,9 @@ public:
 
 std::unique_ptr<DeviceKeyProvider> make_software_test_provider() noexcept;
 std::unique_ptr<DeviceKeyProvider> make_windows_tpm_provider() noexcept;
+std::unique_ptr<DeviceKeyProvider> make_tpm2_openssl_provider() noexcept;
+std::unique_ptr<DeviceKeyProvider> make_tpm2_openssl_provider(
+    std::shared_ptr<OpenSsl3Api> openssl, std::shared_ptr<PosixStorageApi> posix) noexcept;
 
 bool derive_namespace_v1(const std::string& application_id,
                          const std::string& project,

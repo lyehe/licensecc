@@ -1,3 +1,208 @@
+#ifdef LCC_TPM2_OPENSSL_PRODUCTION_TEST
+
+#include "device_key_provider.hpp"
+#include "openssl3_api.hpp"
+#include "posix_storage_api.hpp"
+
+#include <openssl/err.h>
+
+#include <cerrno>
+#include <cstdint>
+#include <cstdlib>
+#include <iostream>
+#include <memory>
+#include <stdexcept>
+#include <string>
+#include <vector>
+
+namespace {
+
+using license::device_identity::OpenSsl3Api;
+using license::device_identity::PosixStorageApi;
+using license::device_identity::ProviderOpenRequest;
+
+void require(bool condition, const char* message) {
+    if (!condition) {
+        throw std::runtime_error(message);
+    }
+}
+
+class FakeOpenSsl3Api final : public OpenSsl3Api {
+public:
+    OSSL_LIB_CTX* libctx_new() noexcept override {
+        calls.push_back("libctx_new");
+        return reinterpret_cast<OSSL_LIB_CTX*>(static_cast<std::uintptr_t>(1U));
+    }
+    void libctx_free(OSSL_LIB_CTX*) noexcept override { calls.push_back("libctx_free"); }
+    OSSL_PROVIDER* provider_load(OSSL_LIB_CTX*, const char* name) noexcept override {
+        calls.push_back(std::string("provider_load:") + name);
+        return std::string(name) == "default" ?
+                   reinterpret_cast<OSSL_PROVIDER*>(static_cast<std::uintptr_t>(2U)) : nullptr;
+    }
+    int provider_unload(OSSL_PROVIDER* provider) noexcept override {
+        calls.push_back(provider == reinterpret_cast<OSSL_PROVIDER*>(static_cast<std::uintptr_t>(2U)) ?
+                            "provider_unload:default" : "provider_unload:unknown");
+        return 1;
+    }
+    EVP_PKEY_CTX* pkey_ctx_new_from_name(OSSL_LIB_CTX*, const char*, const char*) noexcept override { return nullptr; }
+    EVP_PKEY_CTX* pkey_ctx_new_from_pkey(OSSL_LIB_CTX*, EVP_PKEY*, const char*) noexcept override { return nullptr; }
+    void pkey_ctx_free(EVP_PKEY_CTX*) noexcept override {}
+    int pkey_keygen_init(EVP_PKEY_CTX*) noexcept override { return 0; }
+    int pkey_ctx_set_params(EVP_PKEY_CTX*, const OSSL_PARAM*) noexcept override { return 0; }
+    int pkey_generate(EVP_PKEY_CTX*, EVP_PKEY**) noexcept override { return 0; }
+    int pkey_sign_init(EVP_PKEY_CTX*) noexcept override { return 0; }
+    int pkey_verify_init(EVP_PKEY_CTX*) noexcept override { return 0; }
+    int pkey_ctx_set_signature_md(EVP_PKEY_CTX*, const EVP_MD*) noexcept override { return 0; }
+    int pkey_sign(EVP_PKEY_CTX*, unsigned char*, std::size_t*, const unsigned char*, std::size_t) noexcept override {
+        return 0;
+    }
+    int pkey_verify(EVP_PKEY_CTX*, const unsigned char*, std::size_t, const unsigned char*, std::size_t) noexcept override {
+        return 0;
+    }
+    void pkey_free(EVP_PKEY*) noexcept override {}
+    const OSSL_PROVIDER* pkey_get0_provider(const EVP_PKEY*) noexcept override { return nullptr; }
+    const char* provider_name(const OSSL_PROVIDER*) noexcept override { return nullptr; }
+    int pkey_get_utf8_string_param(const EVP_PKEY*, const char*, char*, std::size_t, std::size_t*) noexcept override {
+        return 0;
+    }
+    OSSL_ENCODER_CTX* encoder_new_for_pkey(const EVP_PKEY*, int, const char*, const char*, const char*) noexcept override {
+        return nullptr;
+    }
+    int encoder_to_data(OSSL_ENCODER_CTX*, unsigned char**, std::size_t*) noexcept override { return 0; }
+    void encoder_free(OSSL_ENCODER_CTX*) noexcept override {}
+    OSSL_STORE_CTX* store_open_ex(const char*, OSSL_LIB_CTX*, const char*, const UI_METHOD*, void*) noexcept override {
+        return nullptr;
+    }
+    int store_expect(OSSL_STORE_CTX*, int) noexcept override { return 0; }
+    OSSL_STORE_INFO* store_load(OSSL_STORE_CTX*) noexcept override { return nullptr; }
+    int store_eof(OSSL_STORE_CTX*) noexcept override { return 1; }
+    int store_error(OSSL_STORE_CTX*) noexcept override { return 0; }
+    int store_info_type(const OSSL_STORE_INFO*) noexcept override { return 0; }
+    EVP_PKEY* store_info_get1_pkey(const OSSL_STORE_INFO*) noexcept override { return nullptr; }
+    void store_info_free(OSSL_STORE_INFO*) noexcept override {}
+    int store_close(OSSL_STORE_CTX*) noexcept override { return 1; }
+    int rand_priv_bytes_ex(OSSL_LIB_CTX*, unsigned char*, std::size_t, unsigned int) noexcept override { return 0; }
+
+    std::vector<std::string> calls;
+};
+
+class NullPosixStorageApi final : public PosixStorageApi {
+public:
+    int openat(int, const char*, int, mode_t) noexcept override { errno = ENOSYS; return -1; }
+    int close(int) noexcept override { return 0; }
+    int fstat(int, struct stat*) noexcept override { errno = ENOSYS; return -1; }
+    int flock(int, int) noexcept override { errno = ENOSYS; return -1; }
+    ssize_t write(int, const void*, std::size_t) noexcept override { errno = ENOSYS; return -1; }
+    int fdatasync(int) noexcept override { errno = ENOSYS; return -1; }
+    int fsync(int) noexcept override { errno = ENOSYS; return -1; }
+    int unlinkat(int, const char*, int) noexcept override { errno = ENOSYS; return -1; }
+    int linkat(int, const char*, int, const char*, int) noexcept override { errno = ENOSYS; return -1; }
+    int renameat2_noreplace(int, const char*, const char*) noexcept override { errno = ENOSYS; return -1; }
+    int clock_gettime(clockid_t, struct timespec*) noexcept override { errno = ENOSYS; return -1; }
+    int nanosleep(const struct timespec*, struct timespec*) noexcept override { errno = ENOSYS; return -1; }
+};
+
+ProviderOpenRequest request_for(const std::string& storage) {
+    ProviderOpenRequest request;
+    request.backend = LCC_DEVICE_BACKEND_TPM2_OPENSSL;
+    request.scope = LCC_DEVICE_SCOPE_USER;
+    request.lock_timeout_ms = 5U;
+    request.storage_directory = storage;
+    require(license::device_identity::derive_namespace_v1(
+                "licensecc.test.tpm2-shim", "DEFAULT", request.scope, request.device_namespace),
+            "namespace derivation");
+    return request;
+}
+
+void test_provider_load_order_and_unavailable_mapping() {
+    auto openssl = std::make_shared<FakeOpenSsl3Api>();
+    auto provider = license::device_identity::make_tpm2_openssl_provider(
+        openssl, std::make_shared<NullPosixStorageApi>());
+    const ProviderOpenRequest request = request_for("/var/lib/licensecc");
+    ERR_raise(ERR_LIB_USER, ERR_R_INTERNAL_ERROR);
+    const unsigned long before = ERR_peek_last_error();
+    require(provider->open(request) == LCC_DEVICE_PROVIDER_UNAVAILABLE, "missing tpm2 provider mapping");
+    require(ERR_peek_last_error() == before, "OpenSSL error queue was not preserved");
+    require(openssl->calls.size() == 5U, "provider load/unload call count");
+    require(openssl->calls[0] == "libctx_new", "libctx allocation order");
+    require(openssl->calls[1] == "provider_load:default", "default provider must load first");
+    require(openssl->calls[2] == "provider_load:tpm2", "tpm2 provider must load second");
+    require(openssl->calls[3] == "provider_unload:default", "default provider unload order");
+    require(openssl->calls[4] == "libctx_free", "library context unload order");
+}
+
+void test_storage_path_validation_precedes_provider_access() {
+    auto openssl = std::make_shared<FakeOpenSsl3Api>();
+    auto provider = license::device_identity::make_tpm2_openssl_provider(
+        openssl, std::make_shared<NullPosixStorageApi>());
+    ProviderOpenRequest request = request_for("relative");
+    require(provider->open(request) == LCC_DEVICE_INVALID_ARGUMENT, "relative storage path accepted");
+    require(openssl->calls.empty(), "invalid storage path reached OpenSSL");
+    request = request_for("/var/../lib");
+    require(provider->open(request) == LCC_DEVICE_INVALID_ARGUMENT, "traversal storage path accepted");
+}
+
+int run_shim() {
+    test_provider_load_order_and_unavailable_mapping();
+    test_storage_path_validation_precedes_provider_access();
+    std::cout << "PASS: OpenSSL TPM2 provider shim contract\n";
+    return 0;
+}
+
+int run_real(const char* storage_directory) {
+    const char* marker = std::getenv("LCC_TPM2_CAPABILITY_PREREQUISITE");
+    if (marker == nullptr || std::string(marker) != "1") {
+        std::cerr << "TPM2 capability prerequisite marker absent; skipping\n";
+        return 77;
+    }
+    ProviderOpenRequest request = request_for(storage_directory);
+    auto provider = license::device_identity::make_tpm2_openssl_provider();
+    require(provider != nullptr, "TPM2 provider factory");
+    require(provider->create(request) == LCC_DEVICE_OK, "TPM2 provider create");
+    license::device_identity::P256Spki spki{};
+    require(provider->public_spki(spki) == LCC_DEVICE_OK, "TPM2 public SPKI");
+    const std::string key_id = license::device_identity::device_key_id(spki);
+    require(key_id.size() == LCC_DEVICE_KEY_ID_MAX, "TPM2 key id");
+    license::device_identity::P256Digest digest{};
+    require(license::device_identity::sha256(spki.data(), spki.size(), digest), "TPM2 digest");
+    license::device_identity::P256Signature signature{};
+    require(provider->sign_digest(digest, signature) == LCC_DEVICE_OK, "TPM2 sign");
+    require(license::device_identity::verify_p256_p1363(spki, digest, signature), "TPM2 verify");
+    provider.reset();
+    for (unsigned int cycle = 0U; cycle < 1000U; ++cycle) {
+        auto reopened = license::device_identity::make_tpm2_openssl_provider();
+        require(reopened != nullptr && reopened->open(request) == LCC_DEVICE_OK, "TPM2 reopen cycle");
+        license::device_identity::P256Spki current{};
+        require(reopened->public_spki(current) == LCC_DEVICE_OK && current == spki, "TPM2 stable SPKI");
+        require(reopened->sign_digest(digest, signature) == LCC_DEVICE_OK, "TPM2 cycle sign");
+        require(license::device_identity::verify_p256_p1363(current, digest, signature), "TPM2 cycle verify");
+    }
+    auto deleter = license::device_identity::make_tpm2_openssl_provider();
+    require(deleter != nullptr && deleter->delete_with_expected_id(request, key_id) == LCC_DEVICE_OK,
+            "TPM2 expected-id delete");
+    return 0;
+}
+
+}  // namespace
+
+int main(int argc, char** argv) {
+    try {
+        if (argc == 2 && std::string(argv[1]) == "--shim") {
+            return run_shim();
+        }
+        if (argc == 3 && std::string(argv[1]) == "--real") {
+            return run_real(argv[2]);
+        }
+        std::cerr << "usage: " << argv[0] << " --shim | --real <storage-directory>\n";
+        return 2;
+    } catch (const std::exception& error) {
+        std::cerr << "FAIL: " << error.what() << "\n";
+        return 1;
+    }
+}
+
+#else
+
 #include <openssl/core_names.h>
 #include <openssl/crypto.h>
 #include <openssl/encoder.h>
@@ -363,3 +568,5 @@ int main() {
         return 1;
     }
 }
+
+#endif
