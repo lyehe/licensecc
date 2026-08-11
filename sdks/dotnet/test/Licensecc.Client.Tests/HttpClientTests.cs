@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Net;
 using System.Net.Http;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Licensecc.Client;
@@ -22,6 +23,7 @@ namespace Licensecc.Client.Tests
             private readonly Func<HttpRequestMessage, (HttpStatusCode, string)> _respond;
             public HttpRequestMessage? LastRequest { get; private set; }
             public string? LastBody { get; private set; }
+            public int Calls { get; private set; }
 
             public StubHandler(Func<HttpRequestMessage, (HttpStatusCode, string)> respond)
             {
@@ -30,6 +32,7 @@ namespace Licensecc.Client.Tests
 
             protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
             {
+                Calls++;
                 LastRequest = request;
                 LastBody = request.Content == null ? null : await request.Content.ReadAsStringAsync().ConfigureAwait(false);
                 (HttpStatusCode status, string body) = _respond(request);
@@ -103,6 +106,81 @@ namespace Licensecc.Client.Tests
             Assert.AreEqual("Bearer lcca_secret", System.Linq.Enumerable.First(auth!));
             Assert.IsTrue(response.Ok);
             Assert.AreEqual("<v201 lease>", response.GetString("lic"));
+        }
+
+        [TestMethod]
+        public async Task MeterAsync_PostsExactBody_AppliesBearer_AndParsesSoftDenial()
+        {
+            var handler = new StubHandler(_ => (HttpStatusCode.OK,
+                "{\"ok\":false,\"code\":\"quota_exceeded\",\"units_consumed\":5,\"quota\":5}"));
+            using var http = new HttpClient(handler);
+            var client = new LicensingBackendClient(http, "https://verifier.example.com")
+            {
+                AuthorizationBearer = "lcca_secret",
+            };
+
+            IReadOnlyDictionary<string, object?> body = RequestBody.New()
+                .Set("project", "DEFAULT")
+                .Set("feature", "EXPORT")
+                .Set("license_fingerprint", new string('a', 64))
+                .Set("units", 3)
+                .Build();
+
+            BackendResponse response = await client.MeterAsync(body);
+
+            Assert.AreEqual("https://verifier.example.com/v1/meter", handler.LastRequest!.RequestUri!.ToString());
+            Assert.AreEqual(HttpMethod.Post, handler.LastRequest!.Method);
+            using (JsonDocument document = JsonDocument.Parse(handler.LastBody!))
+            {
+                JsonElement root = document.RootElement;
+                Assert.AreEqual("DEFAULT", root.GetProperty("project").GetString());
+                Assert.AreEqual("EXPORT", root.GetProperty("feature").GetString());
+                Assert.AreEqual(new string('a', 64), root.GetProperty("license_fingerprint").GetString());
+                Assert.AreEqual(3, root.GetProperty("units").GetInt32());
+            }
+            Assert.IsTrue(handler.LastRequest.Headers.TryGetValues("Authorization", out IEnumerable<string>? auth));
+            Assert.AreEqual("Bearer lcca_secret", System.Linq.Enumerable.First(auth!));
+            Assert.IsFalse(response.Ok);
+            Assert.AreEqual("quota_exceeded", response.Code);
+        }
+
+        [TestMethod]
+        public async Task ReportAsync_GetsExactQuery_AppliesBearer_AndParsesFlatResponse()
+        {
+            var handler = new StubHandler(_ => (HttpStatusCode.OK,
+                "{\"ok\":true,\"project\":\"DEFAULT\",\"feature\":\"EXPORT\",\"from\":1700,\"to\":1800,\"peak_concurrent\":2}"));
+            using var http = new HttpClient(handler);
+            var client = new LicensingBackendClient(http, "https://verifier.example.com")
+            {
+                AuthorizationBearer = "lcca_secret",
+            };
+
+            BackendResponse response = await client.ReportAsync("DEFAULT", "EXPORT", new string('a', 64), 1700, 1800);
+
+            Assert.AreEqual(
+                "https://verifier.example.com/v1/admin/report?project=DEFAULT&feature=EXPORT&license_fingerprint=" + new string('a', 64) + "&from=1700&to=1800",
+                handler.LastRequest!.RequestUri!.ToString());
+            Assert.AreEqual(HttpMethod.Get, handler.LastRequest!.Method);
+            Assert.IsNull(handler.LastBody);
+            Assert.IsTrue(handler.LastRequest.Headers.TryGetValues("Authorization", out IEnumerable<string>? auth));
+            Assert.AreEqual("Bearer lcca_secret", System.Linq.Enumerable.First(auth!));
+            Assert.IsTrue(response.Ok);
+            Assert.AreEqual(2L, response.GetInt64("peak_concurrent"));
+        }
+
+        [TestMethod]
+        public async Task ReportAsync_DoesNotRetryAndParsesMalformedBody()
+        {
+            var handler = new StubHandler(_ => (HttpStatusCode.BadGateway, "<html>502 Bad Gateway</html>"));
+            using var http = new HttpClient(handler);
+            var client = new LicensingBackendClient(http, "https://verifier.example.com");
+
+            BackendResponse response = await client.ReportAsync("DEFAULT", "EXPORT", new string('a', 64));
+
+            Assert.AreEqual(1, handler.Calls);
+            Assert.AreEqual(502, response.HttpStatus);
+            Assert.IsFalse(response.Ok);
+            Assert.AreEqual("malformed_response", response.Code);
         }
 
         [TestMethod]

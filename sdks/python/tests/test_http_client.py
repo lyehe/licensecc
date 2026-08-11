@@ -8,6 +8,7 @@ from __future__ import annotations
 import io
 import json
 import urllib.error
+import urllib.parse
 
 import pytest
 
@@ -19,6 +20,24 @@ class _FakeResponse:
     def __init__(self, status: int, body: dict):
         self._status = status
         self._raw = json.dumps(body).encode("utf-8")
+
+    def getcode(self):
+        return self._status
+
+    def read(self):
+        return self._raw
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+
+class _FakeRawResponse:
+    def __init__(self, status: int, raw: bytes):
+        self._status = status
+        self._raw = raw
 
     def getcode(self):
         return self._status
@@ -95,6 +114,98 @@ def test_account_token_sets_authorization_header(capture):
     client.activate({"project": "DEFAULT", "feature": "EXPORT", "license_fingerprint": "a" * 64, "device_key_id": "sha256:" + "0" * 64})
     headers = {k.lower(): v for k, v in capture["headers"].items()}
     assert headers["authorization"] == "Bearer lcca_secret"
+
+
+def test_meter_posts_exact_body_and_parses_soft_denial(capture):
+    capture["response"] = {"ok": False, "code": "quota_exceeded", "units_consumed": 5, "quota": 5}
+    client = HttpClient("https://verifier.example.com", account_token="lcca_secret")
+    resp = client.meter(
+        {
+            "project": "DEFAULT",
+            "feature": "EXPORT",
+            "license_fingerprint": "a" * 64,
+            "units": 3,
+        }
+    )
+
+    assert capture["url"] == "https://verifier.example.com/v1/meter"
+    assert capture["method"] == "POST"
+    assert json.loads(capture["body"]) == {
+        "project": "DEFAULT",
+        "feature": "EXPORT",
+        "license_fingerprint": "a" * 64,
+        "units": 3,
+    }
+    headers = {k.lower(): v for k, v in capture["headers"].items()}
+    assert headers["authorization"] == "Bearer lcca_secret"
+    assert resp.status == 200
+    assert not resp.ok
+    assert resp.code == "quota_exceeded"
+
+
+def test_report_gets_exact_query_and_applies_bearer(capture):
+    capture["response"] = {
+        "ok": True,
+        "project": "DEFAULT",
+        "feature": "EXPORT",
+        "from": 1700,
+        "to": 1800,
+        "peak_concurrent": 2,
+    }
+    client = HttpClient("https://verifier.example.com", account_token="lcca_secret")
+    resp = client.report("DEFAULT", "EXPORT", "a" * 64, from_epoch=1700, to_epoch=1800)
+
+    parsed = urllib.parse.urlsplit(capture["url"])
+    assert parsed.path == "/v1/admin/report"
+    assert urllib.parse.parse_qs(parsed.query) == {
+        "project": ["DEFAULT"],
+        "feature": ["EXPORT"],
+        "license_fingerprint": ["a" * 64],
+        "from": ["1700"],
+        "to": ["1800"],
+    }
+    assert capture["method"] == "GET"
+    assert capture["body"] is None
+    headers = {k.lower(): v for k, v in capture["headers"].items()}
+    assert headers["authorization"] == "Bearer lcca_secret"
+    assert resp.ok
+    assert resp.data["peak_concurrent"] == 2
+
+
+def test_report_omits_optional_window_query(capture):
+    client = HttpClient("https://verifier.example.com")
+    client.report("DEFAULT", "EXPORT", "a" * 64)
+    assert urllib.parse.parse_qs(urllib.parse.urlsplit(capture["url"]).query) == {
+        "project": ["DEFAULT"],
+        "feature": ["EXPORT"],
+        "license_fingerprint": ["a" * 64],
+    }
+
+
+def test_report_malformed_response_is_typed_failure(monkeypatch):
+    def fake_urlopen(request, timeout=None):
+        return _FakeRawResponse(502, b"<html>502 Bad Gateway</html>")
+
+    monkeypatch.setattr(hc.urllib.request, "urlopen", fake_urlopen)
+    resp = HttpClient("https://verifier.example.com", max_retries=0).report("DEFAULT", "EXPORT", "a" * 64)
+    assert resp.status == 502
+    assert not resp.ok
+    assert resp.error is not None and resp.error.startswith("malformed JSON:")
+
+
+def test_report_does_not_retry_non_retryable_http_error(monkeypatch):
+    calls = {"n": 0}
+
+    def fake_urlopen(request, timeout=None):
+        calls["n"] += 1
+        body = json.dumps({"ok": False, "code": "invalid_request"}).encode("utf-8")
+        raise urllib.error.HTTPError(request.full_url, 400, "Bad Request", hdrs=None, fp=io.BytesIO(body))
+
+    monkeypatch.setattr(hc.urllib.request, "urlopen", fake_urlopen)
+    resp = HttpClient("https://verifier.example.com").report("DEFAULT", "EXPORT", "a" * 64)
+    assert calls["n"] == 1
+    assert resp.status == 400
+    assert resp.code == "invalid_request"
 
 
 def test_seat_endpoints_paths(capture):

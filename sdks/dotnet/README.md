@@ -8,7 +8,8 @@ A .NET 8 client SDK for the **licensecc** online licensing backend. It does two 
    - `lcccfg1.` — the **config-attestation** token (produced offline by
      `services/cloudflare-licensing-backend/scripts/config-sign.mjs`, consumed here).
 2. **A thin HTTP client wrapper** over the licensing-backend's client-facing endpoints
-   (`/v1/verify`, `/v1/activate`, `/v1/renew`, `/v1/checkout`, `/v1/heartbeat`, `/v1/release`).
+   (`/v1/verify`, `/v1/activate`, `/v1/renew`, `/v1/checkout`, `/v1/heartbeat`, `/v1/release`,
+   `/v1/meter`, `/v1/admin/report`).
 
 > ## Scope — read this
 >
@@ -32,7 +33,7 @@ sdks/dotnet/
     OnlineAssertion.cs             #   lccoa1 verifier  -> OnlineAssertionVerifier.Verify
     ConfigToken.cs                 #   lcccfg1 verifier -> ConfigTokenVerifier.Verify
     VerifyResult.cs                #   Result type + TrustedPublicKey / TrustedKeyRing
-    LicensingBackendClient.cs      #   thin HttpClient wrapper (Verify/Activate/Renew/Checkout/Heartbeat/Release)
+    LicensingBackendClient.cs      #   thin HttpClient wrapper (Verify/Activate/Renew/Checkout/Heartbeat/Release/Meter/Report)
     Json.cs, Hex.cs                #   zero-dependency helpers
   test/Licensecc.Client.Tests/     # MSTest parity suite against test/vectors (positive + negatives)
 ```
@@ -150,6 +151,30 @@ BackendResponse r = await client.VerifyAsync(RequestBody.New()
 if (r.Ok && r.Code == "entitlement_ok")
 {
     string assertion = r.GetString("assertion");   // feed this to OnlineAssertionVerifier.Verify
+}
+```
+
+Metering and usage reports use the configured account bearer. Metering sends
+the `MeterRequest` body; reports send the required entitlement query and
+optional Unix-second `from`/`to` window. Both return the same flat
+`BackendResponse`, with report fields available through `Fields`:
+
+```csharp
+BackendResponse meter = await client.MeterAsync(RequestBody.New()
+    .Set("project", "DEFAULT")
+    .Set("feature", "EXPORT")
+    .Set("license_fingerprint", fingerprint64Hex)
+    .Set("units", 3)
+    .Build());
+
+BackendResponse report = await client.ReportAsync(
+    "DEFAULT", "EXPORT", fingerprint64Hex,
+    fromEpoch: 1700000000,
+    toEpoch: 1700086400);
+if (report.Ok)
+{
+    long? peak = report.GetInt64("peak_concurrent");
+    long? devices = report.GetInt64("unique_devices");
 }
 ```
 

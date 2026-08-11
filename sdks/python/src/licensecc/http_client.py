@@ -4,7 +4,8 @@ SCOPE — read this first
 -----------------------
 This client is a small, hand-written wrapper over the documented client-facing
 endpoints (``POST /v1/verify``, ``/v1/activate``, ``/v1/renew``, ``/v1/checkout``,
-``/v1/heartbeat``, ``/v1/release``). It sends the documented JSON body and parses
+``/v1/heartbeat``, ``/v1/release``, ``/v1/meter`` and ``GET /v1/admin/report``).
+It sends the documented JSON body/query and parses
 the FLAT ``{ ok, code, ... }`` response envelope that every Worker route returns
 (see ``services/cloudflare-licensing-backend/src/openapi.ts``).
 
@@ -25,6 +26,7 @@ from __future__ import annotations
 import json
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import warnings
 from dataclasses import dataclass, field
@@ -172,6 +174,41 @@ class HttpClient:
                 time.sleep(delay)
             attempt += 1
 
+    def _get(self, path: str, query: Mapping[str, Any]) -> ApiResponse:
+        query_string = urllib.parse.urlencode(query)
+        url = self.base_url + path
+        if query_string:
+            url += "?" + query_string
+        headers = {
+            "Accept": "application/json",
+            "User-Agent": self.user_agent,
+        }
+        if self.account_token:
+            headers["Authorization"] = f"Bearer {self.account_token}"
+        request = urllib.request.Request(url, headers=headers, method="GET")
+
+        attempt = 0
+        while True:
+            retry_after: float | None = None
+            try:
+                with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                    return _parse_response(response.getcode(), response.read())
+            except urllib.error.HTTPError as exc:
+                if exc.code in RETRYABLE_STATUSES and attempt < self.max_retries:
+                    retry_after = _parse_retry_after(exc.headers.get("Retry-After") if exc.headers else None)
+                else:
+                    return _parse_response(exc.code, exc.read())
+            except urllib.error.URLError as exc:
+                if attempt >= self.max_retries:
+                    return ApiResponse(status=0, ok=False, code=None, data={}, error=str(exc.reason))
+            except Exception as exc:  # noqa: BLE001 - surface transport errors, never raise
+                if attempt >= self.max_retries:
+                    return ApiResponse(status=0, ok=False, code=None, data={}, error=str(exc))
+            delay = retry_after if retry_after is not None else self.retry_backoff * (2 ** attempt)
+            if delay > 0:
+                time.sleep(delay)
+            attempt += 1
+
     def health(self) -> ApiResponse:
         """``GET /health`` — service liveness."""
         url = self.base_url + "/health"
@@ -285,6 +322,42 @@ class HttpClient:
     def release(self, body: Mapping[str, Any]) -> ApiResponse:
         """``POST /v1/release`` — release a seat (idempotent). ``seat_id`` required."""
         return self._post("/v1/release", body)
+
+    def meter(self, body: Mapping[str, Any]) -> ApiResponse:
+        """``POST /v1/meter`` — record metered units for an entitlement.
+
+        The body follows ``MeterRequest``: ``project``, ``feature`` and
+        ``license_fingerprint`` are required; ``units`` is an optional positive
+        integer and defaults to one. The account bearer, when configured, is
+        applied just as it is for the lease/seat endpoints.
+        """
+        return self._post("/v1/meter", body)
+
+    def report(
+        self,
+        project: str,
+        feature: str,
+        license_fingerprint: str,
+        from_epoch: int | None = None,
+        to_epoch: int | None = None,
+    ) -> ApiResponse:
+        """``GET /v1/admin/report`` — return the usage summary for an entitlement.
+
+        ``from_epoch`` and ``to_epoch`` map to the route's optional ``from`` and
+        ``to`` Unix-second query parameters. The response remains the generic
+        flat :class:`ApiResponse` so endpoint-specific report fields are
+        available through ``data`` without introducing a second wire contract.
+        """
+        query: dict[str, Any] = {
+            "project": project,
+            "feature": feature,
+            "license_fingerprint": license_fingerprint,
+        }
+        if from_epoch is not None:
+            query["from"] = from_epoch
+        if to_epoch is not None:
+            query["to"] = to_epoch
+        return self._get("/v1/admin/report", query)
 
 
 def _parse_retry_after(value: str | None) -> float | None:
