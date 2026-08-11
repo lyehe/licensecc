@@ -3,6 +3,11 @@
 This directory is a **fenced PostgreSQL adapter for the public verifier path only**.
 It is not a full replacement for the D1/SQLite runtime backend.
 
+`schema.pg.sql` is only a consolidated bootstrap for a **fresh, disposable**
+PostgreSQL database used with that fenced surface. It is not a PostgreSQL
+migration history, cannot upgrade an existing database, and is not a supported
+production schema replacement.
+
 Supported runtime routes are deliberately allow-listed by `pg-route-guard.mjs`:
 
 - `GET /health`
@@ -16,7 +21,7 @@ the supported verify path and continues to call the same D1-shaped DB surface.
 
 | File | What it is |
 |---|---|
-| `schema.pg.sql` | PostgreSQL schema port of the D1 schema for the verified PostgreSQL paths. |
+| `schema.pg.sql` | Fresh/disposable PostgreSQL bootstrap snapshot of the final D1 schema; never an upgrade path. |
 | `statements.pg.sql` | The four verify-path Worker statements (group A) plus the admin/CLI statements that carry the SQLite-isms (group B), each annotated with the original SQL it replaces. |
 | `db-postgres.mjs` | A `postgres.js`-backed adapter exposing the **same** `prepare/bind/first/all/run` surface, throwing on error, with one long-lived pool and a BIGINT(int8)->number type parser. |
 
@@ -114,19 +119,25 @@ export DATABASE_URL='postgresql://postgres.<ref>:<password>@aws-0-<region>.poole
 
 ### 2. Apply the schema
 
+Use an empty, disposable database. Do not apply this file as an upgrade to a
+persistent database:
+
 ```bash
 psql "$DATABASE_URL" -f schema.pg.sql
 ```
 
 `schema.pg.sql` runs `CREATE EXTENSION IF NOT EXISTS pgcrypto;` first (preinstalled on
-Supabase). Every statement is `IF NOT EXISTS`, so re-running is safe.
+Supabase). Its `IF NOT EXISTS` clauses are bootstrap conveniences only. They do
+not reconcile an existing table's columns, types, defaults, constraints, or
+indexes, and `CREATE OR REPLACE FUNCTION`/trigger statements do not turn the
+file into an ordered migration history. Re-running it against stale state can
+therefore leave a mixed schema that has never passed the parity contract.
 
 Verify:
 
 ```bash
 psql "$DATABASE_URL" -c '\dt'
-# expect: entitlements, entitlement_devices, customers, licenses,
-#         entitlement_events, mutation_idempotency, rate_limit_counters
+# expect the same 38 application tables reported by `npm run schema:parity:pg`
 ```
 
 ### 3. Install the adapter dependency
@@ -193,9 +204,12 @@ rows, and the adapter never swallows errors, so this contract holds.
   drop-in option (noted in `schema.pg.sql`), but TEXT preserves byte-compatibility with the
   existing admin/CLI tooling that treats them as opaque JSON strings (and `prev_json`/
   `next_json` legitimately default to the empty string `''`, which is not valid jsonb).
-- **Migrations:** this port ships a single consolidated `schema.pg.sql` equivalent to the
-  final state of the D1 migrations. If you want incremental Postgres migrations,
-  split it along the same boundaries (the per-table comments name the source migration).
+- **No PostgreSQL upgrade path:** this port ships only the consolidated
+  `schema.pg.sql` snapshot of the final D1 state. It has no incremental
+  PostgreSQL migration history. Recreate a fresh disposable database when the
+  snapshot changes; do not split or replay this file against persistent state.
+  Designing a production PostgreSQL migration/deployment path is separate,
+  explicitly out-of-scope work.
 
 ## Run the verify Worker on Postgres (server.mjs)
 
@@ -213,7 +227,7 @@ statements to PostgreSQL at `prepare()` time:
 ```bash
 npx --yes npm@10.9.8 install --no-save --package-lock=false postgres  # adapter runtime dep
 npm run build                                                 # tsc -> dist/index.js
-psql "$DATABASE_URL" -f supabase-postgres/schema.pg.sql       # apply the schema
+psql "$DATABASE_URL" -f supabase-postgres/schema.pg.sql       # fresh disposable database only
 node scripts/generate-online-key.mjs --out-dir .online-key    # signing key (.online-key is gitignored)
 
 DATABASE_URL=postgresql://user:pass@host:5432/db \
@@ -225,7 +239,8 @@ DATABASE_URL=postgresql://user:pass@host:5432/db \
 
 **Verified 2026-06-16 on PostgreSQL 16 (Docker):** the compiled Worker served a genuine signed
 `lccoa1.` assertion for a seeded entitlement (`verify.ok`) and `entitlement_denied` (200, not
-500) for a miss — full parity with the SQLite host. `smoke-worker-sql.mjs` re-runs the
+500) for a miss — the allow-listed outcomes exercised by that smoke matched the SQLite
+host. `smoke-worker-sql.mjs` re-runs the
 data-layer proof (7/7) against any Postgres: `npx --yes npm@10.9.8 install --no-save --package-lock=false postgres && node smoke-worker-sql.mjs`.
 
 ## Exposing the host safely
@@ -247,7 +262,7 @@ the two gaps the security review flagged:
 authentication, and rate limiting. Never expose `/v1/verify` directly. The guard + IP logic live
 in `../host-common.mjs` (unit-tested in `../host-common.test.mjs`).
 
-## Full admin CLI on Postgres
+## Parallel admin CLI experiment on Postgres
 
 `scripts/entitlement.mjs` (the D1 admin CLI) is **not** modified by this port. Instead this
 directory ships a **parallel** PostgreSQL CLI with the same command surface, flags, validation,
@@ -291,7 +306,7 @@ device-list    --fingerprint <64-hex> [--project] [--feature]
 ```bash
 npx --yes npm@10.9.8 install --no-save --package-lock=false postgres  # the adapter's only runtime dep
 export DATABASE_URL='postgresql://postgres.<ref>:<pw>@aws-0-<region>.pooler.supabase.com:6543/postgres'
-psql "$DATABASE_URL" -f schema.pg.sql       # one-time: apply the schema
+psql "$DATABASE_URL" -f schema.pg.sql       # fresh disposable database only; never an upgrade
 
 # create / update an entitlement (writes the row + one audit event, atomically)
 node entitlement-pg.mjs upsert --fingerprint <64-hex> --actor alice --customer-id cus_1

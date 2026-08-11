@@ -1,0 +1,93 @@
+[
+  {
+    "name": "rate-limit-conflict-arbiter-primary-key-removed",
+    "source": "postgres",
+    "old": "  PRIMARY KEY (namespace, rate_key, window_start)   -- <- ON CONFLICT arbiter for the rate-limit upsert\n",
+    "new": "",
+    "expected": "rate_limit_counters: primary key mismatch"
+  },
+  {
+    "name": "request-proof-replay-primary-key-altered",
+    "source": "postgres",
+    "old": "  PRIMARY KEY (project, feature, license_fingerprint, device_key_id, nonce)\n",
+    "new": "  PRIMARY KEY (project, feature, license_fingerprint, device_key_id)\n",
+    "expected": "request_proof_nonces: primary key mismatch"
+  },
+  {
+    "name": "account-token-hmac-unique-index-weakened",
+    "source": "postgres",
+    "old": "CREATE UNIQUE INDEX IF NOT EXISTS idx_account_tokens_hmac ON account_tokens(token_hmac);",
+    "new": "CREATE INDEX IF NOT EXISTS idx_account_tokens_hmac ON account_tokens(token_hmac);",
+    "expected": "idx_account_tokens_hmac: index mismatch"
+  },
+  {
+    "name": "webhook-delivery-unique-constraint-altered",
+    "source": "postgres",
+    "old": "  UNIQUE (endpoint_id, event_source, event_id)\n",
+    "new": "  UNIQUE (endpoint_id, event_source)\n",
+    "expected": "webhook_deliveries: unique constraint mismatch"
+  },
+  {
+    "name": "entitlement-device-cascade-foreign-key-altered",
+    "source": "postgres",
+    "old": "    REFERENCES entitlements(project, feature, license_fingerprint)\n    ON DELETE CASCADE\n",
+    "new": "    REFERENCES entitlements(project, feature, license_fingerprint)\n    ON DELETE RESTRICT\n",
+    "expected": "entitlement_devices: foreign key mismatch"
+  },
+  {
+    "name": "entitlement-status-check-widened",
+    "source": "postgres",
+    "old": "  status                TEXT    NOT NULL CHECK (status IN ('active', 'revoked', 'disabled')),",
+    "new": "  status                TEXT    NOT NULL CHECK (status IN ('active', 'revoked', 'disabled', 'paused')),",
+    "expected": "entitlements.status: check constraint mismatch"
+  },
+  {
+    "name": "rate-limit-request-count-made-nullable",
+    "source": "postgres",
+    "old": "  request_count BIGINT NOT NULL,",
+    "new": "  request_count BIGINT NULL,",
+    "expected": "rate_limit_counters.request_count: nullability mismatch"
+  },
+  {
+    "name": "assertion-ttl-default-altered",
+    "source": "postgres",
+    "old": "  assertion_ttl_seconds BIGINT  NOT NULL DEFAULT 300,",
+    "new": "  assertion_ttl_seconds BIGINT  NOT NULL DEFAULT 301,",
+    "expected": "entitlements.assertion_ttl_seconds: default mismatch"
+  },
+  {
+    "name": "rate-limit-window-type-altered",
+    "source": "postgres",
+    "old": "  window_start  BIGINT NOT NULL,",
+    "new": "  window_start  TEXT   NOT NULL,",
+    "expected": "rate_limit_counters.window_start: type mismatch"
+  },
+  {
+    "name": "rate-limit-expiry-index-column-altered",
+    "source": "postgres",
+    "old": "CREATE INDEX IF NOT EXISTS idx_rate_limit_counters_expires_at\n  ON rate_limit_counters(expires_at);",
+    "new": "CREATE INDEX IF NOT EXISTS idx_rate_limit_counters_expires_at\n  ON rate_limit_counters(updated_at);",
+    "expected": "idx_rate_limit_counters_expires_at: index mismatch"
+  },
+  {
+    "name": "entitlement-audit-id-generation-removed",
+    "source": "postgres",
+    "old": "CREATE TABLE IF NOT EXISTS entitlement_events (\n  id                  BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,",
+    "new": "CREATE TABLE IF NOT EXISTS entitlement_events (\n  id                  BIGINT PRIMARY KEY,",
+    "expected": "entitlement_events.id: generated identity mismatch"
+  },
+  {
+    "name": "catalog-feature-generation-trigger-event-removed",
+    "source": "postgres",
+    "old": "CREATE TRIGGER bump_license_plan_projection_generation_catalog_features\nAFTER INSERT OR UPDATE OR DELETE ON catalog_features",
+    "new": "CREATE TRIGGER bump_license_plan_projection_generation_catalog_features\nAFTER INSERT OR UPDATE ON catalog_features",
+    "expected": "catalog_features: generation trigger event mismatch"
+  },
+  {
+    "name": "generation-trigger-increment-altered",
+    "source": "postgres",
+    "old": "  SET generation = generation + 1,",
+    "new": "  SET generation = generation + 2,",
+    "expected": "bump_license_plan_projection_generation: function body mismatch"
+  }
+]
