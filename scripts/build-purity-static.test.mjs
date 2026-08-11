@@ -326,10 +326,11 @@ test("Ubuntu TPM2 capability probe is isolated, exact-digest, and simulator-scop
   assert.match(capability, /SHA256\(digest\)/u);
   assert.match(capability, /return\s+77/u);
   assert.match(testCmake, /LCC_BUILD_TPM2_OPENSSL_CAPABILITY_TEST/u);
-  assert.match(testCmake, /tpm2_openssl_test/u);
+  assert.match(testCmake, /add_executable\(device_identity_tpm2_openssl_test\s+tpm2_openssl_test\.cpp\)/u);
   assert.match(script, /^set -euo pipefail/mu);
   assert.match(script, /swtpm\s+socket/u);
   assert.match(script, /TPM2OPENSSL_TCTI=/u);
+  assert.match(script, /device_identity_tpm2_openssl_test/u);
   assert.match(script, /trap\s+/u);
   assert.match(workflow, /ubuntu-22\.04/u);
   assert.match(workflow, /ubuntu-24\.04/u);
