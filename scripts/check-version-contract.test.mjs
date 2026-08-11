@@ -63,9 +63,9 @@ function alignedFiles() {
     "doc/capabilities/registry.json": `${JSON.stringify({
       schema_version: 1,
       capabilities: [
-        { id: "platform", availability: { release: `Platform ${platformVersion}` } },
-        { id: "mixed", availability: { release: `C++ 2.1.0 lineage; platform ${platformVersion}` } },
-        { id: "cpp", availability: { release: "C++ 2.1.0 lineage" } },
+        { id: "platform", status: "shipped", availability: { release: `Platform ${platformVersion}` } },
+        { id: "mixed", status: "experimental", availability: { release: `C++ 2.1.0 lineage; platform ${platformVersion}` } },
+        { id: "cpp", status: "planned", availability: { release: "C++ 2.1.0 lineage" } },
       ],
     })}\n`,
     "CMakeLists.txt": `project(licensecc VERSION 2.1.0)\n`,
@@ -241,6 +241,17 @@ test("CMake parsing rejects a comment-only project version", () => {
   }
 });
 
+test("CMake parsing binds the independent version to project licensecc", () => {
+  const sample = fixture((files) => {
+    files["CMakeLists.txt"] = "project(decoy VERSION 2.1.0)\nproject(licensecc LANGUAGES CXX)\n";
+  });
+  try {
+    assert.ok(checkVersionContract(sample).errors.some((error) => error.code === "invalid_version_source" && error.path === "CMakeLists.txt"));
+  } finally {
+    sample.close();
+  }
+});
+
 test("maintained prose requires the version in its release anchor", () => {
   const sample = fixture((files) => {
     files["README.md"] = `An unrelated example mentions ${platformVersion} and C++ 2.1.0.\n`;
@@ -270,6 +281,35 @@ test("maintained docs and registry reject generic platform prerelease projection
     const errors = checkVersionContract(sample).errors;
     assert.ok(errors.some((error) => error.path === "doc/other/QA.md"));
     assert.ok(errors.some((error) => error.path === "doc/capabilities/registry.json"));
+  } finally {
+    sample.close();
+  }
+});
+
+test("every non-planned capability remains bound to the platform release", () => {
+  const sample = fixture((files) => {
+    const registry = JSON.parse(files["doc/capabilities/registry.json"]);
+    registry.capabilities[0].availability.release = "C++ 2.1.0 lineage";
+    files["doc/capabilities/registry.json"] = `${JSON.stringify(registry)}\n`;
+  });
+  try {
+    assert.ok(checkVersionContract(sample).errors.some((error) => error.path === "doc/capabilities/registry.json"));
+  } finally {
+    sample.close();
+  }
+});
+
+test("maintained prose rejects release anchors hidden in HTML or RST comments", () => {
+  const sample = fixture((files) => {
+    files["README.md"] = `<!--\n**Versioning:** The C++ library carries version (\`2.1.0\` in CMake); the platform packages are \`${platformVersion}\`.\n-->\n`;
+    files["CHANGELOG.md"] = `<!--\n- **C++ library** (\`CMakeLists.txt\`): \`2.1.0\` — lineage.\n- **Platform packages** (release set): \`${platformVersion}\` (Python \`${pythonVersion}\`).\n-->\n`;
+    files["doc/capabilities/index.rst"] = `..\n   The platform is at **${platformVersion}** (a prerelease).\n`;
+  });
+  try {
+    const errors = checkVersionContract(sample).errors;
+    assert.ok(errors.some((error) => error.path === "README.md"));
+    assert.ok(errors.some((error) => error.path === "CHANGELOG.md"));
+    assert.ok(errors.some((error) => error.path === "doc/capabilities/index.rst"));
   } finally {
     sample.close();
   }

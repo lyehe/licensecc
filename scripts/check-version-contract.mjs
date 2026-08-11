@@ -225,6 +225,32 @@ function maskCmakeNonCode(source) {
   return output.join("");
 }
 
+function maskMatchedText(value) {
+  return value.replace(/[^\r\n]/gu, " ");
+}
+
+function maskProseComments(source, path) {
+  let visible = source.replace(/<!--[\s\S]*?(?:-->|$)/gu, maskMatchedText);
+  if (!path.endsWith(".rst")) return visible;
+
+  const lines = visible.match(/.*(?:\r?\n|$)/gu) ?? [];
+  let commentIndent = null;
+  visible = lines.map((line) => {
+    const body = line.replace(/\r?\n$/u, "");
+    const indentation = /^\s*/u.exec(body)?.[0].length ?? 0;
+    const startsComment = /^\s*\.\.(?:\s|$)/u.test(body);
+    if (startsComment) commentIndent = indentation;
+    else if (commentIndent !== null && body.trim() !== "" && indentation <= commentIndent) commentIndent = null;
+    if (commentIndent !== null) return maskMatchedText(line);
+    return line;
+  }).join("");
+  return visible;
+}
+
+function proseAt(root, path) {
+  return maskProseComments(sourceAt(root, path), path);
+}
+
 function pythonVersionFor(platformVersion) {
   const match = semverPattern.exec(platformVersion);
   if (!match) return null;
@@ -256,8 +282,9 @@ function pythonLockVersion(source) {
 function cppVersion(root, errors) {
   const source = sourceAt(root, "CMakeLists.txt");
   const projectCalls = [...maskCmakeNonCode(source).matchAll(/\bproject\s*\(([^)]*)\)/giu)];
-  const versions = projectCalls.map((match) => /\bVERSION\s+(\d+\.\d+\.\d+)\b/iu.exec(match[1])?.[1]).filter(Boolean);
-  const version = versions.length === 1 ? versions[0] : null;
+  const licenseccCalls = projectCalls.filter((match) => /^\s*licensecc(?:\s|$)/iu.test(match[1]));
+  const versions = licenseccCalls.map((match) => /\bVERSION\s+(\d+\.\d+\.\d+)\b/iu.exec(match[1])?.[1]).filter(Boolean);
+  const version = licenseccCalls.length === 1 && versions.length === 1 ? versions[0] : null;
   if (version === null) errors.push({ code: "invalid_version_source", path: "CMakeLists.txt", expected: null, actual: null });
   return version;
 }
@@ -285,33 +312,38 @@ function checkCppProjections(root, errors) {
   if (shortVersion !== version || releaseVersion !== version) {
     errors.push({ code: "cpp_version_mismatch", path: confPath, expected: version, actual: releaseVersion });
   }
-  const readmeVersioning = /^\*\*Versioning:\*\*[^\n]*(?:\n(?!\s*$)[^\n]*)*/mu.exec(sourceAt(root, "README.md"))?.[0] ?? "";
+  const readmeVersioning = /^\*\*Versioning:\*\*[^\n]*(?:\n(?!\s*$)[^\n]*)*/mu.exec(proseAt(root, "README.md"))?.[0] ?? "";
   if (!readmeVersioning.includes(`\`${version}\` in CMake`)) errors.push({ code: "cpp_version_mismatch", path: "README.md", expected: version, actual: null });
-  const changelogCpp = /^- \*\*C\+\+ library\*\*[^\n]*(?:\n {2}[^\n]*)*/mu.exec(sourceAt(root, "CHANGELOG.md"))?.[0] ?? "";
+  const changelogCpp = /^- \*\*C\+\+ library\*\*[^\n]*(?:\n {2}[^\n]*)*/mu.exec(proseAt(root, "CHANGELOG.md"))?.[0] ?? "";
   if (!changelogCpp.includes(`\`${version}\``)) errors.push({ code: "cpp_version_mismatch", path: "CHANGELOG.md", expected: version, actual: null });
 }
 
 function anchoredPlatformProjections(root, platformVersion, pythonVersion, errors) {
-  const readmeVersioning = /^\*\*Versioning:\*\*[^\n]*(?:\n(?!\s*$)[^\n]*)*/mu.exec(sourceAt(root, "README.md"))?.[0] ?? "";
+  const readmeVersioning = /^\*\*Versioning:\*\*[^\n]*(?:\n(?!\s*$)[^\n]*)*/mu.exec(proseAt(root, "README.md"))?.[0] ?? "";
   mismatch(errors, "README.md", platformVersion, readmeVersioning.includes(`\`${platformVersion}\``) ? platformVersion : null);
 
-  const changelogPlatform = /^- \*\*Platform packages\*\*[^\n]*(?:\n {2}[^\n]*)*/mu.exec(sourceAt(root, "CHANGELOG.md"))?.[0] ?? "";
+  const changelogPlatform = /^- \*\*Platform packages\*\*[^\n]*(?:\n {2}[^\n]*)*/mu.exec(proseAt(root, "CHANGELOG.md"))?.[0] ?? "";
   const changelogAligned = changelogPlatform.includes(`\`${platformVersion}\``) && changelogPlatform.includes(`\`${pythonVersion}\``);
   mismatch(errors, "CHANGELOG.md", platformVersion, changelogAligned ? platformVersion : null);
 
   const dotnetPath = "sdks/dotnet/README.md";
   const dotnetPattern = new RegExp(`^ {2}src/Licensecc\\.Client/\\s+# the library \\(PackageId Licensecc\\.Client, ${platformVersion.replaceAll(".", "\\.")}\\)\\s*$`, "mu");
-  mismatch(errors, dotnetPath, platformVersion, dotnetPattern.test(sourceAt(root, dotnetPath)) ? platformVersion : null);
+  mismatch(errors, dotnetPath, platformVersion, dotnetPattern.test(proseAt(root, dotnetPath)) ? platformVersion : null);
 
   const escapedPlatformVersion = platformVersion.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
   const docMarker = new RegExp(`The platform is at\\s+\\*\\*${escapedPlatformVersion}\\*\\* \\(a prerelease\\)`, "mu");
-  for (const path of maintainedPlatformDocPaths) mismatch(errors, path, platformVersion, docMarker.test(sourceAt(root, path)) ? platformVersion : null);
+  for (const path of maintainedPlatformDocPaths) mismatch(errors, path, platformVersion, docMarker.test(proseAt(root, path)) ? platformVersion : null);
 
   const registry = parsedJson(root, capabilityRegistryPath, errors);
   if (!registry) return;
+  const platformStatuses = new Set(["shipped", "platform_limited", "experimental"]);
   for (const capability of registry.capabilities ?? []) {
     const release = capability?.availability?.release;
-    if (typeof release !== "string" || !/\bplatform\b/iu.test(release)) continue;
+    if (!platformStatuses.has(capability?.status)) continue;
+    if (typeof release !== "string") {
+      errors.push({ code: "version_mismatch", path: capabilityRegistryPath, expected: platformVersion, actual: release ?? null });
+      continue;
+    }
     const versions = [...release.matchAll(/\bplatform\s+(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)(?:\s+prerelease)?/giu)];
     if (versions.length !== 1 || versions[0][1] !== platformVersion || /\bplatform\s+\S+\s+prerelease\b/iu.test(release)) {
       errors.push({ code: "version_mismatch", path: capabilityRegistryPath, expected: platformVersion, actual: release });
