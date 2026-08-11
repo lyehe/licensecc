@@ -50,7 +50,10 @@ Online platform
   usage metering**, and **signed order fulfillment** are shipped in the accepted
   repository.
 * **Backend request proof of possession** is experimental. The protocol is
-  implemented, while a Windows/Ubuntu TPM-backed provider remains planned.
+  implemented; the C++ runtime now has platform-limited Windows Platform KSP
+  and Ubuntu TPM2/OpenSSL provider surfaces with conditional build and
+  simulator evidence. These are client-runtime integrations, not a hosted
+  backend TPM claim.
 * **Administrative control plane**, **customer self-service portal**, and **D1
   backup and restore drill** are shipped in the accepted repository.
 
@@ -59,8 +62,8 @@ SDKs and planned work
 
 * The **Python SDK** and **.NET SDK** are shipped and tested from the repository.
   Neither is published to its public package registry.
-* **ARM support**, **additional execution-limit types**, a **TPM-backed request-proof provider**,
-  and a **Java SDK** are planned.
+* **ARM support**, **additional execution-limit types**, and a **Java SDK** are
+  planned. TPM provider support remains platform-limited rather than universal.
 
 For exact ownership, release availability, limitations, public-document links,
 and evidence selectors, consult ``registry.json``. Historical feature prose is

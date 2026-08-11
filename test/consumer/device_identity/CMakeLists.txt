@@ -11,12 +11,18 @@ option(LCC_DEVICE_IDENTITY_EXPECT_WINDOWS_TPM
 option(LCC_DEVICE_IDENTITY_EXPECT_TPM2_OPENSSL
     "Require the installed package to contain the Linux OpenSSL TPM2 provider"
     OFF)
+option(LCC_DEVICE_IDENTITY_PRE_FIND_OPENSSL
+    "Find OpenSSL 3 before loading the installed Licensecc package"
+    OFF)
 option(LCC_DEVICE_IDENTITY_TPM2_ALLOW_SKIP
     "Allow the TPM2 consumer test to skip when hardware/provider access is unavailable"
     OFF)
 set(LCC_DEVICE_IDENTITY_TPM2_STORAGE_DIRECTORY "" CACHE PATH
     "Absolute 0700 directory used by the installed TPM2 consumer")
 set(LCC_PROJECT_NAME "test" CACHE STRING "Installed Licensecc project component")
+if(LCC_DEVICE_IDENTITY_PRE_FIND_OPENSSL)
+    find_package(OpenSSL 3.0 REQUIRED COMPONENTS Crypto)
+endif()
 find_package(licensecc CONFIG REQUIRED)
 
 if(NOT TARGET licensecc::licensecc_static)

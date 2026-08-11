@@ -1,15 +1,31 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ $# -ne 1 ]]; then
-    echo "usage: $0 <capability-build-directory>" >&2
+if [[ $# -lt 1 || $# -gt 3 ]]; then
+    echo "usage: $0 <build-directory> [install-prefix] [Debug|Release]" >&2
     exit 2
 fi
 
 build_directory="$(realpath -e -- "$1")"
+script_directory="$(realpath -e -- "$(dirname -- "${BASH_SOURCE[0]}")")"
+installed_consumer_script="$script_directory/run-installed-device-identity-consumer.ps1"
+if [[ ! -f "$installed_consumer_script" ]]; then
+    echo "installed consumer runner is missing: $installed_consumer_script" >&2
+    exit 1
+fi
+install_prefix="${2:-}"
+configuration="${3:-Debug}"
+if [[ -n "$install_prefix" ]]; then
+    install_prefix="$(realpath -e -- "$install_prefix")"
+fi
+if [[ "$configuration" != "Debug" && "$configuration" != "Release" ]]; then
+    echo "configuration must be Debug or Release: $configuration" >&2
+    exit 2
+fi
 capability_binary="$build_directory/test/library/device_identity/device_identity_tpm2_openssl_test"
-if [[ ! -x "$capability_binary" ]]; then
-    echo "capability executable not found or not executable: $capability_binary" >&2
+production_binary="$build_directory/test/library/device_identity/device_identity_tpm2_openssl_shim_test"
+if [[ ! -x "$capability_binary" && ! -x "$production_binary" ]]; then
+    echo "neither TPM2 capability nor production executable was found under: $build_directory" >&2
     exit 1
 fi
 
@@ -19,12 +35,36 @@ swtpm_pid=""
 state_directory=""
 cleanup() {
     local status=$?
+    local validation_status=0
+    local lock_name lock_path lock_mode lock_owner
+    local -a key_reference_entries=()
     if [[ -n "${swtpm_pid:-}" ]] && kill -0 "$swtpm_pid" >/dev/null 2>&1; then
         kill "$swtpm_pid" >/dev/null 2>&1 || true
         wait "$swtpm_pid" >/dev/null 2>&1 || true
     fi
     if [[ "${key_reference_created:-0}" -eq 1 ]]; then
-        rmdir -- "$key_reference_directory" >/dev/null 2>&1 || true
+        mapfile -t key_reference_entries < <(find "$key_reference_directory" -mindepth 1 -maxdepth 1 -printf '%f\n')
+        for lock_name in "${key_reference_entries[@]}"; do
+            lock_path="$key_reference_directory/$lock_name"
+            lock_mode="$(stat -c '%a' -- "$lock_path" 2>/dev/null || true)"
+            lock_owner="$(stat -c '%u' -- "$lock_path" 2>/dev/null || true)"
+            if [[ ! "$lock_name" =~ ^licensecc-v1-[0-9a-f]{64}\.tss2\.pem\.lock$ ]] ||
+               [[ ! -f "$lock_path" || -L "$lock_path" ]] ||
+               [[ "$lock_mode" != "600" || "$lock_owner" != "$(id -u)" ]]; then
+                echo "unexpected key-reference entry; refusing cleanup: $lock_path" >&2
+                validation_status=1
+            fi
+        done
+        if [[ "$validation_status" -eq 0 ]]; then
+            for lock_name in "${key_reference_entries[@]}"; do
+                rm -- "$key_reference_directory/$lock_name" || status=1
+            done
+            if ! rmdir -- "$key_reference_directory" >/dev/null 2>&1; then
+                status=1
+            fi
+        else
+            echo "refusing to remove key-reference entries after validation failure" >&2
+        fi
     fi
     if [[ -n "${state_directory:-}" ]]; then
         rm -rf -- "$state_directory"
@@ -145,9 +185,34 @@ if ! tpm2_getcap -T "$tcti" properties-fixed >/dev/null; then
     exit 1
 fi
 
-echo "swtpm_tcti=$tcti"
 echo "key_reference_directory=$key_reference_directory"
-(
-    cd -- "$key_reference_directory"
-    LCC_TPM2_CAPABILITY_PREREQUISITE=1 TPM2OPENSSL_TCTI="$tcti" "$capability_binary"
-)
+if [[ -x "$capability_binary" ]]; then
+    (
+        cd -- "$key_reference_directory"
+        LCC_TPM2_CAPABILITY_PREREQUISITE=1 TPM2OPENSSL_TCTI="$tcti" "$capability_binary"
+    )
+fi
+if [[ -x "$production_binary" ]]; then
+    (
+        cd -- "$key_reference_directory"
+        LCC_TPM2_CAPABILITY_PREREQUISITE=1 TPM2OPENSSL_TCTI="$tcti" \
+            "$production_binary" --real "$key_reference_directory"
+    )
+    if [[ -n "$install_prefix" ]]; then
+        if ! command -v pwsh >/dev/null 2>&1; then
+            echo "pwsh is required for the installed TPM2 consumer gate" >&2
+            exit 1
+        fi
+        (
+            cd -- "$key_reference_directory"
+            TPM2OPENSSL_TCTI="$tcti" pwsh -NoProfile -ExecutionPolicy Bypass \
+                -File "$installed_consumer_script" \
+                -InstallPrefix "$install_prefix" \
+                -Configuration "$configuration" \
+                -RequireC99 \
+                -ExpectTpm2OpenSsl \
+                -Tpm2StorageDirectory "$key_reference_directory" \
+                -BuildTpm2OpenSslExample
+        )
+    fi
+fi
