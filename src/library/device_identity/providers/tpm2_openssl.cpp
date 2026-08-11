@@ -625,21 +625,25 @@ public:
         }
         const std::int64_t deadline_ns = static_cast<std::int64_t>(start.tv_sec) * 1000000000LL + start.tv_nsec +
                                          static_cast<std::int64_t>(timeout_) * 1000000LL;
+        bool initial_attempt = true;
         for (;;) {
+            if (!initial_attempt) {
+                struct timespec before_retry{};
+                if (api_->clock_gettime(CLOCK_MONOTONIC, &before_retry) != 0) {
+                    return LCC_DEVICE_INTERNAL_ERROR;
+                }
+                const std::int64_t before_retry_ns =
+                    static_cast<std::int64_t>(before_retry.tv_sec) * 1000000000LL + before_retry.tv_nsec;
+                if (before_retry_ns >= deadline_ns) {
+                    return LCC_DEVICE_BUSY;
+                }
+            }
+            initial_attempt = false;
             if (api_->flock(descriptor_, LOCK_EX | LOCK_NB) == 0) {
                 return LCC_DEVICE_OK;
             }
             const int saved_errno = errno;
             if (saved_errno == EINTR) {
-                struct timespec interrupted_now{};
-                if (api_->clock_gettime(CLOCK_MONOTONIC, &interrupted_now) != 0) {
-                    return LCC_DEVICE_INTERNAL_ERROR;
-                }
-                const std::int64_t interrupted_now_ns =
-                    static_cast<std::int64_t>(interrupted_now.tv_sec) * 1000000000LL + interrupted_now.tv_nsec;
-                if (interrupted_now_ns >= deadline_ns) {
-                    return LCC_DEVICE_BUSY;
-                }
                 continue;
             }
             if (saved_errno != EWOULDBLOCK && saved_errno != EAGAIN) {
@@ -654,7 +658,9 @@ public:
             if (now_ns >= deadline_ns) {
                 return LCC_DEVICE_BUSY;
             }
-            const struct timespec pause{0, 1000000L};
+            const std::int64_t remaining_ns = deadline_ns - now_ns;
+            const std::int64_t pause_ns = (std::min)(remaining_ns, static_cast<std::int64_t>(1000000LL));
+            const struct timespec pause{pause_ns / 1000000000LL, pause_ns % 1000000000LL};
             if (api_->nanosleep(&pause, nullptr) != 0 && errno != EINTR) {
                 return LCC_DEVICE_INTERNAL_ERROR;
             }
@@ -678,6 +684,11 @@ bool same_file(const FileIdentity& left, const FileIdentity& right) noexcept {
 
 bool valid_reference_status(const struct stat& status) noexcept {
     return S_ISREG(status.st_mode) && status.st_uid == ::geteuid() && (status.st_mode & 07777U) == 0600U;
+}
+
+bool valid_removal_status(const struct stat& status, bool require_safe_mode) noexcept {
+    return S_ISREG(status.st_mode) && status.st_uid == ::geteuid() &&
+           (!require_safe_mode || (status.st_mode & 07777U) == 0600U);
 }
 
 bool valid_tss2_private_pem(const unsigned char* data, std::size_t size) noexcept {
@@ -856,51 +867,81 @@ public:
 
             bool published = false;
             bool cleanup_attempted = false;
-            result = publish_temporary(directory.descriptor,
-                                        temporary_name,
-                                        request.device_namespace.linux_filename,
-                                        published,
-                                        cleanup_attempted,
-                                        temp_identity);
-            if (result != LCC_DEVICE_OK) {
-                const LCC_DEVICE_RESULT cleanup_result = cleanup_attempted ? LCC_DEVICE_OK :
-                    cleanup_temporary(directory.descriptor, temporary_name, temp_identity);
+            bool transaction_active = true;
+            const auto rollback_transaction = [&]() noexcept {
                 LCC_DEVICE_RESULT rollback_result = LCC_DEVICE_OK;
-                if (published) {
-                    bool removed = false;
-                    rollback_result = remove_owned(directory.descriptor,
-                                                   request.device_namespace.linux_filename,
-                                                   temp_identity,
-                                                   removed);
-                }
-                if (rollback_result != LCC_DEVICE_OK && rollback_result != LCC_DEVICE_KEY_NOT_FOUND) {
+                if (!transaction_active) {
                     return rollback_result;
                 }
-                return cleanup_result == LCC_DEVICE_OK ? result : cleanup_result;
-            }
-            if (!published) {
-                result = load_reference(directory.descriptor, request.device_namespace.linux_filename, existing);
-                if (result == LCC_DEVICE_OK) {
-                    adopt_loaded(std::move(existing), request.scope);
+                if (published) {
+                    try {
+                        bool removed = false;
+                        const LCC_DEVICE_RESULT final_result = remove_owned(
+                            directory.descriptor,
+                            request.device_namespace.linux_filename,
+                            temp_identity,
+                            removed);
+                        if (final_result != LCC_DEVICE_OK && final_result != LCC_DEVICE_KEY_NOT_FOUND) {
+                            rollback_result = final_result;
+                        }
+                    } catch (...) {
+                        rollback_result = LCC_DEVICE_INTERNAL_ERROR;
+                    }
                 }
-                return result;
-            }
+                try {
+                    const LCC_DEVICE_RESULT temporary_result = cleanup_temporary(
+                        directory.descriptor, temporary_name, temp_identity);
+                    if (temporary_result != LCC_DEVICE_OK &&
+                        (rollback_result == LCC_DEVICE_OK || rollback_result == LCC_DEVICE_BUSY ||
+                         rollback_result == LCC_DEVICE_KEY_NOT_FOUND)) {
+                        rollback_result = temporary_result;
+                    }
+                } catch (...) {
+                    rollback_result = LCC_DEVICE_INTERNAL_ERROR;
+                }
+                transaction_active = false;
+                return rollback_result;
+            };
 
-            LoadedReference reopened;
-            result = load_reference(directory.descriptor, request.device_namespace.linux_filename, reopened);
-            if (result == LCC_DEVICE_OK && !same_file(temp_identity, reopened.identity)) {
-                result = LCC_DEVICE_KEY_CORRUPT;
+            try {
+                result = publish_temporary(directory.descriptor,
+                                            temporary_name,
+                                            request.device_namespace.linux_filename,
+                                            published,
+                                            cleanup_attempted,
+                                            temp_identity);
+                if (result != LCC_DEVICE_OK) {
+                    const LCC_DEVICE_RESULT rollback_result = rollback_transaction();
+                    return rollback_result == LCC_DEVICE_OK ? result : rollback_result;
+                }
+                if (!published) {
+                    result = load_reference(directory.descriptor, request.device_namespace.linux_filename, existing);
+                    if (result == LCC_DEVICE_OK) {
+                        adopt_loaded(std::move(existing), request.scope);
+                        transaction_active = false;
+                        return LCC_DEVICE_OK;
+                    }
+                    const LCC_DEVICE_RESULT rollback_result = rollback_transaction();
+                    return rollback_result == LCC_DEVICE_OK ? result : rollback_result;
+                }
+
+                LoadedReference reopened;
+                result = load_reference(directory.descriptor, request.device_namespace.linux_filename, reopened);
+                if (result == LCC_DEVICE_OK && !same_file(temp_identity, reopened.identity)) {
+                    result = LCC_DEVICE_KEY_CORRUPT;
+                }
+                if (result != LCC_DEVICE_OK) {
+                    cleanup_loaded(reopened);
+                    const LCC_DEVICE_RESULT rollback_result = rollback_transaction();
+                    return rollback_result == LCC_DEVICE_OK ? result : rollback_result;
+                }
+                adopt_loaded(std::move(reopened), request.scope);
+                transaction_active = false;
+                return LCC_DEVICE_OK;
+            } catch (...) {
+                const LCC_DEVICE_RESULT rollback_result = rollback_transaction();
+                return rollback_result == LCC_DEVICE_OK ? LCC_DEVICE_INTERNAL_ERROR : rollback_result;
             }
-            if (result != LCC_DEVICE_OK) {
-                cleanup_loaded(reopened);
-                const LCC_DEVICE_RESULT rollback_result =
-                    rollback_owned(directory.descriptor, request.device_namespace.linux_filename, temp_identity);
-                return rollback_result != LCC_DEVICE_OK && rollback_result != LCC_DEVICE_KEY_NOT_FOUND ?
-                           rollback_result :
-                           result;
-            }
-            adopt_loaded(std::move(reopened), request.scope);
-            return LCC_DEVICE_OK;
         } catch (...) {
             reset_key();
             return LCC_DEVICE_INTERNAL_ERROR;
@@ -1127,6 +1168,14 @@ private:
         DescriptorHandle(const DescriptorHandle&) = delete;
         DescriptorHandle& operator=(const DescriptorHandle&) = delete;
         int get() const noexcept { return descriptor_; }
+        int close() noexcept {
+            if (descriptor_ < 0 || !api_) {
+                return 0;
+            }
+            const int descriptor = descriptor_;
+            descriptor_ = -1;
+            return api_->close(descriptor);
+        }
 
     private:
         std::shared_ptr<PosixStorageApi> api_;
@@ -1199,11 +1248,17 @@ private:
         if (default_provider_ == nullptr) {
             const std::string error_text = provider_error_text();
             const LCC_DEVICE_RESULT provider_error = map_provider_error_text(0, false, error_text);
+            const bool provider_module_missing =
+                (error_text.find("not found") != std::string::npos &&
+                 (error_text.find("provider") != std::string::npos ||
+                  error_text.find("module") != std::string::npos ||
+                  error_text.find("dso") != std::string::npos ||
+                  error_text.find("shared library") != std::string::npos)) ||
+                error_text.find("could not load the shared library") != std::string::npos;
+            const bool allocation_failure = error_text.find("memory allocation failure") != std::string::npos ||
+                                            error_text.find("allocation failure") != std::string::npos;
             unload_context();
-            return (error_text.find("dso") != std::string::npos ||
-                    error_text.find("module") != std::string::npos ||
-                    error_text.find("shared library") != std::string::npos ||
-                    error_text.find("no such file") != std::string::npos) ?
+            return provider_module_missing && !allocation_failure ?
                        LCC_DEVICE_PROVIDER_UNAVAILABLE : provider_error;
         }
         clear_provider_error_queue();
@@ -1211,14 +1266,20 @@ private:
         if (tpm2_provider_ == nullptr) {
             const std::string error_text = provider_error_text();
             const LCC_DEVICE_RESULT provider_error = map_provider_error_text(0, false, error_text);
+            const bool provider_module_missing =
+                (error_text.find("not found") != std::string::npos &&
+                 (error_text.find("provider") != std::string::npos ||
+                  error_text.find("module") != std::string::npos ||
+                  error_text.find("dso") != std::string::npos ||
+                  error_text.find("shared library") != std::string::npos)) ||
+                error_text.find("could not load the shared library") != std::string::npos;
+            const bool allocation_failure = error_text.find("memory allocation failure") != std::string::npos ||
+                                            error_text.find("allocation failure") != std::string::npos;
             unload_context();
             return provider_error == LCC_DEVICE_HARDWARE_UNAVAILABLE ||
                            provider_error == LCC_DEVICE_ACCESS_DENIED || provider_error == LCC_DEVICE_BUSY ?
                         provider_error :
-                   (error_text.find("dso") != std::string::npos ||
-                    error_text.find("module") != std::string::npos ||
-                    error_text.find("shared library") != std::string::npos ||
-                    error_text.find("no such file") != std::string::npos) ?
+                   provider_module_missing && !allocation_failure ?
                        LCC_DEVICE_PROVIDER_UNAVAILABLE : provider_error;
         }
         return LCC_DEVICE_OK;
@@ -1552,7 +1613,12 @@ private:
                     return cleanup_result;
                 }
             } else {
-                (void)posix_->close(descriptor);
+                const int close_result = posix_->close(descriptor);
+                const int unlink_result = posix_->unlinkat(directory, out_name.c_str(), 0);
+                const int sync_result = posix_->fsync(directory);
+                if (close_result != 0 || unlink_result != 0 || sync_result != 0) {
+                    return LCC_DEVICE_IO_ERROR;
+                }
             }
             return stat_errno == EACCES || stat_errno == EPERM ? LCC_DEVICE_ACCESS_DENIED :
                                                                   LCC_DEVICE_IO_ERROR;
@@ -1603,96 +1669,124 @@ private:
                                          const std::string& name,
                                          const FileIdentity& expected_identity) {
         bool removed = false;
-        const LCC_DEVICE_RESULT result = remove_owned(directory, name, expected_identity, removed);
+        const LCC_DEVICE_RESULT result = remove_owned(directory, name, expected_identity, removed, false);
         return result == LCC_DEVICE_OK && removed ? LCC_DEVICE_OK :
                result == LCC_DEVICE_KEY_NOT_FOUND ? LCC_DEVICE_OK : result;
+    }
+
+    static LCC_DEVICE_RESULT storage_errno_result(int saved_errno) noexcept {
+        return saved_errno == EACCES || saved_errno == EPERM ? LCC_DEVICE_ACCESS_DENIED :
+               saved_errno == EAGAIN || saved_errno == EWOULDBLOCK || saved_errno == EBUSY ?
+                   LCC_DEVICE_BUSY :
+                   LCC_DEVICE_IO_ERROR;
+    }
+
+    LCC_DEVICE_RESULT cleanup_quarantine(int directory, const std::string& quarantine) noexcept {
+        const int unlink_result = posix_->unlinkat(directory, quarantine.c_str(), 0);
+        const int unlink_errno = unlink_result == 0 ? 0 : errno;
+        const int sync_result = posix_->fsync(directory);
+        const int sync_errno = sync_result == 0 ? 0 : errno;
+        if (unlink_result != 0) {
+            return storage_errno_result(unlink_errno);
+        }
+        if (sync_result != 0) {
+            return storage_errno_result(sync_errno);
+        }
+        return LCC_DEVICE_OK;
     }
 
     LCC_DEVICE_RESULT remove_exact(int directory,
                                    const std::string& filename,
                                    const FileIdentity& expected,
-                                   bool& removed) {
+                                   bool& removed,
+                                   bool require_safe_mode = true) {
         removed = false;
-        const int descriptor = posix_->openat(directory, filename.c_str(), kReferenceOpenFlags, 0U);
-        if (descriptor < 0) {
+        const int raw_descriptor = posix_->openat(directory, filename.c_str(), kReferenceOpenFlags, 0U);
+        if (raw_descriptor < 0) {
             return errno == ENOENT ? LCC_DEVICE_KEY_NOT_FOUND :
                    errno == EACCES || errno == EPERM ? LCC_DEVICE_ACCESS_DENIED : LCC_DEVICE_IO_ERROR;
         }
+        DescriptorHandle descriptor_handle(posix_, raw_descriptor);
         struct stat status{};
-        if (posix_->fstat(descriptor, &status) != 0) {
+        if (posix_->fstat(descriptor_handle.get(), &status) != 0) {
             const int saved_errno = errno;
-            (void)posix_->close(descriptor);
             return saved_errno == EACCES || saved_errno == EPERM ? LCC_DEVICE_ACCESS_DENIED :
                                                                     LCC_DEVICE_IO_ERROR;
         }
         const FileIdentity actual{status.st_dev, status.st_ino};
-        if (!valid_reference_status(status) || !same_file(expected, actual)) {
-            (void)posix_->close(descriptor);
+        if (!same_file(expected, actual)) {
             return LCC_DEVICE_BUSY;
+        }
+        if (!valid_removal_status(status, require_safe_mode)) {
+            const LCC_DEVICE_RESULT result = S_ISREG(status.st_mode) && status.st_uid == ::geteuid() ?
+                                                  LCC_DEVICE_BUSY : LCC_DEVICE_ACCESS_DENIED;
+            return result;
         }
 
         std::array<std::uint8_t, 16> random{};
         if (openssl_->rand_priv_bytes_ex(libctx_, random.data(), random.size(), kRandomStrength) != 1) {
-            (void)posix_->close(descriptor);
             return LCC_DEVICE_INTERNAL_ERROR;
         }
         const std::string suffix = lowercase_hex(random.data(), random.size());
         const std::string quarantine = filename + ".delete." + suffix;
         const std::string moved = filename + ".move." + suffix;
-        const std::string descriptor_path = "/proc/self/fd/" + std::to_string(descriptor);
+        const std::string descriptor_path = "/proc/self/fd/" + std::to_string(descriptor_handle.get());
         if (posix_->linkat(AT_FDCWD,
                            descriptor_path.c_str(),
                            directory,
                            quarantine.c_str(),
                            AT_SYMLINK_FOLLOW) != 0) {
             const int saved_errno = errno;
-            (void)posix_->close(descriptor);
             return saved_errno == EACCES || saved_errno == EPERM ? LCC_DEVICE_ACCESS_DENIED :
                    saved_errno == EEXIST ? LCC_DEVICE_BUSY : LCC_DEVICE_IO_ERROR;
         }
-        (void)posix_->close(descriptor);
+        if (descriptor_handle.close() != 0) {
+            const LCC_DEVICE_RESULT cleanup_result = cleanup_quarantine(directory, quarantine);
+            return cleanup_result == LCC_DEVICE_OK ? LCC_DEVICE_IO_ERROR : cleanup_result;
+        }
         if (posix_->renameat2_noreplace(directory, filename.c_str(), moved.c_str()) != 0) {
             const int saved_errno = errno;
-            last_rename_unsupported_ = saved_errno == ENOSYS || saved_errno == EINVAL || saved_errno == EOPNOTSUPP;
-            const int quarantine_result = posix_->unlinkat(directory, quarantine.c_str(), 0);
-            const int sync_result = posix_->fsync(directory);
-            if (quarantine_result != 0 || sync_result != 0) {
-                return LCC_DEVICE_IO_ERROR;
+            const bool rename_unsupported =
+                saved_errno == ENOSYS || saved_errno == EINVAL || saved_errno == EOPNOTSUPP;
+            const LCC_DEVICE_RESULT cleanup_result = cleanup_quarantine(directory, quarantine);
+            if (cleanup_result != LCC_DEVICE_OK) {
+                last_rename_unsupported_ = false;
+                return cleanup_result;
             }
+            last_rename_unsupported_ = rename_unsupported;
             return saved_errno == EACCES || saved_errno == EPERM ? LCC_DEVICE_ACCESS_DENIED :
                    saved_errno == EEXIST ? LCC_DEVICE_BUSY : LCC_DEVICE_IO_ERROR;
         }
 
-        const int moved_descriptor = posix_->openat(directory, moved.c_str(), kReferenceOpenFlags, 0U);
+        const int raw_moved_descriptor = posix_->openat(directory, moved.c_str(), kReferenceOpenFlags, 0U);
+        DescriptorHandle moved_descriptor(posix_, raw_moved_descriptor);
         struct stat moved_status{};
-        const bool moved_matches = moved_descriptor >= 0 && posix_->fstat(moved_descriptor, &moved_status) == 0 &&
-                                   valid_reference_status(moved_status) &&
+        const bool moved_matches = moved_descriptor.get() >= 0 &&
+                                   posix_->fstat(moved_descriptor.get(), &moved_status) == 0 &&
+                                   valid_removal_status(moved_status, require_safe_mode) &&
                                    same_file(expected, FileIdentity{moved_status.st_dev, moved_status.st_ino});
-        if (moved_descriptor >= 0) {
-            (void)posix_->close(moved_descriptor);
-        }
         if (!moved_matches) {
             const int restore = posix_->renameat2_noreplace(directory, moved.c_str(), filename.c_str());
             const int restore_errno = restore == 0 ? 0 : errno;
-            last_rename_unsupported_ = last_rename_unsupported_ ||
-                                       restore_errno == ENOSYS || restore_errno == EINVAL || restore_errno == EOPNOTSUPP;
-            const int quarantine_result = posix_->unlinkat(directory, quarantine.c_str(), 0);
-            const int sync_result = posix_->fsync(directory);
-            if (quarantine_result != 0 || sync_result != 0) {
-                return LCC_DEVICE_IO_ERROR;
+            const bool restore_unsupported = restore_errno == ENOSYS || restore_errno == EINVAL ||
+                                             restore_errno == EOPNOTSUPP;
+            const LCC_DEVICE_RESULT cleanup_result = cleanup_quarantine(directory, quarantine);
+            if (cleanup_result != LCC_DEVICE_OK) {
+                last_rename_unsupported_ = false;
+                return cleanup_result;
             }
+            last_rename_unsupported_ = last_rename_unsupported_ || restore_unsupported;
             return restore == 0 || restore_errno == EEXIST ? LCC_DEVICE_BUSY : LCC_DEVICE_IO_ERROR;
         }
 
         if (posix_->unlinkat(directory, moved.c_str(), 0) != 0) {
             const int saved_errno = errno;
-            (void)posix_->unlinkat(directory, quarantine.c_str(), 0);
-            (void)posix_->fsync(directory);
-            return saved_errno == EACCES || saved_errno == EPERM ? LCC_DEVICE_ACCESS_DENIED :
-                                                                    LCC_DEVICE_IO_ERROR;
+            const LCC_DEVICE_RESULT cleanup_result = cleanup_quarantine(directory, quarantine);
+            return cleanup_result == LCC_DEVICE_OK ? storage_errno_result(saved_errno) : cleanup_result;
         }
-        if (posix_->unlinkat(directory, quarantine.c_str(), 0) != 0 || posix_->fsync(directory) != 0) {
-            return LCC_DEVICE_IO_ERROR;
+        const LCC_DEVICE_RESULT cleanup_result = cleanup_quarantine(directory, quarantine);
+        if (cleanup_result != LCC_DEVICE_OK) {
+            return cleanup_result;
         }
         removed = true;
         return LCC_DEVICE_OK;
@@ -1741,11 +1835,12 @@ private:
     LCC_DEVICE_RESULT remove_owned(int directory,
                                    const std::string& filename,
                                    const FileIdentity& expected,
-                                   bool& removed) {
+                                   bool& removed,
+                                   bool require_safe_mode = true) {
         last_rename_unsupported_ = false;
-        const LCC_DEVICE_RESULT result = remove_exact(directory, filename, expected, removed);
+        const LCC_DEVICE_RESULT result = remove_exact(directory, filename, expected, removed, require_safe_mode);
         if (result == LCC_DEVICE_IO_ERROR && last_rename_unsupported_) {
-            return remove_exact_without_rename(directory, filename, expected, removed);
+            return remove_exact_without_rename(directory, filename, expected, removed, require_safe_mode);
         }
         return result;
     }
@@ -1753,41 +1848,74 @@ private:
     LCC_DEVICE_RESULT remove_exact_without_rename(int directory,
                                                   const std::string& filename,
                                                   const FileIdentity& expected,
-                                                  bool& removed) {
+                                                  bool& removed,
+                                                  bool require_safe_mode) {
         removed = false;
-        const int descriptor = posix_->openat(directory, filename.c_str(), kReferenceOpenFlags, 0U);
-        if (descriptor < 0) {
+        const int raw_descriptor = posix_->openat(directory, filename.c_str(), kReferenceOpenFlags, 0U);
+        if (raw_descriptor < 0) {
             return errno == ENOENT ? LCC_DEVICE_KEY_NOT_FOUND : LCC_DEVICE_IO_ERROR;
         }
+        DescriptorHandle descriptor(posix_, raw_descriptor);
         struct stat status{};
-        if (posix_->fstat(descriptor, &status) != 0) {
-            (void)posix_->close(descriptor);
+        if (posix_->fstat(descriptor.get(), &status) != 0) {
             return LCC_DEVICE_IO_ERROR;
         }
-        if (!valid_reference_status(status) || !same_file(expected, FileIdentity{status.st_dev, status.st_ino})) {
-            (void)posix_->close(descriptor);
+        if (!same_file(expected, FileIdentity{status.st_dev, status.st_ino})) {
             return LCC_DEVICE_BUSY;
+        }
+        if (!valid_removal_status(status, require_safe_mode)) {
+            return S_ISREG(status.st_mode) && status.st_uid == ::geteuid() ? LCC_DEVICE_BUSY :
+                                                                       LCC_DEVICE_ACCESS_DENIED;
         }
         std::array<std::uint8_t, 16> random{};
         if (openssl_->rand_priv_bytes_ex(libctx_, random.data(), random.size(), kRandomStrength) != 1) {
-            (void)posix_->close(descriptor);
             return LCC_DEVICE_INTERNAL_ERROR;
         }
         const std::string quarantine = filename + ".delete." + lowercase_hex(random.data(), random.size());
-        const std::string descriptor_path = "/proc/self/fd/" + std::to_string(descriptor);
+        const std::string descriptor_path = "/proc/self/fd/" + std::to_string(descriptor.get());
         if (posix_->linkat(AT_FDCWD,
                            descriptor_path.c_str(),
                            directory,
                            quarantine.c_str(),
                            AT_SYMLINK_FOLLOW) != 0) {
-            (void)posix_->close(descriptor);
             return LCC_DEVICE_IO_ERROR;
         }
+        const int verify_raw = posix_->openat(directory, filename.c_str(), kReferenceOpenFlags, 0U);
+        if (verify_raw < 0) {
+            const LCC_DEVICE_RESULT cleanup_result = cleanup_quarantine(directory, quarantine);
+            return cleanup_result == LCC_DEVICE_OK ? LCC_DEVICE_BUSY : cleanup_result;
+        }
+        DescriptorHandle verify_descriptor(posix_, verify_raw);
+        struct stat verify_status{};
+        const bool source_still_matches = posix_->fstat(verify_descriptor.get(), &verify_status) == 0 &&
+                                          valid_removal_status(verify_status, require_safe_mode) &&
+                                          same_file(expected, FileIdentity{verify_status.st_dev, verify_status.st_ino});
+        if (!source_still_matches) {
+            const LCC_DEVICE_RESULT cleanup_result = cleanup_quarantine(directory, quarantine);
+            return cleanup_result == LCC_DEVICE_OK ? LCC_DEVICE_BUSY : cleanup_result;
+        }
+        const int quarantine_raw = posix_->openat(directory, quarantine.c_str(), kReferenceOpenFlags, 0U);
+        if (quarantine_raw < 0) {
+            const LCC_DEVICE_RESULT cleanup_result = cleanup_quarantine(directory, quarantine);
+            return cleanup_result == LCC_DEVICE_OK ? LCC_DEVICE_IO_ERROR : cleanup_result;
+        }
+        DescriptorHandle quarantine_descriptor(posix_, quarantine_raw);
+        struct stat quarantine_status{};
+        const bool quarantine_matches = posix_->fstat(quarantine_descriptor.get(), &quarantine_status) == 0 &&
+                                        valid_removal_status(quarantine_status, require_safe_mode) &&
+                                        same_file(expected, FileIdentity{quarantine_status.st_dev,
+                                                                         quarantine_status.st_ino});
+        if (!quarantine_matches) {
+            const LCC_DEVICE_RESULT cleanup_result = cleanup_quarantine(directory, quarantine);
+            return cleanup_result == LCC_DEVICE_OK ? LCC_DEVICE_IO_ERROR : cleanup_result;
+        }
         const int unlink_result = posix_->unlinkat(directory, filename.c_str(), 0);
-        const int close_result = posix_->close(descriptor);
-        const int quarantine_result = posix_->unlinkat(directory, quarantine.c_str(), 0);
-        const int sync_result = posix_->fsync(directory);
-        if (unlink_result != 0 || close_result != 0 || quarantine_result != 0 || sync_result != 0) {
+        const int close_result = descriptor.close();
+        const LCC_DEVICE_RESULT cleanup_result = cleanup_quarantine(directory, quarantine);
+        if (cleanup_result != LCC_DEVICE_OK) {
+            return cleanup_result;
+        }
+        if (unlink_result != 0 || close_result != 0) {
             return LCC_DEVICE_IO_ERROR;
         }
         removed = true;
@@ -1875,6 +2003,21 @@ bool tpm2_openssl_accepts_tss2_private_pem_for_test(const unsigned char* data, s
 bool tpm2_openssl_accepts_der_signature_for_test(const unsigned char* data, std::size_t size) noexcept {
     P256Signature signature{};
     return data != nullptr && der_signature_to_p1363(data, size, signature);
+}
+
+bool tpm2_openssl_decode_der_signature_for_test(const unsigned char* data,
+                                                std::size_t size,
+                                                unsigned char* output,
+                                                std::size_t output_size) noexcept {
+    if (data == nullptr || output == nullptr || output_size != P256Signature{}.size()) {
+        return false;
+    }
+    P256Signature signature{};
+    if (!der_signature_to_p1363(data, size, signature)) {
+        return false;
+    }
+    std::copy(signature.begin(), signature.end(), output);
+    return true;
 }
 
 bool tpm2_openssl_nested_error_scope_preserves_for_test() noexcept {

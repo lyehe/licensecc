@@ -33,6 +33,10 @@ LCC_DEVICE_RESULT tpm2_openssl_map_error_for_test(int saved_errno,
                                                   bool loading_reference);
 bool tpm2_openssl_accepts_tss2_private_pem_for_test(const unsigned char* data, std::size_t size) noexcept;
 bool tpm2_openssl_accepts_der_signature_for_test(const unsigned char* data, std::size_t size) noexcept;
+bool tpm2_openssl_decode_der_signature_for_test(const unsigned char* data,
+                                                std::size_t size,
+                                                unsigned char* output,
+                                                std::size_t output_size) noexcept;
 bool tpm2_openssl_nested_error_scope_preserves_for_test() noexcept;
 bool tpm2_openssl_error_queue_round_trip_for_test() noexcept;
 bool tpm2_openssl_error_queue_segments_for_test() noexcept;
@@ -443,7 +447,7 @@ public:
     explicit LockReachPosixStorageApi(bool full_state_machine = false)
         : full_state_machine_(full_state_machine) {}
 
-    int openat(int, const char* path, int flags, mode_t) noexcept override {
+    int openat(int, const char* path, int flags, mode_t mode) noexcept override {
         const std::string name = path == nullptr ? std::string() : std::string(path);
         calls.push_back("openat:" + name);
         if (name == "/") {
@@ -452,7 +456,7 @@ public:
         }
         if (name == "safe") {
             selected_directory_flags = flags;
-            if (directory_symlink) {
+            if (directory_symlink && (flags & O_NOFOLLOW) != 0) {
                 errno = ELOOP;
                 return -1;
             }
@@ -460,7 +464,7 @@ public:
             return 101;
         }
         if (name == "ancestor") {
-            if (ancestor_symlink) {
+            if (ancestor_symlink && (flags & O_NOFOLLOW) != 0) {
                 errno = ELOOP;
                 return -1;
             }
@@ -468,7 +472,7 @@ public:
             return 107;
         }
         if (is_final(name)) {
-            if (reference_symlink) {
+            if (reference_symlink && (flags & O_NOFOLLOW) != 0) {
                 errno = ELOOP;
                 return -1;
             }
@@ -496,9 +500,11 @@ public:
                     errno = EEXIST;
                     return -1;
                 }
-                entries_.emplace(name, FakeFile{104, S_IFREG | 0600U, ::geteuid()});
+                entries_.emplace(name, FakeFile{104, S_IFREG | (mode & 07777U), ::geteuid()});
                 temporary_opened = true;
                 temporary_present = true;
+                temporary_flags = flags;
+                temporary_open_mode = mode;
             } else {
                 auto entry = entries_.find(name);
                 if (entry == entries_.end()) {
@@ -509,6 +515,10 @@ public:
                 if (cleanup_swap && !cleanup_swap_applied_ && temporary_open_count >= 2) {
                     entry->second.inode = 105;
                     cleanup_swap_applied_ = true;
+                }
+                if (fallback_swap_before_recheck && !fallback_swap_applied_ && temporary_open_count >= 3) {
+                    entry->second.inode = 105;
+                    fallback_swap_applied_ = true;
                 }
             }
             const int descriptor = allocate_descriptor();
@@ -525,18 +535,29 @@ public:
             descriptors_[descriptor] = Descriptor{entry->second.inode, Kind::Move, name};
             return descriptor;
         }
+        if (full_state_machine_ && is_delete_name(name)) {
+            const auto entry = entries_.find(name);
+            if (entry == entries_.end()) {
+                errno = ENOENT;
+                return -1;
+            }
+            const int descriptor = allocate_descriptor();
+            descriptors_[descriptor] = Descriptor{entry->second.inode, Kind::Reference, name};
+            return descriptor;
+        }
         if (is_lock(name)) {
-            if (lock_symlink) {
+            if (lock_symlink && (flags & O_NOFOLLOW) != 0) {
                 errno = ELOOP;
                 return -1;
             }
             if (entries_.find(name) == entries_.end()) {
-                entries_.emplace(name, FakeFile{102, S_IFREG | 0600U, ::geteuid()});
+                entries_.emplace(name, FakeFile{102, S_IFREG | (mode & 07777U), ::geteuid()});
             }
             const int descriptor = allocate_descriptor();
             descriptors_[descriptor] = Descriptor{entries_.at(name).inode, Kind::Lock, name};
             lock_opened = true;
             lock_flags = flags;
+            lock_open_mode = mode;
             return descriptor;
         }
         reference_checked = true;
@@ -567,7 +588,8 @@ public:
         }
         *status = {};
         const Descriptor& descriptor_info = found->second;
-        if (descriptor_info.kind == Kind::Temporary && fail_temp_fstat && !temp_fstat_failure_consumed_) {
+        if (descriptor_info.kind == Kind::Temporary &&
+            (fail_temp_fstat_persistent || (fail_temp_fstat && !temp_fstat_failure_consumed_))) {
             temp_fstat_failure_consumed_ = true;
             errno = EIO;
             return -1;
@@ -579,22 +601,25 @@ public:
             (descriptor_info.kind == Kind::Reference && reference_wrong_owner);
         status->st_uid = wrong_owner ? ::geteuid() + 1U : ::geteuid();
         status->st_dev = 1;
+        const auto entry = entries_.find(descriptor_info.path);
+        const mode_t recorded_mode = entry == entries_.end() ? 0600U : entry->second.mode;
         status->st_ino = descriptor_info.inode;
         status->st_mode = descriptor_info.kind == Kind::Directory ?
                               S_IFDIR | (directory_bad_mode ? 0750U : 0700U) :
                           descriptor_info.kind == Kind::Ancestor ?
                               S_IFDIR | (ancestor_bad_mode ? 0775U : 0755U) :
                           descriptor_info.kind == Kind::Reference && reference_nonregular ? S_IFIFO | 0600U :
-                          descriptor_info.kind == Kind::Lock && lock_nonregular ? S_IFIFO | 0600U :
-                          descriptor_info.kind == Kind::Lock ? S_IFREG | (lock_bad_mode ? 0640U : 0600U) :
+                          descriptor_info.kind == Kind::Lock && lock_nonregular ? S_IFIFO | (recorded_mode & 07777U) :
+                          descriptor_info.kind == Kind::Lock ?
+                              S_IFREG | (lock_bad_mode ? 0640U : (recorded_mode & 07777U)) :
                           descriptor_info.kind == Kind::Reference ?
                               S_IFREG | (reference_bad_mode ? 0640U : 0600U) :
-                              S_IFREG | (temporary_bad_mode ? 0640U : 0600U);
+                              S_IFREG | (temporary_bad_mode ? 0640U : (recorded_mode & 07777U));
         return 0;
     }
     int flock(int, int) noexcept override {
         calls.push_back("flock");
-        if (lock_busy) {
+        if (lock_busy && !(lock_releases_after_deadline && clock_calls >= 2)) {
             errno = EWOULDBLOCK;
             return -1;
         }
@@ -633,7 +658,7 @@ public:
             errno = EIO;
             return -1;
         }
-        if (fail_cleanup_fsync) {
+        if (fail_cleanup_fsync || (fail_cleanup_fsync_after > 0 && fsync_calls > fail_cleanup_fsync_after)) {
             errno = EIO;
             return -1;
         }
@@ -645,7 +670,11 @@ public:
             return -1;
         }
         const std::string name = path == nullptr ? std::string() : std::string(path);
-        if (fail_cleanup_unlink && (is_temporary(name) || is_move(name) || is_delete_name(name))) {
+        ++cleanup_unlink_calls;
+        const bool cleanup_name = is_temporary(name) || is_move(name) || is_delete_name(name);
+        if (cleanup_name &&
+            (fail_cleanup_unlink ||
+             (fail_cleanup_unlink_after > 0 && cleanup_unlink_calls > fail_cleanup_unlink_after))) {
             errno = EIO;
             return -1;
         }
@@ -779,6 +808,7 @@ public:
     bool force_publish_exists = false;
     bool rename_winner_exists = false;
     bool cleanup_swap = false;
+    bool fallback_swap_before_recheck = false;
     int temporary_open_count = 0;
     bool rename_unavailable = false;
     bool rename_unavailable_all = false;
@@ -786,18 +816,26 @@ public:
     bool link_unsupported = false;
     bool fail_cleanup_unlink = false;
     bool fail_cleanup_fsync = false;
+    int fail_cleanup_unlink_after = 0;
+    int fail_cleanup_fsync_after = 0;
+    int cleanup_unlink_calls = 0;
     bool lock_busy = false;
+    bool lock_releases_after_deadline = false;
     int clock_calls = 0;
     bool link_winner_exists = false;
     bool fail_write = false;
     bool fail_fdatasync = false;
     bool fail_temp_close = false;
     bool fail_temp_fstat = false;
+    bool fail_temp_fstat_persistent = false;
     bool fail_fsync_once = false;
     int fsync_calls = 0;
     int selected_directory_flags = 0;
     int reference_flags = 0;
     int lock_flags = 0;
+    int temporary_flags = 0;
+    mode_t temporary_open_mode = 0;
+    mode_t lock_open_mode = 0;
 
 private:
     enum class Kind { Ancestor, Directory, Lock, Reference, Temporary, Move };
@@ -843,6 +881,7 @@ private:
     bool cleanup_swap_applied_ = false;
     bool temp_close_failure_consumed_ = false;
     bool temp_fstat_failure_consumed_ = false;
+    bool fallback_swap_applied_ = false;
     bool full_state_machine_ = false;
 };
 
@@ -889,6 +928,13 @@ void test_provider_load_unknown_and_allocator_failures_remain_internal() {
         openssl, std::make_shared<NullPosixStorageApi>());
     require(provider->open(request_for("/var/lib/licensecc")) == LCC_DEVICE_INTERNAL_ERROR,
             "unknown provider-load failure was collapsed to unavailable");
+
+    openssl = std::make_shared<FakeOpenSsl3Api>();
+    openssl->tpm2_failure_reason = "memory allocation failure: provider module not found";
+    provider = license::device_identity::make_tpm2_openssl_provider(
+        openssl, std::make_shared<NullPosixStorageApi>());
+    require(provider->open(request_for("/var/lib/licensecc")) == LCC_DEVICE_INTERNAL_ERROR,
+            "allocator failure mentioning a module was collapsed to unavailable");
 }
 
 void test_error_queue_preserved_when_initially_empty() {
@@ -992,6 +1038,7 @@ void test_provider_error_mapping_and_private_reference_type() {
 
 void test_der_signature_edges_are_rejected_before_result_mapping() {
     using license::device_identity::tpm2_openssl_accepts_der_signature_for_test;
+    using license::device_identity::tpm2_openssl_decode_der_signature_for_test;
     const std::vector<unsigned char> valid = {0x30U, 0x06U, 0x02U, 0x01U, 0x01U, 0x02U, 0x01U, 0x02U};
     require(tpm2_openssl_accepts_der_signature_for_test(valid.data(), valid.size()),
             "valid DER signature rejected");
@@ -1043,9 +1090,26 @@ void test_der_signature_edges_are_rejected_before_result_mapping() {
         0xffU, 0xffU, 0xffU, 0xffU, 0xffU, 0xffU, 0xffU, 0xffU,
         0xbcU, 0xe6U, 0xfaU, 0xadU, 0xa7U, 0x17U, 0x9eU, 0x84U,
         0xf3U, 0xb9U, 0xcaU, 0xc2U, 0xfcU, 0x63U, 0x25U, 0x51U}};
-    const std::vector<unsigned char> high_s = make_der(one, order);
-    require(!tpm2_openssl_accepts_der_signature_for_test(high_s.data(), high_s.size()),
-            "out-of-range high-S DER signature accepted");
+    std::array<unsigned char, 32> valid_high_s = order;
+    for (std::size_t index = valid_high_s.size(); index-- > 0U;) {
+        if (valid_high_s[index] != 0U) {
+            --valid_high_s[index];
+            break;
+        }
+        valid_high_s[index] = 0xffU;
+    }
+    const std::vector<unsigned char> high_s = make_der(one, valid_high_s);
+    std::array<unsigned char, 64> decoded_high_s{};
+    require(tpm2_openssl_decode_der_signature_for_test(
+                high_s.data(), high_s.size(), decoded_high_s.data(), decoded_high_s.size()),
+            "valid high-S DER signature rejected");
+    require(std::equal(decoded_high_s.begin(), decoded_high_s.begin() + 31U, std::array<unsigned char, 31U>{}.begin()) &&
+                decoded_high_s[31] == 1U &&
+                std::equal(decoded_high_s.begin() + 32U, decoded_high_s.end(), valid_high_s.begin()),
+            "valid high-S DER signature was not padded into exact P1363");
+    const std::vector<unsigned char> out_of_range = make_der(one, order);
+    require(!tpm2_openssl_accepts_der_signature_for_test(out_of_range.data(), out_of_range.size()),
+            "out-of-range s == n DER signature accepted");
 }
 
 void test_storage_path_validation_precedes_provider_access() {
@@ -1315,6 +1379,15 @@ void test_storage_ancestor_symlink_lock_timeout_and_publish_capabilities() {
     require(provider->open(request_for("/safe")) == LCC_DEVICE_BUSY,
             "lock timeout was not busy");
 
+    storage = std::make_shared<LockReachPosixStorageApi>();
+    storage->lock_busy = true;
+    storage->lock_releases_after_deadline = true;
+    provider = license::device_identity::make_tpm2_openssl_provider(
+        std::make_shared<FakeOpenSsl3Api>(true), storage);
+    require(provider->open(request_for("/safe")) == LCC_DEVICE_BUSY,
+            "lock became available after the deadline");
+    require(!storage->lock_acquired, "lock was acquired after the monotonic deadline");
+
     storage = std::make_shared<LockReachPosixStorageApi>(true);
     storage->rename_unsupported_errno = EINVAL;
     provider = license::device_identity::make_tpm2_openssl_provider(
@@ -1360,9 +1433,48 @@ void test_storage_ancestor_symlink_lock_timeout_and_publish_capabilities() {
     for (unsigned int index = 0U; index < 32U; ++index) {
         expected_id += "a5";
     }
-    require(provider->delete_with_expected_id(request_for("/safe"), expected_id) == LCC_DEVICE_OK,
-            "expected-id delete did not use the no-rename exact fallback");
-    require(!storage->reference_present, "whole-rename delete left the reference");
+    const LCC_DEVICE_RESULT exact_delete_result = provider->delete_with_expected_id(request_for("/safe"), expected_id);
+    require(exact_delete_result == LCC_DEVICE_OK,
+            "expected-id delete did not use the exact no-rename fallback");
+    require(!storage->reference_present, "whole-rename exact delete left the reference behind");
+
+    storage = std::make_shared<LockReachPosixStorageApi>(true);
+    storage->rename_unavailable_all = true;
+    storage->post_publish_mismatch = true;
+    provider = license::device_identity::make_tpm2_openssl_provider(
+        std::make_shared<FakeOpenSsl3Api>(true, false, true), storage);
+    require(provider->create(request_for("/safe")) != LCC_DEVICE_OK,
+            "whole-rename post-publish mismatch was reported as success");
+    require(storage->reference_present, "whole-rename rollback removed the replacement winner");
+
+    storage = std::make_shared<LockReachPosixStorageApi>(true);
+    storage->rename_unavailable_all = true;
+    storage->fallback_swap_before_recheck = true;
+    provider = license::device_identity::make_tpm2_openssl_provider(
+        std::make_shared<FakeOpenSsl3Api>(true, false, true), storage);
+    require(provider->create(request_for("/safe")) != LCC_DEVICE_OK,
+            "fallback revalidation race was reported as success");
+    require(storage->temporary_present,
+            "fallback revalidation race removed the replacement temporary entry");
+
+    storage = std::make_shared<LockReachPosixStorageApi>(true);
+    storage->rename_unavailable_all = true;
+    storage->fallback_swap_before_recheck = true;
+    storage->fail_cleanup_unlink_after = 1;
+    provider = license::device_identity::make_tpm2_openssl_provider(
+        std::make_shared<FakeOpenSsl3Api>(true, false, true), storage);
+    const LCC_DEVICE_RESULT fallback_unlink_result = provider->create(request_for("/safe"));
+    require(fallback_unlink_result == LCC_DEVICE_IO_ERROR,
+            "fallback revalidation cleanup unlink failure was reported as busy");
+
+    storage = std::make_shared<LockReachPosixStorageApi>(true);
+    storage->rename_unavailable_all = true;
+    storage->fallback_swap_before_recheck = true;
+    storage->fail_cleanup_fsync_after = 1;
+    provider = license::device_identity::make_tpm2_openssl_provider(
+        std::make_shared<FakeOpenSsl3Api>(true, false, true), storage);
+    require(provider->create(request_for("/safe")) == LCC_DEVICE_IO_ERROR,
+            "fallback revalidation cleanup fsync failure was reported as busy");
 }
 
 void test_fstat_and_cleanup_failures_are_not_success() {
@@ -1377,11 +1489,36 @@ void test_fstat_and_cleanup_failures_are_not_success() {
 
     openssl = std::make_shared<FakeOpenSsl3Api>(true, false, true);
     storage = std::make_shared<LockReachPosixStorageApi>(true);
+    storage->fail_temp_fstat_persistent = true;
+    provider = license::device_identity::make_tpm2_openssl_provider(openssl, storage);
+    require(provider->create(request_for("/safe")) == LCC_DEVICE_IO_ERROR,
+            "persistent temporary fstat failure was reported as success");
+    require(!storage->temporary_present && !storage->reference_present,
+            "persistent temporary fstat failure stranded the owned temporary");
+
+    openssl = std::make_shared<FakeOpenSsl3Api>(true, false, true);
+    storage = std::make_shared<LockReachPosixStorageApi>(true);
     storage->force_publish_exists = true;
     storage->fail_cleanup_unlink = true;
     provider = license::device_identity::make_tpm2_openssl_provider(openssl, storage);
     require(provider->create(request_for("/safe")) == LCC_DEVICE_IO_ERROR,
             "cleanup unlink failure was reported as success");
+
+    openssl = std::make_shared<FakeOpenSsl3Api>(true, false, true);
+    storage = std::make_shared<LockReachPosixStorageApi>(true);
+    storage->rename_unavailable_all = true;
+    storage->fail_cleanup_unlink = true;
+    provider = license::device_identity::make_tpm2_openssl_provider(openssl, storage);
+    require(provider->create(request_for("/safe")) == LCC_DEVICE_IO_ERROR,
+            "rename unsupported plus quarantine unlink failure was reported as success");
+
+    openssl = std::make_shared<FakeOpenSsl3Api>(true, false, true);
+    storage = std::make_shared<LockReachPosixStorageApi>(true);
+    storage->rename_unavailable_all = true;
+    storage->fail_cleanup_fsync = true;
+    provider = license::device_identity::make_tpm2_openssl_provider(openssl, storage);
+    require(provider->create(request_for("/safe")) == LCC_DEVICE_IO_ERROR,
+            "rename unsupported plus quarantine fsync failure was reported as success");
 }
 
 void test_publish_cleanup_preserves_a_same_name_replacement() {
@@ -1424,6 +1561,14 @@ void test_no_replace_fallback_winner_and_publish_rollback() {
             "hard-link no-replace fallback did not publish");
     require(storage->reference_present && !storage->temporary_present,
             "hard-link fallback left a temporary reference");
+    require((storage->temporary_flags & (O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC)) ==
+                (O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC) &&
+                (storage->temporary_flags & O_WRONLY) != 0 && storage->temporary_open_mode == 0600U,
+            "temporary reference was not opened with exclusive 0600 no-follow flags");
+    require((storage->lock_flags & (O_CREAT | O_RDWR | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK)) ==
+                (O_CREAT | O_RDWR | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK) &&
+                storage->lock_open_mode == 0600U,
+            "namespace lock was not opened with exclusive 0600 no-follow flags");
 
     openssl = std::make_shared<FakeOpenSsl3Api>(true, false, true);
     storage = std::make_shared<LockReachPosixStorageApi>(true);
@@ -1462,6 +1607,24 @@ void test_temporary_failure_points_clean_only_the_owned_inode() {
     run(true, false, false);
     run(false, true, false);
     run(false, false, true);
+}
+
+void test_temporary_owner_and_mode_validation_is_exercised() {
+    auto openssl = std::make_shared<FakeOpenSsl3Api>(true, false, true);
+    auto storage = std::make_shared<LockReachPosixStorageApi>(true);
+    storage->temporary_bad_mode = true;
+    auto provider = license::device_identity::make_tpm2_openssl_provider(openssl, storage);
+    const LCC_DEVICE_RESULT temporary_mode_result = provider->create(request_for("/safe"));
+    require(temporary_mode_result == LCC_DEVICE_ACCESS_DENIED,
+            "temporary mode validation was not exercised");
+
+    openssl = std::make_shared<FakeOpenSsl3Api>(true, false, true);
+    storage = std::make_shared<LockReachPosixStorageApi>(true);
+    storage->temporary_wrong_owner = true;
+    provider = license::device_identity::make_tpm2_openssl_provider(openssl, storage);
+    const LCC_DEVICE_RESULT temporary_owner_result = provider->create(request_for("/safe"));
+    require(temporary_owner_result == LCC_DEVICE_ACCESS_DENIED,
+            "temporary owner validation was not exercised");
 }
 
 void test_shim_provider_lifecycle_1000_cycles() {
@@ -1518,6 +1681,7 @@ int run_shim() {
     test_store_cardinality_and_clean_eof_are_required();
     test_no_replace_fallback_winner_and_publish_rollback();
     test_temporary_failure_points_clean_only_the_owned_inode();
+    test_temporary_owner_and_mode_validation_is_exercised();
     test_shim_provider_lifecycle_1000_cycles();
     test_shim_successful_open_sign_close_1000_cycles();
     std::cout << "PASS: OpenSSL TPM2 provider shim contract\n";
