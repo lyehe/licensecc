@@ -15,6 +15,9 @@
 #include <string>
 #include <vector>
 
+#include <sys/stat.h>
+#include <unistd.h>
+
 namespace {
 
 using license::device_identity::OpenSsl3Api;
@@ -29,6 +32,8 @@ void require(bool condition, const char* message) {
 
 class FakeOpenSsl3Api final : public OpenSsl3Api {
 public:
+    explicit FakeOpenSsl3Api(bool provide_tpm2 = false) : provide_tpm2_(provide_tpm2) {}
+
     OSSL_LIB_CTX* libctx_new() noexcept override {
         calls.push_back("libctx_new");
         return reinterpret_cast<OSSL_LIB_CTX*>(static_cast<std::uintptr_t>(1U));
@@ -36,12 +41,20 @@ public:
     void libctx_free(OSSL_LIB_CTX*) noexcept override { calls.push_back("libctx_free"); }
     OSSL_PROVIDER* provider_load(OSSL_LIB_CTX*, const char* name) noexcept override {
         calls.push_back(std::string("provider_load:") + name);
-        return std::string(name) == "default" ?
-                   reinterpret_cast<OSSL_PROVIDER*>(static_cast<std::uintptr_t>(2U)) : nullptr;
+        if (std::string(name) == "default") {
+            return reinterpret_cast<OSSL_PROVIDER*>(static_cast<std::uintptr_t>(2U));
+        }
+        if (provide_tpm2_ && std::string(name) == "tpm2") {
+            return reinterpret_cast<OSSL_PROVIDER*>(static_cast<std::uintptr_t>(3U));
+        }
+        ERR_raise(ERR_LIB_USER, ERR_R_INTERNAL_ERROR);
+        return nullptr;
     }
     int provider_unload(OSSL_PROVIDER* provider) noexcept override {
         calls.push_back(provider == reinterpret_cast<OSSL_PROVIDER*>(static_cast<std::uintptr_t>(2U)) ?
-                            "provider_unload:default" : "provider_unload:unknown");
+                            "provider_unload:default" :
+                            provider == reinterpret_cast<OSSL_PROVIDER*>(static_cast<std::uintptr_t>(3U)) ?
+                                "provider_unload:tpm2" : "provider_unload:unknown");
         return 1;
     }
     EVP_PKEY_CTX* pkey_ctx_new_from_name(OSSL_LIB_CTX*, const char*, const char*) noexcept override { return nullptr; }
@@ -59,6 +72,8 @@ public:
     int pkey_verify(EVP_PKEY_CTX*, const unsigned char*, std::size_t, const unsigned char*, std::size_t) noexcept override {
         return 0;
     }
+    EVP_MD* md_fetch(OSSL_LIB_CTX*, const char*, const char*) noexcept override { return nullptr; }
+    void md_free(EVP_MD*) noexcept override {}
     void pkey_free(EVP_PKEY*) noexcept override {}
     const OSSL_PROVIDER* pkey_get0_provider(const EVP_PKEY*) noexcept override { return nullptr; }
     const char* provider_name(const OSSL_PROVIDER*) noexcept override { return nullptr; }
@@ -84,6 +99,9 @@ public:
     int rand_priv_bytes_ex(OSSL_LIB_CTX*, unsigned char*, std::size_t, unsigned int) noexcept override { return 0; }
 
     std::vector<std::string> calls;
+
+private:
+    bool provide_tpm2_ = false;
 };
 
 class NullPosixStorageApi final : public PosixStorageApi {
@@ -100,6 +118,71 @@ public:
     int renameat2_noreplace(int, const char*, const char*) noexcept override { errno = ENOSYS; return -1; }
     int clock_gettime(clockid_t, struct timespec*) noexcept override { errno = ENOSYS; return -1; }
     int nanosleep(const struct timespec*, struct timespec*) noexcept override { errno = ENOSYS; return -1; }
+};
+
+class LockReachPosixStorageApi final : public PosixStorageApi {
+public:
+    int openat(int, const char* path, int, mode_t) noexcept override {
+        const std::string name = path == nullptr ? std::string() : std::string(path);
+        calls.push_back("openat:" + name);
+        if (name == "/") {
+            return 100;
+        }
+        if (name == "safe") {
+            return 101;
+        }
+        if (name.size() >= 5U && name.substr(name.size() - 5U) == ".lock") {
+            lock_opened = true;
+            return 102;
+        }
+        reference_checked = true;
+        errno = ENOENT;
+        return -1;
+    }
+    int close(int descriptor) noexcept override {
+        calls.push_back("close:" + std::to_string(descriptor));
+        return 0;
+    }
+    int fstat(int descriptor, struct stat* status) noexcept override {
+        calls.push_back("fstat:" + std::to_string(descriptor));
+        if (status == nullptr) {
+            errno = EINVAL;
+            return -1;
+        }
+        *status = {};
+        status->st_uid = ::geteuid();
+        status->st_dev = 1;
+        status->st_ino = static_cast<ino_t>(descriptor);
+        status->st_mode = descriptor == 101 ? S_IFDIR | 0700U : S_IFREG | 0600U;
+        return 0;
+    }
+    int flock(int, int) noexcept override {
+        calls.push_back("flock");
+        lock_acquired = true;
+        return 0;
+    }
+    ssize_t write(int, const void*, std::size_t) noexcept override { errno = ENOSYS; return -1; }
+    int fdatasync(int) noexcept override { errno = ENOSYS; return -1; }
+    int fsync(int) noexcept override { errno = ENOSYS; return -1; }
+    int unlinkat(int, const char*, int) noexcept override { errno = ENOSYS; return -1; }
+    int linkat(int, const char*, int, const char*, int) noexcept override { errno = ENOSYS; return -1; }
+    int renameat2_noreplace(int, const char*, const char*) noexcept override { errno = ENOSYS; return -1; }
+    int clock_gettime(clockid_t, struct timespec* value) noexcept override {
+        calls.push_back("clock_gettime");
+        if (value == nullptr) {
+            errno = EINVAL;
+            return -1;
+        }
+        value->tv_sec = 1;
+        value->tv_nsec = 0;
+        return 0;
+    }
+    int nanosleep(const struct timespec*, struct timespec*) noexcept override { return 0; }
+
+    std::vector<std::string> calls;
+    bool lock_opened = false;
+    bool lock_acquired = false;
+    bool reference_checked = false;
 };
 
 ProviderOpenRequest request_for(const std::string& storage) {
@@ -131,6 +214,15 @@ void test_provider_load_order_and_unavailable_mapping() {
     require(openssl->calls[4] == "libctx_free", "library context unload order");
 }
 
+void test_error_queue_preserved_when_initially_empty() {
+    ERR_clear_error();
+    auto provider = license::device_identity::make_tpm2_openssl_provider(
+        std::make_shared<FakeOpenSsl3Api>(), std::make_shared<NullPosixStorageApi>());
+    require(provider->open(request_for("/var/lib/licensecc")) == LCC_DEVICE_PROVIDER_UNAVAILABLE,
+            "empty-queue provider error mapping");
+    require(ERR_peek_error() == 0U, "provider error leaked into an initially empty queue");
+}
+
 void test_storage_path_validation_precedes_provider_access() {
     auto openssl = std::make_shared<FakeOpenSsl3Api>();
     auto provider = license::device_identity::make_tpm2_openssl_provider(
@@ -142,9 +234,22 @@ void test_storage_path_validation_precedes_provider_access() {
     require(provider->open(request) == LCC_DEVICE_INVALID_ARGUMENT, "traversal storage path accepted");
 }
 
+void test_create_reaches_namespace_lock_after_directory_open() {
+    auto openssl = std::make_shared<FakeOpenSsl3Api>(true);
+    auto storage = std::make_shared<LockReachPosixStorageApi>();
+    auto provider = license::device_identity::make_tpm2_openssl_provider(openssl, storage);
+    const ProviderOpenRequest request = request_for("/safe");
+    require(provider->create(request) == LCC_DEVICE_INTERNAL_ERROR, "fake key generation result changed");
+    require(storage->lock_opened, "create did not open the namespace lock");
+    require(storage->lock_acquired, "create did not acquire the namespace lock");
+    require(storage->reference_checked, "create did not check the stored reference after locking");
+}
+
 int run_shim() {
     test_provider_load_order_and_unavailable_mapping();
+    test_error_queue_preserved_when_initially_empty();
     test_storage_path_validation_precedes_provider_access();
+    test_create_reaches_namespace_lock_after_directory_open();
     std::cout << "PASS: OpenSSL TPM2 provider shim contract\n";
     return 0;
 }

@@ -40,6 +40,7 @@ namespace {
 constexpr unsigned int kRandomStrength = 256U;
 constexpr std::size_t kNamespaceHashSize = 64U;
 constexpr int kDirectoryOpenFlags = O_PATH | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW;
+constexpr int kSelectedDirectoryOpenFlags = O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW;
 constexpr int kReferenceOpenFlags = O_RDONLY | O_CLOEXEC | O_NOFOLLOW;
 
 class NativeOpenSsl3Api final : public OpenSsl3Api {
@@ -88,6 +89,10 @@ public:
                     std::size_t digest_size) noexcept override {
         return EVP_PKEY_verify(context, signature, signature_size, digest, digest_size);
     }
+    EVP_MD* md_fetch(OSSL_LIB_CTX* libctx, const char* name, const char* properties) noexcept override {
+        return EVP_MD_fetch(libctx, name, properties);
+    }
+    void md_free(EVP_MD* digest) noexcept override { EVP_MD_free(digest); }
     void pkey_free(EVP_PKEY* key) noexcept override { EVP_PKEY_free(key); }
     const OSSL_PROVIDER* pkey_get0_provider(const EVP_PKEY* key) noexcept override {
         return EVP_PKEY_get0_provider(key);
@@ -202,10 +207,21 @@ std::shared_ptr<PosixStorageApi> native_posix_storage_api() noexcept {
 
 class ErrorQueueScope final {
 public:
-    ErrorQueueScope() noexcept : marked_(ERR_set_mark() == 1) {}
+    ErrorQueueScope() noexcept {
+        const bool had_error = ERR_peek_error() != 0U;
+        marked_ = ERR_set_mark() == 1;
+        if (!marked_ && !had_error) {
+            ERR_raise(ERR_LIB_USER, ERR_R_INTERNAL_ERROR);
+            sentinel_ = ERR_peek_last_error();
+            marked_ = sentinel_ != 0U && ERR_set_mark() == 1;
+        }
+    }
     ~ErrorQueueScope() {
         if (marked_) {
             (void)ERR_pop_to_mark();
+            if (sentinel_ != 0U) {
+                (void)ERR_get_error();
+            }
         }
     }
 
@@ -213,7 +229,8 @@ public:
     ErrorQueueScope& operator=(const ErrorQueueScope&) = delete;
 
 private:
-    bool marked_;
+    bool marked_ = false;
+    unsigned long sentinel_ = 0U;
 };
 
 std::string provider_error_text() {
@@ -325,7 +342,11 @@ LCC_DEVICE_RESULT open_storage_directory(const std::shared_ptr<PosixStorageApi>&
         return errno == EACCES || errno == EPERM ? LCC_DEVICE_ACCESS_DENIED : LCC_DEVICE_IO_ERROR;
     }
     for (std::size_t index = 0U; index < components.size(); ++index) {
-        const int next = api->openat(current, components[index].c_str(), kDirectoryOpenFlags, 0U);
+        const bool selected = index + 1U == components.size();
+        const int next = api->openat(current,
+                                     components[index].c_str(),
+                                     selected ? kSelectedDirectoryOpenFlags : kDirectoryOpenFlags,
+                                     0U);
         if (next < 0) {
             const int saved_errno = errno;
             (void)api->close(current);
@@ -340,7 +361,6 @@ LCC_DEVICE_RESULT open_storage_directory(const std::shared_ptr<PosixStorageApi>&
             return saved_errno == EACCES || saved_errno == EPERM ? LCC_DEVICE_ACCESS_DENIED :
                                                                     LCC_DEVICE_IO_ERROR;
         }
-        const bool selected = index + 1U == components.size();
         if (!owned_directory(status, selected)) {
             (void)api->close(next);
             (void)api->close(current);
@@ -369,7 +389,7 @@ public:
     NamespaceLock& operator=(const NamespaceLock&) = delete;
 
     LCC_DEVICE_RESULT acquire(int directory, const std::string& name) noexcept {
-        if (!api_ || descriptor_ < 0) {
+        if (!api_) {
             return errno == EACCES || errno == EPERM ? LCC_DEVICE_ACCESS_DENIED : LCC_DEVICE_IO_ERROR;
         }
         descriptor_ = api_->openat(directory, name.c_str(), O_CREAT | O_RDWR | O_CLOEXEC | O_NOFOLLOW, 0600U);
@@ -597,6 +617,7 @@ public:
                 result = LCC_DEVICE_KEY_CORRUPT;
             }
             if (result != LCC_DEVICE_OK) {
+                cleanup_loaded(reopened);
                 rollback_owned(directory.descriptor, request.device_namespace.linux_filename, temp_identity);
                 return result;
             }
@@ -619,8 +640,9 @@ public:
         }
         try {
             PkeyContext context(openssl_, openssl_->pkey_ctx_new_from_pkey(libctx_, key_, "provider=tpm2"));
-            if (!context.get() || openssl_->pkey_sign_init(context.get()) <= 0 ||
-                openssl_->pkey_ctx_set_signature_md(context.get(), EVP_sha256()) <= 0) {
+            MessageDigest sha256_digest(openssl_, openssl_->md_fetch(libctx_, "SHA256", "provider=default"));
+            if (!context.get() || !sha256_digest.get() || openssl_->pkey_sign_init(context.get()) <= 0 ||
+                openssl_->pkey_ctx_set_signature_md(context.get(), sha256_digest.get()) <= 0) {
                 return map_provider_error(0, false);
             }
             std::size_t signature_size = 0U;
@@ -688,6 +710,7 @@ public:
                 return result;
             }
             const std::string actual = device_key_id(loaded.spki);
+            cleanup_loaded(loaded);
             if (actual.empty()) {
                 return LCC_DEVICE_KEY_CORRUPT;
             }
@@ -720,6 +743,24 @@ private:
     private:
         std::shared_ptr<OpenSsl3Api> api_;
         EVP_PKEY_CTX* context_ = nullptr;
+    };
+
+    class MessageDigest final {
+    public:
+        MessageDigest(std::shared_ptr<OpenSsl3Api> api, EVP_MD* digest)
+            : api_(std::move(api)), digest_(digest) {}
+        ~MessageDigest() {
+            if (digest_ != nullptr && api_) {
+                api_->md_free(digest_);
+            }
+        }
+        MessageDigest(const MessageDigest&) = delete;
+        MessageDigest& operator=(const MessageDigest&) = delete;
+        EVP_MD* get() const noexcept { return digest_; }
+
+    private:
+        std::shared_ptr<OpenSsl3Api> api_;
+        EVP_MD* digest_ = nullptr;
     };
 
     struct LoadedReference final {
