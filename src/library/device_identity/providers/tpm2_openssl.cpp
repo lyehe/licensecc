@@ -243,14 +243,15 @@ std::string provider_error_text() {
     return result;
 }
 
-LCC_DEVICE_RESULT map_provider_error(int saved_errno, bool loading_reference) noexcept {
+LCC_DEVICE_RESULT map_provider_error_text(int saved_errno,
+                                          bool loading_reference,
+                                          const std::string& text) {
     if (saved_errno == EACCES || saved_errno == EPERM) {
         return LCC_DEVICE_ACCESS_DENIED;
     }
     if (saved_errno == EAGAIN || saved_errno == EWOULDBLOCK || saved_errno == EBUSY) {
         return LCC_DEVICE_BUSY;
     }
-    const std::string text = provider_error_text();
     if (text.find("permission") != std::string::npos || text.find("access") != std::string::npos ||
         text.find("auth") != std::string::npos) {
         return LCC_DEVICE_ACCESS_DENIED;
@@ -259,8 +260,17 @@ LCC_DEVICE_RESULT map_provider_error(int saved_errno, bool loading_reference) no
         text.find("algorithm") != std::string::npos) {
         return LCC_DEVICE_UNSUPPORTED_ALGORITHM;
     }
+    if (text.find("exhaust") != std::string::npos || text.find("memory") != std::string::npos ||
+        text.find("resource manager") != std::string::npos || text.find("session memory") != std::string::npos ||
+        text.find("retry") != std::string::npos || text.find("try again") != std::string::npos ||
+        text.find("timeout") != std::string::npos || text.find("lock") != std::string::npos ||
+        text.find("busy") != std::string::npos || text.find("too many") != std::string::npos ||
+        text.find("limit") != std::string::npos) {
+        return LCC_DEVICE_BUSY;
+    }
     if (text.find("tcti") != std::string::npos || text.find("transport") != std::string::npos ||
-        text.find("device") != std::string::npos || text.find("resource") != std::string::npos) {
+        text.find("device") != std::string::npos || text.find("unavailable") != std::string::npos ||
+        (text.find("resource") != std::string::npos && text.find("tpm") != std::string::npos)) {
         return LCC_DEVICE_HARDWARE_UNAVAILABLE;
     }
     if (text.find("parent") != std::string::npos || text.find("hierarchy") != std::string::npos ||
@@ -275,6 +285,10 @@ LCC_DEVICE_RESULT map_provider_error(int saved_errno, bool loading_reference) no
         return LCC_DEVICE_KEY_CORRUPT;
     }
     return LCC_DEVICE_INTERNAL_ERROR;
+}
+
+LCC_DEVICE_RESULT map_provider_error(int saved_errno, bool loading_reference) {
+    return map_provider_error_text(saved_errno, loading_reference, provider_error_text());
 }
 
 bool safe_namespace_component(const std::string& path, std::vector<std::string>& components) {
@@ -329,7 +343,7 @@ struct DirectoryHandle final {
 
 LCC_DEVICE_RESULT open_storage_directory(const std::shared_ptr<PosixStorageApi>& api,
                                          const std::string& path,
-                                         DirectoryHandle& out) noexcept {
+                                         DirectoryHandle& out) {
     if (!api) {
         return LCC_DEVICE_INTERNAL_ERROR;
     }
@@ -451,6 +465,41 @@ bool same_file(const FileIdentity& left, const FileIdentity& right) noexcept {
 
 bool valid_reference_status(const struct stat& status) noexcept {
     return S_ISREG(status.st_mode) && status.st_uid == ::geteuid() && (status.st_mode & 07777U) == 0600U;
+}
+
+bool valid_tss2_private_pem(const unsigned char* data, std::size_t size) noexcept {
+    constexpr char kBegin[] = "-----BEGIN TSS2 PRIVATE KEY-----";
+    constexpr char kEnd[] = "-----END TSS2 PRIVATE KEY-----";
+    constexpr std::size_t kBeginSize = sizeof(kBegin) - 1U;
+    constexpr std::size_t kEndSize = sizeof(kEnd) - 1U;
+    if (data == nullptr || size <= kBeginSize + kEndSize ||
+        std::memcmp(data, kBegin, kBeginSize) != 0) {
+        return false;
+    }
+    std::size_t content_end = size;
+    if (content_end > 0U && data[content_end - 1U] == '\n') {
+        --content_end;
+        if (content_end > 0U && data[content_end - 1U] == '\r') {
+            --content_end;
+        }
+    }
+    if (content_end < kBeginSize + kEndSize ||
+        std::memcmp(data + content_end - kEndSize, kEnd, kEndSize) != 0) {
+        return false;
+    }
+    const std::size_t body_end = content_end - kEndSize;
+    bool has_body = false;
+    for (std::size_t index = kBeginSize; index < body_end; ++index) {
+        const unsigned char value = data[index];
+        if (value == '\r' || value == '\n') {
+            continue;
+        }
+        if (!(std::isalnum(value) || value == '+' || value == '/' || value == '=')) {
+            return false;
+        }
+        has_body = true;
+    }
+    return has_body;
 }
 
 bool constant_time_equal(const std::string& left, const std::string& right) noexcept {
@@ -601,6 +650,13 @@ public:
                                         published);
             if (result != LCC_DEVICE_OK) {
                 cleanup_temporary(directory.descriptor, temporary_name);
+                if (published) {
+                    bool removed = false;
+                    (void)remove_exact(directory.descriptor,
+                                       request.device_namespace.linux_filename,
+                                       temp_identity,
+                                       removed);
+                }
                 return result;
             }
             if (!published) {
@@ -665,17 +721,21 @@ public:
     }
 
     LCC_DEVICE_RESULT metadata(ProviderMetadata& out) noexcept override {
-        if (key_ == nullptr || !validated_) {
-            return LCC_DEVICE_KEY_LOST;
+        try {
+            if (key_ == nullptr || !validated_) {
+                return LCC_DEVICE_KEY_LOST;
+            }
+            ProviderMetadata candidate;
+            candidate.backend = kTpm2OpenSslProviderContract.backend;
+            candidate.scope = scope_;
+            candidate.assurance = kTpm2OpenSslProviderContract.assurance;
+            candidate.provider = kTpm2OpenSslProviderContract.provider;
+            candidate.algorithm = kTpm2OpenSslProviderContract.algorithm;
+            out = std::move(candidate);
+            return LCC_DEVICE_OK;
+        } catch (...) {
+            return LCC_DEVICE_INTERNAL_ERROR;
         }
-        ProviderMetadata candidate;
-        candidate.backend = kTpm2OpenSslProviderContract.backend;
-        candidate.scope = scope_;
-        candidate.assurance = kTpm2OpenSslProviderContract.assurance;
-        candidate.provider = kTpm2OpenSslProviderContract.provider;
-        candidate.algorithm = kTpm2OpenSslProviderContract.algorithm;
-        out = std::move(candidate);
-        return LCC_DEVICE_OK;
     }
 
     LCC_DEVICE_RESULT delete_with_expected_id(const ProviderOpenRequest& request,
@@ -717,10 +777,10 @@ public:
             if (!constant_time_equal(actual, expected_device_key_id)) {
                 return LCC_DEVICE_POLICY_VIOLATION;
             }
-            if (posix_->unlinkat(directory.descriptor, request.device_namespace.linux_filename.c_str(), 0) != 0) {
-                return errno == EACCES || errno == EPERM ? LCC_DEVICE_ACCESS_DENIED : LCC_DEVICE_IO_ERROR;
-            }
-            return posix_->fsync(directory.descriptor) == 0 ? LCC_DEVICE_OK : LCC_DEVICE_IO_ERROR;
+            bool removed = false;
+            const LCC_DEVICE_RESULT removed_result = remove_exact(
+                directory.descriptor, request.device_namespace.linux_filename, loaded.identity, removed);
+            return removed_result;
         } catch (...) {
             return LCC_DEVICE_INTERNAL_ERROR;
         }
@@ -769,7 +829,7 @@ private:
         FileIdentity identity;
     };
 
-    LCC_DEVICE_RESULT validate_request(const ProviderOpenRequest& request) const noexcept {
+    LCC_DEVICE_RESULT validate_request(const ProviderOpenRequest& request) const {
         if (request.backend != LCC_DEVICE_BACKEND_TPM2_OPENSSL ||
             (request.scope != LCC_DEVICE_SCOPE_USER && request.scope != LCC_DEVICE_SCOPE_MACHINE) ||
             request.device_namespace.hash.size() != kNamespaceHashSize ||
@@ -826,7 +886,7 @@ private:
         }
     }
 
-    LCC_DEVICE_RESULT generate_key(EVP_PKEY** out) noexcept {
+    LCC_DEVICE_RESULT generate_key(EVP_PKEY** out) {
         if (out == nullptr) {
             return LCC_DEVICE_INVALID_ARGUMENT;
         }
@@ -854,7 +914,7 @@ private:
         return LCC_DEVICE_OK;
     }
 
-    LCC_DEVICE_RESULT validate_key(EVP_PKEY* key, P256Spki& out) noexcept {
+    LCC_DEVICE_RESULT validate_key(EVP_PKEY* key, P256Spki& out) {
         const OSSL_PROVIDER* owning_provider = key == nullptr ? nullptr : openssl_->pkey_get0_provider(key);
         const char* owning_name = openssl_->provider_name(owning_provider);
         if (key == nullptr || owning_name == nullptr || std::string(owning_name) != "tpm2") {
@@ -911,7 +971,7 @@ private:
         return verify_p256_p1363(spki, digest, signature) ? LCC_DEVICE_OK : LCC_DEVICE_SIGN_FAILED;
     }
 
-    LCC_DEVICE_RESULT encode_private_reference(EVP_PKEY* key, std::vector<std::uint8_t>& out) noexcept {
+    LCC_DEVICE_RESULT encode_private_reference(EVP_PKEY* key, std::vector<std::uint8_t>& out) {
         OSSL_ENCODER_CTX* raw_encoder = openssl_->encoder_new_for_pkey(
             key, EVP_PKEY_KEYPAIR, "PEM", "TSS2 PRIVATE KEY", "provider=tpm2");
         if (raw_encoder == nullptr) {
@@ -921,9 +981,9 @@ private:
         std::size_t encoded_size = 0U;
         const int encoded_ok = openssl_->encoder_to_data(raw_encoder, &encoded, &encoded_size);
         openssl_->encoder_free(raw_encoder);
-        if (encoded_ok != 1 || encoded == nullptr || encoded_size == 0U) {
+        if (encoded_ok != 1 || encoded == nullptr || !valid_tss2_private_pem(encoded, encoded_size)) {
             OPENSSL_free(encoded);
-            return map_provider_error(0, false);
+            return LCC_DEVICE_KEY_CORRUPT;
         }
         SensitiveVector candidate(encoded_size);
         std::memcpy(candidate.value.data(), encoded, encoded_size);
@@ -934,7 +994,7 @@ private:
 
     LCC_DEVICE_RESULT load_reference(int directory,
                                      const std::string& filename,
-                                     LoadedReference& out) noexcept {
+                                     LoadedReference& out) {
         const int descriptor = posix_->openat(directory, filename.c_str(), kReferenceOpenFlags, 0U);
         if (descriptor < 0) {
             if (errno == ENOENT) {
@@ -982,7 +1042,8 @@ private:
             }
             openssl_->store_info_free(info);
         }
-        const bool store_failed = openssl_->store_error(store) != 0;
+        const bool clean_eof = openssl_->store_eof(store) == 1;
+        const bool store_failed = !clean_eof || openssl_->store_error(store) != 0;
         const int close_result = openssl_->store_close(store);
         (void)posix_->close(descriptor);
         if (store_failed || close_result != 1) {
@@ -1019,7 +1080,7 @@ private:
                                        const std::string& filename,
                                        const std::vector<std::uint8_t>& data,
                                        std::string& out_name,
-                                       FileIdentity& out_identity) noexcept {
+                                       FileIdentity& out_identity) {
         std::array<std::uint8_t, 16> random{};
         if (openssl_->rand_priv_bytes_ex(libctx_, random.data(), random.size(), kRandomStrength) != 1) {
             return LCC_DEVICE_INTERNAL_ERROR;
@@ -1074,6 +1135,74 @@ private:
         }
     }
 
+    LCC_DEVICE_RESULT remove_exact(int directory,
+                                   const std::string& filename,
+                                   const FileIdentity& expected,
+                                   bool& removed) {
+        removed = false;
+        const int descriptor = posix_->openat(directory, filename.c_str(), kReferenceOpenFlags, 0U);
+        if (descriptor < 0) {
+            return errno == ENOENT ? LCC_DEVICE_KEY_NOT_FOUND :
+                   errno == EACCES || errno == EPERM ? LCC_DEVICE_ACCESS_DENIED : LCC_DEVICE_IO_ERROR;
+        }
+        struct stat status{};
+        if (posix_->fstat(descriptor, &status) != 0) {
+            const int saved_errno = errno;
+            (void)posix_->close(descriptor);
+            return saved_errno == EACCES || saved_errno == EPERM ? LCC_DEVICE_ACCESS_DENIED :
+                                                                    LCC_DEVICE_IO_ERROR;
+        }
+        const FileIdentity actual{status.st_dev, status.st_ino};
+        if (!valid_reference_status(status) || !same_file(expected, actual)) {
+            (void)posix_->close(descriptor);
+            return LCC_DEVICE_BUSY;
+        }
+
+        std::array<std::uint8_t, 16> random{};
+        if (openssl_->rand_priv_bytes_ex(libctx_, random.data(), random.size(), kRandomStrength) != 1) {
+            (void)posix_->close(descriptor);
+            return LCC_DEVICE_INTERNAL_ERROR;
+        }
+        const std::string quarantine = filename + ".delete." + lowercase_hex(random.data(), random.size());
+        if (posix_->linkat(descriptor, "", directory, quarantine.c_str(), AT_EMPTY_PATH) != 0) {
+            const int saved_errno = errno;
+            (void)posix_->close(descriptor);
+            return saved_errno == EACCES || saved_errno == EPERM ? LCC_DEVICE_ACCESS_DENIED :
+                   saved_errno == EEXIST ? LCC_DEVICE_BUSY : LCC_DEVICE_IO_ERROR;
+        }
+        (void)posix_->close(descriptor);
+
+        const int current = posix_->openat(directory, filename.c_str(), kReferenceOpenFlags, 0U);
+        const int current_errno = current < 0 ? errno : 0;
+        bool current_matches = false;
+        if (current >= 0) {
+            struct stat current_status{};
+            current_matches = posix_->fstat(current, &current_status) == 0 &&
+                              valid_reference_status(current_status) &&
+                              same_file(expected, FileIdentity{current_status.st_dev, current_status.st_ino});
+            (void)posix_->close(current);
+        }
+        if (!current_matches) {
+            (void)posix_->unlinkat(directory, quarantine.c_str(), 0);
+            (void)posix_->fsync(directory);
+            return current < 0 && (current_errno == EACCES || current_errno == EPERM) ?
+                       LCC_DEVICE_ACCESS_DENIED :
+                       LCC_DEVICE_BUSY;
+        }
+        if (posix_->unlinkat(directory, filename.c_str(), 0) != 0) {
+            const int saved_errno = errno;
+            (void)posix_->unlinkat(directory, quarantine.c_str(), 0);
+            (void)posix_->fsync(directory);
+            return saved_errno == EACCES || saved_errno == EPERM ? LCC_DEVICE_ACCESS_DENIED :
+                                                                    LCC_DEVICE_IO_ERROR;
+        }
+        if (posix_->unlinkat(directory, quarantine.c_str(), 0) != 0 || posix_->fsync(directory) != 0) {
+            return LCC_DEVICE_IO_ERROR;
+        }
+        removed = true;
+        return LCC_DEVICE_OK;
+    }
+
     LCC_DEVICE_RESULT publish_temporary(int directory,
                                          const std::string& temporary,
                                          const std::string& final,
@@ -1108,18 +1237,9 @@ private:
                link_errno == EACCES || link_errno == EPERM ? LCC_DEVICE_ACCESS_DENIED : LCC_DEVICE_IO_ERROR;
     }
 
-    void rollback_owned(int directory, const std::string& filename, const FileIdentity& identity) noexcept {
-        const int descriptor = posix_->openat(directory, filename.c_str(), kReferenceOpenFlags, 0U);
-        if (descriptor < 0) {
-            return;
-        }
-        struct stat status{};
-        const bool owned = posix_->fstat(descriptor, &status) == 0 &&
-                           same_file(identity, FileIdentity{status.st_dev, status.st_ino});
-        (void)posix_->close(descriptor);
-        if (owned && posix_->unlinkat(directory, filename.c_str(), 0) == 0) {
-            (void)posix_->fsync(directory);
-        }
+    void rollback_owned(int directory, const std::string& filename, const FileIdentity& identity) {
+        bool removed = false;
+        (void)remove_exact(directory, filename, identity, removed);
     }
 
     void cleanup_loaded(LoadedReference& loaded) noexcept {
@@ -1180,6 +1300,23 @@ std::unique_ptr<DeviceKeyProvider> make_tpm2_openssl_provider(
 
 std::unique_ptr<DeviceKeyProvider> make_tpm2_openssl_provider() noexcept {
     return make_tpm2_openssl_provider(make_native_openssl3_api(), make_native_posix_storage_api());
+}
+
+/* Internal shim hooks; these are not part of the installed/public ABI. */
+LCC_DEVICE_RESULT tpm2_openssl_map_error_for_test(int saved_errno,
+                                                  const char* reason,
+                                                  bool loading_reference) {
+    try {
+        return map_provider_error_text(saved_errno,
+                                       loading_reference,
+                                       reason == nullptr ? std::string() : std::string(reason));
+    } catch (...) {
+        return LCC_DEVICE_INTERNAL_ERROR;
+    }
+}
+
+bool tpm2_openssl_accepts_tss2_private_pem_for_test(const unsigned char* data, std::size_t size) noexcept {
+    return valid_tss2_private_pem(data, size);
 }
 
 }  // namespace device_identity
