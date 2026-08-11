@@ -18,6 +18,15 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+namespace license {
+namespace device_identity {
+LCC_DEVICE_RESULT tpm2_openssl_map_error_for_test(int saved_errno,
+                                                  const char* reason,
+                                                  bool loading_reference);
+bool tpm2_openssl_accepts_tss2_private_pem_for_test(const unsigned char* data, std::size_t size) noexcept;
+}  // namespace device_identity
+}  // namespace license
+
 namespace {
 
 using license::device_identity::OpenSsl3Api;
@@ -223,6 +232,35 @@ void test_error_queue_preserved_when_initially_empty() {
     require(ERR_peek_error() == 0U, "provider error leaked into an initially empty queue");
 }
 
+void test_provider_error_mapping_and_private_reference_type() {
+    using license::device_identity::tpm2_openssl_accepts_tss2_private_pem_for_test;
+    using license::device_identity::tpm2_openssl_map_error_for_test;
+    require(tpm2_openssl_map_error_for_test(0, "resource manager exhausted", false) == LCC_DEVICE_BUSY,
+            "resource exhaustion must map to busy");
+    require(tpm2_openssl_map_error_for_test(0, "session memory unavailable", false) == LCC_DEVICE_BUSY,
+            "session memory exhaustion must map to busy");
+    require(tpm2_openssl_map_error_for_test(0, "transport unavailable", false) ==
+                LCC_DEVICE_HARDWARE_UNAVAILABLE,
+            "transport loss must map to hardware unavailable");
+    require(tpm2_openssl_map_error_for_test(0, "unsupported algorithm", false) ==
+                LCC_DEVICE_UNSUPPORTED_ALGORITHM,
+            "unsupported algorithm mapping");
+
+    const std::string valid =
+        "-----BEGIN TSS2 PRIVATE KEY-----\nYWJj\n-----END TSS2 PRIVATE KEY-----\n";
+    const std::string ordinary = "-----BEGIN PRIVATE KEY-----\nYWJj\n-----END PRIVATE KEY-----\n";
+    const std::string trailing = valid + "unexpected";
+    require(tpm2_openssl_accepts_tss2_private_pem_for_test(
+                reinterpret_cast<const unsigned char*>(valid.data()), valid.size()),
+            "valid TSS2 PEM rejected");
+    require(!tpm2_openssl_accepts_tss2_private_pem_for_test(
+                reinterpret_cast<const unsigned char*>(ordinary.data()), ordinary.size()),
+            "ordinary private-key PEM accepted");
+    require(!tpm2_openssl_accepts_tss2_private_pem_for_test(
+                reinterpret_cast<const unsigned char*>(trailing.data()), trailing.size()),
+            "trailing private-key data accepted");
+}
+
 void test_storage_path_validation_precedes_provider_access() {
     auto openssl = std::make_shared<FakeOpenSsl3Api>();
     auto provider = license::device_identity::make_tpm2_openssl_provider(
@@ -248,6 +286,7 @@ void test_create_reaches_namespace_lock_after_directory_open() {
 int run_shim() {
     test_provider_load_order_and_unavailable_mapping();
     test_error_queue_preserved_when_initially_empty();
+    test_provider_error_mapping_and_private_reference_type();
     test_storage_path_validation_precedes_provider_access();
     test_create_reaches_namespace_lock_after_directory_open();
     std::cout << "PASS: OpenSSL TPM2 provider shim contract\n";
