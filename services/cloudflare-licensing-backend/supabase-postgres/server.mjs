@@ -37,7 +37,7 @@ import { webcrypto } from "node:crypto";
 
 import { createPostgresDatabase, closePool } from "./db-postgres.mjs";
 import { CLIENT_IP_HEADERS, clientIpFromRequest, assertSafeBind } from "../host-common.mjs";
-import { createPgHttpHandler, readNodeBody } from "./pg-http-handler.mjs";
+import { createNodeRequestToWeb, createPgHttpHandler } from "./pg-http-handler.mjs";
 
 // --- Node <20 crypto shim (the Worker uses crypto.subtle for RSA sign / ECDSA verify) ---
 if (typeof globalThis.crypto === "undefined") {
@@ -124,41 +124,11 @@ if (!process.env.ONLINE_SIGNING_PRIVATE_KEY_PKCS8_PEM || !process.env.ONLINE_SIG
 }
 
 // --- node req -> WHATWG Request -------------------------------------------
-function nodeRequestToWeb(req) {
-  const scheme = req.socket && req.socket.encrypted ? "https" : "http";
-  const host = req.headers.host ?? `${HOST}:${PORT}`;
-  const url = `${scheme}://${host}${req.url}`;
-
-  const headers = new Headers();
-  for (const [key, value] of Object.entries(req.headers)) {
-    if (value === undefined) continue;
-    if (CLIENT_IP_HEADERS.includes(key.toLowerCase())) continue; // strip client-supplied IP headers
-    if (Array.isArray(value)) {
-      for (const v of value) headers.append(key, v);
-    } else {
-      headers.set(key, value);
-    }
-  }
-  // Re-derive the caller IP from a trustworthy source (socket / trusted proxy header) so the
-  // Worker's rate limiter (keyed on cf-connecting-ip) cannot be bypassed by a spoofed header.
-  headers.set("cf-connecting-ip", clientIpFromRequest(req));
-
-  return new Promise((resolveReq, rejectReq) => {
-    readNodeBody(req).then((body) => {
-      const hasBody = req.method !== "GET" && req.method !== "HEAD" && body.length > 0;
-      const init = {
-        method: req.method,
-        headers,
-        body: hasBody ? body : undefined,
-      };
-      try {
-        resolveReq(new Request(url, init));
-      } catch (error) {
-        rejectReq(error);
-      }
-    }, rejectReq);
-  });
-}
+const nodeRequestToWeb = createNodeRequestToWeb({
+  defaultHost: `${HOST}:${PORT}`,
+  clientIpHeaders: CLIENT_IP_HEADERS,
+  clientIpFromRequest,
+});
 
 // --- WHATWG Response -> node res ------------------------------------------
 async function webResponseToNode(response, res) {

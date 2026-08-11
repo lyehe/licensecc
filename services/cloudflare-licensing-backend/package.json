@@ -14,7 +14,7 @@
     "test:sql": "npm run build && node --experimental-sqlite --test test/db/*.mjs test/sql/*.mjs test/fulfillment/order_ingest_exactly_once.test.mjs test/fulfillment/account_isolation.test.mjs",
     "test:e2e": "npm --prefix ../cloudflare-license-admin run build:worker && npm run build && node --experimental-sqlite --test test/e2e/*.mjs",
     "test:db": "node --experimental-sqlite --test test/db/*.mjs",
-    "test:pg": "node --test supabase-postgres/translate.test.mjs supabase-postgres/order-apply-pg.test.mjs supabase-postgres/pg-route-guard.test.mjs",
+    "test:pg": "node --test supabase-postgres/translate.test.mjs supabase-postgres/order-apply-pg.test.mjs supabase-postgres/pg-route-guard.test.mjs supabase-postgres/pg-http-handler.test.mjs",
     "scan:secrets": "node scripts/lint.mjs",
     "lint": "eslint \"src/**/*.{js,mjs,ts,tsx}\" --max-warnings 0",
     "generate:wrangler-types": "node ../../scripts/generate-wrangler-types.mjs .wrangler/worker-configuration.d.ts wrangler.example.toml",
