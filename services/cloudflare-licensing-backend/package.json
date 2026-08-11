@@ -17,7 +17,7 @@
     "test:pg": "node --test supabase-postgres/translate.test.mjs supabase-postgres/order-apply-pg.test.mjs supabase-postgres/pg-route-guard.test.mjs",
     "scan:secrets": "node scripts/lint.mjs",
     "lint": "eslint \"src/**/*.{js,mjs,ts,tsx}\" --max-warnings 0",
-    "generate:wrangler-types": "wrangler types .wrangler/worker-configuration.d.ts --config wrangler.example.toml",
+    "generate:wrangler-types": "node ../../scripts/generate-wrangler-types.mjs .wrangler/worker-configuration.d.ts wrangler.example.toml",
     "typecheck": "npm run generate:wrangler-types && tsc -p tsconfig.typecheck.json --noEmit",
     "schema:parity": "uv run --no-project python scripts/check-schema-parity.py",
     "schema:write": "uv run --no-project python scripts/check-schema-parity.py --write",

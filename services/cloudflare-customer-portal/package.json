@@ -14,7 +14,7 @@
     "test:e2e": "playwright test --config playwright.config.mjs",
     "scan:secrets": "node scripts/lint.mjs",
     "lint": "eslint \"src/**/*.{js,mjs,ts,tsx}\" --max-warnings 0",
-    "generate:wrangler-types": "wrangler types .wrangler/worker-configuration.d.ts --config wrangler.example.jsonc",
+    "generate:wrangler-types": "node ../../scripts/generate-wrangler-types.mjs .wrangler/worker-configuration.d.ts wrangler.example.jsonc",
     "typecheck": "npm run generate:wrangler-types && tsc -p tsconfig.worker.typecheck.json --noEmit && tsc -p tsconfig.json --noEmit",
     "dry-run": "npm run build && npx wrangler deploy --dry-run --config wrangler.example.jsonc",
     "migrate:local": "npx wrangler d1 migrations apply DB --local --config ../cloudflare-licensing-backend/wrangler.example.toml",
