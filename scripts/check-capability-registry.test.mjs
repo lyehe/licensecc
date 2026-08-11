@@ -22,6 +22,20 @@ function fixture(mutator = (registry) => registry) {
     "src/implementation.txt": "implemented marker\nrepeated marker\nrepeated marker\n// comment implementation marker\n# comment automated marker",
     "test/implementation.test.mjs": "automated marker",
     "test/comment.py": "# comment automated marker",
+    "src/comment-cases.ts": [
+      "const blockStart = true; /* block comment begins",
+      "multiline block marker",
+      "*/",
+      "const inlineComment = true; // inline slash marker",
+      "const jsxComment = <div>{/* jsx block marker */}</div>;",
+      "const stringLiteral = \"string literal marker\";",
+    ].join("\n"),
+    "test/comment-cases.py": [
+      "value = 1 # python inline marker",
+      "\"\"\"python docstring marker\"\"\"",
+    ].join("\n"),
+    "src/control.h": "#define REAL_MACRO_MARKER 1",
+    "test/control.test.mjs": "test(\"real test marker\", () => {});",
     "doc/platform.rst": "platform marker",
     "doc/limitation.rst": "limitation marker",
     "docs/plan.md": "plan marker",
@@ -259,6 +273,40 @@ test("requires each non-route selector exactly once and rejects comment-only imp
   t.after(() => rmSync(comments.root, { recursive: true, force: true }));
   assert.deepEqual(errors(check(duplicate)), ["duplicate_selector"]);
   assert.deepEqual(errors(check(comments)), ["comment_only_selector", "comment_only_selector"]);
+});
+
+test("rejects selectors beginning in lexical comments or literals while accepting real code", (t) => {
+  const comments = fixture((registry) => {
+    const capability = registry.capabilities[0];
+    capability.evidence = [
+      { kind: "implementation", path: "src/comment-cases.ts", selector: "multiline block marker", surface: "public API", assertion: "block comment" },
+      { kind: "automated_test", path: "src/comment-cases.ts", selector: "inline slash marker", surface: "public API", assertion: "inline slash" },
+      { kind: "automated_test", path: "src/comment-cases.ts", selector: "jsx block marker", surface: "public API", assertion: "JSX block" },
+      { kind: "automated_test", path: "test/comment-cases.py", selector: "python inline marker", surface: "public API", assertion: "Python inline" },
+      { kind: "automated_test", path: "src/comment-cases.ts", selector: "string literal marker", surface: "public API", assertion: "string literal" },
+      { kind: "automated_test", path: "test/comment-cases.py", selector: "python docstring marker", surface: "public API", assertion: "docstring" },
+    ];
+    return registry;
+  });
+  const controls = fixture((registry) => {
+    const capability = registry.capabilities[0];
+    capability.evidence = [
+      { kind: "implementation", path: "src/control.h", selector: "#define REAL_MACRO_MARKER 1", surface: "public API", assertion: "preprocessor macro" },
+      { kind: "automated_test", path: "test/control.test.mjs", selector: "test(\"real test marker\"", surface: "public API", assertion: "test declaration" },
+    ];
+    return registry;
+  });
+  t.after(() => rmSync(comments.root, { recursive: true, force: true }));
+  t.after(() => rmSync(controls.root, { recursive: true, force: true }));
+  assert.deepEqual(errors(check(comments)), [
+    "comment_only_selector",
+    "comment_only_selector",
+    "comment_only_selector",
+    "comment_only_selector",
+    "comment_only_selector",
+    "comment_only_selector",
+  ]);
+  assert.deepEqual(check(controls).errors, []);
 });
 
 test("parses route-contract selectors instead of treating route keys as JSON text", (t) => {

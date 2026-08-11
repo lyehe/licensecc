@@ -215,14 +215,91 @@ function selectorOffsets(source, selector) {
   return offsets;
 }
 
-function containingLine(source, offset) {
-  const start = source.lastIndexOf("\n", offset) + 1;
-  const end = source.indexOf("\n", offset);
-  return source.slice(start, end === -1 ? source.length : end).trimStart();
+function regexLiteralStartsAt(source, offset) {
+  const prefix = source.slice(0, offset).trimEnd();
+  if (prefix.endsWith("=>")) return true;
+  return prefix.length === 0 || /[([{=,:;!&|?]$/u.test(prefix);
 }
 
-function commentOnlyLine(line, path) {
-  return line.startsWith("//") || line.startsWith("/*") || line.startsWith("*") || /\.py$/iu.test(path) && line.startsWith("#");
+/** Return true when a selector starts in a comment, string, or Python docstring. */
+function selectorStartsInNonCode(source, offset, path) {
+  const python = /\.pyi?$/iu.test(path);
+  let state = "code";
+  let cursor = 0;
+  while (cursor < offset) {
+    const character = source[cursor];
+    const next = source[cursor + 1];
+    const triple = source.slice(cursor, cursor + 3);
+    if (state === "line-comment") {
+      if (character === "\n") state = "code";
+      cursor += 1;
+      continue;
+    }
+    if (state === "block-comment") {
+      if (character === "*" && next === "/") {
+        state = "code";
+        cursor += 2;
+      } else cursor += 1;
+      continue;
+    }
+    if (state === "regex") {
+      if (character === "\\") cursor += 2;
+      else if (character === "/") {
+        state = "code";
+        cursor += 1;
+      } else cursor += 1;
+      continue;
+    }
+    if (state === "triple-single" || state === "triple-double") {
+      const delimiter = state === "triple-single" ? "'''" : '"""';
+      if (triple === delimiter) {
+        state = "code";
+        cursor += 3;
+      } else cursor += 1;
+      continue;
+    }
+    if (state === "single-quote" || state === "double-quote" || state === "template") {
+      const delimiter = state === "single-quote" ? "'" : state === "double-quote" ? '"' : "`";
+      if (character === "\\") cursor += 2;
+      else if (character === delimiter) {
+        state = "code";
+        cursor += 1;
+      } else cursor += 1;
+      continue;
+    }
+
+    if (python && (triple === "'''" || triple === '"""')) {
+      state = triple === "'''" ? "triple-single" : "triple-double";
+      cursor += 3;
+    } else if (!python && character === "/" && next === "/") {
+      state = "line-comment";
+      cursor += 2;
+    } else if (!python && character === "/" && next === "*") {
+      state = "block-comment";
+      cursor += 2;
+    } else if (!python && character === "/" && regexLiteralStartsAt(source, cursor)) {
+      state = "regex";
+      cursor += 1;
+    } else if (python && character === "#") {
+      state = "line-comment";
+      cursor += 1;
+    } else if (character === "'") {
+      state = "single-quote";
+      cursor += 1;
+    } else if (character === '"') {
+      state = "double-quote";
+      cursor += 1;
+    } else if (character === "`") {
+      state = "template";
+      cursor += 1;
+    } else cursor += 1;
+  }
+  if (state !== "code") return true;
+  const triple = source.slice(offset, offset + 3);
+  return python && source[offset] === "#"
+    || !python && (source.startsWith("//", offset) || source.startsWith("/*", offset))
+    || python && (triple === "'''" || triple === '"""')
+    || source[offset] === "'" || source[offset] === '"' || source[offset] === "`";
 }
 
 function validateEvidence(root, trackedPaths, capability, errors) {
@@ -267,7 +344,7 @@ function validateEvidence(root, trackedPaths, capability, errors) {
       const offsets = selectorOffsets(source, selector);
       if (offsets.length === 0) addError(errors, "missing_selector", capability, selector);
       else if (offsets.length > 1) addError(errors, "duplicate_selector", capability, selector);
-      else if ((kind === "implementation" || kind === "automated_test") && commentOnlyLine(containingLine(source, offsets[0]), path)) addError(errors, "comment_only_selector", capability, selector);
+      else if ((kind === "implementation" || kind === "automated_test") && selectorStartsInNonCode(source, offsets[0], path)) addError(errors, "comment_only_selector", capability, selector);
     } catch {
       addError(errors, "unreadable_evidence_path", capability, path);
     }
