@@ -79,6 +79,16 @@ test("lint repository-quality runs the clean-checkout regression gate", () => {
     1,
     "repository-quality must invoke test:clean-checkout exactly once",
   );
+  assert.equal(
+    jobLines.filter((line) => line.trim() === "npm run test:versions").length,
+    1,
+    "repository-quality must invoke test:versions exactly once",
+  );
+  assert.equal(
+    jobLines.filter((line) => line.trim() === "npm run check:versions").length,
+    1,
+    "repository-quality must invoke check:versions exactly once",
+  );
 });
 
 test("capability evidence remains a PR gate locally and in repository-quality", () => {

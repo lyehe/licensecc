@@ -19,12 +19,24 @@ const openApiSourcePaths = [
   "services/cloudflare-license-admin/src/worker/openapi/document.ts",
   "services/cloudflare-customer-portal/src/worker/openapi/document.ts",
 ];
+const openApiBindings = {
+  "services/cloudflare-licensing-backend/src/openapi/document.ts": "openApiSpec",
+  "services/cloudflare-license-admin/src/worker/openapi/document.ts": "openApiDocument",
+  "services/cloudflare-customer-portal/src/worker/openapi/document.ts": "openApiDocument",
+};
 const openApiSnapshotPaths = {
   "test/contracts/backend.json": ["openApiSpec", "info", "version"],
   "test/contracts/admin.json": ["openApiDocument", "info", "version"],
   "test/contracts/portal.json": ["openApiDocument", "info", "version"],
 };
 const platformTextPaths = ["README.md", "CHANGELOG.md", "sdks/dotnet/README.md"];
+const maintainedPlatformDocPaths = [
+  "doc/capabilities/index.rst",
+  "doc/development/Build-the-library.md",
+  "doc/development/Build-the-library-windows.rst",
+  "doc/other/QA.md",
+];
+const capabilityRegistryPath = "doc/capabilities/registry.json";
 const cppPaths = ["CMakeLists.txt", "include/licensecc/licensecc.h", "doc/conf.py"];
 const requiredVersionPaths = [
   contractPath,
@@ -38,6 +50,8 @@ const requiredVersionPaths = [
   "sdks/python/src/licensecc/http_client.py",
   "sdks/dotnet/src/Licensecc.Client/Licensecc.Client.csproj",
   ...platformTextPaths,
+  ...maintainedPlatformDocPaths,
+  capabilityRegistryPath,
   ...cppPaths,
 ];
 const semverPattern = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(alpha|beta|rc)\.(0|[1-9]\d*))?$/u;
@@ -73,6 +87,144 @@ function nestedValue(value, keys) {
   return current;
 }
 
+function javascriptTokens(source) {
+  const tokens = [];
+  let cursor = 0;
+  while (cursor < source.length) {
+    const character = source[cursor];
+    const next = source[cursor + 1];
+    if (/\s/u.test(character)) {
+      cursor += 1;
+    } else if (character === "/" && next === "/") {
+      cursor = source.indexOf("\n", cursor + 2);
+      if (cursor === -1) break;
+    } else if (character === "/" && next === "*") {
+      const end = source.indexOf("*/", cursor + 2);
+      cursor = end === -1 ? source.length : end + 2;
+    } else if (character === '"' || character === "'" || character === "`") {
+      const delimiter = character;
+      let value = "";
+      let plain = true;
+      cursor += 1;
+      while (cursor < source.length) {
+        if (source[cursor] === "\\") {
+          value += source[cursor + 1] ?? "";
+          cursor += 2;
+        } else if (delimiter === "`" && source[cursor] === "$" && source[cursor + 1] === "{") {
+          plain = false;
+          cursor += 2;
+        } else if (source[cursor] === delimiter) {
+          cursor += 1;
+          break;
+        } else {
+          value += source[cursor];
+          cursor += 1;
+        }
+      }
+      tokens.push({ kind: plain ? "string" : "template", value });
+    } else if (/[A-Za-z_$]/u.test(character)) {
+      const match = /^[A-Za-z_$][\w$]*/u.exec(source.slice(cursor));
+      tokens.push({ kind: "identifier", value: match[0] });
+      cursor += match[0].length;
+    } else {
+      tokens.push({ kind: "punctuator", value: character });
+      cursor += 1;
+    }
+  }
+  return tokens;
+}
+
+function matchingToken(tokens, start, opening, closing) {
+  let depth = 0;
+  for (let index = start; index < tokens.length; index += 1) {
+    if (tokens[index].value === opening) depth += 1;
+    else if (tokens[index].value === closing) {
+      depth -= 1;
+      if (depth === 0) return index;
+    }
+  }
+  return -1;
+}
+
+function objectPropertyValues(tokens, objectStart, name) {
+  const objectEnd = matchingToken(tokens, objectStart, "{", "}");
+  if (objectEnd === -1) return [];
+  const values = [];
+  let depth = 0;
+  for (let index = objectStart + 1; index < objectEnd; index += 1) {
+    const value = tokens[index].value;
+    if (value === "{" || value === "[" || value === "(") depth += 1;
+    else if (value === "}" || value === "]" || value === ")") depth -= 1;
+    else if (depth === 0 && value === name && tokens[index + 1]?.value === ":") values.push(index + 2);
+  }
+  return values;
+}
+
+function openApiInfoVersion(source, binding) {
+  const tokens = javascriptTokens(source);
+  const initializers = [];
+  for (let index = 0; index < tokens.length - 3; index += 1) {
+    if (tokens[index].value !== "export" || tokens[index + 1].value !== "const" || tokens[index + 2].value !== binding) continue;
+    let assignment = index + 3;
+    while (assignment < tokens.length && tokens[assignment].value !== "=" && tokens[assignment].value !== ";") assignment += 1;
+    if (tokens[assignment]?.value === "=" && tokens[assignment + 1]?.value === "{") initializers.push(assignment + 1);
+  }
+  if (initializers.length !== 1) return null;
+  const infoValues = objectPropertyValues(tokens, initializers[0], "info");
+  if (infoValues.length !== 1 || tokens[infoValues[0]]?.value !== "{") return null;
+  const versionValues = objectPropertyValues(tokens, infoValues[0], "version");
+  if (versionValues.length !== 1 || tokens[versionValues[0]]?.kind !== "string") return null;
+  return tokens[versionValues[0]].value;
+}
+
+function maskCmakeNonCode(source) {
+  const output = [...source];
+  const mask = (start, end) => {
+    for (let index = start; index < end; index += 1) if (output[index] !== "\n" && output[index] !== "\r") output[index] = " ";
+  };
+  let cursor = 0;
+  while (cursor < source.length) {
+    if (source[cursor] === "#") {
+      const bracket = /^#\[(=*)\[/u.exec(source.slice(cursor));
+      if (bracket) {
+        const closing = `]${bracket[1]}]`;
+        const end = source.indexOf(closing, cursor + bracket[0].length);
+        const next = end === -1 ? source.length : end + closing.length;
+        mask(cursor, next);
+        cursor = next;
+      } else {
+        const end = source.indexOf("\n", cursor + 1);
+        const next = end === -1 ? source.length : end;
+        mask(cursor, next);
+        cursor = next;
+      }
+    } else if (source[cursor] === '"') {
+      const start = cursor;
+      cursor += 1;
+      while (cursor < source.length) {
+        if (source[cursor] === "\\") cursor += 2;
+        else if (source[cursor] === '"') {
+          cursor += 1;
+          break;
+        } else cursor += 1;
+      }
+      mask(start, cursor);
+    } else {
+      const bracket = /^\[(=*)\[/u.exec(source.slice(cursor));
+      if (!bracket) {
+        cursor += 1;
+        continue;
+      }
+      const closing = `]${bracket[1]}]`;
+      const end = source.indexOf(closing, cursor + bracket[0].length);
+      const next = end === -1 ? source.length : end + closing.length;
+      mask(cursor, next);
+      cursor = next;
+    }
+  }
+  return output.join("");
+}
+
 function pythonVersionFor(platformVersion) {
   const match = semverPattern.exec(platformVersion);
   if (!match) return null;
@@ -103,7 +255,9 @@ function pythonLockVersion(source) {
 
 function cppVersion(root, errors) {
   const source = sourceAt(root, "CMakeLists.txt");
-  const version = /\bproject\s*\([\s\S]*?\bVERSION\s+(\d+\.\d+\.\d+)\b/iu.exec(source)?.[1] ?? null;
+  const projectCalls = [...maskCmakeNonCode(source).matchAll(/\bproject\s*\(([^)]*)\)/giu)];
+  const versions = projectCalls.map((match) => /\bVERSION\s+(\d+\.\d+\.\d+)\b/iu.exec(match[1])?.[1]).filter(Boolean);
+  const version = versions.length === 1 ? versions[0] : null;
   if (version === null) errors.push({ code: "invalid_version_source", path: "CMakeLists.txt", expected: null, actual: null });
   return version;
 }
@@ -131,8 +285,37 @@ function checkCppProjections(root, errors) {
   if (shortVersion !== version || releaseVersion !== version) {
     errors.push({ code: "cpp_version_mismatch", path: confPath, expected: version, actual: releaseVersion });
   }
-  for (const path of ["README.md", "CHANGELOG.md"]) {
-    if (!sourceAt(root, path).includes(version)) errors.push({ code: "cpp_version_mismatch", path, expected: version, actual: null });
+  const readmeVersioning = /^\*\*Versioning:\*\*[^\n]*(?:\n(?!\s*$)[^\n]*)*/mu.exec(sourceAt(root, "README.md"))?.[0] ?? "";
+  if (!readmeVersioning.includes(`\`${version}\` in CMake`)) errors.push({ code: "cpp_version_mismatch", path: "README.md", expected: version, actual: null });
+  const changelogCpp = /^- \*\*C\+\+ library\*\*[^\n]*(?:\n {2}[^\n]*)*/mu.exec(sourceAt(root, "CHANGELOG.md"))?.[0] ?? "";
+  if (!changelogCpp.includes(`\`${version}\``)) errors.push({ code: "cpp_version_mismatch", path: "CHANGELOG.md", expected: version, actual: null });
+}
+
+function anchoredPlatformProjections(root, platformVersion, pythonVersion, errors) {
+  const readmeVersioning = /^\*\*Versioning:\*\*[^\n]*(?:\n(?!\s*$)[^\n]*)*/mu.exec(sourceAt(root, "README.md"))?.[0] ?? "";
+  mismatch(errors, "README.md", platformVersion, readmeVersioning.includes(`\`${platformVersion}\``) ? platformVersion : null);
+
+  const changelogPlatform = /^- \*\*Platform packages\*\*[^\n]*(?:\n {2}[^\n]*)*/mu.exec(sourceAt(root, "CHANGELOG.md"))?.[0] ?? "";
+  const changelogAligned = changelogPlatform.includes(`\`${platformVersion}\``) && changelogPlatform.includes(`\`${pythonVersion}\``);
+  mismatch(errors, "CHANGELOG.md", platformVersion, changelogAligned ? platformVersion : null);
+
+  const dotnetPath = "sdks/dotnet/README.md";
+  const dotnetPattern = new RegExp(`^ {2}src/Licensecc\\.Client/\\s+# the library \\(PackageId Licensecc\\.Client, ${platformVersion.replaceAll(".", "\\.")}\\)\\s*$`, "mu");
+  mismatch(errors, dotnetPath, platformVersion, dotnetPattern.test(sourceAt(root, dotnetPath)) ? platformVersion : null);
+
+  const escapedPlatformVersion = platformVersion.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+  const docMarker = new RegExp(`The platform is at\\s+\\*\\*${escapedPlatformVersion}\\*\\* \\(a prerelease\\)`, "mu");
+  for (const path of maintainedPlatformDocPaths) mismatch(errors, path, platformVersion, docMarker.test(sourceAt(root, path)) ? platformVersion : null);
+
+  const registry = parsedJson(root, capabilityRegistryPath, errors);
+  if (!registry) return;
+  for (const capability of registry.capabilities ?? []) {
+    const release = capability?.availability?.release;
+    if (typeof release !== "string" || !/\bplatform\b/iu.test(release)) continue;
+    const versions = [...release.matchAll(/\bplatform\s+(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)(?:\s+prerelease)?/giu)];
+    if (versions.length !== 1 || versions[0][1] !== platformVersion || /\bplatform\s+\S+\s+prerelease\b/iu.test(release)) {
+      errors.push({ code: "version_mismatch", path: capabilityRegistryPath, expected: platformVersion, actual: release });
+    }
   }
 }
 
@@ -155,9 +338,11 @@ export function checkVersionContract({ root = repositoryRoot, trackedPaths = tra
   const pythonVersion = pythonVersionFor(platformVersion);
 
   const expectedWorkspaces = nodeManifestPaths.slice(1).map((path) => path.slice(0, path.lastIndexOf("/"))).sort();
+  const manifests = new Map();
   for (const path of nodeManifestPaths) {
     const manifest = parsedJson(root, path, errors);
     if (!manifest) continue;
+    manifests.set(path, manifest);
     mismatch(errors, path, platformVersion, manifest.version);
     if (path === "package.json") {
       const actualWorkspaces = Array.isArray(manifest.workspaces) ? [...manifest.workspaces].sort() : [];
@@ -170,16 +355,30 @@ export function checkVersionContract({ root = repositoryRoot, trackedPaths = tra
   const lockPath = "package-lock.json";
   const lock = parsedJson(root, lockPath, errors);
   if (lock) {
-    mismatch(errors, lockPath, platformVersion, lock.version);
-    for (const manifestPath of nodeManifestPaths) {
+    const rootManifest = manifests.get("package.json");
+    if (lock.name !== rootManifest?.name || lock.version !== platformVersion || lock.packages?.[""]?.name !== rootManifest?.name || lock.packages?.[""]?.version !== platformVersion) {
+      errors.push({ code: "lockfile_root_mismatch", path: lockPath, expected: `${rootManifest?.name}@${platformVersion}`, actual: `${lock.packages?.[""]?.name ?? lock.name ?? "<none>"}@${lock.packages?.[""]?.version ?? lock.version ?? "<none>"}` });
+    }
+    const manifestWorkspaces = rootManifest?.workspaces ?? [];
+    if (JSON.stringify(lock.packages?.[""]?.workspaces) !== JSON.stringify(manifestWorkspaces)) {
+      errors.push({ code: "lockfile_workspaces_mismatch", path: lockPath, expected: manifestWorkspaces.join(","), actual: lock.packages?.[""]?.workspaces?.join(",") ?? null });
+    }
+    for (const manifestPath of nodeManifestPaths.slice(1)) {
       const packagePath = manifestPath === "package.json" ? "" : manifestPath.slice(0, manifestPath.lastIndexOf("/"));
-      mismatch(errors, lockPath, platformVersion, lock.packages?.[packagePath]?.version);
+      const manifest = manifests.get(manifestPath);
+      const entry = lock.packages?.[packagePath];
+      if (entry?.name !== manifest?.name || entry?.version !== platformVersion) {
+        errors.push({ code: "lockfile_workspace_mismatch", path: lockPath, expected: `${packagePath}:${manifest?.name}@${platformVersion}`, actual: entry ? `${entry.name ?? "<none>"}@${entry.version ?? "<none>"}` : null });
+      }
+      const link = lock.packages?.[`node_modules/${manifest?.name}`];
+      if (link?.link !== true || link?.resolved !== packagePath) {
+        errors.push({ code: "lockfile_link_mismatch", path: lockPath, expected: `${manifest?.name}->${packagePath}`, actual: link?.resolved ?? null });
+      }
     }
   }
 
   for (const path of openApiSourcePaths) {
-    const values = [...sourceAt(root, path).matchAll(/\bversion:\s*["']([^"']+)["']/gu)].map((match) => match[1]);
-    mismatch(errors, path, platformVersion, values.length === 1 ? values[0] : null);
+    mismatch(errors, path, platformVersion, openApiInfoVersion(sourceAt(root, path), openApiBindings[path]));
   }
   for (const [path, keys] of Object.entries(openApiSnapshotPaths)) {
     const snapshot = parsedJson(root, path, errors);
@@ -199,9 +398,7 @@ export function checkVersionContract({ root = repositoryRoot, trackedPaths = tra
   const dotnetPath = "sdks/dotnet/src/Licensecc.Client/Licensecc.Client.csproj";
   const dotnetVersion = /<Version>([^<]+)<\/Version>/u.exec(sourceAt(root, dotnetPath))?.[1] ?? null;
   mismatch(errors, dotnetPath, platformVersion, dotnetVersion);
-  for (const path of platformTextPaths) {
-    mismatch(errors, path, platformVersion, sourceAt(root, path).includes(platformVersion) ? platformVersion : null);
-  }
+  anchoredPlatformProjections(root, platformVersion, pythonVersion, errors);
 
   checkCppProjections(root, errors);
   return { errors };

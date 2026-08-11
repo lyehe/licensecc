@@ -48,6 +48,8 @@ jobs:
           npm run scan:secrets
           npm run test:scan:secrets
           npm run test:clean-checkout
+          npm run test:versions
+          npm run check:versions
           npm run lint
           npm run typecheck
           npm run check:architecture

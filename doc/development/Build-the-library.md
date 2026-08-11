@@ -2,8 +2,8 @@
 
 ## Build contract
 
-This page describes the maintained Linux build path. The platform is **0.1.0
-prerelease**: source and automated checks are accepted-repository evidence, not
+This page describes the maintained Linux build path. The platform is at
+**0.1.0-rc.1** (a prerelease): source and automated checks are accepted-repository evidence, not
 a claim that binaries are published, remote CI is current, or an Ubuntu release
 has been attested. The root `README.md` and `AGENTS.md` are the current command
 authority.

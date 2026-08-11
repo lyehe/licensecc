@@ -36,7 +36,14 @@ and all tracked release projections:
 3. Python project metadata, uv lock entry, runtime `__version__`, and default
    HTTP User-Agent;
 4. .NET package metadata and its SDK README; and
-5. the root README and changelog.
+5. the root and maintained public version documentation plus every platform
+   release projection in the capability registry.
+
+The repository-quality workflow runs both the checker tests and the real
+repository check exactly once. The root lock projection includes the exact
+workspace inventory, each workspace package name/version, and each npm
+workspace link target; a repointed or partial lockfile is invalid even when its
+remaining version strings happen to match.
 
 The C++ version remains independently owned by the CMake project. The checker
 only verifies that its public header macros/string and Sphinx version agree

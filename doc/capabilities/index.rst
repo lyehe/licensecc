@@ -10,7 +10,7 @@ that a service is deployed or an SDK is published.
 
 :download:`Download the capability registry <registry.json>`.
 
-The platform is at **0.1.0 prerelease**. Remote CI and Ubuntu release evidence
+The platform is at **0.1.0-rc.1** (a prerelease). Remote CI and Ubuntu release evidence
 are intentionally not claimed by this registry. Deployment, Cloudflare account
 configuration, signing keys, and package publication remain operator or release
 work outside the repository.

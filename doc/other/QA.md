@@ -13,7 +13,7 @@ keys or project material in the source checkout. See
 
 The accepted repository contains Windows and Linux C++ sources and automated
 checks, but this documentation does not claim a released binary matrix, remote
-CI attestation, or Ubuntu release evidence. The platform is **0.1.0 prerelease**.
+CI attestation, or Ubuntu release evidence. The platform is at **0.1.0-rc.1** (a prerelease).
 Run the documented local checks with your compiler, dependencies, and target
 environment before relying on a deployment.
 
