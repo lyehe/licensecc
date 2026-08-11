@@ -262,9 +262,12 @@ LCC_DEVICE_RESULT select_provider(const ValidatedOptions& options,
 #endif
     }
 
-    /* The OpenSSL TPM2 provider remains a fail-closed unavailable stub until
-     * its owning task supplies the native implementation. */
+#if !defined(_WIN32) && LCC_ENABLE_TPM2_OPENSSL
+    provider = make_tpm2_openssl_provider();
+    return provider ? LCC_DEVICE_OK : LCC_DEVICE_INTERNAL_ERROR;
+#else
     return LCC_DEVICE_PROVIDER_UNAVAILABLE;
+#endif
 }
 
 LCC_DEVICE_RESULT validate_output(const LccDeviceIdentityMetadata* output) {

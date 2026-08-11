@@ -59,3 +59,17 @@ if(LCC_BUILD_TPM2_OPENSSL_CAPABILITY_TEST)
     set_tests_properties(device_identity_tpm2_openssl
         PROPERTIES LABELS "security;device_identity;ubuntu_tpm2" SKIP_RETURN_CODE 77)
 endif()
+
+if(LCC_ENABLE_TPM2_OPENSSL)
+    add_executable(device_identity_tpm2_openssl_shim_test tpm2_openssl_test.cpp)
+    target_compile_definitions(device_identity_tpm2_openssl_shim_test
+        PRIVATE LCC_TPM2_OPENSSL_PRODUCTION_TEST=1)
+    target_include_directories(device_identity_tpm2_openssl_shim_test
+        PRIVATE ${CMAKE_SOURCE_DIR}/src/library/device_identity)
+    target_link_libraries(device_identity_tpm2_openssl_shim_test
+        PRIVATE licensecc_static Boost::unit_test_framework Boost::system)
+    add_test(NAME device_identity_tpm2_openssl_shim
+        COMMAND device_identity_tpm2_openssl_shim_test --shim)
+    set_tests_properties(device_identity_tpm2_openssl_shim
+        PROPERTIES LABELS "security;device_identity;ubuntu_tpm2")
+endif()

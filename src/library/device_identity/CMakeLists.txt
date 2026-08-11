@@ -17,6 +17,10 @@ if(LCC_ENABLE_WINDOWS_TPM)
     list(APPEND _lcc_device_identity_sources providers/windows_tpm.cpp)
 endif()
 
+if(LCC_ENABLE_TPM2_OPENSSL)
+    list(APPEND _lcc_device_identity_sources providers/tpm2_openssl.cpp)
+endif()
+
 add_library(device_identity OBJECT ${_lcc_device_identity_sources})
 add_dependencies(device_identity project_public_header)
 target_include_directories(device_identity
