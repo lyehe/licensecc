@@ -41,6 +41,12 @@ bool tpm2_openssl_nested_error_scope_preserves_for_test() noexcept;
 bool tpm2_openssl_error_queue_round_trip_for_test() noexcept;
 bool tpm2_openssl_error_queue_segments_for_test() noexcept;
 const char* tpm2_openssl_test_stage_for_test() noexcept;
+void tpm2_openssl_store_diagnostic_for_test(int* clean_eof,
+                                            int* store_error,
+                                            int* close_result,
+                                            int* pkey_count,
+                                            int* load_error,
+                                            int* close_error) noexcept;
 }  // namespace device_identity
 }  // namespace license
 
@@ -1743,6 +1749,20 @@ int run_real(const char* storage_directory) {
         std::cerr << "TPM2 provider create result=" << static_cast<int>(create_result) << '\n';
         std::cerr << "TPM2 provider create stage="
                   << license::device_identity::tpm2_openssl_test_stage_for_test() << '\n';
+        int clean_eof = -1;
+        int store_error = -1;
+        int close_result = -1;
+        int pkey_count = -1;
+        int load_error = -1;
+        int close_error = -1;
+        license::device_identity::tpm2_openssl_store_diagnostic_for_test(
+            &clean_eof, &store_error, &close_result, &pkey_count, &load_error, &close_error);
+        std::cerr << "TPM2 provider store diagnostics eof=" << clean_eof
+                  << " error=" << store_error
+                  << " close=" << close_result
+                  << " pkeys=" << pkey_count
+                  << " load_error=" << load_error
+                  << " close_error=" << close_error << '\n';
     }
     require(create_result == LCC_DEVICE_OK, "TPM2 provider create");
     license::device_identity::P256Spki spki{};

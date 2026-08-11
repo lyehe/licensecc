@@ -252,6 +252,12 @@ constexpr std::size_t kErrorQueueTextCapacity = ERR_MAX_DATA_SIZE;
 thread_local unsigned long g_error_queue_sentinel = 0U;
 thread_local unsigned int g_error_queue_scope_depth = 0U;
 thread_local const char* g_tpm2_openssl_test_stage = "idle";
+thread_local int g_tpm2_openssl_store_clean_eof = -1;
+thread_local int g_tpm2_openssl_store_error = -1;
+thread_local int g_tpm2_openssl_store_close_result = -1;
+thread_local int g_tpm2_openssl_store_pkey_count = -1;
+thread_local int g_tpm2_openssl_store_load_error = -1;
+thread_local int g_tpm2_openssl_store_close_error = -1;
 
 void set_tpm2_openssl_test_stage(const char* stage) noexcept {
     g_tpm2_openssl_test_stage = stage == nullptr ? "unknown" : stage;
@@ -1514,6 +1520,12 @@ private:
     LCC_DEVICE_RESULT load_reference(int directory,
                                      const std::string& filename,
                                      LoadedReference& out) {
+        g_tpm2_openssl_store_clean_eof = -1;
+        g_tpm2_openssl_store_error = -1;
+        g_tpm2_openssl_store_close_result = -1;
+        g_tpm2_openssl_store_pkey_count = -1;
+        g_tpm2_openssl_store_load_error = -1;
+        g_tpm2_openssl_store_close_error = -1;
         const int raw_descriptor = posix_->openat(directory, filename.c_str(), kReferenceOpenFlags, 0U);
         if (raw_descriptor < 0) {
             if (errno == ENOENT) {
@@ -1587,6 +1599,12 @@ private:
         set_tpm2_openssl_test_stage("load_store_close");
         const int close_result = store.close();
         const std::string close_error = provider_error_text();
+        g_tpm2_openssl_store_clean_eof = clean_eof ? 1 : 0;
+        g_tpm2_openssl_store_error = store_error;
+        g_tpm2_openssl_store_close_result = close_result;
+        g_tpm2_openssl_store_pkey_count = static_cast<int>(pkey_count);
+        g_tpm2_openssl_store_load_error = load_error.empty() ? 0 : 1;
+        g_tpm2_openssl_store_close_error = close_error.empty() ? 0 : 1;
         if (!clean_eof) {
             set_tpm2_openssl_test_stage("load_store_unclean_eof");
             if (!load_error.empty()) {
@@ -2152,6 +2170,32 @@ bool tpm2_openssl_error_queue_segments_for_test() noexcept {
 
 const char* tpm2_openssl_test_stage_for_test() noexcept {
     return g_tpm2_openssl_test_stage;
+}
+
+void tpm2_openssl_store_diagnostic_for_test(int* clean_eof,
+                                            int* store_error,
+                                            int* close_result,
+                                            int* pkey_count,
+                                            int* load_error,
+                                            int* close_error) noexcept {
+    if (clean_eof != nullptr) {
+        *clean_eof = g_tpm2_openssl_store_clean_eof;
+    }
+    if (store_error != nullptr) {
+        *store_error = g_tpm2_openssl_store_error;
+    }
+    if (close_result != nullptr) {
+        *close_result = g_tpm2_openssl_store_close_result;
+    }
+    if (pkey_count != nullptr) {
+        *pkey_count = g_tpm2_openssl_store_pkey_count;
+    }
+    if (load_error != nullptr) {
+        *load_error = g_tpm2_openssl_store_load_error;
+    }
+    if (close_error != nullptr) {
+        *close_error = g_tpm2_openssl_store_close_error;
+    }
 }
 
 }  // namespace device_identity
