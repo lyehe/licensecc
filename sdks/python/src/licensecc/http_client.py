@@ -26,6 +26,7 @@ import json
 import time
 import urllib.error
 import urllib.request
+import warnings
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
@@ -34,6 +35,44 @@ DEFAULT_MAX_RETRIES = 2
 DEFAULT_RETRY_BACKOFF_SECONDS = 0.5
 # 429 (rate limited) + transient 5xx are retryable; 4xx (auth/validation) and 200 are not.
 RETRYABLE_STATUSES = frozenset({429, 502, 503, 504})
+_REQUEST_PROOF_FIELDS = (
+    "device_key_id",
+    "request_signature_version",
+    "request_timestamp",
+    "request_signature_algorithm",
+    "request_signature",
+)
+_DEPRECATED_REQUEST_PROOF_ALIASES = {
+    "device_key_id": "device_key_id",
+    "version": "request_signature_version",
+    "request_signature_version": "request_signature_version",
+    "request_timestamp": "request_timestamp",
+    "algorithm": "request_signature_algorithm",
+    "request_signature_algorithm": "request_signature_algorithm",
+    "signature": "request_signature",
+    "request_signature": "request_signature",
+}
+
+
+def _json_values_equal(left: Any, right: Any) -> bool:
+    """Compare values without Python's bool-is-an-int equality leak."""
+    if left is None or right is None:
+        return left is None and right is None
+    if isinstance(left, bool) or isinstance(right, bool):
+        return isinstance(left, bool) and isinstance(right, bool) and left == right
+    if isinstance(left, (int, float)) or isinstance(right, (int, float)):
+        return isinstance(left, (int, float)) and isinstance(right, (int, float)) and left == right
+    if isinstance(left, str) or isinstance(right, str):
+        return isinstance(left, str) and isinstance(right, str) and left == right
+    if isinstance(left, Mapping) or isinstance(right, Mapping):
+        if not isinstance(left, Mapping) or not isinstance(right, Mapping) or left.keys() != right.keys():
+            return False
+        return all(_json_values_equal(left[key], right[key]) for key in left)
+    if isinstance(left, (list, tuple)) or isinstance(right, (list, tuple)):
+        if not isinstance(left, (list, tuple)) or not isinstance(right, (list, tuple)) or len(left) != len(right):
+            return False
+        return all(_json_values_equal(left_value, right_value) for left_value, right_value in zip(left, right))
+    return type(left) is type(right) and left == right
 
 
 @dataclass(frozen=True)
@@ -158,12 +197,20 @@ class HttpClient:
         client_version: str | None = None,
         client_hardening: int | None = None,
         request_proof: Mapping[str, Any] | None = None,
+        *,
+        device_key_id: str | None = None,
+        request_signature_version: int | None = None,
+        request_timestamp: int | None = None,
+        request_signature_algorithm: str | None = None,
+        request_signature: str | None = None,
     ) -> ApiResponse:
         """``POST /v1/verify`` — request a signed ``lccoa1`` assertion (or a denial).
 
         On ``ok:true`` the ``assertion`` field carries the token; verify it
         locally with :func:`licensecc.verify_online_assertion` using the nonce
-        you supplied here. A soft denial is HTTP 200 with ``ok:false``.
+        you supplied here. A soft denial is HTTP 200 with ``ok:false``. The
+        ``request_proof`` mapping remains accepted for 0.1.x compatibility but
+        is deprecated; pass its five fields as keyword arguments instead.
         """
         body: dict[str, Any] = {
             "project": project,
@@ -177,8 +224,38 @@ class HttpClient:
             body["client_version"] = client_version
         if client_hardening is not None:
             body["client_hardening"] = client_hardening
+        proof_fields = {
+            key: value
+            for key, value in {
+                "device_key_id": device_key_id,
+                "request_signature_version": request_signature_version,
+                "request_timestamp": request_timestamp,
+                "request_signature_algorithm": request_signature_algorithm,
+                "request_signature": request_signature,
+            }.items()
+            if value is not None
+        }
         if request_proof is not None:
-            body["request_proof"] = dict(request_proof)
+            warnings.warn(
+                "request_proof is deprecated; pass the five flat request-proof fields instead",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            deprecated_fields: dict[str, Any] = {}
+            for key, value in request_proof.items():
+                wire_key = _DEPRECATED_REQUEST_PROOF_ALIASES.get(key)
+                if wire_key is None:
+                    raise ValueError(f"unsupported request proof field: {key}")
+                if wire_key in deprecated_fields and not _json_values_equal(deprecated_fields[wire_key], value):
+                    raise ValueError(f"conflicting request proof field: {wire_key}")
+                deprecated_fields[wire_key] = value
+            for key, value in deprecated_fields.items():
+                if key in proof_fields and not _json_values_equal(proof_fields[key], value):
+                    raise ValueError(f"conflicting request proof field: {key}")
+                proof_fields[key] = value
+        for key in _REQUEST_PROOF_FIELDS:
+            if key in proof_fields:
+                body[key] = proof_fields[key]
         return self._post("/v1/verify", body)
 
     def activate(self, body: Mapping[str, Any]) -> ApiResponse:

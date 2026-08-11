@@ -312,6 +312,7 @@ test("hygiene reads the tracked list and permits only documented deterministic e
       "pyvenv.cfg",
       "services/admin/wrangler.example.jsonc",
       "test/vectors/deterministic.lic",
+      "test/vectors/device_proof/v1/manifest.json",
       "test/vectors/public_key.pkcs1.der.hex",
     ],
     checkerConfig: config({
@@ -324,6 +325,21 @@ test("hygiene reads the tracked list and permits only documented deterministic e
     }),
   });
   assert.equal(result.exitCode, 0, result.diagnostics.join("\n"));
+});
+
+test("hygiene permits only the exact reviewed device-proof JSON manifest", () => {
+  const result = fixture({
+    trackedPaths: [
+      "test/vectors/device_proof/v1/manifest.json",
+      "test/vectors/device_proof/v1/unreviewed.json",
+      "test/vectors/other/manifest.json",
+    ],
+  });
+  assert.equal(result.exitCode, 1);
+  assert.deepEqual(errorCodes(result), [
+    "ARCH_UNAPPROVED_VECTOR_FIXTURE",
+    "ARCH_UNAPPROVED_VECTOR_FIXTURE",
+  ]);
 });
 
 test("hygiene rejects generated tracked paths, local Wrangler configuration, and generated credentials", () => {

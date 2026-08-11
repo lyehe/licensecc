@@ -67,7 +67,6 @@ const NOW = Math.floor(Date.now() / 1000);
 const FP = "a".repeat(64);
 const LEASE_KEY_ID = "sha256:" + "a".repeat(64);
 const ONLINE_KEY_ID = "sha256:" + "b".repeat(64);
-const DEVICE_KEY_ID = "sha256:" + "d".repeat(64);
 const SELF_DEVICE = "sha256:" + "e".repeat(64);
 const OTHER_DEVICE = "sha256:" + "f".repeat(64);
 const TRIAL_DURATION = 1209600; // 14 days
@@ -149,9 +148,11 @@ function trialRow(db, fingerprint = FP) {
 }
 
 // Register an ECDSA device + return a body fragment carrying a VALID lease request proof for `nonce`.
-async function provedDeviceBody(db, nonce, { deviceKeyId = DEVICE_KEY_ID } = {}) {
+async function provedDeviceBody(db, nonce) {
   const pair = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"]);
   const spki = new Uint8Array(await crypto.subtle.exportKey("spki", pair.publicKey));
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", spki));
+  const deviceKeyId = `sha256:${Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
   let s = "";
   for (const byte of spki) s += String.fromCharCode(byte);
   const spkiB64 = btoa(s);
@@ -284,13 +285,13 @@ test("trial_require_device_proof: no verified proof -> 403 trial_device_proof_re
 test("trial_require_device_proof: a VALID device proof activates and binds the lock to the proven device_key_id", async () => {
   const { db, env } = await freshEnv();
   seedEntitlement(db, { isTrial: 1, basis: "from_first_activation", durationSec: TRIAL_DURATION, requireProof: 1, onePerDevice: 1 });
-  const proofBody = await provedDeviceBody(db, "n".repeat(64));
+  const proofBody = await provedDeviceBody(db, "c".repeat(64));
   const { status, body } = await activate(env, proofBody);
   assert.equal(status, 200);
   assert.equal(body.trial, true);
   const row = trialRow(db);
   assert.ok(row.trial_started_at !== null, "proven activation started the clock");
-  assert.equal(row.trial_device_hash, DEVICE_KEY_ID, "lock bound to the PROVEN device_key_id");
+  assert.equal(row.trial_device_hash, proofBody.device_key_id, "lock bound to the PROVEN device_key_id");
   db.close();
 });
 

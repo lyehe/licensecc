@@ -17,6 +17,16 @@ import type {
 } from "../env.js";
 import { logEvent, type LogSeverity } from "../observability/index.js";
 import { VERIFY_SQL } from "../db/verify-statements.mjs";
+import {
+  LEASE_REQUEST_PROOF_PURPOSE,
+  ONLINE_REQUEST_PROOF_PURPOSE,
+  REQUEST_PROOF_ALGORITHM,
+  REQUEST_PROOF_VERSION,
+  SEAT_REQUEST_PROOF_PURPOSE,
+  canonicalRequestProofPayload,
+  decodeCanonicalBase64,
+  verifyRequestProofSignature,
+} from "../device/request_proof.mjs";
 
 declare const Buffer:
   | {
@@ -32,16 +42,18 @@ declare const Buffer:
 
 
 export const PURPOSE = "licensecc-online-assertion";
-const REQUEST_PROOF_PURPOSE = "licensecc-online-request";
 // Per-operation proof audiences: a proof is signed over its operation, so a proof minted for
 // /v1/verify is NOT signature-valid at lease/seat issuance (and vice versa). Closes the
 // missing-audience confused-deputy flaw. /v1/verify keeps REQUEST_PROOF_PURPOSE unchanged.
-export const LEASE_PROOF_PURPOSE = "licensecc-lease-request";
-export const SEAT_PROOF_PURPOSE = "licensecc-seat-request";
+const REQUEST_PROOF_PURPOSE = ONLINE_REQUEST_PROOF_PURPOSE;
+export const LEASE_PROOF_PURPOSE = LEASE_REQUEST_PROOF_PURPOSE;
+export const SEAT_PROOF_PURPOSE = SEAT_REQUEST_PROOF_PURPOSE;
+type RequestProofPurposeV1 =
+  | typeof REQUEST_PROOF_PURPOSE
+  | typeof LEASE_PROOF_PURPOSE
+  | typeof SEAT_PROOF_PURPOSE;
 export const VERSION = "1";
 export const ALGORITHM = "rsa-pkcs1-sha256";
-const REQUEST_PROOF_VERSION: RequestProof["version"] = 1;
-const REQUEST_PROOF_ALGORITHM: RequestProof["algorithm"] = "ecdsa-p256-sha256";
 const MAX_BODY_BYTES = 4096;
 // Mirrors the C++ ABI buffer limits LCC_API_ONLINE_PROJECT_SIZE (127) and LCC_API_FEATURE_NAME_SIZE (15) in include/licensecc/datatypes.h; keep in sync.
 const MAX_PROJECT_SIZE = 127;
@@ -52,7 +64,6 @@ const MAX_FEATURE_SIZE = 15;
 const MAX_CLIENT_HARDENING = 0xffff;
 const HEX_64 = /^[0-9a-fA-F]{64}$/;
 const DEVICE_KEY_ID = /^sha256:[0-9a-f]{64}$/;
-const BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
 const textEncoder = new TextEncoder();
 
 let cachedSigningKey:
@@ -123,10 +134,15 @@ function envFlag(value: string | undefined): boolean {
 }
 
 function safeBase64(value: unknown, maxLength: number): string | null {
-  if (typeof value !== "string" || value.length === 0 || value.length > maxLength || !BASE64.test(value)) {
+  if (typeof value !== "string" || value.length === 0 || value.length > maxLength) {
     return null;
   }
-  return value;
+  try {
+    decodeCanonicalBase64(value, 64);
+    return value;
+  } catch {
+    return null;
+  }
 }
 
 export function safeDeviceKeyId(value: unknown): string | null {
@@ -403,28 +419,28 @@ export function canonicalPayloadForTests(claims: AssertionClaims): string {
   return canonicalPayload(claims);
 }
 
-function canonicalRequestProofPayload(request: VerifyRequest, purpose: string = REQUEST_PROOF_PURPOSE): string {
+function requestProofPayloadFields(request: VerifyRequest, purpose: RequestProofPurposeV1) {
   if (request.request_proof === undefined) {
     throw new Error("request proof is missing");
   }
-  return (
-    `purpose=${purpose}\n` +
-    `version=${request.request_proof.version}\n` +
-    `alg=${request.request_proof.algorithm}\n` +
-    `project=${request.project}\n` +
-    `feature=${request.feature}\n` +
-    `license-fingerprint=${request.license_fingerprint}\n` +
-    `device-hash=${request.device_hash ?? ""}\n` +
-    `nonce=${request.nonce}\n` +
-    `request-timestamp=${request.request_proof.request_timestamp}\n` +
-    `client-hardening=${request.client_hardening ?? 0}\n` +
-    `device-key-id=${request.request_proof.device_key_id}\n`
-  );
+  return {
+    purpose,
+    version: request.request_proof.version,
+    algorithm: request.request_proof.algorithm,
+    project: request.project,
+    feature: request.feature,
+    licenseFingerprint: request.license_fingerprint,
+    deviceHash: request.device_hash ?? "",
+    nonce: request.nonce,
+    requestTimestamp: request.request_proof.request_timestamp,
+    clientHardening: request.client_hardening ?? 0,
+    deviceKeyId: request.request_proof.device_key_id,
+  };
 }
 
-export function canonicalRequestProofPayloadForTests(request: VerifyRequest, purpose?: string): string {
-  return canonicalRequestProofPayload(request, purpose);
-}
+export const canonicalRequestProofPayloadForTests = (request: VerifyRequest, purpose: RequestProofPurposeV1 = REQUEST_PROOF_PURPOSE): string => {
+  return canonicalRequestProofPayload(requestProofPayloadFields(request, purpose));
+};
 
 export function base64FromBytes(bytes: Uint8Array): string {
   let binary = "";
@@ -469,12 +485,6 @@ export async function importSigningKey(pem: string): Promise<CryptoKey> {
     false,
     ["sign"],
   );
-}
-
-async function importDevicePublicKey(spkiBase64: string): Promise<CryptoKey> {
-  const bytes = bytesFromBase64(spkiBase64);
-  const keyData = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
-  return crypto.subtle.importKey("spki", keyData, { name: "ECDSA", namedCurve: "P-256" }, false, ["verify"]);
 }
 
 function signingCacheKey(env: Env): string {
@@ -580,21 +590,6 @@ function logRequestProofDecision(
   });
 }
 
-async function verifyRequestSignature(publicKeySpkiDerBase64: string, payload: string, signatureBase64: string): Promise<boolean> {
-  const key = await importDevicePublicKey(publicKeySpkiDerBase64);
-  const signature = bytesFromBase64(signatureBase64);
-  const signatureData = signature.buffer.slice(
-    signature.byteOffset,
-    signature.byteOffset + signature.byteLength,
-  ) as ArrayBuffer;
-  const payloadBytes = textEncoder.encode(payload);
-  const payloadData = payloadBytes.buffer.slice(
-    payloadBytes.byteOffset,
-    payloadBytes.byteOffset + payloadBytes.byteLength,
-  ) as ArrayBuffer;
-  return crypto.subtle.verify({ name: "ECDSA", hash: "SHA-256" }, key, signatureData, payloadData);
-}
-
 // Returns "fresh" if this is the first time the nonce is consumed for this device,
 // "replayed" if it was already consumed within the skew window, or "error" if the
 // store is unavailable. The caller MUST treat "error" as deny (fail closed). The
@@ -649,7 +644,7 @@ async function evaluateProofForRequest(
   verifyRequest: VerifyRequest,
   proof: RequestProof,
   nowSeconds: number,
-  purpose: string,
+  purpose: RequestProofPurposeV1,
 ): Promise<Omit<RequestProofEvaluation, "mode">> {
   const maxSkewSeconds = parsePositiveInt(env.REQUEST_SIGNATURE_MAX_SKEW_SECONDS, 300, 3600);
   if (Math.abs(nowSeconds - proof.request_timestamp) > maxSkewSeconds) {
@@ -683,10 +678,11 @@ async function evaluateProofForRequest(
 
   let valid: boolean;
   try {
-    valid = await verifyRequestSignature(
+    valid = await verifyRequestProofSignature(
+      canonicalRequestProofPayload(requestProofPayloadFields(verifyRequest, purpose)),
       device.public_key_spki_der_base64,
-      canonicalRequestProofPayload(verifyRequest, purpose),
       proof.signature,
+      proof.device_key_id,
     );
   } catch (error) {
     return {
@@ -785,7 +781,7 @@ export async function checkDeviceProof(
   },
   proof: RequestProof | undefined,
   now: number,
-  purpose: string,
+  purpose: RequestProofPurposeV1,
 ): Promise<{ ok: boolean; code?: string; proven: boolean }> {
   const mode = deviceProofMode(env);
   if (mode === null) return { ok: false, code: "config_error", proven: false };

@@ -87,7 +87,7 @@ generic dumping-ground package:
 | Boundary | Files | Lines |
 | --- | ---: | ---: |
 | Admin | 90 | 16,432 |
-| Licensing backend | 34 | 6,312 |
+| Licensing backend | 36 | 6,590 |
 | Customer portal | 25 | 4,464 |
 | D1 backup | 5 | 637 |
 
@@ -108,7 +108,7 @@ implicit architecture:
 | `src/library/licensecc.cpp` | 1,462 |
 | `services/cloudflare-license-admin/src/worker/openapi/components.ts` | 1,308 |
 | `services/cloudflare-licensing-backend/src/fulfillment/order_ingest.mjs` | 1,159 |
-| `services/cloudflare-licensing-backend/src/routes/verify.ts` | 987 |
+| `services/cloudflare-licensing-backend/src/routes/verify.ts` | 983 |
 | `services/cloudflare-customer-portal/src/ui/main.tsx` | 875 |
 | `services/cloudflare-d1-backup/src/core.ts` | 326 |
 

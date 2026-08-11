@@ -1,0 +1,11 @@
+purpose=licensecc-online-request
+version=1
+alg=ecdsa-p256-sha256
+project=DEFAULT
+feature=EXPORT
+license-fingerprint=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+device-hash=
+nonce=f0e1d2c3b4a59687f0e1d2c3b4a59687f0e1d2c3b4a59687f0e1d2c3b4a59687
+request-timestamp=1700000000
+client-hardening=5
+device-key-id=sha256:05981a71c7cfb19d24983370f771e905de3bace2b70b8a90c103da44018d51ab

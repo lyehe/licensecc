@@ -3,6 +3,12 @@
   "version": "0.1.0-rc.1",
   "private": true,
   "type": "module",
+  "exports": {
+    "./device/request_proof": {
+      "types": "./src/device/request_proof.d.ts",
+      "default": "./src/device/request_proof.mjs"
+    }
+  },
   "dependencies": {
     "@licensecc/cloudflare-runtime": "file:../../packages/cloudflare-runtime",
     "@licensecc/licensing-domain": "file:../../packages/licensing-domain",
