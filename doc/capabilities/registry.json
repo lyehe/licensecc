@@ -126,7 +126,7 @@
       "public_docs": ["doc/capabilities/index.rst"],
       "evidence": [
         {"kind": "limitation", "surface": "C++ compatibility enum", "path": "include/licensecc/datatypes.h", "selector": "LCC_REMOTE  // remote licenses are not supported now.", "assertion": "The legacy remote license type is explicitly unsupported."},
-        {"kind": "automated_test", "surface": "C++ compatibility enum", "path": "test/library/public_api_test.cpp", "selector": "BOOST_AUTO_TEST_CASE(public_api_symbols_are_linkable)", "assertion": "The compatibility enum remains covered by the public-API test."}
+        {"kind": "automated_test", "surface": "C++ compatibility enum", "path": "test/library/public_api_test.cpp", "selector": "BOOST_AUTO_TEST_CASE(public_abi_enum_values_are_stable)", "assertion": "The compatibility enum remains covered by the public-API test."}
       ]
     },
     {
@@ -185,7 +185,7 @@
       "evidence": [
         {"kind": "implementation", "surface": "admin Worker", "path": "services/cloudflare-license-admin/src/worker/groups/entitlements.ts", "selector": "operationDescriptor(\"entitlements\", \"admin\", \"POST\", \"/api/admin/entitlements\")", "assertion": "The admin Worker implements entitlement administration."},
         {"kind": "route_contract", "surface": "admin Worker", "path": "test/contracts/admin.json", "selector": "POST /api/admin/entitlements", "assertion": "The canonical admin contract exposes entitlement administration."},
-        {"kind": "automated_test", "surface": "admin Worker", "path": "services/cloudflare-license-admin/test/worker/transition-contracts.test.mjs", "selector": "test(\"compiled device transition state matrix distinguishes changes, no-ops, and terminal conflicts\"", "assertion": "The admin Worker entitlement transitions have automated coverage."},
+        {"kind": "automated_test", "surface": "admin Worker", "path": "services/cloudflare-license-admin/test/worker/transition-contracts.test.mjs", "selector": "test(\"compiled entitlement transition state matrix distinguishes changes, no-ops, and terminal conflicts\"", "assertion": "The admin Worker entitlement transitions have automated coverage."},
         {"kind": "implementation", "surface": "admin UI", "path": "services/cloudflare-license-admin/src/ui/app/App.tsx", "selector": "export function App(): React.ReactElement {", "assertion": "The admin UI application component is implemented."},
         {"kind": "automated_test", "surface": "admin UI", "path": "services/cloudflare-license-admin/test/admin-ui.e2e.mjs", "selector": "test(\"admin UI completes entitlement lifecycle and blocks duplicate create submissions\"", "assertion": "The admin UI entitlement lifecycle is covered by browser automation."}
       ]
@@ -200,7 +200,7 @@
       "replaces": [],
       "public_docs": ["doc/capabilities/index.rst"],
       "evidence": [
-        {"kind": "implementation", "surface": "customer portal Worker", "path": "services/cloudflare-customer-portal/src/worker/routes/self-service.ts", "selector": "\"GET /api/portal/entitlements\":", "assertion": "The portal Worker implements entitlement self-service."},
+        {"kind": "implementation", "surface": "customer portal Worker", "path": "services/cloudflare-customer-portal/src/worker/routes/self-service.ts", "selector": "async function apiEntitlements(", "assertion": "The portal Worker implements entitlement self-service."},
         {"kind": "route_contract", "surface": "customer portal Worker", "path": "test/contracts/portal.json", "selector": "GET /api/portal/entitlements", "assertion": "The canonical portal contract exposes entitlement self-service."},
         {"kind": "automated_test", "surface": "customer portal Worker", "path": "services/cloudflare-customer-portal/test/portal-worker-self-service.test.mjs", "selector": "test(\"A's /api/portal/entitlements returns ONLY A's entitlements\"", "assertion": "Portal self-service isolation has automated coverage."},
         {"kind": "implementation", "surface": "portal UI", "path": "services/cloudflare-customer-portal/src/ui/main.tsx", "selector": "function App(): React.ReactElement {", "assertion": "The portal UI application component is implemented."},
@@ -219,8 +219,8 @@
       "evidence": [
         {"kind": "implementation", "surface": "backup Workflow/R2", "path": "services/cloudflare-d1-backup/src/index.ts", "selector": "export class D1BackupWorkflow", "assertion": "The backup deployable implements a Workflow export."},
         {"kind": "automated_test", "surface": "backup Workflow/R2", "path": "services/cloudflare-d1-backup/test/backup-core.test.mjs", "selector": "test(\"R2 save writes SQL stream and metadata manifest\"", "assertion": "The Workflow/R2 backup path has automated coverage."},
-        {"kind": "implementation", "surface": "restore drill CLI", "path": "services/cloudflare-d1-backup/scripts/restore-drill.mjs", "selector": "function restoreToScratch(options, sqlFile)", "assertion": "The restore drill implements scratch-database restoration."},
-        {"kind": "automated_test", "surface": "restore drill CLI", "path": "services/cloudflare-d1-backup/test/backup-restore-drill.test.mjs", "selector": "test(\"restore drill supports remote R2 source and optional source comparison\"", "assertion": "The remote-R2 restore drill has automated coverage."}
+        {"kind": "implementation", "surface": "restore drill CLI", "path": "services/cloudflare-d1-backup/scripts/restore-drill.mjs", "selector": "function restoreToScratch(options, sqlFile, execute = runWrangler)", "assertion": "The restore drill implements scratch-database restoration."},
+        {"kind": "automated_test", "surface": "restore drill CLI", "path": "services/cloudflare-d1-backup/test/backup-restore-drill.test.mjs", "selector": "test(\"restore drill executes the SQL file against the confirmed scratch D1 database\"", "assertion": "The restore drill executes the confirmed SQL file against scratch D1 in an automated test."}
       ]
     },
     {
