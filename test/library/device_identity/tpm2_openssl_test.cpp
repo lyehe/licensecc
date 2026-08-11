@@ -40,6 +40,7 @@ bool tpm2_openssl_decode_der_signature_for_test(const unsigned char* data,
 bool tpm2_openssl_nested_error_scope_preserves_for_test() noexcept;
 bool tpm2_openssl_error_queue_round_trip_for_test() noexcept;
 bool tpm2_openssl_error_queue_segments_for_test() noexcept;
+const char* tpm2_openssl_test_stage_for_test() noexcept;
 }  // namespace device_identity
 }  // namespace license
 
@@ -1739,6 +1740,8 @@ int run_real(const char* storage_directory) {
     const LCC_DEVICE_RESULT create_result = provider->create(request);
     if (create_result != LCC_DEVICE_OK) {
         std::cerr << "TPM2 provider create result=" << static_cast<int>(create_result) << '\n';
+        std::cerr << "TPM2 provider create stage="
+                  << license::device_identity::tpm2_openssl_test_stage_for_test() << '\n';
     }
     require(create_result == LCC_DEVICE_OK, "TPM2 provider create");
     license::device_identity::P256Spki spki{};
