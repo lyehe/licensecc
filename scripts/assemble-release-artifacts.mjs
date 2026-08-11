@@ -899,6 +899,14 @@ function xmlSingleText(node, localName, label) {
   return value;
 }
 
+function xmlSingleDirectText(node, name, label) {
+  const values = node.children.filter((child) => child.name === name);
+  if (values.length !== 1 || values[0].children.length !== 0) throw new Error(`${label} has invalid ${name} metadata`);
+  const value = values[0].text.join("").trim();
+  if (!value) throw new Error(`${label} has invalid ${name} metadata`);
+  return value;
+}
+
 function xmlAttribute(node, name, label) {
   const value = node.attributes.get(name);
   if (!value) throw new Error(`${label} is missing XML attribute ${name}`);
@@ -975,7 +983,17 @@ function canonicalNugetRelationships(packageId, corePath) {
 }
 
 const NUGET_CORE_MEMBER = "package/services/metadata/core-properties/licensecc.release.psmdcp";
+const NUGET_CONTENT_TYPES_NAMESPACE = "http://schemas.openxmlformats.org/package/2006/content-types";
 const NUGET_RELATIONSHIP_NAMESPACE = "http://schemas.openxmlformats.org/package/2006/relationships";
+const NUGET_NUSPEC_2012_NAMESPACE = "http://schemas.microsoft.com/packaging/2012/06/nuspec.xsd";
+const NUGET_NUSPEC_NAMESPACE = "http://schemas.microsoft.com/packaging/2013/05/nuspec.xsd";
+const NUGET_CORE_PROPERTIES_NAMESPACE = "http://schemas.openxmlformats.org/package/2006/metadata/core-properties";
+const DUBLIN_CORE_ELEMENTS_NAMESPACE = "http://purl.org/dc/elements/1.1/";
+// The pinned SDK emits the 2012/06 nuspec schema.  Only that native schema
+// and the current published schema are accepted; a missing/foreign namespace
+// is not a valid release package.
+const NUGET_NUSPEC_ROOT_NAMESPACES = new Set([NUGET_NUSPEC_2012_NAMESPACE, NUGET_NUSPEC_NAMESPACE]);
+const NUGET_CORE_ROOT_NAMESPACES = new Set([NUGET_CORE_PROPERTIES_NAMESPACE]);
 const NUGET_RELATIONSHIP_TYPES = Object.freeze({
   manifest: "http://schemas.microsoft.com/packaging/2010/07/manifest",
   core: "http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties",
@@ -994,12 +1012,12 @@ function normalizeOpcTarget(value, label) {
 
 function validateOpcContentTypes(files, label) {
   const root = parseXml(requiredArchiveMember(files, "[Content_Types].xml", label), `${label} [Content_Types].xml`);
-  if (xmlLocalName(root.name) !== "Types") throw new Error(`${label} has an invalid OPC content-types root`);
+  if (root.name !== "Types" || root.attributes.get("xmlns") !== NUGET_CONTENT_TYPES_NAMESPACE || root.text.join("").trim()) throw new Error(`${label} has an invalid OPC content-types root`);
   const defaults = new Map();
   const overrides = new Map();
   for (const child of root.children) {
-    const local = xmlLocalName(child.name);
-    if (local !== "Default" && local !== "Override" || child.children.length !== 0 || child.text.join("").trim()) throw new Error(`${label} has an invalid OPC content-types entry`);
+    const local = child.name;
+    if ((local !== "Default" && local !== "Override") || child.children.length !== 0 || child.text.join("").trim()) throw new Error(`${label} has an invalid OPC content-types entry`);
     const contentType = xmlAttribute(child, "ContentType", `${label} OPC content types`);
     if (local === "Default") {
       const extension = xmlAttribute(child, "Extension", `${label} OPC content types`).toLowerCase();
@@ -1024,8 +1042,8 @@ function validateOpcContentTypes(files, label) {
 
 function validateNugetRelationships(files, packageId, coreMember, label) {
   const root = parseXml(requiredArchiveMember(files, "_rels/.rels", label), `${label} relationships`);
-  if (xmlLocalName(root.name) !== "Relationships" || root.attributes.get("xmlns") !== NUGET_RELATIONSHIP_NAMESPACE || root.text.join("").trim()) throw new Error(`${label} relationships have an invalid OPC root`);
-  const relationships = xmlChildren(root, "Relationship");
+  if (root.name !== "Relationships" || root.attributes.get("xmlns") !== NUGET_RELATIONSHIP_NAMESPACE || root.text.join("").trim()) throw new Error(`${label} relationships have an invalid OPC root`);
+  const relationships = root.children.filter((child) => child.name === "Relationship");
   if (relationships.length !== 2 || root.children.length !== relationships.length) throw new Error(`${label} relationships must contain exactly manifest and core bindings`);
   const expected = new Map([
     [NUGET_RELATIONSHIP_TYPES.manifest, `${packageId}.nuspec`],
@@ -1052,21 +1070,289 @@ function nugetExpectedMembers(packageId, symbols, coreMember) {
     : [...common, "README.md", "lib/net8.0/Licensecc.Client.dll", "lib/net8.0/Licensecc.Client.xml"];
 }
 
+function boundedSlice(bytes, offset, length, label) {
+  if (!Buffer.isBuffer(bytes) || !Number.isSafeInteger(offset) || !Number.isSafeInteger(length) || offset < 0 || length < 0 || offset + length > bytes.length) throw new Error(`${label} is truncated or has an invalid range`);
+  return bytes.subarray(offset, offset + length);
+}
+
+function readU16(bytes, offset, label) {
+  return boundedSlice(bytes, offset, 2, label).readUInt16LE(0);
+}
+
+function readU32(bytes, offset, label) {
+  return boundedSlice(bytes, offset, 4, label).readUInt32LE(0);
+}
+
+function readU64(bytes, offset, label) {
+  return boundedSlice(bytes, offset, 8, label).readBigUInt64LE(0);
+}
+
+function alignFour(value, label) {
+  if (!Number.isSafeInteger(value) || value < 0 || value > 0x7ffffffc) throw new Error(`${label} has an invalid alignment`);
+  return (value + 3) & ~3;
+}
+
+function bitCount(value) {
+  let count = 0;
+  for (let cursor = value; cursor !== 0n; cursor >>= 1n) count += Number(cursor & 1n);
+  return count;
+}
+
+const CODED_METADATA_INDEXES = Object.freeze({
+  HasConstant: { bits: 2, tables: [4, 8, 23] },
+  HasCustomAttribute: { bits: 5, tables: [6, 4, 1, 2, 8, 9, 10, 0, 14, 23, 20, 17, 26, 27, 32, 35, 38, 39, 40, 42, 44, 43] },
+  CustomAttributeType: { bits: 3, tables: [6, 10] },
+  HasCustomDebugInformation: { bits: 5, tables: [6, 4, 1, 2, 8, 9, 10, 0, 14, 23, 20, 17, 26, 27, 32, 35, 38, 39, 40, 42, 44, 43, 48, 50, 51, 52, 53] },
+  HasDeclSecurity: { bits: 2, tables: [2, 6, 32] },
+  HasFieldMarshal: { bits: 1, tables: [4, 8] },
+  HasSemantics: { bits: 1, tables: [20, 23] },
+  Implementation: { bits: 2, tables: [38, 35, 39] },
+  MemberForwarded: { bits: 1, tables: [4, 6] },
+  MemberRefParent: { bits: 3, tables: [2, 1, 26, 6, 27] },
+  MethodDefOrRef: { bits: 1, tables: [6, 10] },
+  ResolutionScope: { bits: 2, tables: [0, 26, 35, 1] },
+  TypeDefOrRef: { bits: 2, tables: [2, 1, 27] },
+  TypeOrMethodDef: { bits: 1, tables: [2, 6] },
+});
+
+const METADATA_TABLE_SCHEMAS = new Map([
+  [0, ["u2", "string", "guid", "guid", "guid"]],
+  [1, ["c:ResolutionScope", "string", "string"]],
+  [2, ["u4", "string", "string", "c:TypeDefOrRef", "t:4", "t:6"]],
+  [3, ["t:4"]],
+  [4, ["u2", "string", "blob"]],
+  [5, ["t:6"]],
+  [6, ["u4", "u2", "u2", "string", "blob", "t:8"]],
+  [7, ["t:8"]],
+  [8, ["u2", "u2", "string"]],
+  [9, ["t:2", "c:TypeDefOrRef"]],
+  [10, ["c:MemberRefParent", "string", "blob"]],
+  [11, ["u2", "c:HasConstant", "blob"]],
+  [12, ["c:HasCustomAttribute", "c:CustomAttributeType", "blob"]],
+  [13, ["c:HasFieldMarshal", "blob"]],
+  [14, ["u2", "c:HasDeclSecurity", "blob"]],
+  [15, ["u2", "u4", "t:2"]],
+  [16, ["u4", "t:4"]],
+  [17, ["blob"]],
+  [18, ["t:2", "t:20"]],
+  [19, ["t:20"]],
+  [20, ["u2", "string", "c:TypeDefOrRef"]],
+  [21, ["t:2", "t:23"]],
+  [22, ["t:23"]],
+  [23, ["u2", "string", "blob"]],
+  [24, ["u2", "t:6", "c:HasSemantics"]],
+  [25, ["t:2", "c:MethodDefOrRef", "c:MethodDefOrRef"]],
+  [26, ["string"]],
+  [27, ["blob"]],
+  [28, ["u2", "c:MemberForwarded", "string", "t:26"]],
+  [29, ["u4", "t:4"]],
+  [30, ["u4", "u4"]],
+  [31, ["u4"]],
+  [32, ["u4", "u2", "u2", "u2", "u2", "u4", "blob", "string", "string"]],
+  [33, ["u4"]],
+  [34, ["u4", "u4", "u4"]],
+  [35, ["u2", "u2", "u2", "u2", "u4", "blob", "string", "string", "blob"]],
+  [36, ["u4", "t:35"]],
+  [37, ["u4", "u4", "u4", "t:35"]],
+  [38, ["u4", "string", "blob"]],
+  [39, ["u4", "u4", "string", "string", "c:Implementation"]],
+  [40, ["u4", "u4", "string", "c:Implementation"]],
+  [41, ["t:2", "t:2"]],
+  [42, ["u2", "u2", "c:TypeOrMethodDef", "string"]],
+  [43, ["c:MethodDefOrRef", "blob"]],
+  [44, ["t:42", "c:TypeDefOrRef"]],
+  [48, ["blob", "guid", "blob", "guid"]],
+  [49, ["t:48", "blob"]],
+  [50, ["t:6", "t:53", "t:51", "t:52", "u4", "u4"]],
+  [51, ["u2", "u2", "string"]],
+  [52, ["string", "blob"]],
+  [53, ["t:53", "blob"]],
+  [54, ["t:6", "t:6"]],
+  [55, ["c:HasCustomDebugInformation", "guid", "blob"]],
+]);
+
+function metadataColumnSize(column, rows, heapSizes, label) {
+  if (column === "u2") return 2;
+  if (column === "u4") return 4;
+  if (column === "string") return (heapSizes & 0x01) === 0 ? 2 : 4;
+  if (column === "guid") return (heapSizes & 0x02) === 0 ? 2 : 4;
+  if (column === "blob") return (heapSizes & 0x04) === 0 ? 2 : 4;
+  if (column.startsWith("t:")) {
+    const table = Number.parseInt(column.slice(2), 10);
+    if (!Number.isInteger(table) || table < 0 || table >= rows.length) throw new Error(`${label} references an invalid metadata table`);
+    return rows[table] < 0x10000 ? 2 : 4;
+  }
+  if (column.startsWith("c:")) {
+    const coded = CODED_METADATA_INDEXES[column.slice(2)];
+    if (!coded) throw new Error(`${label} references an unsupported coded metadata index`);
+    const largest = Math.max(...coded.tables.map((table) => rows[table]));
+    return largest < 2 ** (16 - coded.bits) ? 2 : 4;
+  }
+  throw new Error(`${label} has an unsupported metadata column`);
+}
+
+function validateMetadataTables(bytes, label, { typeSystemRows } = {}) {
+  if (bytes.length < 24) throw new Error(`${label} metadata tables stream is truncated`);
+  if (bytes[4] === 0 || bytes[7] !== 1 || (bytes[6] & ~0x07) !== 0) throw new Error(`${label} metadata tables stream has an invalid header`);
+  const valid = readU64(bytes, 8, `${label} metadata tables`);
+  // A producer may advertise sortability for an empty table, so `Sorted` is
+  // intentionally parsed for bounds but is not required to be a subset of
+  // `Valid`.  The row-count and schema closure below are authoritative.
+  readU64(bytes, 16, `${label} metadata tables`);
+  if (valid === 0n) throw new Error(`${label} metadata tables stream has an invalid table mask`);
+  let offset = 24;
+  const rows = Array(64).fill(0);
+  let totalRows = 0;
+  for (let table = 0; table < 64; table += 1) {
+    if ((valid & (1n << BigInt(table))) === 0n) continue;
+    const rowCount = readU32(bytes, offset, `${label} metadata tables row count`);
+    offset += 4;
+    rows[table] = rowCount;
+    totalRows += rowCount;
+    if (!Number.isSafeInteger(totalRows) || totalRows > MAX_ARCHIVE_ENTRIES * MAX_ARCHIVE_ENTRIES) throw new Error(`${label} metadata tables have an unreasonable row count`);
+  }
+  let required = 0;
+  const indexRows = rows.map((rowCount, table) => rowCount || typeSystemRows?.[table] || 0);
+  for (let table = 0; table < 64; table += 1) {
+    if ((valid & (1n << BigInt(table))) === 0n) continue;
+    const schema = METADATA_TABLE_SCHEMAS.get(table);
+    if (!schema) throw new Error(`${label} metadata tables contain an unsupported table`);
+    const rowSize = schema.reduce((size, column) => size + metadataColumnSize(column, indexRows, bytes[6], `${label} metadata tables`), 0);
+    required += rowSize * rows[table];
+    if (!Number.isSafeInteger(required) || required > bytes.length - offset) throw new Error(`${label} metadata tables stream is truncated at table ${table}`);
+  }
+  const trailing = bytes.length - offset - required;
+  if (totalRows === 0 || trailing < 0) throw new Error(`${label} metadata tables stream is truncated (requires ${required} row bytes after ${offset} bytes of headers; has ${bytes.length - offset})`);
+  // The pinned Portable-PDB writer preserves one 4-byte stream-alignment tail
+  // after table data.  It is not a table row and must remain tightly bounded.
+  if (trailing > 4) throw new Error(`${label} metadata tables stream has an oversized trailing region`);
+}
+
+function validatePortablePdbStream(bytes, label) {
+  if (bytes.length < 32) throw new Error(`${label} #Pdb stream is truncated`);
+  const referencedTables = readU64(bytes, 24, `${label} #Pdb stream`);
+  const rows = Array(64).fill(0);
+  let offset = 32;
+  for (let table = 0; table < 64; table += 1) {
+    if ((referencedTables & (1n << BigInt(table))) === 0n) continue;
+    rows[table] = readU32(bytes, offset, `${label} #Pdb stream`);
+    offset += 4;
+  }
+  if (offset !== 32 + bitCount(referencedTables) * 4 || offset !== bytes.length) throw new Error(`${label} #Pdb stream has invalid trailing data`);
+  return rows;
+}
+
+function parseManagedMetadata(bytes, label, { portablePdb = false } = {}) {
+  if (!Buffer.isBuffer(bytes) || bytes.length < 24 || bytes.subarray(0, 4).toString("ascii") !== "BSJB") throw new Error(`${label} is not managed metadata`);
+  const major = readU16(bytes, 4, `${label} metadata`);
+  const minor = readU16(bytes, 6, `${label} metadata`);
+  if (major === 0 || minor > 0xff) throw new Error(`${label} metadata has an invalid version header`);
+  const versionLength = readU32(bytes, 12, `${label} metadata`);
+  if (versionLength === 0 || versionLength > 1024) throw new Error(`${label} metadata has an invalid version string length`);
+  const version = strictUtf8(boundedSlice(bytes, 16, versionLength, `${label} metadata version`), `${label} metadata version`).replace(/\0+$/u, "");
+  if (portablePdb ? !/^PDB v\d+\.\d+(?:\.\d+)?$/u.test(version) : !/^v\d+\.\d+(?:\.\d+)?$/u.test(version)) throw new Error(`${label} metadata has an invalid version string`);
+  const header = alignFour(16 + versionLength, `${label} metadata`);
+  readU16(bytes, header, `${label} metadata flags`);
+  const streamCount = readU16(bytes, header + 2, `${label} metadata`);
+  if (streamCount < 4 || streamCount > 64) throw new Error(`${label} metadata has an invalid stream count`);
+  let offset = header + 4;
+  const streams = new Map();
+  const ranges = [];
+  const allowedStreams = new Set(["#~", "#-", "#Strings", "#US", "#GUID", "#Blob", "#Pdb"]);
+  for (let stream = 0; stream < streamCount; stream += 1) {
+    const streamOffset = readU32(bytes, offset, `${label} metadata stream`);
+    const streamLength = readU32(bytes, offset + 4, `${label} metadata stream`);
+    const nameStart = offset + 8;
+    const maximumNameEnd = Math.min(bytes.length, nameStart + 64);
+    let nameEnd = -1;
+    for (let cursor = nameStart; cursor < maximumNameEnd; cursor += 1) {
+      if (bytes[cursor] === 0) {
+        nameEnd = cursor;
+        break;
+      }
+    }
+    if (nameEnd < 0) throw new Error(`${label} metadata has an unterminated stream name`);
+    const name = bytes.subarray(nameStart, nameEnd).toString("ascii");
+    if (!allowedStreams.has(name) || streams.has(name)) throw new Error(`${label} metadata has an unsupported or duplicate stream`);
+    offset = alignFour(nameEnd + 1, `${label} metadata stream header`);
+    if (streamOffset < offset || streamLength === 0) throw new Error(`${label} metadata stream has an invalid range`);
+    const contents = boundedSlice(bytes, streamOffset, streamLength, `${label} metadata stream ${name}`);
+    streams.set(name, contents);
+    ranges.push({ start: streamOffset, end: streamOffset + streamLength });
+  }
+  if (ranges.some((range) => range.start < offset)) throw new Error(`${label} metadata stream overlaps its header table`);
+  ranges.sort((left, right) => left.start - right.start);
+  for (let index = 1; index < ranges.length; index += 1) {
+    if (ranges[index - 1].end > ranges[index].start) throw new Error(`${label} metadata streams overlap`);
+  }
+  const tableStreams = ["#~", "#-"].filter((name) => streams.has(name));
+  if (tableStreams.length !== 1 || !streams.has("#Strings") || !streams.has("#GUID") || !streams.has("#Blob")) throw new Error(`${label} metadata has an incomplete stream table`);
+  let typeSystemRows;
+  if (portablePdb) {
+    if (!streams.has("#Pdb")) throw new Error(`${label} is missing its portable PDB stream`);
+    typeSystemRows = validatePortablePdbStream(streams.get("#Pdb"), label);
+  }
+  validateMetadataTables(streams.get(tableStreams[0]), label, { typeSystemRows });
+  return streams;
+}
+
 function validatePeDll(contents, label) {
-  if (!Buffer.isBuffer(contents) || contents.length < 0xa0 || contents.subarray(0, 2).toString("ascii") !== "MZ") throw new Error(`${label} is not a PE DLL`);
-  const offset = contents.readUInt32LE(0x3c);
-  if (!Number.isSafeInteger(offset) || offset < 0x40 || offset + 24 > contents.length || contents.subarray(offset, offset + 4).toString("ascii") !== "PE\0\0") throw new Error(`${label} is not a PE DLL`);
-  const machine = contents.readUInt16LE(offset + 4);
-  const sections = contents.readUInt16LE(offset + 6);
-  const optionalSize = contents.readUInt16LE(offset + 20);
-  const characteristics = contents.readUInt16LE(offset + 22);
-  if (![0x14c, 0x8664, 0xaa64].includes(machine) || sections === 0 || optionalSize < 2 || offset + 24 + optionalSize > contents.length || (characteristics & 0x2000) === 0 || ![0x10b, 0x20b].includes(contents.readUInt16LE(offset + 24))) throw new Error(`${label} is not a PE DLL`);
+  if (!Buffer.isBuffer(contents) || contents.length < 0x100 || contents.subarray(0, 2).toString("ascii") !== "MZ") throw new Error(`${label} is not a PE DLL`);
+  const peOffset = readU32(contents, 0x3c, `${label} DOS header`);
+  if (peOffset < 0x40 || boundedSlice(contents, peOffset, 24, `${label} PE header`).subarray(0, 4).toString("ascii") !== "PE\0\0") throw new Error(`${label} is not a PE DLL`);
+  const machine = readU16(contents, peOffset + 4, `${label} COFF header`);
+  const sectionCount = readU16(contents, peOffset + 6, `${label} COFF header`);
+  const optionalSize = readU16(contents, peOffset + 20, `${label} COFF header`);
+  const characteristics = readU16(contents, peOffset + 22, `${label} COFF header`);
+  const optional = peOffset + 24;
+  const magic = readU16(contents, optional, `${label} optional header`);
+  if (![0x14c, 0x8664, 0xaa64].includes(machine) || sectionCount === 0 || sectionCount > 96 || (characteristics & 0x2000) === 0 || ![0x10b, 0x20b].includes(magic)) throw new Error(`${label} is not a PE DLL`);
+  const dataDirectoryOffset = optional + (magic === 0x10b ? 96 : 112);
+  const dataDirectoryCountOffset = optional + (magic === 0x10b ? 92 : 108);
+  const minimumOptionalSize = dataDirectoryOffset - optional + 15 * 8;
+  if (optionalSize < minimumOptionalSize || readU32(contents, dataDirectoryCountOffset, `${label} optional header`) < 15) throw new Error(`${label} PE header does not expose a CLR metadata directory`);
+  const headersEnd = optional + optionalSize + sectionCount * 40;
+  boundedSlice(contents, optional, optionalSize, `${label} optional header`);
+  boundedSlice(contents, optional + optionalSize, sectionCount * 40, `${label} section table`);
+  const sections = [];
+  for (let index = 0; index < sectionCount; index += 1) {
+    const header = optional + optionalSize + index * 40;
+    const virtualSize = readU32(contents, header + 8, `${label} section`);
+    const virtualAddress = readU32(contents, header + 12, `${label} section`);
+    const rawSize = readU32(contents, header + 16, `${label} section`);
+    const rawOffset = readU32(contents, header + 20, `${label} section`);
+    const span = Math.max(virtualSize, rawSize);
+    if (virtualAddress === 0 || span === 0 || (rawSize > 0 && rawOffset < headersEnd)) throw new Error(`${label} PE section table is invalid`);
+    if (rawSize > 0) boundedSlice(contents, rawOffset, rawSize, `${label} section`);
+    sections.push({ virtualAddress, span, rawOffset, rawSize });
+  }
+  sections.sort((left, right) => left.virtualAddress - right.virtualAddress);
+  for (let index = 1; index < sections.length; index += 1) {
+    if (sections[index - 1].virtualAddress + sections[index - 1].span > sections[index].virtualAddress) throw new Error(`${label} PE sections overlap`);
+  }
+  const rvaToOffset = (rva, length, rangeLabel) => {
+    const section = sections.find((entry) => rva >= entry.virtualAddress && rva < entry.virtualAddress + entry.span);
+    if (!section) throw new Error(`${rangeLabel} is outside the PE sections`);
+    const relativeOffset = rva - section.virtualAddress;
+    if (relativeOffset + length > section.rawSize) throw new Error(`${rangeLabel} exceeds its PE section bounds`);
+    return section.rawOffset + relativeOffset;
+  };
+  const clrDirectory = dataDirectoryOffset + 14 * 8;
+  const clrRva = readU32(contents, clrDirectory, `${label} CLR directory`);
+  const clrSize = readU32(contents, clrDirectory + 4, `${label} CLR directory`);
+  if (clrRva === 0 || clrSize < 0x48 || clrSize > MAX_ARCHIVE_MEMBER_BYTES) throw new Error(`${label} has no bounded CLR metadata directory`);
+  const clrOffset = rvaToOffset(clrRva, clrSize, `${label} CLR header`);
+  const clrHeader = boundedSlice(contents, clrOffset, 0x48, `${label} CLR header`);
+  if (readU32(clrHeader, 0, `${label} CLR header`) < 0x48) throw new Error(`${label} CLR header is invalid`);
+  const metadataRva = readU32(clrHeader, 8, `${label} CLR metadata`);
+  const metadataSize = readU32(clrHeader, 12, `${label} CLR metadata`);
+  if (metadataRva === 0 || metadataSize === 0 || metadataSize > MAX_ARCHIVE_MEMBER_BYTES) throw new Error(`${label} CLR metadata directory is invalid`);
+  const metadataOffset = rvaToOffset(metadataRva, metadataSize, `${label} CLR metadata`);
+  parseManagedMetadata(boundedSlice(contents, metadataOffset, metadataSize, `${label} CLR metadata`), `${label} CLR metadata`);
 }
 
 function validatePortablePdb(contents, label) {
-  if (!Buffer.isBuffer(contents) || contents.length < 24 || contents.subarray(0, 4).toString("ascii") !== "BSJB") throw new Error(`${label} is not a portable PDB`);
-  const versionBytes = contents.readUInt32LE(12);
-  if (!Number.isSafeInteger(versionBytes) || versionBytes === 0 || 16 + versionBytes > contents.length || !/^PDB v\d+\.\d+/u.test(contents.subarray(16, 16 + versionBytes).toString("ascii").replace(/\0+$/u, ""))) throw new Error(`${label} is not a portable PDB`);
+  parseManagedMetadata(contents, label, { portablePdb: true });
 }
 
 function nugetCoreMember(files, label, requireCanonicalCore) {
@@ -1085,16 +1371,17 @@ function validateNugetArtifact({ archivePath, packageId, platformVersion, symbol
   validateNugetRelationships(files, packageId, coreMember, label);
 
   const packageRoot = parseXml(requiredArchiveMember(files, `${packageId}.nuspec`, label), `${label} metadata`);
-  if (xmlLocalName(packageRoot.name) !== "package") throw new Error(`${label} metadata has an invalid nuspec root`);
-  const metadata = xmlChildren(packageRoot, "metadata");
-  if (metadata.length !== 1) throw new Error(`${label} metadata has an invalid nuspec metadata element`);
-  if (xmlSingleText(metadata[0], "id", `${label} metadata`) !== packageId || xmlSingleText(metadata[0], "version", `${label} metadata`) !== platformVersion) throw new Error(`${label} metadata does not carry the expected identity`);
-  const packageTypes = xmlChildren(metadata[0], "packageTypes");
-  const symbolTypes = packageTypes.flatMap((node) => xmlChildren(node, "packageType")).filter((node) => node.attributes.get("name") === "SymbolsPackage");
+  const nuspecNamespace = packageRoot.attributes.get("xmlns") ?? "";
+  if (packageRoot.name !== "package" || !NUGET_NUSPEC_ROOT_NAMESPACES.has(nuspecNamespace) || packageRoot.text.join("").trim()) throw new Error(`${label} metadata has an invalid nuspec root (${packageRoot.name}, ${JSON.stringify(nuspecNamespace)})`);
+  const metadata = packageRoot.children.filter((child) => child.name === "metadata");
+  if (metadata.length !== 1 || packageRoot.children.length !== 1) throw new Error(`${label} metadata has an invalid nuspec metadata element`);
+  if (xmlSingleDirectText(metadata[0], "id", `${label} metadata`) !== packageId || xmlSingleDirectText(metadata[0], "version", `${label} metadata`) !== platformVersion) throw new Error(`${label} metadata does not carry the expected identity`);
+  const packageTypes = metadata[0].children.filter((node) => node.name === "packageTypes");
+  const symbolTypes = packageTypes.flatMap((node) => node.children.filter((child) => child.name === "packageType")).filter((node) => node.attributes.get("name") === "SymbolsPackage");
   if (symbols ? symbolTypes.length !== 1 : packageTypes.length !== 0) throw new Error(symbols ? "NuGet symbols metadata does not declare exactly one SymbolsPackage" : "NuGet package metadata must not declare a symbols package type");
 
   const core = parseXml(requiredArchiveMember(files, coreMember, label), `${label} core metadata`);
-  if (xmlLocalName(core.name) !== "coreProperties" || xmlSingleText(core, "identifier", `${label} core metadata`) !== packageId || xmlSingleText(core, "version", `${label} core metadata`) !== platformVersion) throw new Error(`${label} core metadata does not carry the expected identity`);
+  if (core.name !== "coreProperties" || !NUGET_CORE_ROOT_NAMESPACES.has(core.attributes.get("xmlns") ?? "") || core.attributes.get("xmlns:dc") !== DUBLIN_CORE_ELEMENTS_NAMESPACE || core.text.join("").trim() || xmlSingleDirectText(core, "dc:identifier", `${label} core metadata`) !== packageId || xmlSingleDirectText(core, "version", `${label} core metadata`) !== platformVersion) throw new Error(`${label} core metadata does not carry the expected identity`);
   if (symbols) validatePortablePdb(requiredArchiveMember(files, "lib/net8.0/Licensecc.Client.pdb", label), `${label} PDB`);
   else validatePeDll(requiredArchiveMember(files, "lib/net8.0/Licensecc.Client.dll", label), `${label} DLL`);
   return { files, coreMember };
@@ -1319,6 +1606,9 @@ function sanitizedEnvironment(canonicalRoot, sourceDateEpoch) {
     SOURCE_DATE_EPOCH: String(sourceDateEpoch),
     TZ: "UTC",
     PYTHONHASHSEED: "0",
+    // The release build supplies one verified interpreter explicitly to uv;
+    // forbid its managed download fallback as a second line of defense.
+    UV_PYTHON_DOWNLOADS: "never",
     DOTNET_CLI_TELEMETRY_OPTOUT: "1",
     DOTNET_SKIP_FIRST_TIME_EXPERIENCE: "1",
     NUGET_XMLDOC_MODE: "skip",
@@ -1365,12 +1655,30 @@ function assertExactToolVersion({ executable, args = ["--version"], expected, pr
   const output = typeof result?.stdout === "string" ? result.stdout.trim() : "";
   const expression = prefix ? new RegExp(`^${prefix.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}\\s+${expected.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}(?:\\s|$)`, "u") : new RegExp(`^${expected.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}$`, "u");
   if (!expression.test(output)) throw new Error(`${label} must be exactly ${expected}; received ${output || "<no version output>"}`);
+  return output;
+}
+
+function verifiedPythonExecutable({ root, run, env }) {
+  const result = run({
+    executable: "python",
+    args: ["-c", "import os, sys; print(os.path.realpath(sys.executable))"],
+    cwd: root,
+    env,
+    label: "release Python executable",
+  });
+  const output = typeof result?.stdout === "string" ? result.stdout.trim() : "";
+  if (!output || /[\r\n\0]/u.test(output) || !isAbsolute(output) || !existsSync(output)) throw new Error("release Python executable must resolve to one existing absolute file");
+  const executable = realpathSync(output);
+  if (!lstatSync(executable).isFile()) throw new Error("release Python executable must resolve to a regular file");
+  return executable;
 }
 
 function assertReleaseToolchains({ root, run, env, toolchains, hasDotnet }) {
-  assertExactToolVersion({ executable: "python", expected: toolchains.pythonVersion, prefix: "Python", label: "release Python version", root, run, env });
+  const pythonExecutable = verifiedPythonExecutable({ root, run, env });
+  assertExactToolVersion({ executable: pythonExecutable, expected: toolchains.pythonVersion, prefix: "Python", label: "release Python version", root, run, env });
   assertExactToolVersion({ executable: "uv", expected: toolchains.uvVersion, prefix: "uv", label: "release uv version", root, run, env });
   if (hasDotnet) assertExactToolVersion({ executable: "dotnet", expected: toolchains.dotnetSdkVersion, label: "release .NET SDK version", root, run, env });
+  return { pythonExecutable };
 }
 
 function resolveLocalModule(root, request, label) {
@@ -1899,15 +2207,15 @@ function assembleReleaseArtifacts({ root = repositoryRoot, outputDirectory, cons
     try {
       assertCanonicalVersionContract({ sourceRoot: root, canonicalRoot: canonical });
       const env = sanitizedEnvironment(canonical, versions.sourceDateEpoch);
-      assertReleaseToolchains({ root: canonical, run, env, toolchains: versions.toolchains, hasDotnet });
+      const tooling = assertReleaseToolchains({ root: canonical, run, env, toolchains: versions.toolchains, hasDotnet });
       const npm = runCanonicalNpmInstall({ root: canonical, run, env });
       runWorkerAssembly({ root: canonical, outputDirectory: staging.output, run, env, staging, npm });
       // `uv build` deliberately has no --locked mode.  Validate the canonical
       // project lock first, then constrain and hash-check the isolated PEP 517
       // backend resolution used for the wheel and sdist.
-      run({ executable: "uv", args: ["lock", "--check", "--directory", join(canonical, "sdks/python")], cwd: canonical, env, label: "locked Python dependency check" });
+      run({ executable: "uv", args: ["lock", "--check", "--python", tooling.pythonExecutable, "--no-python-downloads", "--directory", join(canonical, "sdks/python")], cwd: canonical, env, label: "locked Python dependency check" });
       const pythonToolOutput = join(canonical, ".release-python-output");
-      run({ executable: "uv", args: ["build", "--directory", join(canonical, "sdks/python"), "--build-constraint", canonicalPythonBuildConstraint(canonical), "--require-hashes", "--wheel", "--sdist", "--out-dir", pythonToolOutput], cwd: canonical, env, label: "locked Python wheel and sdist" });
+      run({ executable: "uv", args: ["build", "--python", tooling.pythonExecutable, "--no-python-downloads", "--directory", join(canonical, "sdks/python"), "--build-constraint", canonicalPythonBuildConstraint(canonical), "--require-hashes", "--wheel", "--sdist", "--out-dir", pythonToolOutput], cwd: canonical, env, label: "locked Python wheel and sdist" });
       stagePythonArtifacts({ canonicalRoot: canonical, toolOutput: pythonToolOutput, stagingOutput: staging.output, pythonVersion: versions.pythonVersion });
       if (hasDotnet) {
         const dotnetProject = join(canonical, "sdks/dotnet/src/Licensecc.Client/Licensecc.Client.csproj");

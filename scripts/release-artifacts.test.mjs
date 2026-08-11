@@ -151,31 +151,95 @@ function sdistArtifact({ version = PYTHON_VERSION, name = "licensecc", metadataN
 }
 
 function nuspec({ id = "Licensecc.Client", version = PLATFORM_VERSION, symbols = false } = {}) {
-  return `<?xml version="1.0"?><package><metadata><id>${id}</id><version>${version}</version><authors>fixture</authors>${symbols ? "<packageTypes><packageType name=\"SymbolsPackage\" /></packageTypes>" : ""}</metadata></package>`;
+  return `<?xml version="1.0"?><package xmlns="http://schemas.microsoft.com/packaging/2012/06/nuspec.xsd"><metadata><id>${id}</id><version>${version}</version><authors>fixture</authors>${symbols ? "<packageTypes><packageType name=\"SymbolsPackage\" /></packageTypes>" : ""}</metadata></package>`;
 }
 
-function fakePeDll() {
-  const bytes = Buffer.alloc(0x200);
+function alignFour(value) {
+  return (value + 3) & ~3;
+}
+
+function managedMetadata({ portablePdb = false, missingPdbStream = false, truncatedTables = false, trailingTableBytes = 0, pdbTrailingBytes = 0, metadataTable = 0, metadataRows = 1, tableDataBytes = metadataTable === 0 ? 10 : 4, typeSystemRows = [] } = {}) {
+  const version = Buffer.from(`${portablePdb ? "PDB v1.0" : "v4.0.30319"}\0`, "ascii");
+  const versionLength = alignFour(version.length);
+  const streams = [
+    { name: "#~", contents: (() => {
+      const table = Buffer.alloc(truncatedTables ? 28 : 28 + tableDataBytes + trailingTableBytes);
+      table[4] = 2;
+      table[7] = 1;
+      table.writeBigUInt64LE(1n << BigInt(metadataTable), 8);
+      table.writeUInt32LE(metadataRows, 24);
+      if (trailingTableBytes > 0) table.fill(0x7f, 28 + tableDataBytes);
+      return table;
+    })() },
+    { name: "#Strings", contents: Buffer.from([0]) },
+    { name: "#GUID", contents: Buffer.alloc(16) },
+    { name: "#Blob", contents: Buffer.from([0]) },
+  ];
+  if (portablePdb && !missingPdbStream) {
+    const mask = typeSystemRows.reduce((value, [table]) => value | (1n << BigInt(table)), 0n);
+    const pdb = Buffer.alloc(32 + typeSystemRows.length * 4 + pdbTrailingBytes);
+    pdb.writeBigUInt64LE(mask, 24);
+    typeSystemRows.forEach(([, rows], index) => pdb.writeUInt32LE(rows, 32 + index * 4));
+    if (pdbTrailingBytes > 0) pdb.fill(0x7f, 32 + typeSystemRows.length * 4);
+    streams.push({ name: "#Pdb", contents: pdb });
+  }
+  const headerStart = 16 + versionLength;
+  const headerLength = 4 + streams.reduce((total, stream) => total + alignFour(8 + Buffer.byteLength(stream.name) + 1), 0);
+  let contentOffset = alignFour(headerStart + headerLength);
+  for (const stream of streams) {
+    stream.offset = contentOffset;
+    contentOffset += stream.contents.length;
+  }
+  const bytes = Buffer.alloc(contentOffset);
+  bytes.write("BSJB", 0, "ascii");
+  bytes.writeUInt16LE(1, 4);
+  bytes.writeUInt16LE(1, 6);
+  bytes.writeUInt32LE(versionLength, 12);
+  version.copy(bytes, 16);
+  bytes.writeUInt16LE(0, headerStart);
+  bytes.writeUInt16LE(streams.length, headerStart + 2);
+  let cursor = headerStart + 4;
+  for (const stream of streams) {
+    bytes.writeUInt32LE(stream.offset, cursor);
+    bytes.writeUInt32LE(stream.contents.length, cursor + 4);
+    bytes.write(stream.name, cursor + 8, "ascii");
+    cursor = alignFour(cursor + 8 + Buffer.byteLength(stream.name) + 1);
+    stream.contents.copy(bytes, stream.offset);
+  }
+  return bytes;
+}
+
+function fakePeDll({ missingClr = false, invalidSection = false, truncatedTables = false, trailingTableBytes = 0 } = {}) {
+  const metadata = managedMetadata({ truncatedTables, trailingTableBytes });
+  const bytes = Buffer.alloc(0x1200);
   bytes.write("MZ", 0, "ascii");
   bytes.writeUInt32LE(0x80, 0x3c);
   bytes.write("PE\0\0", 0x80, "ascii");
   bytes.writeUInt16LE(0x8664, 0x84);
   bytes.writeUInt16LE(1, 0x86);
-  bytes.writeUInt16LE(0xe0, 0x94);
+  bytes.writeUInt16LE(0xf0, 0x94);
   bytes.writeUInt16LE(0x2002, 0x96);
   bytes.writeUInt16LE(0x20b, 0x98);
+  bytes.writeUInt32LE(16, 0x104);
+  if (!missingClr) {
+    bytes.writeUInt32LE(0x2000, 0x178);
+    bytes.writeUInt32LE(0x48, 0x17c);
+  }
+  bytes.writeUInt32LE(0x1000, 0x190);
+  bytes.writeUInt32LE(0x2000, 0x194);
+  bytes.writeUInt32LE(0x1000, 0x198);
+  bytes.writeUInt32LE(invalidSection ? 0x1100 : 0x200, 0x19c);
+  bytes.writeUInt32LE(0x48, 0x200);
+  bytes.writeUInt16LE(2, 0x204);
+  bytes.writeUInt16LE(5, 0x206);
+  bytes.writeUInt32LE(0x2200, 0x208);
+  bytes.writeUInt32LE(metadata.length, 0x20c);
+  metadata.copy(bytes, 0x400);
   return bytes;
 }
 
-function fakePortablePdb() {
-  const bytes = Buffer.alloc(32);
-  bytes.write("BSJB", 0, "ascii");
-  bytes.writeUInt16LE(1, 4);
-  bytes.writeUInt16LE(1, 6);
-  bytes.writeUInt32LE(0, 8);
-  bytes.writeUInt32LE(8, 12);
-  bytes.write("PDB v1.0", 16, "ascii");
-  return bytes;
+function fakePortablePdb(options) {
+  return managedMetadata({ portablePdb: true, ...options });
 }
 
 function contentTypes(files) {
@@ -188,14 +252,14 @@ function contentTypes(files) {
   return `<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">${extensions.map((extension) => `<Default Extension="${extension}" ContentType="${type(extension)}"/>`).join("")}</Types>`;
 }
 
-function nugetArtifact({ id = "Licensecc.Client", metadataId = id, version = PLATFORM_VERSION, symbols = false, coreNonce = "licensecc.release", binaryContents, extraEntries = [], nuspecContents, contentTypesContents } = {}) {
+function nugetArtifact({ id = "Licensecc.Client", metadataId = id, version = PLATFORM_VERSION, symbols = false, coreNonce = "licensecc.release", binaryContents, extraEntries = [], nuspecContents, contentTypesContents, coreContents, relationshipsContents } = {}) {
   const core = `package/services/metadata/core-properties/${coreNonce}.psmdcp`;
   const relationships = `<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Type="http://schemas.microsoft.com/packaging/2010/07/manifest" Target="/${id}.nuspec" Id="R${coreNonce}Manifest"/><Relationship Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="/${core}" Id="R${coreNonce}Core"/></Relationships>`;
-  const coreProperties = `<?xml version="1.0"?><coreProperties xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier>${metadataId}</dc:identifier><version>${version}</version></coreProperties>`;
+  const coreProperties = `<?xml version="1.0"?><coreProperties xmlns="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier>${metadataId}</dc:identifier><version>${version}</version></coreProperties>`;
   const files = [
-    { name: "_rels/.rels", contents: relationships },
+    { name: "_rels/.rels", contents: relationshipsContents ?? relationships },
     { name: `${id}.nuspec`, contents: nuspecContents ?? nuspec({ id: metadataId, version, symbols }) },
-    { name: core, contents: coreProperties },
+    { name: core, contents: coreContents ?? coreProperties },
   ];
   if (symbols) files.push({ name: "lib/net8.0/Licensecc.Client.pdb", contents: binaryContents ?? fakePortablePdb() });
   else files.push(
@@ -268,12 +332,13 @@ function valueAfter(args, flag) {
   return args[index + 1];
 }
 
-function fakeRun(commands, { symbols = true, failLabel, wrongSymbol = false, wrongPython = false, invalidArtifact, workerVariant = false, workerEphemera = false, nugetEphemera = false, pythonAuxiliaryFile = false, standardTarPadding = false, uiMissingAsset = false, workerEntryDecoy = false, toolVersionDrift = false } = {}) {
+function fakeRun(commands, { symbols = true, failLabel, wrongSymbol = false, wrongPython = false, invalidArtifact, workerVariant = false, workerEphemera = false, nugetEphemera = false, pythonAuxiliaryFile = false, standardTarPadding = false, uiMissingAsset = false, workerEntryDecoy = false, toolVersionDrift = false, pythonExecutableDrift = false } = {}) {
   return (entry) => {
     commands.push(entry);
     if (entry.label === failLabel) throw new Error(`intentional ${failLabel} failure`);
     const put = (path, contents) => { mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, contents); };
     if (entry.label === "canonical npm version") return { status: 0, stdout: `${NPM_VERSION}\n` };
+    if (entry.label === "release Python executable") return { status: 0, stdout: pythonExecutableDrift ? "relative-python\n" : `${process.execPath}\n` };
     if (entry.label === "release Python version") return { status: 0, stdout: toolVersionDrift ? "Python 3.12.9\n" : "Python 3.12.8\n" };
     if (entry.label === "release uv version") return { status: 0, stdout: "uv 0.5.15\n" };
     if (entry.label === "release .NET SDK version") return { status: 0, stdout: "8.0.423\n" };
@@ -431,13 +496,16 @@ test("assembly uses a sanitized canonical install, four pinned Worker dry-runs, 
     assert.match(spdx.documentNamespace, new RegExp(PLATFORM_VERSION.replaceAll(".", "\\.")));
     assert.match(spdx.documentNamespace, new RegExp(CPP_VERSION.replaceAll(".", "\\.")));
     assert.match(spdx.documentNamespace, new RegExp(PYTHON_VERSION.replaceAll(".", "\\.")));
+    const pythonExecutable = commands.find((entry) => entry.label === "release Python executable");
     const pythonVersion = commands.find((entry) => entry.label === "release Python version");
     const uvVersion = commands.find((entry) => entry.label === "release uv version");
     const dotnetVersion = commands.find((entry) => entry.label === "release .NET SDK version");
     assert.deepEqual(pythonVersion?.args, ["--version"]);
     assert.deepEqual(uvVersion?.args, ["--version"]);
     assert.deepEqual(dotnetVersion?.args, ["--version"]);
-    assert.equal(pythonVersion?.executable, "python");
+    assert.deepEqual(pythonExecutable?.args, ["-c", "import os, sys; print(os.path.realpath(sys.executable))"]);
+    assert.equal(pythonExecutable?.executable, "python");
+    assert.notEqual(pythonVersion?.executable, "python");
     assert.equal(uvVersion?.executable, "uv");
     assert.equal(dotnetVersion?.executable, "dotnet");
     const npmInstall = commands.find((entry) => entry.label === "canonical locked npm ci");
@@ -480,9 +548,14 @@ test("assembly uses a sanitized canonical install, four pinned Worker dry-runs, 
     assert.ok(pythonLock, "the canonical Python lock is checked before building distributions");
     assert.deepEqual(pythonLock.args.slice(0, 2), ["lock", "--check"]);
     assert.ok(pythonLock.args.some((arg) => String(arg).includes(".canonical-head")));
+    assert.equal(valueAfter(pythonLock.args, "--python"), pythonVersion?.executable);
+    assert.ok(pythonLock.args.includes("--no-python-downloads"));
     const pythonBuild = commands.find((entry) => entry.label.includes("Python wheel"));
     assert.ok(pythonBuild.args.includes("--build-constraint"));
     assert.ok(pythonBuild.args.includes("--require-hashes"));
+    assert.equal(valueAfter(pythonBuild.args, "--python"), pythonVersion?.executable);
+    assert.ok(pythonBuild.args.includes("--no-python-downloads"));
+    assert.equal(npmInstall.env.UV_PYTHON_DOWNLOADS, "never");
     const nugetRestore = commands.find((entry) => entry.label.includes("NuGet restore"));
     assert.ok(nugetRestore && nugetRestore.args.includes("--locked-mode") && nugetRestore.args.includes("--disable-build-servers") && nugetRestore.args.some((arg) => String(arg).includes(".canonical-head")));
     assert.match(nugetRestore.args[1], /[\\/]sdks[\\/]dotnet[\\/]src[\\/]Licensecc\.Client[\\/]Licensecc\.Client\.csproj$/u);
@@ -531,6 +604,23 @@ test("assembly rejects a runtime toolchain version that differs from its tracked
     );
     assert.ok(commands.some((entry) => entry.label === "release Python version"));
     assert.ok(!commands.some((entry) => entry.label === "canonical locked npm ci"), "toolchain drift stops before dependency installation");
+    assert.ok(!existsSync(output));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("uv build binds its checked interpreter and rejects an unresolved executable", () => {
+  const root = releaseFixture();
+  const output = join(root, "build", "release-artifacts", "python-executable-drift");
+  const commands = [];
+  try {
+    assert.throws(
+      () => assembleReleaseArtifacts({ root, outputDirectory: output, consumerId: "acme", run: fakeRun(commands, { pythonExecutableDrift: true }), verifyArchive: () => {}, toolAvailable: () => true }),
+      /Python executable.*absolute|existing/i,
+    );
+    assert.ok(commands.some((entry) => entry.label === "release Python executable"));
+    assert.ok(!commands.some((entry) => entry.label.includes("Python wheel")), "uv build cannot select or download a replacement interpreter");
     assert.ok(!existsSync(output));
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -627,11 +717,26 @@ test("inner archive inspection rejects comment decoys, incomplete RECORD data, t
     [wheelPath, wheelArtifact({ extraEntries: [{ name: "private-key.pem", contents: "never package this" }] }), /unsafe|forbidden|RECORD|wheel/i],
     [sdistPath, sdistArtifact({ extraEntries: [{ name: `licensecc-${PYTHON_VERSION}/secret.db`, contents: "never package this" }] }), /unsafe|forbidden|sdist|archive/i],
     [primaryPath, nugetArtifact({ binaryContents: "plain text is not a DLL" }), /PE|DLL|NuGet package/i],
+    [primaryPath, nugetArtifact({ binaryContents: fakePeDll({ missingClr: true }) }), /CLR|PE|metadata/i],
+    [primaryPath, nugetArtifact({ binaryContents: fakePeDll({ invalidSection: true }) }), /section|PE|metadata/i],
+    [primaryPath, nugetArtifact({ binaryContents: fakePeDll({ truncatedTables: true }) }), /tables|metadata|truncated/i],
+    [primaryPath, nugetArtifact({ binaryContents: fakePeDll({ trailingTableBytes: 5 }) }), /tables|metadata|trailing/i],
     [primaryPath, nugetArtifact({ extraEntries: [{ name: "private-key.pem", contents: "never package this" }] }), /unsafe|forbidden|NuGet package/i],
     [symbolsPath, nugetArtifact({ symbols: true, binaryContents: "plain text is not a PDB" }), /PDB|NuGet symbols/i],
+    [symbolsPath, nugetArtifact({ symbols: true, binaryContents: fakePortablePdb({ missingPdbStream: true }) }), /PDB|stream|metadata/i],
+    [symbolsPath, nugetArtifact({ symbols: true, binaryContents: fakePortablePdb({ truncatedTables: true }) }), /tables|metadata|truncated/i],
+    [symbolsPath, nugetArtifact({ symbols: true, binaryContents: fakePortablePdb({ trailingTableBytes: 5 }) }), /tables|metadata|trailing/i],
+    [symbolsPath, nugetArtifact({ symbols: true, binaryContents: fakePortablePdb({ pdbTrailingBytes: 4 }) }), /PDB|stream|trailing/i],
+    [symbolsPath, nugetArtifact({ symbols: true, binaryContents: fakePortablePdb({ metadataTable: 54, typeSystemRows: [[6, 0x10000]], tableDataBytes: 4 }) }), /tables|metadata|truncated/i],
     [symbolsPath, nugetArtifact({ symbols: true, extraEntries: [{ name: "private-key.pem", contents: "never package this" }] }), /unsafe|forbidden|NuGet symbols/i],
     [primaryPath, nugetArtifact({ nuspecContents: "<?xml version=\"1.0\"?><package><metadata><!-- <id>Licensecc.Client</id><version>0.1.0-rc.1</version> --></metadata></package>" }), /metadata|NuGet package/i],
+    [primaryPath, nugetArtifact({ nuspecContents: "<?xml version=\"1.0\"?><package><metadata><id>Licensecc.Client</id><version>0.1.0-rc.1</version></metadata></package>" }), /nuspec root|NuGet package/i],
     [primaryPath, nugetArtifact({ contentTypesContents: "<?xml version=\"1.0\"?><Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"><Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/></Types>" }), /content.types|OPC|NuGet package/i],
+    [primaryPath, nugetArtifact({ contentTypesContents: "<?xml version=\"1.0\"?><Types xmlns=\"urn:wrong\"><Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/></Types>" }), /content.types|OPC|NuGet package/i],
+    [primaryPath, nugetArtifact({ nuspecContents: "<?xml version=\"1.0\"?><package xmlns=\"urn:wrong\"><metadata><id>Licensecc.Client</id><version>0.1.0-rc.1</version></metadata></package>" }), /nuspec|metadata|NuGet package/i],
+    [primaryPath, nugetArtifact({ coreContents: "<?xml version=\"1.0\"?><coreProperties xmlns:dc=\"http://purl.org/dc/elements/1.1/\"><dc:identifier>Licensecc.Client</dc:identifier><version>0.1.0-rc.1</version></coreProperties>" }), /core metadata|NuGet package/i],
+    [primaryPath, nugetArtifact({ coreContents: "<?xml version=\"1.0\"?><coreProperties xmlns=\"urn:wrong\" xmlns:dc=\"http://purl.org/dc/elements/1.1/\"><dc:identifier>Licensecc.Client</dc:identifier><version>0.1.0-rc.1</version></coreProperties>" }), /core metadata|NuGet package/i],
+    [primaryPath, nugetArtifact({ relationshipsContents: "<?xml version=\"1.0\"?><Relationships xmlns=\"urn:wrong\"><Relationship Type=\"http://schemas.microsoft.com/packaging/2010/07/manifest\" Target=\"/Licensecc.Client.nuspec\" Id=\"manifest\"/><Relationship Type=\"http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties\" Target=\"/package/services/metadata/core-properties/licensecc.release.psmdcp\" Id=\"core\"/></Relationships>" }), /relationships|OPC|NuGet package/i],
   ];
   try {
     assembleReleaseArtifacts({ root, outputDirectory: output, consumerId: "acme", run: fakeRun([]), verifyArchive: () => {}, toolAvailable: () => true });
