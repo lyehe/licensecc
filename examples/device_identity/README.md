@@ -1,4 +1,8 @@
-# Windows TPM device identity example
+# Device identity provider examples
+
+This page documents the conditional Windows and Ubuntu provider examples.
+
+## Windows TPM device identity example
 
 This example opens the application-scoped P-256 key in the Microsoft Platform
 Crypto Provider and prints its public metadata. The provider is reported
@@ -50,4 +54,56 @@ build/device-identity-tpm2/licensecc_tpm2_openssl \
 
 The TPM2/OpenSSL provider signs the fixed 32-byte device-identity digest with
 the distro `tpm2` provider. The example reports provider metadata and the
-canonical public SPKI; it does not delete keys.
+canonical public SPKI; it does not delete keys. The package requires OpenSSL
+3.x and a distro `tpm2-openssl` provider. This is not an FIPS certification
+claim: configure and validate the provider separately if your deployment has
+FIPS requirements.
+
+On Ubuntu, enable the `universe` repository. Runtime needs OpenSSL 3,
+`tpm2-openssl`, a usable pre-start TCTI, and `/proc/self/fd` (the provider uses
+it for descriptor-relative STORE loading and inode-bound cleanup). `tpm2-tools`
+and `swtpm` are diagnostic/CI-only packages; the library does not invoke either
+at runtime. For a hardware TCTI, the service account needs access to
+`/dev/tpmrm0` (or the explicitly selected TPM device). Set
+`TPM2OPENSSL_TCTI` and, when the TPM hierarchy requires it,
+`TPM2OPENSSL_PARENT_AUTH` in the service/process environment before starting
+the application; configure `tpm2-abrmd` and its TCTI there as well when a
+resource manager is needed. The library itself does not read those variables,
+log their values, or mutate global OpenSSL state.
+
+The provider uses a local filesystem directory with a persistent `flock`
+namespace lock, descriptor-relative no-follow checks, `renameat2`
+no-replace (with the constrained hard-link fallback), and directory `fsync`
+for publication and rollback. Do not place the directory on NFS, FUSE, or a
+shared/network volume; their rename, locking, ownership, or durability
+semantics are not supported. The directory must remain private to the
+effective user and its ancestors must not be group/world writable.
+
+TPM resource pressure can make an operation busy while the TPM or an optional
+user-space resource manager is retrying or has constrained session/object
+memory. TPM operations are intentionally slower and more failure-prone than
+software-key operations, especially under constrained TPM or resource-manager
+memory. Applications should apply bounded retry/backoff at their operation
+boundary and avoid assuming that a transient resource failure means the key
+is gone.
+
+The `.tss2.pem` file is a machine-specific recovery reference for the same TPM,
+not a raw private key and not a guaranteed backup. Protect it with the same
+filesystem controls, and retain it only according to the deployment's
+recovery policy. Expected-id namespace deletion removes the reference file and
+is not cryptographic erasure of TPM-resident state; follow the TPM/platform
+provisioning policy for lifecycle destruction.
+
+The simulator runner is intentionally separate from hardware validation. An
+operator may opt into the production test with
+`LCC_RUN_REAL_TPM2_TESTS=1 TPM2OPENSSL_TCTI=<preconfigured-tcti>` and an
+existing effective-user `0700` storage directory; ordinary CI uses an isolated
+`swtpm` instance instead.
+
+For a configured build, the real CTest entry is opt-in and uses its build-local
+`test/library/device_identity/tpm2-real-keyrefs` directory:
+
+```bash
+LCC_RUN_REAL_TPM2_TESTS=1 TPM2OPENSSL_TCTI=device:/dev/tpmrm0 \
+  ctest --test-dir build/ci-linux-debug-tpm2 -R device_identity_tpm2_openssl_real
+```

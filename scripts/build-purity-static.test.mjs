@@ -411,6 +411,8 @@ test("Ubuntu TPM2 production integration is explicit and remains opt-in", () => 
   assert.match(packageConfig, /find_package\(OpenSSL 3\.0 REQUIRED COMPONENTS Crypto\)/u);
   assert.match(packageConfig, /elseif\("HAS_OPENSSL" IN_LIST COMPILE_DEF/u);
   assert.match(consumer, /NOT LCC_ENABLE_TPM2_OPENSSL/u);
+  assert.match(consumer, /LCC_DEVICE_IDENTITY_PRE_FIND_OPENSSL/u);
+  assert.match(consumer, /find_package\(OpenSSL 3\.0 REQUIRED COMPONENTS Crypto\)/u);
   assert.match(swtpm, /script_directory=/u);
   assert.match(exampleReadme, /TPM2OPENSSL_TCTI/u);
   assert.match(exampleReadme, /TPM2OPENSSL_PARENT_AUTH/u);

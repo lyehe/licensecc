@@ -135,13 +135,13 @@
       "status": "experimental",
       "owner": "Backend deployable maintainer",
       "surfaces": ["licensing backend"],
-      "availability": {"release": "Platform 0.1.0-rc.1", "platforms": ["Cloudflare Workers"], "limitations": ["The protocol is available for integration, but Windows/Ubuntu TPM-provider integration is plan-only and not shipped."]},
+      "availability": {"release": "Platform 0.1.0-rc.1", "platforms": ["Cloudflare Workers"], "limitations": ["The protocol is available for integration; repository-local Windows and Ubuntu TPM-provider implementations have automated evidence, but no universal client support or published deployment claim is made."]},
       "replaces": [],
       "public_docs": ["doc/capabilities/index.rst"],
       "evidence": [
         {"kind": "implementation", "surface": "licensing backend", "path": "services/cloudflare-licensing-backend/src/routes/verify.ts", "selector": "export function parseRequestProofFields", "assertion": "The verification route implements request-proof parsing."},
         {"kind": "automated_test", "surface": "licensing backend", "path": "services/cloudflare-licensing-backend/test/contexts/request-proof.test.mjs", "selector": "test(\"canonical request proof payload is byte exact\"", "assertion": "The backend has automated request-proof coverage."},
-        {"kind": "limitation", "surface": "licensing backend", "path": "services/cloudflare-licensing-backend/README.md", "selector": "Windows/Ubuntu TPM-provider/request-proof", "assertion": "The service documentation keeps TPM-provider integration explicitly plan-only."}
+        {"kind": "limitation", "surface": "licensing backend", "path": "services/cloudflare-licensing-backend/README.md", "selector": "platform-specific and are not a universal client", "assertion": "The service documentation keeps TPM-provider use client-local and platform-limited rather than claiming hosted TPM support."}
       ]
     },
     {
@@ -280,13 +280,22 @@
     {
       "id": "tpm-request-proof-provider",
       "title": "TPM-backed request-proof provider",
-      "status": "planned",
-      "owner": "Backend deployable maintainer",
-      "surfaces": ["Windows and Ubuntu client integration"],
-      "availability": {"release": "Not scheduled", "platforms": ["Not available"], "limitations": ["No universal TPM provider or published client integration is included."]},
+      "status": "platform_limited",
+      "owner": "C++ ABI and core maintainer",
+      "surfaces": ["Windows Platform KSP device-identity provider", "Ubuntu TPM2/OpenSSL device-identity provider"],
+      "availability": {"release": "C++ 2.1.0 lineage; platform 0.1.0-rc.1", "platforms": ["Windows", "Ubuntu 22.04", "Ubuntu 24.04"], "limitations": ["The conditional C++ surfaces are implemented and tested in the repository, not published binaries or a deployed service. Windows requires the Platform Crypto Provider and its host security policy; Ubuntu requires Linux, OpenSSL 3.x, and a distro tpm2-openssl provider. The Ubuntu simulator gates cover swtpm and both Ubuntu releases; real hardware, FIPS certification, remote deployment, and universal client availability are not claimed."]},
       "replaces": [],
       "public_docs": ["doc/capabilities/index.rst"],
-      "evidence": [{"kind": "plan", "surface": "Windows and Ubuntu client integration", "path": "doc/capabilities/index.rst", "selector": "TPM-backed request-proof provider", "assertion": "The capability is recorded as planned, not shipped."}]
+      "evidence": [
+        {"kind": "implementation", "surface": "Windows Platform KSP device-identity provider", "path": "src/library/device_identity/providers/windows_tpm.cpp", "selector": "make_windows_tpm_provider(std::shared_ptr<WindowsCngApi> api) noexcept", "assertion": "The Windows provider implements the signing-only Platform Crypto Provider surface."},
+        {"kind": "automated_test", "surface": "Windows Platform KSP device-identity provider", "path": "test/library/device_identity/windows_tpm_test.cpp", "selector": "void run_shim() {", "assertion": "The Windows provider has deterministic shim coverage and an opt-in real-provider test."},
+        {"kind": "platform", "surface": "Windows Platform KSP device-identity provider", "path": "test/library/device_identity/CMakeLists.txt", "selector": "add_test(NAME device_identity_windows_shim", "assertion": "The Windows CMake surface registers the provider shim and an opt-in real-provider test."},
+        {"kind": "implementation", "surface": "Ubuntu TPM2/OpenSSL device-identity provider", "path": "src/library/device_identity/providers/tpm2_openssl.cpp", "selector": "make_tpm2_openssl_provider(\n", "assertion": "The Ubuntu provider implements dedicated-context TPM2/OpenSSL signing and local reference storage."},
+        {"kind": "automated_test", "surface": "Ubuntu TPM2/OpenSSL device-identity provider", "path": "test/library/device_identity/tpm2_openssl_test.cpp", "selector": "int run_shim() {", "assertion": "The Ubuntu provider has injectable shim coverage plus the exact-digest simulator and installed-consumer gates."},
+        {"kind": "platform", "surface": "Ubuntu TPM2/OpenSSL device-identity provider", "path": ".github/workflows/linux.yml", "selector": "build-linux-tpm2:\n", "assertion": "Ubuntu 22.04 and 24.04 Debug/Release TPM2 simulator jobs exercise the provider surface."},
+        {"kind": "limitation", "surface": "Windows Platform KSP device-identity provider", "path": "examples/device_identity/README.md", "selector": "default security descriptor", "assertion": "Windows authorization and provisioning remain host-policy constraints."},
+        {"kind": "limitation", "surface": "Ubuntu TPM2/OpenSSL device-identity provider", "path": "examples/device_identity/README.md", "selector": "Do not place the directory on NFS, FUSE", "assertion": "Ubuntu storage, resource-pressure, FIPS, recovery-reference, and deployment limits are maintained in the example documentation."}
+      ]
     },
     {
       "id": "java-sdk",

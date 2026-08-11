@@ -19,6 +19,8 @@ param(
 
     [switch]$BuildWindowsTpmExample,
 
+    [switch]$BuildTpm2OpenSslExample,
+
     [switch]$StaticRuntime
 )
 
@@ -26,6 +28,15 @@ $ErrorActionPreference = "Stop"
 
 if ($ExpectWindowsTpm -and $ExpectTpm2OpenSsl) {
     throw "-ExpectWindowsTpm and -ExpectTpm2OpenSsl are mutually exclusive"
+}
+if ($BuildWindowsTpmExample -and $BuildTpm2OpenSslExample) {
+    throw "-BuildWindowsTpmExample and -BuildTpm2OpenSslExample are mutually exclusive"
+}
+if ($BuildWindowsTpmExample -and -not $ExpectWindowsTpm) {
+    throw "-BuildWindowsTpmExample requires -ExpectWindowsTpm"
+}
+if ($BuildTpm2OpenSslExample -and -not $ExpectTpm2OpenSsl) {
+    throw "-BuildTpm2OpenSslExample requires -ExpectTpm2OpenSsl"
 }
 if ($ExpectTpm2OpenSsl -and [string]::IsNullOrWhiteSpace($Tpm2StorageDirectory)) {
     throw "-ExpectTpm2OpenSsl requires -Tpm2StorageDirectory"
@@ -73,6 +84,7 @@ if ($ExpectTpm2OpenSsl) {
     }
     $resolvedTpm2StorageDirectory = [System.IO.Path]::GetFullPath($Tpm2StorageDirectory)
     $configureArguments += "-DLCC_DEVICE_IDENTITY_EXPECT_TPM2_OPENSSL=ON"
+    $configureArguments += "-DLCC_DEVICE_IDENTITY_PRE_FIND_OPENSSL=ON"
     $configureArguments += "-DLCC_DEVICE_IDENTITY_TPM2_STORAGE_DIRECTORY=$resolvedTpm2StorageDirectory"
     $configureArguments += "-DLCC_DEVICE_IDENTITY_TPM2_ALLOW_SKIP=$([bool]$AllowTpm2Skip)"
 } else {
@@ -102,12 +114,13 @@ if ($LASTEXITCODE -ne 0) {
     throw "Installed device-identity consumer run failed with exit code $LASTEXITCODE"
 }
 
-if ($BuildWindowsTpmExample) {
-    if (-not $ExpectWindowsTpm) {
-        throw "-BuildWindowsTpmExample requires -ExpectWindowsTpm"
-    }
+if ($BuildWindowsTpmExample -or $BuildTpm2OpenSslExample) {
     $exampleSource = Join-Path $repositoryRoot "examples\device_identity"
-    $exampleBuild = "$consumerBuild-example"
+    if ($BuildWindowsTpmExample) {
+        $exampleBuild = "$consumerBuild-example"
+    } else {
+        $exampleBuild = "$consumerBuild-example-tpm2"
+    }
     $exampleConfigureArguments = @(
         "-S", $exampleSource,
         "-B", $exampleBuild,
@@ -129,6 +142,6 @@ if ($BuildWindowsTpmExample) {
     }
     & cmake --build $exampleBuild --config $Configuration
     if ($LASTEXITCODE -ne 0) {
-        throw "Installed Windows TPM example build failed with exit code $LASTEXITCODE"
+        throw "Installed device-identity example build failed with exit code $LASTEXITCODE"
     }
 }

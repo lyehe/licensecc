@@ -116,10 +116,11 @@ also supports an optional Cloudflare rate-limit binding named
    only. Production hosts should create or import the P-256 key through their
    own platform key-store or secure-enclave integration when available, then
    persist only the public SPKI and `sha256:<spki der>` key id. The optional
-   request-proof protocol is available for integration, but no universal client
-   key provider is shipped: Windows/Ubuntu TPM-provider/request-proof
-   integration remains plan-only, conditional on approval and publication.
-   This service does not claim TPM support.
+   request-proof protocol is available for integration. The C++ client runtime
+   provides conditional Windows Platform KSP and Ubuntu TPM2/OpenSSL provider
+   surfaces, but they remain platform-specific and are not a universal client
+   integration or a hosted-service feature. This service does not claim TPM
+   support; callers must provision and configure their provider locally.
 
    To smoke-test the signed request body fields during integration:
 
