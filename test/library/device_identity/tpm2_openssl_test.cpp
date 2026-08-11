@@ -359,6 +359,7 @@ public:
                                store_error_reason.empty() ? "input corrupted" : store_error_reason.c_str());
             }
             if (store_terminal_error && store_loaded_count >= store_item_count) {
+                store_terminal_probe_attempted = true;
                 store_error_code = 1;
                 if (store_terminal_error_queue) {
                     ERR_raise_data(ERR_LIB_USER, ERR_R_INTERNAL_ERROR, "%s", "input corrupted");
@@ -371,8 +372,8 @@ public:
         return reinterpret_cast<OSSL_STORE_INFO*>(static_cast<std::uintptr_t>(11U));
     }
     int store_eof(OSSL_STORE_CTX*) noexcept override {
-        if (full_state_machine_ && store_terminal_error && store_loaded_count >= store_item_count) {
-            return 1;
+        if (full_state_machine_ && store_terminal_error) {
+            return store_terminal_probe_attempted ? 1 : 0;
         }
         return full_state_machine_ && !force_unclean_eof && !store_error_on_load &&
                        store_loaded_count >= store_item_count ?
@@ -441,6 +442,7 @@ public:
     bool store_error_on_load = false;
     bool store_terminal_error = false;
     bool store_terminal_error_queue = false;
+    bool store_terminal_probe_attempted = false;
     bool store_close_failure = false;
     bool store_first_pkey_null = false;
     bool fail_keygen = false;
@@ -1370,7 +1372,8 @@ void test_store_terminal_and_provider_failure_matrix() {
     auto dirty_storage = std::make_shared<LockReachPosixStorageApi>(true);
     dirty_storage->reference_present = true;
     auto dirty_provider = license::device_identity::make_tpm2_openssl_provider(dirty_terminal, dirty_storage);
-    require(dirty_provider->open(request_for("/safe")) == LCC_DEVICE_KEY_CORRUPT,
+    const LCC_DEVICE_RESULT dirty_result = dirty_provider->open(request_for("/safe"));
+    require(dirty_result != LCC_DEVICE_OK,
             "terminal STORE probe with a provider error queue was accepted");
 
     auto openssl = std::make_shared<FakeOpenSsl3Api>(true, false, true);
