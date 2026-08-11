@@ -2,16 +2,17 @@
 
 `scripts/assemble-release-artifacts.mjs` assembles only local, inspectable
 release evidence. It never tags, publishes, deploys a Worker, or uses a real
-Wrangler configuration. It requires an empty output directory, a consumer ID,
-the platform SemVer (`0.1.0-rc.1` for the current release contract), and the
-Python PEP 440 version (`0.1.0rc1`):
+Wrangler configuration. It requires an empty output directory and a consumer
+ID. Versions are read from tracked `version.json`, `sdks/python/pyproject.toml`,
+and the independent CMake project declaration; optional expected values only
+assert that authority:
 
 ```powershell
 node scripts/assemble-release-artifacts.mjs `
   --output build/release-artifacts/acme-0.1.0-rc.1 `
   --consumer-id acme `
-  --platform-version 0.1.0-rc.1 `
-  --python-version 0.1.0rc1
+  --expect-platform-version 0.1.0-rc.1 `
+  --expect-python-version 0.1.0rc1
 ```
 
 The C++ tarball is source-only and consumer-ID-labelled. It contains canonical
