@@ -7,7 +7,7 @@ if [[ $# -ne 1 ]]; then
 fi
 
 build_directory="$(realpath -e -- "$1")"
-capability_binary="$build_directory/test/library/device_identity/tpm2_openssl_test"
+capability_binary="$build_directory/test/library/device_identity/device_identity_tpm2_openssl_test"
 if [[ ! -x "$capability_binary" ]]; then
     echo "capability executable not found or not executable: $capability_binary" >&2
     exit 1
