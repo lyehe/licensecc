@@ -17,6 +17,9 @@ const retiredClaims = Object.freeze([
   "ubuntu 18.04-cross compile",
   "usually in ``projects/",
   "source-tree projects/",
+  "workflows call `scripts/dev-check.ps1` with ci presets",
+  "root npm shortcuts call the same powershell script",
+  "run ``scripts/dev-check.ps1`` before submitting.",
 ]);
 const statuses = new Set(["shipped", "experimental", "platform_limited", "planned", "deprecated"]);
 const statusesRequiringImplementation = new Set(["shipped", "experimental", "platform_limited"]);
@@ -80,42 +83,67 @@ function rejectUnknownFields(value, allowed, code, capability, errors) {
   }
 }
 
-function sameValues(left, right) {
-  return Array.isArray(left) && left.length === right.length && left.every((value, index) => value === right[index]);
-}
-
-function sameFields(value, fields) {
-  return value && typeof value === "object" && !Array.isArray(value) && sameValues(Object.keys(value).sort(), [...fields].sort());
-}
-
-function stringSchema(value) {
-  return value?.type === "string" && value?.minLength === 1;
-}
-
-function uniqueArraySchema(value, minItems) {
-  return value?.type === "array" && value?.uniqueItems === true && (minItems === undefined || value?.minItems === minItems);
+function expectedSchema() {
+  const identifierSchema = { type: "string", minLength: 1, pattern: identifier.source };
+  const stringSchema = { type: "string", minLength: 1 };
+  return {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    $id: "https://licensecc.dev/schemas/capability-registry.schema.json",
+    title: "Licensecc capability registry",
+    description: "Versioned, static evidence inventory. The repository checker applies cross-entry, tracked-file, selector, route-contract, and status rules that JSON Schema cannot express.",
+    type: "object",
+    additionalProperties: false,
+    required: ["schema_version", "capabilities"],
+    properties: {
+      schema_version: { const: 1 },
+      capabilities: { type: "array", minItems: 1, items: { $ref: "#/$defs/capability" } },
+    },
+    $defs: {
+      capability: {
+        type: "object",
+        additionalProperties: false,
+        required: ["id", "title", "status", "owner", "surfaces", "availability", "evidence", "replaces", "public_docs"],
+        properties: {
+          id: identifierSchema,
+          title: stringSchema,
+          status: { enum: [...statuses] },
+          owner: { enum: [...owners] },
+          surfaces: { type: "array", minItems: 1, items: stringSchema, uniqueItems: true },
+          availability: {
+            type: "object",
+            additionalProperties: false,
+            required: ["release", "platforms", "limitations"],
+            properties: {
+              release: stringSchema,
+              platforms: { type: "array", minItems: 1, items: stringSchema, uniqueItems: true },
+              limitations: { type: "array", minItems: 1, items: stringSchema, uniqueItems: true },
+            },
+          },
+          evidence: { type: "array", minItems: 1, uniqueItems: true, items: { $ref: "#/$defs/evidence" } },
+          references: { type: "array", items: { $ref: "#/$defs/capabilityId" }, uniqueItems: true },
+          replaces: { type: "array", items: { $ref: "#/$defs/capabilityId" }, uniqueItems: true },
+          public_docs: { type: "array", minItems: 1, items: stringSchema, uniqueItems: true },
+        },
+      },
+      capabilityId: identifierSchema,
+      evidence: {
+        type: "object",
+        additionalProperties: false,
+        required: ["kind", "path", "selector", "surface", "assertion"],
+        properties: {
+          kind: { enum: [...evidenceKinds] },
+          path: stringSchema,
+          selector: stringSchema,
+          surface: stringSchema,
+          assertion: stringSchema,
+        },
+      },
+    },
+  };
 }
 
 function schemaDrift(schema) {
-  const expectedRootRequired = ["schema_version", "capabilities"].sort();
-  const expectedCapabilityRequired = [...capabilityFields].filter((field) => field !== "references").sort();
-  const expectedEvidenceRequired = [...evidenceFields].sort();
-  const capability = schema?.$defs?.capability;
-  const availability = capability?.properties?.availability;
-  const evidence = schema?.$defs?.evidence;
-  const capabilityId = schema?.$defs?.capabilityId;
-  const properties = capability?.properties;
-  if (schema?.type !== "object" || schema?.additionalProperties !== false || !sameValues([...schema.required ?? []].sort(), expectedRootRequired) || schema?.properties?.schema_version?.const !== 1) return "root object contract";
-  if (schema?.properties?.capabilities?.type !== "array" || schema.properties.capabilities.minItems !== 1 || schema.properties.capabilities.items?.$ref !== "#/$defs/capability") return "capabilities array contract";
-  if (capability?.type !== "object" || capability?.additionalProperties !== false || !sameValues([...capability.required ?? []].sort(), expectedCapabilityRequired) || !sameFields(properties, capabilityFields)) return "capability object contract";
-  if (!stringSchema(properties.id) || properties.id.pattern !== identifier.source || !stringSchema(properties.title) || !sameValues(properties.status?.enum, [...statuses]) || !sameValues(properties.owner?.enum, [...owners])) return "capability scalar contract";
-  if (!uniqueArraySchema(properties.surfaces, 1) || !stringSchema(properties.surfaces.items)) return "surfaces contract";
-  if (availability?.type !== "object" || availability.additionalProperties !== false || !sameValues([...availability.required ?? []].sort(), [...availabilityFields].sort()) || !sameFields(availability.properties, availabilityFields) || !stringSchema(availability.properties.release) || !uniqueArraySchema(availability.properties.platforms, 1) || !stringSchema(availability.properties.platforms.items) || !uniqueArraySchema(availability.properties.limitations, 1) || !stringSchema(availability.properties.limitations.items)) return "availability contract";
-  if (!uniqueArraySchema(properties.evidence, 1) || properties.evidence.items?.$ref !== "#/$defs/evidence") return "evidence array contract";
-  if (!uniqueArraySchema(properties.references) || properties.references.items?.$ref !== "#/$defs/capabilityId" || !uniqueArraySchema(properties.replaces) || properties.replaces.items?.$ref !== "#/$defs/capabilityId" || !uniqueArraySchema(properties.public_docs, 1) || !stringSchema(properties.public_docs.items)) return "reference/document contract";
-  if (!stringSchema(capabilityId) || capabilityId.pattern !== identifier.source || evidence?.type !== "object" || evidence.additionalProperties !== false || !sameValues([...evidence.required ?? []].sort(), expectedEvidenceRequired) || !sameFields(evidence.properties, evidenceFields) || !sameValues(evidence.properties.kind?.enum, [...evidenceKinds])) return "evidence object contract";
-  if (!["path", "selector", "surface", "assertion"].every((field) => stringSchema(evidence.properties[field]))) return "evidence scalar contract";
-  return null;
+  return canonicalValue(schema) === canonicalValue(expectedSchema()) ? null : "schema must exactly match the checker contract";
 }
 
 function canonicalValue(value) {
@@ -177,6 +205,26 @@ function validateRouteContract(root, evidence, capability, errors) {
   }
 }
 
+function selectorOffsets(source, selector) {
+  const offsets = [];
+  let offset = source.indexOf(selector);
+  while (offset !== -1) {
+    offsets.push(offset);
+    offset = source.indexOf(selector, offset + 1);
+  }
+  return offsets;
+}
+
+function containingLine(source, offset) {
+  const start = source.lastIndexOf("\n", offset) + 1;
+  const end = source.indexOf("\n", offset);
+  return source.slice(start, end === -1 ? source.length : end).trimStart();
+}
+
+function commentOnlyLine(line, path) {
+  return line.startsWith("//") || line.startsWith("/*") || line.startsWith("*") || /\.py$/iu.test(path) && line.startsWith("#");
+}
+
 function validateEvidence(root, trackedPaths, capability, errors) {
   const evidenceByKind = new Map();
   if (!Array.isArray(capability.evidence) || capability.evidence.length === 0) {
@@ -215,7 +263,11 @@ function validateEvidence(root, trackedPaths, capability, errors) {
       continue;
     }
     try {
-      if (!sourceAt(root, path).includes(selector)) addError(errors, "missing_selector", capability, selector);
+      const source = sourceAt(root, path);
+      const offsets = selectorOffsets(source, selector);
+      if (offsets.length === 0) addError(errors, "missing_selector", capability, selector);
+      else if (offsets.length > 1) addError(errors, "duplicate_selector", capability, selector);
+      else if ((kind === "implementation" || kind === "automated_test") && commentOnlyLine(containingLine(source, offsets[0]), path)) addError(errors, "comment_only_selector", capability, selector);
     } catch {
       addError(errors, "unreadable_evidence_path", capability, path);
     }

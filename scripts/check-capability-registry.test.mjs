@@ -19,8 +19,9 @@ function fixture(mutator = (registry) => registry) {
     "doc/guide.rst": "Current guide.\n",
     "doc/usage/concepts.rst": "Current concepts.\n",
     "sdks/dotnet/README.md": "Current .NET SDK support.\n",
-    "src/implementation.txt": "implemented marker",
+    "src/implementation.txt": "implemented marker\nrepeated marker\nrepeated marker\n// comment implementation marker\n# comment automated marker",
     "test/implementation.test.mjs": "automated marker",
+    "test/comment.py": "# comment automated marker",
     "doc/platform.rst": "platform marker",
     "doc/limitation.rst": "limitation marker",
     "docs/plan.md": "plan marker",
@@ -155,13 +156,20 @@ test("requires a non-empty capability registry and schema contract file", (t) =>
 });
 
 test("rejects schema drift instead of treating the JSON Schema as an unverified comment", (t) => {
-  const subject = fixture();
-  const schemaPath = join(subject.root, "scripts/capability-registry.schema.json");
-  const schema = JSON.parse(readFileSync(schemaPath, "utf8"));
-  schema.$defs.evidence.required = schema.$defs.evidence.required.filter((field) => field !== "selector");
-  writeFileSync(schemaPath, `${JSON.stringify(schema, null, 2)}\n`);
-  t.after(() => rmSync(subject.root, { recursive: true, force: true }));
-  assert.deepEqual(errors(check(subject)), ["schema_drift"]);
+  const mutations = [
+    (schema) => { schema.$defs.evidence.required = schema.$defs.evidence.required.filter((field) => field !== "selector"); },
+    (schema) => { schema.$defs.capability.properties.surfaces.maxItems = 1; },
+    (schema) => { schema.unexpected = true; },
+  ];
+  for (const mutate of mutations) {
+    const subject = fixture();
+    const schemaPath = join(subject.root, "scripts/capability-registry.schema.json");
+    const schema = JSON.parse(readFileSync(schemaPath, "utf8"));
+    mutate(schema);
+    writeFileSync(schemaPath, `${JSON.stringify(schema, null, 2)}\n`);
+    t.after(() => rmSync(subject.root, { recursive: true, force: true }));
+    assert.deepEqual(errors(check(subject)), ["schema_drift"]);
+  }
 });
 
 test("enforces schema unique-item collections", (t) => {
@@ -235,6 +243,24 @@ test("rejects untracked paths and evidence selectors that are not literal source
   assert.deepEqual(errors(check(subject)), ["untracked_evidence_path", "missing_selector", "untracked_public_doc"]);
 });
 
+test("requires each non-route selector exactly once and rejects comment-only implementation evidence", (t) => {
+  const duplicate = fixture((registry) => {
+    registry.capabilities[0].evidence[0].selector = "repeated marker";
+    return registry;
+  });
+  const comments = fixture((registry) => {
+    registry.capabilities[0].evidence[0].selector = "// comment implementation marker";
+    const automated = registry.capabilities[0].evidence.find((item) => item.kind === "automated_test");
+    automated.path = "test/comment.py";
+    automated.selector = "# comment automated marker";
+    return registry;
+  });
+  t.after(() => rmSync(duplicate.root, { recursive: true, force: true }));
+  t.after(() => rmSync(comments.root, { recursive: true, force: true }));
+  assert.deepEqual(errors(check(duplicate)), ["duplicate_selector"]);
+  assert.deepEqual(errors(check(comments)), ["comment_only_selector", "comment_only_selector"]);
+});
+
 test("parses route-contract selectors instead of treating route keys as JSON text", (t) => {
   const subject = fixture((registry) => {
     registry.capabilities[0].evidence.at(-1).selector = "POST /v1/missing";
@@ -277,4 +303,17 @@ test("requires public capability entries in the index and rejects retired claims
     "retired_phrase",
     "retired_phrase",
   ]);
+});
+
+test("rejects targeted dev-check stale claims only in maintained documentation", (t) => {
+  const subject = fixture();
+  const workflowPath = join(subject.root, "doc/analysis/Development-And-Usage-Workflow.md");
+  const historicalPlanPath = join(subject.root, "doc/analysis/historical-plan.md");
+  mkdirSync(join(workflowPath, ".."), { recursive: true });
+  writeFileSync(workflowPath, "The workflows call `scripts/dev-check.ps1` with CI presets.\nRoot npm shortcuts call the same PowerShell script.");
+  writeFileSync(historicalPlanPath, "The workflows call `scripts/dev-check.ps1` with CI presets.");
+  writeFileSync(join(subject.root, "doc/index.rst"), "run ``scripts/dev-check.ps1`` before submitting.");
+  subject.trackedPaths.push("doc/analysis/Development-And-Usage-Workflow.md", "doc/analysis/historical-plan.md", "doc/index.rst");
+  t.after(() => rmSync(subject.root, { recursive: true, force: true }));
+  assert.deepEqual(errors(check(subject)), ["retired_phrase", "retired_phrase", "retired_phrase"]);
 });
