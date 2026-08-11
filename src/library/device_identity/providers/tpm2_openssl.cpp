@@ -1577,6 +1577,7 @@ private:
         PkeyHandle key(openssl_, nullptr);
         bool duplicate = false;
         bool null_pkey = false;
+        bool terminal_store_probe = false;
         std::size_t pkey_count = 0U;
         std::string load_error;
         clear_provider_error_queue();
@@ -1590,6 +1591,12 @@ private:
             OSSL_STORE_INFO* info = openssl_->store_load(store.get());
             if (info == nullptr) {
                 load_error = provider_error_text();
+                /* OpenSSL's storeutl loop treats an EOF probe that reports both
+                 * EOF and the loader error flag as terminal.  Keep that
+                 * compatibility narrow: the probe must add no provider error;
+                 * cardinality, close, and the key self-test remain mandatory. */
+                terminal_store_probe = openssl_->store_eof(store.get()) == 1 &&
+                                       openssl_->store_error(store.get()) != 0 && load_error.empty();
                 break;
             }
             if (openssl_->store_info_type(info) != OSSL_STORE_INFO_PKEY) {
@@ -1634,13 +1641,13 @@ private:
             return close_error.empty() ? LCC_DEVICE_INTERNAL_ERROR :
                                          map_provider_error_text(0, true, close_error);
         }
-        if (store_error != 0) {
-            set_tpm2_openssl_test_stage("load_store_error");
-            return map_provider_error(0, true);
-        }
         set_tpm2_openssl_test_stage("load_store_cardinality");
         if (duplicate || null_pkey || pkey_count != 1U || key.get() == nullptr) {
             return LCC_DEVICE_KEY_CORRUPT;
+        }
+        if (store_error != 0 && !terminal_store_probe) {
+            set_tpm2_openssl_test_stage("load_store_error");
+            return map_provider_error(0, true);
         }
         P256Spki spki{};
         set_tpm2_openssl_test_stage("load_validate_key");
