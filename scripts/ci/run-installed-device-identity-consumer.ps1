@@ -11,12 +11,25 @@ param(
 
     [switch]$ExpectWindowsTpm,
 
+    [switch]$ExpectTpm2OpenSsl,
+
+    [string]$Tpm2StorageDirectory,
+
+    [switch]$AllowTpm2Skip,
+
     [switch]$BuildWindowsTpmExample,
 
     [switch]$StaticRuntime
 )
 
 $ErrorActionPreference = "Stop"
+
+if ($ExpectWindowsTpm -and $ExpectTpm2OpenSsl) {
+    throw "-ExpectWindowsTpm and -ExpectTpm2OpenSsl are mutually exclusive"
+}
+if ($ExpectTpm2OpenSsl -and [string]::IsNullOrWhiteSpace($Tpm2StorageDirectory)) {
+    throw "-ExpectTpm2OpenSsl requires -Tpm2StorageDirectory"
+}
 
 $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 $resolvedInstallPrefix = (Resolve-Path -LiteralPath $InstallPrefix).Path
@@ -53,6 +66,18 @@ if ($ExpectWindowsTpm) {
     $configureArguments += "-DLCC_DEVICE_IDENTITY_EXPECT_WINDOWS_TPM=ON"
 } else {
     $configureArguments += "-DLCC_DEVICE_IDENTITY_EXPECT_WINDOWS_TPM=OFF"
+}
+if ($ExpectTpm2OpenSsl) {
+    if (-not [System.IO.Path]::IsPathRooted($Tpm2StorageDirectory)) {
+        throw "TPM2 storage directory must be absolute"
+    }
+    $resolvedTpm2StorageDirectory = [System.IO.Path]::GetFullPath($Tpm2StorageDirectory)
+    $configureArguments += "-DLCC_DEVICE_IDENTITY_EXPECT_TPM2_OPENSSL=ON"
+    $configureArguments += "-DLCC_DEVICE_IDENTITY_TPM2_STORAGE_DIRECTORY=$resolvedTpm2StorageDirectory"
+    $configureArguments += "-DLCC_DEVICE_IDENTITY_TPM2_ALLOW_SKIP=$([bool]$AllowTpm2Skip)"
+} else {
+    $configureArguments += "-DLCC_DEVICE_IDENTITY_EXPECT_TPM2_OPENSSL=OFF"
+    $configureArguments += "-DLCC_DEVICE_IDENTITY_TPM2_ALLOW_SKIP=OFF"
 }
 if ($StaticRuntime) {
     if ($Configuration -eq "Debug") {

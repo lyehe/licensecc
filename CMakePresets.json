@@ -66,7 +66,11 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
         "CMAKE_INSTALL_PREFIX": "${sourceDir}/build/ci-linux-debug/install",
-        "LCC_PROJECT_NAME": "test"
+        "LCC_PROJECT_NAME": "test",
+        "LCC_ENABLE_DEVICE_IDENTITY": "FALSE",
+        "LCC_ENABLE_WINDOWS_TPM": "FALSE",
+        "LCC_ENABLE_TPM2_OPENSSL": "FALSE",
+        "LCC_BUILD_DEVICE_IDENTITY_TEST_PROVIDER": "FALSE"
       }
     },
     {
@@ -77,7 +81,11 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
         "CMAKE_INSTALL_PREFIX": "${sourceDir}/build/ci-linux-release/install",
-        "LCC_PROJECT_NAME": "test"
+        "LCC_PROJECT_NAME": "test",
+        "LCC_ENABLE_DEVICE_IDENTITY": "FALSE",
+        "LCC_ENABLE_WINDOWS_TPM": "FALSE",
+        "LCC_ENABLE_TPM2_OPENSSL": "FALSE",
+        "LCC_BUILD_DEVICE_IDENTITY_TEST_PROVIDER": "FALSE"
       }
     },
     {
@@ -88,7 +96,11 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
         "CMAKE_INSTALL_PREFIX": "${sourceDir}/build/ci-linux-core/install",
-        "LCC_PROJECT_NAME": "test"
+        "LCC_PROJECT_NAME": "test",
+        "LCC_ENABLE_DEVICE_IDENTITY": "FALSE",
+        "LCC_ENABLE_WINDOWS_TPM": "FALSE",
+        "LCC_ENABLE_TPM2_OPENSSL": "FALSE",
+        "LCC_BUILD_DEVICE_IDENTITY_TEST_PROVIDER": "FALSE"
       }
     },
     {
@@ -135,6 +147,38 @@
         "LCC_ENABLE_TPM2_OPENSSL": "FALSE",
         "LCC_BUILD_DEVICE_IDENTITY_TEST_PROVIDER": "FALSE",
         "LCC_BUILD_TPM2_OPENSSL_CAPABILITY_TEST": "TRUE"
+      }
+    },
+    {
+      "name": "ci-linux-debug-tpm2",
+      "inherits": "ci-linux-debug",
+      "displayName": "CI Linux Debug TPM2 OpenSSL Provider",
+      "description": "Linux debug build with the production OpenSSL tpm2 device-key provider.",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/ci-linux-debug-tpm2",
+      "cacheVariables": {
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/build/ci-linux-debug-tpm2/install",
+        "LCC_ENABLE_DEVICE_IDENTITY": "TRUE",
+        "LCC_ENABLE_WINDOWS_TPM": "FALSE",
+        "LCC_ENABLE_TPM2_OPENSSL": "TRUE",
+        "LCC_BUILD_DEVICE_IDENTITY_TEST_PROVIDER": "FALSE",
+        "LCC_BUILD_TPM2_OPENSSL_CAPABILITY_TEST": "FALSE"
+      }
+    },
+    {
+      "name": "ci-linux-release-tpm2",
+      "inherits": "ci-linux-release",
+      "displayName": "CI Linux Release TPM2 OpenSSL Provider",
+      "description": "Linux release build with the production OpenSSL tpm2 device-key provider.",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/ci-linux-release-tpm2",
+      "cacheVariables": {
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/build/ci-linux-release-tpm2/install",
+        "LCC_ENABLE_DEVICE_IDENTITY": "TRUE",
+        "LCC_ENABLE_WINDOWS_TPM": "FALSE",
+        "LCC_ENABLE_TPM2_OPENSSL": "TRUE",
+        "LCC_BUILD_DEVICE_IDENTITY_TEST_PROVIDER": "FALSE",
+        "LCC_BUILD_TPM2_OPENSSL_CAPABILITY_TEST": "FALSE"
       }
     },
     {
@@ -356,6 +400,18 @@
       "configuration": "Release"
     },
     {
+      "name": "ci-linux-debug-tpm2",
+      "configurePreset": "ci-linux-debug-tpm2",
+      "configuration": "Debug",
+      "targets": ["install"]
+    },
+    {
+      "name": "ci-linux-release-tpm2",
+      "configurePreset": "ci-linux-release-tpm2",
+      "configuration": "Release",
+      "targets": ["install"]
+    },
+    {
       "name": "ci-windows-msvc-debug-dynamic",
       "configurePreset": "ci-windows-msvc-debug-dynamic",
       "configuration": "Debug",
@@ -519,6 +575,28 @@
     {
       "name": "ci-linux-release-tpm2-capability",
       "configurePreset": "ci-linux-release-tpm2-capability",
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true
+      },
+      "environment": {
+        "VIRTUAL_ENV": "VM"
+      }
+    },
+    {
+      "name": "ci-linux-debug-tpm2",
+      "configurePreset": "ci-linux-debug-tpm2",
+      "configuration": "Debug",
+      "output": {
+        "outputOnFailure": true
+      },
+      "environment": {
+        "VIRTUAL_ENV": "VM"
+      }
+    },
+    {
+      "name": "ci-linux-release-tpm2",
+      "configurePreset": "ci-linux-release-tpm2",
       "configuration": "Release",
       "output": {
         "outputOnFailure": true
