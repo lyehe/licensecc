@@ -352,6 +352,10 @@ test("assembly uses a sanitized canonical install, four pinned Worker dry-runs, 
     assert.match(npmInstall.env.NUGET_PACKAGES, /\.canonical-head[\\/]\.release-tool-home[\\/]nuget-packages$/);
     assert.match(npmInstall.env.APPDATA, /\.canonical-head[\\/]\.release-tool-home[\\/]appdata[\\/]roaming$/);
     assert.match(npmInstall.env.LOCALAPPDATA, /\.canonical-head[\\/]\.release-tool-home[\\/]appdata[\\/]local$/);
+    assert.match(npmInstall.env.ProgramData, /\.canonical-head[\\/]\.release-tool-home[\\/]appdata[\\/]programdata$/);
+    assert.match(npmInstall.env["ProgramFiles(x86)"], /\.canonical-head[\\/]\.release-tool-home[\\/]appdata[\\/]programfiles-x86$/);
+    assert.match(npmInstall.env.ProgramFiles, /\.canonical-head[\\/]\.release-tool-home[\\/]appdata[\\/]programfiles$/);
+    assert.match(npmInstall.env.NUGET_HTTP_CACHE_PATH, /\.canonical-head[\\/]\.release-tool-home[\\/]nuget-http-cache$/);
     assert.equal(commands.filter((entry) => entry.label.includes("isolated UI build")).length, 2);
     const workerCommands = commands.filter((entry) => entry.label.includes("Worker dry-run"));
     assert.equal(workerCommands.length, 4);
@@ -375,8 +379,9 @@ test("assembly uses a sanitized canonical install, four pinned Worker dry-runs, 
     const pythonBuild = commands.find((entry) => entry.label.includes("Python wheel"));
     assert.ok(pythonBuild.args.includes("--build-constraint"));
     assert.ok(pythonBuild.args.includes("--require-hashes"));
-    assert.ok(commands.some((entry) => entry.label.includes("NuGet restore") && entry.args.includes("--locked-mode") && entry.args.some((arg) => String(arg).includes(".canonical-head"))));
+    assert.ok(commands.some((entry) => entry.label.includes("NuGet restore") && entry.args.includes("--locked-mode") && entry.args.includes("--disable-build-servers") && entry.args.some((arg) => String(arg).includes(".canonical-head"))));
     const nugetPack = commands.find((entry) => entry.label.includes("NuGet package"));
+    assert.ok(nugetPack.args.includes("--disable-build-servers"));
     assert.ok(nugetPack.args.includes(`-p:PackageVersion=${PLATFORM_VERSION}`));
     assert.ok(nugetPack.args.includes("-p:SymbolPackageFormat=snupkg"));
     assert.equal(npmInstall.env.SOURCE_DATE_EPOCH, String(Math.floor(new Date(manifest.source_date).getTime() / 1000)));

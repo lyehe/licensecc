@@ -756,17 +756,31 @@ function sanitizedEnvironment(canonicalRoot, sourceDateEpoch) {
   const home = join(canonicalRoot, ".release-tool-home");
   const appData = join(home, "appdata", "roaming");
   const localAppData = join(home, "appdata", "local");
+  const programData = join(home, "appdata", "programdata");
+  const programFiles = join(home, "appdata", "programfiles");
+  const programFilesX86 = join(home, "appdata", "programfiles-x86");
   const nugetPackages = join(home, "nuget-packages");
+  const nugetHttpCache = join(home, "nuget-http-cache");
+  const nugetPluginsCache = join(home, "nuget-plugins-cache");
+  const nugetScratch = join(home, "nuget-scratch");
+  const nugetConfig = join(home, "NuGet.Config");
   const temporary = join(canonicalRoot, ".release-tool-temp");
   const cache = join(canonicalRoot, ".release-npm-cache");
   const userConfig = join(canonicalRoot, ".release-npmrc");
   mkdirSync(home, { recursive: true });
   mkdirSync(appData, { recursive: true });
   mkdirSync(localAppData, { recursive: true });
+  mkdirSync(programData, { recursive: true });
+  mkdirSync(programFiles, { recursive: true });
+  mkdirSync(programFilesX86, { recursive: true });
   mkdirSync(nugetPackages, { recursive: true });
+  mkdirSync(nugetHttpCache, { recursive: true });
+  mkdirSync(nugetPluginsCache, { recursive: true });
+  mkdirSync(nugetScratch, { recursive: true });
   mkdirSync(temporary, { recursive: true });
   mkdirSync(cache, { recursive: true });
   writeFileSync(userConfig, "audit=false\nfund=false\nupdate-notifier=false\n");
+  writeFileSync(nugetConfig, "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<configuration>\n  <packageSources>\n    <clear />\n    <add key=\"nuget.org\" value=\"https://api.nuget.org/v3/index.json\" protocolVersion=\"3\" />\n  </packageSources>\n</configuration>\n");
   const inheritedPath = process.env.PATH ?? process.env.Path ?? "";
   const env = {
     PATH: inheritedPath,
@@ -774,8 +788,22 @@ function sanitizedEnvironment(canonicalRoot, sourceDateEpoch) {
     USERPROFILE: home,
     APPDATA: appData,
     LOCALAPPDATA: localAppData,
+    // NuGet's Windows configuration defaults discover a machine-wide config
+    // below ProgramData.  Keep that discovery local to canonical staging too.
+    ProgramData: programData,
+    ALLUSERSPROFILE: programData,
+    // NuGet's default configuration probes ProgramFiles before honoring a
+    // supplied config file.  Point those probes at empty canonical paths so
+    // host-wide NuGet configuration cannot affect release contents.
+    ProgramFiles: programFiles,
+    ProgramW6432: programFiles,
+    "ProgramFiles(x86)": programFilesX86,
     DOTNET_CLI_HOME: home,
     NUGET_PACKAGES: nugetPackages,
+    NUGET_HTTP_CACHE_PATH: nugetHttpCache,
+    NUGET_PLUGINS_CACHE_PATH: nugetPluginsCache,
+    NUGET_SCRATCH: nugetScratch,
+    NUGET_CONFIG_FILE: nugetConfig,
     TMPDIR: temporary,
     TEMP: temporary,
     TMP: temporary,
@@ -1170,8 +1198,8 @@ function assembleReleaseArtifacts({ root = repositoryRoot, outputDirectory, cons
       hasDotnet = toolAvailable("dotnet");
       if (!hasDotnet && !allowPartial) throw new Error("dotnet is required; use --allow-partial only for an explicitly incomplete manifest");
       if (hasDotnet) {
-        run({ executable: "dotnet", args: ["restore", join(canonical, "sdks/dotnet/Licensecc.Client.sln"), "--locked-mode"], cwd: canonical, env, label: "locked NuGet restore" });
-        run({ executable: "dotnet", args: ["pack", join(canonical, "sdks/dotnet/src/Licensecc.Client/Licensecc.Client.csproj"), "--configuration", "Release", "--no-restore", "--include-symbols", "--include-source", `-p:PackageVersion=${versions.platformVersion}`, "-p:SymbolPackageFormat=snupkg", "-p:ContinuousIntegrationBuild=true", "-p:Deterministic=true", `-p:SourceRevisionId=${versions.commit}`, "--output", join(staging.output, "dotnet")], cwd: canonical, env, label: "NuGet package and symbols" });
+        run({ executable: "dotnet", args: ["restore", join(canonical, "sdks/dotnet/Licensecc.Client.sln"), "--locked-mode", "--disable-build-servers", "--configfile", env.NUGET_CONFIG_FILE, "--packages", env.NUGET_PACKAGES], cwd: canonical, env, label: "locked NuGet restore" });
+        run({ executable: "dotnet", args: ["pack", join(canonical, "sdks/dotnet/src/Licensecc.Client/Licensecc.Client.csproj"), "--configuration", "Release", "--no-restore", "--disable-build-servers", "--include-symbols", "--include-source", `-p:PackageVersion=${versions.platformVersion}`, "-p:SymbolPackageFormat=snupkg", "-p:ContinuousIntegrationBuild=true", "-p:Deterministic=true", `-p:SourceRevisionId=${versions.commit}`, "--output", join(staging.output, "dotnet")], cwd: canonical, env, label: "NuGet package and symbols" });
       }
     } finally {
       removeOwnedChild(staging, canonical);

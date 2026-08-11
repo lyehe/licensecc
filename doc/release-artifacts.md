@@ -56,6 +56,9 @@ The assembler first checks the canonical `uv.lock`, then invokes `uv build`
 with the tracked hash-constrained `sdks/python/build-constraints.txt` and
 `--require-hashes`. NuGet packaging
 sets `SymbolPackageFormat=snupkg` both in the SDK project and the pack command.
+Its locked restore uses a generated canonical-only NuGet configuration, package
+caches, and disabled persistent build servers, so host-level NuGet settings do
+not influence the staged payload.
 
 The assembler derives `SOURCE_DATE_EPOCH` from the exact Git commit timestamp
 and sets UTC, deterministic Python, and .NET reproducibility inputs in its
