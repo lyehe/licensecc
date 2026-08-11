@@ -1647,7 +1647,8 @@ private:
         }
         if (store_error != 0 && !terminal_store_probe) {
             set_tpm2_openssl_test_stage("load_store_error");
-            return map_provider_error(0, true);
+            return load_error.empty() ? map_provider_error(0, true) :
+                                        map_provider_error_text(0, true, load_error);
         }
         P256Spki spki{};
         set_tpm2_openssl_test_stage("load_validate_key");
