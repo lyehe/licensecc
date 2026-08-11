@@ -1540,7 +1540,8 @@ private:
         errno = 0;
         clear_provider_error_queue();
         set_tpm2_openssl_test_stage("load_store_open");
-        StoreContext store(openssl_, openssl_->store_open_ex(uri.c_str(), libctx_, nullptr, ui_method, nullptr));
+        StoreContext store(
+            openssl_, openssl_->store_open_ex(uri.c_str(), libctx_, "?provider=tpm2", ui_method, nullptr));
         const int store_errno = errno;
         if (store.get() == nullptr) {
             return map_provider_error(store_errno, true);
