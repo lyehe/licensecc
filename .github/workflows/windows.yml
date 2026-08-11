@@ -81,17 +81,43 @@ jobs:
       -  name: Installed C99 and C++ device-identity consumer
          if: matrix.preset == 'ci-windows-device-identity-test'
          shell: pwsh
-         run: pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/ci/run-installed-device-identity-consumer.ps1 -InstallPrefix build/ci-windows-device-identity-test/install
+         run: pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/ci/run-installed-device-identity-consumer.ps1 -InstallPrefix build/ci-windows-device-identity-test/install -RequireC99
       -  name: Reject OpenSSL from the Windows identity package
          if: matrix.preset == 'ci-windows-device-identity-test'
          shell: pwsh
          run: |
+            $cachePath = "build/ci-windows-device-identity-test/CMakeCache.txt"
+            if (-not (Test-Path -LiteralPath $cachePath -PathType Leaf)) {
+              throw "Configured CMake cache was not found: $cachePath"
+            }
+            $linkerEntries = @(
+              Get-Content -LiteralPath $cachePath | ForEach-Object {
+                if ($_ -match '^CMAKE_LINKER:FILEPATH=(.+)$') { $Matches[1] }
+              }
+            )
+            if ($linkerEntries.Count -ne 1) {
+              throw "Expected exactly one CMAKE_LINKER:FILEPATH entry in $cachePath; found $($linkerEntries.Count)"
+            }
+            $linker = $linkerEntries[0]
+            if (-not (Test-Path -LiteralPath $linker -PathType Leaf)) {
+              throw "Configured CMAKE_LINKER does not exist: $linker"
+            }
+            $dumpbin = Join-Path (Split-Path -Parent $linker) "dumpbin.exe"
+            if (-not (Test-Path -LiteralPath $dumpbin -PathType Leaf)) {
+              throw "dumpbin.exe was not found beside configured CMAKE_LINKER '$linker': $dumpbin"
+            }
             $consumer = "build/installed-device-identity-consumer/Debug/device_identity_cpp_link_smoke.exe"
-            $imports = & dumpbin.exe /dependents $consumer
+            if (-not (Test-Path -LiteralPath $consumer -PathType Leaf)) {
+              throw "Installed consumer executable was not found: $consumer"
+            }
+            $imports = & $dumpbin /dependents $consumer
             if ($LASTEXITCODE -ne 0) { throw "dumpbin dependency inspection failed" }
             if ($imports -match '(?i)(?:lib)?(?:ssl|crypto)[^\s]*\.dll') { throw "OpenSSL DLL dependency detected" }
             $archive = "build/ci-windows-device-identity-test/src/library/Debug/licensecc_static.lib"
-            $directives = & dumpbin.exe /directives $archive
+            if (-not (Test-Path -LiteralPath $archive -PathType Leaf)) {
+              throw "Configured licensecc archive was not found: $archive"
+            }
+            $directives = & $dumpbin /directives $archive
             if ($LASTEXITCODE -ne 0) { throw "dumpbin archive inspection failed" }
             if ($directives -match '(?i)(?:libcrypto|libssl|crypto|ssl)\.lib') { throw "OpenSSL archive directive detected" }
       -  name: Inspector

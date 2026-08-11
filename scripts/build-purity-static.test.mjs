@@ -168,14 +168,33 @@ test("platform CI actively runs the exact identity suite and installed consumers
     assert.ok(commands.some((line) => line === "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/check-build-purity.ps1 -Preset ${{ matrix.preset }}"));
     assert.ok(commands.some((line) => line === `ctest --preset ${item.preset} --no-tests=error -R "^device_identity_(abi|vectors|policy|concurrency)_test$"`));
     assert.ok(commands.some((line) => line.startsWith(`cmake --install build/${item.preset} `)));
-    assert.ok(commands.some((line) => line === `pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/ci/run-installed-device-identity-consumer.ps1 -InstallPrefix build/${item.preset}/install`));
+    assert.ok(commands.some((line) => line === `pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/ci/run-installed-device-identity-consumer.ps1 -InstallPrefix build/${item.preset}/install -RequireC99`));
   }
 
   const windowsCommands = activeRunLines(source(".github/workflows/windows.yml"), "build-windows");
-  assert.ok(windowsCommands.some((line) => /^\$imports\s*=\s*&\s*dumpbin(?:\.exe)?\s+\/dependents/u.test(line)));
+  assert.ok(windowsCommands.some((line) => /^\$cachePath\s*=.*CMakeCache\.txt/u.test(line)));
+  assert.ok(windowsCommands.some((line) => /CMAKE_LINKER:FILEPATH=/u.test(line)));
+  assert.ok(windowsCommands.some((line) => /\$linkerEntries\.Count\s+-ne\s+1/u.test(line)));
+  assert.ok(windowsCommands.some((line) => /Test-Path\s+-LiteralPath\s+\$linker\s+-PathType\s+Leaf/u.test(line)));
+  assert.ok(windowsCommands.some((line) => /^\$dumpbin\s*=\s*Join-Path\s+.*dumpbin\.exe/u.test(line)));
+  assert.ok(windowsCommands.some((line) => /Test-Path\s+-LiteralPath\s+\$dumpbin\s+-PathType\s+Leaf/u.test(line)));
+  assert.ok(windowsCommands.some((line) => /^\$imports\s*=\s*&\s*\$dumpbin\s+\/dependents/u.test(line)));
   assert.ok(windowsCommands.some((line) => /^if\s*\(\$imports\s+-match\s+.*(?:ssl|crypto)/iu.test(line)));
-  assert.ok(windowsCommands.some((line) => /^\$directives\s*=\s*&\s*dumpbin(?:\.exe)?\s+\/directives/u.test(line)));
+  assert.ok(windowsCommands.some((line) => /^\$directives\s*=\s*&\s*\$dumpbin\s+\/directives/u.test(line)));
   assert.ok(windowsCommands.some((line) => /^if\s*\(\$directives\s+-match\s+.*(?:ssl|crypto)/iu.test(line)));
+  assert.doesNotMatch(windowsCommands.join("\n"), /&\s*dumpbin(?:\.exe)?\b/iu);
+});
+
+test("installed consumer makes C99 mandatory only when its CI gate requests it", () => {
+  const runner = source("scripts/ci/run-installed-device-identity-consumer.ps1");
+  const cmake = source("test/consumer/device_identity/CMakeLists.txt");
+
+  assert.match(runner, /\[switch\]\$RequireC99/u);
+  assert.match(runner, /LCC_DEVICE_IDENTITY_REQUIRE_C99=ON/u);
+  assert.match(runner, /LCC_DEVICE_IDENTITY_REQUIRE_C99=OFF/u);
+  assert.match(cmake, /option\(\s*LCC_DEVICE_IDENTITY_REQUIRE_C99\s+"[^"]*"\s+OFF\s*\)/u);
+  assert.match(cmake, /elseif\(LCC_DEVICE_IDENTITY_REQUIRE_C99\)[\s\S]*message\(FATAL_ERROR\s+"[^"]*C99/u);
+  assert.match(cmake, /C_STANDARD\s+99/u);
 });
 
 test("platform identity CI presets pin isolated feature-enabled builds", () => {

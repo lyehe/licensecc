@@ -34,7 +34,7 @@ jobs:
          run: cmake --install build/ci-linux-device-identity-test --prefix build/ci-linux-device-identity-test/install
       -  name: Installed C99 and C++ device-identity consumer
          if: matrix.preset == 'ci-linux-device-identity-test'
-         run: pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/ci/run-installed-device-identity-consumer.ps1 -InstallPrefix build/ci-linux-device-identity-test/install
+         run: pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/ci/run-installed-device-identity-consumer.ps1 -InstallPrefix build/ci-linux-device-identity-test/install -RequireC99
       -  name: On failure print logs
          if: ${{ failure() }}
          run: cat /tmp/open-license.log || true

@@ -1,6 +1,8 @@
 param(
     [Parameter(Mandatory = $true)]
-    [string]$InstallPrefix
+    [string]$InstallPrefix,
+
+    [switch]$RequireC99
 )
 
 $ErrorActionPreference = "Stop"
@@ -17,11 +19,21 @@ if (-not $packageDirectory) {
     throw "Installed licensecc-config.cmake was not found below $resolvedInstallPrefix"
 }
 
-& cmake -S $consumerSource -B $consumerBuild `
-    "-DCMAKE_BUILD_TYPE=Debug" `
-    "-DCMAKE_PREFIX_PATH=$resolvedInstallPrefix" `
-    "-Dlicensecc_DIR=$packageDirectory" `
+$configureArguments = @(
+    "-S", $consumerSource,
+    "-B", $consumerBuild,
+    "-DCMAKE_BUILD_TYPE=Debug",
+    "-DCMAKE_PREFIX_PATH=$resolvedInstallPrefix",
+    "-Dlicensecc_DIR=$packageDirectory",
     "-DLCC_PROJECT_NAME=test"
+)
+if ($RequireC99) {
+    $configureArguments += "-DLCC_DEVICE_IDENTITY_REQUIRE_C99=ON"
+} else {
+    $configureArguments += "-DLCC_DEVICE_IDENTITY_REQUIRE_C99=OFF"
+}
+
+& cmake @configureArguments
 if ($LASTEXITCODE -ne 0) {
     throw "Installed device-identity consumer configure failed with exit code $LASTEXITCODE"
 }

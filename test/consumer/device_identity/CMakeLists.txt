@@ -2,6 +2,9 @@ cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
 project(licensecc_device_identity_consumer LANGUAGES CXX)
 
 include(CheckLanguage)
+option(LCC_DEVICE_IDENTITY_REQUIRE_C99
+    "Fail configuration when the installed C99 header smoke cannot be built"
+    OFF)
 set(LCC_PROJECT_NAME "test" CACHE STRING "Installed Licensecc project component")
 find_package(licensecc CONFIG REQUIRED)
 
@@ -19,6 +22,8 @@ if(CMAKE_C_COMPILER)
     set_target_properties(device_identity_c_header_smoke PROPERTIES C_STANDARD 99 C_STANDARD_REQUIRED YES)
     target_link_libraries(device_identity_c_header_smoke PRIVATE licensecc::licensecc_static)
     message(STATUS "Device identity installed C99 header smoke: ENABLED")
+elseif(LCC_DEVICE_IDENTITY_REQUIRE_C99)
+    message(FATAL_ERROR "Device identity installed consumer requires a C compiler for its C99 header smoke")
 else()
     message(STATUS "Device identity installed C99 header smoke: SKIP (no C compiler)")
 endif()
