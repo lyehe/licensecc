@@ -53,6 +53,14 @@ public:
                              const char* name,
                              const char* properties) noexcept = 0;
     virtual void md_free(EVP_MD* digest) noexcept = 0;
+    virtual EVP_PKEY* d2i_public_key(OSSL_LIB_CTX* libctx,
+                                     const unsigned char* data,
+                                     std::size_t size) noexcept = 0;
+    virtual int digest(EVP_MD* digest,
+                       const unsigned char* data,
+                       std::size_t size,
+                       unsigned char* output,
+                       std::size_t* output_size) noexcept = 0;
     virtual void pkey_free(EVP_PKEY* key) noexcept = 0;
     virtual const OSSL_PROVIDER* pkey_get0_provider(const EVP_PKEY* key) noexcept = 0;
     virtual const char* provider_name(const OSSL_PROVIDER* provider) noexcept = 0;
@@ -71,6 +79,7 @@ public:
                                 unsigned char** data,
                                 std::size_t* data_size) noexcept = 0;
     virtual void encoder_free(OSSL_ENCODER_CTX* context) noexcept = 0;
+    virtual void clear_free(void* data, std::size_t size) noexcept = 0;
 
     virtual OSSL_STORE_CTX* store_open_ex(const char* uri,
                                           OSSL_LIB_CTX* libctx,
