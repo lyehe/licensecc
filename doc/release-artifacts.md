@@ -62,10 +62,14 @@ not influence the staged payload.
 
 The assembler derives `SOURCE_DATE_EPOCH` from the exact Git commit timestamp
 and sets UTC, deterministic Python, and .NET reproducibility inputs in its
-sanitized build environment. Passing `--repeat-output` performs two independent
-canonical assemblies and fails unless every payload and metadata byte matches.
-This is a release gate, not an unsupported claim that arbitrary future upstream
-packaging tools will remain byte-stable.
+sanitized build environment. It makes .NET source paths stable, omits
+Wrangler's timestamped README, makes Worker source-map roots bundle-relative,
+and rewrites only NuGet's generated relationship/container metadata with
+ordinal entry order and Git-timestamped ZIP headers. Runtime Worker JavaScript,
+managed DLLs/PDBs, and all package metadata are parsed and validated before
+and after that normalization. Passing `--repeat-output` performs two
+independent canonical assemblies and fails unless every payload and metadata
+byte matches.
 
 The C++ archive is built from ordinal-sorted canonical Git blobs only. It
 contains the curated runtime CMake/include/source inputs and the vendored

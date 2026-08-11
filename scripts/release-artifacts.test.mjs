@@ -128,8 +128,15 @@ function nuspec({ id = "Licensecc.Client", version = PLATFORM_VERSION, symbols =
   return `<?xml version="1.0"?><package><metadata><id>${id}</id><version>${version}</version><authors>fixture</authors>${symbols ? "<packageTypes><packageType name=\"SymbolsPackage\" /></packageTypes>" : ""}</metadata></package>`;
 }
 
-function nugetArtifact({ id = "Licensecc.Client", metadataId = id, version = PLATFORM_VERSION, symbols = false } = {}) {
-  const files = [{ name: `${id}.nuspec`, contents: nuspec({ id: metadataId, version, symbols }) }];
+function nugetArtifact({ id = "Licensecc.Client", metadataId = id, version = PLATFORM_VERSION, symbols = false, coreNonce = "stable" } = {}) {
+  const core = `package/services/metadata/core-properties/${coreNonce}.psmdcp`;
+  const relationships = `<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Type="http://schemas.microsoft.com/packaging/2010/07/manifest" Target="/${id}.nuspec" Id="R${coreNonce}Manifest"/><Relationship Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="/${core}" Id="R${coreNonce}Core"/></Relationships>`;
+  const coreProperties = `<?xml version="1.0"?><coreProperties xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier>${metadataId}</dc:identifier><version>${version}</version></coreProperties>`;
+  const files = [
+    { name: "_rels/.rels", contents: relationships },
+    { name: `${id}.nuspec`, contents: nuspec({ id: metadataId, version, symbols }) },
+    { name: core, contents: coreProperties },
+  ];
   files.push(symbols
     ? { name: "lib/net8.0/Licensecc.Client.pdb", contents: "fixture pdb" }
     : { name: "lib/net8.0/Licensecc.Client.dll", contents: "fixture dll" });
@@ -195,7 +202,7 @@ function valueAfter(args, flag) {
   return args[index + 1];
 }
 
-function fakeRun(commands, { symbols = true, failLabel, wrongSymbol = false, wrongPython = false, invalidArtifact, workerVariant = false, pythonAuxiliaryFile = false, standardTarPadding = false } = {}) {
+function fakeRun(commands, { symbols = true, failLabel, wrongSymbol = false, wrongPython = false, invalidArtifact, workerVariant = false, workerEphemera = false, nugetEphemera = false, pythonAuxiliaryFile = false, standardTarPadding = false } = {}) {
   return (entry) => {
     commands.push(entry);
     if (entry.label === failLabel) throw new Error(`intentional ${failLabel} failure`);
@@ -209,7 +216,13 @@ function fakeRun(commands, { symbols = true, failLabel, wrongSymbol = false, wro
     if (entry.label.includes("isolated UI build")) put(join(valueAfter(entry.args, "--outDir"), "index.html"), "ui");
     if (entry.label.includes("Worker dry-run")) {
       const contents = invalidArtifact === "worker-empty" ? "" : invalidArtifact === "worker-malformed" ? "export default {" : `export default { fetch() { return new Response("ok"); } };${workerVariant ? "\n// independently valid variant\n" : "\n"}`;
-      put(join(valueAfter(entry.args, "--outdir"), "worker.js"), contents);
+      const out = valueAfter(entry.args, "--outdir");
+      put(join(out, "worker.js"), contents);
+      if (workerEphemera) {
+        const timestamp = out.includes("first") ? "2026-01-01T00:00:00.000Z" : "2026-01-01T00:00:01.000Z";
+        put(join(out, "README.md"), `This folder contains the built output assets for the worker "fixture" generated at ${timestamp}.\n`);
+        put(join(out, "worker.js.map"), JSON.stringify({ version: 3, sourceRoot: out, sources: ["worker.ts"], names: [], mappings: "" }));
+      }
     }
     if (entry.label.includes("Python wheel")) {
       const out = valueAfter(entry.args, "--out-dir");
@@ -222,8 +235,9 @@ function fakeRun(commands, { symbols = true, failLabel, wrongSymbol = false, wro
     }
     if (entry.label.includes("NuGet package")) {
       const out = valueAfter(entry.args, "--output");
-      const primary = invalidArtifact === "nupkg-empty" ? Buffer.alloc(0) : invalidArtifact === "nupkg-truncated" ? nugetArtifact().subarray(0, 8) : nugetArtifact({ metadataId: invalidArtifact === "nupkg-metadata" ? "Other.Client" : "Licensecc.Client" });
-      const symbolsPackage = invalidArtifact === "snupkg-empty" ? Buffer.alloc(0) : invalidArtifact === "snupkg-truncated" ? nugetArtifact({ symbols: true }).subarray(0, 8) : nugetArtifact({ metadataId: invalidArtifact === "snupkg-metadata" ? "Other.Client" : "Licensecc.Client", symbols: true });
+      const nonce = nugetEphemera ? Buffer.from(out, "utf8").toString("hex").slice(-16) : "stable";
+      const primary = invalidArtifact === "nupkg-empty" ? Buffer.alloc(0) : invalidArtifact === "nupkg-truncated" ? nugetArtifact().subarray(0, 8) : nugetArtifact({ metadataId: invalidArtifact === "nupkg-metadata" ? "Other.Client" : "Licensecc.Client", coreNonce: nonce });
+      const symbolsPackage = invalidArtifact === "snupkg-empty" ? Buffer.alloc(0) : invalidArtifact === "snupkg-truncated" ? nugetArtifact({ symbols: true }).subarray(0, 8) : nugetArtifact({ metadataId: invalidArtifact === "snupkg-metadata" ? "Other.Client" : "Licensecc.Client", symbols: true, coreNonce: nonce });
       put(join(out, `Licensecc.Client.${PLATFORM_VERSION}.nupkg`), primary);
       if (symbols) put(join(out, wrongSymbol ? `Other.Client.${PLATFORM_VERSION}.snupkg` : `Licensecc.Client.${PLATFORM_VERSION}.snupkg`), symbolsPackage);
     }
@@ -392,6 +406,8 @@ test("assembly uses a sanitized canonical install, four pinned Worker dry-runs, 
     assert.ok(nugetPack.args.includes("--disable-build-servers"));
     assert.ok(nugetPack.args.includes(`-p:PackageVersion=${PLATFORM_VERSION}`));
     assert.ok(nugetPack.args.includes("-p:SymbolPackageFormat=snupkg"));
+    assert.ok(nugetPack.args.includes("-p:DeterministicSourcePaths=true"));
+    assert.ok(nugetPack.args.some((argument) => String(argument).startsWith("-p:PathMap=") && String(argument).endsWith("=/src")));
     assert.equal(npmInstall.env.SOURCE_DATE_EPOCH, String(Math.floor(new Date(manifest.source_date).getTime() / 1000)));
     assert.equal(npmInstall.env.TZ, "UTC");
     assert.ok(!existsSync(join(output, ".canonical-head")));
@@ -470,7 +486,7 @@ test("dotnet is mandatory by default, records an explicit boolean partial manife
     const manifest = assembleReleaseArtifacts({ root, outputDirectory: partial, consumerId: "acme", allowPartial: true, run: fakeRun([]), verifyArchive: () => {}, toolAvailable: () => false });
     assert.equal(manifest.incomplete, true);
     assert.equal(typeof manifest.incomplete, "boolean");
-    assert.throws(() => assembleReleaseArtifacts({ root, outputDirectory: wrongSymbols, consumerId: "acme", run: fakeRun([], { wrongSymbol: true }), verifyArchive: () => {}, toolAvailable: () => true }), /NuGet primary and symbols artifacts/);
+    assert.throws(() => assembleReleaseArtifacts({ root, outputDirectory: wrongSymbols, consumerId: "acme", run: fakeRun([], { wrongSymbol: true }), verifyArchive: () => {}, toolAvailable: () => true }), /NuGet symbols output is missing/);
     assert.throws(() => assembleReleaseArtifacts({ root, outputDirectory: wrongPython, consumerId: "acme", run: fakeRun([], { wrongPython: true }), verifyArchive: () => {}, toolAvailable: () => true }), /Python tool output contains an unexpected entry/);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -520,17 +536,17 @@ test("two controlled canonical assemblies are byte-identical despite mutable non
   const second = join(root, "build", "release-artifacts", "second");
   const variant = join(root, "build", "release-artifacts", "variant");
   try {
-    assembleReleaseArtifacts({ root, outputDirectory: first, consumerId: "acme", run: fakeRun([]), verifyArchive: () => {}, toolAvailable: () => true });
+    assembleReleaseArtifacts({ root, outputDirectory: first, consumerId: "acme", run: fakeRun([], { workerEphemera: true, nugetEphemera: true }), verifyArchive: () => {}, toolAvailable: () => true });
     writeFileSync(join(root, "services/cloudflare-license-admin/src/index.ts"), "// mutable drift after first assembly\n");
     write(root, "services/cloudflare-license-admin/.dev.vars", "ignored-secret\n");
-    assembleReleaseArtifacts({ root, outputDirectory: second, consumerId: "acme", run: fakeRun([]), verifyArchive: () => {}, toolAvailable: () => true });
+    assembleReleaseArtifacts({ root, outputDirectory: second, consumerId: "acme", run: fakeRun([], { workerEphemera: true, nugetEphemera: true }), verifyArchive: () => {}, toolAvailable: () => true });
     for (const file of ["checksums.sha256", "release-manifest.json", "spdx.json"]) assert.deepEqual(readFileSync(join(first, file)), readFileSync(join(second, file)), file);
     const firstCpp = readdirSync(join(first, "cpp"));
     const secondCpp = readdirSync(join(second, "cpp"));
     assert.deepEqual(firstCpp, secondCpp);
     assert.deepEqual(readFileSync(join(first, "cpp", firstCpp[0])), readFileSync(join(second, "cpp", secondCpp[0])));
     assert.doesNotThrow(() => verifyReleaseArtifactReproducibility({ firstDirectory: first, secondDirectory: second, root }));
-    assembleReleaseArtifacts({ root, outputDirectory: variant, consumerId: "acme", run: fakeRun([], { workerVariant: true }), verifyArchive: () => {}, toolAvailable: () => true });
+    assembleReleaseArtifacts({ root, outputDirectory: variant, consumerId: "acme", run: fakeRun([], { workerVariant: true, workerEphemera: true, nugetEphemera: true }), verifyArchive: () => {}, toolAvailable: () => true });
     assert.throws(() => verifyReleaseArtifactReproducibility({ firstDirectory: first, secondDirectory: variant, root }), /not reproducible: workers\//);
   } finally {
     rmSync(root, { recursive: true, force: true });

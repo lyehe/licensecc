@@ -16,7 +16,7 @@ import {
 import { createRequire } from "node:module";
 import { dirname, isAbsolute, join, parse, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { gunzipSync, inflateRawSync } from "node:zlib";
+import { deflateRawSync, gunzipSync, inflateRawSync } from "node:zlib";
 
 import { checkVersionContract, readVersionAuthorities } from "./check-version-contract.mjs";
 
@@ -617,6 +617,100 @@ function xmlValue(contents, field, label) {
   return values[0];
 }
 
+function zipDosTimestamp(sourceDateEpoch) {
+  if (!Number.isSafeInteger(sourceDateEpoch) || sourceDateEpoch < 0) throw new Error("release ZIP timestamp is invalid");
+  const date = new Date(sourceDateEpoch * 1000);
+  const year = Math.min(2107, Math.max(1980, date.getUTCFullYear()));
+  return {
+    date: ((year - 1980) << 9) | ((date.getUTCMonth() + 1) << 5) | date.getUTCDate(),
+    time: (date.getUTCHours() << 11) | (date.getUTCMinutes() << 5) | Math.floor(date.getUTCSeconds() / 2),
+  };
+}
+
+/** Write the regular-file ZIP subset with stable entry order, compression, and time. */
+function writeDeterministicZip(archivePath, files, sourceDateEpoch) {
+  const entries = [...files.entries()].sort(([left], [right]) => ordinal(left, right));
+  if (entries.length === 0 || entries.length > 0xffff) throw new Error("deterministic ZIP has an invalid entry count");
+  const timestamp = zipDosTimestamp(sourceDateEpoch);
+  const local = [];
+  const central = [];
+  let offset = 0;
+  for (const [name, contents] of entries) {
+    const member = assertSafePackageMemberPath(name, "deterministic ZIP");
+    if (member.endsWith("/") || !Buffer.isBuffer(contents) || contents.length > MAX_ARCHIVE_MEMBER_BYTES) throw new Error("deterministic ZIP contains an unsafe member");
+    const nameBytes = Buffer.from(member, "utf8");
+    const compressed = deflateRawSync(contents, { level: 9 });
+    if (nameBytes.length > 0xffff || compressed.length > 0xffffffff || contents.length > 0xffffffff || offset > 0xffffffff) throw new Error("deterministic ZIP member exceeds ZIP32 limits");
+    const crc = crc32(contents);
+    const header = Buffer.alloc(30);
+    header.writeUInt32LE(0x04034b50, 0);
+    header.writeUInt16LE(20, 4);
+    header.writeUInt16LE(0x0800, 6);
+    header.writeUInt16LE(8, 8);
+    header.writeUInt16LE(timestamp.time, 10);
+    header.writeUInt16LE(timestamp.date, 12);
+    header.writeUInt32LE(crc, 14);
+    header.writeUInt32LE(compressed.length, 18);
+    header.writeUInt32LE(contents.length, 22);
+    header.writeUInt16LE(nameBytes.length, 26);
+    const directory = Buffer.alloc(46);
+    directory.writeUInt32LE(0x02014b50, 0);
+    directory.writeUInt16LE(0x0314, 4);
+    directory.writeUInt16LE(20, 6);
+    directory.writeUInt16LE(0x0800, 8);
+    directory.writeUInt16LE(8, 10);
+    directory.writeUInt16LE(timestamp.time, 12);
+    directory.writeUInt16LE(timestamp.date, 14);
+    directory.writeUInt32LE(crc, 16);
+    directory.writeUInt32LE(compressed.length, 20);
+    directory.writeUInt32LE(contents.length, 24);
+    directory.writeUInt16LE(nameBytes.length, 28);
+    directory.writeUInt32LE(0x81a40000, 38);
+    directory.writeUInt32LE(offset, 42);
+    local.push(header, nameBytes, compressed);
+    central.push(directory, nameBytes);
+    offset += header.length + nameBytes.length + compressed.length;
+  }
+  const centralBytes = Buffer.concat(central);
+  if (offset + centralBytes.length + 22 > 0xffffffff) throw new Error("deterministic ZIP exceeds ZIP32 limits");
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0);
+  end.writeUInt16LE(entries.length, 8);
+  end.writeUInt16LE(entries.length, 10);
+  end.writeUInt32LE(centralBytes.length, 12);
+  end.writeUInt32LE(offset, 16);
+  writeFileSync(archivePath, Buffer.concat([...local, centralBytes, end]));
+}
+
+function canonicalNugetRelationships(packageId, corePath) {
+  return `<?xml version="1.0" encoding="utf-8"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">\n  <Relationship Type="http://schemas.microsoft.com/packaging/2010/07/manifest" Target="/${packageId}.nuspec" Id="Rmanifest" />\n  <Relationship Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="/${corePath}" Id="Rcore" />\n</Relationships>\n`;
+}
+
+/** Normalize only NuGet's generated relationship names and ZIP container metadata. */
+function canonicalizeNugetArtifact({ archivePath, packageId, platformVersion, symbols, sourceDateEpoch }) {
+  const label = symbols ? "NuGet symbols" : "NuGet package";
+  if (!existsSync(archivePath) || lstatSync(archivePath).isSymbolicLink() || !lstatSync(archivePath).isFile()) throw new Error(`${label} output is missing its expected artifact`);
+  validateNugetArtifact({ archivePath, packageId, platformVersion, symbols });
+  const files = readZipArchive(archivePath, label);
+  const coreMembers = [...files.keys()].filter((path) => /^package\/services\/metadata\/core-properties\/[^/]+\.psmdcp$/u.test(path));
+  if (coreMembers.length !== 1) throw new Error(`${label} must contain exactly one core-properties document`);
+  const coreMember = coreMembers[0];
+  const core = requiredArchiveMember(files, coreMember, label);
+  if (xmlValue(core, "dc:identifier", `${label} core metadata`) !== packageId || xmlValue(core, "version", `${label} core metadata`) !== platformVersion) throw new Error(`${label} core metadata does not carry the expected identity`);
+  const relationships = requiredArchiveMember(files, "_rels/.rels", label);
+  const relationshipSource = strictUtf8(relationships, `${label} relationships`);
+  const relationshipElements = [...relationshipSource.matchAll(/<Relationship\b[^>]*\/?\s*>/giu)];
+  if (relationshipElements.length !== 2 || !relationshipSource.includes(`Target="/${packageId}.nuspec"`) || !relationshipSource.includes(`Target="/${coreMember}"`)) throw new Error(`${label} relationships do not bind the expected package metadata`);
+  const canonicalCore = "package/services/metadata/core-properties/licensecc.release.psmdcp";
+  files.delete(coreMember);
+  files.set(canonicalCore, core);
+  files.set("_rels/.rels", Buffer.from(canonicalNugetRelationships(packageId, canonicalCore), "utf8"));
+  writeDeterministicZip(archivePath, files, sourceDateEpoch);
+  validateNugetArtifact({ archivePath, packageId, platformVersion, symbols });
+  const normalized = readZipArchive(archivePath, label);
+  if (!normalized.has(canonicalCore) || !normalized.get("_rels/.rels").equals(Buffer.from(canonicalNugetRelationships(packageId, canonicalCore), "utf8"))) throw new Error(`${label} deterministic normalization did not persist expected metadata`);
+}
+
 function validateNugetArtifact({ archivePath, packageId, platformVersion, symbols }) {
   const label = symbols ? "NuGet symbols" : "NuGet package";
   const files = readZipArchive(archivePath, label);
@@ -1001,6 +1095,33 @@ function validateWorkerBundle(directory, label = "Worker bundle") {
   if (!sources.some(hasWorkerEntrypoint)) throw new Error(`${label} has no Worker fetch or module default entrypoint`);
 }
 
+/** Remove Wrangler's timestamped note and make source maps portable. */
+function normalizeWorkerBundle(directory, staging) {
+  const output = resolve(directory);
+  if (!pathWithin(output, staging.output) || !ownsStaging(staging)) throw new Error("Worker bundle normalization escaped owned release staging");
+  assertNoReparseComponents(output);
+  const readme = join(output, "README.md");
+  if (existsSync(readme)) {
+    if (lstatSync(readme).isSymbolicLink() || !lstatSync(readme).isFile()) throw new Error("Wrangler generated README is unsafe");
+    const generated = strictUtf8(readFileSync(readme), "Wrangler generated README");
+    if (!/^This folder contains the built output assets for the worker "[^"\r\n]+" generated at \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z\.\r?\n?$/u.test(generated)) throw new Error("Wrangler generated README does not have the expected ephemeral form");
+    rmSync(readme, { force: true });
+  }
+  for (const map of walk(output).filter((path) => path.endsWith(".js.map"))) {
+    let sourceMap;
+    try {
+      sourceMap = JSON.parse(strictUtf8(readFileSync(map), "Worker source map"));
+    } catch {
+      throw new Error("Worker source map is invalid");
+    }
+    if (!sourceMap || Array.isArray(sourceMap) || typeof sourceMap.sourceRoot !== "string" || !Array.isArray(sourceMap.sources)) throw new Error("Worker source map is missing a safe source root");
+    // Wrangler writes the staging directory here.  A relative root retains the
+    // map's bundle-relative meaning without embedding a volatile host path.
+    sourceMap.sourceRoot = ".";
+    writeFileSync(map, `${JSON.stringify(sourceMap)}\n`);
+  }
+}
+
 function runWorkerAssembly({ root, outputDirectory, run, env, staging, npm }) {
   assertCanonicalWorkerInputs(root);
   const localWrangler = localWranglerBinary(root);
@@ -1014,6 +1135,7 @@ function runWorkerAssembly({ root, outputDirectory, run, env, staging, npm }) {
       }
       if (command.outdir) {
         if (!directoryHasFiles(command.outdir)) throw new Error(`${command.label} produced no bundle files`);
+        normalizeWorkerBundle(command.outdir, staging);
         validateWorkerBundle(command.outdir, `${command.label} Worker bundle`);
       }
     }
@@ -1252,7 +1374,10 @@ function assembleReleaseArtifacts({ root = repositoryRoot, outputDirectory, cons
       if (!hasDotnet && !allowPartial) throw new Error("dotnet is required; use --allow-partial only for an explicitly incomplete manifest");
       if (hasDotnet) {
         run({ executable: "dotnet", args: ["restore", join(canonical, "sdks/dotnet/Licensecc.Client.sln"), "--locked-mode", "--disable-build-servers", "--configfile", env.NUGET_CONFIG_FILE, "--packages", env.NUGET_PACKAGES], cwd: canonical, env, label: "locked NuGet restore" });
-        run({ executable: "dotnet", args: ["pack", join(canonical, "sdks/dotnet/src/Licensecc.Client/Licensecc.Client.csproj"), "--configuration", "Release", "--no-restore", "--disable-build-servers", "--include-symbols", "--include-source", `-p:PackageVersion=${versions.platformVersion}`, "-p:SymbolPackageFormat=snupkg", "-p:ContinuousIntegrationBuild=true", "-p:Deterministic=true", `-p:SourceRevisionId=${versions.commit}`, "--output", join(staging.output, "dotnet")], cwd: canonical, env, label: "NuGet package and symbols" });
+        const dotnetOutput = join(staging.output, "dotnet");
+        run({ executable: "dotnet", args: ["pack", join(canonical, "sdks/dotnet/src/Licensecc.Client/Licensecc.Client.csproj"), "--configuration", "Release", "--no-restore", "--disable-build-servers", "--include-symbols", "--include-source", `-p:PackageVersion=${versions.platformVersion}`, "-p:SymbolPackageFormat=snupkg", "-p:ContinuousIntegrationBuild=true", "-p:Deterministic=true", "-p:DeterministicSourcePaths=true", `-p:PathMap=${canonical}=/src`, `-p:SourceRevisionId=${versions.commit}`, "--output", dotnetOutput], cwd: canonical, env, label: "NuGet package and symbols" });
+        canonicalizeNugetArtifact({ archivePath: join(dotnetOutput, `${versions.dotnetPackageId}.${versions.platformVersion}.nupkg`), packageId: versions.dotnetPackageId, platformVersion: versions.platformVersion, symbols: false, sourceDateEpoch: versions.sourceDateEpoch });
+        canonicalizeNugetArtifact({ archivePath: join(dotnetOutput, `${versions.dotnetPackageId}.${versions.platformVersion}.snupkg`), packageId: versions.dotnetPackageId, platformVersion: versions.platformVersion, symbols: true, sourceDateEpoch: versions.sourceDateEpoch });
       }
     } finally {
       removeOwnedChild(staging, canonical);
