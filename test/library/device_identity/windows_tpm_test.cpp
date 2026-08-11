@@ -630,6 +630,7 @@ void test_open_scope_properties_spki_and_signing() {
 		require_equal(api->nth("open_provider").text, narrow(MS_PLATFORM_CRYPTO_PROVIDER), "Platform KSP name");
 		require_equal(api->nth("open_provider").flags, 0UL, "provider-open flags");
 		const Call& opened = api->nth("open_key");
+		require_equal(opened.object, static_cast<NCRYPT_HANDLE>(kProviderHandle), "open key provider handle");
 		require_equal(opened.text, request.device_namespace.windows_name, "exact key namespace");
 		require_equal(opened.legacy_key_spec, 0UL, "legacy key spec");
 		const DWORD expected_scope_flags = scope == LCC_DEVICE_SCOPE_MACHINE ? NCRYPT_MACHINE_KEY_FLAG : 0U;
@@ -709,7 +710,13 @@ void test_create_order_policy_reopen_and_self_test() {
 	require(export_policy.input_pointer == PointerState::non_null_pointer,
 			"export policy zero comes from a non-null DWORD input");
 	require_equal(export_policy.flags, NCRYPT_PERSIST_FLAG | NCRYPT_SILENT_FLAG, "persist+silent export flags");
+	require_equal(api->nth("finalize").object, static_cast<NCRYPT_HANDLE>(kCreatedKeyHandle),
+				  "finalize owned created key handle");
 	require_equal(api->nth("finalize").flags, NCRYPT_SILENT_FLAG, "silent finalize");
+	require_equal(api->nth("open_key").object, static_cast<NCRYPT_HANDLE>(kProviderHandle),
+				  "initial open uses Platform KSP provider handle");
+	require_equal(api->nth("open_key", 1U).object, static_cast<NCRYPT_HANDLE>(kProviderHandle),
+				  "post-create reopen uses Platform KSP provider handle");
 	require_equal(api->nth("open_key", 1U).flags, NCRYPT_MACHINE_KEY_FLAG | NCRYPT_SILENT_FLAG,
 				  "silent post-create reopen");
 	require_validation_call_evidence(*api, kReopenedKeyHandle);
@@ -923,6 +930,10 @@ void test_nte_exists_reopens_and_preserves_race_winner() {
 		require_equal(api->count("set_usage"), std::size_t{0U}, "never modify race winner");
 		require_equal(api->count("set_export"), std::size_t{0U}, "never modify race winner export policy");
 		require_equal(api->count("finalize"), std::size_t{0U}, "never finalize race winner");
+		require_equal(api->nth("open_key").object, static_cast<NCRYPT_HANDLE>(kProviderHandle),
+					  "race initial open uses Platform KSP provider handle");
+		require_equal(api->nth("open_key", 1U).object, static_cast<NCRYPT_HANDLE>(kProviderHandle),
+					  "race winner reopen uses Platform KSP provider handle");
 		require_validation_call_evidence(*api, kExistingKeyHandle);
 		if (returns_handle) {
 			require(api->freed(kCreatedKeyHandle), "release only returned unfinalized race handle");
@@ -1011,6 +1022,8 @@ void test_signature_boundaries_and_delete_ownership() {
 	mismatch.back() = mismatch.back() == '0' ? '1' : '0';
 	require_equal(mismatch_provider->delete_with_expected_id(request, mismatch), LCC_DEVICE_POLICY_VIOLATION,
 				  "expected-id mismatch blocks delete");
+	require_equal(mismatch_api->nth("open_key").object, static_cast<NCRYPT_HANDLE>(kProviderHandle),
+				  "mismatched expected-id open uses Platform KSP provider handle");
 	require_validation_call_evidence(*mismatch_api, kExistingKeyHandle);
 	require_equal(mismatch_api->count("delete"), std::size_t{0U}, "mismatch never reaches delete");
 	require(mismatch_api->freed(kExistingKeyHandle), "mismatched delete releases open key");
@@ -1020,8 +1033,12 @@ void test_signature_boundaries_and_delete_ownership() {
 	const std::string delete_expected = license::device_identity::device_key_id(delete_api->expected_spki());
 	require_equal(delete_provider->delete_with_expected_id(request, delete_expected), LCC_DEVICE_OK,
 				  "expected-id delete");
+	require_equal(delete_api->nth("open_key").object, static_cast<NCRYPT_HANDLE>(kProviderHandle),
+				  "successful expected-id open uses Platform KSP provider handle");
 	require_validation_call_evidence(*delete_api, kExistingKeyHandle);
 	require_equal(delete_api->count("delete"), std::size_t{1U}, "one exact delete");
+	require_equal(delete_api->nth("delete").object, static_cast<NCRYPT_HANDLE>(kExistingKeyHandle),
+				  "successful expected-id delete uses existing key handle");
 	require_equal(delete_api->nth("delete").flags, NCRYPT_SILENT_FLAG, "delete uses only silent flag");
 	delete_provider.reset();
 	require(!delete_api->freed(kExistingKeyHandle), "successful delete consumes the key handle");
@@ -1033,7 +1050,11 @@ void test_signature_boundaries_and_delete_ownership() {
 	const std::string failure_expected = license::device_identity::device_key_id(failure_api->expected_spki());
 	require_equal(failure_provider->delete_with_expected_id(request, failure_expected), LCC_DEVICE_ACCESS_DENIED,
 				  "delete native failure mapping");
+	require_equal(failure_api->nth("open_key").object, static_cast<NCRYPT_HANDLE>(kProviderHandle),
+				  "failed expected-id open uses Platform KSP provider handle");
 	require_validation_call_evidence(*failure_api, kExistingKeyHandle);
+	require_equal(failure_api->nth("delete").object, static_cast<NCRYPT_HANDLE>(kExistingKeyHandle),
+				  "failed expected-id delete uses existing key handle");
 	require(failure_api->freed(kExistingKeyHandle), "failed delete retains then frees key handle");
 
 	auto missing_api = std::make_shared<FakeCngApi>();
@@ -1041,6 +1062,8 @@ void test_signature_boundaries_and_delete_ownership() {
 	auto missing_provider = license::device_identity::make_windows_tpm_provider(missing_api);
 	require_equal(missing_provider->delete_with_expected_id(request, expected), LCC_DEVICE_KEY_NOT_FOUND,
 				  "delete reports missing exact namespace");
+	require_equal(missing_api->nth("open_key").object, static_cast<NCRYPT_HANDLE>(kProviderHandle),
+				  "missing expected-id open uses Platform KSP provider handle");
 	require_equal(missing_api->count("delete"), std::size_t{0U}, "missing key never calls delete");
 }
 
