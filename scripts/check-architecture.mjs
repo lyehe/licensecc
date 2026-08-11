@@ -394,7 +394,10 @@ const DETERMINISTIC_VECTOR_SUFFIXES = Object.freeze([
   ".token",
   ".txt",
 ]);
-const DEVICE_PROOF_V1_MANIFEST = "test/vectors/device_proof/v1/manifest.json";
+const REVIEWED_JSON_VECTOR_FIXTURES = new Set([
+  "test/vectors/device_identity/namespace_v1.json",
+  "test/vectors/device_proof/v1/manifest.json",
+]);
 
 const VENDORED_GENERATOR_HYGIENE_FIXTURES = new Set([
   "extern/license-generator/build/.gitkeep",
@@ -409,7 +412,7 @@ function isGeneratedPrivateKey(filename) {
 }
 
 function isAllowedDeterministicVector(pathName, filename) {
-  return pathName === DEVICE_PROOF_V1_MANIFEST
+  return REVIEWED_JSON_VECTOR_FIXTURES.has(pathName)
     || pathName.startsWith("test/vectors/")
       && DETERMINISTIC_VECTOR_SUFFIXES.some((suffix) => filename.endsWith(suffix));
 }
