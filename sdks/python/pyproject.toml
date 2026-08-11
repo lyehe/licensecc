@@ -39,6 +39,11 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/licensecc"]
 
+[tool.hatch.build.targets.sdist]
+# uv.lock is intentionally gitignored for local SDK workflows, so force it
+# into the source distribution to keep the release payload platform-neutral.
+artifacts = ["uv.lock"]
+
 [dependency-groups]
 dev = ["pytest>=7.0"]
 
