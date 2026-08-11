@@ -1587,16 +1587,19 @@ private:
         const int close_result = store.close();
         const std::string close_error = provider_error_text();
         if (!clean_eof) {
+            set_tpm2_openssl_test_stage("load_store_unclean_eof");
             if (!load_error.empty()) {
                 return map_provider_error_text(0, true, load_error);
             }
             return store_error != 0 ? map_provider_error(0, true) : LCC_DEVICE_KEY_CORRUPT;
         }
         if (close_result != 1) {
+            set_tpm2_openssl_test_stage("load_store_close_failed");
             return close_error.empty() ? LCC_DEVICE_INTERNAL_ERROR :
                                          map_provider_error_text(0, true, close_error);
         }
         if (store_error != 0) {
+            set_tpm2_openssl_test_stage("load_store_error");
             return map_provider_error(0, true);
         }
         set_tpm2_openssl_test_stage("load_store_cardinality");
