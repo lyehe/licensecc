@@ -258,9 +258,24 @@ thread_local int g_tpm2_openssl_store_close_result = -1;
 thread_local int g_tpm2_openssl_store_pkey_count = -1;
 thread_local int g_tpm2_openssl_store_load_error = -1;
 thread_local int g_tpm2_openssl_store_close_error = -1;
+thread_local std::array<char, 1024> g_tpm2_openssl_store_status_error_text{};
 
 void set_tpm2_openssl_test_stage(const char* stage) noexcept {
     g_tpm2_openssl_test_stage = stage == nullptr ? "unknown" : stage;
+}
+
+void set_tpm2_openssl_store_status_error_text(const std::string& text) noexcept {
+    std::size_t output = 0U;
+    for (const unsigned char value : text) {
+        if (output + 1U >= g_tpm2_openssl_store_status_error_text.size()) {
+            break;
+        }
+        const bool safe = (value >= 'a' && value <= 'z') || (value >= 'A' && value <= 'Z') ||
+                          (value >= '0' && value <= '9') || value == ' ' || value == ':' || value == ',' ||
+                          value == '-' || value == '_' || value == '.' || value == '(' || value == ')';
+        g_tpm2_openssl_store_status_error_text[output++] = safe ? static_cast<char>(value) : '?';
+    }
+    g_tpm2_openssl_store_status_error_text[output] = '\0';
 }
 
 class ErrorQueueScope final {
@@ -1526,6 +1541,7 @@ private:
         g_tpm2_openssl_store_pkey_count = -1;
         g_tpm2_openssl_store_load_error = -1;
         g_tpm2_openssl_store_close_error = -1;
+        g_tpm2_openssl_store_status_error_text[0] = '\0';
         const int raw_descriptor = posix_->openat(directory, filename.c_str(), kReferenceOpenFlags, 0U);
         if (raw_descriptor < 0) {
             if (errno == ENOENT) {
@@ -1595,6 +1611,7 @@ private:
         }
         const bool clean_eof = openssl_->store_eof(store.get()) == 1;
         const int store_error = openssl_->store_error(store.get());
+        set_tpm2_openssl_store_status_error_text(provider_error_text());
         clear_provider_error_queue();
         set_tpm2_openssl_test_stage("load_store_close");
         const int close_result = store.close();
@@ -2196,6 +2213,10 @@ void tpm2_openssl_store_diagnostic_for_test(int* clean_eof,
     if (close_error != nullptr) {
         *close_error = g_tpm2_openssl_store_close_error;
     }
+}
+
+const char* tpm2_openssl_store_status_error_text_for_test() noexcept {
+    return g_tpm2_openssl_store_status_error_text.data();
 }
 
 }  // namespace device_identity
