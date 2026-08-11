@@ -1,26 +1,35 @@
 -- schema.pg.sql
 --
--- PostgreSQL / Supabase port of the licensecc licensing backend schema.
--- Ground truth: services/cloudflare-licensing-backend/schema.sql (SQLite/D1, built from
---   migrations/0001..0020). This is a faithful 1:1 port: every table, column, default,
---   CHECK enum, composite primary key, index, and the composite ON DELETE CASCADE FK are
---   preserved. The ONLY behavioral differences are the documented type/identity changes
---   required by Postgres (see header notes per change).
+-- Fresh/disposable PostgreSQL bootstrap for the fenced verifier adapter.
+-- Ground truth: services/cloudflare-licensing-backend/schema.sql (SQLite/D1), generated
+--   from migrations 0001 through 0032 inclusive (currently ending at
+--   0032_plan_projection_remediation.sql). The D1 migration history remains authoritative.
 --
--- Port rules applied (verbatim from the task contract):
+-- Apply this consolidated snapshot only to an empty, disposable PostgreSQL database. It is
+-- NOT a PostgreSQL migration history or an upgrade path. IF NOT EXISTS only avoids duplicate-
+-- object errors; it cannot alter stale columns, constraints, indexes, or triggers in an
+-- existing database. This snapshot is also NOT a full production replacement for the D1
+-- backend; the runtime route fence and supported surface are documented in README.md.
+--
+-- scripts/check-pg-parity.py reviews table/column types, nullability/defaults, PK/unique/FK/
+-- CHECK constraints, explicit indexes, generated audit/event ids, and source-generation
+-- triggers against the final D1 snapshot.
+--
+-- Reviewed dialect rules enforced by check-pg-parity.py:
 --   * INTEGER PRIMARY KEY AUTOINCREMENT          -> BIGINT GENERATED ALWAYS AS IDENTITY
---   * epoch / counter INTEGER columns            -> BIGINT  (32-bit unix seconds overflow
---       in 2038; counters/seq are 64-bit-intent). Widened columns:
---         created_at, updated_at, valid_from, valid_until, last_seen_at,
---         window_start, expires_at, revocation_seq, request_count,
---         assertion_ttl_seconds, cache_ttl_seconds.
+--   * INTEGER                                      -> BIGINT for epochs, counters, sequences,
+--       capacities, durations, and generated ids. The five reviewed 0/1 flag columns remain
+--       INTEGER: entitlements.is_trial, entitlements.trial_one_per_device,
+--       entitlements.trial_require_device_proof,
+--       entitlement_policies.trial_one_per_device, and
+--       entitlement_policies.trial_require_device_proof.
 --     NOTE: postgres.js returns BIGINT (int8, OID 20) columns as JavaScript STRINGS by
 --       default. The Worker's verify path survives that coincidentally (every BIGINT read
 --       is numerically coerced downstream -- see db-postgres.mjs), but the adapter now
 --       installs an int8 type parser so these columns arrive as numbers. See db-postgres.mjs.
---   * CHECK (col IN (...)) enums                 -> kept verbatim (NOT converted to native
---       ENUM types, so migrations 0006/0007 that widened the enum lists stay trivial to
---       reproduce as ALTER ... DROP/ADD CONSTRAINT, exactly like the SQLite rebuilds).
+--   * CHECK (col IN (...)) enums                 -> kept as text CHECK expressions rather
+--       than native ENUM types, including the final values introduced by D1 migrations
+--       0006 and 0007.
 --   * TEXT NOT NULL DEFAULT ''                   -> kept as-is.
 --   * metadata_json TEXT NOT NULL DEFAULT '{}'   -> kept as TEXT (jsonb is an option;
 --       see the commented jsonb variant next to each occurrence). Kept TEXT to stay
@@ -28,6 +37,9 @@
 --       these columns as opaque JSON strings.
 --   * composite TEXT primary keys                -> ported verbatim.
 --   * composite FOREIGN KEY ... ON DELETE CASCADE -> ported verbatim.
+--   * three SQLite row triggers per generation source -> one PostgreSQL statement trigger
+--       covering INSERT OR UPDATE OR DELETE; generation is an invalidation token, not a row
+--       counter.
 --
 -- pgcrypto is required because the admin/CLI statements port `lower(hex(randomblob(8)))`
 -- to `encode(gen_random_bytes(8),'hex')` (see statements.pg.sql). gen_random_bytes lives
@@ -139,15 +151,10 @@ CREATE TABLE IF NOT EXISTS customers (
 -- collide. Keyed on lower(email) for CASE-INSENSITIVE uniqueness (matches the
 -- SQLite migration 0013).
 --
--- NOTE: this file is a FRESH-PROVISION snapshot (all CREATE ... IF NOT EXISTS);
--- there is no Postgres migration runner in this repo (D1/SQLite is the
--- production ground truth, migrations/ is its source of truth). An EXISTING
--- Postgres deployment will NOT pick up the migration-0013 changes from re-applying
--- this snapshot — run the upgrade DDL manually:
---   ALTER TABLE customers ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','disabled'));
---   ALTER TABLE customers ADD COLUMN IF NOT EXISTS external_ref TEXT NOT NULL DEFAULT '';
---   DROP INDEX IF EXISTS idx_customers_email;
---   CREATE UNIQUE INDEX idx_customers_email ON customers(lower(email)) WHERE email <> '';
+-- NOTE: this is a fresh/disposable bootstrap snapshot, and there is no PostgreSQL
+-- migration runner in this repository. An existing database will not acquire the
+-- migration-0013 shape by reapplying this file. Discard and recreate disposable test
+-- state; no manual or production PostgreSQL upgrade procedure is supported here.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_email
   ON customers(lower(email))
   WHERE email <> '';

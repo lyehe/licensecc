@@ -1,6 +1,6 @@
 {
   "name": "licensecc",
-  "version": "0.1.0",
+  "version": "0.1.0-rc.1",
   "private": true,
   "description": "Local orchestration scripts for the Licensecc monorepo.",
   "scripts": {
@@ -12,12 +12,16 @@
     "check:dry-run": "npm run dry-run --workspace @licensecc/cloudflare-licensing-backend && npm run dry-run --workspace @licensecc/cloudflare-license-admin && npm run dry-run --workspace @licensecc/cloudflare-customer-portal && npm run dry-run --workspace @licensecc/cloudflare-d1-backup",
     "check:docs": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/check-docs.ps1",
     "check:docs:links": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/check-docs.ps1 -LinkCheck",
+    "check:versions": "node scripts/check-version-contract.mjs",
     "scan:secrets": "node scripts/scan-secrets.mjs",
     "test:scan:secrets": "node --test scripts/secret-lint.test.mjs",
     "test:docs-accuracy": "node --test scripts/docs-accuracy.test.mjs",
     "test:wrangler-pins": "node --test scripts/wrangler-pin-consistency.test.mjs",
     "test:wrangler-env-drift": "node --test scripts/wrangler-env-drift.test.mjs",
+    "test:clean-checkout": "node --test scripts/clean-checkout-regressions.test.mjs scripts/generate-wrangler-types.test.mjs && pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/check-build-purity-tool-resolution.test.ps1",
     "test:workflow-pins": "node --test scripts/workflow-action-pins.test.mjs",
+    "test:versions": "node --test scripts/check-version-contract.test.mjs",
+    "test:release-artifacts": "node --test scripts/release-artifacts.test.mjs",
     "lint": "eslint \"packages/*/src/**/*.{js,mjs,ts,tsx}\" \"services/cloudflare-licensing-backend/src/**/*.{js,mjs,ts,tsx}\" \"services/cloudflare-license-admin/src/**/*.{js,mjs,ts,tsx}\" \"services/cloudflare-customer-portal/src/**/*.{js,mjs,ts,tsx}\" \"services/cloudflare-d1-backup/src/**/*.{js,mjs,ts,tsx}\" \"scripts/**/*.{js,mjs,ts,tsx}\" --max-warnings 0",
     "lint:services": "npm run lint --workspace @licensecc/cloudflare-licensing-backend && npm run lint --workspace @licensecc/cloudflare-license-admin && npm run lint --workspace @licensecc/cloudflare-customer-portal && npm run lint --workspace @licensecc/cloudflare-d1-backup",
     "typecheck": "node scripts/check-typecheck-coverage.mjs && npm run typecheck --workspace @licensecc/licensing-domain && npm run typecheck --workspace @licensecc/cloudflare-runtime && npm run typecheck --workspace @licensecc/cloudflare-licensing-backend && npm run typecheck --workspace @licensecc/cloudflare-license-admin && npm run typecheck --workspace @licensecc/cloudflare-customer-portal && npm run typecheck --workspace @licensecc/cloudflare-d1-backup && npm run test:wrangler-env-drift",
@@ -32,9 +36,11 @@
     "test:e2e": "npm run test:e2e --workspace @licensecc/cloudflare-licensing-backend && npm run test:e2e --workspace @licensecc/cloudflare-license-admin && npm run test:e2e --workspace @licensecc/cloudflare-customer-portal",
     "check:architecture": "node scripts/check-architecture.mjs",
     "test:architecture": "node --test scripts/check-architecture.test.mjs",
+    "test:capabilities": "node --test scripts/check-capability-registry.test.mjs",
+    "check:capabilities": "node scripts/check-capability-registry.mjs",
     "test:contracts": "node --test test/contracts/canonical-contracts.test.mjs && node scripts/canonical-contracts.mjs",
     "write:contract-baselines": "node scripts/canonical-contracts.mjs --write",
-    "check:pr": "npm run scan:secrets && npm run test:scan:secrets && npm run test:docs-accuracy && npm run test:wrangler-pins && npm run test:workflow-pins && npm run lint && npm run typecheck && npm run check:architecture && npm run test:architecture && npm run test:contracts && npm run test:services"
+    "check:pr": "npm run scan:secrets && npm run test:scan:secrets && npm run test:docs-accuracy && npm run test:wrangler-pins && npm run test:clean-checkout && npm run test:workflow-pins && npm run test:versions && npm run test:release-artifacts && npm run check:versions && npm run test:capabilities && npm run check:capabilities && npm run lint && npm run typecheck && npm run check:architecture && npm run test:architecture && npm run test:contracts && npm run test:services"
   },
   "workspaces": [
     "packages/licensing-domain",

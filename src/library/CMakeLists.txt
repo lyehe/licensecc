@@ -7,6 +7,10 @@ add_subdirectory("activation")
 add_subdirectory("os")
 add_subdirectory("locate")
 add_subdirectory("hw_identifier")
+if(LCC_ENABLE_DEVICE_IDENTITY)
+    add_subdirectory("device_identity")
+    set(_lcc_device_identity_objects $<TARGET_OBJECTS:device_identity>)
+endif()
 
 foreach(_lcc_generated_metadata_target IN ITEMS signed_token base anti_tamper online_verification config_attestation activation os locate hw_identifier)
     if(TARGET ${_lcc_generated_metadata_target})
@@ -28,7 +32,9 @@ ADD_LIBRARY(licensecc_static STATIC
     $<TARGET_OBJECTS:online_verification>
     $<TARGET_OBJECTS:config_attestation>
     $<TARGET_OBJECTS:activation>
+    ${_lcc_device_identity_objects}
 )
+unset(_lcc_device_identity_objects)
 add_dependencies(licensecc_static project_public_header)
 
 if(CODE_COVERAGE AND UNIX)
@@ -50,6 +56,9 @@ ENDIF(UNIX OR OPENSSL_FOUND)
 
 if(WIN32)
 	target_link_libraries(licensecc_static PUBLIC bcrypt)
+	if(LCC_ENABLE_WINDOWS_TPM)
+		target_link_libraries(licensecc_static PUBLIC ncrypt)
+	endif()
 endif()
 
 #set_property(TARGET licensecc_static PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
@@ -67,6 +76,10 @@ target_compile_definitions(licensecc_static
     PUBLIC
         "LCC_PROJECT_CONFIG_HEADER=\"${LCC_PROJECT_CONFIG_HEADER}\""
         "LCC_PROJECT_PUBLIC_KEY_HEADER=\"${LCC_PROJECT_PUBLIC_KEY_HEADER}\""
+        LCC_ENABLE_DEVICE_IDENTITY=$<BOOL:${LCC_ENABLE_DEVICE_IDENTITY}>
+        LCC_ENABLE_WINDOWS_TPM=$<BOOL:${LCC_ENABLE_WINDOWS_TPM}>
+        LCC_ENABLE_TPM2_OPENSSL=$<BOOL:${LCC_ENABLE_TPM2_OPENSSL}>
+        LCC_BUILD_DEVICE_IDENTITY_TEST_PROVIDER=$<BOOL:${LCC_BUILD_DEVICE_IDENTITY_TEST_PROVIDER}>
 )
 
 if(NOT "${LCC_ONLINE_ASSERTION_PUBLIC_KEY_RECORDS}" STREQUAL "")

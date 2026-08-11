@@ -108,6 +108,33 @@ namespace Licensecc.Client
         public Task<BackendResponse> ReleaseAsync(IReadOnlyDictionary<string, object?> body, CancellationToken ct = default) =>
             PostAsync("v1/release", body, applyBearer: true, ct);
 
+        /// <summary>POST /v1/meter — record metered units for an entitlement. The body follows the
+        /// MeterRequest schema; the account bearer is applied to this report-scoped operation.</summary>
+        public Task<BackendResponse> MeterAsync(IReadOnlyDictionary<string, object?> body, CancellationToken ct = default) =>
+            PostAsync("v1/meter", body, applyBearer: true, ct);
+
+        /// <summary>GET /v1/admin/report — return the usage summary for an entitlement over an
+        /// optional Unix-second window. The flat response remains a BackendResponse so endpoint-specific
+        /// report fields are available through <see cref="BackendResponse.Fields"/>.</summary>
+        public Task<BackendResponse> ReportAsync(
+            string project,
+            string feature,
+            string licenseFingerprint,
+            long? fromEpoch = null,
+            long? toEpoch = null,
+            CancellationToken ct = default)
+        {
+            var query = new Dictionary<string, object?>
+            {
+                ["project"] = project,
+                ["feature"] = feature,
+                ["license_fingerprint"] = licenseFingerprint,
+                ["from"] = fromEpoch,
+                ["to"] = toEpoch,
+            };
+            return GetAsync("v1/admin/report", query, applyBearer: true, ct);
+        }
+
         /// <summary>
         /// Build the JSON request, POST it, and parse the flat response. Exposed so callers/tests can
         /// hit any endpoint with an arbitrary body.
@@ -135,6 +162,57 @@ namespace Licensecc.Client
                     return ParseResponse((int)response.StatusCode, bodyText);
                 }
             }
+        }
+
+        /// <summary>
+        /// Build the query string, issue a GET, and parse the flat response. Exposed alongside
+        /// <see cref="PostAsync"/> so callers/tests can hit an endpoint with arbitrary query fields.
+        /// Null query values are omitted.
+        /// </summary>
+        public async Task<BackendResponse> GetAsync(string relativePath, IReadOnlyDictionary<string, object?> query,
+            bool applyBearer, CancellationToken ct = default)
+        {
+            if (query == null)
+            {
+                throw new ArgumentNullException(nameof(query));
+            }
+
+            string queryString = BuildQueryString(query);
+            string target = relativePath + (queryString.Length == 0 ? string.Empty : "?" + queryString);
+            using (var request = new HttpRequestMessage(HttpMethod.Get, new Uri(_baseUri, target)))
+            {
+                if (applyBearer && !string.IsNullOrEmpty(AuthorizationBearer))
+                {
+                    request.Headers.TryAddWithoutValidation("Authorization", "Bearer " + AuthorizationBearer);
+                }
+
+                using (HttpResponseMessage response = await _http.SendAsync(request, ct).ConfigureAwait(false))
+                {
+                    string bodyText = await ReadBodyAsync(response).ConfigureAwait(false);
+                    return ParseResponse((int)response.StatusCode, bodyText);
+                }
+            }
+        }
+
+        private static string BuildQueryString(IReadOnlyDictionary<string, object?> query)
+        {
+            var builder = new StringBuilder();
+            foreach (KeyValuePair<string, object?> pair in query)
+            {
+                if (pair.Value == null)
+                {
+                    continue;
+                }
+
+                if (builder.Length > 0)
+                {
+                    builder.Append('&');
+                }
+                builder.Append(Uri.EscapeDataString(pair.Key));
+                builder.Append('=');
+                builder.Append(Uri.EscapeDataString(Convert.ToString(pair.Value, CultureInfo.InvariantCulture) ?? string.Empty));
+            }
+            return builder.ToString();
         }
 
         private static async Task<string> ReadBodyAsync(HttpResponseMessage response)

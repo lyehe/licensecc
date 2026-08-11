@@ -13,9 +13,57 @@ import {
   parseArgs,
   parseWranglerJson,
   requiredStatusMismatches,
+  restoreToScratch,
   tableListSql,
   validateOptions,
 } from "../scripts/restore-drill.mjs";
+
+test("restore drill executes the SQL file against the confirmed scratch D1 database", () => {
+  const executions = [];
+  const options = validateOptions(parseArgs([
+    "node",
+    "restore-drill.mjs",
+    "--sql-file",
+    "restore backup.sql",
+    "--scratch-database",
+    "licensecc-online-verifier-restore-drill",
+    "--scratch-config",
+    "wrangler.restore-drill.jsonc",
+    "--confirm-scratch",
+    "--remote",
+  ]));
+  const sqlFile = "C:\\restore evidence\\restore backup.sql";
+  const execute = (args, label) => {
+    executions.push({ args, label });
+    return { status: 0, stdout: "", stderr: "" };
+  };
+
+  restoreToScratch(options, sqlFile, execute);
+
+  assert.deepEqual(executions, [{
+    args: [
+      "d1",
+      "execute",
+      "licensecc-online-verifier-restore-drill",
+      "--file",
+      sqlFile,
+      "--yes",
+      "--json",
+      "--remote",
+      "--config",
+      options.scratchConfig,
+    ],
+    label: "scratch D1 restore",
+  }]);
+  assert.ok(!executions[0].args.includes("licensecc-online-verifier"));
+  assert.ok(!executions[0].args.some((arg) => /[;&|`$()]/.test(arg)));
+  assert.ok(!JSON.stringify(executions).match(/token|secret|authorization/i));
+
+  assert.throws(
+    () => restoreToScratch(options, sqlFile, () => { throw new Error("wrangler restore failed"); }),
+    /wrangler restore failed/,
+  );
+});
 
 test("restore drill arguments require explicit scratch confirmation", () => {
   const parsed = parseArgs([

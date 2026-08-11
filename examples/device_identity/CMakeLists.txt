@@ -1,0 +1,25 @@
+cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
+project(licensecc_device_identity_example LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+set(LCC_PROJECT_NAME "test" CACHE STRING "Installed Licensecc project component")
+find_package(licensecc CONFIG REQUIRED)
+
+if(NOT TARGET licensecc::licensecc_static)
+    message(FATAL_ERROR "The installed package did not export licensecc::licensecc_static")
+endif()
+if(NOT LCC_ENABLE_DEVICE_IDENTITY)
+    message(FATAL_ERROR "This example requires an installed package built with device identity enabled")
+endif()
+
+if(LCC_ENABLE_WINDOWS_TPM)
+    add_executable(licensecc_windows_tpm windows_tpm.cpp)
+    target_link_libraries(licensecc_windows_tpm PRIVATE licensecc::licensecc_static)
+elseif(LCC_ENABLE_TPM2_OPENSSL)
+    add_executable(licensecc_tpm2_openssl tpm2_openssl.cpp)
+    target_link_libraries(licensecc_tpm2_openssl PRIVATE licensecc::licensecc_static)
+else()
+    message(FATAL_ERROR "This example requires LCC_ENABLE_WINDOWS_TPM or LCC_ENABLE_TPM2_OPENSSL")
+endif()

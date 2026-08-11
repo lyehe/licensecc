@@ -17,6 +17,8 @@ import {
   validBody,
 } from "./fixtures.mjs";
 
+const TEST_P1363_BASE64 = Buffer.alloc(64, 1).toString("base64");
+
 test("validates request schema", () => {
   assert.equal(validateVerifyRequest(validBody()).project, "DEFAULT");
   assert.equal(validateVerifyRequest(validBody({ nonce: "x" })), null);
@@ -29,7 +31,7 @@ test("validates request schema", () => {
         device_key_id: `sha256:${"a".repeat(64)}`,
         request_timestamp: 1_000_000,
         request_signature_algorithm: "ecdsa-p256-sha256",
-        request_signature: "AA==",
+        request_signature: TEST_P1363_BASE64,
       }),
     ).request_proof.device_key_id,
     `sha256:${"a".repeat(64)}`,
@@ -41,7 +43,7 @@ test("validates request schema", () => {
         device_key_id: `sha256:${"a".repeat(64)}`,
         request_timestamp: 1_000_000,
         request_signature_algorithm: "rsa-pkcs1-sha256",
-        request_signature: "AA==",
+        request_signature: TEST_P1363_BASE64,
       }),
     ),
     null,
@@ -55,7 +57,7 @@ test("canonical request proof payload is byte exact", () => {
       device_key_id: `sha256:${"d".repeat(64)}`,
       request_timestamp: 1_000_000,
       request_signature_algorithm: "ecdsa-p256-sha256",
-      request_signature: "AA==",
+      request_signature: TEST_P1363_BASE64,
       client_hardening: 15,
     }),
   );
@@ -347,7 +349,7 @@ test("request proof required mode denies invalid and stale proof", async () => {
       new Request("https://example.test/v1/verify", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ ...proof.body, request_signature: "AA==" }),
+        body: JSON.stringify({ ...proof.body, request_signature: TEST_P1363_BASE64 }),
       }),
       env,
     );
@@ -396,7 +398,7 @@ test("request proof soft mode logs invalid proof but preserves allow behavior", 
         new Request("https://example.test/v1/verify", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ ...proof.body, request_signature: "AA==" }),
+          body: JSON.stringify({ ...proof.body, request_signature: TEST_P1363_BASE64 }),
         }),
         env,
       );

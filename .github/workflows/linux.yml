@@ -10,7 +10,7 @@ jobs:
       strategy:
         fail-fast: false
         matrix:
-          preset: ["ci-linux-debug", "ci-linux-release"]
+          preset: ["ci-linux-debug", "ci-linux-release", "ci-linux-device-identity-test"]
 
       steps:
       -  uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -26,6 +26,107 @@ jobs:
          run: pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/bootstrap.ps1 -CheckOnly
       -  name: Core build purity
          run: pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/check-build-purity.ps1 -Preset ${{ matrix.preset }}
+      -  name: Exact device-identity suite
+         if: matrix.preset == 'ci-linux-device-identity-test'
+         run: ctest --preset ci-linux-device-identity-test --no-tests=error -R "^device_identity_(abi|vectors|policy|concurrency)_test$"
+      -  name: Install device-identity package
+         if: matrix.preset == 'ci-linux-device-identity-test'
+         run: cmake --install build/ci-linux-device-identity-test --prefix build/ci-linux-device-identity-test/install
+      -  name: Installed C99 and C++ device-identity consumer
+         if: matrix.preset == 'ci-linux-device-identity-test'
+         run: pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/ci/run-installed-device-identity-consumer.ps1 -InstallPrefix build/ci-linux-device-identity-test/install -RequireC99
       -  name: On failure print logs
          if: ${{ failure() }}
          run: cat /tmp/open-license.log || true
+
+   build-linux-tpm2-capability:
+      runs-on: ${{ matrix.os }}
+      strategy:
+        fail-fast: false
+        matrix:
+          include:
+            - os: ubuntu-22.04
+              preset: ci-linux-debug-tpm2-capability
+            - os: ubuntu-22.04
+              preset: ci-linux-release-tpm2-capability
+            - os: ubuntu-24.04
+              preset: ci-linux-debug-tpm2-capability
+            - os: ubuntu-24.04
+              preset: ci-linux-release-tpm2-capability
+
+      steps:
+      -  uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      -  name: Install dependencies
+         run: |
+            sudo apt-get update
+            sudo apt-get install -y software-properties-common
+            sudo add-apt-repository --yes universe
+            sudo apt-get update
+            sudo apt-get install -y cmake libssl-dev zlib1g-dev \
+              libboost-dev libboost-test-dev libboost-filesystem-dev \
+              libboost-iostreams-dev libboost-program-options-dev \
+              libboost-system-dev libboost-thread-dev libboost-date-time-dev \
+              valgrind tpm2-openssl tpm2-tools swtpm
+      -  name: Record TPM2 package and provider versions
+         run: |
+            dpkg-query -W -f='${binary:Package} ${Version}\n' tpm2-openssl tpm2-tools swtpm libtss2-esys-3.0.2 || true
+            openssl version -a
+      -  name: Bootstrap preflight
+         run: pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/bootstrap.ps1 -CheckOnly
+      -  name: Capability build purity
+         run: pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/check-build-purity.ps1 -Preset ${{ matrix.preset }}
+      -  name: OpenSSL TPM2 exact-digest simulator capability
+         run: scripts/ci/run-swtpm-device-identity.sh build/${{ matrix.preset }}
+      -  name: On failure print simulator logs
+         if: ${{ failure() }}
+         run: find build/${{ matrix.preset }} -name swtpm.log -type f -print -exec cat {} \; || true
+
+   build-linux-tpm2:
+      runs-on: ${{ matrix.os }}
+      strategy:
+        fail-fast: false
+        matrix:
+          include:
+            - os: ubuntu-22.04
+              preset: ci-linux-debug-tpm2
+              configuration: Debug
+            - os: ubuntu-22.04
+              preset: ci-linux-release-tpm2
+              configuration: Release
+            - os: ubuntu-24.04
+              preset: ci-linux-debug-tpm2
+              configuration: Debug
+            - os: ubuntu-24.04
+              preset: ci-linux-release-tpm2
+              configuration: Release
+
+      steps:
+      -  uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      -  name: Install dependencies
+         run: |
+            sudo apt-get update
+            sudo apt-get install -y software-properties-common
+            sudo add-apt-repository --yes universe
+            sudo apt-get update
+            sudo apt-get install -y cmake libssl-dev zlib1g-dev \
+              libboost-dev libboost-test-dev libboost-filesystem-dev \
+              libboost-iostreams-dev libboost-program-options-dev \
+              libboost-system-dev libboost-thread-dev libboost-date-time-dev \
+              valgrind tpm2-openssl tpm2-tools swtpm
+      -  name: Record TPM2 package and provider versions
+         run: |
+            dpkg-query -W -f='${binary:Package} ${Version}\n' tpm2-openssl tpm2-tools swtpm libtss2-esys-3.0.2 || true
+            openssl version -a
+      -  name: Bootstrap preflight
+         run: pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/bootstrap.ps1 -CheckOnly
+      -  name: Production TPM2 build purity
+         run: pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/check-build-purity.ps1 -Preset ${{ matrix.preset }}
+      -  name: Exact production TPM2 shim
+         run: ctest --preset ${{ matrix.preset }} --no-tests=error -R '^device_identity_tpm2_openssl_shim$'
+      -  name: Install TPM2 device-identity package
+         run: cmake --install build/${{ matrix.preset }} --prefix build/${{ matrix.preset }}/install
+      -  name: OpenSSL TPM2 simulator, installed consumer, and example
+         run: scripts/ci/run-swtpm-device-identity.sh build/${{ matrix.preset }} build/${{ matrix.preset }}/install ${{ matrix.configuration }}
+      -  name: On failure print simulator logs
+         if: ${{ failure() }}
+         run: find build/${{ matrix.preset }} -name swtpm.log -type f -print -exec cat {} \; || true

@@ -18,6 +18,8 @@ Start here:
 * :doc:`decisions/0003-route-openapi-ownership` — route and OpenAPI ownership.
 * :doc:`decisions/0004-build-bootstrap-purity` — source-tree and bootstrap
   purity rules.
+* :doc:`decisions/0005-platform-version-and-release-tags` — platform version
+  projections, independent C++ versioning, and release tag namespaces.
 
 Documentation split
 -------------------

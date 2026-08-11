@@ -3,6 +3,11 @@
 This directory is a **fenced PostgreSQL adapter for the public verifier path only**.
 It is not a full replacement for the D1/SQLite runtime backend.
 
+`schema.pg.sql` is only a consolidated bootstrap for a **fresh, disposable**
+PostgreSQL database used with that fenced surface. It is not a PostgreSQL
+migration history, cannot upgrade an existing database, and is not a supported
+production schema replacement.
+
 Supported runtime routes are deliberately allow-listed by `pg-route-guard.mjs`:
 
 - `GET /health`
@@ -16,8 +21,9 @@ the supported verify path and continues to call the same D1-shaped DB surface.
 
 | File | What it is |
 |---|---|
-| `schema.pg.sql` | PostgreSQL schema port of the D1 schema for the verified PostgreSQL paths. |
-| `statements.pg.sql` | The four verify-path Worker statements (group A) plus the admin/CLI statements that carry the SQLite-isms (group B), each annotated with the original SQL it replaces. |
+| `schema.pg.sql` | Fresh/disposable PostgreSQL bootstrap snapshot of the final D1 schema; never an upgrade path. |
+| `statements.pg.sql` | The exact six-statement verify-path inventory (group A), including request-proof nonce consume/cleanup, plus the admin/CLI translation reference (group B). |
+| `../src/db/verify-statements.mjs` | Single source of the six D1 statements executed by the Worker and translated by this adapter. |
 | `db-postgres.mjs` | A `postgres.js`-backed adapter exposing the **same** `prepare/bind/first/all/run` surface, throwing on error, with one long-lived pool and a BIGINT(int8)->number type parser. |
 
 ## Why `postgres.js` and not `@supabase/supabase-js`
@@ -76,8 +82,11 @@ introduces three more translations the entitlement port never exercised — pinn
 - The `rate_limit_counters` composite PK is the **`ON CONFLICT` arbiter** -- do not drop it,
   or the upsert errors with "no unique or exclusion constraint matching the ON CONFLICT".
 
-The adapter requires callers to pass **`$n` placeholders** (it does not rewrite `?`), which
-is why the Worker's SQL strings are ported to `$n` in `statements.pg.sql`.
+The generic adapter mode requires callers to pass **`$n` placeholders**. The fenced Worker
+mode (`{ workerSql: true }`) accepts only the six shared verify statements and translates
+their D1 `?` placeholders to PostgreSQL `$n` placeholders. `statements.pg.sql` records the
+equivalent native PostgreSQL forms for review and direct smoke tests; it is not a second
+runtime source of truth.
 
 ### BIGINT (int8) columns arrive as numbers, not strings
 
@@ -101,10 +110,14 @@ columns here hold unix seconds or small counters/sequences, comfortably inside t
 **Supabase:** create a project, then grab a connection string from
 *Project Settings -> Database -> Connection string*:
 
-- **Serverless / edge / Workers** (recommended): use the **transaction pooler** host on
+- **Node host behind a transaction pooler:** use the **transaction pooler** host on
   port **6543** (`...pooler.supabase.com:6543`). The adapter sets `prepare: false`, which is
   required for the transaction-mode pooler.
 - **Long-running Node host:** the **direct** connection on port **5432** is fine.
+
+D1 remains the production Cloudflare Worker database. A Worker-hosted PostgreSQL
+deployment is not supplied by this Node adapter; that would require a separately
+reviewed [Hyperdrive binding and adapter](https://developers.cloudflare.com/workers/databases/connecting-to-databases/).
 
 Export it:
 
@@ -114,25 +127,33 @@ export DATABASE_URL='postgresql://postgres.<ref>:<password>@aws-0-<region>.poole
 
 ### 2. Apply the schema
 
+Use an empty, disposable database. Do not apply this file as an upgrade to a
+persistent database:
+
 ```bash
 psql "$DATABASE_URL" -f schema.pg.sql
 ```
 
 `schema.pg.sql` runs `CREATE EXTENSION IF NOT EXISTS pgcrypto;` first (preinstalled on
-Supabase). Every statement is `IF NOT EXISTS`, so re-running is safe.
+Supabase). Its `IF NOT EXISTS` clauses are bootstrap conveniences only. They do
+not reconcile an existing table's columns, types, defaults, constraints, or
+indexes, and `CREATE OR REPLACE FUNCTION`/trigger statements do not turn the
+file into an ordered migration history. Re-running it against stale state can
+therefore leave a mixed schema that has never passed the parity contract.
 
 Verify:
 
 ```bash
 psql "$DATABASE_URL" -c '\dt'
-# expect: entitlements, entitlement_devices, customers, licenses,
-#         entitlement_events, mutation_idempotency, rate_limit_counters
+# expect the same 38 application tables reported by `npm run schema:parity:pg`
 ```
 
-### 3. Install the adapter dependency
+### 3. Install the locked workspace dependencies
+
+Run this from the repository root so the single workspace lockfile is authoritative:
 
 ```bash
-npx --yes npm@10.9.8 install --no-save --package-lock=false postgres
+npm ci
 ```
 
 ### 4. Wire the adapter into the Worker / host
@@ -141,7 +162,7 @@ npx --yes npm@10.9.8 install --no-save --package-lock=false postgres
 import { createPostgresDatabase } from "./supabase-postgres/db-postgres.mjs";
 
 // Create ONE pool at startup and reuse it for every request.
-const DB = createPostgresDatabase(process.env.DATABASE_URL);
+const DB = createPostgresDatabase(process.env.DATABASE_URL, { workerSql: true });
 
 // env.DB is a D1DatabaseLike; the rest of Env is unchanged (signing secrets, the optional
 // VERIFY_RATE_LIMITER binding, and the D1_*/MAX_*/REQUEST_SIGNATURE_* string vars).
@@ -183,8 +204,10 @@ rows, and the adapter never swallows errors, so this contract holds.
 
 ## Notes / caveats
 
-- **Placeholder style is `$n`, not `?`.** The adapter is a thin pass-through; it does not
-  rewrite `?`. The ground-truth statements are ported to `$n` in `statements.pg.sql`.
+- **Placeholder style depends on the entry point.** Native CLI statements use `$n` and pass
+  through unchanged. The unmodified Worker uses the six exact, single-sourced D1 statements;
+  `{ workerSql: true }` translates only that allowlist and rejects every other SQL string.
+  `statements.pg.sql` documents both forms.
 - **BIGINT columns are parsed to JS numbers.** The adapter installs an int8 type parser so
   the Worker reads numbers (like D1), not postgres.js's default strings; out-of-safe-range
   values keep their string form rather than truncate. See "BIGINT (int8) columns arrive as
@@ -193,9 +216,12 @@ rows, and the adapter never swallows errors, so this contract holds.
   drop-in option (noted in `schema.pg.sql`), but TEXT preserves byte-compatibility with the
   existing admin/CLI tooling that treats them as opaque JSON strings (and `prev_json`/
   `next_json` legitimately default to the empty string `''`, which is not valid jsonb).
-- **Migrations:** this port ships a single consolidated `schema.pg.sql` equivalent to the
-  final state of the D1 migrations. If you want incremental Postgres migrations,
-  split it along the same boundaries (the per-table comments name the source migration).
+- **No PostgreSQL upgrade path:** this port ships only the consolidated
+  `schema.pg.sql` snapshot of the final D1 state. It has no incremental
+  PostgreSQL migration history. Recreate a fresh disposable database when the
+  snapshot changes; do not split or replay this file against persistent state.
+  Designing a production PostgreSQL migration/deployment path is separate,
+  explicitly out-of-scope work.
 
 ## Run the verify Worker on Postgres (server.mjs)
 
@@ -211,9 +237,9 @@ statements to PostgreSQL at `prepare()` time:
   it, which is why the Worker uses it.
 
 ```bash
-npx --yes npm@10.9.8 install --no-save --package-lock=false postgres  # adapter runtime dep
+npm ci                                                        # locked adapter/runtime dependencies
 npm run build                                                 # tsc -> dist/index.js
-psql "$DATABASE_URL" -f supabase-postgres/schema.pg.sql       # apply the schema
+psql "$DATABASE_URL" -f supabase-postgres/schema.pg.sql       # fresh disposable database only
 node scripts/generate-online-key.mjs --out-dir .online-key    # signing key (.online-key is gitignored)
 
 DATABASE_URL=postgresql://user:pass@host:5432/db \
@@ -225,8 +251,11 @@ DATABASE_URL=postgresql://user:pass@host:5432/db \
 
 **Verified 2026-06-16 on PostgreSQL 16 (Docker):** the compiled Worker served a genuine signed
 `lccoa1.` assertion for a seeded entitlement (`verify.ok`) and `entitlement_denied` (200, not
-500) for a miss — full parity with the SQLite host. `smoke-worker-sql.mjs` re-runs the
-data-layer proof (7/7) against any Postgres: `npx --yes npm@10.9.8 install --no-save --package-lock=false postgres && node smoke-worker-sql.mjs`.
+500) for a miss. After `npm ci`, `node smoke-worker-sql.mjs` exercises the exact six-statement
+Worker inventory, including request-proof nonce first-use, replay denial, and cleanup.
+The scheduled/manual `postgres-conformance.yml` gate applies a fresh disposable PostgreSQL 16
+schema and runs `npm run test:pg:real --workspace @licensecc/cloudflare-licensing-backend`, which
+executes the compiled Worker, adapter, nonce replay, CLI SQL, and `runApplyTransaction` itself.
 
 ## Exposing the host safely
 
@@ -247,7 +276,7 @@ the two gaps the security review flagged:
 authentication, and rate limiting. Never expose `/v1/verify` directly. The guard + IP logic live
 in `../host-common.mjs` (unit-tested in `../host-common.test.mjs`).
 
-## Full admin CLI on Postgres
+## Parallel admin CLI experiment on Postgres
 
 `scripts/entitlement.mjs` (the D1 admin CLI) is **not** modified by this port. Instead this
 directory ships a **parallel** PostgreSQL CLI with the same command surface, flags, validation,
@@ -289,9 +318,9 @@ device-list    --fingerprint <64-hex> [--project] [--feature]
 ### Run it
 
 ```bash
-npx --yes npm@10.9.8 install --no-save --package-lock=false postgres  # the adapter's only runtime dep
+npm ci                                                        # locked workspace dependencies
 export DATABASE_URL='postgresql://postgres.<ref>:<pw>@aws-0-<region>.pooler.supabase.com:6543/postgres'
-psql "$DATABASE_URL" -f schema.pg.sql       # one-time: apply the schema
+psql "$DATABASE_URL" -f schema.pg.sql       # fresh disposable database only; never an upgrade
 
 # create / update an entitlement (writes the row + one audit event, atomically)
 node entitlement-pg.mjs upsert --fingerprint <64-hex> --actor alice --customer-id cus_1
@@ -328,8 +357,7 @@ on a single connection -- the same all-or-nothing guarantee.
 ### The pg-mem test
 
 ```bash
-npx --yes npm@10.9.8 install --no-save --package-lock=false pg-mem  # in-memory Postgres, no server needed
-node --test supabase-postgres/entitlement-pg.test.mjs
+npm run test:pg --workspace @licensecc/cloudflare-licensing-backend
 ```
 
 It loads `schema.pg.sql` into `pg-mem`, then for each command runs `pgSqlFor()`'s **unmodified**
@@ -380,7 +408,7 @@ faithfully -- the `pg-sql.mjs` output is never changed, only what is handed to `
   1→2→…→6 monotonic), the conditional `WHERE entitlements.status != 'revoked'` guard (reenable on
   a revoked row = `rowCount 0`, zero audit events), and `pgcrypto`'s `gen_random_bytes`. The
   correlated `entitlements.<col>` reference resolves natively — no rewrite needed off `pg-mem`.
-  Re-run it against your own instance: `npx --yes npm@10.9.8 install --no-save --package-lock=false pg && DATABASE_URL=… node smoke-real-pg.mjs`
+  Re-run it after `npm ci`: `DATABASE_URL=… node smoke-real-pg.mjs`
   (after `schema.pg.sql` is applied).
 - The CLI uses **`postgres.js`** (a wire-protocol client), which `pg-mem` cannot serve. The
   `pg-mem` suite therefore exercises the SQL and the row effects, not a live `entitlement-pg.mjs`

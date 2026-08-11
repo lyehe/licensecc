@@ -399,6 +399,7 @@ export function OperatorControlsProvider({ children }: { children: ReactNode }):
   const invokingSectionKeyRef = useRef<string | null>(null);
   const pendingRestoreFocusRef = useRef<PendingFocus | null>(null);
   const pendingSuccessFocusRef = useRef<PendingFocus | null>(null);
+  const pendingShellFocusRef = useRef(false);
   const confirmPendingRef = useRef(false);
   const confirmAttemptKeyRef = useRef<string | null>(null);
   const noticePendingRef = useRef(false);
@@ -888,7 +889,9 @@ export function OperatorControlsProvider({ children }: { children: ReactNode }):
       } else if (staleRetainedReplay) {
         // The old presentation is stale, so never resolve its Catalog/row
         // target. Move from the soon-to-unmount notice to a live shell target
-        // before clearing it, then reaffirm after React removes the notice.
+        // before clearing it, then let the post-commit layout pass reaffirm
+        // focus after React removes the notice.
+        pendingShellFocusRef.current = true;
         focusSoon(currentContextStableFocusTarget());
       }
       clearActionNotice();
@@ -898,17 +901,10 @@ export function OperatorControlsProvider({ children }: { children: ReactNode }):
       // terminal Worker rejection is just as conclusive as an applied replay:
       // both release the retained key and the shared operation owner.
       setMessage(resolution === "unapplied" ? "Mutation was not applied." : "Status reconciled.");
-      if (focusAllowed) {
+      if (focusAllowed || staleRetainedReplay) {
         setFocusGeneration((current) => current + 1);
       }
       restoreNoticeFocus();
-      if (staleRetainedReplay) {
-        window.requestAnimationFrame(() => {
-          if (confirmActionRef.current === null) {
-            focusSoon(currentContextStableFocusTarget());
-          }
-        });
-      }
     } catch {
       if (actionNoticeRef.current?.generation === generation) {
         if (canRestoreFocus()) {
@@ -945,6 +941,15 @@ export function OperatorControlsProvider({ children }: { children: ReactNode }):
 
   useLayoutEffect(() => {
     if (confirmAction !== null) {
+      return;
+    }
+    if (pendingShellFocusRef.current) {
+      pendingShellFocusRef.current = false;
+      const focusCurrentShell = (): void => {
+        focusSoon(currentContextStableFocusTarget());
+      };
+      focusCurrentShell();
+      window.requestAnimationFrame(focusCurrentShell);
       return;
     }
     const pendingFocus = pendingSuccessFocusRef.current ?? pendingRestoreFocusRef.current;

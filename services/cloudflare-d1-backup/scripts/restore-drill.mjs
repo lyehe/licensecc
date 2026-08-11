@@ -357,8 +357,8 @@ function downloadBackup(options, tempDir) {
   return destination;
 }
 
-function restoreToScratch(options, sqlFile) {
-  runWrangler([
+function restoreToScratch(options, sqlFile, execute = runWrangler) {
+  execute([
     "d1",
     "execute",
     options.scratchDatabase,
@@ -499,6 +499,7 @@ export {
   parseArgs,
   parseWranglerJson,
   requiredStatusMismatches,
+  restoreToScratch,
   tableListSql,
   validateOptions,
 };

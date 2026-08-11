@@ -11,9 +11,13 @@ Licensecc helps applications verify local license files, bind licenses to machin
 
 The repository is licensed under the [GNU Affero General Public License v3.0 or later](https://www.gnu.org/licenses/agpl-3.0.html). See [LICENSE](LICENSE) for the full license text.
 
-**Versioning:** no tagged release yet. The C++ library carries the upstream 2.x lineage version
-(`2.1.0` in CMake); the platform packages (services, SDKs, root tooling) are `0.1.0` pre-release and
-versioned independently until the first platform release. See [CHANGELOG.md](CHANGELOG.md).
+**Versioning:** no namespaced release has been tagged yet. The C++ library carries the upstream 2.x
+lineage version (`2.1.0` in CMake); the platform packages (services, SDKs, and root/workspace Node
+packages) are `0.1.0-rc.1` and versioned independently. [`version.json`](version.json) is the
+machine-readable platform source, and `npm run check:versions` verifies every projection. Platform
+tags use `platform-v*`; future independent C++ tags use `cpp-v*`; new bare `v*` tags are forbidden.
+See [CHANGELOG.md](CHANGELOG.md) and
+[ADR 0005](doc/architecture/decisions/0005-platform-version-and-release-tags.md).
 
 ## Repository Map
 
@@ -47,6 +51,8 @@ Generated project material is written under the CMake build tree by default, not
 - A C++17 compiler.
 - Git for clone and source history operations.
 - PowerShell 7 (`pwsh`) on any platform for bootstrap, build-purity checks, `scripts/dev-check.ps1`, and the root npm shortcuts (CI uses the same binary; Windows PowerShell 5.1 is not targeted).
+- Python 3.12 and uv 0.5.15. The repository-level `uv.toml` pins uv, and the
+  Python SDK and PostgreSQL parity tools each use a checked-in `uv.lock`.
 - Linux: OpenSSL, Zlib where required by the OpenSSL version, and Boost development packages for the bundled generator/tests.
 - Windows: Visual Studio 2022 or another supported C++ toolchain. Boost is required for tests and for building the bundled license generator during configuration. If Boost is not in a default CMake search path, set `BOOST_ROOT` to the Boost install directory.
 
@@ -92,6 +98,7 @@ The root command surface is intentionally explicit:
 | `npm run lint` | Source lint for packages, services, and scripts. |
 | `npm run typecheck` | Production TypeScript/JavaScript type-check coverage. |
 | `npm run check:architecture` | Dependency direction, composition roots, and repository hygiene. |
+| `npm run check:versions` | Platform/C++ version contract and release-projection consistency. |
 | `npm run test:contracts` | Canonical route/OpenAPI contract checks. |
 | `npm run test:services` | Package, Worker, SQL, UI workflow, and schema-parity tests. |
 | `npm run test:sdks` | Python and .NET SDK tests. |

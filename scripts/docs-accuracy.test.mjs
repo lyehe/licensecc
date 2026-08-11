@@ -84,8 +84,12 @@ test("backend documentation tracks the accepted C++ online API", () => {
   assert.doesNotMatch(backendReadme, /not yet .*C\+\+|C\+\+.*not yet/i);
   assert.match(backendReadme, /For production C\+\+ hosts, use `lcc_acquire_license_decision\(\)`/);
   assert.match(backendReadme, /persisted revocation sequence/i);
-  assert.match(backendReadme, /Windows\/Ubuntu TPM-provider\/request-proof\s+integration remains\s+plan-only/is);
-  assert.match(backendReadme, /does not\s+claim TPM support/i);
+  assert.match(
+    backendReadme,
+    /C\+\+ client runtime\s+provides conditional Windows Platform KSP and Ubuntu TPM2\/OpenSSL provider\s+surfaces/is,
+  );
+  assert.doesNotMatch(backendReadme, /TPM-provider\/request-proof\s+integration remains\s+plan-only/is);
+  assert.match(backendReadme, /does not\s+claim\s+TPM\s+support/i);
 });
 
 test("organization evidence tracks the repository-owned generator snapshot", () => {

@@ -2,15 +2,27 @@
 param(
     [ValidateSet(
         "dev-debug",
+        "dev-device-identity-off",
+        "dev-device-identity-test",
         "dev-release",
         "ci-linux-debug",
         "ci-linux-release",
         "ci-linux-core",
+        "ci-linux-device-identity-test",
+        "ci-linux-debug-tpm2-capability",
+        "ci-linux-release-tpm2-capability",
+        "ci-linux-debug-tpm2",
+        "ci-linux-release-tpm2",
         "ci-windows-msvc-debug-dynamic",
         "ci-windows-msvc-debug-static",
         "ci-windows-msvc-release-dynamic",
         "ci-windows-msvc-release-static",
-        "ci-windows-msvc"
+        "ci-windows-msvc-debug-dynamic-tpm",
+        "ci-windows-msvc-debug-static-tpm",
+        "ci-windows-msvc-release-dynamic-tpm",
+        "ci-windows-msvc-release-static-tpm",
+        "ci-windows-msvc",
+        "ci-windows-device-identity-test"
     )]
     [string]$Preset = "dev-debug",
 

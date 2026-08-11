@@ -40,7 +40,7 @@ export const openApiSpec: OpenApiDocument = {
   openapi: "3.1.0",
   info: {
     title: "licensecc online verifier / licensing-backend",
-    version: "0.1.0",
+    version: "0.1.0-rc.1",
     description:
       "Cloudflare Worker that issues signed online assertions (lccoa1) and hardware-bound v201 leases / floating seats, ingests signed subscription orders, and reports usage. All responses use a FLAT { ok, code, ... } envelope. This spec documents the routes the Worker's fetch handler dispatches.",
   },

@@ -23,7 +23,10 @@ Change the hardware identification strategy
 Included with the library there are three hardware identification strategies: `IP_ADDRESS`, `STRATEGY_ETHERNET` (mac address) and 
 `STRATEGY_DISK` (partition serial number). If you want to change the preferred one:
   
-  - locate the file `licensecc_properties.h`` (usually in ``projects/<$project_name>/include/licensecc/<$project_name>``
+  - locate the generated ``licensecc_properties.h`` in
+    ``build/<preset>/projects/<project-name>/include/licensecc/<project-name>``
+    or in the explicitly external ``LCC_PROJECTS_BASE_DIR``; it is not written
+    below the source checkout
   - you can change the order of the strategies in the following code block (the strategies will be tried in sequence until the first one succeeds):
 
 

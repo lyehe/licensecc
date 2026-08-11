@@ -92,7 +92,7 @@ export async function requestProofFixture(bodyOverrides = {}, proofOverrides = {
     device_key_id: deviceKeyId,
     request_timestamp: 1_000_000,
     request_signature_algorithm: "ecdsa-p256-sha256",
-    request_signature: "AA==",
+    request_signature: base64FromBytes(new Uint8Array(64).fill(1)),
     ...bodyOverrides,
   });
   const validated = validateVerifyRequest(body);

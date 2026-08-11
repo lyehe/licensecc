@@ -3408,7 +3408,7 @@
     "info": {
       "description": "Operator back-office API for managing entitlements, customers, licenses, and orders. All /api/admin/* routes require Cloudflare Access JWT (reader or admin RBAC); mutations require the admin role. /api/sync/entitlements uses a separate bearer token (SYNC_API_TOKEN). Every response is the flat envelope { ok, code, request_id, data? }.",
       "title": "Cloudflare License Admin API",
-      "version": "0.1.0"
+      "version": "0.1.0-rc.1"
     },
     "openapi": "3.1.0",
     "paths": {

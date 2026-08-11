@@ -1,0 +1,49 @@
+name: PostgreSQL conformance
+
+on:
+  schedule:
+    - cron: "41 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  postgres-conformance:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
+        env:
+          POSTGRES_DB: licensecc
+          POSTGRES_PASSWORD: conformance-only
+          POSTGRES_USER: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d licensecc"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Select npm 10.9.8
+        run: |
+          npm install --global npm@10.9.8 --no-audit --no-fund
+          test "$(npm --version)" = "10.9.8"
+      - name: Install locked workspace
+        run: npm ci
+      - name: Apply fresh disposable PostgreSQL schema
+        run: >-
+          docker exec -i "${{ job.services.postgres.id }}"
+          psql --username postgres --dbname licensecc --set ON_ERROR_STOP=on
+          < services/cloudflare-licensing-backend/supabase-postgres/schema.pg.sql
+      - name: Run actual Worker, adapter, nonce, CLI, and transaction conformance
+        env:
+          DATABASE_URL: postgresql://postgres:conformance-only@127.0.0.1:5432/licensecc
+        run: npm run test:pg:real --workspace @licensecc/cloudflare-licensing-backend

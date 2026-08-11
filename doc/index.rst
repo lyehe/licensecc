@@ -9,7 +9,8 @@ features. If the software runs on real hardware (not a container/VM) it can gene
 a signature of that hardware and report when the signature doesn't match — for
 instance because the software was copied to another machine.
 
-A list of features and their status is in :ref:`features <analysis/features:Features>`.
+Capability status, availability limits, and implementation/test evidence are in
+the :doc:`capability registry <capabilities/index>`.
 
 License (AGPL-3.0-or-later)
 ****************************
@@ -57,7 +58,9 @@ How to contribute
 ********************
 Open issues and pull requests on the `repository <https://github.com/lyehe/licensecc>`_.
 Pull requests target the ``main`` branch. See ``CONTRIBUTING.md`` for guidelines and
-run ``scripts/dev-check.ps1`` before submitting.
+run ``npm run check:pr`` before submitting. For C++ core changes, also run
+``pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/check-build-purity.ps1
+-Preset dev-debug``.
 
 * :ref:`genindex`
 * :ref:`modindex`
@@ -79,6 +82,20 @@ run ``scripts/dev-check.ps1`` before submitting.
    :caption: Integrate and use:
 
    usage/*
+
+.. toctree::
+   :maxdepth: 2
+   :hidden:
+   :caption: Capabilities:
+
+   capabilities/index
+
+.. toctree::
+   :maxdepth: 2
+   :hidden:
+   :caption: Release and packaging:
+
+   release-artifacts
 
 
 .. toctree::

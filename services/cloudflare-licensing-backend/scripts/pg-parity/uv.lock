@@ -1,0 +1,22 @@
+version = 1
+requires-python = "==3.12.*"
+
+[[package]]
+name = "licensecc-pg-parity-tools"
+version = "0.0.0"
+source = { virtual = "." }
+dependencies = [
+    { name = "sqlglot" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "sqlglot", specifier = "==30.15.0" }]
+
+[[package]]
+name = "sqlglot"
+version = "30.15.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/58/fb/c43bfdc662bd6fcdf93158f9239b975ac01b775cfcb56015913fee9b95e2/sqlglot-30.15.0.tar.gz", hash = "sha256:fe5412f4da61075f532d3de2482144bf7139028980a37bbd79fb016c49dc2dbe", size = 5973319 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/32/28/f1e99aca0c23e2406dc8727555476647d58c2d6315d7d8101dffbb2cbc0f/sqlglot-30.15.0-py3-none-any.whl", hash = "sha256:594da0bc9d020edfb9982fd56b61dc93483cb24edca5ed1b3bb17937ba9b59bc", size = 731813 },
+]

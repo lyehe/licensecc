@@ -8,8 +8,8 @@
 // revocation_seq increments monotonically, disable/reenable stay guarded against revoked rows,
 // and the device commands bump the parent + write an 'update' event only when the device exists.
 //
-// Run:  npm install --no-save pg-mem
-//       node --test supabase-postgres/entitlement-pg.test.mjs
+// Run through the lock-backed workspace gate:
+//       npm run test:pg --workspace @licensecc/cloudflare-licensing-backend
 //
 // =====================================================================================
 // pg-mem EMULATION CAVEATS (and how this test handles them)
@@ -124,6 +124,12 @@ function loadSchema(db) {
   // The schema's own `CREATE EXTENSION IF NOT EXISTS pgcrypto;` is satisfied by our shim above;
   // strip the line so a duplicate CREATE EXTENSION does not error on pg-mem.
   sql = sql.replace(/CREATE EXTENSION IF NOT EXISTS pgcrypto;\s*/i, "");
+  // pg-mem cannot parse PL/pgSQL functions or CREATE TRIGGER. Those objects are
+  // verified by the semantic schema-parity contract and the real-PG smoke job;
+  // this CLI suite intentionally exercises table/constraint DDL and command SQL.
+  const tableDdl = sql.replace(/CREATE OR REPLACE FUNCTION bump_license_plan_projection_generation\(\)[\s\S]*$/u, "");
+  assert.notEqual(tableDdl, sql, "expected the PostgreSQL trigger section after the table DDL");
+  sql = tableDdl;
   try {
     db.public.none(sql);
     return;

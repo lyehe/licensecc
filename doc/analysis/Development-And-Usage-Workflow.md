@@ -1,83 +1,63 @@
 # Development and usage workflow
 
-This document describes the current development workflow for the `main` branch.
-
-## Development workflow
-
-The current public branch for normal development is `main`.
-
-Before opening or reviewing a C++ core change, run the local core verification command:
+This page describes the accepted repository workflow for the `main` branch.
+The root npm workspace is the command authority: install dependencies once with
+the pinned npm version, then run the deterministic pull-request gate:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts/dev-check.ps1
+npm ci
+npm run check:pr
 ```
 
-Equivalent preset commands:
-
-```console
-cmake --preset dev-debug
-cmake --build --preset dev-debug
-ctest --preset dev-debug
-```
-
-The local command is the source of truth for developer parity. GitHub Actions should run the same CMake shape rather than carrying workflow-only build behavior.
-The existing Linux and Windows workflows call `scripts/dev-check.ps1` with CI presets instead of duplicating CMake commands. Linux uses `ci-linux-debug` and `ci-linux-release`; Windows uses explicit Debug/Release static/dynamic MSVC presets.
-
-For service, SDK, database-backend, and portal changes, run the matching local gates:
+`check:pr` runs the deterministic secret, documentation-accuracy, capability,
+lint, type, architecture, contract, and service checks. It intentionally does
+not claim browser, SDK, dry-run, or documentation validation as part of that
+single gate. Run the dedicated surfaces when the change requires them:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -SkipCore -IncludeServices -IncludeUi -IncludeSchemaParity
-powershell -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -SkipCore -IncludeE2E
-powershell -ExecutionPolicy Bypass -File scripts/dev-check.ps1 -SkipCore -IncludeSdks
+npm run test:sdks
+npm run setup:browsers
+npm run test:e2e
+npm run check:dry-run
+npm run check:docs
 ```
 
-Root npm shortcuts call the same PowerShell script for common service workflows:
+The docs gate requires Doxygen and `uv`; link checking is network-sensitive and
+is reserved for `npm run check:docs:links` scheduled or manual validation.
+
+For C++ core changes, also run the build-purity gate for the selected preset:
 
 ```powershell
-npm run check:services
-npm run check:e2e
-npm run check:all
+pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/check-build-purity.ps1 -Preset dev-debug
 ```
+
+The Windows and Linux workflows run the same purity boundary around their
+configured CMake presets. Service workflows use the root workspace commands,
+including separate SDK and documentation jobs, rather than a second set of
+workflow-only developer shortcuts.
 
 ## Generated project files
 
-Licensecc needs a generated license project containing keys and generated headers. By default, those files are written under the build tree:
+Licensecc needs a generated license project containing keys and generated
+headers. By default, those files are written under the build tree:
 
 ```text
 build/<preset>/projects/<project-name>
 ```
 
-Use `LCC_PROJECTS_BASE_DIR` only when a workflow intentionally needs a stable external project directory.
-
-## Release build contents
-
-A release should contain:
-
-- the license generator executable (`lccgen`) or a documented way to obtain it,
-- the configured or configurable `licensecc` library artifacts,
-- public headers,
-- integration examples,
-- enough test or smoke-test material to verify the package,
-- license and source-notice files required by AGPL-3.0-or-later.
+Use `LCC_PROJECTS_BASE_DIR` only when a workflow intentionally needs a stable
+external project directory. Do not generate project material in the source
+checkout.
 
 ## Integration workflow
 
-1. Build or obtain the license generator.
-2. Configure `licensecc` with a project name.
-3. Generate the project keys and public-key header under the build tree or an explicitly supplied project directory.
-4. Link the C++ library into the protected product.
-5. Issue a license file for the customer or machine.
-6. Ship the application with the runtime license-checking path documented for operators.
+1. Configure a C++ build with the selected project name.
+2. Generate keys and the public-key header under the build tree or an explicit
+   external project directory.
+3. Link the C++ library into the protected product.
+4. Issue a local license or configure the online backend lifecycle.
+5. Validate the affected repository surfaces before release or deployment.
 
-## Platform workflow
-
-Service, SDK, database-backend, and portal work is handled in deliberate slices. Each slice needs local validation before CI wiring:
-
-- backend unit and DB tests,
-- SQLite local backend tests,
-- fenced PostgreSQL/Supabase adapter tests when applicable,
-- SDK unit tests,
-- portal UI and E2E tests,
-- deployment dry-runs using example configuration files rather than local secrets.
-
-Keep real Wrangler configs and secrets local. Track `wrangler.example.*` templates, not deployment-specific `wrangler.toml`, `wrangler.jsonc`, `.dev.vars`, or `.online-key/` files.
+Keep real Wrangler configurations and secrets local. Track
+`wrangler.example.*` templates, not deployment-specific `wrangler.toml`,
+`wrangler.jsonc`, `.dev.vars`, or `.online-key/` files.

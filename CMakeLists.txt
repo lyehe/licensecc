@@ -138,6 +138,34 @@ option(BUILD_BENCHMARKS "Build performance benchmarks (no extra dependencies)" O
 # configure a test tree that will later contain undeclared generator-library
 # links.
 option(BUILD_TESTING "Build the testing tree." ON)
+option(LCC_ENABLE_DEVICE_IDENTITY "Build the portable device-identity ABI and proof core." OFF)
+option(LCC_ENABLE_WINDOWS_TPM "Build the Windows Platform KSP device-key provider." OFF)
+option(LCC_ENABLE_TPM2_OPENSSL "Build the OpenSSL TPM2 device-key provider." OFF)
+option(LCC_BUILD_DEVICE_IDENTITY_TEST_PROVIDER "Build the process-local software device-key test provider." OFF)
+option(LCC_BUILD_TPM2_OPENSSL_CAPABILITY_TEST
+	"Build the standalone OpenSSL tpm2-provider exact-digest capability test." OFF)
+
+if(LCC_ENABLE_WINDOWS_TPM AND NOT WIN32)
+	message(FATAL_ERROR "LCC_ENABLE_WINDOWS_TPM is valid only on WIN32")
+endif()
+if(LCC_BUILD_TPM2_OPENSSL_CAPABILITY_TEST AND NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+	message(FATAL_ERROR "LCC_BUILD_TPM2_OPENSSL_CAPABILITY_TEST is valid only on Linux")
+endif()
+if(LCC_ENABLE_TPM2_OPENSSL AND NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+	message(FATAL_ERROR "LCC_ENABLE_TPM2_OPENSSL is valid only on Linux")
+endif()
+if(LCC_BUILD_TPM2_OPENSSL_CAPABILITY_TEST AND NOT BUILD_TESTING)
+	message(FATAL_ERROR
+		"LCC_BUILD_TPM2_OPENSSL_CAPABILITY_TEST=ON requires BUILD_TESTING=ON")
+endif()
+if(LCC_ENABLE_WINDOWS_TPM OR LCC_ENABLE_TPM2_OPENSSL OR LCC_BUILD_DEVICE_IDENTITY_TEST_PROVIDER)
+	set(LCC_ENABLE_DEVICE_IDENTITY ON CACHE BOOL
+		"Build the portable device-identity ABI and proof core." FORCE)
+endif()
+if(LCC_BUILD_DEVICE_IDENTITY_TEST_PROVIDER AND NOT BUILD_TESTING)
+	message(FATAL_ERROR
+		"LCC_BUILD_DEVICE_IDENTITY_TEST_PROVIDER=ON requires BUILD_TESTING=ON; the software provider is test-only")
+endif()
 SET(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake/")
 
 #find lccgen executable or build it.
@@ -157,10 +185,19 @@ SET (OPENSSL_USE_STATIC_LIBS TRUE)
 IF(${STATIC_RUNTIME})
 	SET(OPENSSL_MSVC_STATIC_RT TRUE)
 ENDIF(${STATIC_RUNTIME})
-find_package(OpenSSL COMPONENTS Crypto QUIET)
+if(LCC_ENABLE_TPM2_OPENSSL OR LCC_BUILD_TPM2_OPENSSL_CAPABILITY_TEST)
+	find_package(OpenSSL 3.0 REQUIRED COMPONENTS Crypto)
+else()
+	find_package(OpenSSL COMPONENTS Crypto QUIET)
+endif()
 IF(OPENSSL_FOUND)
 	MESSAGE(STATUS "Found openssl version ${OPENSSL_VERSION} -licensecc")
 ENDIF(OPENSSL_FOUND)
+if(LCC_ENABLE_TPM2_OPENSSL)
+	if(NOT OPENSSL_FOUND OR OPENSSL_VERSION VERSION_LESS 3.0)
+		message(FATAL_ERROR "LCC_ENABLE_TPM2_OPENSSL requires OpenSSL >= 3")
+	endif()
+endif()
 
 if(UNIX) #this is true for all the linux systems but not for cross compiling "linux->windows"
 	IF(${STATIC_RUNTIME})
@@ -351,7 +388,9 @@ file(TO_CMAKE_PATH "${LCC_INCLUDE_DIR}" _lcc_include_dir_for_install)
 install(DIRECTORY "${_lcc_include_dir_for_install}" DESTINATION include/${PROJECT_NAME})
 unset(_lcc_include_dir_for_install)
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/ DESTINATION include)
-install(FILES src/cmake/licensecc-config.cmake DESTINATION ${pkg_config_dest})
+configure_file(src/cmake/licensecc-config.cmake
+	${CMAKE_BINARY_DIR}/licensecc-config.cmake @ONLY)
+install(FILES ${CMAKE_BINARY_DIR}/licensecc-config.cmake DESTINATION ${pkg_config_dest})
 
 include(CMakePackageConfigHelpers)
 write_basic_package_version_file(${CMAKE_BINARY_DIR}/licensecc-config-version.cmake COMPATIBILITY SameMajorVersion)

@@ -1,11 +1,18 @@
 {
   "name": "@licensecc/cloudflare-licensing-backend",
-  "version": "0.1.0",
+  "version": "0.1.0-rc.1",
   "private": true,
   "type": "module",
+  "exports": {
+    "./device/request_proof": {
+      "types": "./src/device/request_proof.d.ts",
+      "default": "./src/device/request_proof.mjs"
+    }
+  },
   "dependencies": {
     "@licensecc/cloudflare-runtime": "file:../../packages/cloudflare-runtime",
-    "@licensecc/licensing-domain": "file:../../packages/licensing-domain"
+    "@licensecc/licensing-domain": "file:../../packages/licensing-domain",
+    "postgres": "3.4.9"
   },
   "scripts": {
     "build": "npm run generate:wrangler-types && tsc -p tsconfig.json",
@@ -14,14 +21,15 @@
     "test:sql": "npm run build && node --experimental-sqlite --test test/db/*.mjs test/sql/*.mjs test/fulfillment/order_ingest_exactly_once.test.mjs test/fulfillment/account_isolation.test.mjs",
     "test:e2e": "npm --prefix ../cloudflare-license-admin run build:worker && npm run build && node --experimental-sqlite --test test/e2e/*.mjs",
     "test:db": "node --experimental-sqlite --test test/db/*.mjs",
-    "test:pg": "node --test supabase-postgres/translate.test.mjs supabase-postgres/order-apply-pg.test.mjs supabase-postgres/pg-route-guard.test.mjs",
+    "test:pg": "npm run build && node --test supabase-postgres/translate.test.mjs supabase-postgres/verify-sql-contract.test.mjs supabase-postgres/verify-worker-pg-adapter.test.mjs supabase-postgres/entitlement-pg.test.mjs supabase-postgres/order-apply-pg.test.mjs supabase-postgres/pg-route-guard.test.mjs supabase-postgres/pg-http-handler.test.mjs supabase-postgres/real-pg-gate-contract.test.mjs",
+    "test:pg:real": "npm run build && node supabase-postgres/verify-worker-real-pg.mjs && node supabase-postgres/smoke-worker-sql.mjs && node supabase-postgres/smoke-real-pg.mjs && node supabase-postgres/order-apply-smoke-real-pg.mjs",
     "scan:secrets": "node scripts/lint.mjs",
     "lint": "eslint \"src/**/*.{js,mjs,ts,tsx}\" --max-warnings 0",
-    "generate:wrangler-types": "wrangler types .wrangler/worker-configuration.d.ts --config wrangler.example.toml",
+    "generate:wrangler-types": "node ../../scripts/generate-wrangler-types.mjs .wrangler/worker-configuration.d.ts wrangler.example.toml",
     "typecheck": "npm run generate:wrangler-types && tsc -p tsconfig.typecheck.json --noEmit",
     "schema:parity": "uv run --no-project python scripts/check-schema-parity.py",
     "schema:write": "uv run --no-project python scripts/check-schema-parity.py --write",
-    "schema:parity:pg": "uv run --no-project --with sqlglot==30.15.0 python scripts/check-pg-parity.py",
+    "schema:parity:pg": "uv run --directory scripts/pg-parity --locked python ../check-pg-parity.py",
     "dry-run": "npx wrangler deploy src/index.ts --dry-run --config wrangler.example.toml",
     "migrate:local": "npx wrangler d1 migrations apply DB --local --config wrangler.example.toml",
     "migrate:remote": "npx wrangler d1 migrations apply DB --remote --config wrangler.toml",
@@ -39,6 +47,8 @@
     "validate:public-verifier": "node scripts/public-verifier-drill.mjs"
   },
   "devDependencies": {
+    "pg": "8.22.0",
+    "pg-mem": "3.0.14",
     "typescript": "5.9.3",
     "wrangler": "4.120.0"
   }

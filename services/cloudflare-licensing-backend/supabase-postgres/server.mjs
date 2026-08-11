@@ -19,7 +19,7 @@
 // `async fetch(request, env)` — no ctx/ExecutionContext, so no waitUntil hook is needed.
 //
 // Setup:
-//   npm install postgres            # postgres.js (the adapter's runtime dep)
+//   npm ci                          # lock-pinned workspace dependencies
 //   npm run build                   # tsc -> dist/index.js
 //   psql "$DATABASE_URL" -f supabase-postgres/schema.pg.sql   # apply the schema once
 //
@@ -37,7 +37,7 @@ import { webcrypto } from "node:crypto";
 
 import { createPostgresDatabase, closePool } from "./db-postgres.mjs";
 import { CLIENT_IP_HEADERS, clientIpFromRequest, assertSafeBind } from "../host-common.mjs";
-import { isSupportedPgRoute } from "./pg-route-guard.mjs";
+import { createNodeRequestToWeb, createPgHttpHandler } from "./pg-http-handler.mjs";
 
 // --- Node <20 crypto shim (the Worker uses crypto.subtle for RSA sign / ECDSA verify) ---
 if (typeof globalThis.crypto === "undefined") {
@@ -124,44 +124,11 @@ if (!process.env.ONLINE_SIGNING_PRIVATE_KEY_PKCS8_PEM || !process.env.ONLINE_SIG
 }
 
 // --- node req -> WHATWG Request -------------------------------------------
-function nodeRequestToWeb(req) {
-  const scheme = req.socket && req.socket.encrypted ? "https" : "http";
-  const host = req.headers.host ?? `${HOST}:${PORT}`;
-  const url = `${scheme}://${host}${req.url}`;
-
-  const headers = new Headers();
-  for (const [key, value] of Object.entries(req.headers)) {
-    if (value === undefined) continue;
-    if (CLIENT_IP_HEADERS.includes(key.toLowerCase())) continue; // strip client-supplied IP headers
-    if (Array.isArray(value)) {
-      for (const v of value) headers.append(key, v);
-    } else {
-      headers.set(key, value);
-    }
-  }
-  // Re-derive the caller IP from a trustworthy source (socket / trusted proxy header) so the
-  // Worker's rate limiter (keyed on cf-connecting-ip) cannot be bypassed by a spoofed header.
-  headers.set("cf-connecting-ip", clientIpFromRequest(req));
-
-  return new Promise((resolveReq, rejectReq) => {
-    const chunks = [];
-    req.on("data", (chunk) => chunks.push(chunk));
-    req.on("error", rejectReq);
-    req.on("end", () => {
-      const hasBody = req.method !== "GET" && req.method !== "HEAD" && chunks.length > 0;
-      const init = {
-        method: req.method,
-        headers,
-        body: hasBody ? Buffer.concat(chunks) : undefined,
-      };
-      try {
-        resolveReq(new Request(url, init));
-      } catch (error) {
-        rejectReq(error);
-      }
-    });
-  });
-}
+const nodeRequestToWeb = createNodeRequestToWeb({
+  defaultHost: `${HOST}:${PORT}`,
+  clientIpHeaders: CLIENT_IP_HEADERS,
+  clientIpFromRequest,
+});
 
 // --- WHATWG Response -> node res ------------------------------------------
 async function webResponseToNode(response, res) {
@@ -174,32 +141,7 @@ async function webResponseToNode(response, res) {
   res.end(buffer);
 }
 
-const server = createServer(async (req, res) => {
-  try {
-    const request = await nodeRequestToWeb(req);
-    // R3.2: this adapter supports ONLY the verify path; fence everything else so a misdirected
-    // request fails fast and clearly instead of hitting untranslatable order/webhook/mutator SQL.
-    const pathname = new URL(request.url).pathname;
-    if (!isSupportedPgRoute(request.method, pathname)) {
-      res.writeHead(501, { "content-type": "application/json" });
-      res.end(
-        JSON.stringify({
-          ok: false,
-          code: "not_supported_on_postgres_adapter",
-          error: "the Postgres adapter serves only GET /health and POST /v1/verify; other routes are D1-only",
-        }),
-      );
-      return;
-    }
-    const response = await worker.fetch(request, buildEnv());
-    await webResponseToNode(response, res);
-  } catch (error) {
-    // The Worker maps its own errors to JSON 500s; this only catches node<->WHATWG bridge failures.
-    const message = error instanceof Error ? error.message : "host bridge error";
-    res.writeHead(500, { "content-type": "application/json" });
-    res.end(JSON.stringify({ ok: false, code: "host_error", error: message }));
-  }
-});
+const server = createServer(createPgHttpHandler({ worker, buildEnv, nodeRequestToWeb, webResponseToNode }));
 
 // Close the pool on shutdown so the process exits cleanly.
 for (const signal of ["SIGINT", "SIGTERM"]) {

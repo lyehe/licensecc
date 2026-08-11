@@ -2,15 +2,27 @@
 param(
     [ValidateSet(
         "dev-debug",
+        "dev-device-identity-off",
+        "dev-device-identity-test",
         "dev-release",
         "ci-linux-debug",
         "ci-linux-release",
         "ci-linux-core",
+        "ci-linux-device-identity-test",
+        "ci-linux-debug-tpm2-capability",
+        "ci-linux-release-tpm2-capability",
+        "ci-linux-debug-tpm2",
+        "ci-linux-release-tpm2",
         "ci-windows-msvc-debug-dynamic",
         "ci-windows-msvc-debug-static",
         "ci-windows-msvc-release-dynamic",
         "ci-windows-msvc-release-static",
-        "ci-windows-msvc"
+        "ci-windows-msvc-debug-dynamic-tpm",
+        "ci-windows-msvc-debug-static-tpm",
+        "ci-windows-msvc-release-dynamic-tpm",
+        "ci-windows-msvc-release-static-tpm",
+        "ci-windows-msvc",
+        "ci-windows-device-identity-test"
     )]
     [string]$Preset = "dev-debug",
 
@@ -253,29 +265,112 @@ function Compare-SourceSnapshots {
     return $changes.ToArray()
 }
 
-function Resolve-CmakeTool {
+function Get-NormalizedToolCandidates {
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyCollection()]
+        [object[]]$Candidates
+    )
+
+    $uniquePaths = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+    $normalizedPaths = [System.Collections.Generic.List[string]]::new()
+    foreach ($candidate in $Candidates) {
+        $path = $null
+        if ($candidate -is [string]) {
+            $path = $candidate
+        } elseif ($null -ne $candidate) {
+            foreach ($propertyName in @("Source", "Path")) {
+                $property = $candidate.PSObject.Properties[$propertyName]
+                if ($null -ne $property -and -not [string]::IsNullOrWhiteSpace([string]$property.Value)) {
+                    $path = [string]$property.Value
+                    break
+                }
+            }
+        }
+
+        if ([string]::IsNullOrWhiteSpace($path) -or -not (Test-Path -LiteralPath $path -PathType Leaf)) {
+            continue
+        }
+
+        try {
+            $normalizedPath = [System.IO.Path]::GetFullPath((Resolve-Path -LiteralPath $path -ErrorAction Stop).Path)
+        } catch {
+            continue
+        }
+
+        if ($uniquePaths.Add($normalizedPath)) {
+            $normalizedPaths.Add($normalizedPath)
+        }
+    }
+
+    return $normalizedPaths.ToArray()
+}
+
+function Test-CmakeTool {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Tool
+    )
+
+    try {
+        & $Tool "--version" *> $null
+        return $LASTEXITCODE -eq 0
+    } catch {
+        return $false
+    }
+}
+
+function Get-VisualStudioCmakeCandidates {
     param(
         [Parameter(Mandatory = $true)]
         [ValidateSet("cmake", "ctest")]
         [string]$Name
     )
 
-    $onPath = Get-Command $Name -CommandType Application -ErrorAction SilentlyContinue
-    if ($onPath) {
-        return $onPath.Source
+    if (-not $IsWindows) {
+        return @()
     }
 
-    if ($IsWindows) {
-        $programFiles = [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::ProgramFiles)
-        foreach ($edition in @("Community", "Professional", "Enterprise", "BuildTools")) {
-            $candidate = Join-Path $programFiles "Microsoft Visual Studio/2022/$edition/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/$Name.exe"
-            if (Test-Path -LiteralPath $candidate -PathType Leaf) {
-                return $candidate
-            }
+    $programFiles = [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::ProgramFiles)
+    $candidates = [System.Collections.Generic.List[string]]::new()
+    foreach ($edition in @("Community", "Professional", "Enterprise", "BuildTools")) {
+        $candidates.Add((Join-Path $programFiles "Microsoft Visual Studio/2022/$edition/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/$Name.exe"))
+    }
+    return $candidates.ToArray()
+}
+
+function Resolve-CmakeTool {
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateSet("cmake", "ctest")]
+        [string]$Name,
+
+        [scriptblock]$CommandResolver = {
+            param([string]$CommandName)
+            Get-Command $CommandName -CommandType Application -All -ErrorAction SilentlyContinue
+        },
+
+        [scriptblock]$VisualStudioCandidateResolver = {
+            param([string]$CommandName)
+            Get-VisualStudioCmakeCandidates -Name $CommandName
+        }
+    )
+
+    $onPathCandidates = Get-NormalizedToolCandidates -Candidates @(& $CommandResolver $Name)
+    foreach ($candidate in $onPathCandidates) {
+        if (Test-CmakeTool -Tool $candidate) {
+            return [string]$candidate
         }
     }
 
-    throw "$Name was not found on PATH or in the Visual Studio bundled CMake location."
+    $visualStudioCandidates = Get-NormalizedToolCandidates -Candidates @(& $VisualStudioCandidateResolver $Name)
+    foreach ($candidate in $visualStudioCandidates) {
+        if (Test-CmakeTool -Tool $candidate) {
+            return [string]$candidate
+        }
+    }
+
+    throw "$Name was not found or no usable executable passed '--version' on PATH or in the Visual Studio bundled CMake location."
 }
 
 function Invoke-CmakeStep {

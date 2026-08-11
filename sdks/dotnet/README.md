@@ -8,7 +8,8 @@ A .NET 8 client SDK for the **licensecc** online licensing backend. It does two 
    - `lcccfg1.` — the **config-attestation** token (produced offline by
      `services/cloudflare-licensing-backend/scripts/config-sign.mjs`, consumed here).
 2. **A thin HTTP client wrapper** over the licensing-backend's client-facing endpoints
-   (`/v1/verify`, `/v1/activate`, `/v1/renew`, `/v1/checkout`, `/v1/heartbeat`, `/v1/release`).
+   (`/v1/verify`, `/v1/activate`, `/v1/renew`, `/v1/checkout`, `/v1/heartbeat`, `/v1/release`,
+   `/v1/meter`, `/v1/admin/report`).
 
 > ## Scope — read this
 >
@@ -27,12 +28,12 @@ No external NuGet dependencies in the library: it uses only `System.Security.Cry
 ```
 sdks/dotnet/
   Licensecc.Client.sln
-  src/Licensecc.Client/            # the library (PackageId Licensecc.Client, 0.1.0)
+  src/Licensecc.Client/            # the library (PackageId Licensecc.Client, 0.1.0-rc.1)
     SignedTokenCore.cs             #   shared: envelope split, canonical base64, RSA verify, field parse
     OnlineAssertion.cs             #   lccoa1 verifier  -> OnlineAssertionVerifier.Verify
     ConfigToken.cs                 #   lcccfg1 verifier -> ConfigTokenVerifier.Verify
     VerifyResult.cs                #   Result type + TrustedPublicKey / TrustedKeyRing
-    LicensingBackendClient.cs      #   thin HttpClient wrapper (Verify/Activate/Renew/Checkout/Heartbeat/Release)
+    LicensingBackendClient.cs      #   thin HttpClient wrapper (Verify/Activate/Renew/Checkout/Heartbeat/Release/Meter/Report)
     Json.cs, Hex.cs                #   zero-dependency helpers
   test/Licensecc.Client.Tests/     # MSTest parity suite against test/vectors (positive + negatives)
 ```
@@ -92,7 +93,7 @@ else
 }
 ```
 
-The verifier mirrors the C++ online-verification client (in progress; not yet on `main`) exactly,
+The verifier mirrors the accepted C++ online-verification contract,
 with parity pinned by the shared golden vectors: 3-part envelope,
 exact prefix, **canonical standard base64** (url-safe / unpadded / whitespace rejected),
 RSA-PKCS1-SHA256 over the payload bytes against the **key-id-selected** trusted key (unknown key-id →
@@ -150,6 +151,32 @@ BackendResponse r = await client.VerifyAsync(RequestBody.New()
 if (r.Ok && r.Code == "entitlement_ok")
 {
     string assertion = r.GetString("assertion");   // feed this to OnlineAssertionVerifier.Verify
+}
+```
+
+Metering and usage reports use the configured account bearer. Metering sends
+the `MeterRequest` body; reports send the required entitlement query and
+optional Unix-second `from`/`to` window. Both return the same flat
+`BackendResponse`, with report fields available through `Fields`. Metering is
+intentionally a single attempt because the backend counter has no idempotency
+key; this .NET wrapper does not retry other operations either.
+
+```csharp
+BackendResponse meter = await client.MeterAsync(RequestBody.New()
+    .Set("project", "DEFAULT")
+    .Set("feature", "EXPORT")
+    .Set("license_fingerprint", fingerprint64Hex)
+    .Set("units", 3)
+    .Build());
+
+BackendResponse report = await client.ReportAsync(
+    "DEFAULT", "EXPORT", fingerprint64Hex,
+    fromEpoch: 1700000000,
+    toEpoch: 1700086400);
+if (report.Ok)
+{
+    long? peak = report.GetInt64("peak_concurrent");
+    long? devices = report.GetInt64("unique_devices");
 }
 ```
 

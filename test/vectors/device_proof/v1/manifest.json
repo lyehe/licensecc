@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "protocol": "licensecc-request-proof",
+  "proof_version": 1,
+  "algorithm": "ecdsa-p256-sha256",
+  "project": "DEFAULT",
+  "feature": "EXPORT",
+  "license_fingerprint": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  "device_hash": "",
+  "nonce": "f0e1d2c3b4a59687f0e1d2c3b4a59687f0e1d2c3b4a59687f0e1d2c3b4a59687",
+  "request_timestamp": 1700000000,
+  "client_hardening": 5,
+  "device_key_id": "sha256:05981a71c7cfb19d24983370f771e905de3bace2b70b8a90c103da44018d51ab",
+  "signed_payload": "online.payload",
+  "public_x": "e0ec72a1cebdb87086f3dcc62a396f4d32d422a908f1813304f88451c898a87c",
+  "public_y": "bef71729cea0f7c405e32943fdc4301172d0f00b448c71b800855ebac2ae4197",
+  "generated_by": "npm --prefix services/cloudflare-licensing-backend run device-key -- verify-vectors --dir ../../test/vectors/device_proof/v1 --write-manifest",
+  "files": {
+    "README.md": "9efa5abaf8570cbfb9caba98f012c558c96911367e0a2bcb73f33fc8db659cd7",
+    "device_key_id.txt": "c48dc05c6d3f6b26cf251af2fc4a93dd9f70d2f02fbeb91e9257895726affab5",
+    "lease.payload": "d70c116a6a07ebe819efa7deec4c8bd836ba7a4478a8fcebb15abb438b461824",
+    "online.payload": "47316845f2d6d0b058fabb76fd1974c5c81ff9cf37d42f98640d03a6f03a1a42",
+    "public_key.spki.der.b64": "b639e3e38881968c7a48e7f6b0a87aac3d2f2fe391b4f73d8bb9ddb8b31911da",
+    "public_key.spki.der.hex": "c25325435c5e4e3a7298152ced840696c4e9f8d0a187588dc7da92f913e56f7a",
+    "seat.payload": "a77735a303140a78f4ac1085fbeaa4199b4784c46444327c010d2b26ece97662",
+    "signature.p1363.b64": "68be0f64f39e2292f8a2bea3c40216ce3cfaeba5929a806dae9ebb8cd50deea3",
+    "signature.p1363.hex": "0590fe8a59ad10260d20c10396c45fb82fe3df265bcbbe8f2d3dc259edff9cf3"
+  }
+}

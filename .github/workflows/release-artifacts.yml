@@ -1,0 +1,52 @@
+name: Release artifact dry-run
+
+on:
+  workflow_dispatch:
+    inputs:
+      consumer_id:
+        description: Consumer identifier to label the source-only C++ archive
+        required: true
+        default: release-candidate
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  assemble:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12.8"
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+        with:
+          version: "0.5.15"
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
+        with:
+          dotnet-version: "8.0.423"
+      - name: Select npm 10.9.8
+        run: |
+          npm install --global npm@10.9.8 --no-audit --no-fund
+          test "$(npm --version)" = "10.9.8"
+      - name: Install no-install verifier toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build libssl-dev zlib1g-dev \
+            libboost-dev libboost-test-dev libboost-filesystem-dev \
+            libboost-iostreams-dev libboost-program-options-dev \
+            libboost-system-dev libboost-thread-dev libboost-date-time-dev
+      - name: Assemble and inspect local release-candidate staging
+        env:
+          CONSUMER_ID: ${{ inputs.consumer_id }}
+        run: >-
+          node scripts/assemble-release-artifacts.mjs
+          --output "$RUNNER_TEMP/licensecc-release-artifacts"
+          --repeat-output "$RUNNER_TEMP/licensecc-release-artifacts-repeat"
+          --consumer-id "$CONSUMER_ID"

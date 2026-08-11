@@ -1,0 +1,147 @@
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$InstallPrefix,
+
+    [ValidateSet("Debug", "Release")]
+    [string]$Configuration = "Debug",
+
+    [string]$BuildDirectory,
+
+    [switch]$RequireC99,
+
+    [switch]$ExpectWindowsTpm,
+
+    [switch]$ExpectTpm2OpenSsl,
+
+    [string]$Tpm2StorageDirectory,
+
+    [switch]$AllowTpm2Skip,
+
+    [switch]$BuildWindowsTpmExample,
+
+    [switch]$BuildTpm2OpenSslExample,
+
+    [switch]$StaticRuntime
+)
+
+$ErrorActionPreference = "Stop"
+
+if ($ExpectWindowsTpm -and $ExpectTpm2OpenSsl) {
+    throw "-ExpectWindowsTpm and -ExpectTpm2OpenSsl are mutually exclusive"
+}
+if ($BuildWindowsTpmExample -and $BuildTpm2OpenSslExample) {
+    throw "-BuildWindowsTpmExample and -BuildTpm2OpenSslExample are mutually exclusive"
+}
+if ($BuildWindowsTpmExample -and -not $ExpectWindowsTpm) {
+    throw "-BuildWindowsTpmExample requires -ExpectWindowsTpm"
+}
+if ($BuildTpm2OpenSslExample -and -not $ExpectTpm2OpenSsl) {
+    throw "-BuildTpm2OpenSslExample requires -ExpectTpm2OpenSsl"
+}
+if ($ExpectTpm2OpenSsl -and [string]::IsNullOrWhiteSpace($Tpm2StorageDirectory)) {
+    throw "-ExpectTpm2OpenSsl requires -Tpm2StorageDirectory"
+}
+
+$repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
+$resolvedInstallPrefix = (Resolve-Path -LiteralPath $InstallPrefix).Path
+$consumerSource = Join-Path $repositoryRoot "test\consumer\device_identity"
+if ([string]::IsNullOrWhiteSpace($BuildDirectory)) {
+    $consumerBuild = Join-Path $repositoryRoot "build\installed-device-identity-consumer"
+} elseif ([System.IO.Path]::IsPathRooted($BuildDirectory)) {
+    $consumerBuild = [System.IO.Path]::GetFullPath($BuildDirectory)
+} else {
+    $consumerBuild = [System.IO.Path]::GetFullPath((Join-Path $repositoryRoot $BuildDirectory))
+}
+$packageDirectory = @(
+    (Join-Path $resolvedInstallPrefix "cmake\licensecc"),
+    (Join-Path $resolvedInstallPrefix "lib\cmake\licensecc")
+) | Where-Object { Test-Path -LiteralPath (Join-Path $_ "licensecc-config.cmake") } | Select-Object -First 1
+if (-not $packageDirectory) {
+    throw "Installed licensecc-config.cmake was not found below $resolvedInstallPrefix"
+}
+
+$configureArguments = @(
+    "-S", $consumerSource,
+    "-B", $consumerBuild,
+    "-DCMAKE_BUILD_TYPE=$Configuration",
+    "-DCMAKE_PREFIX_PATH=$resolvedInstallPrefix",
+    "-Dlicensecc_DIR=$packageDirectory",
+    "-DLCC_PROJECT_NAME=test"
+)
+if ($RequireC99) {
+    $configureArguments += "-DLCC_DEVICE_IDENTITY_REQUIRE_C99=ON"
+} else {
+    $configureArguments += "-DLCC_DEVICE_IDENTITY_REQUIRE_C99=OFF"
+}
+if ($ExpectWindowsTpm) {
+    $configureArguments += "-DLCC_DEVICE_IDENTITY_EXPECT_WINDOWS_TPM=ON"
+} else {
+    $configureArguments += "-DLCC_DEVICE_IDENTITY_EXPECT_WINDOWS_TPM=OFF"
+}
+if ($ExpectTpm2OpenSsl) {
+    if (-not [System.IO.Path]::IsPathRooted($Tpm2StorageDirectory)) {
+        throw "TPM2 storage directory must be absolute"
+    }
+    $resolvedTpm2StorageDirectory = [System.IO.Path]::GetFullPath($Tpm2StorageDirectory)
+    $configureArguments += "-DLCC_DEVICE_IDENTITY_EXPECT_TPM2_OPENSSL=ON"
+    $configureArguments += "-DLCC_DEVICE_IDENTITY_PRE_FIND_OPENSSL=ON"
+    $configureArguments += "-DLCC_DEVICE_IDENTITY_TPM2_STORAGE_DIRECTORY=$resolvedTpm2StorageDirectory"
+    $configureArguments += "-DLCC_DEVICE_IDENTITY_TPM2_ALLOW_SKIP=$([bool]$AllowTpm2Skip)"
+} else {
+    $configureArguments += "-DLCC_DEVICE_IDENTITY_EXPECT_TPM2_OPENSSL=OFF"
+    $configureArguments += "-DLCC_DEVICE_IDENTITY_TPM2_ALLOW_SKIP=OFF"
+}
+if ($StaticRuntime) {
+    if ($Configuration -eq "Debug") {
+        $configureArguments += "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDebug"
+    } else {
+        $configureArguments += "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded"
+    }
+}
+
+& cmake @configureArguments
+if ($LASTEXITCODE -ne 0) {
+    throw "Installed device-identity consumer configure failed with exit code $LASTEXITCODE"
+}
+
+& cmake --build $consumerBuild --config $Configuration
+if ($LASTEXITCODE -ne 0) {
+    throw "Installed device-identity consumer build failed with exit code $LASTEXITCODE"
+}
+
+& ctest --test-dir $consumerBuild -C $Configuration --output-on-failure --no-tests=error
+if ($LASTEXITCODE -ne 0) {
+    throw "Installed device-identity consumer run failed with exit code $LASTEXITCODE"
+}
+
+if ($BuildWindowsTpmExample -or $BuildTpm2OpenSslExample) {
+    $exampleSource = Join-Path $repositoryRoot "examples\device_identity"
+    if ($BuildWindowsTpmExample) {
+        $exampleBuild = "$consumerBuild-example"
+    } else {
+        $exampleBuild = "$consumerBuild-example-tpm2"
+    }
+    $exampleConfigureArguments = @(
+        "-S", $exampleSource,
+        "-B", $exampleBuild,
+        "-DCMAKE_BUILD_TYPE=$Configuration",
+        "-DCMAKE_PREFIX_PATH=$resolvedInstallPrefix",
+        "-Dlicensecc_DIR=$packageDirectory",
+        "-DLCC_PROJECT_NAME=test"
+    )
+    if ($StaticRuntime) {
+        if ($Configuration -eq "Debug") {
+            $exampleConfigureArguments += "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDebug"
+        } else {
+            $exampleConfigureArguments += "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded"
+        }
+    }
+    & cmake @exampleConfigureArguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "Installed Windows TPM example configure failed with exit code $LASTEXITCODE"
+    }
+    & cmake --build $exampleBuild --config $Configuration
+    if ($LASTEXITCODE -ne 0) {
+        throw "Installed device-identity example build failed with exit code $LASTEXITCODE"
+    }
+}

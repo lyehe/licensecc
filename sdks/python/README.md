@@ -30,8 +30,8 @@ Two surfaces:
 
 2. **Thin HTTP client** (`HttpClient`) — small wrappers over the documented
    client-facing endpoints (`/v1/verify`, `/v1/activate`, `/v1/renew`,
-   `/v1/checkout`, `/v1/heartbeat`, `/v1/release`), parsing the FLAT
-   `{ ok, code, ... }` response envelope.
+   `/v1/checkout`, `/v1/heartbeat`, `/v1/release`, `/v1/meter`, and
+   `/v1/admin/report`), parsing the FLAT `{ ok, code, ... }` response envelope.
 
 The verifier **never raises on a bad token** — every rejection is a typed
 `VerificationResult(ok=False, code=RejectionCode...)`.
@@ -139,6 +139,23 @@ The lease/seat endpoints (`activate`, `renew`, `checkout`, `heartbeat`,
 client = HttpClient(base_url, account_token="lcca_...")
 client.checkout({"project": "DEFAULT", "feature": "EXPORT", "license_fingerprint": "a"*64,
                  "client_instance_id": "...", "nonce": "..."})
+```
+
+Metering and usage reports use the same account bearer. `meter()` sends the
+`MeterRequest` JSON body; `report()` sends the required entitlement query and
+optionally the `from`/`to` Unix-second window. Both return the generic
+`ApiResponse`, so report fields remain available in `resp.data` without a
+second response contract. Metering is intentionally a single attempt because
+the backend counter has no idempotency key; the other Python operations retain
+the client's configured bounded retry behavior:
+
+```python
+client.meter({"project": "DEFAULT", "feature": "EXPORT",
+              "license_fingerprint": "a" * 64, "units": 3})
+report = client.report("DEFAULT", "EXPORT", "a" * 64,
+                       from_epoch=1700000000, to_epoch=1700086400)
+if report.ok:
+    print(report.data["peak_concurrent"], report.data["unique_devices"])
 ```
 
 ## The PKCS#1 → import gotcha (why `TrustedPublicKey` exists)
