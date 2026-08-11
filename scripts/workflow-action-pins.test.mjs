@@ -70,8 +70,28 @@ test("Dependabot keeps GitHub Actions SHA pins maintainable", () => {
 test("lint repository-quality runs the clean-checkout regression gate", () => {
   const jobLines = workflowJobLines(".github/workflows/lint.yml", "repository-quality");
   assert.equal(
+    jobLines.filter((line) => line.trim() === "npm run test:capabilities").length,
+    1,
+    "repository-quality must invoke test:capabilities exactly once",
+  );
+  assert.equal(
     jobLines.filter((line) => line.trim() === "npm run test:clean-checkout").length,
     1,
     "repository-quality must invoke test:clean-checkout exactly once",
+  );
+});
+
+test("capability evidence remains a PR gate locally and in repository-quality", () => {
+  const packageJson = JSON.parse(source("package.json"));
+  assert.match(packageJson.scripts["check:pr"], /npm run test:capabilities/);
+  assert.match(packageJson.scripts["check:pr"], /npm run check:capabilities/);
+  assert.equal(packageJson.scripts["test:capabilities"], "node --test scripts/check-capability-registry.test.mjs");
+  assert.equal(packageJson.scripts["check:capabilities"], "node scripts/check-capability-registry.mjs");
+
+  const jobLines = workflowJobLines(".github/workflows/lint.yml", "repository-quality");
+  assert.equal(
+    jobLines.filter((line) => line.trim() === "npm run check:capabilities").length,
+    1,
+    "repository-quality must invoke check:capabilities exactly once",
   );
 });

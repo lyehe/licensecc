@@ -33,9 +33,11 @@
     "test:e2e": "npm run test:e2e --workspace @licensecc/cloudflare-licensing-backend && npm run test:e2e --workspace @licensecc/cloudflare-license-admin && npm run test:e2e --workspace @licensecc/cloudflare-customer-portal",
     "check:architecture": "node scripts/check-architecture.mjs",
     "test:architecture": "node --test scripts/check-architecture.test.mjs",
+    "test:capabilities": "node --test scripts/check-capability-registry.test.mjs",
+    "check:capabilities": "node scripts/check-capability-registry.mjs",
     "test:contracts": "node --test test/contracts/canonical-contracts.test.mjs && node scripts/canonical-contracts.mjs",
     "write:contract-baselines": "node scripts/canonical-contracts.mjs --write",
-    "check:pr": "npm run scan:secrets && npm run test:scan:secrets && npm run test:docs-accuracy && npm run test:wrangler-pins && npm run test:clean-checkout && npm run test:workflow-pins && npm run lint && npm run typecheck && npm run check:architecture && npm run test:architecture && npm run test:contracts && npm run test:services"
+    "check:pr": "npm run scan:secrets && npm run test:scan:secrets && npm run test:docs-accuracy && npm run test:wrangler-pins && npm run test:clean-checkout && npm run test:workflow-pins && npm run test:capabilities && npm run check:capabilities && npm run lint && npm run typecheck && npm run check:architecture && npm run test:architecture && npm run test:contracts && npm run test:services"
   },
   "workspaces": [
     "packages/licensing-domain",

@@ -52,3 +52,5 @@ jobs:
           npm run typecheck
           npm run check:architecture
           npm run test:architecture
+          npm run test:capabilities
+          npm run check:capabilities
