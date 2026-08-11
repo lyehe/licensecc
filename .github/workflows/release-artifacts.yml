@@ -29,10 +29,22 @@ jobs:
       - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
         with:
           dotnet-version: "8.0.x"
+      - name: Select npm 10.9.8
+        run: |
+          npm install --global npm@10.9.8 --no-audit --no-fund
+          test "$(npm --version)" = "10.9.8"
+      - name: Install no-install verifier toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build libssl-dev zlib1g-dev \
+            libboost-dev libboost-test-dev libboost-filesystem-dev \
+            libboost-iostreams-dev libboost-program-options-dev \
+            libboost-system-dev libboost-thread-dev libboost-date-time-dev
       - name: Assemble and inspect local release-candidate staging
         env:
           CONSUMER_ID: ${{ inputs.consumer_id }}
         run: >-
           node scripts/assemble-release-artifacts.mjs
           --output "$RUNNER_TEMP/licensecc-release-artifacts"
+          --repeat-output "$RUNNER_TEMP/licensecc-release-artifacts-repeat"
           --consumer-id "$CONSUMER_ID"

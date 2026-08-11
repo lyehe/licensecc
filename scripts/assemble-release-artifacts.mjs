@@ -14,8 +14,9 @@ import {
 import { createRequire } from "node:module";
 import { dirname, isAbsolute, join, parse, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { gunzipSync, inflateRawSync } from "node:zlib";
 
-import { readVersionAuthorities } from "./check-version-contract.mjs";
+import { checkVersionContract, readVersionAuthorities } from "./check-version-contract.mjs";
 
 const repositoryRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const LOCAL_WRANGLER_VERSION = "4.120.0";
@@ -39,6 +40,9 @@ const WORKERS = [
 const FORBIDDEN_SEGMENTS = new Set([".git", ".wrangler", "node_modules", "build", "dist", "dist-worker", "bin", "obj", "install", "projects", "test-results", "coverage", "database", "databases"]);
 const FORBIDDEN_ARTIFACT_NAME = /(?:^\.dev\.vars(?:$|\.)|^wrangler\.(?:toml|jsonc)$|^id_rsa(?:\.pub)?$|private[-_.]?key|secret|\.(?:pem|key|pfx|p12|rsa|db|sqlite|sqlite3)$)/iu;
 const FORBIDDEN_CANONICAL_NAME = /(?:^\.dev\.vars(?:$|\.)|^wrangler\.(?:toml|jsonc)$|^id_rsa(?:\.pub)?$|\.(?:pem|key|pfx|p12|rsa|db|sqlite|sqlite3)$)/iu;
+const MAX_ARCHIVE_ENTRIES = 10_000;
+const MAX_ARCHIVE_MEMBER_BYTES = 128 * 1024 * 1024;
+const parsedWorkerSources = new Map();
 
 function sha256(contents) {
   return createHash("sha256").update(contents).digest("hex");
@@ -137,7 +141,18 @@ function repositoryVersions(root) {
     dotnetPackageId: readDotnetPackageId((path) => gitBlob(root, path).toString("utf8")),
     commit,
     sourceDate: new Date(seconds * 1000).toISOString(),
+    sourceDateEpoch: seconds,
   };
+}
+
+/** Check every tracked release projection from the immutable canonical HEAD tree. */
+function assertCanonicalVersionContract({ sourceRoot, canonicalRoot }) {
+  const trackedPaths = gitHeadEntries(sourceRoot).map((entry) => entry.path);
+  const { errors } = checkVersionContract({ root: canonicalRoot, trackedPaths });
+  if (errors.length > 0) {
+    const locations = errors.map((error) => error.path).filter(Boolean).sort(ordinal).join(", ");
+    throw new Error(`complete tracked version contract is invalid in canonical HEAD: ${locations}`);
+  }
 }
 
 function realpath(value) {
@@ -386,6 +401,226 @@ function validateArchiveMembers(archivePath, options) {
   return parseArchive(archivePath, options);
 }
 
+function assertSafePackageMemberPath(value, label) {
+  if (typeof value !== "string" || !value || value.includes("\0") || value.includes("\\") || isAbsolute(value) || /^[A-Za-z]:\//u.test(value)) throw new Error(`${label} has an unsafe member path`);
+  const directory = value.endsWith("/");
+  const normalized = directory ? value.slice(0, -1) : value;
+  if (!normalized || normalized.split("/").some((part) => !part || part === "." || part === "..")) throw new Error(`${label} has an unsafe member path`);
+  return directory ? `${normalized}/` : normalized;
+}
+
+function crc32(bytes) {
+  let value = 0xffffffff;
+  for (const byte of bytes) {
+    value ^= byte;
+    for (let bit = 0; bit < 8; bit += 1) value = (value >>> 1) ^ (value & 1 ? 0xedb88320 : 0);
+  }
+  return (value ^ 0xffffffff) >>> 0;
+}
+
+function zipError(label) {
+  return new Error(`${label} is not a valid non-empty ZIP archive`);
+}
+
+/** Parse ZIP central/local records and contents without extracting or invoking archive tools. */
+function readZipArchive(archivePath, label) {
+  const archive = readFileSync(archivePath);
+  if (archive.length < 22) throw zipError(label);
+  let eocd = -1;
+  const start = Math.max(0, archive.length - 0xffff - 22);
+  for (let offset = archive.length - 22; offset >= start; offset -= 1) {
+    if (archive.readUInt32LE(offset) !== 0x06054b50) continue;
+    const commentLength = archive.readUInt16LE(offset + 20);
+    if (offset + 22 + commentLength === archive.length) {
+      eocd = offset;
+      break;
+    }
+  }
+  if (eocd === -1) throw zipError(label);
+  const disk = archive.readUInt16LE(eocd + 4);
+  const directoryDisk = archive.readUInt16LE(eocd + 6);
+  const entriesOnDisk = archive.readUInt16LE(eocd + 8);
+  const entries = archive.readUInt16LE(eocd + 10);
+  const directoryBytes = archive.readUInt32LE(eocd + 12);
+  const directoryOffset = archive.readUInt32LE(eocd + 16);
+  if (disk !== 0 || directoryDisk !== 0 || entriesOnDisk !== entries || entries === 0 || entries > MAX_ARCHIVE_ENTRIES || directoryOffset + directoryBytes !== eocd) throw zipError(label);
+
+  const files = new Map();
+  const seen = new Set();
+  let cursor = directoryOffset;
+  for (let index = 0; index < entries; index += 1) {
+    if (cursor + 46 > eocd || archive.readUInt32LE(cursor) !== 0x02014b50) throw zipError(label);
+    const flags = archive.readUInt16LE(cursor + 8);
+    const compression = archive.readUInt16LE(cursor + 10);
+    const storedCrc = archive.readUInt32LE(cursor + 16);
+    const compressedBytes = archive.readUInt32LE(cursor + 20);
+    const uncompressedBytes = archive.readUInt32LE(cursor + 24);
+    const nameLength = archive.readUInt16LE(cursor + 28);
+    const extraLength = archive.readUInt16LE(cursor + 30);
+    const commentLength = archive.readUInt16LE(cursor + 32);
+    const diskStart = archive.readUInt16LE(cursor + 34);
+    const externalAttributes = archive.readUInt32LE(cursor + 38);
+    const localOffset = archive.readUInt32LE(cursor + 42);
+    const next = cursor + 46 + nameLength + extraLength + commentLength;
+    if (next > eocd || diskStart !== 0 || compressedBytes > MAX_ARCHIVE_MEMBER_BYTES || uncompressedBytes > MAX_ARCHIVE_MEMBER_BYTES) throw zipError(label);
+    const nameBytes = archive.subarray(cursor + 46, cursor + 46 + nameLength);
+    const name = assertSafePackageMemberPath(strictUtf8(nameBytes, `${label} ZIP member name`), label);
+    if (seen.has(name)) throw new Error(`${label} contains duplicate ZIP members`);
+    seen.add(name);
+    const mode = (externalAttributes >>> 16) & 0xffff;
+    const type = mode & 0o170000;
+    if (type !== 0 && type !== 0o100000 && type !== 0o040000) throw new Error(`${label} contains a non-regular ZIP member`);
+    if (localOffset + 30 > directoryOffset || archive.readUInt32LE(localOffset) !== 0x04034b50) throw zipError(label);
+    const localFlags = archive.readUInt16LE(localOffset + 6);
+    const localCompression = archive.readUInt16LE(localOffset + 8);
+    const localNameLength = archive.readUInt16LE(localOffset + 26);
+    const localExtraLength = archive.readUInt16LE(localOffset + 28);
+    const dataOffset = localOffset + 30 + localNameLength + localExtraLength;
+    if (localFlags !== flags || localCompression !== compression || dataOffset + compressedBytes > directoryOffset || !archive.subarray(localOffset + 30, localOffset + 30 + localNameLength).equals(nameBytes)) throw zipError(label);
+    if ((flags & 0x0008) === 0 && (archive.readUInt32LE(localOffset + 14) !== storedCrc || archive.readUInt32LE(localOffset + 18) !== compressedBytes || archive.readUInt32LE(localOffset + 22) !== uncompressedBytes)) throw zipError(label);
+    const compressed = archive.subarray(dataOffset, dataOffset + compressedBytes);
+    let contents;
+    try {
+      contents = compression === 0 ? Buffer.from(compressed) : compression === 8 ? inflateRawSync(compressed, { maxOutputLength: MAX_ARCHIVE_MEMBER_BYTES }) : null;
+    } catch {
+      throw zipError(label);
+    }
+    if (!contents || contents.length !== uncompressedBytes || crc32(contents) !== storedCrc) throw zipError(label);
+    if (name.endsWith("/")) {
+      if (contents.length !== 0) throw zipError(label);
+    } else {
+      files.set(name, contents);
+    }
+    cursor = next;
+  }
+  if (cursor !== eocd || files.size === 0) throw zipError(label);
+  return files;
+}
+
+function tarDistributionError(label) {
+  return new Error(`${label} is not a valid non-empty source archive`);
+}
+
+function paxAttributes(bytes, label) {
+  const source = strictUtf8(bytes, `${label} PAX header`);
+  const values = {};
+  let cursor = 0;
+  while (cursor < source.length) {
+    const space = source.indexOf(" ", cursor);
+    if (space < cursor + 1 || !/^\d+$/u.test(source.slice(cursor, space))) throw tarDistributionError(label);
+    const size = Number(source.slice(cursor, space));
+    const end = cursor + size;
+    if (!Number.isSafeInteger(size) || end > source.length || source[end - 1] !== "\n") throw tarDistributionError(label);
+    const record = source.slice(space + 1, end - 1);
+    const equals = record.indexOf("=");
+    if (equals < 1) throw tarDistributionError(label);
+    values[record.slice(0, equals)] = record.slice(equals + 1);
+    cursor = end;
+  }
+  return values;
+}
+
+/** Parse the regular-file subset of a gzip source distribution without extracting it. */
+function readSdistArchive(archivePath, label) {
+  let archive;
+  try {
+    archive = gunzipSync(readFileSync(archivePath), { maxOutputLength: MAX_ARCHIVE_MEMBER_BYTES });
+  } catch {
+    throw tarDistributionError(label);
+  }
+  if (archive.length < 1024) throw tarDistributionError(label);
+  const files = new Map();
+  const seen = new Set();
+  let offset = 0;
+  let pendingPax = null;
+  while (offset + 512 <= archive.length) {
+    const header = archive.subarray(offset, offset + 512);
+    if (header.every((byte) => byte === 0)) break;
+    const stored = tarOctal(header, 148, 8, "header checksum");
+    const copy = Buffer.from(header);
+    copy.fill(0x20, 148, 156);
+    if (copy.reduce((sum, byte) => sum + byte, 0) !== stored) throw tarDistributionError(label);
+    const size = tarOctal(header, 124, 12, "member size");
+    const dataOffset = offset + 512;
+    const padded = Math.ceil(size / 512) * 512;
+    if (!Number.isSafeInteger(padded) || size > MAX_ARCHIVE_MEMBER_BYTES || dataOffset + padded > archive.length) throw tarDistributionError(label);
+    const type = header[156];
+    const name = tarString(header, 0, 100, "member name");
+    const prefix = tarString(header, 345, 155, "member prefix");
+    const data = archive.subarray(dataOffset, dataOffset + size);
+    if (type === 120) {
+      if (pendingPax) throw tarDistributionError(label);
+      pendingPax = paxAttributes(data, label);
+    } else {
+      if (type !== 0 && type !== 48 && type !== 53) throw new Error(`${label} contains a non-regular archive member`);
+      const raw = pendingPax?.path ?? (prefix ? `${prefix}/${name}` : name);
+      pendingPax = null;
+      const member = assertSafePackageMemberPath(raw, label);
+      if (seen.has(member)) throw new Error(`${label} contains duplicate archive members`);
+      seen.add(member);
+      if (type === 53 || member.endsWith("/")) {
+        if (data.length !== 0) throw tarDistributionError(label);
+      } else {
+        files.set(member, data);
+      }
+    }
+    offset = dataOffset + padded;
+  }
+  if (pendingPax || offset + 1024 !== archive.length || !archive.subarray(offset, offset + 1024).every((byte) => byte === 0) || files.size === 0) throw tarDistributionError(label);
+  return files;
+}
+
+function requiredArchiveMember(files, member, label) {
+  const contents = files.get(member);
+  if (!contents || contents.length === 0) throw new Error(`${label} is missing required non-empty member ${member}`);
+  return contents;
+}
+
+function metadataHeader(contents, field, label) {
+  const values = strictUtf8(contents, label)
+    .replaceAll("\r\n", "\n")
+    .split("\n")
+    .filter((line) => line.startsWith(`${field}:`))
+    .map((line) => line.slice(field.length + 1).trim());
+  if (values.length !== 1 || !values[0]) throw new Error(`${label} has invalid ${field} metadata`);
+  return values[0];
+}
+
+function validatePythonArtifacts({ wheelPath, sdistPath, pythonVersion }) {
+  const wheelLabel = "Python wheel";
+  const wheel = readZipArchive(wheelPath, wheelLabel);
+  const distInfo = `licensecc-${pythonVersion}.dist-info`;
+  const wheelMetadata = requiredArchiveMember(wheel, `${distInfo}/METADATA`, wheelLabel);
+  if (metadataHeader(wheelMetadata, "Name", `${wheelLabel} metadata`) !== "licensecc" || metadataHeader(wheelMetadata, "Version", `${wheelLabel} metadata`) !== pythonVersion) throw new Error("Python wheel metadata does not carry the expected identity");
+  requiredArchiveMember(wheel, `${distInfo}/WHEEL`, wheelLabel);
+  requiredArchiveMember(wheel, `${distInfo}/RECORD`, wheelLabel);
+  requiredArchiveMember(wheel, "licensecc/__init__.py", wheelLabel);
+
+  const sdistLabel = "Python sdist";
+  const sdist = readSdistArchive(sdistPath, sdistLabel);
+  const root = `licensecc-${pythonVersion}`;
+  const sdistMetadata = requiredArchiveMember(sdist, `${root}/PKG-INFO`, sdistLabel);
+  if (metadataHeader(sdistMetadata, "Name", `${sdistLabel} metadata`) !== "licensecc" || metadataHeader(sdistMetadata, "Version", `${sdistLabel} metadata`) !== pythonVersion) throw new Error("Python sdist metadata does not carry the expected identity");
+  requiredArchiveMember(sdist, `${root}/pyproject.toml`, sdistLabel);
+}
+
+function xmlValue(contents, field, label) {
+  const source = strictUtf8(contents, label);
+  const values = [...source.matchAll(new RegExp(`<${field}>\\s*([^<\\s][^<]*?)\\s*</${field}>`, "giu"))].map((match) => match[1].trim());
+  if (values.length !== 1) throw new Error(`${label} has invalid ${field} metadata`);
+  return values[0];
+}
+
+function validateNugetArtifact({ archivePath, packageId, platformVersion, symbols }) {
+  const label = symbols ? "NuGet symbols" : "NuGet package";
+  const files = readZipArchive(archivePath, label);
+  const metadata = requiredArchiveMember(files, `${packageId}.nuspec`, label);
+  if (xmlValue(metadata, "id", `${label} metadata`) !== packageId || xmlValue(metadata, "version", `${label} metadata`) !== platformVersion) throw new Error(`${label} metadata does not carry the expected identity`);
+  if (symbols && !/<packageType\s+name\s*=\s*["']SymbolsPackage["']\s*\/?\s*>/iu.test(strictUtf8(metadata, `${label} metadata`))) throw new Error("NuGet symbols metadata does not declare SymbolsPackage");
+  const expected = symbols ? "lib/net8.0/Licensecc.Client.pdb" : "lib/net8.0/Licensecc.Client.dll";
+  requiredArchiveMember(files, expected, label);
+}
+
 function extractValidatedArchive({ archivePath, destination, expectedRoot, expectedMembers }) {
   const entries = parseArchive(archivePath, { expectedRoot, expectedMembers });
   const target = resolve(destination);
@@ -516,7 +751,8 @@ function createCanonicalHeadTree({ root = repositoryRoot, destination }) {
   }
 }
 
-function sanitizedEnvironment(canonicalRoot) {
+function sanitizedEnvironment(canonicalRoot, sourceDateEpoch) {
+  if (!Number.isSafeInteger(sourceDateEpoch) || sourceDateEpoch < 0) throw new Error("release assembly requires a non-negative Git source timestamp");
   const home = join(canonicalRoot, ".release-tool-home");
   const temporary = join(canonicalRoot, ".release-tool-temp");
   const cache = join(canonicalRoot, ".release-npm-cache");
@@ -538,6 +774,12 @@ function sanitizedEnvironment(canonicalRoot) {
     NPM_CONFIG_AUDIT: "false",
     NPM_CONFIG_FUND: "false",
     NPM_CONFIG_UPDATE_NOTIFIER: "false",
+    SOURCE_DATE_EPOCH: String(sourceDateEpoch),
+    TZ: "UTC",
+    PYTHONHASHSEED: "0",
+    DOTNET_CLI_TELEMETRY_OPTOUT: "1",
+    DOTNET_SKIP_FIRST_TIME_EXPERIENCE: "1",
+    NUGET_XMLDOC_MODE: "skip",
     CI: "true",
   };
   for (const key of ["SystemRoot", "SYSTEMROOT", "ComSpec", "COMSPEC", "PATHEXT", "WINDIR", "PROCESSOR_ARCHITECTURE", "NUMBER_OF_PROCESSORS"]) {
@@ -561,7 +803,10 @@ function runCanonicalNpmInstall({ root, run, env }) {
   const npm = bootstrapNpmCommand();
   const version = run({ executable: npm.executable, args: [...npm.prefix, "--version"], cwd: root, env, label: "canonical npm version" });
   if (typeof version?.stdout !== "string" || version.stdout.trim() !== REQUIRED_NPM_VERSION) throw new Error(`release assembly requires npm ${REQUIRED_NPM_VERSION} for the canonical locked install`);
-  run({ executable: npm.executable, args: [...npm.prefix, "ci"], cwd: root, env, label: "canonical locked npm ci" });
+  // Wrangler and the UI build tools are pinned workspace devDependencies.  Be
+  // explicit so a hosting environment's production-default config cannot turn
+  // a clean source projection into an incomplete Worker build.
+  run({ executable: npm.executable, args: [...npm.prefix, "ci", "--include=dev"], cwd: root, env, label: "canonical locked npm ci" });
   return npm;
 }
 
@@ -576,7 +821,9 @@ function resolveLocalModule(root, request, label) {
 function localWranglerBinary(root) {
   const lock = JSON.parse(readFileSync(join(root, "package-lock.json"), "utf8"));
   if (lock.packages?.["node_modules/wrangler"]?.version !== LOCAL_WRANGLER_VERSION) throw new Error(`release assembly requires local wrangler ${LOCAL_WRANGLER_VERSION}`);
-  return resolveLocalModule(root, "wrangler/bin/wrangler.js", "the pinned local Wrangler CLI");
+  // Resolve the package's exported CLI entry from the canonical installation.
+  // Wrangler 4 no longer exports its historical bin/wrangler.js subpath.
+  return resolveLocalModule(root, "wrangler", "the pinned local Wrangler CLI");
 }
 
 function assertCanonicalWorkerInputs(root) {
@@ -588,6 +835,12 @@ function assertCanonicalWorkerInputs(root) {
       if (existsSync(join(directory, realConfig))) throw new Error(`canonical release source contains a real Wrangler config: ${worker.directory}/${realConfig}`);
     }
   }
+}
+
+function canonicalPythonBuildConstraint(root) {
+  const constraint = join(root, "sdks", "python", "build-constraints.txt");
+  if (!existsSync(constraint) || lstatSync(constraint).isSymbolicLink() || readFileSync(constraint).length === 0) throw new Error("canonical Python build constraint is missing or unsafe");
+  return constraint;
 }
 
 function planWorkerAssembly(outputDirectory, root = repositoryRoot) {
@@ -609,6 +862,56 @@ function directoryHasFiles(directory) {
   return existsSync(directory) && readdirSync(directory, { recursive: true, withFileTypes: true }).some((entry) => entry.isFile());
 }
 
+function strictUtf8(bytes, label) {
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    throw new Error(`${label} is not valid UTF-8`);
+  }
+}
+
+/** Parse, but never execute, a module bundle with the same Node parser used by release tooling. */
+function parseWorkerModule(bytes, label) {
+  if (!Buffer.isBuffer(bytes) || bytes.length === 0 || bytes.length > MAX_ARCHIVE_MEMBER_BYTES) throw new Error(`${label} is empty or too large`);
+  const cacheKey = sha256(bytes);
+  const cached = parsedWorkerSources.get(cacheKey);
+  if (cached !== undefined) return cached;
+  const source = strictUtf8(bytes, label);
+  const parsed = spawnSync(process.execPath, ["--input-type=module", "--check"], {
+    input: source,
+    encoding: "utf8",
+    windowsHide: true,
+  });
+  if (parsed.error || parsed.status !== 0) throw new Error(`${label} does not parse as an ES module`);
+  if (parsedWorkerSources.size < 256) parsedWorkerSources.set(cacheKey, source);
+  return source;
+}
+
+function hasWorkerEntrypoint(source) {
+  return /\bexport\s+default\b/u.test(source)
+    || /\bexport\s*\{[^}]*\b(?:default|as\s+default)\b[^}]*\}/su.test(source)
+    || /\baddEventListener\s*\(\s*["']fetch["']/u.test(source);
+}
+
+/** Require a parsed non-empty JavaScript bundle and an explicit Worker fetch/module entrypoint. */
+function validateWorkerBundle(directory, label = "Worker bundle") {
+  if (!existsSync(directory) || lstatSync(directory).isSymbolicLink()) throw new Error(`${label} directory is missing or unsafe`);
+  const javascript = [];
+  const visit = (current) => {
+    for (const entry of readdirSync(current, { withFileTypes: true }).sort((left, right) => ordinal(left.name, right.name))) {
+      const child = join(current, entry.name);
+      if (entry.isSymbolicLink()) throw new Error(`${label} contains a symbolic link`);
+      if (entry.isDirectory()) visit(child);
+      else if (entry.isFile() && /\.(?:mjs|cjs|js)$/iu.test(entry.name)) javascript.push(child);
+      else if (!entry.isFile()) throw new Error(`${label} contains an unsupported filesystem entry`);
+    }
+  };
+  visit(directory);
+  if (javascript.length === 0) throw new Error(`${label} has no JavaScript entrypoint`);
+  const sources = javascript.map((file) => parseWorkerModule(readFileSync(file), `${label} ${relative(directory, file)}`));
+  if (!sources.some(hasWorkerEntrypoint)) throw new Error(`${label} has no Worker fetch or module default entrypoint`);
+}
+
 function runWorkerAssembly({ root, outputDirectory, run, env, staging, npm }) {
   assertCanonicalWorkerInputs(root);
   const localWrangler = localWranglerBinary(root);
@@ -620,7 +923,10 @@ function runWorkerAssembly({ root, outputDirectory, run, env, staging, npm }) {
         const args = command.args.map((argument) => argument === "<local-wrangler-bin>" ? localWrangler : argument);
         run({ ...command, args, env });
       }
-      if (command.outdir && !directoryHasFiles(command.outdir)) throw new Error(`${command.label} produced no bundle files`);
+      if (command.outdir) {
+        if (!directoryHasFiles(command.outdir)) throw new Error(`${command.label} produced no bundle files`);
+        validateWorkerBundle(command.outdir, `${command.label} Worker bundle`);
+      }
     }
   } finally {
     removeOwnedChild(staging, join(outputDirectory, ".release-work"));
@@ -700,7 +1006,18 @@ function verifyPackageVersions(records, versions, consumerId, { incomplete = fal
   }
   const cpp = records.filter((record) => record.path.startsWith("cpp/"));
   if (cpp.length !== 1 || cpp[0].path !== identity.cpp) throw new Error("C++ archive does not carry the exact consumer and version identity");
-  if (payloadRoot && canonicalRepositoryRoot) validateArchiveMembers(join(payloadRoot, cpp[0].path), { expectedRoot: identity.cpp.slice("cpp/".length, -".tar".length), expectedMembers: trackedCppFiles(canonicalRepositoryRoot) });
+  if (payloadRoot && canonicalRepositoryRoot) {
+    validatePythonArtifacts({
+      wheelPath: join(payloadRoot, identity.python[0]),
+      sdistPath: join(payloadRoot, identity.python[1]),
+      pythonVersion: versions.pythonVersion,
+    });
+    if (!incomplete) {
+      validateNugetArtifact({ archivePath: join(payloadRoot, identity.dotnet[0]), packageId: versions.dotnetPackageId, platformVersion: versions.platformVersion, symbols: false });
+      validateNugetArtifact({ archivePath: join(payloadRoot, identity.dotnet[1]), packageId: versions.dotnetPackageId, platformVersion: versions.platformVersion, symbols: true });
+    }
+    validateArchiveMembers(join(payloadRoot, cpp[0].path), { expectedRoot: identity.cpp.slice("cpp/".length, -".tar".length), expectedMembers: trackedCppFiles(canonicalRepositoryRoot) });
+  }
 }
 
 function stableJson(value) {
@@ -715,6 +1032,7 @@ function expectedReleaseMetadata({ root, outputDirectory, consumerId, versions, 
   const artifacts = payloadRecords(outputDirectory, { allowOwnerMarker });
   verifyPackageVersions(artifacts, versions, consumer, { incomplete, payloadRoot: outputDirectory, repositoryRoot: root });
   if (!WORKERS.every((worker) => artifacts.some((artifact) => artifact.path.startsWith(`workers/${worker.name}/`)))) throw new Error("release staging is missing a required Worker payload");
+  for (const worker of WORKERS) validateWorkerBundle(join(outputDirectory, "workers", worker.name), `${worker.name} Worker bundle`);
   const cppArchive = artifacts.find((artifact) => artifact.path.startsWith("cpp/"));
   const checksums = artifacts.map((artifact) => `${artifact.sha256}  ${artifact.path}`).join("\n") + "\n";
   const inputs = licenseInputs(root);
@@ -791,8 +1109,9 @@ function inspectReleaseDirectory(outputDirectory, { root = repositoryRoot, allow
   let expected;
   try {
     expected = expectedReleaseMetadata({ root, outputDirectory: output, consumerId: manifest.consumer_id, versions: repositoryVersions(root), incomplete: manifest.incomplete, allowOwnerMarker });
-  } catch {
-    throw new Error("invalid release manifest");
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "invalid payload";
+    throw new Error(`invalid release manifest: ${detail}`);
   }
   if (stableJson(manifest) !== stableJson(expected.manifest)) throw new Error("invalid release manifest");
   if (readFileSync(join(output, "checksums.sha256"), "utf8") !== expected.checksums) throw new Error("release checksums do not match payloads");
@@ -801,23 +1120,44 @@ function inspectReleaseDirectory(outputDirectory, { root = repositoryRoot, allow
   return expected.manifest;
 }
 
+/** Fail closed unless two independently assembled release payloads are byte-for-byte identical. */
+function verifyReleaseArtifactReproducibility({ firstDirectory, secondDirectory, root = repositoryRoot }) {
+  const first = inspectReleaseDirectory(firstDirectory, { root });
+  const second = inspectReleaseDirectory(secondDirectory, { root });
+  const firstPaths = first.artifacts.map((artifact) => artifact.path).sort(ordinal);
+  const secondPaths = second.artifacts.map((artifact) => artifact.path).sort(ordinal);
+  if (JSON.stringify(firstPaths) !== JSON.stringify(secondPaths)) throw new Error("release artifact inventory differs between controlled assemblies");
+  // Compare payloads before derived metadata so a changed bundle/package reports
+  // its own byte boundary rather than only the checksum file that reflects it.
+  const paths = [...first.artifacts.map((artifact) => artifact.path), ...[...METADATA_FILES].sort(ordinal)];
+  for (const path of paths) {
+    const left = readFileSync(join(firstDirectory, path));
+    const right = readFileSync(join(secondDirectory, path));
+    if (!left.equals(right)) throw new Error(`release artifact is not reproducible: ${path}`);
+  }
+  if (stableJson(first) !== stableJson(second)) throw new Error("release artifact manifests differ between controlled assemblies");
+  return { artifacts: first.artifacts, commit: first.commit, source_date: first.source_date };
+}
+
 function assembleReleaseArtifacts({ root = repositoryRoot, outputDirectory, consumerId, expectedPlatformVersion, expectedPythonVersion, allowPartial = false, run = commandResult, verifyArchive = verifyArchiveGenerator, toolAvailable = (tool) => spawnSync(tool, ["--version"], { stdio: "ignore" }).status === 0 }) {
   const versions = repositoryVersions(root);
   if ((expectedPlatformVersion !== undefined && expectedPlatformVersion !== versions.platformVersion) || (expectedPythonVersion !== undefined && expectedPythonVersion !== versions.pythonVersion)) throw new Error("supplied expected version does not match tracked version authority");
   safeConsumerId(consumerId);
   const staging = prepareOwnedOutput({ root, outputDirectory });
   try {
+    let hasDotnet;
     const canonical = createCanonicalHeadTree({ root, destination: join(staging.output, ".canonical-head") });
-    const env = sanitizedEnvironment(canonical);
     try {
+      assertCanonicalVersionContract({ sourceRoot: root, canonicalRoot: canonical });
+      const env = sanitizedEnvironment(canonical, versions.sourceDateEpoch);
       const npm = runCanonicalNpmInstall({ root: canonical, run, env });
       runWorkerAssembly({ root: canonical, outputDirectory: staging.output, run, env, staging, npm });
-      run({ executable: "uv", args: ["build", "--locked", "--directory", join(canonical, "sdks/python"), "--wheel", "--sdist", "--out-dir", join(staging.output, "python")], cwd: canonical, env, label: "locked Python wheel and sdist" });
-      const hasDotnet = toolAvailable("dotnet");
+      run({ executable: "uv", args: ["build", "--locked", "--directory", join(canonical, "sdks/python"), "--build-constraint", canonicalPythonBuildConstraint(canonical), "--require-hashes", "--wheel", "--sdist", "--out-dir", join(staging.output, "python")], cwd: canonical, env, label: "locked Python wheel and sdist" });
+      hasDotnet = toolAvailable("dotnet");
       if (!hasDotnet && !allowPartial) throw new Error("dotnet is required; use --allow-partial only for an explicitly incomplete manifest");
       if (hasDotnet) {
         run({ executable: "dotnet", args: ["restore", join(canonical, "sdks/dotnet/Licensecc.Client.sln"), "--locked-mode"], cwd: canonical, env, label: "locked NuGet restore" });
-        run({ executable: "dotnet", args: ["pack", join(canonical, "sdks/dotnet/src/Licensecc.Client/Licensecc.Client.csproj"), "--configuration", "Release", "--no-restore", "--include-symbols", "--include-source", `-p:PackageVersion=${versions.platformVersion}`, "--output", join(staging.output, "dotnet")], cwd: canonical, env, label: "NuGet package and symbols" });
+        run({ executable: "dotnet", args: ["pack", join(canonical, "sdks/dotnet/src/Licensecc.Client/Licensecc.Client.csproj"), "--configuration", "Release", "--no-restore", "--include-symbols", "--include-source", `-p:PackageVersion=${versions.platformVersion}`, "-p:SymbolPackageFormat=snupkg", "-p:ContinuousIntegrationBuild=true", "-p:Deterministic=true", `-p:SourceRevisionId=${versions.commit}`, "--output", join(staging.output, "dotnet")], cwd: canonical, env, label: "NuGet package and symbols" });
       }
     } finally {
       removeOwnedChild(staging, canonical);
@@ -825,11 +1165,11 @@ function assembleReleaseArtifacts({ root = repositoryRoot, outputDirectory, cons
     const archive = createCppSourceArchive({ root, outputDirectory: staging.output, consumerId, cppVersion: versions.cppVersion, platformVersion: versions.platformVersion });
     const verifierStaging = prepareOwnedVerifierOutput(root);
     try {
-      verifyArchive({ archivePath: archive, expectedSha256: sha256(readFileSync(archive)), expectedMembers: trackedCppFiles(root), tempParent: verifierStaging.output, run, env: sanitizedEnvironment(verifierStaging.output) });
+      verifyArchive({ archivePath: archive, expectedSha256: sha256(readFileSync(archive)), expectedMembers: trackedCppFiles(root), tempParent: verifierStaging.output, run, env: sanitizedEnvironment(verifierStaging.output, versions.sourceDateEpoch) });
     } finally {
       cleanupOwnedStaging(verifierStaging);
     }
-    const manifest = writeReleaseMetadata({ root, outputDirectory: staging.output, consumerId, versions, incomplete: !toolAvailable("dotnet"), allowOwnerMarker: true });
+    const manifest = writeReleaseMetadata({ root, outputDirectory: staging.output, consumerId, versions, incomplete: !hasDotnet, allowOwnerMarker: true });
     inspectReleaseDirectory(staging.output, { root, allowOwnerMarker: true });
     rmSync(staging.marker, { force: true });
     return inspectReleaseDirectory(staging.output, { root });
@@ -841,7 +1181,7 @@ function assembleReleaseArtifacts({ root = repositoryRoot, outputDirectory, cons
 
 function parseArgs(argv) {
   const values = {};
-  const known = new Set(["output", "consumer-id", "expect-platform-version", "expect-python-version"]);
+  const known = new Set(["output", "repeat-output", "consumer-id", "expect-platform-version", "expect-python-version"]);
   for (let index = 2; index < argv.length; index += 1) {
     const argument = argv[index];
     if (argument === "--allow-partial") {
@@ -859,9 +1199,16 @@ function parseArgs(argv) {
 
 function main() {
   const options = parseArgs(process.argv);
-  if (options.help) return console.log("usage: node scripts/assemble-release-artifacts.mjs --output <stage> --consumer-id <consumer> [--expect-platform-version <semver>] [--expect-python-version <pep440>] [--allow-partial]");
+  if (options.help) return console.log("usage: node scripts/assemble-release-artifacts.mjs --output <stage> --consumer-id <consumer> [--repeat-output <second-stage>] [--expect-platform-version <semver>] [--expect-python-version <pep440>] [--allow-partial]");
   if (!options.output || !options["consumer-id"]) throw new Error("--output and --consumer-id are required");
-  console.log(JSON.stringify(assembleReleaseArtifacts({ outputDirectory: options.output, consumerId: options["consumer-id"], expectedPlatformVersion: options["expect-platform-version"], expectedPythonVersion: options["expect-python-version"], allowPartial: options.allowPartial }), null, 2));
+  const assembly = { consumerId: options["consumer-id"], expectedPlatformVersion: options["expect-platform-version"], expectedPythonVersion: options["expect-python-version"], allowPartial: options.allowPartial };
+  const manifest = assembleReleaseArtifacts({ ...assembly, outputDirectory: options.output });
+  if (options["repeat-output"]) {
+    if (samePath(options.output, options["repeat-output"])) throw new Error("--repeat-output must differ from --output");
+    assembleReleaseArtifacts({ ...assembly, outputDirectory: options["repeat-output"] });
+    verifyReleaseArtifactReproducibility({ firstDirectory: options.output, secondDirectory: options["repeat-output"] });
+  }
+  console.log(JSON.stringify(manifest, null, 2));
 }
 
 export {
@@ -879,6 +1226,8 @@ export {
   safeConsumerId,
   trackedCppFiles,
   validateArchiveMembers,
+  validateWorkerBundle,
+  verifyReleaseArtifactReproducibility,
   verifyArchiveGenerator,
   writeReleaseMetadata,
 };

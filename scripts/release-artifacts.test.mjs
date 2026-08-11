@@ -4,6 +4,7 @@ import { dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import test from "node:test";
+import { gzipSync } from "node:zlib";
 
 import {
   assertReleaseOutputBoundary,
@@ -15,6 +16,7 @@ import {
   planArchiveVerification,
   planWorkerAssembly,
   validateArchiveMembers,
+  verifyReleaseArtifactReproducibility,
   verifyArchiveGenerator,
 } from "./assemble-release-artifacts.mjs";
 
@@ -22,6 +24,7 @@ const PLATFORM_VERSION = "0.1.0-rc.1";
 const PYTHON_VERSION = "0.1.0rc1";
 const CPP_VERSION = "2.1.0";
 const NPM_VERSION = "10.9.8";
+const repositoryRoot = resolve(import.meta.dirname, "..");
 
 function command(executable, args, cwd) {
   const result = spawnSync(executable, args, { cwd, encoding: "utf8" });
@@ -34,7 +37,106 @@ function write(root, path, contents) {
   writeFileSync(destination, contents);
 }
 
-function releaseFixture() {
+function crc32(bytes) {
+  let value = 0xffffffff;
+  for (const byte of bytes) {
+    value ^= byte;
+    for (let bit = 0; bit < 8; bit += 1) value = (value >>> 1) ^ (value & 1 ? 0xedb88320 : 0);
+  }
+  return (value ^ 0xffffffff) >>> 0;
+}
+
+function zip(entries) {
+  const files = entries.map(({ name, contents }) => ({ name: Buffer.from(name, "utf8"), contents: Buffer.isBuffer(contents) ? contents : Buffer.from(contents, "utf8") }));
+  const locals = [];
+  const central = [];
+  let offset = 0;
+  for (const file of files) {
+    const header = Buffer.alloc(30);
+    header.writeUInt32LE(0x04034b50, 0);
+    header.writeUInt16LE(20, 4);
+    header.writeUInt32LE(crc32(file.contents), 14);
+    header.writeUInt32LE(file.contents.length, 18);
+    header.writeUInt32LE(file.contents.length, 22);
+    header.writeUInt16LE(file.name.length, 26);
+    locals.push(header, file.name, file.contents);
+
+    const directory = Buffer.alloc(46);
+    directory.writeUInt32LE(0x02014b50, 0);
+    directory.writeUInt16LE(20, 4);
+    directory.writeUInt16LE(20, 6);
+    directory.writeUInt32LE(crc32(file.contents), 16);
+    directory.writeUInt32LE(file.contents.length, 20);
+    directory.writeUInt32LE(file.contents.length, 24);
+    directory.writeUInt16LE(file.name.length, 28);
+    directory.writeUInt32LE(offset, 42);
+    central.push(directory, file.name);
+    offset += header.length + file.name.length + file.contents.length;
+  }
+  const centralBytes = Buffer.concat(central);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0);
+  end.writeUInt16LE(files.length, 8);
+  end.writeUInt16LE(files.length, 10);
+  end.writeUInt32LE(centralBytes.length, 12);
+  end.writeUInt32LE(offset, 16);
+  return Buffer.concat([...locals, centralBytes, end]);
+}
+
+function tarHeader(name, contents) {
+  const header = Buffer.alloc(512);
+  const data = Buffer.isBuffer(contents) ? contents : Buffer.from(contents, "utf8");
+  const writeOctal = (value, start, length) => Buffer.from(`${value.toString(8).padStart(length - 1, "0")}\0`, "ascii").copy(header, start);
+  Buffer.from(name, "utf8").copy(header, 0);
+  writeOctal(0o644, 100, 8);
+  writeOctal(0, 108, 8);
+  writeOctal(0, 116, 8);
+  writeOctal(data.length, 124, 12);
+  writeOctal(0, 136, 12);
+  header.fill(0x20, 148, 156);
+  header[156] = 48;
+  Buffer.from("ustar\0", "ascii").copy(header, 257);
+  Buffer.from("00", "ascii").copy(header, 263);
+  const checksum = header.reduce((sum, byte) => sum + byte, 0);
+  Buffer.from(`${checksum.toString(8).padStart(6, "0")}\0 `, "ascii").copy(header, 148);
+  return [header, data, Buffer.alloc((512 - (data.length % 512)) % 512)];
+}
+
+function tarGzip(entries) {
+  return gzipSync(Buffer.concat([...entries.flatMap(({ name, contents }) => tarHeader(name, contents)), Buffer.alloc(1024)]));
+}
+
+function wheelArtifact({ version = PYTHON_VERSION, name = "licensecc", metadataName = name } = {}) {
+  const distInfo = `${name}-${version}.dist-info`;
+  return zip([
+    { name: `${distInfo}/METADATA`, contents: `Metadata-Version: 2.3\nName: ${metadataName}\nVersion: ${version}\n` },
+    { name: `${distInfo}/WHEEL`, contents: "Wheel-Version: 1.0\nGenerator: fixture\nRoot-Is-Purelib: true\nTag: py3-none-any\n" },
+    { name: `${distInfo}/RECORD`, contents: `${name}/__init__.py,,\n` },
+    { name: `${name}/__init__.py`, contents: "__version__ = 'fixture'\n" },
+  ]);
+}
+
+function sdistArtifact({ version = PYTHON_VERSION, name = "licensecc", metadataName = name } = {}) {
+  const root = `${name}-${version}`;
+  return tarGzip([
+    { name: `${root}/PKG-INFO`, contents: `Metadata-Version: 2.3\nName: ${metadataName}\nVersion: ${version}\n` },
+    { name: `${root}/pyproject.toml`, contents: `[project]\nname = "${name}"\nversion = "${version}"\n` },
+  ]);
+}
+
+function nuspec({ id = "Licensecc.Client", version = PLATFORM_VERSION, symbols = false } = {}) {
+  return `<?xml version="1.0"?><package><metadata><id>${id}</id><version>${version}</version><authors>fixture</authors>${symbols ? "<packageTypes><packageType name=\"SymbolsPackage\" /></packageTypes>" : ""}</metadata></package>`;
+}
+
+function nugetArtifact({ id = "Licensecc.Client", metadataId = id, version = PLATFORM_VERSION, symbols = false } = {}) {
+  const files = [{ name: `${id}.nuspec`, contents: nuspec({ id: metadataId, version, symbols }) }];
+  files.push(symbols
+    ? { name: "lib/net8.0/Licensecc.Client.pdb", contents: "fixture pdb" }
+    : { name: "lib/net8.0/Licensecc.Client.dll", contents: "fixture dll" });
+  return zip(files);
+}
+
+function releaseFixture({ contractDrift = false } = {}) {
   const root = join(tmpdir(), `licensecc-release-fixture-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`);
   mkdirSync(root, { recursive: true });
   const workers = [
@@ -43,21 +145,42 @@ function releaseFixture() {
     ["cloudflare-customer-portal", "wrangler.example.jsonc"],
     ["cloudflare-d1-backup", "wrangler.example.jsonc"],
   ];
+  const workspacePaths = [
+    ["packages/cloudflare-runtime", "@fixture/cloudflare-runtime"],
+    ["packages/licensing-domain", "@fixture/licensing-domain"],
+    ["services/cloudflare-customer-portal", "@fixture/cloudflare-customer-portal"],
+    ["services/cloudflare-d1-backup", "@fixture/cloudflare-d1-backup"],
+    ["services/cloudflare-license-admin", "@fixture/cloudflare-license-admin"],
+    ["services/cloudflare-licensing-backend", "@fixture/cloudflare-licensing-backend"],
+  ];
+  const workspaceNames = workspacePaths.map(([path]) => path);
+  const rootManifest = { name: "fixture", version: PLATFORM_VERSION, private: true, workspaces: workspaceNames };
+  const lockPackages = {
+    "": { name: rootManifest.name, version: PLATFORM_VERSION, workspaces: workspaceNames },
+    "node_modules/wrangler": { version: "4.120.0" },
+  };
+  for (const [path, name] of workspacePaths) {
+    lockPackages[path] = { name, version: PLATFORM_VERSION };
+    lockPackages[`node_modules/${name}`] = { link: true, resolved: path };
+  }
   for (const [path, contents] of [
-    ["package.json", JSON.stringify({ name: "fixture", private: true })],
-    ["package-lock.json", JSON.stringify({ lockfileVersion: 3, packages: { "node_modules/wrangler": { version: "4.120.0" } } })],
+    ["package.json", JSON.stringify(rootManifest)],
+    ["package-lock.json", JSON.stringify({ name: rootManifest.name, version: PLATFORM_VERSION, lockfileVersion: 3, packages: lockPackages })],
     ["version.json", JSON.stringify({ schema_version: 1, platform_version: PLATFORM_VERSION })],
     ["CMakeLists.txt", `cmake_minimum_required(VERSION 3.16)\nproject(licensecc VERSION ${CPP_VERSION} LANGUAGES CXX)\n`],
-    ["LICENSE", "AGPL"], ["cmake/config.cmake", "# cmake"], ["include/licensecc/licensecc.h", "// header"], ["src/library/runtime.cpp", "// committed runtime"],
+    ["LICENSE", "AGPL"], ["cmake/config.cmake", "# cmake"], ["include/licensecc/licensecc.h", `#define LCC_VERSION_MAJOR 2\n#define LCC_VERSION_MINOR 1\n#define LCC_VERSION_PATCH 0\n#define LCC_VERSION_STRING "${CPP_VERSION}"\n`], ["src/library/runtime.cpp", "// committed runtime"],
     ["extern/license-generator/CMakeLists.txt", "cmake_minimum_required(VERSION 3.16)\nproject(lccgen)\n"], ["extern/license-generator/LICENSE", "BSD 3-Clause License"], ["extern/license-generator/PROVENANCE.md", "reviewed vendor provenance"], ["extern/license-generator/cmake/lccgen-config.cmake", "# config"], ["extern/license-generator/src/license_generator/main.cpp", "// generator"],
-    ["sdks/python/LICENSE", "AGPL"], ["sdks/python/pyproject.toml", `[project]\nname = "licensecc"\nversion = "${PYTHON_VERSION}"\n`],
+    ["sdks/python/LICENSE", "AGPL"], ["sdks/python/pyproject.toml", `[project]\nname = "licensecc"\nversion = "${PYTHON_VERSION}"\n\n[build-system]\nrequires = ["hatchling==1.27.0"]\nbuild-backend = "hatchling.build"\n`], ["sdks/python/build-constraints.txt", "hatchling==1.27.0 --hash=sha256:0000000000000000000000000000000000000000000000000000000000000000\n"], ["sdks/python/uv.lock", `version = 1\n\n[[package]]\nname = "licensecc"\nversion = "${PYTHON_VERSION}"\n`], ["sdks/python/src/licensecc/__init__.py", `__version__ = "${PYTHON_VERSION}"\n`], ["sdks/python/src/licensecc/http_client.py", `user_agent: str = "licensecc-python-sdk/${PYTHON_VERSION}"\n`],
     ["sdks/dotnet/src/Licensecc.Client/LICENSE", "AGPL"], ["sdks/dotnet/Licensecc.Client.sln", "solution"], ["sdks/dotnet/src/Licensecc.Client/Licensecc.Client.csproj", `<Project><PropertyGroup><PackageId>Licensecc.Client</PackageId><Version>${PLATFORM_VERSION}</Version></PropertyGroup></Project>`],
+    ["services/cloudflare-licensing-backend/src/openapi/document.ts", `export const openApiSpec = { info: { version: "${PLATFORM_VERSION}" } };\n`], ["services/cloudflare-license-admin/src/worker/openapi/document.ts", `export const openApiDocument = { info: { version: "${PLATFORM_VERSION}" } };\n`], ["services/cloudflare-customer-portal/src/worker/openapi/document.ts", `export const openApiDocument = { info: { version: "${PLATFORM_VERSION}" } };\n`], ["test/contracts/backend.json", JSON.stringify({ openApiSpec: { info: { version: PLATFORM_VERSION } } })], ["test/contracts/admin.json", JSON.stringify({ openApiDocument: { info: { version: PLATFORM_VERSION } } })], ["test/contracts/portal.json", JSON.stringify({ openApiDocument: { info: { version: PLATFORM_VERSION } } })],
+    ["README.md", `**Versioning:** Platform packages use \`${PLATFORM_VERSION}\`; C++ uses \`${CPP_VERSION}\` in CMake.\n`], ["CHANGELOG.md", `- **Platform packages** \`${PLATFORM_VERSION}\` Python \`${PYTHON_VERSION}\`\n- **C++ library** \`${CPP_VERSION}\`\n`], ["sdks/dotnet/README.md", `  src/Licensecc.Client/ # the library (PackageId Licensecc.Client, ${PLATFORM_VERSION})\n`], ["doc/conf.py", `version = "${CPP_VERSION}"\nrelease = "${CPP_VERSION}"\n`], ["doc/capabilities/index.rst", `The platform is at **${PLATFORM_VERSION}** (a prerelease)\n`], ["doc/development/Build-the-library.md", `The platform is at **${PLATFORM_VERSION}** (a prerelease)\n`], ["doc/development/Build-the-library-windows.rst", `The platform is at **${PLATFORM_VERSION}** (a prerelease)\n`], ["doc/other/QA.md", `The platform is at **${PLATFORM_VERSION}** (a prerelease)\n`], ["doc/capabilities/registry.json", JSON.stringify({ capabilities: [] })],
   ]) write(root, path, contents);
+  for (const [path, name] of workspacePaths) write(root, `${path}/package.json`, JSON.stringify({ name, version: PLATFORM_VERSION }));
   for (const [worker, config] of workers) {
     write(root, `services/${worker}/${config}`, "name = \"example\"\n");
     write(root, `services/${worker}/src/index.ts`, "export default {};\n");
-    write(root, `services/${worker}/package.json`, JSON.stringify({ name: `@fixture/${worker}`, version: PLATFORM_VERSION }));
   }
+  if (contractDrift) write(root, "README.md", "**Versioning:** drifted platform prose only\n");
   command("git", ["init", "--quiet"], root);
   command("git", ["config", "user.email", "release@test.invalid"], root);
   command("git", ["config", "user.name", "Release Test"], root);
@@ -72,7 +195,7 @@ function valueAfter(args, flag) {
   return args[index + 1];
 }
 
-function fakeRun(commands, { symbols = true, failLabel, wrongSymbol = false, wrongPython = false } = {}) {
+function fakeRun(commands, { symbols = true, failLabel, wrongSymbol = false, wrongPython = false, invalidArtifact, workerVariant = false } = {}) {
   return (entry) => {
     commands.push(entry);
     if (entry.label === failLabel) throw new Error(`intentional ${failLabel} failure`);
@@ -80,21 +203,28 @@ function fakeRun(commands, { symbols = true, failLabel, wrongSymbol = false, wro
     if (entry.label === "canonical npm version") return { status: 0, stdout: `${NPM_VERSION}\n` };
     if (entry.label === "canonical locked npm ci") {
       const root = entry.cwd;
-      put(join(root, "node_modules/wrangler/package.json"), "{}");
-      put(join(root, "node_modules/wrangler/bin/wrangler.js"), "// fake wrangler\n");
+      put(join(root, "node_modules/wrangler/package.json"), JSON.stringify({ exports: { ".": "./wrangler-dist/cli.js" } }));
+      put(join(root, "node_modules/wrangler/wrangler-dist/cli.js"), "// fake wrangler\n");
     }
     if (entry.label.includes("isolated UI build")) put(join(valueAfter(entry.args, "--outDir"), "index.html"), "ui");
-    if (entry.label.includes("Worker dry-run")) put(join(valueAfter(entry.args, "--outdir"), "worker.js"), "bundle");
+    if (entry.label.includes("Worker dry-run")) {
+      const contents = invalidArtifact === "worker-empty" ? "" : invalidArtifact === "worker-malformed" ? "export default {" : `export default { fetch() { return new Response("ok"); } };${workerVariant ? "\n// independently valid variant\n" : "\n"}`;
+      put(join(valueAfter(entry.args, "--outdir"), "worker.js"), contents);
+    }
     if (entry.label.includes("Python wheel")) {
       const out = valueAfter(entry.args, "--out-dir");
       const distribution = wrongPython ? "other" : "licensecc";
-      put(join(out, `${distribution}-${PYTHON_VERSION}-py3-none-any.whl`), "wheel");
-      put(join(out, `${distribution}-${PYTHON_VERSION}.tar.gz`), "sdist");
+      const wheel = invalidArtifact === "wheel-empty" ? Buffer.alloc(0) : invalidArtifact === "wheel-truncated" ? wheelArtifact({ name: distribution }).subarray(0, 8) : wheelArtifact({ name: distribution, metadataName: invalidArtifact === "wheel-metadata" ? "other" : distribution });
+      const sdist = invalidArtifact === "sdist-empty" ? Buffer.alloc(0) : invalidArtifact === "sdist-truncated" ? sdistArtifact({ name: distribution }).subarray(0, 8) : sdistArtifact({ name: distribution, metadataName: invalidArtifact === "sdist-metadata" ? "other" : distribution });
+      put(join(out, `${distribution}-${PYTHON_VERSION}-py3-none-any.whl`), wheel);
+      put(join(out, `${distribution}-${PYTHON_VERSION}.tar.gz`), sdist);
     }
     if (entry.label.includes("NuGet package")) {
       const out = valueAfter(entry.args, "--output");
-      put(join(out, `Licensecc.Client.${PLATFORM_VERSION}.nupkg`), "package");
-      if (symbols) put(join(out, wrongSymbol ? `Other.Client.${PLATFORM_VERSION}.snupkg` : `Licensecc.Client.${PLATFORM_VERSION}.snupkg`), "symbols");
+      const primary = invalidArtifact === "nupkg-empty" ? Buffer.alloc(0) : invalidArtifact === "nupkg-truncated" ? nugetArtifact().subarray(0, 8) : nugetArtifact({ metadataId: invalidArtifact === "nupkg-metadata" ? "Other.Client" : "Licensecc.Client" });
+      const symbolsPackage = invalidArtifact === "snupkg-empty" ? Buffer.alloc(0) : invalidArtifact === "snupkg-truncated" ? nugetArtifact({ symbols: true }).subarray(0, 8) : nugetArtifact({ metadataId: invalidArtifact === "snupkg-metadata" ? "Other.Client" : "Licensecc.Client", symbols: true });
+      put(join(out, `Licensecc.Client.${PLATFORM_VERSION}.nupkg`), primary);
+      if (symbols) put(join(out, wrongSymbol ? `Other.Client.${PLATFORM_VERSION}.snupkg` : `Licensecc.Client.${PLATFORM_VERSION}.snupkg`), symbolsPackage);
     }
     if (entry.label === "build embedded generator from archive") {
       const build = entry.args[1];
@@ -130,6 +260,16 @@ function tryDirectoryLink(target, link) {
     return false;
   }
 }
+
+test("release packaging pins the Hatchling backend by hash and forces NuGet snupkg symbols", () => {
+  const pyproject = readFileSync(join(repositoryRoot, "sdks/python/pyproject.toml"), "utf8");
+  const constraints = readFileSync(join(repositoryRoot, "sdks/python/build-constraints.txt"), "utf8");
+  const project = readFileSync(join(repositoryRoot, "sdks/dotnet/src/Licensecc.Client/Licensecc.Client.csproj"), "utf8");
+  assert.match(pyproject, /requires\s*=\s*\["hatchling==1\.27\.0"\]/u);
+  assert.match(constraints, /^hatchling==1\.27\.0\s+--hash=sha256:[0-9a-f]{64}\s+--hash=sha256:[0-9a-f]{64}$/mu);
+  assert.match(project, /<IncludeSymbols>true<\/IncludeSymbols>/u);
+  assert.match(project, /<SymbolPackageFormat>snupkg<\/SymbolPackageFormat>/u);
+});
 
 test("release source archive is canonical HEAD data with deterministic headers and dependency closure", () => {
   const root = releaseFixture();
@@ -206,13 +346,14 @@ test("assembly uses a sanitized canonical install, four pinned Worker dry-runs, 
     const npmInstall = commands.find((entry) => entry.label === "canonical locked npm ci");
     assert.ok(npmInstall);
     assert.match(npmInstall.cwd, /\.canonical-head$/);
+    assert.ok(npmInstall.args.includes("--include=dev"), "the canonical install retains pinned workspace build tools such as Wrangler");
     assert.ok(!Object.keys(npmInstall.env).some((key) => /(?:token|secret|password|cloudflare)/iu.test(key)));
     assert.equal(commands.filter((entry) => entry.label.includes("isolated UI build")).length, 2);
     const workerCommands = commands.filter((entry) => entry.label.includes("Worker dry-run"));
     assert.equal(workerCommands.length, 4);
     for (const entry of workerCommands) {
       assert.equal(entry.executable, process.execPath);
-      assert.match(entry.args[0], /\.canonical-head[\\/]node_modules[\\/]wrangler[\\/]bin[\\/]wrangler\.js$/);
+      assert.match(entry.args[0], /\.canonical-head[\\/]node_modules[\\/]wrangler[\\/]wrangler-dist[\\/]cli\.js$/);
       assert.ok(entry.args.includes("--dry-run"));
       assert.ok(entry.args.includes("--outdir"));
       assert.ok(entry.args.includes("--config"));
@@ -224,11 +365,74 @@ test("assembly uses a sanitized canonical install, four pinned Worker dry-runs, 
     const npmPrefix = npmVersion.args.slice(0, -1);
     assert.ok(uiCommands.every((entry) => entry.executable === npmVersion.executable && JSON.stringify(entry.args.slice(0, npmPrefix.length)) === JSON.stringify(npmPrefix) && !entry.args.some((argument) => String(argument).includes(".canonical-head") && String(argument).includes("npm-cli"))));
     assert.ok(commands.some((entry) => entry.label.includes("Python wheel") && entry.args.includes("--locked") && entry.args.some((arg) => String(arg).includes(".canonical-head"))));
+    const pythonBuild = commands.find((entry) => entry.label.includes("Python wheel"));
+    assert.ok(pythonBuild.args.includes("--build-constraint"));
+    assert.ok(pythonBuild.args.includes("--require-hashes"));
     assert.ok(commands.some((entry) => entry.label.includes("NuGet restore") && entry.args.includes("--locked-mode") && entry.args.some((arg) => String(arg).includes(".canonical-head"))));
-    assert.ok(commands.some((entry) => entry.label.includes("NuGet package") && entry.args.includes(`-p:PackageVersion=${PLATFORM_VERSION}`)));
+    const nugetPack = commands.find((entry) => entry.label.includes("NuGet package"));
+    assert.ok(nugetPack.args.includes(`-p:PackageVersion=${PLATFORM_VERSION}`));
+    assert.ok(nugetPack.args.includes("-p:SymbolPackageFormat=snupkg"));
+    assert.equal(npmInstall.env.SOURCE_DATE_EPOCH, String(Math.floor(new Date(manifest.source_date).getTime() / 1000)));
+    assert.equal(npmInstall.env.TZ, "UTC");
     assert.ok(!existsSync(join(output, ".canonical-head")));
     assert.ok(!existsSync(join(output, ".release-work")));
     inspectReleaseDirectory(output, { root });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("assembly validates the complete canonical version contract before invoking build tools", () => {
+  const root = releaseFixture({ contractDrift: true });
+  const output = join(root, "build", "release-artifacts", "contract-drift");
+  const commands = [];
+  try {
+    assert.throws(
+      () => assembleReleaseArtifacts({ root, outputDirectory: output, consumerId: "acme", run: fakeRun(commands), verifyArchive: () => {}, toolAvailable: () => true }),
+      /complete tracked version contract/i,
+    );
+    assert.deepEqual(commands, [], "canonical contract drift must stop before install or build commands");
+    assert.ok(!existsSync(output));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("inspector parses Worker, wheel, sdist, NuGet, and symbol payload bytes rather than trusting filenames", () => {
+  const cases = [
+    ["workers/license-admin/worker.js", Buffer.alloc(0), /Worker bundle/i],
+    ["workers/license-admin/worker.js", Buffer.from("export default {"), /Worker bundle/i],
+    [`python/licensecc-${PYTHON_VERSION}-py3-none-any.whl`, Buffer.alloc(0), /wheel/i],
+    [`python/licensecc-${PYTHON_VERSION}-py3-none-any.whl`, wheelArtifact().subarray(0, 8), /ZIP|wheel/i],
+    [`python/licensecc-${PYTHON_VERSION}-py3-none-any.whl`, wheelArtifact({ metadataName: "other" }), /wheel metadata/i],
+    [`python/licensecc-${PYTHON_VERSION}.tar.gz`, Buffer.alloc(0), /sdist/i],
+    [`python/licensecc-${PYTHON_VERSION}.tar.gz`, sdistArtifact().subarray(0, 8), /sdist|archive/i],
+    [`python/licensecc-${PYTHON_VERSION}.tar.gz`, sdistArtifact({ metadataName: "other" }), /sdist metadata/i],
+    [`dotnet/Licensecc.Client.${PLATFORM_VERSION}.nupkg`, Buffer.alloc(0), /NuGet package/i],
+    [`dotnet/Licensecc.Client.${PLATFORM_VERSION}.nupkg`, nugetArtifact().subarray(0, 8), /ZIP|NuGet package/i],
+    [`dotnet/Licensecc.Client.${PLATFORM_VERSION}.nupkg`, nugetArtifact({ metadataId: "Other.Client" }), /NuGet package metadata/i],
+    [`dotnet/Licensecc.Client.${PLATFORM_VERSION}.snupkg`, Buffer.alloc(0), /NuGet symbols/i],
+    [`dotnet/Licensecc.Client.${PLATFORM_VERSION}.snupkg`, nugetArtifact({ symbols: true }).subarray(0, 8), /ZIP|NuGet symbols/i],
+    [`dotnet/Licensecc.Client.${PLATFORM_VERSION}.snupkg`, nugetArtifact({ metadataId: "Other.Client", symbols: true }), /NuGet symbols metadata/i],
+  ];
+  const root = releaseFixture();
+  const output = join(root, "build", "release-artifacts", "inspect-payloads");
+  try {
+    assembleReleaseArtifacts({ root, outputDirectory: output, consumerId: "acme", run: fakeRun([]), verifyArchive: () => {}, toolAvailable: () => true });
+    for (const [path, invalidBytes, pattern] of cases) {
+      const target = join(output, ...path.split("/"));
+      const original = readFileSync(target);
+      try {
+        writeFileSync(target, invalidBytes);
+        assert.throws(
+          () => inspectReleaseDirectory(output, { root }),
+          pattern,
+          path,
+        );
+      } finally {
+        writeFileSync(target, original);
+      }
+    }
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -294,6 +498,7 @@ test("two controlled canonical assemblies are byte-identical despite mutable non
   const root = releaseFixture();
   const first = join(root, "build", "release-artifacts", "first");
   const second = join(root, "build", "release-artifacts", "second");
+  const variant = join(root, "build", "release-artifacts", "variant");
   try {
     assembleReleaseArtifacts({ root, outputDirectory: first, consumerId: "acme", run: fakeRun([]), verifyArchive: () => {}, toolAvailable: () => true });
     writeFileSync(join(root, "services/cloudflare-license-admin/src/index.ts"), "// mutable drift after first assembly\n");
@@ -304,6 +509,9 @@ test("two controlled canonical assemblies are byte-identical despite mutable non
     const secondCpp = readdirSync(join(second, "cpp"));
     assert.deepEqual(firstCpp, secondCpp);
     assert.deepEqual(readFileSync(join(first, "cpp", firstCpp[0])), readFileSync(join(second, "cpp", secondCpp[0])));
+    assert.doesNotThrow(() => verifyReleaseArtifactReproducibility({ firstDirectory: first, secondDirectory: second, root }));
+    assembleReleaseArtifacts({ root, outputDirectory: variant, consumerId: "acme", run: fakeRun([], { workerVariant: true }), verifyArchive: () => {}, toolAvailable: () => true });
+    assert.throws(() => verifyReleaseArtifactReproducibility({ firstDirectory: first, secondDirectory: variant, root }), /not reproducible: workers\//);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -423,6 +631,7 @@ test("worker plan remains explicit about example configs and output isolation", 
 test("CLI rejects unknown and duplicate flags", () => {
   assert.throws(() => parseArgs(["node", "script", "--unknown", "x"]), /invalid argument/);
   assert.throws(() => parseArgs(["node", "script", "--output", "a", "--output", "b"]), /invalid argument/);
+  assert.throws(() => parseArgs(["node", "script", "--repeat-output", "a", "--repeat-output", "b"]), /invalid argument/);
   assert.throws(() => parseArgs(["node", "script", "--allow-partial", "--allow-partial"]), /duplicate argument/);
   const root = releaseFixture();
   try {

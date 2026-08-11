@@ -230,8 +230,22 @@ test("the release-candidate workflow is manual and performs only local dry-run a
   assert.match(workflow, /node scripts\/assemble-release-artifacts\.mjs/);
   assert.match(workflow, /--consumer-id/);
   assert.match(workflow, /--output/);
+  assert.match(workflow, /--repeat-output/);
   assert.doesNotMatch(workflow, /(?:^|\s)(?:git\s+tag|gh\s+release|npm\s+publish|dotnet\s+nuget\s+push|wrangler\s+deploy)(?:\s|$)/imu);
   assert.doesNotMatch(workflow, /upload-artifact/iu);
+});
+
+test("pull requests run a clean, toolchain-backed double assembly rather than only fake artifact tests", () => {
+  const workflow = source(".github/workflows/lint.yml");
+  const jobLines = workflowJobLines(".github/workflows/lint.yml", "release-artifact-integration");
+  assert.match(workflow, /^on:\s*\[pull_request\]/mu);
+  assert.match(jobLines.join("\n"), /actions\/setup-python@/u);
+  assert.match(jobLines.join("\n"), /astral-sh\/setup-uv@/u);
+  assert.match(jobLines.join("\n"), /actions\/setup-dotnet@/u);
+  assert.equal(jobLines.filter((line) => line.trim() === "node scripts/assemble-release-artifacts.mjs").length, 1);
+  assert.equal(jobLines.filter((line) => line.trim() === "--repeat-output \"$RUNNER_TEMP/licensecc-release-artifacts-b\"").length, 1);
+  assert.match(jobLines.join("\n"), /cmake ninja-build/u);
+  assert.doesNotMatch(jobLines.join("\n"), /(?:^|\s)(?:git\s+tag|gh\s+release|npm\s+publish|dotnet\s+nuget\s+push|wrangler\s+deploy)(?:\s|$)/imu);
 });
 
 test("capability evidence remains a PR gate locally and in repository-quality", () => {
