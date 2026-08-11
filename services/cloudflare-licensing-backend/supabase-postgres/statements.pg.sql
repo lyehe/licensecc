@@ -5,10 +5,10 @@
 -- and its source location, so a reviewer can diff shape-for-shape.
 --
 -- TWO GROUPS:
---   (A) The FOUR verify-path Worker statements from src/index.ts -- the only SQL the
---       fail-closed online verifier executes per request. These are what db-postgres.mjs
---       must run. Placeholders are shown as $1,$2,... (Postgres-native), since the
---       adapter requires callers to pass numbered placeholders (see db-postgres.mjs).
+--   (A) The SIX verify-path Worker statements from src/routes/verify.ts -- the only SQL the
+--       fail-closed online verifier may execute (several are conditional). These are what
+--       db-postgres.mjs must run. Placeholders are shown as $1,$2,... (Postgres-native); workerSql mode
+--       translates only the exact D1 source statements into these forms.
 --   (B) The admin/CLI statements from scripts/entitlement.mjs that contain the
 --       SQLite-isms the task flagged (unixepoch(), two-arg max(), randomblob(),
 --       conditional ON CONFLICT ... DO UPDATE ... WHERE). These do NOT run in the verify
@@ -26,10 +26,11 @@
 
 
 -- =====================================================================================
--- (A) VERIFY-PATH STATEMENTS  (services/.../src/index.ts) -- the four the adapter runs.
+-- (A) VERIFY-PATH STATEMENTS  (services/.../src/routes/verify.ts) -- the six the adapter runs.
 -- =====================================================================================
 
--- A1. rate_limit_counters upsert with RETURNING  (index.ts lines 303-307, checkD1RateLimitTier)
+-- A1. rate_limit_counters upsert with RETURNING
+--     (verify-statements.mjs rateLimitUpsert; verify.ts checkD1RateLimitTier)
 --   ORIGINAL (D1):
 --     INSERT INTO rate_limit_counters (namespace, rate_key, window_start, request_count, expires_at, updated_at)
 --     VALUES (?, ?, ?, 1, ?, ?)
@@ -38,8 +39,8 @@
 --     RETURNING request_count
 --   .bind(namespace, key, windowStart, expiresAt, nowSeconds) -> 5 params; request_count literal 1 in VALUES.
 --   Atomic read-modify-write is load-bearing (the counter increment). Consumed via .first<{request_count:number}>().
---   NOTE: in the bare DO UPDATE SET, `request_count` (unqualified) resolves to the EXISTING row's value in both
---   SQLite and Postgres, so `request_count = request_count + 1` is the same atomic increment in both engines.
+--   NOTE: the shared D1 statement uses the bare `request_count` reference. PostgreSQL treats that
+--   reference as ambiguous in this INSERT ... ON CONFLICT shape, so the fenced translator qualifies it.
 INSERT INTO rate_limit_counters (namespace, rate_key, window_start, request_count, expires_at, updated_at)
 VALUES ($1, $2, $3, 1, $4, $5)
 ON CONFLICT (namespace, rate_key, window_start)
@@ -48,17 +49,18 @@ DO UPDATE SET
   expires_at    = EXCLUDED.expires_at,
   updated_at    = EXCLUDED.updated_at
 RETURNING request_count;
--- (request_count is qualified as rate_limit_counters.request_count above purely for clarity; the unqualified
---  form `request_count = request_count + 1` is equally valid in Postgres and matches the original byte-for-byte.)
+-- (The qualification above is load-bearing PostgreSQL syntax, not a cosmetic rewrite.)
 
 
--- A2. rate_limit_counters cleanup DELETE  (index.ts line 310, fire-and-forget via .run())
+-- A2. rate_limit_counters cleanup DELETE
+--     (verify-statements.mjs rateLimitCleanup; verify.ts checkD1RateLimitTier)
 --   ORIGINAL (D1): DELETE FROM rate_limit_counters WHERE expires_at < ?
 --   .bind(nowSeconds) -> 1 param. Return value ignored.
 DELETE FROM rate_limit_counters WHERE expires_at < $1;
 
 
--- A3. entitlement lookup SELECT  (index.ts line 604, lookupEntitlement)
+-- A3. entitlement lookup SELECT
+--     (verify-statements.mjs entitlementLookup; verify.ts lookupEntitlement)
 --   ORIGINAL (D1):
 --     SELECT project, feature, license_fingerprint, device_hash, status, assertion_ttl_seconds,
 --            cache_ttl_seconds, revocation_seq, valid_from, valid_until
@@ -72,7 +74,8 @@ WHERE project = $1 AND feature = $2 AND license_fingerprint = $3
 LIMIT 1;
 
 
--- A4. entitlement_device lookup SELECT  (index.ts line 615, lookupEntitlementDevice)
+-- A4. entitlement_device lookup SELECT
+--     (verify-statements.mjs entitlementDeviceLookup; verify.ts lookupEntitlementDevice)
 --   ORIGINAL (D1):
 --     SELECT device_key_id, public_key_spki_der_base64, status
 --     FROM entitlement_devices
@@ -83,6 +86,32 @@ SELECT device_key_id, public_key_spki_der_base64, status
 FROM entitlement_devices
 WHERE project = $1 AND feature = $2 AND license_fingerprint = $3 AND device_key_id = $4
 LIMIT 1;
+
+
+-- A5. request-proof nonce consume (verify-statements.mjs, consumeRequestProofNonce)
+--   ORIGINAL (D1):
+--     INSERT INTO request_proof_nonces
+--       (project, feature, license_fingerprint, device_key_id, nonce,
+--        request_timestamp, consumed_at, expires_at)
+--     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+--     ON CONFLICT(project, feature, license_fingerprint, device_key_id, nonce)
+--     DO NOTHING RETURNING nonce
+--   The composite primary key is the replay arbiter. The first request returns a row;
+--   concurrent and later replays return no row and must be denied in required mode.
+INSERT INTO request_proof_nonces (
+  project, feature, license_fingerprint, device_key_id, nonce,
+  request_timestamp, consumed_at, expires_at
+)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+ON CONFLICT (project, feature, license_fingerprint, device_key_id, nonce)
+DO NOTHING
+RETURNING nonce;
+
+
+-- A6. request-proof nonce cleanup (verify-statements.mjs, consumeRequestProofNonce)
+--   ORIGINAL (D1): DELETE FROM request_proof_nonces WHERE expires_at < ?
+--   Best-effort retention cleanup after a successful first consume.
+DELETE FROM request_proof_nonces WHERE expires_at < $1;
 
 
 -- =====================================================================================

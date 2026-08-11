@@ -134,12 +134,13 @@ vars) is satisfied here, so the Worker's security logic runs unchanged.
 
 ## How the adapter maps to the Worker's DB contract
 
-The Worker uses a deliberately tiny DB surface (`src/index.ts` lines 9-17):
+The Worker uses a deliberately tiny DB surface (`src/env.ts`):
 `prepare(sql)` -> chainable `.bind(...)` -> `.first<T>()` (row or `null`),
 `.all<T>()`, `.run()`, transactional `.batch()`, and optional `.withSession()`.
-The verify path issues exactly four statements — the
+The verify path imports exactly six statements from `src/db/verify-statements.mjs` — the
 `rate_limit_counters` `INSERT ... ON CONFLICT ... RETURNING` upsert and cleanup
-`DELETE`, the `entitlements` SELECT, and the `entitlement_devices` SELECT. The
+`DELETE`, the `entitlements` SELECT, the `entitlement_devices` SELECT, and the
+`request_proof_nonces` consume and cleanup statements. The
 adapter honours the load-bearing contract: **`null` for an empty result, a
 thrown `Error` for a real failure** — which is what the Worker's two
 `try { ... } catch` branches rely on to distinguish "no entitlement / unknown

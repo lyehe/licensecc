@@ -19,7 +19,7 @@
 // `async fetch(request, env)` — no ctx/ExecutionContext, so no waitUntil hook is needed.
 //
 // Setup:
-//   npm install postgres            # postgres.js (the adapter's runtime dep)
+//   npm ci                          # lock-pinned workspace dependencies
 //   npm run build                   # tsc -> dist/index.js
 //   psql "$DATABASE_URL" -f supabase-postgres/schema.pg.sql   # apply the schema once
 //

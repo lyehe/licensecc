@@ -2,6 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-08-08
+- Amended: 2026-08-11 (lock-backed PostgreSQL conformance tooling)
 - Decision owners: repository maintainers
 
 ## Context
@@ -37,9 +38,10 @@ The repository uses one root npm workspace install:
    `file:` dependencies were removed during the shared-package extraction;
    services do not depend on another deployable's implementation.
 6. CI caches and installs from the root lockfile with one `npm ci`.
-7. Optional real-PostgreSQL or `pg-mem` smoke dependencies are not ordinary
-   workspace dependencies. Their opt-in instructions must install them
-   explicitly and must not rewrite or extend the authoritative lockfile.
+7. PostgreSQL clients and `pg-mem` used by repository conformance tests are
+   exact-pinned ordinary workspace dependencies in the root lockfile. A live
+   PostgreSQL server remains an external scheduled/manual test prerequisite;
+   no developer command installs JavaScript packages outside `npm ci`.
 
 The local service gate checks `npm --version` and fails unless it is exactly
 `10.9.8`. On a fresh machine, bootstrap the pinned CLI for the root install
@@ -55,8 +57,9 @@ before running its single `npm ci`.
   performed by the pinned npm version; lockfile content is never hand-edited.
 - Service-local `npm ci` is no longer a supported installation path because no
   package-local lockfile exists.
-- Optional PostgreSQL smoke tests remain intentionally separate from ordinary
-  service and CI installs, avoiding flaky network/database prerequisites.
+- Hermetic PostgreSQL contract tests run from the ordinary workspace install.
+  Live PostgreSQL 16 conformance remains a separate scheduled/manual job, so a
+  database daemon is not a pull-request prerequisite.
 
 ## Final workspace outcome
 

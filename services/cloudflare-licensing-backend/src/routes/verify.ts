@@ -16,6 +16,7 @@ import type {
   VerifyRequest,
 } from "../env.js";
 import { logEvent, type LogSeverity } from "../observability/index.js";
+import { VERIFY_SQL } from "../db/verify-statements.mjs";
 
 declare const Buffer:
   | {
@@ -206,14 +207,12 @@ async function checkD1RateLimitTier(
   const periodSeconds = parsePositiveInt(periodValue ?? env.D1_RATE_LIMIT_PERIOD_SECONDS, 60, 3600);
   const windowStart = fixedWindowStart(nowSeconds, periodSeconds);
   const expiresAt = windowStart + periodSeconds * 2;
-  const row = await env.DB.prepare(
-    "INSERT INTO rate_limit_counters (namespace, rate_key, window_start, request_count, expires_at, updated_at) VALUES (?, ?, ?, 1, ?, ?) ON CONFLICT(namespace, rate_key, window_start) DO UPDATE SET request_count = request_count + 1, expires_at = excluded.expires_at, updated_at = excluded.updated_at RETURNING request_count",
-  )
+  const row = await env.DB.prepare(VERIFY_SQL.rateLimitUpsert)
     .bind(namespace, key, windowStart, expiresAt, nowSeconds)
     .first<{ request_count: number }>();
   const requestCount = Number(row?.request_count ?? 0);
   if (requestCount === 1) {
-    await env.DB.prepare("DELETE FROM rate_limit_counters WHERE expires_at < ?").bind(nowSeconds).run();
+    await env.DB.prepare(VERIFY_SQL.rateLimitCleanup).bind(nowSeconds).run();
   }
   return { limited: requestCount > limit, source: requestCount > limit ? source : undefined };
 }
@@ -506,9 +505,7 @@ export async function signAssertion(claims: AssertionClaims, env: Env): Promise<
 }
 
 async function lookupEntitlement(env: Env, request: VerifyRequest): Promise<EntitlementRow | null> {
-  return env.DB.prepare(
-    "SELECT project, feature, license_fingerprint, device_hash, status, assertion_ttl_seconds, cache_ttl_seconds, revocation_seq, valid_from, valid_until FROM entitlements WHERE project = ? AND feature = ? AND license_fingerprint = ? LIMIT 1",
-  )
+  return env.DB.prepare(VERIFY_SQL.entitlementLookup)
     .bind(request.project, request.feature, request.license_fingerprint)
     .first<EntitlementRow>();
 }
@@ -517,9 +514,7 @@ async function lookupEntitlementDevice(env: Env, request: VerifyRequest): Promis
   if (request.request_proof === undefined) {
     return null;
   }
-  return env.DB.prepare(
-    "SELECT device_key_id, public_key_spki_der_base64, status FROM entitlement_devices WHERE project = ? AND feature = ? AND license_fingerprint = ? AND device_key_id = ? LIMIT 1",
-  )
+  return env.DB.prepare(VERIFY_SQL.entitlementDeviceLookup)
     .bind(request.project, request.feature, request.license_fingerprint, request.request_proof.device_key_id)
     .first<EntitlementDeviceRow>();
 }
@@ -617,9 +612,7 @@ async function consumeRequestProofNonce(
   // signed request-timestamp, so keep the row until the window certainly closes.
   const expiresAt = nowSeconds + skewSeconds * 2;
   try {
-    const row = await env.DB.prepare(
-      "INSERT INTO request_proof_nonces (project, feature, license_fingerprint, device_key_id, nonce, request_timestamp, consumed_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(project, feature, license_fingerprint, device_key_id, nonce) DO NOTHING RETURNING nonce",
-    )
+    const row = await env.DB.prepare(VERIFY_SQL.requestProofNonceConsume)
       .bind(
         request.project,
         request.feature,
@@ -637,7 +630,7 @@ async function consumeRequestProofNonce(
     // Opportunistic sweep (mirrors checkD1RateLimitTier). Best-effort; a sweep
     // failure must not turn a fresh nonce into a denial, so swallow it.
     try {
-      await env.DB.prepare("DELETE FROM request_proof_nonces WHERE expires_at < ?").bind(nowSeconds).run();
+      await env.DB.prepare(VERIFY_SQL.requestProofNonceCleanup).bind(nowSeconds).run();
     } catch {
       // ignore: cleanup is not load-bearing for correctness
     }

@@ -4,7 +4,7 @@
 // licensing Worker consumes (D1DatabaseLike / D1PreparedStatementLike). Backed by
 // `postgres.js` (the `postgres` npm package), a single long-lived connection pool.
 //
-// Surface the Worker actually uses (verified against src/index.ts -- nothing else exists):
+// Surface the fenced verify Worker uses (verified against src/db/verify-statements.mjs):
 //   db.prepare(sql)            -> a statement object
 //   stmt.bind(...values)       -> chainable; returns the statement
 //   stmt.first<T>()            -> Promise<T | null>     (row or null)
@@ -47,7 +47,8 @@
 //     not a runtime SQL rewriter).
 //   - A naive `?`->`$n` rewriter is unsafe: it would also rewrite `?` inside string
 //     literals. Requiring $n keeps the adapter a thin, predictable pass-through.
-// The compiled Worker (src/index.ts), however, emits D1/SQLite SQL: `?` placeholders AND a
+// The compiled Worker emits the six single-sourced D1/SQLite statements with `?`
+// placeholders, including a
 // bare self-referential ON CONFLICT counter update (`request_count = request_count + 1`).
 // To run the UNMODIFIED Worker on Postgres, pass `{ workerSql: true }` to
 // createPostgresDatabase(): the adapter translates the Worker's verify-path statements to
@@ -73,6 +74,9 @@
 
 import postgres from "postgres";
 import { translateWorkerSqlToPg } from "./sql-translate.mjs";
+import { VERIFY_SQL_STATEMENTS } from "../src/db/verify-statements.mjs";
+
+const VERIFY_SQL_ALLOWLIST = new Set(VERIFY_SQL_STATEMENTS);
 
 // PostgreSQL type OID for BIGINT / int8. Used by the type parser below so BIGINT columns
 // are returned as JS numbers (matching D1/SQLite) instead of postgres.js's default string.
@@ -170,6 +174,9 @@ class PostgresPreparedStatement {
    */
   constructor(pool, sql, rewrite = false) {
     /** @private */ this._pool = pool;
+    if (rewrite && !VERIFY_SQL_ALLOWLIST.has(sql)) {
+      throw new Error("PostgreSQL verify adapter rejected SQL outside the six-statement inventory");
+    }
     /** @private */ this._sql = rewrite ? translateWorkerSqlToPg(sql) : sql;
     /** @private */ this._params = [];
   }

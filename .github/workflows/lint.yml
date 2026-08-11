@@ -48,6 +48,7 @@ jobs:
           npm run scan:secrets
           npm run test:scan:secrets
           npm run test:clean-checkout
+          npm run test:workflow-pins
           npm run test:versions
           npm run check:versions
           npm run lint

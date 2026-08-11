@@ -8,13 +8,13 @@
 // emulate (the revocation_seq floor subquery correlated to the ON CONFLICT / UPDATE
 // target row, `... WHERE project = entitlements.project ...`) runs exactly as shipped.
 //
-// Verified 2026-06-16 on PostgreSQL 16 (Docker): 9/9.
+// This is an executable live-engine gate, not a substitute for the hermetic test suite.
 //
 // Run:
 //   1) start a Postgres and apply the schema:
 //        docker run -d --name pg -e POSTGRES_PASSWORD=smoke -e POSTGRES_DB=licensecc -p 5433:5432 postgres:16-alpine
 //        psql postgresql://postgres:smoke@localhost:5433/licensecc -f schema.pg.sql   # or pipe via docker exec
-//   2) npm install --no-save pg        # node-postgres (a smoke-only dep; the runtime adapter uses postgres.js)
+//   2) npm ci                          # installs the lock-pinned smoke and runtime clients
 //   3) DATABASE_URL=postgresql://postgres:smoke@localhost:5433/licensecc node smoke-real-pg.mjs
 //
 // Exit 0 = all assertions passed; exit 1 = a failure (or the correlated subquery did not resolve).
