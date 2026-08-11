@@ -754,10 +754,16 @@ function createCanonicalHeadTree({ root = repositoryRoot, destination }) {
 function sanitizedEnvironment(canonicalRoot, sourceDateEpoch) {
   if (!Number.isSafeInteger(sourceDateEpoch) || sourceDateEpoch < 0) throw new Error("release assembly requires a non-negative Git source timestamp");
   const home = join(canonicalRoot, ".release-tool-home");
+  const appData = join(home, "appdata", "roaming");
+  const localAppData = join(home, "appdata", "local");
+  const nugetPackages = join(home, "nuget-packages");
   const temporary = join(canonicalRoot, ".release-tool-temp");
   const cache = join(canonicalRoot, ".release-npm-cache");
   const userConfig = join(canonicalRoot, ".release-npmrc");
   mkdirSync(home, { recursive: true });
+  mkdirSync(appData, { recursive: true });
+  mkdirSync(localAppData, { recursive: true });
+  mkdirSync(nugetPackages, { recursive: true });
   mkdirSync(temporary, { recursive: true });
   mkdirSync(cache, { recursive: true });
   writeFileSync(userConfig, "audit=false\nfund=false\nupdate-notifier=false\n");
@@ -766,6 +772,10 @@ function sanitizedEnvironment(canonicalRoot, sourceDateEpoch) {
     PATH: inheritedPath,
     HOME: home,
     USERPROFILE: home,
+    APPDATA: appData,
+    LOCALAPPDATA: localAppData,
+    DOTNET_CLI_HOME: home,
+    NUGET_PACKAGES: nugetPackages,
     TMPDIR: temporary,
     TEMP: temporary,
     TMP: temporary,

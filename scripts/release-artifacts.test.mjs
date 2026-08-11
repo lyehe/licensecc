@@ -348,6 +348,10 @@ test("assembly uses a sanitized canonical install, four pinned Worker dry-runs, 
     assert.match(npmInstall.cwd, /\.canonical-head$/);
     assert.ok(npmInstall.args.includes("--include=dev"), "the canonical install retains pinned workspace build tools such as Wrangler");
     assert.ok(!Object.keys(npmInstall.env).some((key) => /(?:token|secret|password|cloudflare)/iu.test(key)));
+    assert.match(npmInstall.env.DOTNET_CLI_HOME, /\.canonical-head[\\/]\.release-tool-home$/);
+    assert.match(npmInstall.env.NUGET_PACKAGES, /\.canonical-head[\\/]\.release-tool-home[\\/]nuget-packages$/);
+    assert.match(npmInstall.env.APPDATA, /\.canonical-head[\\/]\.release-tool-home[\\/]appdata[\\/]roaming$/);
+    assert.match(npmInstall.env.LOCALAPPDATA, /\.canonical-head[\\/]\.release-tool-home[\\/]appdata[\\/]local$/);
     assert.equal(commands.filter((entry) => entry.label.includes("isolated UI build")).length, 2);
     const workerCommands = commands.filter((entry) => entry.label.includes("Worker dry-run"));
     assert.equal(workerCommands.length, 4);
