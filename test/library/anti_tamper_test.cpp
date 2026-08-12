@@ -48,8 +48,7 @@ static bool has_status_event(const LicenseInfo& info, LCC_EVENT_TYPE event_type)
 	return false;
 }
 
-static const AuditEvent* find_status_event(const LicenseInfo& info, LCC_EVENT_TYPE event_type,
-										   LCC_SEVERITY severity) {
+static const AuditEvent* find_status_event(const LicenseInfo& info, LCC_EVENT_TYPE event_type, LCC_SEVERITY severity) {
 	for (int i = 0; i < LCC_API_AUDIT_EVENT_NUM; ++i) {
 		if (info.status[i].event_type == event_type && info.status[i].severity == severity) {
 			return &info.status[i];
@@ -72,7 +71,10 @@ static string issue_license_file(const string& license_name, const string& extra
 	ss << LCC_EXE << " license issue";
 	ss << " --" PARAM_PRIMARY_KEY " " << LCC_PROJECT_PRIVATE_KEY;
 	ss << " --" PARAM_LICENSE_OUTPUT " " << file_path;
-	ss << " --" PARAM_PROJECT_FOLDER " " << LCC_TEST_LICENSES_PROJECT;
+	// v201 binds the license to the generated public-key metadata. Point the
+	// issuer at the configured project instead of a clean test-output directory;
+	// the license itself still belongs in the isolated test directory above.
+	ss << " --" PARAM_PROJECT_FOLDER " " << LCC_PROJECT_FOLDER;
 	if (!extra_args.empty()) {
 		ss << " " << extra_args;
 	}
@@ -82,9 +84,7 @@ static string issue_license_file(const string& license_name, const string& extra
 	return file_path;
 }
 
-static string issue_valid_license_file(const string& license_name) {
-	return issue_license_file(license_name, "");
-}
+static string issue_valid_license_file(const string& license_name) { return issue_license_file(license_name, ""); }
 
 static string read_binary_file(const string& file_path) {
 	ifstream input(file_path.c_str(), ios::binary);
@@ -308,9 +308,9 @@ BOOST_AUTO_TEST_CASE(v1_options_size_remains_accepted_and_ignores_online_tail) {
 
 BOOST_AUTO_TEST_CASE(v2_options_size_remains_accepted_and_ignores_custom_limit_tail) {
 	RuntimePolicyGuard guard;
-	const string license_path = issue_license_file(
-		"anti-tamper-v2-options-custom-limit",
-		"--license-version 201 --target-license-format-max 201 --custom-limit cpu-max-8");
+	const string license_path =
+		issue_license_file("anti-tamper-v2-options-custom-limit",
+						   "--license-version 201 --target-license-format-max 201 --custom-limit cpu-max-8");
 	LicenseLocation location = license_path_location(license_path);
 	CallerInformations caller = default_caller();
 
@@ -323,8 +323,7 @@ BOOST_AUTO_TEST_CASE(v2_options_size_remains_accepted_and_ignores_custom_limit_t
 	options.custom_limit_user_data = &calls;
 
 	LicenseInfo info{};
-	BOOST_CHECK_EQUAL(acquire_license_ex(&caller, &location, &info, &options),
-					  LICENSE_CUSTOM_LIMIT_EVALUATION_FAILED);
+	BOOST_CHECK_EQUAL(acquire_license_ex(&caller, &location, &info, &options), LICENSE_CUSTOM_LIMIT_EVALUATION_FAILED);
 	BOOST_CHECK_EQUAL(calls, 0);
 	BOOST_CHECK(has_status_event(info, LICENSE_CUSTOM_LIMIT_EVALUATION_FAILED));
 
@@ -375,8 +374,8 @@ BOOST_AUTO_TEST_CASE(strict_source_shadowing_flag_reports_malformed_fallback_sha
 BOOST_AUTO_TEST_CASE(strict_source_shadowing_reports_corrupted_fallback_shadowing) {
 	RuntimePolicyGuard guard;
 	const string valid_path = issue_valid_license_file("anti-tamper-corrupted-source-shadow-valid");
-	const string corrupted_path = write_license_text_file(
-		"anti-tamper-corrupted-source-shadow", with_corrupted_signature(read_binary_file(valid_path)));
+	const string corrupted_path = write_license_text_file("anti-tamper-corrupted-source-shadow",
+														  with_corrupted_signature(read_binary_file(valid_path)));
 	LicenseLocation location = license_path_location(corrupted_path + ";" + valid_path);
 	CallerInformations caller = default_caller();
 
@@ -448,8 +447,8 @@ BOOST_AUTO_TEST_CASE(strict_source_shadowing_reports_identifier_mismatch_fallbac
 BOOST_AUTO_TEST_CASE(source_shadowing_flag_can_be_disabled_for_fallback_shadowing) {
 	RuntimePolicyGuard guard;
 	const string valid_path = issue_valid_license_file("anti-tamper-source-shadow-disabled-valid");
-	const string corrupted_path = write_license_text_file(
-		"anti-tamper-source-shadow-disabled", with_corrupted_signature(read_binary_file(valid_path)));
+	const string corrupted_path = write_license_text_file("anti-tamper-source-shadow-disabled",
+														  with_corrupted_signature(read_binary_file(valid_path)));
 	LicenseLocation location = license_path_location(corrupted_path + ";" + valid_path);
 	CallerInformations caller = default_caller();
 
