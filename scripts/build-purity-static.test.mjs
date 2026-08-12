@@ -160,6 +160,18 @@ test("native Linux ARM64 CI pins the runner, compiler target, and purity preset"
   assert.match(source("CMakeLists.txt"), /LCC_EXPECT_TARGET_ARCH=arm64 but the configured compiler does not target ARM64/u);
 });
 
+test("Linux CPU inspection and v201 test issuance are clean-checkout portable", () => {
+  const cpuInfo = source("src/library/os/linux/cpu_info.cpp");
+  const x86Guard = cpuInfo.indexOf("#elif defined(__i386__) || defined(__x86_64__)");
+  const cpuidInclude = cpuInfo.indexOf("#include <cpuid.h>");
+  assert.ok(x86Guard >= 0 && cpuidInclude > x86Guard, "cpuid.h is guarded by the x86 architecture check");
+  assert.match(cpuInfo, /#else[\s\S]*get_non_x86_cpu_brand[\s\S]*#endif/u);
+
+  const antiTamper = source("test/library/anti_tamper_test.cpp");
+  assert.match(antiTamper, /PARAM_PROJECT_FOLDER\s+" "\s+<<\s+LCC_PROJECT_FOLDER/u);
+  assert.doesNotMatch(antiTamper, /PARAM_PROJECT_FOLDER\s+" "\s+<<\s+LCC_TEST_LICENSES_PROJECT/u);
+});
+
 test("device-identity presets are accepted by both PowerShell entrypoints", () => {
   const presetNames = [
     "dev-device-identity-off",
