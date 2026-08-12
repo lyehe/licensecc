@@ -28,6 +28,12 @@ DmiInfo::DmiInfo() {
 		m_sys_vendor = "";
 		LOG_DEBUG("Can not read sys_vendor %s", e.what());
 	}
+	try {
+		m_chassis_asset_tag = toupper_copy(trim_copy(get_file_contents("/sys/class/dmi/id/chassis_asset_tag", 256)));
+	} catch (const std::exception& e) {
+		m_chassis_asset_tag = "";
+		LOG_DEBUG("Can not read chassis_asset_tag %s", e.what());
+	}
 }
 
 }  // namespace os

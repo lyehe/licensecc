@@ -98,6 +98,10 @@ const char* lcc_strerror(LCC_EVENT_TYPE event_type) {
 			return "online license assertion invalid";
 		case LICENSE_ONLINE_CACHE_EXPIRED:
 			return "online license verification cache expired (reserved)";
+		case LICENSE_CUSTOM_LIMIT_DENIED:
+			return "signed custom execution limit denied this environment";
+		case LICENSE_CUSTOM_LIMIT_EVALUATION_FAILED:
+			return "signed custom execution limit could not be evaluated";
 		case LICENSE_SPECIFIED:
 			return "license location specified";
 		case LICENSE_FOUND:
@@ -509,19 +513,23 @@ static bool normalize_decision_options(const LccLicenseDecisionOptions* options,
 	if (options == nullptr) {
 		return true;
 	}
-	if (options->size != sizeof(LccLicenseDecisionOptions)) {
+	const size_t v1_size = offsetof(LccLicenseDecisionOptions, custom_limit_check);
+	const bool is_v1 = options->version == 1U && options->size == v1_size;
+	const bool is_current = options->version == LCC_LICENSE_DECISION_OPTIONS_VERSION &&
+		options->size == sizeof(LccLicenseDecisionOptions);
+	if (!is_v1 && !is_current) {
 		error = "invalid LccLicenseDecisionOptions size";
-		return false;
-	}
-	if (options->version != LCC_LICENSE_DECISION_OPTIONS_VERSION) {
-		error = "invalid LccLicenseDecisionOptions version";
 		return false;
 	}
 	if (options->reserved != 0) {
 		error = "reserved fields must be zero";
 		return false;
 	}
-	normalized = *options;
+	if (is_v1) {
+		memcpy(&normalized, options, v1_size);
+	} else {
+		normalized = *options;
+	}
 	normalized.size = sizeof(LccLicenseDecisionOptions);
 	normalized.version = LCC_LICENSE_DECISION_OPTIONS_VERSION;
 	if (normalized.online_timeout_ms == 0 || normalized.online_timeout_ms > LCC_ONLINE_MAX_TIMEOUT_MS) {
@@ -572,7 +580,11 @@ static bool normalize_config_verify_options(const LccConfigVerifyOptions* option
 	if (options == nullptr) {
 		return true;
 	}
-	if (options->size != sizeof(LccConfigVerifyOptions) || options->version != LCC_CONFIG_VERIFY_OPTIONS_VERSION) {
+	const size_t v2_size = offsetof(LccConfigVerifyOptions, custom_limit_check);
+	const bool is_v2 = options->version == 2U && options->size == v2_size;
+	const bool is_current = options->version == LCC_CONFIG_VERIFY_OPTIONS_VERSION &&
+		options->size == sizeof(LccConfigVerifyOptions);
+	if (!is_v2 && !is_current) {
 		error = "invalid LccConfigVerifyOptions size or version";
 		return false;
 	}
@@ -584,7 +596,11 @@ static bool normalize_config_verify_options(const LccConfigVerifyOptions* option
 		error = "config-seq floor load and store callbacks must both be set or both be null";
 		return false;
 	}
-	normalized = *options;
+	if (is_v2) {
+		memcpy(&normalized, options, v2_size);
+	} else {
+		normalized = *options;
+	}
 	normalized.size = sizeof(LccConfigVerifyOptions);
 	normalized.version = LCC_CONFIG_VERIFY_OPTIONS_VERSION;
 	return true;
@@ -604,6 +620,8 @@ static LicenseCheckOptions secure_decision_check_options(const LccLicenseDecisio
 	check_options.online_user_data = options.online_user_data;
 	license::mstrlcpy(check_options.online_device_hash, options.online_device_hash,
 					   sizeof(check_options.online_device_hash));
+	check_options.custom_limit_check = options.custom_limit_check;
+	check_options.custom_limit_user_data = options.custom_limit_user_data;
 	return check_options;
 }
 
@@ -733,7 +751,9 @@ static void export_license_status(license::EventRegistry& er, LicenseInfo* licen
 static LCC_EVENT_TYPE acquire_license_internal(const CallerInformations* callerInformation,
 											   const LicenseLocation* licenseLocation, LicenseInfo* license_out,
 											   bool strict_source_fatal, license::EventRegistry& er,
-											   AcquiredLicenseContext* context_out) {
+											   AcquiredLicenseContext* context_out,
+											   LCC_CUSTOM_LIMIT_CHECK custom_limit_check = nullptr,
+											   void* custom_limit_user_data = nullptr) {
 	if (license_out != nullptr) {
 		*license_out = LicenseInfo{};
 	}
@@ -783,7 +803,8 @@ static LCC_EVENT_TYPE acquire_license_internal(const CallerInformations* callerI
 				}
 				const FUNCTION_RETURN signatureValid = verifier.verify_signature(*full_lic_info_it);
 				if (signatureValid == FUNC_RET_OK) {
-					const FUNCTION_RETURN limitsValid = verifier.verify_limits(*full_lic_info_it, callerInformation);
+					const FUNCTION_RETURN limitsValid = verifier.verify_limits(
+						*full_lic_info_it, callerInformation, custom_limit_check, custom_limit_user_data);
 					LicenseInfo licInfo = verifier.toLicenseInfo(*full_lic_info_it);
 					if (limitsValid == FUNC_RET_OK) {
 						VerifiedLicenseCandidate candidate;
@@ -875,7 +896,9 @@ static LCC_EVENT_TYPE acquire_license_with_runtime_checks(const CallerInformatio
 	license::EventRegistry er;
 	AcquiredLicenseContext license_context;
 	LCC_EVENT_TYPE result =
-		acquire_license_internal(callerInformation, licenseLocation, license_out, false, er, &license_context);
+		acquire_license_internal(callerInformation, licenseLocation, license_out, false, er, &license_context,
+								 normalized_options.custom_limit_check,
+								 normalized_options.custom_limit_user_data);
 	// INVARIANT: runtime checks run ONLY after the base license returns LICENSE_OK, so an ordinary
 	// license failure (expired/mismatch/malformed) is never masked or overwritten. Tamper under ENFORCE
 	// and a failed required online check both fail closed (clear license_out, return the failure code).
@@ -1179,7 +1202,8 @@ static LCC_EVENT_TYPE lcc_release_license_impl(const CallerInformations* callerI
 	AcquiredLicenseContext license_context;
 	const LCC_EVENT_TYPE read_result =
 		acquire_license_internal(callerInformation, licenseLocation, license_out, strict_source_fatal, er,
-								 &license_context);
+								 &license_context, normalized_decision_options.custom_limit_check,
+								 normalized_decision_options.custom_limit_user_data);
 	if (read_result != LICENSE_OK) {
 		export_license_status(er, license_out);
 		return read_result;
@@ -1294,7 +1318,7 @@ static LCC_EVENT_TYPE lcc_verify_config_impl(const CallerInformations* callerInf
 	const bool strict_source_fatal = strict_source_fatal_enabled.load(std::memory_order_relaxed);
 	LCC_EVENT_TYPE result =
 		acquire_license_internal(callerInformation, licenseLocation, license_out, strict_source_fatal, er,
-								 &license_context);
+								 &license_context, normalized.custom_limit_check, normalized.custom_limit_user_data);
 	if (result != LICENSE_OK) {
 		export_license_status(er, license_out);
 		if (decision_out != nullptr) {

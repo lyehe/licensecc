@@ -56,6 +56,7 @@ static vector<license::v201::CanonicalField> v201_fields_for(const FullLicenseIn
 	add_v201_field(fields, PARAM_EXPIRY_DATE, limit_value_or_empty(licInfo, PARAM_EXPIRY_DATE));
 	add_v201_field(fields, PARAM_VERSION_FROM, limit_value_or_empty(licInfo, PARAM_VERSION_FROM));
 	add_v201_field(fields, PARAM_VERSION_TO, limit_value_or_empty(licInfo, PARAM_VERSION_TO));
+	add_v201_field(fields, PARAM_CUSTOM_LIMIT, limit_value_or_empty(licInfo, PARAM_CUSTOM_LIMIT));
 	add_v201_field(fields, PARAM_CLIENT_SIGNATURE, limit_value_or_empty(licInfo, PARAM_CLIENT_SIGNATURE));
 	add_v201_field(fields, PARAM_CLIENT_SIGNATURE_SOURCE_STRENGTH,
 				   limit_value_or_empty(licInfo, PARAM_CLIENT_SIGNATURE_SOURCE_STRENGTH));
@@ -203,9 +204,34 @@ static bool validate_extra_data_value(const string& extra_data, string& error) {
 	return true;
 }
 
+static bool validate_custom_limit_value(const string& policy, string& error) {
+	if (policy.empty()) {
+		error = "custom-limit must not be empty";
+		return false;
+	}
+	if (policy.size() > LCC_API_CUSTOM_LIMIT_SIZE) {
+		error = "custom-limit exceeds the public policy limit";
+		return false;
+	}
+	if (isspace(static_cast<unsigned char>(policy.front())) ||
+		isspace(static_cast<unsigned char>(policy.back()))) {
+		error = "custom-limit must not start or end with whitespace";
+		return false;
+	}
+	for (const unsigned char character : policy) {
+		if (character < 0x20U || character > 0x7eU) {
+			error = "custom-limit must contain printable ASCII only";
+			return false;
+		}
+	}
+	return true;
+}
+
 // TODO: split in different classes
 FUNCTION_RETURN LicenseVerifier::verify_limits(const FullLicenseInfo& lic_info,
-											   const CallerInformations* callerInformation) {
+											   const CallerInformations* callerInformation,
+											   LCC_CUSTOM_LIMIT_CHECK custom_limit_check,
+											   void* custom_limit_user_data) {
 	bool is_valid = LCC_VERIFY_MAGIC;
 	if (!is_valid) {
 		m_event_registry.addEvent(LICENSE_CORRUPTED, lic_info.source.c_str());
@@ -299,6 +325,38 @@ FUNCTION_RETURN LicenseVerifier::verify_limits(const FullLicenseInfo& lic_info,
 		if (!validate_extra_data_value(extra_data->second, error)) {
 			m_event_registry.addEvent(LICENSE_MALFORMED, lic_info.source.c_str(), error.c_str());
 			is_valid = false;
+		}
+	}
+	const auto custom_limit = lic_info.m_limits.find(PARAM_CUSTOM_LIMIT);
+	if (is_valid && custom_limit != lic_info.m_limits.end()) {
+		if (!is_v201_license(lic_info)) {
+			m_event_registry.addEvent(LICENSE_MALFORMED, lic_info.source.c_str(),
+								  "custom-limit requires license format 201");
+			is_valid = false;
+		} else if (string error; !validate_custom_limit_value(custom_limit->second, error)) {
+			m_event_registry.addEvent(LICENSE_MALFORMED, lic_info.source.c_str(), error.c_str());
+			is_valid = false;
+		} else if (custom_limit_check == nullptr) {
+			m_event_registry.addEvent(LICENSE_CUSTOM_LIMIT_EVALUATION_FAILED, lic_info.source.c_str(),
+								  "custom-limit evaluator is required");
+			is_valid = false;
+		} else {
+			LCC_CUSTOM_LIMIT_RESULT evaluation = LCC_CUSTOM_LIMIT_ERROR;
+			try {
+				evaluation = custom_limit_check(custom_limit_user_data, custom_limit->second.c_str(),
+											custom_limit->second.size());
+			} catch (...) {
+				evaluation = LCC_CUSTOM_LIMIT_ERROR;
+			}
+			if (evaluation == LCC_CUSTOM_LIMIT_DENY) {
+				m_event_registry.addEvent(LICENSE_CUSTOM_LIMIT_DENIED, lic_info.source.c_str(),
+									  "custom execution limit denied");
+				is_valid = false;
+			} else if (evaluation != LCC_CUSTOM_LIMIT_ALLOW) {
+				m_event_registry.addEvent(LICENSE_CUSTOM_LIMIT_EVALUATION_FAILED, lic_info.source.c_str(),
+									  "custom-limit evaluator failed");
+				is_valid = false;
+			}
 		}
 	}
 	return is_valid ? FUNC_RET_OK : FUNC_RET_ERROR;

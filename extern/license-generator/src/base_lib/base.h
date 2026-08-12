@@ -57,6 +57,7 @@ typedef int bool;
 #define PARAM_VERSION_FROM "start-version"
 #define PARAM_VERSION_TO "end-version"
 #define PARAM_EXTRA_DATA "extra-data"
+#define PARAM_CUSTOM_LIMIT "custom-limit"
 // license file extra entries
 #define LICENSE_SIGNATURE "sig"
 #define LICENSE_VERSION "lic_ver"
@@ -74,6 +75,9 @@ typedef int bool;
 // src/templates/licensecc_properties.h.in.
 #ifndef LCC_API_PROPRIETARY_DATA_SIZE
 #define LCC_API_PROPRIETARY_DATA_SIZE 16
+#endif
+#ifndef LCC_API_CUSTOM_LIMIT_SIZE
+#define LCC_API_CUSTOM_LIMIT_SIZE 255
 #endif
 
 typedef enum { FUNC_RET_OK, FUNC_RET_NOT_AVAIL, FUNC_RET_ERROR, FUNC_RET_BUFFER_TOO_SMALL } FUNCTION_RETURN;

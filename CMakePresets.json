@@ -104,6 +104,17 @@
       }
     },
     {
+      "name": "ci-linux-arm64",
+      "inherits": "ci-linux-debug",
+      "displayName": "CI Linux ARM64",
+      "description": "Native Linux ARM64 build with a compiler-level target assertion.",
+      "binaryDir": "${sourceDir}/build/ci-linux-arm64",
+      "cacheVariables": {
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/build/ci-linux-arm64/install",
+        "LCC_EXPECT_TARGET_ARCH": "arm64"
+      }
+    },
+    {
       "name": "ci-linux-device-identity-test",
       "inherits": "ci-linux-debug",
       "displayName": "CI Linux Device Identity Software Test",
@@ -384,6 +395,12 @@
       "targets": ["install"]
     },
     {
+      "name": "ci-linux-arm64",
+      "configurePreset": "ci-linux-arm64",
+      "configuration": "Debug",
+      "targets": ["install"]
+    },
+    {
       "name": "ci-linux-device-identity-test",
       "configurePreset": "ci-linux-device-identity-test",
       "configuration": "Debug",
@@ -542,6 +559,17 @@
     {
       "name": "ci-linux-core",
       "configurePreset": "ci-linux-core",
+      "configuration": "Debug",
+      "output": {
+        "outputOnFailure": true
+      },
+      "environment": {
+        "VIRTUAL_ENV": "VM"
+      }
+    },
+    {
+      "name": "ci-linux-arm64",
+      "configurePreset": "ci-linux-arm64",
       "configuration": "Debug",
       "output": {
         "outputOnFailure": true

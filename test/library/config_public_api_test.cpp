@@ -39,6 +39,8 @@ BOOST_AUTO_TEST_CASE(config_init_helpers_set_size_version_and_defaults) {
 	lcc_init_config_verify_options(&options);
 	BOOST_CHECK_EQUAL(options.size, sizeof(LccConfigVerifyOptions));
 	BOOST_CHECK_EQUAL(options.version, LCC_CONFIG_VERIFY_OPTIONS_VERSION);
+	BOOST_CHECK(options.custom_limit_check == nullptr);
+	BOOST_CHECK(options.custom_limit_user_data == nullptr);
 	BOOST_CHECK_EQUAL(options.reserved, 0u);
 
 	LccConfigDecision decision;

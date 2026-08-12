@@ -5,6 +5,25 @@ permissions:
    contents: read
 
 jobs:
+   build-linux-arm64:
+      runs-on: ubuntu-24.04-arm
+      steps:
+      -  uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      -  name: Assert native ARM64 runner
+         run: test "$(uname -m)" = "aarch64"
+      -  name: Install dependencies
+         run: |
+            sudo apt-get update
+            sudo apt-get install -y cmake libssl-dev zlib1g-dev \
+              libboost-dev libboost-test-dev libboost-filesystem-dev \
+              libboost-iostreams-dev libboost-program-options-dev \
+              libboost-system-dev libboost-thread-dev libboost-date-time-dev \
+              valgrind
+      -  name: Bootstrap preflight
+         run: pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/bootstrap.ps1 -CheckOnly
+      -  name: Native ARM64 build purity and tests
+         run: pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/check-build-purity.ps1 -Preset ci-linux-arm64
+
    build-linux:
       runs-on: ubuntu-latest
       strategy:

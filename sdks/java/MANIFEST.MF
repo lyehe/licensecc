@@ -1,0 +1,4 @@
+Manifest-Version: 1.0
+Implementation-Title: Licensecc Java Client
+Implementation-Version: 0.1.0-rc.1
+Automatic-Module-Name: io.licensecc.client

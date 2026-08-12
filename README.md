@@ -41,6 +41,7 @@ See [CHANGELOG.md](CHANGELOG.md) and
 - `services/cloudflare-d1-backup/`: D1 backup and restore-drill Worker.
 - `sdks/python/`: Python SDK for token verification and backend HTTP calls.
 - `sdks/dotnet/`: .NET SDK for token verification and backend HTTP calls.
+- `sdks/java/`: dependency-free Java 17 SDK for token verification and backend HTTP calls.
 
 Generated project material is written under the CMake build tree by default, not into the source checkout.
 
@@ -53,6 +54,7 @@ Generated project material is written under the CMake build tree by default, not
 - PowerShell 7 (`pwsh`) on any platform for bootstrap, build-purity checks, `scripts/dev-check.ps1`, and the root npm shortcuts (CI uses the same binary; Windows PowerShell 5.1 is not targeted).
 - Python 3.12 and uv 0.5.15. The repository-level `uv.toml` pins uv, and the
   Python SDK and PostgreSQL parity tools each use a checked-in `uv.lock`.
+- JDK 17.0.20 for the Java SDK and deterministic release artifact gate.
 - Linux: OpenSSL, Zlib where required by the OpenSSL version, and Boost development packages for the bundled generator/tests.
 - Windows: Visual Studio 2022 or another supported C++ toolchain. Boost is required for tests and for building the bundled license generator during configuration. If Boost is not in a default CMake search path, set `BOOST_ROOT` to the Boost install directory.
 
@@ -99,9 +101,10 @@ The root command surface is intentionally explicit:
 | `npm run typecheck` | Production TypeScript/JavaScript type-check coverage. |
 | `npm run check:architecture` | Dependency direction, composition roots, and repository hygiene. |
 | `npm run check:versions` | Platform/C++ version contract and release-projection consistency. |
+| `npm run test:release-operations` | Platform-tag and protected production-config contract tests. |
 | `npm run test:contracts` | Canonical route/OpenAPI contract checks. |
 | `npm run test:services` | Package, Worker, SQL, UI workflow, and schema-parity tests. |
-| `npm run test:sdks` | Python and .NET SDK tests. |
+| `npm run test:sdks` | Python, .NET, and Java SDK tests. |
 | `npm run setup:browsers` | One explicit setup command installing both retained Playwright Chromium revisions. |
 | `npm run test:e2e` | Browser and cross-service smoke tests; no install side effect. |
 | `npm run check:dry-run` | Credential-free Wrangler bundle/deploy dry-runs. |
@@ -113,6 +116,13 @@ SDK, browser, docs, dry-run, and native CMake matrix checks are dedicated
 commands rather than hidden side effects of `check:pr`. See
 [`doc/architecture/change-guide.md`](doc/architecture/change-guide.md) for
 the smallest correct change surface and exact focused checks.
+
+Canonical artifact assembly, protected package publication, and the manual
+four-Worker production rollout are documented in
+[`doc/release-artifacts.md`](doc/release-artifacts.md). Their GitHub
+environments, trusted publishers, Cloudflare resources, and credentials are
+operator-owned; source control contains the fail-closed workflow contracts,
+not those external identities or secrets.
 
 ## Manual Build
 

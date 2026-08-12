@@ -24,6 +24,11 @@ const char *vmVendors[] = {
 
 enum CONTAINER_TYPE { NONE, DOCKER, LXC };
 
+LCC_API_CLOUD_PROVIDER classify_cloud_provider(const std::string& bios_description,
+											 const std::string& bios_vendor,
+											 const std::string& sys_vendor,
+											 const std::string& chassis_asset_tag);
+
 class ExecutionEnvironment {
 private:
 	const CpuInfo m_cpu_info;

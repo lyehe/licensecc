@@ -136,6 +136,30 @@ test("CI uses purity checks and local preset installation paths", () => {
   assert.match(windows, /\.\/build\/\$\{\{ matrix\.preset \}\}\/install\/bin\/test\/lccinspector\.exe/);
 });
 
+test("native Linux ARM64 CI pins the runner, compiler target, and purity preset", () => {
+  const presets = JSON.parse(source("CMakePresets.json"));
+  const configure = presets.configurePresets.find((preset) => preset.name === "ci-linux-arm64");
+  assert.ok(configure, "ci-linux-arm64 configure preset");
+  assert.equal(configure.inherits, "ci-linux-debug");
+  assert.equal(configure.binaryDir, "${sourceDir}/build/ci-linux-arm64");
+  assert.equal(configure.cacheVariables.LCC_EXPECT_TARGET_ARCH, "arm64");
+  assert.ok(presets.buildPresets.some((preset) =>
+    preset.name === "ci-linux-arm64" && preset.configurePreset === "ci-linux-arm64"));
+  assert.ok(presets.testPresets.some((preset) =>
+    preset.name === "ci-linux-arm64" && preset.configurePreset === "ci-linux-arm64"));
+
+  const workflow = source(".github/workflows/linux.yml");
+  const commands = activeRunLines(workflow, "build-linux-arm64");
+  assert.match(workflow, /build-linux-arm64:[\s\S]*runs-on:\s*ubuntu-24\.04-arm/u);
+  assert.ok(commands.includes('test "$(uname -m)" = "aarch64"'));
+  assert.ok(commands.includes(
+    "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/check-build-purity.ps1 -Preset ci-linux-arm64"));
+  for (const script of [source("scripts/check-build-purity.ps1"), source("scripts/dev-check.ps1")]) {
+    assert.match(script, /"ci-linux-arm64"/u);
+  }
+  assert.match(source("CMakeLists.txt"), /LCC_EXPECT_TARGET_ARCH=arm64 but the configured compiler does not target ARM64/u);
+});
+
 test("device-identity presets are accepted by both PowerShell entrypoints", () => {
   const presetNames = [
     "dev-device-identity-off",

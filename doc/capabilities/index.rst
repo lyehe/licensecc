@@ -10,10 +10,11 @@ that a service is deployed or an SDK is published.
 
 :download:`Download the capability registry <registry.json>`.
 
-The platform is at **0.1.0-rc.1** (a prerelease). Remote CI and Ubuntu release evidence
-are intentionally not claimed by this registry. Deployment, Cloudflare account
-configuration, signing keys, and package publication remain operator or release
-work outside the repository.
+The platform is at **0.1.0-rc.1** (a prerelease). Repository-owned, protected
+publication and production-deployment workflows are present, but no successful
+remote run is inferred from source code. Cloudflare account configuration,
+trusted-publisher identities, protected-environment approvals, signing keys,
+and the act of publishing or deploying remain operator actions.
 
 Status vocabulary
 =================
@@ -38,8 +39,12 @@ Local C++ runtime
 * **C++ local license verification** — shipped for the Windows/Linux C++ runtime.
 * **Hardware identifier binding** — shipped, with environment-dependent suitability.
 * **Environment-aware identification** — platform-limited: containers and cloud
-  environments deliberately default to no hardware binding.
+  environments deliberately default to no hardware binding; Azure, AWS, GCP,
+  and Alibaba classification is covered without treating generic Hyper-V or
+  SeaBIOS strings as cloud proof.
 * **License version limits** and **signed configuration attestation** — shipped.
+* **Signed host-defined execution limits** — shipped for v201 licenses. The
+  runtime fails closed unless the host evaluates the signed opaque policy.
 * **Legacy ``LCC_REMOTE`` license type** — deprecated and unsupported; use the
   online callback and backend lifecycle rather than this compatibility enum.
 
@@ -57,13 +62,15 @@ Online platform
 * **Administrative control plane**, **customer self-service portal**, and **D1
   backup and restore drill** are shipped in the accepted repository.
 
-SDKs and planned work
----------------------
+SDKs and platform limits
+------------------------
 
-* The **Python SDK** and **.NET SDK** are shipped and tested from the repository.
-  Neither is published to its public package registry.
-* **ARM support**, **additional execution-limit types**, and a **Java SDK** are
-  planned. TPM provider support remains platform-limited rather than universal.
+* The **Python**, **.NET**, and dependency-free **Java 17+ SDKs** are shipped and
+  tested from the repository. None is published to its public package registry.
+* **Linux ARM64** is platform-limited and runs the native purity suite on an
+  Ubuntu 24.04 ARM64 runner. Windows ARM64, macOS, and prebuilt ARM packages are
+  not claimed.
+* TPM provider support remains platform-limited rather than universal.
 
 For exact ownership, release availability, limitations, public-document links,
 and evidence selectors, consult ``registry.json``. Historical feature prose is

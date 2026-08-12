@@ -20,6 +20,10 @@ function source(relativePath) {
   return readFileSync(resolve(repositoryRoot, relativePath), "utf8");
 }
 
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+}
+
 function yamlWithoutComment(line) {
   let quote = null;
   let output = "";
@@ -309,6 +313,7 @@ function assertExactSetupPins(job, toolchains, label) {
     ["actions/setup-python", "python-version", toolchains.python_version],
     ["astral-sh/setup-uv", "version", toolchains.uv_version],
     ["actions/setup-dotnet", "dotnet-version", toolchains.dotnet_sdk_version],
+    ["actions/setup-java", "java-version", toolchains.java_setup_version],
   ];
   for (const [action, withKey, expected] of required) {
     const matched = job.steps.filter((step) => step.properties.get("uses")?.value.startsWith(`${action}@`));
@@ -318,6 +323,9 @@ function assertExactSetupPins(job, toolchains, label) {
     const configured = matched[0].children.get("with")?.get(withKey);
     assert.ok(configured, `${label}: ${action} must configure ${withKey} in its direct with mapping`);
     assert.equal(configured.value, expected, `${label}: ${action} must configure ${withKey} from the tracked authority`);
+    if (action === "actions/setup-java") {
+      assert.equal(matched[0].children.get("with")?.get("distribution")?.value, "temurin", `${label}: setup-java must use the tracked Temurin distribution contract`);
+    }
   }
 }
 
@@ -455,6 +463,51 @@ test("release artifact evidence is an exact-once local and repository-quality ga
   );
 });
 
+test("release and deployment operation contracts are deterministic PR gates", () => {
+  const packageJson = JSON.parse(source("package.json"));
+  assert.equal(packageJson.scripts["test:release-operations"], "node --test scripts/check-release-tag.test.mjs scripts/materialize-deploy-configs.test.mjs");
+  assert.equal(packageJson.scripts["check:pr"].split(" && ").filter((command) => command === "npm run test:release-operations").length, 1);
+});
+
+test("platform tags build once and publish through protected trusted-publisher jobs", () => {
+  const workflow = source(".github/workflows/platform-release.yml");
+  const toolchains = JSON.parse(source("release-toolchains.json"));
+  const nugetJob = workflowJobLines(".github/workflows/platform-release.yml", "publish-nuget").rawLines.join("\n");
+  assert.match(workflow, /^\s*tags:\s*\n\s*- "platform-v\*"\s*$/mu);
+  assert.doesNotMatch(workflow, /^\s*workflow_dispatch:\s*$/mu);
+  assert.match(workflow, /environment: pypi/u);
+  assert.match(workflow, /environment: nuget/u);
+  assert.match(workflow, /environment: github-release/u);
+  assert.match(workflow, /id-token: write/u);
+  assert.match(workflow, /node scripts\/check-release-tag\.mjs "\$GITHUB_REF_NAME"/u);
+  assert.match(workflow, /pypa\/gh-action-pypi-publish@[0-9a-f]{40}/u);
+  assert.match(workflow, /NuGet\/login@[0-9a-f]{40}/u);
+  assert.match(
+    nugetJob,
+    new RegExp(`actions/setup-dotnet@[0-9a-f]{40}[\\s\\S]*dotnet-version: ["']?${escapeRegExp(toolchains.dotnet_sdk_version)}["']?`, "u"),
+  );
+  assert.match(workflow, /dotnet nuget push release\/dotnet\/\*\.nupkg/u);
+  assert.match(workflow, /gh release create "\$GITHUB_REF_NAME"/u);
+  assert.equal((workflow.match(/node scripts\/assemble-release-artifacts\.mjs/gmu) ?? []).length, 1);
+});
+
+test("production deployment is manual, confirmed, serialized, and uses only materialized configs", () => {
+  const workflow = source(".github/workflows/deploy-production.yml");
+  assert.match(workflow, /^\s*workflow_dispatch:\s*$/mu);
+  assert.doesNotMatch(workflow, /^\s*(?:push|pull_request|schedule):\s*$/mu);
+  assert.match(workflow, /if: inputs\.confirmation == 'deploy-production'/u);
+  assert.match(workflow, /environment: production/u);
+  assert.match(workflow, /cancel-in-progress: false/u);
+  assert.match(workflow, /node scripts\/materialize-deploy-configs\.mjs/u);
+  assert.equal((workflow.match(/wrangler deploy --dry-run --config services\//gmu) ?? []).length, 4);
+  assert.equal((workflow.match(/wrangler deploy --config services\//gmu) ?? []).length, 4);
+  assert.equal((workflow.match(/wrangler d1 migrations apply DB --remote/gmu) ?? []).length, 1);
+  assert.ok(workflow.indexOf("wrangler d1 migrations apply DB --remote") < workflow.indexOf("wrangler deploy --config services/cloudflare-licensing-backend"));
+  assert.doesNotMatch(workflow, /wrangler\.example\.(?:toml|jsonc)/u);
+  assert.match(workflow, /validate:public-verifier/u);
+  assert.match(workflow, /validate:deploy/u);
+});
+
 test("the release-candidate workflow is manual and performs only local dry-run assembly", () => {
   const workflow = source(".github/workflows/release-artifacts.yml");
   const job = workflowJobLines(".github/workflows/release-artifacts.yml", "assemble");
@@ -474,6 +527,7 @@ test("pull requests run a clean, toolchain-backed double assembly rather than on
   assert.match(jobSource, /actions\/setup-python@/u);
   assert.match(jobSource, /astral-sh\/setup-uv@/u);
   assert.match(jobSource, /actions\/setup-dotnet@/u);
+  assert.match(jobSource, /actions\/setup-java@/u);
   const toolchains = JSON.parse(source("release-toolchains.json"));
   assertExactSetupPins(job, toolchains, ".github/workflows/lint.yml:release-artifact-integration");
   const commands = executionRunCommands(job);
@@ -489,6 +543,7 @@ test("release workflows use exact toolchain pins and cannot bypass the real asse
   const jobs = [
     [".github/workflows/lint.yml", "release-artifact-integration"],
     [".github/workflows/release-artifacts.yml", "assemble"],
+    [".github/workflows/platform-release.yml", "build"],
   ];
   for (const [path, job] of jobs) {
     const parsed = workflowJobLines(path, job);

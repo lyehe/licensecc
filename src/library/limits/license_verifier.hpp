@@ -19,7 +19,9 @@ private:
 public:
 	LicenseVerifier(EventRegistry& er);
 	FUNCTION_RETURN verify_signature(const FullLicenseInfo& licInfo);
-	FUNCTION_RETURN verify_limits(const FullLicenseInfo& licInfo, const CallerInformations* callerInformation);
+	FUNCTION_RETURN verify_limits(const FullLicenseInfo& licInfo, const CallerInformations* callerInformation,
+								  LCC_CUSTOM_LIMIT_CHECK custom_limit_check = nullptr,
+								  void* custom_limit_user_data = nullptr);
 	LicenseInfo toLicenseInfo(const FullLicenseInfo& fullLicInfo) const;
 	virtual ~LicenseVerifier();
 };

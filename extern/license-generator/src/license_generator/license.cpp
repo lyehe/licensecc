@@ -42,7 +42,7 @@ static const unordered_set<string> NO_OUTPUT_PARAM = {
 
 static const unordered_set<string> LICENSE_OUTPUT_PARAM = {
 	PARAM_BEGIN_DATE,	   PARAM_CLIENT_SIGNATURE, PARAM_EXPIRY_DATE,
-	PARAM_VERSION_FROM, PARAM_VERSION_TO,		PARAM_EXTRA_DATA,
+	PARAM_VERSION_FROM, PARAM_VERSION_TO,		PARAM_CUSTOM_LIMIT, PARAM_EXTRA_DATA,
 };
 
 struct ProjectPublicMetadata {
@@ -300,6 +300,24 @@ static void validate_extra_data(const string &extra_data) {
 	}
 }
 
+static void validate_custom_limit(const string &policy) {
+	if (policy.empty()) {
+		throw invalid_argument("custom-limit must not be empty");
+	}
+	if (policy.size() > LCC_API_CUSTOM_LIMIT_SIZE) {
+		throw invalid_argument("custom-limit exceeds the public policy limit");
+	}
+	if (isspace(static_cast<unsigned char>(policy.front())) ||
+		isspace(static_cast<unsigned char>(policy.back()))) {
+		throw invalid_argument("custom-limit must not start or end with whitespace");
+	}
+	for (const unsigned char ch : policy) {
+		if (ch < 0x20 || ch > 0x7e) {
+			throw invalid_argument("custom-limit must contain printable ASCII only");
+		}
+	}
+}
+
 static bool parse_version_limit(const string &version, vector<unsigned int> &out) {
 	if (version.empty() || version.front() == '.' || version.back() == '.') {
 		return false;
@@ -349,6 +367,10 @@ static map<string, string> normalized_output_parameters(const map<string, string
 	if (expiry != values.end()) {
 		expiry->second = v201 ? normalize_date(expiry->second) : normalize_legacy_date(expiry->second);
 	}
+	const auto custom_limit = values.find(PARAM_CUSTOM_LIMIT);
+	if (!v201 && custom_limit != values.end()) {
+		throw invalid_argument("custom-limit requires license-version 201");
+	}
 	if (!v201) {
 		return values;
 	}
@@ -363,6 +385,9 @@ static map<string, string> normalized_output_parameters(const map<string, string
 	const auto extra_data = values.find(PARAM_EXTRA_DATA);
 	if (extra_data != values.end()) {
 		validate_extra_data(extra_data->second);
+	}
+	if (custom_limit != values.end()) {
+		validate_custom_limit(custom_limit->second);
 	}
 	vector<unsigned int> begin_version;
 	vector<unsigned int> end_version;
@@ -785,7 +810,7 @@ static const unordered_set<string> &existing_license_param_v201() {
 		LICENSE_SIGNATURE_ALGORITHM, LICENSE_KEY_ID,			 LICENSE_SIGNATURE,
 		PARAM_BEGIN_DATE,	  PARAM_CLIENT_SIGNATURE,		 PARAM_CLIENT_SIGNATURE_SOURCE_STRENGTH,
 		PARAM_EXPIRY_DATE,	  PARAM_VERSION_FROM,			 PARAM_VERSION_TO,
-		PARAM_EXTRA_DATA,
+		PARAM_CUSTOM_LIMIT, PARAM_EXTRA_DATA,
 	};
 	return params;
 }
@@ -865,6 +890,7 @@ static vector<v201::CanonicalField> v201_fields_for_section(const string &projec
 	add_v201_field(fields, PARAM_EXPIRY_DATE, ini.GetValue(section_name, PARAM_EXPIRY_DATE, nullptr));
 	add_v201_field(fields, PARAM_VERSION_FROM, ini.GetValue(section_name, PARAM_VERSION_FROM, nullptr));
 	add_v201_field(fields, PARAM_VERSION_TO, ini.GetValue(section_name, PARAM_VERSION_TO, nullptr));
+	add_v201_field(fields, PARAM_CUSTOM_LIMIT, ini.GetValue(section_name, PARAM_CUSTOM_LIMIT, nullptr));
 	add_v201_field(fields, PARAM_CLIENT_SIGNATURE, ini.GetValue(section_name, PARAM_CLIENT_SIGNATURE, nullptr));
 	add_v201_field(fields, PARAM_CLIENT_SIGNATURE_SOURCE_STRENGTH,
 				   ini.GetValue(section_name, PARAM_CLIENT_SIGNATURE_SOURCE_STRENGTH, nullptr));

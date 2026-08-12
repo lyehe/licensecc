@@ -51,6 +51,11 @@ void lcc_init_license_info(LicenseInfo* licenseInfo);
  * shadowing is enabled, and online verification is disabled unless the host
  * supplies online_check. When online_check is set, online verification is
  * required and must return a fresh signed assertion.
+ *
+ * A v201 license may also contain a signed host-defined `custom-limit`
+ * policy. Such a license fails closed unless `custom_limit_check` evaluates
+ * the policy and returns ::LCC_CUSTOM_LIMIT_ALLOW. The policy string is
+ * opaque to Licensecc so the host owns its schema and deterministic evidence.
  */
 void lcc_init_license_check_options(LicenseCheckOptions* options);
 /**
@@ -65,6 +70,8 @@ void lcc_init_revocation_floor_record(LccRevocationFloorRecord* record);
  * enforcement and strict source shadowing are always enabled, online
  * verification is required, and persisted revocation-floor load/store
  * callbacks are required.
+ * Signed custom-limit policies use the same fail-closed evaluator contract as
+ * ::acquire_license_ex and are forwarded through `custom_limit_check`.
  */
 void lcc_init_license_decision_options(LccLicenseDecisionOptions* options);
 /**
@@ -278,6 +285,9 @@ LCC_EVENT_TYPE lcc_release_license(const CallerInformations* callerInformation,
  * clock -- the signature/binding/window checks alone do not stop that. Production
  * hosts should prefer ::lcc_verify_config_decision, which REQUIRES a persisted
  * floor, exactly as ::lcc_acquire_license_decision requires the revocation floor.
+ * If the bound v201 license contains a signed custom-limit policy, configure
+ * `custom_limit_check`; absence, denial, or evaluator failure denies the
+ * combined license/config decision.
  */
 LCC_EVENT_TYPE lcc_verify_config(const CallerInformations* callerInformation,
 								 const LicenseLocation* licenseLocation, LicenseInfo* license_out,

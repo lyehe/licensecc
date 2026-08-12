@@ -105,7 +105,7 @@ implicit architecture:
 
 | Owned hotspot | Lines |
 | --- | ---: |
-| `src/library/licensecc.cpp` | 1,462 |
+| `src/library/licensecc.cpp` | 1,486 |
 | `services/cloudflare-license-admin/src/worker/openapi/components.ts` | 1,308 |
 | `services/cloudflare-licensing-backend/src/fulfillment/order_ingest.mjs` | 1,159 |
 | `services/cloudflare-licensing-backend/src/routes/verify.ts` | 983 |

@@ -257,25 +257,35 @@
     },
     {
       "id": "arm-support",
-      "title": "ARM support",
-      "status": "planned",
+      "title": "Linux ARM64 runtime support",
+      "status": "platform_limited",
       "owner": "C++ ABI and core maintainer",
-      "surfaces": ["C++ runtime"],
-      "availability": {"release": "Not scheduled", "platforms": ["Not available"], "limitations": ["No accepted implementation or automated platform evidence exists."]},
+      "surfaces": ["Linux ARM64 C++ runtime"],
+      "availability": {"release": "C++ 2.1.0 lineage; platform 0.1.0-rc.1", "platforms": ["Ubuntu 24.04 ARM64"], "limitations": ["The native ARM64 runtime is source-built and CI-tested on Linux. Windows ARM64, macOS, and published prebuilt ARM binaries are not claimed."]},
       "replaces": [],
       "public_docs": ["doc/capabilities/index.rst"],
-      "evidence": [{"kind": "plan", "surface": "C++ runtime", "path": "doc/capabilities/index.rst", "selector": "ARM support", "assertion": "The capability is recorded as planned, not shipped."}]
+      "evidence": [
+        {"kind": "implementation", "surface": "Linux ARM64 C++ runtime", "path": "CMakeLists.txt", "selector": "set(LCC_EXPECT_TARGET_ARCH \"\" CACHE STRING", "assertion": "CMake fails when an ARM64-only preset is configured by a non-ARM64 compiler."},
+        {"kind": "automated_test", "surface": "Linux ARM64 C++ runtime", "path": "scripts/build-purity-static.test.mjs", "selector": "test(\"native Linux ARM64 CI pins the runner, compiler target, and purity preset\"", "assertion": "The static CI contract binds the ARM runner, target assertion, and purity command."},
+        {"kind": "platform", "surface": "Linux ARM64 C++ runtime", "path": ".github/workflows/linux.yml", "selector": "   build-linux-arm64:\n", "assertion": "The Linux workflow runs the complete purity build and CTest suite on GitHub's native Ubuntu 24.04 ARM64 runner."},
+        {"kind": "limitation", "surface": "Linux ARM64 C++ runtime", "path": "doc/capabilities/index.rst", "selector": "  Ubuntu 24.04 ARM64 runner. Windows ARM64, macOS, and prebuilt ARM packages are", "assertion": "The public capability index limits the claim to source-built Linux ARM64 evidence."}
+      ]
     },
     {
       "id": "custom-execution-limits",
-      "title": "Additional execution-limit types",
-      "status": "planned",
+      "title": "Signed host-defined execution limits",
+      "status": "shipped",
       "owner": "C++ ABI and core maintainer",
-      "surfaces": ["C++ runtime"],
-      "availability": {"release": "Not scheduled", "platforms": ["Not available"], "limitations": ["CPU-size and similar additional limit types are not implemented."]},
+      "surfaces": ["C++ custom-limit callback", "license generator CLI"],
+      "availability": {"release": "C++ 2.1.0 lineage; platform 0.1.0-rc.1", "platforms": ["Windows", "Linux"], "limitations": ["The signed v201 custom-limit value is an opaque printable policy. The host owns its schema and deterministic evaluator; absence, denial, or evaluator failure fails closed. Legacy v200 licenses cannot carry it."]},
       "replaces": [],
       "public_docs": ["doc/capabilities/index.rst", "doc/analysis/features.rst"],
-      "evidence": [{"kind": "plan", "surface": "C++ runtime", "path": "doc/capabilities/index.rst", "selector": "additional execution-limit types", "assertion": "The capability is recorded as planned, not shipped."}]
+      "evidence": [
+        {"kind": "implementation", "surface": "C++ custom-limit callback", "path": "include/licensecc/datatypes.h", "selector": "typedef LCC_CUSTOM_LIMIT_RESULT (*LCC_CUSTOM_LIMIT_CHECK)(void* user_data, const char* policy,", "assertion": "The versioned public options expose a host evaluator for a signed custom-limit policy."},
+        {"kind": "automated_test", "surface": "C++ custom-limit callback", "path": "test/functional/standard-license_test.cpp", "selector": "BOOST_AUTO_TEST_CASE(generated_v201_custom_limit_is_signed_and_requires_a_host_evaluator)", "assertion": "The functional suite proves signature binding plus allow, deny, missing-evaluator, and tamper behavior."},
+        {"kind": "implementation", "surface": "license generator CLI", "path": "extern/license-generator/src/license_generator/command_line-parser.cpp", "selector": "\t\t(PARAM_CUSTOM_LIMIT, po::value<string>(),", "assertion": "The repository-owned generator exposes the v201 custom-limit issuance option."},
+        {"kind": "automated_test", "surface": "license generator CLI", "path": "extern/license-generator/test/license_test.cpp", "selector": "BOOST_AUTO_TEST_CASE(validate_custom_limit_parameter)", "assertion": "Generator tests reject v200, empty, oversized, whitespace, and control-character policies."}
+      ]
     },
     {
       "id": "tpm-request-proof-provider",
@@ -299,14 +309,19 @@
     },
     {
       "id": "java-sdk",
-      "title": "Java SDK",
-      "status": "planned",
+      "title": "Java SDK token verification and HTTP client",
+      "status": "shipped",
       "owner": "SDK maintainer",
-      "surfaces": ["Java"],
-      "availability": {"release": "Not scheduled", "platforms": ["Not available"], "limitations": ["No Java SDK source or automated tests are in the accepted repository."]},
+      "surfaces": ["Java token verifier", "Java HTTP client"],
+      "availability": {"release": "Platform 0.1.0-rc.1", "platforms": ["Java 17+"], "limitations": ["The dependency-free JAR is repository-built and included in deterministic release staging but is not published to Maven Central; it does not provide C++ binary enforcement."]},
       "replaces": [],
-      "public_docs": ["doc/capabilities/index.rst"],
-      "evidence": [{"kind": "plan", "surface": "Java", "path": "doc/capabilities/index.rst", "selector": "Java SDK", "assertion": "The capability is recorded as planned, not shipped."}]
+      "public_docs": ["doc/capabilities/index.rst", "sdks/java/README.md"],
+      "evidence": [
+        {"kind": "implementation", "surface": "Java token verifier", "path": "sdks/java/src/main/java/io/licensecc/client/OnlineAssertion.java", "selector": "public final class OnlineAssertion {", "assertion": "The Java SDK implements strict signed online-assertion verification and shares the same token primitives with config attestation."},
+        {"kind": "automated_test", "surface": "Java token verifier", "path": "sdks/java/src/test/java/io/licensecc/client/SdkTest.java", "selector": "    private static void onlineGolden(Path root) throws IOException {", "assertion": "Java golden-vector, cache, retired-key, tamper, and strict parsing behavior is automated."},
+        {"kind": "implementation", "surface": "Java HTTP client", "path": "sdks/java/src/main/java/io/licensecc/client/LicensingBackendClient.java", "selector": "public final class LicensingBackendClient {", "assertion": "The dependency-free Java SDK implements the backend HTTP contract."},
+        {"kind": "automated_test", "surface": "Java HTTP client", "path": "sdks/java/src/test/java/io/licensecc/client/SdkTest.java", "selector": "    private static void httpContract() throws Exception {", "assertion": "A local HTTP server pins retry, no-retry metering, bearer, route, and response parsing behavior."}
+      ]
     }
   ]
 }

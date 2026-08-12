@@ -58,6 +58,12 @@ static const AuditEvent* find_status_event(const LicenseInfo& info, LCC_EVENT_TY
 	return nullptr;
 }
 
+static LCC_CUSTOM_LIMIT_RESULT counting_custom_limit_callback(void* user_data, const char*, size_t) {
+	int* calls = static_cast<int*>(user_data);
+	++(*calls);
+	return LCC_CUSTOM_LIMIT_ALLOW;
+}
+
 static string issue_license_file(const string& license_name, const string& extra_args) {
 	std::filesystem::create_directories(LCC_LICENSES_BASE);
 	const string file_path = string(LCC_LICENSES_BASE) + "/" + license_name + ".lic";
@@ -298,6 +304,31 @@ BOOST_AUTO_TEST_CASE(v1_options_size_remains_accepted_and_ignores_online_tail) {
 	BOOST_CHECK(!has_status_event(info, LICENSE_ONLINE_REQUIRED));
 
 	std::remove(valid_path.c_str());
+}
+
+BOOST_AUTO_TEST_CASE(v2_options_size_remains_accepted_and_ignores_custom_limit_tail) {
+	RuntimePolicyGuard guard;
+	const string license_path = issue_license_file(
+		"anti-tamper-v2-options-custom-limit",
+		"--license-version 201 --target-license-format-max 201 --custom-limit cpu-max-8");
+	LicenseLocation location = license_path_location(license_path);
+	CallerInformations caller = default_caller();
+
+	LicenseCheckOptions options;
+	lcc_init_license_check_options(&options);
+	options.size = static_cast<uint32_t>(offsetof(LicenseCheckOptions, custom_limit_check));
+	options.version = 2;
+	int calls = 0;
+	options.custom_limit_check = counting_custom_limit_callback;
+	options.custom_limit_user_data = &calls;
+
+	LicenseInfo info{};
+	BOOST_CHECK_EQUAL(acquire_license_ex(&caller, &location, &info, &options),
+					  LICENSE_CUSTOM_LIMIT_EVALUATION_FAILED);
+	BOOST_CHECK_EQUAL(calls, 0);
+	BOOST_CHECK(has_status_event(info, LICENSE_CUSTOM_LIMIT_EVALUATION_FAILED));
+
+	std::remove(license_path.c_str());
 }
 
 BOOST_AUTO_TEST_CASE(invalid_license_result_is_not_masked_by_tamper_callback) {
