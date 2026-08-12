@@ -108,6 +108,7 @@ BOOST_AUTO_TEST_CASE(generator_v201_full_payload_matches_runtime_order) {
 	fields.push_back({"client-signature-source-strength", "strong-disk-serial-or-uuid"});
 	fields.push_back({"client-signature", "AEBC-Q0RF-Rkc="});
 	fields.push_back({"end-version", "1.10"});
+	fields.push_back({"custom-limit", "cpu<=8"});
 	fields.push_back({"start-version", "1.2"});
 	fields.push_back({"valid-to", "2050-12-31"});
 	fields.push_back({"valid-from", "2020-01-01"});
@@ -120,7 +121,8 @@ BOOST_AUTO_TEST_CASE(generator_v201_full_payload_matches_runtime_order) {
 	BOOST_CHECK_LT(payload.find("valid-from"), payload.find("valid-to"));
 	BOOST_CHECK_LT(payload.find("valid-to"), payload.find("start-version"));
 	BOOST_CHECK_LT(payload.find("start-version"), payload.find("end-version"));
-	BOOST_CHECK_LT(payload.find("end-version"), payload.find("client-signature"));
+	BOOST_CHECK_LT(payload.find("end-version"), payload.find("custom-limit"));
+	BOOST_CHECK_LT(payload.find("custom-limit"), payload.find("client-signature"));
 	BOOST_CHECK_LT(payload.find("client-signature"), payload.find("client-signature-source-strength"));
 	BOOST_CHECK_LT(payload.find("client-signature-source-strength"), payload.find("extra-data"));
 }

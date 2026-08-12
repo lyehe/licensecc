@@ -87,6 +87,21 @@ static string different_source_strength(const string& source_strength) {
 	return source_strength == "strong-ethernet-mac" ? "strong-disk-serial-or-uuid" : "strong-ethernet-mac";
 }
 
+struct CustomLimitContext {
+	string expected_policy;
+	LCC_CUSTOM_LIMIT_RESULT result;
+	size_t calls;
+};
+
+static LCC_CUSTOM_LIMIT_RESULT custom_limit_callback(void* user_data, const char* policy, size_t policy_size) {
+	CustomLimitContext* context = static_cast<CustomLimitContext*>(user_data);
+	++context->calls;
+	if (string(policy, policy_size) != context->expected_policy) {
+		return LCC_CUSTOM_LIMIT_ERROR;
+	}
+	return context->result;
+}
+
 /**
  * Test a generic license with no expiry neither client id. The license is read from file
  */
@@ -149,6 +164,31 @@ BOOST_AUTO_TEST_CASE(generated_v201_license_verifies) {
 	const LCC_EVENT_TYPE result = acquire_license(nullptr, &location, &license);
 	BOOST_CHECK_EQUAL(result, LICENSE_OK);
 	BOOST_CHECK_EQUAL(license.license_version, LCC_LICENSE_FORMAT_VERSION_V201);
+}
+
+BOOST_AUTO_TEST_CASE(generated_v201_custom_limit_is_signed_and_requires_a_host_evaluator) {
+	const vector<string> extraArgs = {"--license-version", "201", "--target-license-format-max", "201",
+								  "--custom-limit", "cpu-max-8_memory-mib-max-4096"};
+	const string licLocation = generate_license("generated_custom_limit_v201", extraArgs);
+	LicenseLocation location = {LICENSE_PATH};
+	BOOST_REQUIRE(lcc_set_license_path(&location, licLocation.c_str()));
+	LicenseInfo license{};
+	BOOST_CHECK_EQUAL(acquire_license(nullptr, &location, &license), LICENSE_CUSTOM_LIMIT_EVALUATION_FAILED);
+
+	LicenseCheckOptions options{};
+	lcc_init_license_check_options(&options);
+	CustomLimitContext context{"cpu-max-8_memory-mib-max-4096", LCC_CUSTOM_LIMIT_ALLOW, 0};
+	options.custom_limit_check = custom_limit_callback;
+	options.custom_limit_user_data = &context;
+	BOOST_CHECK_EQUAL(acquire_license_ex(nullptr, &location, &license, &options), LICENSE_OK);
+	BOOST_CHECK_EQUAL(context.calls, 1U);
+
+	context.result = LCC_CUSTOM_LIMIT_DENY;
+	BOOST_CHECK_EQUAL(acquire_license_ex(nullptr, &location, &license, &options), LICENSE_CUSTOM_LIMIT_DENIED);
+	const string generated = get_file_contents(licLocation.c_str(), 65536);
+	const string tampered = replace_once(generated, "custom-limit = cpu-max-8_memory-mib-max-4096",
+									 "custom-limit = cpu-max-9_memory-mib-max-4096");
+	BOOST_CHECK_EQUAL(acquire_plain_with_version(tampered, "1", license), LICENSE_CORRUPTED);
 }
 
 BOOST_AUTO_TEST_CASE(generated_full_v201_license_verifies_and_signed_optional_fields_are_bound) {

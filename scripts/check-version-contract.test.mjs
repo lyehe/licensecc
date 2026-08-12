@@ -40,7 +40,7 @@ function alignedFiles() {
   }, null, 2)}\n`;
   return {
     "version.json": `${JSON.stringify({ schema_version: 1, platform_version: platformVersion }, null, 2)}\n`,
-    "release-toolchains.json": `${JSON.stringify({ schema_version: 1, python_version: "3.12.8", uv_version: "0.5.15", dotnet_sdk_version: "8.0.423" }, null, 2)}\n`,
+    "release-toolchains.json": `${JSON.stringify({ schema_version: 1, python_version: "3.12.8", uv_version: "0.5.15", dotnet_sdk_version: "8.0.423", java_version: "17.0.20", java_setup_version: "17.0.20+8" }, null, 2)}\n`,
     "global.json": `${JSON.stringify({ sdk: { version: "8.0.423", rollForward: "disable", allowPrerelease: false } }, null, 2)}\n`,
     ...manifests,
     "package-lock.json": `${JSON.stringify({ name: "licensecc", version: platformVersion, lockfileVersion: 3, packages }, null, 2)}\n`,
@@ -56,6 +56,9 @@ function alignedFiles() {
     "sdks/python/src/licensecc/http_client.py": `user_agent: str = "licensecc-python-sdk/${pythonVersion}",\n`,
     "sdks/dotnet/src/Licensecc.Client/Licensecc.Client.csproj": `<Project><PropertyGroup><Version>${platformVersion}</Version></PropertyGroup></Project>\n`,
     "sdks/dotnet/README.md": `  src/Licensecc.Client/            # the library (PackageId Licensecc.Client, ${platformVersion})\n`,
+    "sdks/java/MANIFEST.MF": `Manifest-Version: 1.0\nImplementation-Version: ${platformVersion}\n`,
+    "sdks/java/src/main/java/io/licensecc/client/LicensingBackendClient.java": `public final class LicensingBackendClient {\n  public static final String VERSION = "${platformVersion}";\n}\n`,
+    "sdks/java/README.md": `The repository builds licensecc-client-${platformVersion}.jar.\n`,
     "README.md": `**Versioning:** The C++ library carries version (\`2.1.0\` in CMake); the platform packages are \`${platformVersion}\`.\n`,
     "CHANGELOG.md": `- **C++ library** (\`CMakeLists.txt\`): \`2.1.0\` — lineage.\n- **Platform packages** (release set): \`${platformVersion}\` (Python \`${pythonVersion}\`).\n`,
     "doc/capabilities/index.rst": `The platform is at **${platformVersion}** (a prerelease).\n`,
@@ -111,9 +114,9 @@ test("exports the strict release authority reader used by artifact assembly", ()
       versions: { platformVersion, pythonVersion, cppVersion: "2.1.0" },
       errors: [],
     });
-    assert.deepEqual(releaseToolchainSchema, { schemaVersion: 1, fields: ["dotnet_sdk_version", "python_version", "schema_version", "uv_version"] });
+    assert.deepEqual(releaseToolchainSchema, { schemaVersion: 1, fields: ["dotnet_sdk_version", "java_setup_version", "java_version", "python_version", "schema_version", "uv_version"] });
     assert.deepEqual(readReleaseToolchainAuthorities({ root: sample.root }), {
-      toolchains: { pythonVersion: "3.12.8", uvVersion: "0.5.15", dotnetSdkVersion: "8.0.423" },
+      toolchains: { pythonVersion: "3.12.8", uvVersion: "0.5.15", dotnetSdkVersion: "8.0.423", javaVersion: "17.0.20", javaSetupVersion: "17.0.20+8" },
       errors: [],
     });
   } finally {
@@ -123,7 +126,9 @@ test("exports the strict release authority reader used by artifact assembly", ()
 
 test("rejects missing, floating, or inconsistent release toolchain authorities", () => {
   const cases = [
-    ["missing uv exact version", (files) => { files["release-toolchains.json"] = `${JSON.stringify({ schema_version: 1, python_version: "3.12", uv_version: "0.5.15", dotnet_sdk_version: "8.0.423" })}\n`; }, "release-toolchains.json"],
+    ["missing uv exact version", (files) => { files["release-toolchains.json"] = `${JSON.stringify({ schema_version: 1, python_version: "3.12", uv_version: "0.5.15", dotnet_sdk_version: "8.0.423", java_version: "17.0.20", java_setup_version: "17.0.20+8" })}\n`; }, "release-toolchains.json"],
+    ["floating Java version", (files) => { files["release-toolchains.json"] = `${JSON.stringify({ schema_version: 1, python_version: "3.12.8", uv_version: "0.5.15", dotnet_sdk_version: "8.0.423", java_version: "17", java_setup_version: "17.0.20+8" })}\n`; }, "release-toolchains.json"],
+    ["Java setup build mismatch", (files) => { files["release-toolchains.json"] = `${JSON.stringify({ schema_version: 1, python_version: "3.12.8", uv_version: "0.5.15", dotnet_sdk_version: "8.0.423", java_version: "17.0.20", java_setup_version: "17.0.19+7" })}\n`; }, "release-toolchains.json"],
     ["global SDK mismatch", (files) => { files["global.json"] = `${JSON.stringify({ sdk: { version: "8.0.424", rollForward: "disable", allowPrerelease: false } })}\n`; }, "global.json"],
     ["floating SDK roll forward", (files) => { files["global.json"] = `${JSON.stringify({ sdk: { version: "8.0.423", rollForward: "latestFeature", allowPrerelease: false } })}\n`; }, "global.json"],
   ];
@@ -148,6 +153,9 @@ const driftCases = [
   ["Python User-Agent", "sdks/python/src/licensecc/http_client.py"],
   [".NET metadata", "sdks/dotnet/src/Licensecc.Client/Licensecc.Client.csproj"],
   [".NET README", "sdks/dotnet/README.md"],
+  ["Java manifest", "sdks/java/MANIFEST.MF"],
+  ["Java runtime", "sdks/java/src/main/java/io/licensecc/client/LicensingBackendClient.java"],
+  ["Java README", "sdks/java/README.md"],
   ["root README", "README.md"],
   ["root changelog", "CHANGELOG.md"],
 ];

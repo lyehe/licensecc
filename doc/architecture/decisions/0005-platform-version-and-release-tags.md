@@ -8,7 +8,7 @@
 
 The repository has two release streams. The C++ library continues the upstream
 2.x lineage, while the Cloudflare services, shared Node packages, OpenAPI
-documents, and Python and .NET SDKs form one platform contract. Before this
+documents, and Python, .NET, and Java SDKs form one platform contract. Before this
 decision, platform version strings were repeated without an executable source
 of truth. The reachable bare `v1.0.0` tag belongs to inherited upstream history
 and is not an identifier for the current platform.
@@ -35,8 +35,10 @@ and all tracked release projections:
    their reviewed canonical contract snapshots;
 3. Python project metadata, uv lock entry, runtime `__version__`, and default
    HTTP User-Agent;
-4. .NET package metadata and its SDK README; and
-5. the root and maintained public version documentation plus every platform
+4. .NET package metadata and its SDK README;
+5. the Java artifact manifest, SDK documentation, and release-toolchain
+   projection; and
+6. the root and maintained public version documentation plus every platform
    release projection in the capability registry.
 
 The repository-quality workflow runs both the checker tests and the real
@@ -85,4 +87,12 @@ public ABI and CMake `SameMajorVersion` package contract.
   maintained as a separate decision.
 * Preparing a release requires one contract change plus reviewed projections;
   it does not authorize publishing, deployment, or a change to the other
-  release stream.
+release stream.
+
+The repository-owned `Publish platform release` workflow is the only supported
+automation for a platform tag. It assembles and byte-compares the canonical
+payload once, publishes Python and NuGet packages through protected GitHub
+environments and OIDC trusted publishers, and creates the GitHub release only
+after both registries accept the artifacts. Configuring those protected
+environments and trusted-publisher identities is an operator action outside the
+source tree; adding the workflow does not claim that a release has occurred.

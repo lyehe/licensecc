@@ -446,6 +446,25 @@ BOOST_AUTO_TEST_CASE(validate_extra_data_parameter) {
 	}
 }
 
+BOOST_AUTO_TEST_CASE(validate_custom_limit_parameter) {
+	License valid(nullptr, MyGlobalFixture::project_path.string());
+	request_v201(valid);
+	BOOST_CHECK_NO_THROW(valid.add_parameter(PARAM_CUSTOM_LIMIT, "cpu-max-8_memory-mib-max-4096"));
+
+	License legacy(nullptr, MyGlobalFixture::project_path.string());
+	legacy.add_parameter(PARAM_CUSTOM_LIMIT, "cpu-max-8");
+	BOOST_CHECK_THROW(legacy.write_license(), invalid_argument);
+
+	const vector<string> invalid_values = {"", " leading", "trailing ", "line\nbreak", "tab\tvalue",
+									   string(LCC_API_CUSTOM_LIMIT_SIZE + 1, 'x')};
+	for (const string &value : invalid_values) {
+		License license(nullptr, MyGlobalFixture::project_path.string());
+		request_v201(license);
+		license.add_parameter(PARAM_CUSTOM_LIMIT, value);
+		BOOST_CHECK_THROW(license.write_license(), invalid_argument);
+	}
+}
+
 BOOST_AUTO_TEST_CASE(validate_version_limit_parameters) {
 	const vector<string> invalid_versions = {"", "1..2", "1.2.3.4", "12345", "1.abc", ".1", "1."};
 	for (const string &version : invalid_versions) {

@@ -6,6 +6,8 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <algorithm>
+#include <cctype>
 #include <unordered_map>
 #include <array>
 #include <licensecc/datatypes.h>
@@ -82,15 +84,27 @@ bool ExecutionEnvironment::is_cloud() const {
 	return prov != ON_PREMISE && prov != PROV_UNKNOWN;
 }
 
-// TODO test and azure
-LCC_API_CLOUD_PROVIDER ExecutionEnvironment::cloud_provider() const {
+static string upper_ascii(string value) {
+	transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
+		return static_cast<char>(toupper(ch));
+	});
+	return value;
+}
+
+LCC_API_CLOUD_PROVIDER classify_cloud_provider(const string& raw_bios_description, const string& raw_bios_vendor,
+											 const string& raw_sys_vendor, const string& raw_chassis_asset_tag) {
 	LCC_API_CLOUD_PROVIDER result = PROV_UNKNOWN;
-	const string bios_description = m_dmi_info.bios_description();
-	const string bios_vendor = m_dmi_info.bios_vendor();
-	const string sys_vendor = m_dmi_info.sys_vendor();
-	if (bios_description.size() > 0 || bios_vendor.size() > 0 || sys_vendor.size() > 0) {
-		if (bios_vendor.find("SEABIOS") != string::npos || bios_description.find("ALIBABA") != string::npos ||
-			sys_vendor.find("ALIBABA") != string::npos) {
+	const string bios_description = upper_ascii(raw_bios_description);
+	const string bios_vendor = upper_ascii(raw_bios_vendor);
+	const string sys_vendor = upper_ascii(raw_sys_vendor);
+	const string chassis_asset_tag = upper_ascii(raw_chassis_asset_tag);
+	if (!bios_description.empty() || !bios_vendor.empty() || !sys_vendor.empty() || !chassis_asset_tag.empty()) {
+		// Azure and Azure Stack currently expose this well-known SMBIOS chassis asset tag. Do not classify a
+		// generic Microsoft/Hyper-V guest as Azure: the same system-vendor strings are common on-premises.
+		if (chassis_asset_tag == "7783-7084-3265-9085-8269-3286-77") {
+			result = AZURE_CLOUD;
+		} else if (bios_description.find("ALIBABA") != string::npos || sys_vendor.find("ALIBABA") != string::npos ||
+				   sys_vendor.find("ALIBABA CLOUD") != string::npos) {
 			result = ALI_CLOUD;
 		} else if (sys_vendor.find("GOOGLE") != string::npos ||
 				   bios_description.find("GOOGLECOMPUTEENGINE") != string::npos) {
@@ -104,6 +118,11 @@ LCC_API_CLOUD_PROVIDER ExecutionEnvironment::cloud_provider() const {
 		}
 	}
 	return result;
+}
+
+LCC_API_CLOUD_PROVIDER ExecutionEnvironment::cloud_provider() const {
+	return classify_cloud_provider(m_dmi_info.bios_description(), m_dmi_info.bios_vendor(), m_dmi_info.sys_vendor(),
+								   m_dmi_info.chassis_asset_tag());
 }
 }  // namespace os
 }  // namespace license

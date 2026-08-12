@@ -31,7 +31,7 @@ const openApiSnapshotPaths = {
   "test/contracts/admin.json": ["openApiDocument", "info", "version"],
   "test/contracts/portal.json": ["openApiDocument", "info", "version"],
 };
-const platformTextPaths = ["README.md", "CHANGELOG.md", "sdks/dotnet/README.md"];
+const platformTextPaths = ["README.md", "CHANGELOG.md", "sdks/dotnet/README.md", "sdks/java/README.md"];
 const maintainedPlatformDocPaths = [
   "doc/capabilities/index.rst",
   "doc/development/Build-the-library.md",
@@ -52,7 +52,7 @@ export const versionContractSchema = Object.freeze({
 /** Exact release-toolchain authority; platform version remains version.json only. */
 export const releaseToolchainSchema = Object.freeze({
   schemaVersion: 1,
-  fields: Object.freeze(["dotnet_sdk_version", "python_version", "schema_version", "uv_version"]),
+  fields: Object.freeze(["dotnet_sdk_version", "java_setup_version", "java_version", "python_version", "schema_version", "uv_version"]),
 });
 const requiredVersionPaths = [
   contractPath,
@@ -67,6 +67,8 @@ const requiredVersionPaths = [
   "sdks/python/src/licensecc/__init__.py",
   "sdks/python/src/licensecc/http_client.py",
   "sdks/dotnet/src/Licensecc.Client/Licensecc.Client.csproj",
+  "sdks/java/MANIFEST.MF",
+  "sdks/java/src/main/java/io/licensecc/client/LicensingBackendClient.java",
   ...platformTextPaths,
   ...maintainedPlatformDocPaths,
   capabilityRegistryPath,
@@ -380,8 +382,10 @@ export function readReleaseToolchainAuthorities({ root = repositoryRoot, readSou
   const pythonVersion = contract.python_version;
   const uvVersion = contract.uv_version;
   const dotnetSdkVersion = contract.dotnet_sdk_version;
-  if (contract.schema_version !== releaseToolchainSchema.schemaVersion || fields.join(",") !== releaseToolchainSchema.fields.join(",") || ![pythonVersion, uvVersion, dotnetSdkVersion].every((value) => typeof value === "string" && exactToolVersionPattern.test(value))) {
-    errors.push({ code: "invalid_toolchain_contract", path: releaseToolchainsPath, expected: "schema 1 with exact Python, uv, and .NET x.y.z versions", actual: null });
+  const javaVersion = contract.java_version;
+  const javaSetupVersion = contract.java_setup_version;
+  if (contract.schema_version !== releaseToolchainSchema.schemaVersion || fields.join(",") !== releaseToolchainSchema.fields.join(",") || ![pythonVersion, uvVersion, dotnetSdkVersion, javaVersion].every((value) => typeof value === "string" && exactToolVersionPattern.test(value)) || typeof javaSetupVersion !== "string" || !/^\d+\.\d+\.\d+\+\d+$/u.test(javaSetupVersion) || !javaSetupVersion.startsWith(`${javaVersion}+`)) {
+    errors.push({ code: "invalid_toolchain_contract", path: releaseToolchainsPath, expected: "schema 1 with exact Python, uv, .NET, and Java x.y.z versions", actual: null });
     return { toolchains: null, errors };
   }
   const globalFields = typeof global === "object" && !Array.isArray(global) ? Object.keys(global).sort() : [];
@@ -390,7 +394,7 @@ export function readReleaseToolchainAuthorities({ root = repositoryRoot, readSou
   if (globalFields.join(",") !== "sdk" || sdkFields.join(",") !== "allowPrerelease,rollForward,version" || sdk.version !== dotnetSdkVersion || sdk.rollForward !== "disable" || sdk.allowPrerelease !== false) {
     errors.push({ code: "dotnet_sdk_authority_mismatch", path: globalJsonPath, expected: `${dotnetSdkVersion} with rollForward=disable`, actual: sdk?.version ?? null });
   }
-  return { toolchains: { pythonVersion, uvVersion, dotnetSdkVersion }, errors };
+  return { toolchains: { pythonVersion, uvVersion, dotnetSdkVersion, javaVersion, javaSetupVersion }, errors };
 }
 
 function checkCppProjections(root, errors) {
@@ -433,6 +437,10 @@ function anchoredPlatformProjections(root, platformVersion, pythonVersion, error
   const dotnetPath = "sdks/dotnet/README.md";
   const dotnetPattern = new RegExp(`^ {2}src/Licensecc\\.Client/\\s+# the library \\(PackageId Licensecc\\.Client, ${platformVersion.replaceAll(".", "\\.")}\\)\\s*$`, "mu");
   mismatch(errors, dotnetPath, platformVersion, dotnetPattern.test(proseAt(root, dotnetPath)) ? platformVersion : null);
+
+  const javaPath = "sdks/java/README.md";
+  const javaPattern = new RegExp(`^The repository builds .*licensecc-client-${platformVersion.replaceAll(".", "\\.")}\\.jar.*$`, "mu");
+  mismatch(errors, javaPath, platformVersion, javaPattern.test(proseAt(root, javaPath)) ? platformVersion : null);
 
   const escapedPlatformVersion = platformVersion.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
   const docMarker = new RegExp(`The platform is at\\s+\\*\\*${escapedPlatformVersion}\\*\\* \\(a prerelease\\)`, "mu");
@@ -531,6 +539,12 @@ export function checkVersionContract({ root = repositoryRoot, trackedPaths = tra
   const dotnetPath = "sdks/dotnet/src/Licensecc.Client/Licensecc.Client.csproj";
   const dotnetVersion = /<Version>([^<]+)<\/Version>/u.exec(sourceAt(root, dotnetPath))?.[1] ?? null;
   mismatch(errors, dotnetPath, platformVersion, dotnetVersion);
+  const javaManifestPath = "sdks/java/MANIFEST.MF";
+  const javaManifestVersion = /^Implementation-Version:\s*([^\r\n]+)$/mu.exec(sourceAt(root, javaManifestPath))?.[1] ?? null;
+  mismatch(errors, javaManifestPath, platformVersion, javaManifestVersion);
+  const javaClientPath = "sdks/java/src/main/java/io/licensecc/client/LicensingBackendClient.java";
+  const javaClientVersion = /^\s*public static final String VERSION = "([^"]+)";$/mu.exec(sourceAt(root, javaClientPath))?.[1] ?? null;
+  mismatch(errors, javaClientPath, platformVersion, javaClientVersion);
   anchoredPlatformProjections(root, platformVersion, pythonVersion, errors);
 
   // The authority reader above is deliberately the only CMake grammar used by

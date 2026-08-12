@@ -8,6 +8,7 @@ param(
         "ci-linux-debug",
         "ci-linux-release",
         "ci-linux-core",
+        "ci-linux-arm64",
         "ci-linux-device-identity-test",
         "ci-linux-debug-tpm2-capability",
         "ci-linux-release-tpm2-capability",

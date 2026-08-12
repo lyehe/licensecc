@@ -73,6 +73,21 @@ set(PROJECT_DESCRIPTION "Copy protection and licensing library")
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+set(LCC_EXPECT_TARGET_ARCH "" CACHE STRING
+	"Optional configure-time target architecture assertion (currently: arm64).")
+if(LCC_EXPECT_TARGET_ARCH)
+	if(NOT LCC_EXPECT_TARGET_ARCH STREQUAL "arm64")
+		message(FATAL_ERROR "Unsupported LCC_EXPECT_TARGET_ARCH value: ${LCC_EXPECT_TARGET_ARCH}")
+	endif()
+	include(CheckCXXSourceCompiles)
+	check_cxx_source_compiles(
+		"#if !defined(__aarch64__) && !defined(_M_ARM64)\n#error target is not ARM64\n#endif\nint main() { return 0; }"
+		LCC_TARGET_IS_ARM64)
+	if(NOT LCC_TARGET_IS_ARM64)
+		message(FATAL_ERROR "LCC_EXPECT_TARGET_ARCH=arm64 but the configured compiler does not target ARM64")
+	endif()
+endif()
+
 # Generated project material is build output. An explicit external base is
 # supported for stable keys. A normal build tree is also allowed when it is
 # nested below the source checkout, but it may not equal or contain that

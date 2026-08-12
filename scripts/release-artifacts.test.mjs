@@ -25,6 +25,7 @@ import {
 const PLATFORM_VERSION = "0.1.0-rc.1";
 const PYTHON_VERSION = "0.1.0rc1";
 const CPP_VERSION = "2.1.0";
+const JAVA_VERSION = "17.0.20";
 const NPM_VERSION = "10.9.8";
 const repositoryRoot = resolve(import.meta.dirname, "..");
 
@@ -308,13 +309,16 @@ function releaseFixture({ contractDrift = false, omitDotnetLock = false } = {}) 
     ["package.json", JSON.stringify(rootManifest)],
     ["package-lock.json", JSON.stringify({ name: rootManifest.name, version: PLATFORM_VERSION, lockfileVersion: 3, packages: lockPackages })],
     ["version.json", JSON.stringify({ schema_version: 1, platform_version: PLATFORM_VERSION })],
-    ["release-toolchains.json", JSON.stringify({ schema_version: 1, python_version: "3.12.8", uv_version: "0.5.15", dotnet_sdk_version: "8.0.423" })],
+    ["release-toolchains.json", JSON.stringify({ schema_version: 1, python_version: "3.12.8", uv_version: "0.5.15", dotnet_sdk_version: "8.0.423", java_version: JAVA_VERSION, java_setup_version: "17.0.20+8" })],
     ["global.json", JSON.stringify({ sdk: { version: "8.0.423", rollForward: "disable", allowPrerelease: false } })],
     ["CMakeLists.txt", `cmake_minimum_required(VERSION 3.16)\nproject(licensecc VERSION ${CPP_VERSION} LANGUAGES CXX)\n`],
     ["LICENSE", "AGPL"], ["cmake/config.cmake", "# cmake"], ["include/licensecc/licensecc.h", `#define LCC_VERSION_MAJOR 2\n#define LCC_VERSION_MINOR 1\n#define LCC_VERSION_PATCH 0\n#define LCC_VERSION_STRING "${CPP_VERSION}"\n`], ["src/library/runtime.cpp", "// committed runtime"],
     ["extern/license-generator/CMakeLists.txt", "cmake_minimum_required(VERSION 3.16)\nproject(lccgen)\n"], ["extern/license-generator/LICENSE", "BSD 3-Clause License"], ["extern/license-generator/PROVENANCE.md", "reviewed vendor provenance"], ["extern/license-generator/cmake/lccgen-config.cmake", "# config"], ["extern/license-generator/src/license_generator/main.cpp", "// generator"],
     ["sdks/python/.gitignore", "\n"], ["sdks/python/LICENSE", "AGPL\n"], ["sdks/python/README.md", "# fixture\n"], ["sdks/python/pyproject.toml", `[project]\nname = "licensecc"\nversion = "${PYTHON_VERSION}"\n\n[build-system]\nrequires = ["hatchling==1.27.0"]\nbuild-backend = "hatchling.build"\n\n[tool.hatch.build.targets.sdist]\nartifacts = ["uv.lock"]\n`], ["sdks/python/build-constraints.txt", "hatchling==1.27.0 --hash=sha256:0000000000000000000000000000000000000000000000000000000000000000\n"], ["sdks/python/uv.lock", `version = 1\n\n[[package]]\nname = "licensecc"\nversion = "${PYTHON_VERSION}"\n`], ["sdks/python/src/licensecc/__init__.py", `__version__ = "${PYTHON_VERSION}"\n`], ["sdks/python/src/licensecc/http_client.py", `user_agent: str = "licensecc-python-sdk/${PYTHON_VERSION}"\n`], ["sdks/python/tests/test_http_client.py", "def test_fixture():\n    assert True\n"],
     ["sdks/dotnet/src/Licensecc.Client/LICENSE", "AGPL"], ["sdks/dotnet/Licensecc.Client.sln", "solution"], ["sdks/dotnet/src/Licensecc.Client/Licensecc.Client.csproj", `<Project><PropertyGroup><PackageId>Licensecc.Client</PackageId><Version>${PLATFORM_VERSION}</Version><TargetFramework>net8.0</TargetFramework></PropertyGroup></Project>`], ...(omitDotnetLock ? [] : [["sdks/dotnet/src/Licensecc.Client/packages.lock.json", JSON.stringify({ version: 1, dependencies: { "net8.0": {} } })]]),
+    ["sdks/java/MANIFEST.MF", `Manifest-Version: 1.0\nImplementation-Title: Licensecc Java Client\nImplementation-Version: ${PLATFORM_VERSION}\nAutomatic-Module-Name: io.licensecc.client\n`],
+    ["sdks/java/README.md", `The repository builds licensecc-client-${PLATFORM_VERSION}.jar.\n`],
+    ["sdks/java/src/main/java/io/licensecc/client/LicensingBackendClient.java", `package io.licensecc.client;\npublic final class LicensingBackendClient {\n  public static final String VERSION = "${PLATFORM_VERSION}";\n}\n`],
     ["services/cloudflare-licensing-backend/src/openapi/document.ts", `export const openApiSpec = { info: { version: "${PLATFORM_VERSION}" } };\n`], ["services/cloudflare-license-admin/src/worker/openapi/document.ts", `export const openApiDocument = { info: { version: "${PLATFORM_VERSION}" } };\n`], ["services/cloudflare-customer-portal/src/worker/openapi/document.ts", `export const openApiDocument = { info: { version: "${PLATFORM_VERSION}" } };\n`], ["test/contracts/backend.json", JSON.stringify({ openApiSpec: { info: { version: PLATFORM_VERSION } } })], ["test/contracts/admin.json", JSON.stringify({ openApiDocument: { info: { version: PLATFORM_VERSION } } })], ["test/contracts/portal.json", JSON.stringify({ openApiDocument: { info: { version: PLATFORM_VERSION } } })],
     ["README.md", `**Versioning:** Platform packages use \`${PLATFORM_VERSION}\`; C++ uses \`${CPP_VERSION}\` in CMake.\n`], ["CHANGELOG.md", `- **Platform packages** \`${PLATFORM_VERSION}\` Python \`${PYTHON_VERSION}\`\n- **C++ library** \`${CPP_VERSION}\`\n`], ["sdks/dotnet/README.md", `  src/Licensecc.Client/ # the library (PackageId Licensecc.Client, ${PLATFORM_VERSION})\n`], ["doc/conf.py", `version = "${CPP_VERSION}"\nrelease = "${CPP_VERSION}"\n`], ["doc/capabilities/index.rst", `The platform is at **${PLATFORM_VERSION}** (a prerelease)\n`], ["doc/development/Build-the-library.md", `The platform is at **${PLATFORM_VERSION}** (a prerelease)\n`], ["doc/development/Build-the-library-windows.rst", `The platform is at **${PLATFORM_VERSION}** (a prerelease)\n`], ["doc/other/QA.md", `The platform is at **${PLATFORM_VERSION}** (a prerelease)\n`], ["doc/capabilities/registry.json", JSON.stringify({ capabilities: [] })],
   ]) write(root, path, contents);
@@ -348,6 +352,7 @@ function fakeRun(commands, { symbols = true, failLabel, wrongSymbol = false, wro
     if (entry.label === "release Python version") return { status: 0, stdout: toolVersionDrift ? "Python 3.12.9\n" : "Python 3.12.8\n" };
     if (entry.label === "release uv version") return { status: 0, stdout: "uv 0.5.15\n" };
     if (entry.label === "release .NET SDK version") return { status: 0, stdout: "8.0.423\n" };
+    if (entry.label === "release Java compiler version") return { status: 0, stdout: `javac ${JAVA_VERSION}\n` };
     if (entry.label === "canonical locked npm ci") {
       const root = entry.cwd;
       put(join(root, "node_modules/wrangler/package.json"), JSON.stringify({ exports: { ".": "./wrangler-dist/cli.js" } }));
@@ -384,6 +389,20 @@ function fakeRun(commands, { symbols = true, failLabel, wrongSymbol = false, wro
       const symbolsPackage = invalidArtifact === "snupkg-empty" ? Buffer.alloc(0) : invalidArtifact === "snupkg-truncated" ? nugetArtifact({ symbols: true }).subarray(0, 8) : nugetArtifact({ metadataId: invalidArtifact === "snupkg-metadata" ? "Other.Client" : "Licensecc.Client", symbols: true, coreNonce: nonce });
       put(join(out, `Licensecc.Client.${PLATFORM_VERSION}.nupkg`), primary);
       if (symbols) put(join(out, wrongSymbol ? `Other.Client.${PLATFORM_VERSION}.snupkg` : `Licensecc.Client.${PLATFORM_VERSION}.snupkg`), symbolsPackage);
+    }
+    if (entry.label === "Java SDK production classes") {
+      const output = valueAfter(entry.args, "-d");
+      for (const source of entry.args.filter((argument) => String(argument).endsWith(".java"))) {
+        const normalized = String(source).replaceAll("\\", "/");
+        const marker = "/src/main/java/";
+        const index = normalized.lastIndexOf(marker);
+        assert.ok(index >= 0, `Java source is inside src/main/java: ${source}`);
+        const classPath = normalized.slice(index + marker.length, -".java".length) + ".class";
+        const bytes = Buffer.alloc(8);
+        bytes.writeUInt32BE(0xcafebabe, 0);
+        bytes.writeUInt16BE(61, 6);
+        put(join(output, ...classPath.split("/")), bytes);
+      }
     }
     if (entry.label === "build embedded generator from archive") {
       const build = entry.args[1];
@@ -514,14 +533,17 @@ test("assembly uses a sanitized canonical install, four pinned Worker dry-runs, 
     const pythonVersion = commands.find((entry) => entry.label === "release Python version");
     const uvVersion = commands.find((entry) => entry.label === "release uv version");
     const dotnetVersion = commands.find((entry) => entry.label === "release .NET SDK version");
+    const javaVersion = commands.find((entry) => entry.label === "release Java compiler version");
     assert.deepEqual(pythonVersion?.args, ["--version"]);
     assert.deepEqual(uvVersion?.args, ["--version"]);
     assert.deepEqual(dotnetVersion?.args, ["--version"]);
+    assert.deepEqual(javaVersion?.args, ["-version"]);
     assert.deepEqual(pythonExecutable?.args, ["-c", "import os, sys; print(os.path.realpath(sys.executable))"]);
     assert.equal(pythonExecutable?.executable, "python");
     assert.notEqual(pythonVersion?.executable, "python");
     assert.equal(uvVersion?.executable, "uv");
     assert.equal(dotnetVersion?.executable, "dotnet");
+    assert.equal(javaVersion?.executable, "javac");
     const npmInstall = commands.find((entry) => entry.label === "canonical locked npm ci");
     assert.ok(npmInstall);
     assert.match(npmInstall.cwd, /\.canonical-head$/);
@@ -543,6 +565,10 @@ test("assembly uses a sanitized canonical install, four pinned Worker dry-runs, 
       assert.equal(npmInstall.env.INCLUDE, process.env.INCLUDE, "the Windows C++ verifier keeps its explicit include search path");
     }
     assert.equal(commands.filter((entry) => entry.label.includes("isolated UI build")).length, 2);
+    const javaCompile = commands.find((entry) => entry.label === "Java SDK production classes");
+    assert.ok(javaCompile);
+    assert.deepEqual(javaCompile.args.slice(0, 5), ["--release", "17", "-Xlint:all", "-Werror", "-d"]);
+    assert.ok(existsSync(join(output, "java", `licensecc-client-${PLATFORM_VERSION}.jar`)));
     const workerCommands = commands.filter((entry) => entry.label.includes("Worker dry-run"));
     assert.equal(workerCommands.length, 4);
     for (const entry of workerCommands) {
@@ -677,7 +703,7 @@ test("Worker assembly rejects missing UI assets and lexical comment or string en
   }
 });
 
-test("inspector parses Worker, wheel, sdist, NuGet, and symbol payload bytes rather than trusting filenames", () => {
+test("inspector parses Worker, wheel, sdist, NuGet, Java, and symbol payload bytes rather than trusting filenames", () => {
   const cases = [
     ["workers/license-admin/worker.js", Buffer.alloc(0), /Worker bundle/i],
     ["workers/license-admin/worker.js", Buffer.from("export default {"), /Worker bundle/i],
@@ -693,6 +719,8 @@ test("inspector parses Worker, wheel, sdist, NuGet, and symbol payload bytes rat
     [`dotnet/Licensecc.Client.${PLATFORM_VERSION}.snupkg`, Buffer.alloc(0), /NuGet symbols/i],
     [`dotnet/Licensecc.Client.${PLATFORM_VERSION}.snupkg`, nugetArtifact({ symbols: true }).subarray(0, 8), /ZIP|NuGet symbols/i],
     [`dotnet/Licensecc.Client.${PLATFORM_VERSION}.snupkg`, nugetArtifact({ metadataId: "Other.Client", symbols: true }), /NuGet symbols metadata/i],
+    [`java/licensecc-client-${PLATFORM_VERSION}.jar`, Buffer.alloc(0), /Java SDK JAR|ZIP/i],
+    [`java/licensecc-client-${PLATFORM_VERSION}.jar`, zip([{ name: "META-INF/MANIFEST.MF", contents: "Manifest-Version: 1.0\n" }]), /Java SDK JAR|manifest|license|class/i],
   ];
   const root = releaseFixture();
   const output = join(root, "build", "release-artifacts", "inspect-payloads");

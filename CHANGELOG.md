@@ -8,7 +8,7 @@ release streams are:
 
 - **C++ library** (`CMakeLists.txt`): `2.1.0` — continues the upstream `licensecc` 2.x lineage.
 - **Platform packages** (root/workspace Node packages, the four Cloudflare services, OpenAPI
-  documents, and the Python and .NET SDKs): `0.1.0-rc.1` (Python `0.1.0rc1`) — versioned
+  documents, and the Python, .NET, and Java SDKs): `0.1.0-rc.1` (Python `0.1.0rc1`) — versioned
   independently of the C++ core and not yet published to any registry.
 
 Platform release tags use `platform-v<version>`; future independent C++ release tags use
@@ -26,11 +26,15 @@ are recorded in [ADR 0005](doc/architecture/decisions/0005-platform-version-and-
   break-glass routes), operator console Worker + React UI, customer portal Worker + React UI
   (email-OTP auth, entitlement/device/usage views, license download and activation, self-serve
   device release, floating-seat persistence across reloads), and a D1 backup/restore-drill Worker.
-- Python and .NET client SDKs: fail-closed verification of `lccoa1`/`lcccfg1` tokens with
+- Python, .NET, and dependency-free Java client SDKs: fail-closed verification of `lccoa1`/`lcccfg1` tokens with
   byte-for-byte C++ parity pinned by shared golden vectors, plus thin HTTP clients.
+- Native Linux ARM64 CI/purity coverage, Azure-aware environment classification, and signed
+  host-defined v201 `custom-limit` policies with fail-closed runtime evaluators.
 - Fenced PostgreSQL/Supabase adapter for the public verifier path, with D1↔PG schema-parity gates.
 - CI: Linux/Windows C++ matrices, C/C++ formatting gate, and a services workflow covering
   per-service lint, unit/API tests, SQL suites, Vite UI workflow tests, and schema parity.
+- Protected platform publication and manual production-deployment workflows with exact tag,
+  trusted-publisher, production-config, migration-order, and post-deploy drill contracts.
 - Repository-wide secret-scan lint with a unified needle set; `schema.sql` generated from
   migrations (`npm run schema:write`); ordered zero-to-first-online-license operator runbook;
   per-worker OpenAPI documents with artifact-based drift guards.

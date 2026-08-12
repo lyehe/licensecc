@@ -112,6 +112,13 @@ DmiInfo::DmiInfo() {
 							std::string(strings[x->manufacturer]) + std::string(strings[x->product_name]);
 					}
 				} break;
+				case types::system_chassis: {
+					auto *const x = reinterpret_cast<system_chassis *>(header);
+					if (dmi_field_in_bounds(header, offsetof(system_chassis, assert_tag), sizeof(x->assert_tag), buffer_end) &&
+						x->assert_tag > 0 && x->assert_tag < strings.size()) {
+						m_chassis_asset_tag = strings[x->assert_tag];
+					}
+				} break;
 				default:;
 			}
 		}

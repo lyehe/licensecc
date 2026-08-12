@@ -19,6 +19,7 @@ const uint32_t kSupportedFlags = LCC_TAMPER_FLAG_STRICT_SOURCE_SHADOWING;
 const uint32_t kSupportedOnlineFlags =
 	LCC_ONLINE_FLAG_PURPOSE_HEARTBEAT | LCC_ONLINE_FLAG_PURPOSE_RELEASE;
 const uint32_t kOptionsVersionV1 = 1;
+const uint32_t kOptionsVersionV2 = 2;
 const char kHostIntegrityReference[] = "HostIntegrityCheck";
 const char kSourceShadowingPrefix[] = "source-shadowing";
 
@@ -121,7 +122,8 @@ bool normalize_options(const LicenseCheckOptions* options, LicenseCheckOptions& 
 		error = "invalid LicenseCheckOptions size";
 		return false;
 	}
-	if (options->version != kOptionsVersionV1 && options->version != LCC_LICENSE_CHECK_OPTIONS_VERSION) {
+	if (options->version != kOptionsVersionV1 && options->version != kOptionsVersionV2 &&
+		options->version != LCC_LICENSE_CHECK_OPTIONS_VERSION) {
 		error = "invalid LicenseCheckOptions version";
 		return false;
 	}
@@ -137,7 +139,7 @@ bool normalize_options(const LicenseCheckOptions* options, LicenseCheckOptions& 
 	if (LCC_OPTIONS_FIELD_PRESENT(*options, host_integrity_user_data)) {
 		normalized.host_integrity_user_data = options->host_integrity_user_data;
 	}
-	const bool include_online_fields = options->version >= LCC_LICENSE_CHECK_OPTIONS_VERSION;
+	const bool include_online_fields = options->version >= kOptionsVersionV2;
 	if (include_online_fields && LCC_OPTIONS_FIELD_PRESENT(*options, online_policy)) {
 		normalized.online_policy = options->online_policy;
 	}
@@ -161,6 +163,13 @@ bool normalize_options(const LicenseCheckOptions* options, LicenseCheckOptions& 
 		}
 		license::mstrlcpy(normalized.online_device_hash, options->online_device_hash,
 						   sizeof(normalized.online_device_hash));
+	}
+	const bool include_custom_limit_fields = options->version >= LCC_LICENSE_CHECK_OPTIONS_VERSION;
+	if (include_custom_limit_fields && LCC_OPTIONS_FIELD_PRESENT(*options, custom_limit_check)) {
+		normalized.custom_limit_check = options->custom_limit_check;
+	}
+	if (include_custom_limit_fields && LCC_OPTIONS_FIELD_PRESENT(*options, custom_limit_user_data)) {
+		normalized.custom_limit_user_data = options->custom_limit_user_data;
 	}
 	normalized.size = sizeof(LicenseCheckOptions);
 	normalized.version = LCC_LICENSE_CHECK_OPTIONS_VERSION;

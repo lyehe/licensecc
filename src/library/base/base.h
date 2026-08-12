@@ -36,6 +36,7 @@ typedef int bool;
 #define PARAM_CLIENT_SIGNATURE_SOURCE_STRENGTH "client-signature-source-strength"
 #define PARAM_VERSION_TO "end-version"
 #define PARAM_EXTRA_DATA "extra-data"
+#define PARAM_CUSTOM_LIMIT "custom-limit"
 // license file extra entries
 #define LICENSE_SIGNATURE "sig"
 #define LICENSE_VERSION "lic_ver"

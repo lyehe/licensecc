@@ -1730,6 +1730,7 @@ function assertReleaseToolchains({ root, run, env, toolchains, hasDotnet }) {
   assertExactToolVersion({ executable: pythonExecutable, expected: toolchains.pythonVersion, prefix: "Python", label: "release Python version", root, run, env });
   assertExactToolVersion({ executable: "uv", expected: toolchains.uvVersion, prefix: "uv", label: "release uv version", root, run, env });
   if (hasDotnet) assertExactToolVersion({ executable: "dotnet", expected: toolchains.dotnetSdkVersion, label: "release .NET SDK version", root, run, env });
+  assertExactToolVersion({ executable: "javac", args: ["-version"], expected: toolchains.javaVersion, prefix: "javac", label: "release Java compiler version", root, run, env });
   return { pythonExecutable };
 }
 
@@ -1792,6 +1793,88 @@ function stagePythonArtifacts({ canonicalRoot, toolOutput, stagingOutput, python
     if (!existsSync(artifact) || lstatSync(artifact).isSymbolicLink() || !lstatSync(artifact).isFile()) throw new Error(`Python tool output is missing expected artifact: ${name}`);
     copyFileSync(artifact, join(destination, name));
   }
+}
+
+function javaSourceFiles(root) {
+  const sourceRoot = join(root, "sdks", "java", "src", "main", "java");
+  if (!existsSync(sourceRoot) || lstatSync(sourceRoot).isSymbolicLink() || !lstatSync(sourceRoot).isDirectory()) throw new Error("canonical Java source tree is missing or unsafe");
+  const files = [];
+  const visit = (directory) => {
+    for (const entry of readdirSync(directory, { withFileTypes: true }).sort((left, right) => ordinal(left.name, right.name))) {
+      const child = join(directory, entry.name);
+      if (entry.isSymbolicLink()) throw new Error("canonical Java source tree contains a symbolic link");
+      if (entry.isDirectory()) visit(child);
+      else if (entry.isFile() && entry.name.endsWith(".java")) files.push(child);
+      else throw new Error(`canonical Java source tree contains an unexpected entry: ${relative(sourceRoot, child)}`);
+    }
+  };
+  visit(sourceRoot);
+  if (files.length === 0) throw new Error("canonical Java source tree is empty");
+  return files.sort((left, right) => ordinal(relative(sourceRoot, left), relative(sourceRoot, right)));
+}
+
+function javaTopLevelClassMembers(root) {
+  const marker = `${sep}src${sep}main${sep}java${sep}`;
+  return javaSourceFiles(root).map((source) => {
+    const index = source.lastIndexOf(marker);
+    if (index < 0) throw new Error("canonical Java source escaped its source root");
+    return assertSafePackageMemberPath(`${source.slice(index + marker.length, -".java".length).split(sep).join("/")}.class`, "Java SDK");
+  }).sort(ordinal);
+}
+
+function canonicalJavaManifest(contents, platformVersion) {
+  const normalized = contents.toString("utf8").replaceAll("\r\n", "\n");
+  const lines = normalized.split("\n").filter(Boolean);
+  const expected = [
+    "Manifest-Version: 1.0",
+    "Implementation-Title: Licensecc Java Client",
+    `Implementation-Version: ${platformVersion}`,
+    "Automatic-Module-Name: io.licensecc.client",
+  ];
+  if (JSON.stringify(lines) !== JSON.stringify(expected)) throw new Error("tracked Java manifest does not carry the exact release identity");
+  return Buffer.from(`${expected.join("\r\n")}\r\n\r\n`, "utf8");
+}
+
+function validateJavaArtifact({ archivePath, platformVersion, repositoryRoot: canonicalRoot }) {
+  const label = "Java SDK JAR";
+  const files = readZipArchive(archivePath, label);
+  const manifest = canonicalJavaManifest(gitBlob(canonicalRoot, "sdks/java/MANIFEST.MF"), platformVersion);
+  if (!requiredArchiveMember(files, "META-INF/MANIFEST.MF", label).equals(manifest)) throw new Error("Java SDK JAR manifest is not canonical");
+  if (!requiredArchiveMember(files, "META-INF/LICENSE", label).equals(gitBlob(canonicalRoot, "LICENSE"))) throw new Error("Java SDK JAR license is not canonical");
+  const expectedTopLevels = new Set(javaTopLevelClassMembers(canonicalRoot));
+  const observedTopLevels = new Set();
+  for (const [member, contents] of files) {
+    if (member === "META-INF/MANIFEST.MF" || member === "META-INF/LICENSE") continue;
+    if (!member.startsWith("io/licensecc/client/") || !member.endsWith(".class") || contents.length < 8 || contents.readUInt32BE(0) !== 0xcafebabe || contents.readUInt16BE(6) !== 61) throw new Error(`Java SDK JAR contains an invalid Java 17 class: ${member}`);
+    const topLevel = member.replace(/\$[^/]+\.class$/u, ".class");
+    if (!expectedTopLevels.has(topLevel)) throw new Error(`Java SDK JAR contains a class outside the tracked source closure: ${member}`);
+    observedTopLevels.add(topLevel);
+  }
+  if (JSON.stringify([...observedTopLevels].sort(ordinal)) !== JSON.stringify([...expectedTopLevels].sort(ordinal))) throw new Error("Java SDK JAR is missing a tracked top-level class");
+  return files;
+}
+
+function stageJavaArtifact({ canonicalRoot, stagingOutput, platformVersion, sourceDateEpoch, run, env, repositoryRoot: sourceRoot }) {
+  const classes = join(canonicalRoot, ".release-java-classes");
+  mkdirSync(classes, { recursive: true });
+  const sources = javaSourceFiles(canonicalRoot);
+  run({ executable: "javac", args: ["--release", "17", "-Xlint:all", "-Werror", "-d", classes, ...sources], cwd: canonicalRoot, env, label: "Java SDK production classes" });
+  const entries = new Map([
+    ["META-INF/MANIFEST.MF", canonicalJavaManifest(readFileSync(join(canonicalRoot, "sdks", "java", "MANIFEST.MF")), platformVersion)],
+    ["META-INF/LICENSE", readFileSync(join(canonicalRoot, "LICENSE"))],
+  ]);
+  if (!existsSync(classes) || lstatSync(classes).isSymbolicLink() || !lstatSync(classes).isDirectory()) throw new Error("Java compiler output is missing or unsafe");
+  for (const file of walk(classes)) {
+    const member = assertSafePackageMemberPath(relative(classes, file).split(sep).join("/"), "Java compiler output");
+    if (!member.endsWith(".class")) throw new Error(`Java compiler output contains an unexpected entry: ${member}`);
+    entries.set(member, readFileSync(file));
+  }
+  const destination = join(stagingOutput, "java");
+  mkdirSync(destination, { recursive: true });
+  const artifact = join(destination, `licensecc-client-${platformVersion}.jar`);
+  writeDeterministicZip(artifact, entries, sourceDateEpoch);
+  validateJavaArtifact({ archivePath: artifact, platformVersion, repositoryRoot: sourceRoot });
+  return artifact;
 }
 
 function planWorkerAssembly(outputDirectory, root = repositoryRoot) {
@@ -2058,7 +2141,7 @@ function assertReleaseAllowlist(root, file, { allowOwnerMarker = false } = {}) {
   const path = artifactPath(root, file);
   if (allowOwnerMarker && path === OWNER_FILE) return path;
   if (METADATA_FILES.has(path)) return path;
-  if (/^workers\/(?:licensing-backend|license-admin|customer-portal|d1-backup)\/.+/u.test(path) || /^python\/[^/]+\.(?:whl|tar\.gz)$/u.test(path) || /^dotnet\/[^/]+\.(?:nupkg|snupkg)$/u.test(path) || /^cpp\/licensecc-cpp-sdk-[a-z0-9][a-z0-9-]*-cpp-[0-9A-Za-z.+_-]+-platform-[0-9A-Za-z.+_-]+\.tar$/u.test(path)) return path;
+  if (/^workers\/(?:licensing-backend|license-admin|customer-portal|d1-backup)\/.+/u.test(path) || /^python\/[^/]+\.(?:whl|tar\.gz)$/u.test(path) || /^dotnet\/[^/]+\.(?:nupkg|snupkg)$/u.test(path) || /^java\/licensecc-client-[0-9A-Za-z.+_-]+\.jar$/u.test(path) || /^cpp\/licensecc-cpp-sdk-[a-z0-9][a-z0-9-]*-cpp-[0-9A-Za-z.+_-]+-platform-[0-9A-Za-z.+_-]+\.tar$/u.test(path)) return path;
   throw new Error(`release artifact is outside the allowlist: ${path}`);
 }
 
@@ -2095,6 +2178,7 @@ function expectedArtifactIdentity({ consumerId, versions }) {
       `dotnet/${versions.dotnetPackageId}.${versions.platformVersion}.nupkg`,
       `dotnet/${versions.dotnetPackageId}.${versions.platformVersion}.snupkg`,
     ],
+    java: [`java/licensecc-client-${versions.platformVersion}.jar`],
   };
 }
 
@@ -2105,6 +2189,7 @@ function verifyPackageVersions(records, versions, consumerId, { incomplete = fal
     if (JSON.stringify(actual) !== JSON.stringify([...expected].sort(ordinal))) throw new Error(`${prefix.slice(0, -1)} artifacts do not carry the exact expected identity`);
   };
   exactSubset("python/", identity.python);
+  exactSubset("java/", identity.java);
   if (incomplete) {
     if (records.some((record) => record.path.startsWith("dotnet/"))) throw new Error("incomplete release must not contain a partial NuGet payload");
   } else {
@@ -2124,6 +2209,7 @@ function verifyPackageVersions(records, versions, consumerId, { incomplete = fal
       validateNugetArtifact({ archivePath: join(payloadRoot, identity.dotnet[0]), packageId: versions.dotnetPackageId, platformVersion: versions.platformVersion, symbols: false });
       validateNugetArtifact({ archivePath: join(payloadRoot, identity.dotnet[1]), packageId: versions.dotnetPackageId, platformVersion: versions.platformVersion, symbols: true });
     }
+    validateJavaArtifact({ archivePath: join(payloadRoot, identity.java[0]), platformVersion: versions.platformVersion, repositoryRoot: canonicalRepositoryRoot });
     validateArchiveMembers(join(payloadRoot, cpp[0].path), { expectedRoot: identity.cpp.slice("cpp/".length, -".tar".length), expectedMembers: trackedCppFiles(canonicalRepositoryRoot) });
   }
 }
@@ -2180,6 +2266,7 @@ function expectedReleaseMetadata({ root, outputDirectory, consumerId, versions, 
     format: "licensecc-release-manifest-v1",
     platform_version: versions.platformVersion,
     python_version: versions.pythonVersion,
+    java_version: versions.platformVersion,
     cpp_version: versions.cppVersion,
     consumer_id: consumer,
     commit: versions.commit,
@@ -2262,6 +2349,7 @@ function assembleReleaseArtifacts({ root = repositoryRoot, outputDirectory, cons
       const tooling = assertReleaseToolchains({ root: canonical, run, env, toolchains: versions.toolchains, hasDotnet });
       const npm = runCanonicalNpmInstall({ root: canonical, run, env });
       runWorkerAssembly({ root: canonical, outputDirectory: staging.output, run, env, staging, npm });
+      stageJavaArtifact({ canonicalRoot: canonical, stagingOutput: staging.output, platformVersion: versions.platformVersion, sourceDateEpoch: versions.sourceDateEpoch, run, env, repositoryRoot: root });
       // `uv build` deliberately has no --locked mode.  Validate the canonical
       // project lock first, then constrain and hash-check the isolated PEP 517
       // backend resolution used for the wheel and sdist.

@@ -602,6 +602,8 @@ static int issueLicense(const po::parsed_options &parsed, po::variables_map &vm,
 		 "Specify the first version of the software this license apply to.")  //
 		(PARAM_VERSION_TO, po::value<string>()->default_value("0", "All Versions"),  //
 		 "Specify the last version of the software this license apply to.")  //
+		(PARAM_CUSTOM_LIMIT, po::value<string>(),
+		 "Signed host-defined execution policy. Requires license-version 201 and a runtime evaluator.")  //
 		(PARAM_EXTRA_DATA ",x", po::value<string>(), "Specify extra data to be included into the license")  //
 		("help,h", "Print this help.");  //
 	bool should_execute = false;

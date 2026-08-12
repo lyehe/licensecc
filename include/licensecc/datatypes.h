@@ -58,6 +58,8 @@ typedef enum {
 	LICENSE_CONFIG_HASH_MISMATCH = 17,	// config bytes do not match the signed config-hash
 	LICENSE_CONFIG_EXPIRED = 18,  // config token outside its issued/expires window
 	LICENSE_CONFIG_ROLLBACK = 19,  // config-seq below the accepted minimum
+	LICENSE_CUSTOM_LIMIT_DENIED = 20,  // signed host-defined execution policy denied this environment
+	LICENSE_CUSTOM_LIMIT_EVALUATION_FAILED = 21,  // required host policy evaluator was absent or failed
 
 	LICENSE_SPECIFIED = 100,  // license location was specified
 	LICENSE_FOUND = 101,  // License file has been found or license data has been located
@@ -110,12 +112,12 @@ typedef enum { LCC_TAMPER_DISABLED = 0, LCC_TAMPER_ENFORCE = 2 } LCC_TAMPER_POLI
 #define LCC_ONLINE_REQUEST_VERSION 2u
 #define LCC_ONLINE_DEFAULT_TIMEOUT_MS 3000u
 #define LCC_ONLINE_MAX_TIMEOUT_MS 30000u
-#define LCC_LICENSE_CHECK_OPTIONS_VERSION 2u
-#define LCC_LICENSE_DECISION_OPTIONS_VERSION 1u
+#define LCC_LICENSE_CHECK_OPTIONS_VERSION 3u
+#define LCC_LICENSE_DECISION_OPTIONS_VERSION 2u
 #define LCC_LICENSE_DECISION_VERSION 1u
 #define LCC_API_CONFIG_ID_SIZE 64u
 #define LCC_CONFIG_INPUT_VERSION 1u
-#define LCC_CONFIG_VERIFY_OPTIONS_VERSION 2u
+#define LCC_CONFIG_VERIFY_OPTIONS_VERSION 3u
 #define LCC_CONFIG_DECISION_VERSION 2u
 
 /**
@@ -127,6 +129,25 @@ typedef enum { LCC_TAMPER_DISABLED = 0, LCC_TAMPER_ENFORCE = 2 } LCC_TAMPER_POLI
  * process, so it is advisory and tamper-resistant, not tamper-proof.
  */
 typedef bool (*LCC_HOST_INTEGRITY_CHECK)(void* user_data, char* detail_out, size_t detail_out_size);
+
+/** Result returned by a host-defined signed execution-limit evaluator. */
+typedef enum {
+	LCC_CUSTOM_LIMIT_ALLOW = 0,
+	LCC_CUSTOM_LIMIT_DENY = 1,
+	LCC_CUSTOM_LIMIT_ERROR = 2
+} LCC_CUSTOM_LIMIT_RESULT;
+
+/**
+ * Evaluate an optional signed v201 `custom-limit` policy.
+ *
+ * `policy` is printable ASCII, NUL-terminated, and `policy_size` excludes the
+ * terminator. The library does not interpret its schema: applications can use
+ * it for CPU count, process/machine memory, virtualization, tenant policy, or
+ * another deterministic environment constraint. A license that contains this
+ * field fails closed unless a callback is configured.
+ */
+typedef LCC_CUSTOM_LIMIT_RESULT (*LCC_CUSTOM_LIMIT_CHECK)(void* user_data, const char* policy,
+													   size_t policy_size);
 
 typedef enum { LCC_ONLINE_DISABLED = 0, LCC_ONLINE_REQUIRE = 2 } LCC_ONLINE_POLICY;
 
@@ -178,6 +199,8 @@ typedef struct LicenseCheckOptions {
 	LCC_ONLINE_CHECK online_check;
 	void* online_user_data;
 	char online_device_hash[LCC_API_ONLINE_DEVICE_HASH_SIZE + 1];
+	LCC_CUSTOM_LIMIT_CHECK custom_limit_check;
+	void* custom_limit_user_data;
 } LicenseCheckOptions;
 
 typedef enum { LCC_LICENSE_DECISION_DENY = 0, LCC_LICENSE_DECISION_ALLOW = 1 } LCC_LICENSE_DECISION;
@@ -229,6 +252,8 @@ typedef struct LccLicenseDecisionOptions {
 	uint32_t online_timeout_ms;
 	uint32_t reserved;
 	char online_device_hash[LCC_API_ONLINE_DEVICE_HASH_SIZE + 1];
+	LCC_CUSTOM_LIMIT_CHECK custom_limit_check;
+	void* custom_limit_user_data;
 } LccLicenseDecisionOptions;
 
 typedef struct LccLicenseDecision {
@@ -330,6 +355,8 @@ typedef struct LccConfigVerifyOptions {
 	LCC_CONFIG_SEQ_FLOOR_STORE config_seq_floor_store;
 	void* config_seq_floor_user_data;
 	uint32_t reserved;
+	LCC_CUSTOM_LIMIT_CHECK custom_limit_check;
+	void* custom_limit_user_data;
 } LccConfigVerifyOptions;
 
 /**

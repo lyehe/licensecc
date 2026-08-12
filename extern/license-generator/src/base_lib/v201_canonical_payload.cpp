@@ -20,7 +20,7 @@ const std::vector<std::string>& canonical_order() {
 	static const std::vector<std::string> order = {
 		"lic_ver",		  "canonical-v",	 "sig-v",		 "sig-alg",		"key-id",
 		"project",		  "feature",		 "valid-from",	 "valid-to",	"start-version",
-		"end-version",	  "client-signature", "client-signature-source-strength", "extra-data",
+		"end-version",	  "custom-limit", "client-signature", "client-signature-source-strength", "extra-data",
 	};
 	return order;
 }
@@ -269,6 +269,10 @@ bool validate_field_semantics(const std::string& key, const std::string& value, 
 	}
 	if ((key == "start-version" || key == "end-version") && !valid_version(value)) {
 		error = key + " is not a canonical version";
+		return false;
+	}
+	if (key == "custom-limit" && value.size() > 255U) {
+		error = "custom-limit exceeds the public policy limit";
 		return false;
 	}
 	if (key == "client-signature-source-strength" && !valid_client_signature_source_strength(value)) {

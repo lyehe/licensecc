@@ -48,6 +48,23 @@ BOOST_AUTO_TEST_CASE(test_virtualization) {
 		}
 	}
 }
+
+BOOST_AUTO_TEST_CASE(cloud_provider_classification_is_exact_and_case_insensitive) {
+	BOOST_CHECK_EQUAL(classify_cloud_provider("", "", "Microsoft Corporation",
+											 "7783-7084-3265-9085-8269-3286-77"),
+					  AZURE_CLOUD);
+	BOOST_CHECK_EQUAL(classify_cloud_provider("amazon ec2", "", "", ""), AWS);
+	BOOST_CHECK_EQUAL(classify_cloud_provider("GoogleComputeEngine", "", "Google", ""), GOOGLE_CLOUD);
+	BOOST_CHECK_EQUAL(classify_cloud_provider("", "SeaBIOS", "Alibaba Cloud", ""), ALI_CLOUD);
+	BOOST_CHECK_EQUAL(classify_cloud_provider("Dell Inc.", "", "", ""), ON_PREMISE);
+}
+
+BOOST_AUTO_TEST_CASE(generic_hyper_v_is_not_misclassified_as_azure) {
+	BOOST_CHECK_EQUAL(classify_cloud_provider("Microsoft Corporation Virtual Machine", "American Megatrends Inc.",
+											 "Microsoft Corporation", ""),
+					  PROV_UNKNOWN);
+	BOOST_CHECK_EQUAL(classify_cloud_provider("", "SeaBIOS", "", ""), PROV_UNKNOWN);
+}
 }  // namespace test
 }  // namespace os
 }  // namespace license
