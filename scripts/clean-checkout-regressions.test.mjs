@@ -100,3 +100,22 @@ test("all Worker type generators use the shared helper from an empty checkout", 
     rmSync(fixture, { recursive: true, force: true });
   }
 });
+
+test("tracked LF-attributed text is stored canonically in the Git index", () => {
+  const result = spawnSync("git", ["ls-files", "--eol", "-z"], {
+    cwd: repositoryRoot,
+    encoding: "utf8",
+    windowsHide: true,
+  });
+  assert.equal(result.status, 0, result.stderr || result.error?.message);
+  const violations = result.stdout.split("\0").filter(Boolean).flatMap((entry) => {
+    const [metadata, path] = entry.split("\t", 2);
+    if (!metadata.includes("attr/text eol=lf") || /^i\/(?:lf|none)\s/u.test(metadata)) return [];
+    return [`${path}: ${metadata.trim()}`];
+  });
+  assert.deepEqual(
+    violations,
+    [],
+    "LF-attributed files must be normalized in the index so Windows checkouts do not start dirty",
+  );
+});
