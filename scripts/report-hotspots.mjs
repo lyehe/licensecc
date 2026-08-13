@@ -7,7 +7,6 @@ const repositoryRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const SOURCE_EXTENSION = /\.(?:c|cc|cpp|cxx|h|hh|hpp|hxx|js|mjs|ts|tsx)$/u;
 const PRODUCTION_SOURCE = /^(?:src|packages\/[^/]+\/src|services\/[^/]+\/src)\//u;
 const THIRD_PARTY_SOURCE = /^src\/library\/ini\//u;
-const baselinePath = resolve(repositoryRoot, "scripts/hotspot-baseline.json");
 
 function trackedFiles(root) {
   const result = spawnSync("git", ["ls-files", "-z"], { cwd: root, encoding: "buffer" });

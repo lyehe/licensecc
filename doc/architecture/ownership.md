@@ -3,10 +3,10 @@
 Ownership here is by role and repository boundary. It intentionally names no
 individuals or teams that have not been confirmed.
 
-`.github/CODEOWNERS` makes these review boundaries executable. The confirmed
-repository account is the review fallback today; replace that fallback with
-role-specific GitHub teams only after those teams exist and accept ownership.
-The table below remains the semantic authority for what each boundary owns.
+`.github/CODEOWNERS` supplies the confirmed repository-wide review fallback.
+The table below remains the semantic authority for each boundary; add
+path-specific CODEOWNERS rules only after role-specific GitHub teams exist and
+accept ownership.
 
 | Role | Authoritative paths | Owns |
 | --- | --- | --- |

@@ -1,32 +1,4 @@
-# The confirmed repository account is the review fallback until role-specific
-# GitHub teams are created. Keep path boundaries aligned with
+# The confirmed repository account is the review fallback until distinct,
+# role-specific GitHub teams exist. Semantic ownership stays in
 # doc/architecture/ownership.md.
 * @lyehe
-
-/include/licensecc/ @lyehe
-/src/library/ @lyehe
-/test/ @lyehe
-/cmake/ @lyehe
-/CMakeLists.txt @lyehe
-/CMakePresets.json @lyehe
-/extern/license-generator/ @lyehe
-
-/packages/licensing-domain/ @lyehe
-/packages/cloudflare-runtime/ @lyehe
-/services/cloudflare-licensing-backend/ @lyehe
-/services/cloudflare-license-admin/ @lyehe
-/services/cloudflare-customer-portal/ @lyehe
-/services/cloudflare-d1-backup/ @lyehe
-/sdks/ @lyehe
-/test/contracts/ @lyehe
-
-/.github/ @lyehe
-/scripts/ @lyehe
-/package.json @lyehe
-/package-lock.json @lyehe
-
-/README.md @lyehe
-/CONTRIBUTING.md @lyehe
-/doc/ @lyehe
-/docs/implementation/ @lyehe
-/docs/superpowers/plans/ @lyehe

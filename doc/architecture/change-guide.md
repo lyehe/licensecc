@@ -93,11 +93,12 @@ path under `scripts/` must have exactly one purpose category in
 `scripts/script-catalog.json`; internal helpers may move into a subdirectory
 when that reflects a real module boundary rather than cosmetic depth.
 
-Update `.github/CODEOWNERS` with `doc/architecture/ownership.md` whenever an
-authoritative path boundary changes. For a first-party production file already
-at or above the checked threshold, do not raise its line-count ratchet as a
-routine consequence of a feature. Extract a coherent responsibility or explain
-and review the explicit baseline change.
+Keep the confirmed repository-wide fallback in `.github/CODEOWNERS`. When
+role-specific GitHub teams are introduced, align their path rules with
+`doc/architecture/ownership.md`. For a first-party production file already at
+or above the checked threshold, do not raise its line-count ratchet as a routine
+consequence of a feature. Extract a coherent responsibility or explain and
+review the explicit baseline change.
 
 Run `npm run test:repository`, `npm run check:scripts`, and
 `npm run check:hotspots`. `npm run doctor` is the read-only local diagnostic;

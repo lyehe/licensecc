@@ -5,7 +5,7 @@ import { evaluateRepositorySnapshot, formatDoctorReport } from "./repository-doc
 
 function cleanSnapshot(overrides = {}) {
   return {
-    trackedPaths: ["README.md", "services/example/wrangler.example.toml"],
+    repositoryContract: { status: 0, output: "Architecture policy passed." },
     statusEntries: [],
     worktrees: ["C:/repo"],
     branches: ["main"],
@@ -28,26 +28,16 @@ test("clean repository state passes without findings", () => {
   assert.match(formatDoctorReport(result), /OK\s+No repository contract/u);
 });
 
-test("tracked repository contract violations fail closed", () => {
+test("canonical repository contract failures fail closed", () => {
   const result = evaluateRepositorySnapshot(cleanSnapshot({
-    trackedPaths: [
-      ".gitmodules",
-      "services/admin/.wrangler/state.json",
-      "services/admin/wrangler.toml",
-      "services/admin/.dev.vars",
-      "services/admin/wrangler.example.toml",
-    ],
+    repositoryContract: {
+      status: 1,
+      output: "[ARCH_LOCAL_WRANGLER_CONFIG] services/admin/wrangler.toml: tracked local configuration",
+    },
   }));
   assert.equal(result.exitCode, 1);
-  assert.deepEqual(
-    result.findings.map(({ code }) => code),
-    [
-      "DOCTOR_SUBMODULE_METADATA",
-      "DOCTOR_TRACKED_GENERATED_STATE",
-      "DOCTOR_TRACKED_LOCAL_SECRET",
-      "DOCTOR_TRACKED_WRANGLER_CONFIG",
-    ],
-  );
+  assert.deepEqual(result.findings.map(({ code }) => code), ["DOCTOR_REPOSITORY_CONTRACT"]);
+  assert.match(result.findings[0].detail, /ARCH_LOCAL_WRANGLER_CONFIG/u);
 });
 
 test("local hygiene and toolchain drift are advisory by default", () => {

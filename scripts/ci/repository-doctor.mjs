@@ -1,61 +1,12 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repositoryRoot = resolve(fileURLToPath(new URL("../..", import.meta.url)));
 
-const LOCAL_OUTPUT_PATHS = [
-  ".wrangler",
-  "dist",
-  "build",
-  "doc/_build",
-  "doc/_doxygen",
-  "services/cloudflare-licensing-backend/.wrangler",
-  "services/cloudflare-licensing-backend/dist",
-  "services/cloudflare-license-admin/.wrangler",
-  "services/cloudflare-license-admin/dist",
-  "services/cloudflare-license-admin/playwright-report",
-  "services/cloudflare-license-admin/test-results",
-  "services/cloudflare-customer-portal/.wrangler",
-  "services/cloudflare-customer-portal/dist",
-  "services/cloudflare-customer-portal/playwright-report",
-  "services/cloudflare-customer-portal/test-results",
-  "services/cloudflare-d1-backup/.wrangler",
-  "services/cloudflare-d1-backup/dist",
-];
-
 function finding(severity, code, message, detail = undefined) {
   return { severity, code, message, ...(detail === undefined ? {} : { detail }) };
-}
-
-function normalizedPath(path) {
-  return path.replaceAll("\\", "/");
-}
-
-function isExampleWranglerConfig(path) {
-  return /(?:^|\/)wrangler\.example\.(?:toml|jsonc?)$/iu.test(path);
-}
-
-function trackedContractFindings(trackedPaths) {
-  const findings = [];
-  for (const input of trackedPaths) {
-    const path = normalizedPath(input);
-    const filename = path.slice(path.lastIndexOf("/") + 1);
-    if (path === ".gitmodules") {
-      findings.push(finding("error", "DOCTOR_SUBMODULE_METADATA", "Repository-owned dependencies must not retain .gitmodules.", path));
-    }
-    if (/(?:^|\/)\.(?:wrangler)(?:\/|$)/iu.test(path) || /(?:^|\/)node_modules(?:\/|$)/iu.test(path)) {
-      findings.push(finding("error", "DOCTOR_TRACKED_GENERATED_STATE", "Generated dependency or Wrangler state is tracked.", path));
-    }
-    if (/^wrangler(?:\.[^.]+)*\.(?:toml|jsonc?|ya?ml)$/iu.test(filename) && !isExampleWranglerConfig(path)) {
-      findings.push(finding("error", "DOCTOR_TRACKED_WRANGLER_CONFIG", "A real Wrangler configuration is tracked; keep only explicit examples.", path));
-    }
-    if (filename === ".dev.vars" || /(?:^|\/)\.online-key(?:\/|$)/u.test(path)) {
-      findings.push(finding("error", "DOCTOR_TRACKED_LOCAL_SECRET", "Local service credentials are tracked.", path));
-    }
-  }
-  return findings;
 }
 
 function toolFinding(tool) {
@@ -72,7 +23,11 @@ function toolFinding(tool) {
 }
 
 export function evaluateRepositorySnapshot(snapshot, { strictLocal = false } = {}) {
-  const findings = trackedContractFindings(snapshot.trackedPaths ?? []);
+  const findings = [];
+  if (snapshot.repositoryContract?.status !== 0) {
+    const detail = snapshot.repositoryContract?.output?.split(/\r?\n/u).find(Boolean) ?? "architecture check unavailable";
+    findings.push(finding("error", "DOCTOR_REPOSITORY_CONTRACT", "The canonical architecture/repository contract failed.", detail));
+  }
   if ((snapshot.statusEntries ?? []).length > 0) {
     findings.push(finding("warning", "DOCTOR_DIRTY_WORKTREE", "The active worktree has preserved or uncommitted changes.", `${snapshot.statusEntries.length} entries`));
   }
@@ -143,18 +98,6 @@ function remoteUrls(root) {
   return remotes;
 }
 
-function nonemptyLocalOutputs(root) {
-  return LOCAL_OUTPUT_PATHS.filter((relativePath) => {
-    const absolutePath = resolve(root, relativePath);
-    if (!existsSync(absolutePath)) return false;
-    try {
-      return readdirSync(absolutePath).some((entry) => entry !== ".gitkeep");
-    } catch {
-      return true;
-    }
-  });
-}
-
 function versionTool(name, command, args, expected, matches, root) {
   const result = run(command, args, root);
   return {
@@ -192,6 +135,12 @@ function collectTools(root) {
 }
 
 export function collectRepositorySnapshot({ root = repositoryRoot } = {}) {
+  const architectureCheck = run(process.execPath, [resolve(root, "scripts/check-architecture.mjs")], root);
+  const status = execFileSync("git", ["status", "--ignored", "--porcelain=v1", "-z"], {
+    cwd: root,
+    encoding: "utf8",
+    windowsHide: true,
+  }).split("\0").filter(Boolean);
   const divergenceResult = run("git", ["rev-list", "--left-right", "--count", "main...origin/main"], root);
   let mainDivergence = null;
   if (divergenceResult.status === 0) {
@@ -199,13 +148,13 @@ export function collectRepositorySnapshot({ root = repositoryRoot } = {}) {
     mainDivergence = { ahead, behind };
   }
   return {
-    trackedPaths: git(["ls-files"], root).split(/\r?\n/u).filter(Boolean),
-    statusEntries: git(["status", "--porcelain=v1", "-z"], root).split("\0").filter(Boolean),
+    repositoryContract: { status: architectureCheck.status, output: architectureCheck.output },
+    statusEntries: status.filter((entry) => !entry.startsWith("!! ")),
     worktrees: git(["worktree", "list", "--porcelain"], root).split(/\r?\n/u).filter((line) => line.startsWith("worktree ")).map((line) => line.slice(9)),
     branches: git(["for-each-ref", "--format=%(refname:short)", "refs/heads"], root).split(/\r?\n/u).filter(Boolean),
     remotes: remoteUrls(root),
     mainDivergence,
-    localOutputs: nonemptyLocalOutputs(root),
+    localOutputs: status.filter((entry) => entry.startsWith("!! ")).map((entry) => entry.slice(3)),
     tools: collectTools(root),
   };
 }

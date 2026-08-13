@@ -139,7 +139,8 @@ local build output.
 
 The remaining repository tooling boundaries are executable too:
 
-* `.github/CODEOWNERS` mirrors the role boundaries in {doc}`ownership`;
+* `.github/CODEOWNERS` supplies the confirmed repository-wide review fallback,
+  while {doc}`ownership` defines semantic path boundaries;
 * `scripts/script-catalog.json` assigns every script exactly one category;
 * `npm run check:hotspots` enforces the measured-file growth ratchets; and
 * `npm run doctor` reports local branch, worktree, remote, ignored-output, and

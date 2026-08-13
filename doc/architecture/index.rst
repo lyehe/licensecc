@@ -12,8 +12,8 @@ Start here:
   and measured hotspots.
 * :doc:`change-guide` — the smallest correct place to make common changes,
   including repository tooling and layout changes.
-* :doc:`ownership` — role-based ownership mirrored by ``.github/CODEOWNERS``
-  without assigning work to unconfirmed teams.
+* :doc:`ownership` — role-based ownership plus the repository-wide
+  ``.github/CODEOWNERS`` fallback, without inventing unconfirmed teams.
 * :doc:`decisions/0001-module-boundaries` — package and deployable boundaries.
 * :doc:`decisions/0002-node-workspace` — the final root-workspace outcome.
 * :doc:`decisions/0003-route-openapi-ownership` — route and OpenAPI ownership.

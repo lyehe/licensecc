@@ -4,7 +4,6 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repositoryRoot = resolve(fileURLToPath(new URL("../..", import.meta.url)));
-const catalogPath = resolve(repositoryRoot, "scripts/script-catalog.json");
 
 function error(code, message, path = undefined) {
   return { code, message, ...(path === undefined ? {} : { path }) };
