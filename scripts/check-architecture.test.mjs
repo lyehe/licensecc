@@ -48,6 +48,14 @@ const COMPOSITION_ROOTS = {
     appForbiddenTargets: ["services/cloudflare-license-admin/src/ui/shared/api.ts"],
     appForbiddenSuffixes: ["/workflow.ts"],
   },
+  portalUi: {
+    mount: "services/cloudflare-customer-portal/src/ui/main.tsx",
+    mountImports: ["./app/App"],
+    app: "services/cloudflare-customer-portal/src/ui/app/App.tsx",
+    appImports: ["../features/**", "../shared/**", "../styles.css", "../types"],
+    appForbiddenTargets: [],
+    appForbiddenSuffixes: ["/portalWorkflow.ts"],
+  },
 };
 
 function compositionConfig(overrides = {}) {
@@ -563,4 +571,28 @@ test("composition roots resolve Windows .js-to-TypeScript edges and protect Work
   });
   assert.equal(uiApp.exitCode, 1);
   assert.deepEqual(errorCodes(uiApp), ["ARCH_UI_APP_API_IMPORT", "ARCH_UI_APP_DIRECT_FETCH"]);
+});
+
+test("portal UI composition keeps main mount-only and workflow logic in features", () => {
+  const mount = fixture({
+    sourceFiles: [
+      ["services/cloudflare-customer-portal/src/ui/main.tsx", 'import "./features/devices/DevicesFeature";'],
+      ["services/cloudflare-customer-portal/src/ui/features/devices/DevicesFeature.tsx", "export const DevicesFeature = true;"],
+    ],
+    manifests: [serviceManifest("cloudflare-customer-portal")],
+    checkerConfig: compositionConfig(),
+  });
+  assert.equal(mount.exitCode, 1);
+  assert.deepEqual(errorCodes(mount), ["ARCH_UI_MOUNT_IMPORT"]);
+
+  const app = fixture({
+    sourceFiles: [
+      ["services/cloudflare-customer-portal/src/ui/app/App.tsx", 'import "../portalWorkflow.js"; fetch("/api/portal/me");'],
+      ["services/cloudflare-customer-portal/src/ui/portalWorkflow.ts", "export const mePath = true;"],
+    ],
+    manifests: [serviceManifest("cloudflare-customer-portal")],
+    checkerConfig: compositionConfig(),
+  });
+  assert.equal(app.exitCode, 1);
+  assert.deepEqual(errorCodes(app), ["ARCH_UI_APP_API_IMPORT", "ARCH_UI_APP_DIRECT_FETCH", "ARCH_UI_APP_IMPORT"]);
 });

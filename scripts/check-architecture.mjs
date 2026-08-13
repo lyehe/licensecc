@@ -36,6 +36,14 @@ const COMPOSITION_ROOTS = Object.freeze({
     appForbiddenTargets: ["services/cloudflare-license-admin/src/ui/shared/api.ts"],
     appForbiddenSuffixes: ["/workflow.ts"],
   },
+  portalUi: {
+    mount: "services/cloudflare-customer-portal/src/ui/main.tsx",
+    mountImports: ["./app/App"],
+    app: "services/cloudflare-customer-portal/src/ui/app/App.tsx",
+    appImports: ["../features/**", "../shared/**", "../styles.css", "../types"],
+    appForbiddenTargets: [],
+    appForbiddenSuffixes: ["/portalWorkflow.ts"],
+  },
 });
 
 function debtKey(from, specifier) {
@@ -523,7 +531,7 @@ function validateCompositionRoots(config, errors) {
     errors.push(makeError(
       "ARCH_MALFORMED_COMPOSITION_ROOTS",
       "scripts/architecture-boundaries.json",
-      "compositionRoots must exactly declare the reviewed backend, admin, portal, and adminUi composition boundaries; broad or omitted exceptions are forbidden.",
+      "compositionRoots must exactly declare the reviewed Worker and UI composition boundaries; broad or omitted exceptions are forbidden.",
       "setup",
     ));
     return undefined;
@@ -569,7 +577,7 @@ function evaluateCompositionRoots(productionFiles, allResolvablePaths, compositi
   };
 
   for (const [serviceName, service] of Object.entries(compositionRoots)) {
-    if (serviceName === "adminUi") continue;
+    if (serviceName.endsWith("Ui")) continue;
     enforceImports(service.entry, service.entryImports, "ARCH_COMPOSITION_ENTRY_IMPORT", `${serviceName} Worker entrypoint`);
     if (service.adapter) {
       enforceImports(service.adapter, service.adapterImports, "ARCH_COMPOSITION_ADAPTER_IMPORT", `${serviceName} module-worker adapter`);
@@ -577,27 +585,29 @@ function evaluateCompositionRoots(productionFiles, allResolvablePaths, compositi
     enforceImports(service.app, service.appImports, "ARCH_COMPOSITION_APP_IMPORT", `${serviceName} Worker app composition root`);
   }
 
-  const ui = compositionRoots.adminUi;
-  enforceImports(ui.mount, ui.mountImports, "ARCH_UI_MOUNT_IMPORT", "Admin UI mount root");
-  enforceImports(ui.app, ui.appImports, "ARCH_UI_APP_IMPORT", "Admin UI app composition root");
+  for (const [name, ui] of Object.entries(compositionRoots).filter(([name]) => name.endsWith("Ui"))) {
+    const label = name === "adminUi" ? "Admin UI" : "Portal UI";
+    enforceImports(ui.mount, ui.mountImports, "ARCH_UI_MOUNT_IMPORT", `${label} mount root`);
+    enforceImports(ui.app, ui.appImports, "ARCH_UI_APP_IMPORT", `${label} app composition root`);
 
-  const app = byPath.get(ui.app);
-  if (!app) return;
-  for (const moduleImport of parseModuleSpecifiers(app.source)) {
-    if (!isRelativeSpecifier(moduleImport.specifier)) continue;
-    const target = normalizedSpecifier(moduleImport.specifier).startsWith("/")
-      ? undefined
-      : relativeImportTarget(ui.app, moduleImport.specifier, allResolvablePaths);
-    if (!target) continue;
-    const forbiddenTarget = ui.appForbiddenTargets.includes(target);
-    const forbiddenSuffix = ui.appForbiddenSuffixes.some((suffix) => target.endsWith(suffix));
-    if (forbiddenTarget || forbiddenSuffix) {
-      errors.push(importError("ARCH_UI_APP_API_IMPORT", ui.app, moduleImport, "Admin UI app composition may not import API-client or feature-workflow modules directly."));
+    const app = byPath.get(ui.app);
+    if (!app) continue;
+    for (const moduleImport of parseModuleSpecifiers(app.source)) {
+      if (!isRelativeSpecifier(moduleImport.specifier)) continue;
+      const target = normalizedSpecifier(moduleImport.specifier).startsWith("/")
+        ? undefined
+        : relativeImportTarget(ui.app, moduleImport.specifier, allResolvablePaths);
+      if (!target) continue;
+      const forbiddenTarget = ui.appForbiddenTargets.includes(target);
+      const forbiddenSuffix = ui.appForbiddenSuffixes.some((suffix) => target.endsWith(suffix));
+      if (forbiddenTarget || forbiddenSuffix) {
+        errors.push(importError("ARCH_UI_APP_API_IMPORT", ui.app, moduleImport, `${label} app composition may not import API-client or feature-workflow modules directly.`));
+      }
     }
-  }
-  const fetchCall = firstFetchCall(app.source);
-  if (fetchCall) {
-    errors.push(makeError("ARCH_UI_APP_DIRECT_FETCH", ui.app, "Admin UI app composition may not invoke fetch directly; network work belongs to feature/shared API modules.", "policy", { line: fetchCall.line }));
+    const fetchCall = firstFetchCall(app.source);
+    if (fetchCall) {
+      errors.push(makeError("ARCH_UI_APP_DIRECT_FETCH", ui.app, `${label} app composition may not invoke fetch directly; network work belongs to feature/shared API modules.`, "policy", { line: fetchCall.line }));
+    }
   }
 }
 

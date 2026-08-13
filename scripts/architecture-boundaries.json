@@ -31,6 +31,14 @@
       "appImports": ["./types", "../features/**", "../shared/**", "../styles.css"],
       "appForbiddenTargets": ["services/cloudflare-license-admin/src/ui/shared/api.ts"],
       "appForbiddenSuffixes": ["/workflow.ts"]
+    },
+    "portalUi": {
+      "mount": "services/cloudflare-customer-portal/src/ui/main.tsx",
+      "mountImports": ["./app/App"],
+      "app": "services/cloudflare-customer-portal/src/ui/app/App.tsx",
+        "appImports": ["../features/**", "../shared/**", "../styles.css", "../types"],
+      "appForbiddenTargets": [],
+      "appForbiddenSuffixes": ["/portalWorkflow.ts"]
     }
   }
 }

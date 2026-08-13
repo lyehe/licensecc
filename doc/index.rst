@@ -29,7 +29,7 @@ This repository contains:
 * ``lccgen``         : the license generator (vendored under ``extern/license-generator``), used to initialize projects and issue licenses.
 * ``examples/minimal``: a standalone integration example.
 * ``services/``      : Cloudflare Workers for online licensing (backend, operator console, customer portal, D1 backup).
-* ``sdks/``          : Python and .NET client SDKs for token verification and backend HTTP calls.
+* ``sdks/``          : Python, .NET, and Java client SDKs for token verification and backend HTTP calls.
 
 How to build
 ****************

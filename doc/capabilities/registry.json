@@ -187,7 +187,7 @@
         {"kind": "route_contract", "surface": "admin Worker", "path": "test/contracts/admin.json", "selector": "POST /api/admin/entitlements", "assertion": "The canonical admin contract exposes entitlement administration."},
         {"kind": "automated_test", "surface": "admin Worker", "path": "services/cloudflare-license-admin/test/worker/transition-contracts.test.mjs", "selector": "test(\"compiled entitlement transition state matrix distinguishes changes, no-ops, and terminal conflicts\"", "assertion": "The admin Worker entitlement transitions have automated coverage."},
         {"kind": "implementation", "surface": "admin UI", "path": "services/cloudflare-license-admin/src/ui/app/App.tsx", "selector": "export function App(): React.ReactElement {", "assertion": "The admin UI application component is implemented."},
-        {"kind": "automated_test", "surface": "admin UI", "path": "services/cloudflare-license-admin/test/admin-ui.e2e.mjs", "selector": "test(\"admin UI completes entitlement lifecycle and blocks duplicate create submissions\"", "assertion": "The admin UI entitlement lifecycle is covered by browser automation."}
+        {"kind": "automated_test", "surface": "admin UI", "path": "services/cloudflare-license-admin/test/admin-ui.lifecycle.e2e.mjs", "selector": "test(\"admin UI completes entitlement lifecycle and blocks duplicate create submissions\"", "assertion": "The admin UI entitlement lifecycle is covered by browser automation."}
       ]
     },
     {
@@ -203,7 +203,7 @@
         {"kind": "implementation", "surface": "customer portal Worker", "path": "services/cloudflare-customer-portal/src/worker/routes/self-service.ts", "selector": "async function apiEntitlements(", "assertion": "The portal Worker implements entitlement self-service."},
         {"kind": "route_contract", "surface": "customer portal Worker", "path": "test/contracts/portal.json", "selector": "GET /api/portal/entitlements", "assertion": "The canonical portal contract exposes entitlement self-service."},
         {"kind": "automated_test", "surface": "customer portal Worker", "path": "services/cloudflare-customer-portal/test/portal-worker-self-service.test.mjs", "selector": "test(\"A's /api/portal/entitlements returns ONLY A's entitlements\"", "assertion": "Portal self-service isolation has automated coverage."},
-        {"kind": "implementation", "surface": "portal UI", "path": "services/cloudflare-customer-portal/src/ui/main.tsx", "selector": "function App(): React.ReactElement {", "assertion": "The portal UI application component is implemented."},
+        {"kind": "implementation", "surface": "portal UI", "path": "services/cloudflare-customer-portal/src/ui/app/App.tsx", "selector": "export function App(): React.ReactElement {", "assertion": "The portal UI application component is implemented."},
         {"kind": "automated_test", "surface": "portal UI", "path": "services/cloudflare-customer-portal/test/portal-ui.e2e.mjs", "selector": "test(\"customer portal signs in with an 8-digit code and walks every screen without leaking secrets\"", "assertion": "The portal walkthrough is covered by browser automation."}
       ]
     },

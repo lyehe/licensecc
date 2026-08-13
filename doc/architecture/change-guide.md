@@ -62,23 +62,37 @@ are convenience and explanatory copy only.
 
 Add an admin feature under
 `services/cloudflare-license-admin/src/ui/features/<workflow>/` or keep a
-portal workflow in `services/cloudflare-customer-portal/src/ui/` when it has a
-demonstrated portal-local responsibility. Put browser API plumbing in the
+portal workflow under
+`services/cloudflare-customer-portal/src/ui/features/<workflow>/` when it has
+a demonstrated portal-local responsibility. Put browser API plumbing in the
 service's existing shared UI layer. `main.tsx` mounts, `App.tsx` composes, and
 feature modules own workflow state and presentation. Do not import Worker
 implementation files into UI code. Preserve neutral consequence text and
 deliberate confirmation for destructive actions.
 
-Run the service UI workflow tests and the relevant browser smoke test. Do not
-change the route contract merely to make a UI feature easier to compose.
+Run the service UI workflow tests and the relevant browser smoke test. Admin
+browser scenarios live in concern-specific `admin-ui.*.e2e.mjs` specs and
+share only the API fixture in `admin-ui.fixture.mjs`; add a scenario to the
+owning concern rather than rebuilding a monolithic suite. Do not change the
+route contract merely to make a UI feature easier to compose.
+
+## Release assembly
+
+Release orchestration stays in `scripts/assemble-release-artifacts.mjs` while
+format validation and filesystem boundaries live under `scripts/release/`.
+Keep those modules pure or dependency-injected where possible, preserve the
+canonical-HEAD input contract, and never relax output ownership or archive
+validation to accommodate a tool. Run `npm run test:release-artifacts`; a real
+release proof additionally requires two confined, byte-identical assemblies.
 
 ## SDK change
 
-Change the relevant package under `sdks/python/` or `sdks/dotnet/`, keeping
-wire-format and token verification behavior aligned with the canonical
-fixtures. Add package-local tests and update the SDK README when supported
-runtime or install behavior changes. Run `npm run test:sdks` from the root;
-this command runs Python and .NET checks without changing the root lockfile.
+Change the relevant package under `sdks/python/`, `sdks/dotnet/`, or
+`sdks/java/`, keeping wire-format and token verification behavior aligned with
+the canonical fixtures. Add package-local tests and update the SDK README when
+supported runtime or install behavior changes. Run `npm run test:sdks` from
+the root; this command runs Python, .NET, and Java checks without changing the
+root lockfile.
 
 ## OpenAPI operation
 

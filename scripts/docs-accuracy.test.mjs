@@ -38,6 +38,15 @@ function trackedSourceStats(relativeRoot) {
   };
 }
 
+function trackedChildDirectories(relativeRoot) {
+  const prefix = `${relativeRoot}/`;
+  return [...new Set(git(["ls-files", "--", relativeRoot])
+    .split(/\r?\n/u)
+    .filter((path) => path.startsWith(prefix))
+    .map((path) => path.slice(prefix.length).split("/", 1)[0]))]
+    .sort();
+}
+
 function sqlTableNames(relativePath) {
   const names = [...source(relativePath).matchAll(
     /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:"([^"]+)"|([A-Za-z_][A-Za-z0-9_]*))/giu,
@@ -190,6 +199,7 @@ test("organization evidence derives canonical, schema, source, and E2E facts", (
     ["Admin Worker", "services/cloudflare-license-admin/src/worker/index.ts", "services/cloudflare-license-admin/src/worker/app.ts"],
     ["Admin UI", "services/cloudflare-license-admin/src/ui/main.tsx", "services/cloudflare-license-admin/src/ui/app/App.tsx"],
     ["Portal Worker", "services/cloudflare-customer-portal/src/worker/index.ts", "services/cloudflare-customer-portal/src/worker/app.ts"],
+    ["Portal UI", "services/cloudflare-customer-portal/src/ui/main.tsx", "services/cloudflare-customer-portal/src/ui/app/App.tsx"],
   ];
   for (const [label, entry, app] of compositionCases) {
     const row = `| ${label} | ${lineCount(entry)} | ${lineCount(app)} |`;
@@ -201,7 +211,8 @@ test("organization evidence derives canonical, schema, source, and E2E facts", (
     "services/cloudflare-license-admin/src/worker/openapi/components.ts",
     "services/cloudflare-licensing-backend/src/fulfillment/order_ingest.mjs",
     "services/cloudflare-licensing-backend/src/routes/verify.ts",
-    "services/cloudflare-customer-portal/src/ui/main.tsx",
+    "services/cloudflare-license-admin/src/ui/features/catalog/Catalog.tsx",
+    "services/cloudflare-customer-portal/src/ui/features/devices/DevicesFeature.tsx",
     "services/cloudflare-d1-backup/src/core.ts",
   ];
   for (const relativePath of hotspotCases) {
@@ -216,6 +227,71 @@ test("organization evidence derives canonical, schema, source, and E2E facts", (
     report,
     new RegExp(`current non-running inventory is backend ${backendE2e}, admin ${adminE2e}, portal ${portalE2e}`, "i"),
   );
+});
+
+test("architecture documentation derives the SDK inventory and current measurements", () => {
+  const systemMap = source("doc/architecture/system-map.md");
+  const ownership = source("doc/architecture/ownership.md");
+  const changeGuide = source("doc/architecture/change-guide.md");
+  const docsIndex = source("doc/index.rst");
+  const packageJson = JSON.parse(source("package.json"));
+
+  assert.deepEqual(
+    trackedChildDirectories("sdks"),
+    ["dotnet", "java", "python"],
+    "the reviewed SDK inventory must change deliberately",
+  );
+  assert.match(systemMap, /`sdks\/` \| Python, \.NET, and Java client surfaces/);
+  assert.match(docsIndex, /Python, \.NET, and Java client SDKs/);
+  for (const sdkPath of ["sdks/python/", "sdks/dotnet/", "sdks/java/"]) {
+    assert.ok(ownership.includes(`\`${sdkPath}\``), `ownership must name ${sdkPath}`);
+    assert.ok(changeGuide.includes(`\`${sdkPath}\``), `change guide must route ${sdkPath}`);
+  }
+  assert.match(packageJson.scripts["test:sdks"], /sdks\/python/);
+  assert.match(packageJson.scripts["test:sdks"], /sdks\/dotnet/);
+  assert.match(packageJson.scripts["test:sdks"], /test:java-sdk/);
+  assert.match(source("scripts/test-java-sdk.mjs"), /join\(root,\s*"sdks",\s*"java"/);
+
+  const sourceCases = [
+    ["license-admin", "services/cloudflare-license-admin/src"],
+    ["licensing-backend", "services/cloudflare-licensing-backend/src"],
+    ["customer-portal", "services/cloudflare-customer-portal/src"],
+    ["D1-backup", "services/cloudflare-d1-backup/src"],
+  ];
+  for (const [label, relativeRoot] of sourceCases) {
+    const { lines } = trackedSourceStats(relativeRoot);
+    assert.match(
+      systemMap,
+      new RegExp(`${lines.toLocaleString("en-US")}\\s+lines for\\s+${label}`, "u"),
+      `system map must derive the current ${label} source total`,
+    );
+  }
+
+  const compositionCases = [
+    ["Backend", "services/cloudflare-licensing-backend/src/index.ts", "services/cloudflare-licensing-backend/src/app.ts"],
+    ["Admin Worker", "services/cloudflare-license-admin/src/worker/index.ts", "services/cloudflare-license-admin/src/worker/app.ts"],
+    ["Admin UI", "services/cloudflare-license-admin/src/ui/main.tsx", "services/cloudflare-license-admin/src/ui/app/App.tsx"],
+    ["Portal Worker", "services/cloudflare-customer-portal/src/worker/index.ts", "services/cloudflare-customer-portal/src/worker/app.ts"],
+    ["Portal UI", "services/cloudflare-customer-portal/src/ui/main.tsx", "services/cloudflare-customer-portal/src/ui/app/App.tsx"],
+  ];
+  for (const [label, entry, app] of compositionCases) {
+    const row = `| ${label} \`${entry.slice(entry.indexOf("src/"))}\` / \`${app.slice(app.indexOf("src/"))}\` | ${lineCount(entry)} | ${lineCount(app)} |`;
+    assert.ok(systemMap.includes(row), `system map must derive current composition counts for ${label}`);
+  }
+
+  const hotspotCases = [
+    "src/library/licensecc.cpp",
+    "services/cloudflare-license-admin/src/worker/openapi/components.ts",
+    "services/cloudflare-licensing-backend/src/fulfillment/order_ingest.mjs",
+    "services/cloudflare-licensing-backend/src/routes/verify.ts",
+    "services/cloudflare-license-admin/src/ui/features/catalog/Catalog.tsx",
+    "services/cloudflare-customer-portal/src/ui/features/devices/DevicesFeature.tsx",
+    "services/cloudflare-d1-backup/src/core.ts",
+  ];
+  for (const relativePath of hotspotCases) {
+    const row = `| \`${relativePath}\` | ${lineCount(relativePath).toLocaleString("en-US")} |`;
+    assert.ok(systemMap.includes(row), `system map must derive current hotspot count for ${relativePath}`);
+  }
 });
 
 test("admin browser instructions and the PR gate keep docs checks honest", () => {

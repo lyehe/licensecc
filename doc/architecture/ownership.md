@@ -12,9 +12,9 @@ individuals or teams that have not been confirmed.
 | Admin deployable maintainer | `services/cloudflare-license-admin/` | Operator Worker routes, authorization/use cases, admin OpenAPI, catalog/policy workflows, UI features, and deployment. |
 | Customer-portal deployable maintainer | `services/cloudflare-customer-portal/` | Customer auth/session/public routes, portal OpenAPI, self-service UI/workflows, and deployment. |
 | D1-backup deployable maintainer | `services/cloudflare-d1-backup/` | D1 export/R2 backup Worker, restore drill, Workflow, operational checks, and deployment. |
-| SDK maintainer | `sdks/python/`, `sdks/dotnet/`, `test/vectors/` | Python/.NET public client behavior, token/vector compatibility, package tests, and SDK documentation. |
+| SDK maintainer | `sdks/python/`, `sdks/dotnet/`, `sdks/java/`, `test/vectors/` | Python, .NET, and Java public client behavior, token/vector compatibility, package tests, and SDK documentation. |
 | API-contract maintainer | Each service's route inventory, `src/**/openapi/`, `test/contracts/`, contract tests | Served route sets, OpenAPI operations/components, canonical hashes, and compatibility review. The serving deployable remains the owner. |
-| Release and CI maintainer | `.github/workflows/`, `package.json`, `package-lock.json`, `scripts/`, `CMakePresets.json` | Reproducible installs, local/CI command parity, purity gates, architecture/secret checks, release evidence, and workflow configuration. |
+| Release and CI maintainer | `.github/workflows/`, `package.json`, `package-lock.json`, `scripts/` (including `scripts/release/`), `CMakePresets.json` | Reproducible installs, local/CI command parity, purity gates, architecture/secret checks, canonical artifact assembly/validation, release evidence, and workflow configuration. |
 | Documentation and architecture maintainer | `README.md`, `CONTRIBUTING.md`, `doc/`, `docs/implementation/` | Repository map, maintainer guidance, architecture decisions, user/developer docs, and evidence reports. Protected plans remain under `docs/superpowers/plans/`. |
 
 ## Boundary rules

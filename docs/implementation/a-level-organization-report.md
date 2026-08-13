@@ -86,9 +86,9 @@ generic dumping-ground package:
 
 | Boundary | Files | Lines |
 | --- | ---: | ---: |
-| Admin | 90 | 16,437 |
+| Admin | 95 | 17,095 |
 | Licensing backend | 36 | 6,590 |
-| Customer portal | 25 | 4,464 |
+| Customer portal | 35 | 4,672 |
 | D1 backup | 5 | 637 |
 
 The deployable composition roots remain small:
@@ -99,6 +99,7 @@ The deployable composition roots remain small:
 | Admin Worker | 1 | 55 |
 | Admin UI | 6 | 81 |
 | Portal Worker | 2 | 69 |
+| Portal UI | 6 | 109 |
 
 Large implementation files remain explicitly owned hotspots rather than
 implicit architecture:
@@ -109,7 +110,8 @@ implicit architecture:
 | `services/cloudflare-license-admin/src/worker/openapi/components.ts` | 1,308 |
 | `services/cloudflare-licensing-backend/src/fulfillment/order_ingest.mjs` | 1,159 |
 | `services/cloudflare-licensing-backend/src/routes/verify.ts` | 983 |
-| `services/cloudflare-customer-portal/src/ui/main.tsx` | 875 |
+| `services/cloudflare-license-admin/src/ui/features/catalog/Catalog.tsx` | 740 |
+| `services/cloudflare-customer-portal/src/ui/features/devices/DevicesFeature.tsx` | 408 |
 | `services/cloudflare-d1-backup/src/core.ts` | 326 |
 
 ## Integrated correctness and organization outcomes

@@ -14,16 +14,30 @@ import {
   writeFileSync,
 } from "node:fs";
 import { createRequire } from "node:module";
-import { dirname, isAbsolute, join, parse, relative, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { deflateRawSync, gunzipSync, inflateRawSync } from "node:zlib";
 
 import { checkVersionContract, readReleaseToolchainAuthorities, readVersionAuthorities } from "./check-version-contract.mjs";
+import { tarOctal, tarString, validateArchiveMembers, writeCppSourceArchive } from "./release/cpp-source-archive.mjs";
+import {
+  RELEASE_OWNER_FILE as OWNER_FILE,
+  assertNoReparseComponents,
+  assertReleaseOutputBoundary,
+  cleanupOwnedStaging,
+  nearestExistingAncestor,
+  ownsStaging,
+  pathWithin,
+  prepareOwnedOutput,
+  prepareOwnedVerifierOutput,
+  removeOwnedChild,
+  samePath,
+} from "./release/output-boundary.mjs";
+import { strictUtf8, validateWorkerBundle } from "./release/worker-bundle.mjs";
 
 const repositoryRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const LOCAL_WRANGLER_VERSION = "4.120.0";
 const REQUIRED_NPM_VERSION = "10.9.8";
-const OWNER_FILE = ".release-artifacts-owner";
 const METADATA_FILES = new Set(["checksums.sha256", "release-manifest.json", "spdx.json"]);
 const CPP_EXACT = new Set([
   "CMakeLists.txt",
@@ -44,7 +58,6 @@ const FORBIDDEN_ARTIFACT_NAME = /(?:^\.dev\.vars(?:$|\.)|^wrangler\.(?:toml|json
 const FORBIDDEN_CANONICAL_NAME = /(?:^\.dev\.vars(?:$|\.)|^wrangler\.(?:toml|jsonc)$|^id_rsa(?:\.pub)?$|\.(?:pem|key|pfx|p12|rsa|db|sqlite|sqlite3)$)/iu;
 const MAX_ARCHIVE_ENTRIES = 10_000;
 const MAX_ARCHIVE_MEMBER_BYTES = 128 * 1024 * 1024;
-const parsedWorkerSources = new Map();
 
 function sha256(contents) {
   return createHash("sha256").update(contents).digest("hex");
@@ -160,167 +173,6 @@ function assertCanonicalVersionContract({ sourceRoot, canonicalRoot }) {
   }
 }
 
-function realpath(value) {
-  return realpathSync.native ? realpathSync.native(value) : realpathSync(value);
-}
-
-function samePath(left, right) {
-  const normalized = (value) => resolve(value).replaceAll("/", "\\").replace(/[\\/]+$/u, "");
-  const first = normalized(left);
-  const second = normalized(right);
-  return process.platform === "win32" ? first.toLowerCase() === second.toLowerCase() : first === second;
-}
-
-function pathWithin(child, parent, { allowEqual = false } = {}) {
-  const distance = relative(resolve(parent), resolve(child));
-  if (distance === "") return allowEqual;
-  return distance !== ".." && !distance.startsWith(`..${sep}`) && !isAbsolute(distance);
-}
-
-function nearestExistingAncestor(value) {
-  let cursor = resolve(value);
-  while (!existsSync(cursor)) {
-    const parent = dirname(cursor);
-    if (samePath(parent, cursor)) throw new Error(`no existing ancestor for release output: ${value}`);
-    cursor = parent;
-  }
-  return cursor;
-}
-
-/** Reject symlink and Windows junction/reparse components before cleanup can touch them. */
-function assertNoReparseComponents(value) {
-  const absolute = resolve(value);
-  const parsed = parse(absolute);
-  let cursor = parsed.root;
-  const segments = relative(parsed.root, absolute).split(/[\\/]/u).filter(Boolean);
-  for (const segment of segments) {
-    cursor = join(cursor, segment);
-    if (!existsSync(cursor)) break;
-    const stat = lstatSync(cursor);
-    if (stat.isSymbolicLink()) throw new Error(`release output traverses a symlink or junction: ${cursor}`);
-    if (process.platform === "win32" && !samePath(realpath(cursor), cursor)) throw new Error(`release output traverses a reparse alias: ${cursor}`);
-  }
-}
-
-/**
- * An output is either wholly outside the checkout or a child of the one
- * repository-owned release staging root.  Lexical and physical checks are both
- * necessary because a junction can make an apparently safe spelling point back
- * at source.
- */
-function assertReleaseOutputBoundary({ root = repositoryRoot, outputDirectory, requireExists = false }) {
-  const source = resolve(root);
-  if (!existsSync(source)) throw new Error(`release source does not exist: ${source}`);
-  const output = resolve(outputDirectory);
-  const permitted = resolve(source, "build", "release-artifacts");
-  const sourceReal = realpath(source);
-  const lexicalInsideSource = pathWithin(output, source, { allowEqual: true });
-  if (samePath(output, source) || (lexicalInsideSource && !pathWithin(output, permitted))) throw new Error("release output must be outside the repository or beneath build/release-artifacts");
-
-  const ancestor = nearestExistingAncestor(output);
-  assertNoReparseComponents(ancestor);
-  const ancestorReal = realpath(ancestor);
-  if (!lexicalInsideSource && pathWithin(ancestorReal, sourceReal, { allowEqual: true })) throw new Error("release output resolves into the repository through an alias");
-  if (lexicalInsideSource && !pathWithin(ancestorReal, sourceReal, { allowEqual: true })) throw new Error("release output leaves the repository through an alias");
-
-  if (requireExists) {
-    if (!existsSync(output)) throw new Error(`release staging output does not exist: ${output}`);
-    assertNoReparseComponents(output);
-    const outputReal = realpath(output);
-    if (lexicalInsideSource) {
-      const permittedReal = realpath(permitted);
-      if (!pathWithin(outputReal, permittedReal)) throw new Error("release output escaped build/release-artifacts through an alias");
-    } else if (pathWithin(outputReal, sourceReal, { allowEqual: true })) {
-      throw new Error("release output resolves into the repository through an alias");
-    }
-  }
-  return { source, output, permitted };
-}
-
-function ownerText({ source, output }) {
-  return `licensecc-release-artifacts-v1\n${source}\n${output}\n`;
-}
-
-function claimOwnedOutput({ root, outputDirectory }) {
-  const verified = assertReleaseOutputBoundary({ root, outputDirectory, requireExists: true });
-  const marker = join(verified.output, OWNER_FILE);
-  writeFileSync(marker, ownerText(verified), { flag: "wx" });
-  return { ...verified, marker, owner: ownerText(verified) };
-}
-
-function prepareOwnedOutput({ root, outputDirectory }) {
-  const boundary = assertReleaseOutputBoundary({ root, outputDirectory });
-  if (existsSync(boundary.output)) throw new Error(`release staging output already exists: ${boundary.output}`);
-  mkdirSync(boundary.output, { recursive: true });
-  return claimOwnedOutput({ root, outputDirectory: boundary.output });
-}
-
-/** Keep MSVC's CMake probe short while still confining it below build/. */
-function prepareOwnedVerifierOutput(root) {
-  const source = resolve(root);
-  const parent = join(source, "build", "release-artifacts");
-  const ancestor = nearestExistingAncestor(parent);
-  assertNoReparseComponents(ancestor);
-  mkdirSync(parent, { recursive: true });
-  assertNoReparseComponents(parent);
-  const output = mkdtempSync(join(parent, ".rv-"));
-  try {
-    return claimOwnedOutput({ root: source, outputDirectory: output });
-  } catch (error) {
-    if (existsSync(output) && !lstatSync(output).isSymbolicLink()) rmSync(output, { recursive: true, force: true });
-    throw error;
-  }
-}
-
-function ownsStaging(staging) {
-  try {
-    const checked = assertReleaseOutputBoundary({ root: staging.source, outputDirectory: staging.output, requireExists: true });
-    const marker = join(checked.output, OWNER_FILE);
-    return lstatSync(marker).isFile() && readFileSync(marker, "utf8") === staging.owner;
-  } catch {
-    return false;
-  }
-}
-
-function removeOwnedChild(staging, child) {
-  if (!pathWithin(child, staging.output) || !ownsStaging(staging) || !existsSync(child)) return;
-  const stat = lstatSync(child);
-  if (stat.isSymbolicLink()) throw new Error("owned release staging child became a symlink");
-  rmSync(child, { recursive: true, force: true });
-}
-
-function cleanupOwnedStaging(staging) {
-  if (!staging || !ownsStaging(staging)) return;
-  rmSync(staging.output, { recursive: true, force: true });
-}
-
-function tarHeader(name, size) {
-  const header = Buffer.alloc(512);
-  let fileName = name;
-  let prefix = "";
-  if (Buffer.byteLength(fileName) > 100) {
-    const cut = fileName.lastIndexOf("/");
-    if (cut < 1 || Buffer.byteLength(fileName.slice(0, cut)) > 155) throw new Error(`tar path too long: ${name}`);
-    prefix = fileName.slice(0, cut);
-    fileName = fileName.slice(cut + 1);
-  }
-  const text = (value, at, length) => header.write(value, at, length, "utf8");
-  const octal = (value, at, length) => text(`${value.toString(8).padStart(length - 1, "0")}\0`, at, length);
-  text(fileName, 0, 100);
-  octal(0o644, 100, 8);
-  octal(0, 108, 8);
-  octal(0, 116, 8);
-  octal(size, 124, 12);
-  octal(0, 136, 12);
-  header.fill(0x20, 148, 156);
-  header[156] = 48;
-  text("ustar\0", 257, 6);
-  text("00", 263, 2);
-  text(prefix, 345, 155);
-  text(`${header.reduce((sum, byte) => sum + byte, 0).toString(8).padStart(6, "0")}\0 `, 148, 8);
-  return header;
-}
-
 function archiveRootName({ consumerId, cppVersion, platformVersion }) {
   return `licensecc-cpp-sdk-${safeConsumerId(consumerId)}-cpp-${safeVersion(cppVersion)}-platform-${safeVersion(platformVersion)}`;
 }
@@ -328,82 +180,13 @@ function archiveRootName({ consumerId, cppVersion, platformVersion }) {
 function createCppSourceArchive({ root = repositoryRoot, outputDirectory, consumerId, cppVersion = repositoryVersions(root).cppVersion, platformVersion = repositoryVersions(root).platformVersion }) {
   const archiveRoot = archiveRootName({ consumerId, cppVersion, platformVersion });
   const archivePath = join(outputDirectory, "cpp", `${archiveRoot}.tar`);
-  const chunks = [];
-  for (const path of trackedCppFiles(root)) {
-    const bytes = gitBlob(root, path);
-    const member = assertSafeRelativePath(`${archiveRoot}/${path}`);
-    chunks.push(tarHeader(member, bytes.length), bytes);
-    if (bytes.length % 512) chunks.push(Buffer.alloc(512 - (bytes.length % 512)));
-  }
-  chunks.push(Buffer.alloc(1024));
-  mkdirSync(dirname(archivePath), { recursive: true });
-  writeFileSync(archivePath, Buffer.concat(chunks));
-  return archivePath;
-}
-
-function tarString(header, start, length, label) {
-  const field = header.subarray(start, start + length);
-  const nul = field.indexOf(0);
-  const value = field.subarray(0, nul === -1 ? length : nul);
-  const suffix = nul === -1 ? Buffer.alloc(0) : field.subarray(nul + 1);
-  if (suffix.some((byte) => byte !== 0 && byte !== 0x20) || value.includes(0)) throw new Error(`release archive has malformed ${label}`);
-  const text = value.toString("utf8");
-  if (text.includes("�")) throw new Error(`release archive has malformed ${label}`);
-  return text;
-}
-
-function tarOctal(header, start, length, label) {
-  const field = header.subarray(start, start + length);
-  const text = field.toString("ascii").replace(/[\0 ]+$/u, "").trim();
-  if (text === "") return 0;
-  if (!/^[0-7]+$/u.test(text)) throw new Error(`release archive has malformed ${label}`);
-  const value = Number.parseInt(text, 8);
-  if (!Number.isSafeInteger(value) || value < 0) throw new Error(`release archive has malformed ${label}`);
-  return value;
-}
-
-function parseArchive(archivePath, { expectedRoot, expectedMembers } = {}) {
-  const archive = readFileSync(archivePath);
-  const entries = [];
-  const seen = new Set();
-  let offset = 0;
-  while (offset + 512 <= archive.length) {
-    const header = archive.subarray(offset, offset + 512);
-    if (header.every((byte) => byte === 0)) break;
-    const stored = tarOctal(header, 148, 8, "header checksum");
-    const copy = Buffer.from(header);
-    copy.fill(0x20, 148, 156);
-    if (copy.reduce((sum, byte) => sum + byte, 0) !== stored) throw new Error("release archive has an invalid header checksum");
-    const name = tarString(header, 0, 100, "member name");
-    const prefix = tarString(header, 345, 155, "member prefix");
-    const type = header[156];
-    if (type !== 0 && type !== 48) throw new Error("release archive contains a non-regular entry");
-    const size = tarOctal(header, 124, 12, "member size");
-    const member = assertSafeRelativePath(prefix ? `${prefix}/${name}` : name);
-    if (seen.has(member)) throw new Error("release archive contains duplicate members");
-    const dataOffset = offset + 512;
-    const padded = Math.ceil(size / 512) * 512;
-    if (!Number.isSafeInteger(padded) || dataOffset + padded > archive.length) throw new Error("release archive is truncated");
-    seen.add(member);
-    entries.push({ member, size, dataOffset, contents: archive.subarray(dataOffset, dataOffset + size) });
-    offset = dataOffset + padded;
-  }
-  if (offset + 1024 !== archive.length || !archive.subarray(offset, offset + 1024).every((byte) => byte === 0)) throw new Error("release archive is truncated or has trailing data");
-
-  if (expectedRoot) {
-    const prefix = `${expectedRoot}/`;
-    if (entries.some((entry) => !entry.member.startsWith(prefix))) throw new Error("release archive member is outside its expected root");
-    if (expectedMembers) {
-      const actual = entries.map((entry) => entry.member.slice(prefix.length)).sort(ordinal);
-      const expected = [...expectedMembers].sort(ordinal);
-      if (JSON.stringify(actual) !== JSON.stringify(expected)) throw new Error(`release archive member set does not match canonical C++ inputs (expected ${expected.length}, got ${actual.length}; root=${expectedRoot})`);
-    }
-  }
-  return entries;
-}
-
-function validateArchiveMembers(archivePath, options) {
-  return parseArchive(archivePath, options);
+  return writeCppSourceArchive({
+    archivePath,
+    members: trackedCppFiles(root).map((path) => ({
+      path: assertSafeRelativePath(`${archiveRoot}/${path}`),
+      contents: gitBlob(root, path),
+    })),
+  });
 }
 
 function assertSafePackageMemberPath(value, label) {
@@ -1456,7 +1239,7 @@ function canonicalizeNugetArtifact({ archivePath, packageId, platformVersion, sy
 }
 
 function extractValidatedArchive({ archivePath, destination, expectedRoot, expectedMembers }) {
-  const entries = parseArchive(archivePath, { expectedRoot, expectedMembers });
+  const entries = validateArchiveMembers(archivePath, { expectedRoot, expectedMembers });
   const target = resolve(destination);
   if (existsSync(target)) {
     if (lstatSync(target).isSymbolicLink() || readdirSync(target).length !== 0) throw new Error(`release archive extraction destination is not an empty owned directory: ${target}`);
@@ -1917,160 +1700,6 @@ function validateUiAssets(directory, label) {
   };
   visit(directory);
   if (!files.includes("index.html") || !files.some((member) => /^assets\/[^/]+\.(?:css|js|mjs)$/iu.test(member))) throw new Error(`${label} output must contain nonempty index.html and a built CSS or JavaScript asset`);
-}
-
-function strictUtf8(bytes, label) {
-  try {
-    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-  } catch {
-    throw new Error(`${label} is not valid UTF-8`);
-  }
-}
-
-/** Parse, but never execute, a module bundle with the same Node parser used by release tooling. */
-function parseWorkerModule(bytes, label) {
-  if (!Buffer.isBuffer(bytes) || bytes.length === 0 || bytes.length > MAX_ARCHIVE_MEMBER_BYTES) throw new Error(`${label} is empty or too large`);
-  const cacheKey = sha256(bytes);
-  const cached = parsedWorkerSources.get(cacheKey);
-  if (cached !== undefined) return cached;
-  const source = strictUtf8(bytes, label);
-  const parsed = spawnSync(process.execPath, ["--input-type=module", "--check"], {
-    input: source,
-    encoding: "utf8",
-    windowsHide: true,
-  });
-  if (parsed.error || parsed.status !== 0) throw new Error(`${label} does not parse as an ES module`);
-  if (parsedWorkerSources.size < 256) parsedWorkerSources.set(cacheKey, source);
-  return source;
-}
-
-function workerTokens(source) {
-  const tokens = [];
-  const regexMayStartAfter = new Set(["(", "[", "{", ",", ";", ":", "=", "!", "?", "&", "|", "+", "-", "*", "%", "^", "~", "<", ">", "return", "throw", "case", "delete", "void", "typeof", "new", "in", "of", "yield", "await"]);
-  const skipQuoted = (cursor, quote) => {
-    for (let index = cursor + 1; index < source.length; index += 1) {
-      if (source[index] === "\\") {
-        index += 1;
-      } else if (source[index] === quote) {
-        return index + 1;
-      }
-    }
-    return source.length;
-  };
-  let cursor = 0;
-  while (cursor < source.length) {
-    const character = source[cursor];
-    const next = source[cursor + 1];
-    if (/\s/u.test(character)) {
-      cursor += 1;
-    } else if (character === "/" && next === "/") {
-      const end = source.indexOf("\n", cursor + 2);
-      cursor = end === -1 ? source.length : end + 1;
-    } else if (character === "/" && next === "*") {
-      const end = source.indexOf("*/", cursor + 2);
-      cursor = end === -1 ? source.length : end + 2;
-    } else if (character === '"' || character === "'") {
-      let value = "";
-      let index = cursor + 1;
-      for (; index < source.length; index += 1) {
-        if (source[index] === "\\") {
-          value += source[index + 1] ?? "";
-          index += 1;
-        } else if (source[index] === character) {
-          index += 1;
-          break;
-        } else value += source[index];
-      }
-      tokens.push({ kind: "string", value });
-      cursor = index;
-    } else if (character === "`") {
-      cursor = skipQuoted(cursor, "`");
-    } else if (character === "/" && regexMayStartAfter.has(tokens.at(-1)?.value)) {
-      cursor = skipQuoted(cursor, "/");
-      while (/[A-Za-z]/u.test(source[cursor] ?? "")) cursor += 1;
-    } else if (/[A-Za-z_$]/u.test(character)) {
-      const match = /^[A-Za-z_$][\w$]*/u.exec(source.slice(cursor));
-      tokens.push({ kind: "identifier", value: match[0] });
-      cursor += match[0].length;
-    } else {
-      tokens.push({ kind: "punctuator", value: character });
-      cursor += 1;
-    }
-  }
-  return tokens;
-}
-
-/** Ask Node's module parser for exports without evaluating the bundle. */
-function moduleExportsDefault(source) {
-  const inspector = [
-    'import vm from "node:vm";',
-    'import { readFileSync } from "node:fs";',
-    'const source = readFileSync(0, "utf8");',
-    'const module = new vm.SourceTextModule(source);',
-    'await module.link(() => { throw new Error("static import is not expected in a Worker bundle"); });',
-    'process.stdout.write(JSON.stringify(Object.getOwnPropertyNames(module.namespace)));',
-  ].join("");
-  const parsed = spawnSync(process.execPath, ["--experimental-vm-modules", "--input-type=module", "-e", inspector], {
-    input: source,
-    encoding: "utf8",
-    windowsHide: true,
-  });
-  if (parsed.error || parsed.status !== 0) return false;
-  try {
-    return JSON.parse(parsed.stdout).includes("default");
-  } catch {
-    return false;
-  }
-}
-
-function hasWorkerEntrypoint(source) {
-  if (moduleExportsDefault(source)) return true;
-  const tokens = workerTokens(source);
-  let depth = 0;
-  for (let index = 0; index < tokens.length; index += 1) {
-    const token = tokens[index];
-    if (token.value === "{") {
-      depth += 1;
-      continue;
-    }
-    if (token.value === "}") {
-      depth = Math.max(0, depth - 1);
-      continue;
-    }
-    if (depth !== 0) continue;
-    if (token.value === "export" && tokens[index + 1]?.value === "default") return true;
-    if (token.value === "export" && tokens[index + 1]?.value === "{") {
-      let braceDepth = 0;
-      for (let cursor = index + 1; cursor < tokens.length; cursor += 1) {
-        if (tokens[cursor].value === "{") braceDepth += 1;
-        else if (tokens[cursor].value === "}") {
-          braceDepth -= 1;
-          if (braceDepth === 0) break;
-        } else if (braceDepth === 1 && (tokens[cursor].value === "default" || (tokens[cursor].value === "as" && tokens[cursor + 1]?.value === "default"))) return true;
-      }
-    }
-    if (token.value === "addEventListener" && tokens[index + 1]?.value === "(" && tokens[index + 2]?.kind === "string" && tokens[index + 2]?.value === "fetch") return true;
-  }
-  return false;
-}
-
-/** Require a parsed non-empty JavaScript bundle and an explicit Worker fetch/module entrypoint. */
-function validateWorkerBundle(directory, label = "Worker bundle") {
-  if (!existsSync(directory) || lstatSync(directory).isSymbolicLink()) throw new Error(`${label} directory is missing or unsafe`);
-  const javascript = [];
-  const visit = (current) => {
-    for (const entry of readdirSync(current, { withFileTypes: true }).sort((left, right) => ordinal(left.name, right.name))) {
-      const child = join(current, entry.name);
-      if (entry.isSymbolicLink()) throw new Error(`${label} contains a symbolic link`);
-      if (entry.isDirectory()) visit(child);
-      else if (entry.isFile() && /\.(?:mjs|cjs|js)$/iu.test(entry.name)) javascript.push(child);
-      else if (!entry.isFile()) throw new Error(`${label} contains an unsupported filesystem entry`);
-    }
-  };
-  visit(directory);
-  if (javascript.length === 0) throw new Error(`${label} has no JavaScript entrypoint`);
-  const sources = javascript.map((file) => parseWorkerModule(readFileSync(file), `${label} ${relative(directory, file)}`));
-  if (!sources.some(hasWorkerEntrypoint)) throw new Error(`${label} has no Worker fetch or module default entrypoint`);
 }
 
 /** Remove Wrangler's timestamped note and make source maps portable. */

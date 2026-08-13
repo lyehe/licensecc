@@ -5,7 +5,7 @@ const baseURL = externalBaseUrl ?? "http://127.0.0.1:4173";
 
 export default defineConfig({
   testDir: "./test",
-  testMatch: /admin-ui\.e2e\.mjs$/,
+  testMatch: /admin-ui\.[^.]+\.e2e\.mjs$/,
   timeout: 30_000,
   workers: 1,
   reporter: [["list"]],

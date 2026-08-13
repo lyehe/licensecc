@@ -18,7 +18,7 @@ rewrite.
 | `services/cloudflare-license-admin/` | Administrative Worker API and its React/Vite operator UI. | Cloudflare license-admin Worker plus static UI assets. |
 | `services/cloudflare-customer-portal/` | Customer portal Worker, session/auth flow, and React/Vite customer UI. | Cloudflare customer-portal Worker plus static UI assets. |
 | `services/cloudflare-d1-backup/` | D1 export-to-R2 backup Worker and Workflow composition. | Cloudflare D1 backup Worker and `D1BackupWorkflow`. |
-| `sdks/` | Python and .NET client surfaces. | Client SDK packages. |
+| `sdks/` | Python, .NET, and Java client surfaces. | Client SDK packages. |
 | `test/` | C++/service tests and deterministic public golden vectors. | Test-only fixtures and suites. |
 
 `extern/license-generator` is repository-owned vendored source. Its
@@ -88,32 +88,34 @@ path guard and the build-purity script.
 
 ## Measured hotspots and responsibility audit
 
-Measurements are tracked source lines at the Task 11 base, collected from
-production `src` trees. They identify ownership pressure; they are not a
-quality score. The large files below have explicit owners in
-{doc}`ownership` and are not shared implementation by accident.
+Measurements are current tracked source lines collected from production `src`
+trees and verified by `scripts/docs-accuracy.test.mjs`. They identify ownership
+pressure; they are not a quality score. The large files below have explicit
+owners in {doc}`ownership` and are not shared implementation by accident.
 
 | Path | Lines | Responsibility audit |
 | --- | ---: | --- |
-| `src/library/licensecc.cpp` | 1,462 | C++ public API orchestration; changes pair with public ABI tests and CMake packaging. |
-| `services/cloudflare-license-admin/src/worker/openapi/components.ts` | 988 | Admin contract components; API-contract ownership stays with the admin deployable. |
-| `services/cloudflare-licensing-backend/src/fulfillment/order_ingest.mjs` | 1,091 | Backend order-ingest bounded context; persistence and exactly-once tests stay backend-owned. |
-| `services/cloudflare-licensing-backend/src/routes/verify.ts` | 985 | Backend verification route and abuse controls; it is not a shared package concern. |
-| `services/cloudflare-customer-portal/src/ui/main.tsx` | 640 | Portal UI composition and customer workflows; portal-local UI ownership. |
+| `src/library/licensecc.cpp` | 1,486 | C++ public API orchestration; changes pair with public ABI tests and CMake packaging. |
+| `services/cloudflare-license-admin/src/worker/openapi/components.ts` | 1,308 | Admin contract components; API-contract ownership stays with the admin deployable. |
+| `services/cloudflare-licensing-backend/src/fulfillment/order_ingest.mjs` | 1,159 | Backend order-ingest bounded context; persistence and exactly-once tests stay backend-owned. |
+| `services/cloudflare-licensing-backend/src/routes/verify.ts` | 983 | Backend verification route and abuse controls; it is not a shared package concern. |
+| `services/cloudflare-license-admin/src/ui/features/catalog/Catalog.tsx` | 740 | Catalog list/mutation coordinator; consequence-heavy import/projection workflows and presentation stay in sibling catalog modules. |
+| `services/cloudflare-customer-portal/src/ui/features/devices/DevicesFeature.tsx` | 408 | Portal device/floating-seat workflow; portal-local state and consequences remain feature-owned. |
 | `services/cloudflare-d1-backup/src/core.ts` | 326 | D1 export/R2 backup orchestration; backup remains independently deployable. |
 
-Composition roots remain intentionally small. The Task 9 accepted final and
-Task 11 current counts are:
+Composition roots remain intentionally small. Current counts are:
 
-| Deployable | Task 9 accepted | Task 11 current |
+| Deployable | Entry lines | App lines |
 | --- | ---: | ---: |
-| Backend `src/index.ts` / `src/app.ts` | 1 / 73 | 1 / 80 |
-| Admin Worker `src/worker/index.ts` / `src/worker/app.ts` | 1 / 50 | 1 / 54 |
-| Admin UI `src/ui/main.tsx` / `src/ui/app/App.tsx` | 4 / 75 | 6 / 81 |
-| Portal Worker `src/worker/index.ts` / `src/worker/app.ts` | 2 / 67 | 2 / 75 |
+| Backend `src/index.ts` / `src/app.ts` | 1 | 98 |
+| Admin Worker `src/worker/index.ts` / `src/worker/app.ts` | 1 | 55 |
+| Admin UI `src/ui/main.tsx` / `src/ui/app/App.tsx` | 6 | 81 |
+| Portal Worker `src/worker/index.ts` / `src/worker/app.ts` | 2 | 69 |
+| Portal UI `src/ui/main.tsx` / `src/ui/app/App.tsx` | 6 | 109 |
 
-Current production-source totals are 10,940 lines for license-admin, 5,946 for
-licensing-backend, 3,480 for customer-portal, and 568 for D1-backup. These
+Current production-source totals are 17,095 lines for license-admin, 6,590
+lines for licensing-backend, 4,672 lines for customer-portal, and 637 lines for
+D1-backup. These
 counts include TypeScript, TSX, JavaScript, and MJS under each service's
 tracked `src` tree. They are evidence for responsibility review, not a reason
 to move code without a behavioral or ownership boundary.

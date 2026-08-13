@@ -2,25 +2,16 @@ import React, { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
 import type {
   CatalogFeature,
-  CatalogImportApplyResult,
-  CatalogImportEffect,
   CatalogImportManifest,
-  CatalogImportPreviewResponse,
   CatalogPlan,
   CatalogPlanFeature,
-  PlanProjectionApplyInput,
-  PlanProjectionApplyResult,
-  PlanProjectionInput,
-  PlanProjectionItem,
-  PlanProjectionPreviewResponse,
   Policy,
 } from "../../../shared/api";
 import { api, apiFailureDetails, apiFailureMessage, parseExactApiSuccess } from "../../shared/api";
-import { confirmMutationUnknown, confirmSuccessWithRefreshFailure, ConfirmRefreshFailure, EXACT_READ_PROOF, focusTargetInRow, focusTargetInSection, type ConfirmActionContext, type ConfirmActionOutcome, type ConfirmActionResolution, type ExactReadProof, useContextGeneration, useOperatorControls } from "../../shared/controls";
+import { confirmMutationUnknown, confirmSuccessWithRefreshFailure, ConfirmRefreshFailure, EXACT_READ_PROOF, focusTargetInRow, type ConfirmActionContext, type ConfirmActionOutcome, type ConfirmActionResolution, type ExactReadProof, useContextGeneration, useOperatorControls } from "../../shared/controls";
 import { useCoreRefresh } from "../../shared/coreRefresh";
-import { formatEpoch, shortHash } from "../../shared/format";
 import { loadAllExactPages, loadMore } from "../../shared/pagination";
-import { hasCatalogFeatureData, hasCatalogFeatureListData, hasCatalogFeatureTransitionData, hasCatalogImportApplyData, hasCatalogImportManifestData, hasCatalogImportPreviewData, hasCatalogPlanData, hasCatalogPlanFeatureData, hasCatalogPlanFeatureListData, hasCatalogPlanFeatureTransitionData, hasCatalogPlanListData, hasCatalogPlanTransitionData, hasPlanProjectionApplyData, hasPlanProjectionPreviewEvidence, hasPolicyListData, mutationFailurePolicies, parseMutationResponse } from "../../shared/mutationGuards";
+import { hasCatalogFeatureData, hasCatalogFeatureListData, hasCatalogFeatureTransitionData, hasCatalogImportManifestData, hasCatalogPlanData, hasCatalogPlanFeatureData, hasCatalogPlanFeatureListData, hasCatalogPlanFeatureTransitionData, hasCatalogPlanListData, hasCatalogPlanTransitionData, hasPolicyListData, mutationFailurePolicies, parseMutationResponse } from "../../shared/mutationGuards";
 import { useRequestFence } from "../../shared/requestFence";
 import {
   canRunCatalogAction,
@@ -28,15 +19,6 @@ import {
   catalogFeaturePath,
   catalogFeaturesPath,
   catalogFeatureTransitionPath,
-  catalogImportApplyBody,
-  catalogImportApplyMatchesConfirmedPreview,
-  catalogImportEffectValueLabel,
-  catalogImportInputDigest,
-  catalogImportInputSnapshot,
-  catalogImportPath,
-  catalogImportPreviewMatchesLocalInput,
-  catalogImportTargetFields,
-  catalogImportTargetKey,
   catalogPlanExportPath,
   catalogPlanFeatureTransitionPath,
   catalogPlanFeaturesPath,
@@ -51,31 +33,16 @@ import {
   emptyCatalogFeatureForm,
   emptyCatalogPlanFeatureForm,
   emptyCatalogPlanForm,
-  emptyPlanProjectionForm,
   normalizeCatalogFeatureForm,
   normalizeCatalogFeaturePatch,
   normalizeCatalogPlanFeatureForm,
   normalizeCatalogPlanForm,
   normalizeCatalogPlanPatch,
-  normalizePlanProjectionForm,
-  planProjectionInputDigest,
-  planProjectionApplyBody,
-  planProjectionApplyPath,
-  PlanProjectionFormState,
-  planProjectionPreviewPath,
 } from "./workflow";
-
-interface PlanProjectionPreviewBinding {
-  input: PlanProjectionInput;
-  digest: string;
-  preview: PlanProjectionPreviewResponse;
-}
-
-interface CatalogImportPreviewBinding {
-  digest: string;
-  snapshot: string;
-  preview: CatalogImportPreviewResponse;
-}
+import { CatalogFeatureEditor, CatalogImportEditor, CatalogPlanEditor, CatalogPlanFeatureEditor, PlanProjectionEditor } from "./CatalogForms";
+import { CatalogFeaturesTable, CatalogPlanFeaturesTable, CatalogPlansTable, PlanProjectionResults } from "./CatalogTables";
+import { useCatalogImportWorkflow } from "./useCatalogImportWorkflow";
+import { usePlanProjectionWorkflow } from "./usePlanProjectionWorkflow";
 
 export function Catalog({ active }: { active: boolean }): React.ReactElement | null {
   const [catalogFeaturesSnapshot, setCatalogFeatures] = useState<CatalogFeature[]>([]);
@@ -91,16 +58,6 @@ export function Catalog({ active }: { active: boolean }): React.ReactElement | n
   const [selectedCatalogPlanId, setSelectedCatalogPlanId] = useState("");
   const [catalogPlanFeaturesSnapshot, setCatalogPlanFeatures] = useState<CatalogPlanFeature[]>([]);
   const [catalogPlanFeatureForm, setCatalogPlanFeatureForm] = useState(emptyCatalogPlanFeatureForm);
-  const [catalogImportText, setCatalogImportText] = useState("");
-  const [catalogImportPreviewBinding, setCatalogImportPreviewBinding] = useState<CatalogImportPreviewBinding | null>(null);
-  const catalogImportPreviewBindingRef = useRef<CatalogImportPreviewBinding | null>(null);
-  catalogImportPreviewBindingRef.current = catalogImportPreviewBinding;
-  const [catalogImportApplyResult, setCatalogImportApplyResult] = useState<CatalogImportApplyResult | null>(null);
-  const catalogImportRevision = useRef(0);
-  const [planForm, setPlanForm] = useState(emptyPlanProjectionForm);
-  const [planPreviewBinding, setPlanPreviewBinding] = useState<PlanProjectionPreviewBinding | null>(null);
-  const [planApplyResult, setPlanApplyResult] = useState<PlanProjectionApplyResult | null>(null);
-  const planProjectionRevision = useRef(0);
   const [activePolicies, setActivePolicies] = useState<Policy[]>([]);
   const { busy: requestBusy, operationLocked, currentReason, requestConfirm, runConsequenceAction, runKeyedMutation, runMutation, setMessage, setReason } = useOperatorControls();
   const busy = requestBusy || operationLocked;
@@ -127,10 +84,6 @@ export function Catalog({ active }: { active: boolean }): React.ReactElement | n
   const { generation: catalogPlanFeatureGeneration, isCurrent: isCatalogPlanFeatureGenerationCurrent, currentGeneration: currentCatalogPlanFeatureGeneration, currentContext: currentCatalogPlanFeatureContext } = useContextGeneration(catalogPlanFeatureContextKey);
   const catalogPlanFeatureFormContextKey = JSON.stringify(catalogPlanFeatureForm);
   const { generation: catalogPlanFeatureFormGeneration, isCurrent: isCatalogPlanFeatureFormGenerationCurrent } = useContextGeneration(catalogPlanFeatureFormContextKey);
-  const catalogImportContextKey = `${active ? "active" : "inactive"}\u0000${catalogImportText}`;
-  const { generation: catalogImportGeneration, isCurrent: isCatalogImportGenerationCurrent, currentGeneration: currentCatalogImportGeneration } = useContextGeneration(catalogImportContextKey);
-  const catalogImportActiveRef = useRef(active);
-  catalogImportActiveRef.current = active;
   const catalogPlanFeaturesFence = useRequestFence(`${active ? "active" : "inactive"}\u0000${catalogPlanFeatureContextKey}`);
   const activePoliciesFence = useRequestFence(`${active ? "active" : "inactive"}\u0000catalog-active-policies`);
   const exportFence = useRequestFence(`${active ? "active" : "inactive"}\u0000catalog-export`);
@@ -141,6 +94,18 @@ export function Catalog({ active }: { active: boolean }): React.ReactElement | n
   const currentCatalogPlansRefreshRef = useRef<() => Promise<ExactReadProof | null>>(() => Promise.resolve(null));
   const currentCatalogPlanFeaturesRefreshRef = useRef<() => Promise<ExactReadProof | null>>(() => Promise.resolve(null));
   const currentCatalogImportRefreshRef = useRef<() => Promise<ExactReadProof | null>>(() => Promise.resolve(null));
+  const planProjection = usePlanProjectionWorkflow({ refreshCore, runKeyedMutation, runMutation, setMessage });
+  const catalogImport = useCatalogImportWorkflow({
+    active,
+    invalidatePlanProjection: planProjection.invalidate,
+    refreshCurrentCatalog: () => currentCatalogImportRefreshRef.current(),
+    requestConfirm,
+    runMutation,
+    setMessage,
+  });
+  const invalidatePlanProjectionPreview = planProjection.invalidate;
+  const invalidateCatalogImportPreview = catalogImport.invalidate;
+  const updatePlanProjectionForm = planProjection.updateForm;
 
   async function refreshCatalogFeatures(invalidatePreview = true, strict = false, isCurrent: () => boolean = () => true): Promise<ExactReadProof | null> {
     if (!isCurrent()) return null;
@@ -262,25 +227,6 @@ export function Catalog({ active }: { active: boolean }): React.ReactElement | n
       else if (result.kind === "failure") setMessage(result.message);
     })();
   }, [active, activePoliciesFence, setMessage]);
-
-  function invalidatePlanProjectionPreview(): void {
-    planProjectionRevision.current += 1;
-    setPlanPreviewBinding(null);
-    setPlanApplyResult(null);
-  }
-
-  function invalidateCatalogImportPreview(clearResult = true): void {
-    catalogImportRevision.current += 1;
-    catalogImportPreviewBindingRef.current = null;
-    setCatalogImportPreviewBinding(null);
-    if (clearResult) setCatalogImportApplyResult(null);
-  }
-
-  function updatePlanProjectionForm(updater: (current: PlanProjectionFormState) => PlanProjectionFormState): void {
-    planProjectionRevision.current += 1;
-    setPlanForm(updater);
-    setPlanPreviewBinding(null);
-  }
 
   function selectCatalogPlan(plan: CatalogPlan): void {
     setSelectedCatalogPlanId(plan.id);
@@ -640,171 +586,6 @@ export function Catalog({ active }: { active: boolean }): React.ReactElement | n
     });
   }
 
-  async function previewCatalogImport(): Promise<void> {
-    const importGeneration = catalogImportGeneration;
-    const revision = catalogImportRevision.current;
-    const isCurrent = (): boolean => active && isCatalogImportGenerationCurrent(importGeneration) && catalogImportRevision.current === revision;
-    let manifest: CatalogImportManifest;
-    let snapshot: string;
-    let digest: string;
-    try {
-      manifest = JSON.parse(catalogImportText) as CatalogImportManifest;
-      snapshot = catalogImportInputSnapshot(manifest);
-      digest = await catalogImportInputDigest(manifest);
-    } catch {
-      if (isCurrent()) setMessage("invalid_catalog_import_manifest");
-      return;
-    }
-    if (!isCurrent()) return;
-    await runMutation(async () => {
-      const parsed = parseMutationResponse(
-        await api<unknown>(catalogImportPath(true), { method: "POST", body: JSON.stringify(manifest) }),
-        "catalog_import_previewed",
-        hasCatalogImportPreviewData,
-        mutationFailurePolicies.catalogImport,
-        "initial",
-      );
-      if (!isCurrent()) return;
-      if (parsed.kind === "success") {
-        if (!catalogImportPreviewMatchesLocalInput(parsed.data, digest, snapshot)) {
-          invalidateCatalogImportPreview();
-          setMessage("catalog_import_manifest_digest_mismatch");
-          return;
-        }
-        const binding: CatalogImportPreviewBinding = { digest, snapshot, preview: parsed.data };
-        catalogImportPreviewBindingRef.current = binding;
-        setCatalogImportPreviewBinding(binding);
-        setCatalogImportApplyResult(null);
-        setMessage(`${parsed.code} (${parsed.requestId})`);
-        return;
-      }
-      if (parsed.kind === "failure") {
-        setMessage(parsed.code === "catalog_import_too_large"
-          ? "catalog_import_too_large — narrow the manifest and preview again"
-          : `${parsed.code} (${parsed.requestId})`);
-        return;
-      }
-      setMessage("invalid_mutation_response");
-    });
-  }
-
-  function catalogImportBindingIsUsable(binding: CatalogImportPreviewBinding, revision: number): boolean {
-    return catalogImportRevision.current === revision && catalogImportPreviewBindingRef.current === binding;
-  }
-
-  async function applyCatalogImportFromPreview(
-    binding: CatalogImportPreviewBinding,
-    revision: number,
-    importGeneration: number,
-    idempotencyKey: string,
-  ): Promise<ConfirmActionOutcome> {
-    // The original presentation owns its focus target. A retained same-key
-    // replay may still be required after navigating away, but must never use
-    // this captured generation to publish into or focus a successor view.
-    const isCurrent = (): boolean => catalogImportActiveRef.current && isCatalogImportGenerationCurrent(importGeneration);
-    const bindingMatchesLocalInput = catalogImportPreviewMatchesLocalInput(binding.preview, binding.digest, binding.snapshot);
-    if (!catalogImportBindingIsUsable(binding, revision) || !bindingMatchesLocalInput) {
-      return { ok: false, message: "preview_required", retryable: true };
-    }
-    const body = JSON.stringify(catalogImportApplyBody(binding.preview.preview_id));
-    const refreshStatus = async (): Promise<ExactReadProof | null> => await currentCatalogImportRefreshRef.current();
-    const postSuccessRefresh = confirmSuccessWithRefreshFailure(refreshStatus, isCurrent).manualRefresh;
-    const hasConfirmedApplyData = (value: unknown): value is CatalogImportApplyResult =>
-      bindingMatchesLocalInput && hasCatalogImportApplyData(value) && catalogImportApplyMatchesConfirmedPreview(value, binding.preview);
-    const applyKnown = async (
-      parsed: { code: string; requestId: string; data: CatalogImportApplyResult },
-      publicationGeneration: number,
-    ): Promise<ConfirmActionResolution> => {
-      const ownsBinding = catalogImportBindingIsUsable(binding, revision);
-      const mayPublish = ownsBinding && catalogImportActiveRef.current && isCatalogImportGenerationCurrent(publicationGeneration);
-      // A known write consumes only the precise capability that issued it.
-      // Clearing that capability is safe even when its screen is inactive;
-      // rendering the response/result is not.
-      if (ownsBinding) {
-        invalidateCatalogImportPreview();
-        invalidatePlanProjectionPreview();
-      }
-      if (mayPublish) {
-        setCatalogImportApplyResult(parsed.data);
-        setMessage(`${parsed.code} (${parsed.requestId})`);
-      }
-      if (!mayPublish) return "applied";
-      try {
-        return (await refreshStatus()) === EXACT_READ_PROOF ? "applied" : "refresh_failed";
-      } catch {
-        return "refresh_failed";
-      }
-    };
-    const replay = async (): Promise<ConfirmActionResolution> => {
-      // Reconciliation owns an immutable request. Presentation freshness must
-      // not suppress the same-key POST: it is the only safe way to determine
-      // whether the already-submitted server mutation committed.
-      let retry: unknown | undefined;
-      try {
-        retry = await runMutation(async () => await api<unknown>(catalogImportPath(), {
-          method: "POST",
-          headers: { "idempotency-key": idempotencyKey },
-          body,
-        }), "recovery");
-      } catch {
-        return "indeterminate";
-      }
-      if (retry === undefined) return "indeterminate";
-      const parsed = parseMutationResponse(retry, "catalog_import_applied", hasConfirmedApplyData, mutationFailurePolicies.catalogImport, "replay");
-      if (parsed.kind !== "success") return parsed.kind === "failure" ? "unapplied" : "indeterminate";
-      // Capture the generation only after the replay response arrives. The
-      // exact binding check in applyKnown prevents it from overwriting a new
-      // Preview or a view that was superseded while the request was in flight.
-      return await applyKnown(parsed, currentCatalogImportGeneration());
-    };
-    const reconciliation = { label: "Reconcile catalog import", run: replay, isCurrent, settlesRetainedAttempt: true, postSuccessRefresh };
-    let mutation: unknown | undefined;
-    try {
-      mutation = await runMutation(async () => await api<unknown>(catalogImportPath(), {
-        method: "POST",
-        headers: { "idempotency-key": idempotencyKey },
-        body,
-      }), "consequence");
-    } catch {
-      return confirmMutationUnknown(reconciliation);
-    }
-    if (mutation === undefined) return confirmMutationUnknown(reconciliation);
-    const parsed = parseMutationResponse(mutation, "catalog_import_applied", hasConfirmedApplyData, mutationFailurePolicies.catalogImport, "initial");
-    if (parsed.kind === "invalid") return confirmMutationUnknown(reconciliation);
-    if (parsed.kind === "failure") {
-      if (["catalog_import_snapshot_stale", "stale_catalog_import_preview", "expired_catalog_import_preview", "claimed_catalog_import_preview", "catalog_import_too_large"].includes(parsed.code)) {
-        invalidateCatalogImportPreview();
-      }
-      const message = ["catalog_import_snapshot_stale", "stale_catalog_import_preview", "expired_catalog_import_preview", "claimed_catalog_import_preview", "catalog_import_too_large"].includes(parsed.code)
-        ? `${parsed.code} — preview again`
-        : `${parsed.code} (${parsed.requestId})`;
-      setMessage(message);
-      return { ok: false, message, retryable: true };
-    }
-    return await applyKnown(parsed, importGeneration) === "applied"
-      ? { ok: true }
-      : confirmSuccessWithRefreshFailure(refreshStatus, isCurrent);
-  }
-
-  function requestCatalogImportApply(): void {
-    const binding = catalogImportPreviewBinding;
-    if (binding === null) {
-      setMessage("preview_required");
-      return;
-    }
-    const revision = catalogImportRevision.current;
-    const importGeneration = catalogImportGeneration;
-    requestConfirm({
-      title: "Apply catalog import",
-      body: "Apply this exact server-bound Preview. The manifest editor is not sent again.",
-      details: catalogImportConsequenceDetails(binding.preview),
-      requiresReason: false,
-      run: ({ idempotencyKey }: ConfirmActionContext) => applyCatalogImportFromPreview(binding, revision, importGeneration, idempotencyKey),
-      successFocusTarget: focusTargetInSection("catalog-import"),
-      isCurrent: () => active && isCatalogImportGenerationCurrent(importGeneration),
-    });
-  }
-
   async function submitCatalogPlanFeatureCreate(event: FormEvent): Promise<void> {
     event.preventDefault();
     if (settledSelectedCatalogPlanId === "") {
@@ -854,126 +635,6 @@ export function Catalog({ active }: { active: boolean }): React.ReactElement | n
     });
   }
 
-  async function submitPlanPreview(event: FormEvent): Promise<void> {
-    event.preventDefault();
-    const revision = planProjectionRevision.current;
-    await runMutation(async () => {
-      let body: ReturnType<typeof normalizePlanProjectionForm>;
-      try {
-        body = normalizePlanProjectionForm(planForm);
-      } catch (error) {
-        setMessage(error instanceof Error ? error.message : "invalid_plan_projection");
-        setPlanPreviewBinding(null);
-        setPlanApplyResult(null);
-        return;
-      }
-      let digest: string;
-      try {
-        digest = await planProjectionInputDigest(body);
-      } catch (error) {
-        setMessage(error instanceof Error ? error.message : "plan_projection_digest_failed");
-        setPlanPreviewBinding(null);
-        setPlanApplyResult(null);
-        return;
-      }
-      setPlanPreviewBinding(null);
-      setPlanApplyResult(null);
-      const result = await api<PlanProjectionPreviewResponse>(planProjectionPreviewPath(), { method: "POST", body: JSON.stringify(body) });
-      if (revision !== planProjectionRevision.current) return;
-      const parsed = parseMutationResponse(result, "license_plan_projection_previewed", (value): value is PlanProjectionPreviewResponse => hasPlanProjectionPreviewEvidence(value, body), mutationFailurePolicies.catalogProjectionPreview, "initial");
-      if (parsed.kind === "success") {
-        setMessage(`${parsed.code} (${parsed.requestId})`);
-        setPlanPreviewBinding({ input: body, digest, preview: parsed.data });
-      } else if (parsed.kind === "failure") {
-        setMessage(`${parsed.code} (${parsed.requestId})`);
-      } else {
-        setMessage("invalid_mutation_response");
-      }
-    });
-  }
-
-  async function applyPlanProjectionFromPreview(): Promise<void> {
-    const binding = planPreviewBinding;
-    const revision = planProjectionRevision.current;
-    if (binding === null || binding.preview.blocked.length > 0) {
-      setMessage("plan_projection_preview_required");
-      return;
-    }
-    if (revision !== planProjectionRevision.current) {
-      setMessage("plan_projection_preview_required");
-      return;
-    }
-    const body: PlanProjectionApplyInput = planProjectionApplyBody(binding.preview.preview_id);
-    const requestBody = JSON.stringify(body);
-    const isCurrent = (): boolean => revision === planProjectionRevision.current;
-    let appliedResult: PlanProjectionApplyResult | null = null;
-    await runKeyedMutation<PlanProjectionApplyResult>({
-      request: { method: "POST", path: planProjectionApplyPath(), body: requestBody },
-      send: (attempt) => api<PlanProjectionApplyResult>(attempt.path, { method: attempt.method, headers: { "idempotency-key": attempt.idempotencyKey }, body: attempt.body }),
-      parse: (result, phase) => parseMutationResponse(result, "license_plan_projection_applied", (value): value is PlanProjectionApplyResult => {
-        if (!hasPlanProjectionApplyData(value) || !hasPlanProjectionPreviewEvidence(value, binding.input)) return false;
-        return (value as PlanProjectionApplyResult).preview_id === binding.preview.preview_id;
-      }, mutationFailurePolicies.catalogProjectionApply, phase),
-      onUnapplied: (parsed) => {
-        if (!isCurrent()) return;
-        if (["stale_projection_preview", "projection_preview_grant_expired", "license_fingerprint_conflict", "plan_projection_blocked"].includes(parsed.code)) {
-        invalidatePlanProjectionPreview();
-        setMessage(`${parsed.code} — preview again`);
-        return;
-        }
-        setMessage(`${parsed.code} (${parsed.requestId})`);
-      },
-      onApplied: async (parsed) => {
-        if (!isCurrent()) return;
-        setMessage(`${parsed.code} (${parsed.requestId})`);
-        appliedResult = parsed.data;
-      },
-      refresh: async (): Promise<ExactReadProof | null> => {
-        const proof = await refreshCore(true, isCurrent);
-        if (proof !== EXACT_READ_PROOF || !isCurrent() || appliedResult === null) return null;
-        invalidatePlanProjectionPreview();
-        setPlanApplyResult(appliedResult);
-        return EXACT_READ_PROOF;
-      },
-      isCurrent,
-    });
-  }
-
-  function projectionRows(title: string, items: PlanProjectionItem[]): React.ReactElement | null {
-    if (items.length === 0) return null;
-    return <section className="deliveriesPane"><h3>{title}</h3><table><thead><tr><th>Feature</th><th>Mode</th><th>Policy</th><th>Window</th><th>Capacity</th><th>Source</th></tr></thead><tbody>{items.map((item) => <tr key={`${title}:${item.feature}`}><td>{item.feature}</td><td>{item.license_mode}</td><td>{item.policy_id ?? "-"}</td><td>{item.valid_until === null ? "open" : formatEpoch(item.valid_until)}</td><td>{item.pool_size > 0 ? `pool ${item.pool_size}` : `devices ${item.max_active_devices}`}</td><td>{item.addon_key ?? item.source}{item.reason ? ` / ${item.reason}` : ""}</td></tr>)}</tbody></table></section>;
-  }
-
-  function catalogImportEffectSummary(label: string, summary: CatalogImportPreviewResponse["effects"]["summary"]["features"]): string {
-    return `${label}: ${summary.create} create, ${summary.update} update, ${summary.disable} disable, ${summary.reenable} reenable, ${summary.unchanged} unchanged`;
-  }
-
-  function catalogImportEffectChanges(effect: CatalogImportEffect): Array<{ field: string; before: unknown; after: unknown }> {
-    const before = effect.before ?? {};
-    return [...new Set([...Object.keys(before), ...Object.keys(effect.after)])]
-      .filter((field) => !["id", "created_at", "updated_at"].includes(field) && before[field] !== effect.after[field])
-      .sort()
-      .map((field) => ({ field, before: before[field], after: effect.after[field] }));
-  }
-
-  function catalogImportRows(title: string, effects: CatalogImportEffect[]): React.ReactElement | null {
-    if (effects.length === 0) return null;
-    return <section className="deliveriesPane"><h3>{title}</h3><table><thead><tr><th>Transition</th><th>Target</th><th>Delta</th></tr></thead><tbody>{effects.map((effect) => {
-      const changes = catalogImportEffectChanges(effect);
-      const targetFields = catalogImportTargetFields(effect.target);
-      return <tr key={JSON.stringify([title, catalogImportTargetKey(effect.target)])}><td>{effect.effect}</td><td><dl aria-label="Catalog import target">{targetFields.map((field) => <div key={field.label}><dt>{field.label}</dt><dd><code>{catalogImportEffectValueLabel(field.value)}</code></dd></div>)}</dl></td><td><details><summary>Before → after ({changes.length})</summary>{changes.length === 0 ? <span className="muted">No mutable field changes</span> : <ul>{changes.map((change) => <li key={change.field}><code>{change.field}</code>: {catalogImportEffectValueLabel(change.before)} → {catalogImportEffectValueLabel(change.after)}</li>)}</ul>}</details></td></tr>;
-    })}</tbody></table></section>;
-  }
-
-  function catalogImportConsequenceDetails(preview: CatalogImportPreviewResponse): React.ReactElement {
-    return <div className="catalogImportConsequences"><div className="details"><span>Server preview {preview.preview_id}</span><span>Server digest {preview.manifest_digest}</span><span>Effective {formatEpoch(preview.effective_at)}</span><span>Expires {formatEpoch(preview.expires_at)}</span><span>{catalogImportEffectSummary("Features", preview.effects.summary.features)}</span><span>{catalogImportEffectSummary("Plans", preview.effects.summary.plans)}</span><span>{catalogImportEffectSummary("Plan rows", preview.effects.summary.plan_features)}</span></div>{catalogImportRows("Features", preview.effects.features)}{catalogImportRows("Plans", preview.effects.plans)}{catalogImportRows("Plan rows", preview.effects.plan_features)}</div>;
-  }
-
-  function catalogOverrideSummary(row: CatalogPlanFeature): string {
-    const parts = [row.assertion_ttl_seconds === null ? "" : `TTL ${row.assertion_ttl_seconds}s`, row.pool_size === null ? "" : `pool ${row.pool_size}`, row.max_active_devices === null ? "" : `devices ${row.max_active_devices}`, row.max_borrow_sec === null ? "" : `borrow ${row.max_borrow_sec}s`, row.meter_quota === null ? "" : `meter ${row.meter_quota}`, row.meter_period_sec === null ? "" : `period ${row.meter_period_sec}s`].filter((item) => item !== "");
-    return parts.length === 0 ? "-" : parts.join(" / ");
-  }
-
   const catalogFeaturesSettled = catalogFeaturesFence.isSettled();
   const catalogPlansSettled = catalogPlansFence.isSettled();
   const catalogPlanFeaturesSettled = catalogPlanFeaturesFence.isSettled();
@@ -988,33 +649,91 @@ export function Catalog({ active }: { active: boolean }): React.ReactElement | n
   const visibleActivePolicies = activePoliciesSettled ? activePolicies : [];
   const catalogFeatureEditActionable = editingCatalogFeatureId === null || (catalogFeaturesSettled && catalogFeaturesSnapshot.some((feature) => feature.id === editingCatalogFeatureId));
   const catalogPlanEditActionable = editingCatalogPlanId === null || (catalogPlansSettled && catalogPlansSnapshot.some((plan) => plan.id === editingCatalogPlanId));
+  const planForm = planProjection.form;
+  const planPreviewBinding = planProjection.previewBinding;
+  const planPreview = planProjection.preview;
+  const submitPlanPreview = planProjection.submitPreview;
+  const applyPlanProjectionFromPreview = planProjection.applyFromPreview;
+  const catalogImportText = catalogImport.text;
+  const catalogImportPreviewBinding = catalogImport.previewBinding;
+  const catalogImportPreview = catalogImport.preview;
+  const previewCatalogImport = catalogImport.previewImport;
+  const requestCatalogImportApply = catalogImport.requestApply;
 
   if (!active) return null;
   const selectedCatalogPlan = visibleCatalogPlans.find((plan) => plan.id === settledSelectedCatalogPlanId) ?? null;
-  const planPreview = planPreviewBinding?.preview ?? planApplyResult;
-  const catalogImportPreview = catalogImportPreviewBinding?.preview ?? catalogImportApplyResult;
+
+  function requestPlanDisable(plan: CatalogPlan): void {
+    requestConfirm({
+      title: "Disable plan",
+      body: disableCatalogPlanConfirm(plan),
+      requiresReason: true,
+      run: ({ idempotencyKey }: ConfirmActionContext) => catalogPlanTransition(plan, "disable", idempotencyKey),
+      successFocusTarget: focusTargetInRow(`catalog-plan:${plan.id}`, ['button[data-focus-action="reenable"]', ".status"]),
+      isCurrent: () => isCatalogPlanGenerationCurrent(catalogPlanGeneration),
+    });
+  }
+
+  function runPlanReenable(plan: CatalogPlan): void {
+    void runConsequenceAction({
+      run: ({ idempotencyKey }: ConfirmActionContext) => catalogPlanTransition(plan, "reenable", idempotencyKey),
+      successFocusTarget: focusTargetInRow(`catalog-plan:${plan.id}`, ['button[data-focus-action="reenable"]', ".status"]),
+      isCurrent: () => isCatalogPlanGenerationCurrent(catalogPlanGeneration),
+    });
+  }
+
+  function requestFeatureDisable(feature: CatalogFeature): void {
+    requestConfirm({
+      title: "Disable feature",
+      body: disableCatalogFeatureConfirm(feature),
+      requiresReason: true,
+      run: ({ idempotencyKey }: ConfirmActionContext) => catalogFeatureTransition(feature, "disable", idempotencyKey),
+      successFocusTarget: focusTargetInRow(`catalog-feature:${feature.id}`, ['button[data-focus-action="reenable"]', ".status"]),
+      isCurrent: () => isCatalogFeatureGenerationCurrent(catalogFeatureGeneration),
+    });
+  }
+
+  function runFeatureReenable(feature: CatalogFeature): void {
+    void runConsequenceAction({
+      run: ({ idempotencyKey }: ConfirmActionContext) => catalogFeatureTransition(feature, "reenable", idempotencyKey),
+      successFocusTarget: focusTargetInRow(`catalog-feature:${feature.id}`, ['button[data-focus-action="reenable"]', ".status"]),
+      isCurrent: () => isCatalogFeatureGenerationCurrent(catalogFeatureGeneration),
+    });
+  }
+
+  function requestPlanFeatureDisable(row: CatalogPlanFeature): void {
+    requestConfirm({
+      title: "Disable plan row",
+      body: disableCatalogPlanFeatureConfirm(row),
+      requiresReason: true,
+      run: ({ idempotencyKey }: ConfirmActionContext) => catalogPlanFeatureTransition(row, "disable", idempotencyKey),
+      successFocusTarget: focusTargetInRow(`catalog-plan-feature:${row.plan_id}:${row.feature_key}`, ['button[data-focus-action="reenable"]', ".status"]),
+      isCurrent: () => isCatalogPlanFeatureGenerationCurrent(catalogPlanFeatureGeneration),
+    });
+  }
+
+  function runPlanFeatureReenable(row: CatalogPlanFeature): void {
+    void runConsequenceAction({
+      run: ({ idempotencyKey }: ConfirmActionContext) => catalogPlanFeatureTransition(row, "reenable", idempotencyKey),
+      successFocusTarget: focusTargetInRow(`catalog-plan-feature:${row.plan_id}:${row.feature_key}`, ['button[data-focus-action="reenable"]', ".status"]),
+      isCurrent: () => isCatalogPlanFeatureGenerationCurrent(catalogPlanFeatureGeneration),
+    });
+  }
+
   return (
     <section className="workspace">
       <aside><fieldset disabled={operationLocked}>
-        <h2>{editingCatalogFeatureId === null ? "Catalog feature" : "Edit feature"}</h2>
-        <form aria-label="Catalog feature" onSubmit={(event) => void submitCatalogFeatureCreate(event)}><label>Project<input disabled={editingCatalogFeatureId !== null} value={catalogFeatureForm.project} onChange={(event) => setCatalogFeatureForm({ ...catalogFeatureForm, project: event.target.value })} /></label><label>Feature key<input disabled={editingCatalogFeatureId !== null} value={catalogFeatureForm.feature_key} onChange={(event) => setCatalogFeatureForm({ ...catalogFeatureForm, feature_key: event.target.value })} /></label><label>Name<input value={catalogFeatureForm.name} onChange={(event) => setCatalogFeatureForm({ ...catalogFeatureForm, name: event.target.value })} /></label><label>Category<input value={catalogFeatureForm.category} onChange={(event) => setCatalogFeatureForm({ ...catalogFeatureForm, category: event.target.value })} /></label><label>Status<select disabled={editingCatalogFeatureId !== null} value={catalogFeatureForm.status} onChange={(event) => setCatalogFeatureForm({ ...catalogFeatureForm, status: event.target.value as CatalogFeature["status"] })}><option value="active">active</option><option value="disabled">disabled</option></select></label><label>Description<textarea value={catalogFeatureForm.description} onChange={(event) => setCatalogFeatureForm({ ...catalogFeatureForm, description: event.target.value })} /></label><div className="actions"><button disabled={busy || !catalogFeatureEditActionable} type="submit">{editingCatalogFeatureId === null ? "Create feature" : "Update feature"}</button>{editingCatalogFeatureId !== null && <button type="button" disabled={busy} onClick={cancelCatalogFeatureEdit}>Cancel</button>}</div></form>
-        <h2>{editingCatalogPlanId === null ? "Catalog plan" : "Edit plan"}</h2>
-        <form aria-label="Catalog plan" onSubmit={(event) => void submitCatalogPlanCreate(event)}><label>Project<input disabled={editingCatalogPlanId !== null} value={catalogPlanForm.project} onChange={(event) => setCatalogPlanForm({ ...catalogPlanForm, project: event.target.value })} /></label><label>Plan key<input disabled={editingCatalogPlanId !== null} value={catalogPlanForm.plan_key} onChange={(event) => setCatalogPlanForm({ ...catalogPlanForm, plan_key: event.target.value })} /></label><label>Name<input value={catalogPlanForm.name} onChange={(event) => setCatalogPlanForm({ ...catalogPlanForm, name: event.target.value })} /></label><label>Version<input disabled={editingCatalogPlanId !== null} type="number" value={catalogPlanForm.version} onChange={(event) => setCatalogPlanForm({ ...catalogPlanForm, version: Number(event.target.value) })} /></label><label>Status<select disabled={editingCatalogPlanId !== null} value={catalogPlanForm.status} onChange={(event) => setCatalogPlanForm({ ...catalogPlanForm, status: event.target.value as CatalogPlan["status"] })}><option value="active">active</option><option value="disabled">disabled</option></select></label><label>Description<textarea value={catalogPlanForm.description} onChange={(event) => setCatalogPlanForm({ ...catalogPlanForm, description: event.target.value })} /></label><div className="actions"><button disabled={busy || !catalogPlanEditActionable} type="submit">{editingCatalogPlanId === null ? "Create plan" : "Update plan"}</button>{editingCatalogPlanId !== null && <button type="button" disabled={busy} onClick={cancelCatalogPlanEdit}>Cancel</button>}</div></form>
-        <h2>Plan feature</h2>
-        <form aria-label="Plan feature" onSubmit={(event) => void submitCatalogPlanFeatureCreate(event)}><label>Selected plan<select disabled={!catalogPlansSettled} value={settledSelectedCatalogPlanId} onChange={(event) => { const plan = visibleCatalogPlans.find((item) => item.id === event.target.value); if (plan !== undefined) selectCatalogPlan(plan); else { setSelectedCatalogPlanId(""); invalidatePlanProjectionPreview(); } }}><option value="">none</option>{visibleCatalogPlans.map((plan) => <option key={plan.id} value={plan.id}>{plan.plan_key} ({plan.project})</option>)}</select></label><label>Project<input value={catalogPlanFeatureForm.project} onChange={(event) => setCatalogPlanFeatureForm({ ...catalogPlanFeatureForm, project: event.target.value })} /></label><label>Feature key<input list="catalog-feature-keys" value={catalogPlanFeatureForm.feature_key} onChange={(event) => setCatalogPlanFeatureForm({ ...catalogPlanFeatureForm, feature_key: event.target.value })} /></label><datalist id="catalog-feature-keys">{visibleCatalogFeatures.map((feature) => <option key={feature.id} value={feature.feature_key} />)}</datalist><label>Inclusion<select value={catalogPlanFeatureForm.feature_inclusion} onChange={(event) => setCatalogPlanFeatureForm({ ...catalogPlanFeatureForm, feature_inclusion: event.target.value as CatalogPlanFeature["feature_inclusion"] })}><option value="included">included</option><option value="addon">addon</option></select></label>{catalogPlanFeatureForm.feature_inclusion === "addon" && <label>Add-on key<input value={catalogPlanFeatureForm.addon_key} onChange={(event) => setCatalogPlanFeatureForm({ ...catalogPlanFeatureForm, addon_key: event.target.value })} /></label>}<label>Policy ID<input disabled={!activePoliciesSettled} list="active-policy-ids" value={catalogPlanFeatureForm.policy_id} onChange={(event) => setCatalogPlanFeatureForm({ ...catalogPlanFeatureForm, policy_id: event.target.value })} /></label><datalist id="active-policy-ids">{visibleActivePolicies.map((policy) => <option key={policy.id} value={policy.id}>{policy.name}</option>)}</datalist><label>Display order<input type="number" value={catalogPlanFeatureForm.display_order} onChange={(event) => setCatalogPlanFeatureForm({ ...catalogPlanFeatureForm, display_order: Number(event.target.value) })} /></label><label>Status<select value={catalogPlanFeatureForm.status} onChange={(event) => setCatalogPlanFeatureForm({ ...catalogPlanFeatureForm, status: event.target.value as CatalogPlanFeature["status"] })}><option value="active">active</option><option value="disabled">disabled</option></select></label><label>Pool size<input type="number" value={catalogPlanFeatureForm.pool_size} onChange={(event) => setCatalogPlanFeatureForm({ ...catalogPlanFeatureForm, pool_size: event.target.value })} /></label><label>Max devices<input type="number" value={catalogPlanFeatureForm.max_active_devices} onChange={(event) => setCatalogPlanFeatureForm({ ...catalogPlanFeatureForm, max_active_devices: event.target.value })} /></label><label>Max borrow<input type="number" value={catalogPlanFeatureForm.max_borrow_sec} onChange={(event) => setCatalogPlanFeatureForm({ ...catalogPlanFeatureForm, max_borrow_sec: event.target.value })} /></label><button disabled={busy || !catalogPlansSettled || !activePoliciesSettled || settledSelectedCatalogPlanId === ""} type="submit">Save plan feature</button></form>
-        <h2>Plan projection</h2>
-        <form aria-label="Plan projection" onSubmit={(event) => void submitPlanPreview(event)}><label>Project<input value={planForm.project} onChange={(event) => updatePlanProjectionForm((current) => ({ ...current, project: event.target.value }))} /></label><label>License ID<input value={planForm.license_id} onChange={(event) => updatePlanProjectionForm((current) => ({ ...current, license_id: event.target.value }))} /></label><label>Fingerprint<input value={planForm.license_fingerprint} onChange={(event) => updatePlanProjectionForm((current) => ({ ...current, license_fingerprint: event.target.value }))} /></label><label>Customer ID<input value={planForm.customer_id} onChange={(event) => updatePlanProjectionForm((current) => ({ ...current, customer_id: event.target.value }))} /></label><label>Plan key<input placeholder="pro" value={planForm.plan_key} onChange={(event) => updatePlanProjectionForm((current) => ({ ...current, plan_key: event.target.value }))} /></label><label>Plan ID<input value={planForm.plan_id} onChange={(event) => updatePlanProjectionForm((current) => ({ ...current, plan_id: event.target.value }))} /></label><label>Support until<input type="date" value={planForm.support_until} onChange={(event) => updatePlanProjectionForm((current) => ({ ...current, support_until: event.target.value }))} /></label><label>Add-ons (csv)<input placeholder="team_seats,priority_support" value={planForm.addons} onChange={(event) => updatePlanProjectionForm((current) => ({ ...current, addons: event.target.value }))} /></label><label>Notes<textarea value={planForm.notes} onChange={(event) => updatePlanProjectionForm((current) => ({ ...current, notes: event.target.value }))} /></label><div className="actions"><button disabled={busy} type="submit">Preview</button><button disabled={busy || planPreviewBinding === null || planPreviewBinding.preview.blocked.length > 0} type="button" onClick={() => void applyPlanProjectionFromPreview()}>Apply</button></div></form>
-        <section data-focus-section="catalog-import">
-          <h2>Catalog import</h2>
-          <form aria-label="Catalog import" onSubmit={(event) => { event.preventDefault(); void previewCatalogImport(); }}><label>Manifest JSON<textarea value={catalogImportText} onChange={(event) => { setCatalogImportText(event.target.value); invalidateCatalogImportPreview(); }} /></label><div className="actions"><button type="submit" disabled={busy || catalogImportText.trim() === ""}>Preview import</button><button type="button" disabled={busy || catalogImportPreviewBinding === null} onClick={requestCatalogImportApply}>Apply import</button></div>{catalogImportPreview !== null && <div className="details"><span>{catalogImportEffectSummary("Features", catalogImportPreview.effects.summary.features)}</span><span>{catalogImportEffectSummary("Plans", catalogImportPreview.effects.summary.plans)}</span><span>{catalogImportEffectSummary("Plan rows", catalogImportPreview.effects.summary.plan_features)}</span>{catalogImportPreviewBinding === null ? <span>Applied; preview again before another Apply</span> : <><span>Server preview {catalogImportPreviewBinding.preview.preview_id}</span><span>Server digest {catalogImportPreviewBinding.preview.manifest_digest}</span><span>Local manifest digest {catalogImportPreviewBinding.digest}</span><span>Effective {formatEpoch(catalogImportPreviewBinding.preview.effective_at)}</span></>}</div>}</form>
-          {catalogImportPreview !== null && <><p className="muted">Each target and transition is server-derived from the persisted preview snapshot.</p>{catalogImportRows("Imported features", catalogImportPreview.effects.features)}{catalogImportRows("Imported plans", catalogImportPreview.effects.plans)}{catalogImportRows("Imported plan rows", catalogImportPreview.effects.plan_features)}</>}
-        </section>
+        <CatalogFeatureEditor form={catalogFeatureForm} editingId={editingCatalogFeatureId} busy={busy} actionable={catalogFeatureEditActionable} onChange={setCatalogFeatureForm} onSubmit={(event) => void submitCatalogFeatureCreate(event)} onCancel={cancelCatalogFeatureEdit} />
+        <CatalogPlanEditor form={catalogPlanForm} editingId={editingCatalogPlanId} busy={busy} actionable={catalogPlanEditActionable} onChange={setCatalogPlanForm} onSubmit={(event) => void submitCatalogPlanCreate(event)} onCancel={cancelCatalogPlanEdit} />
+        <CatalogPlanFeatureEditor form={catalogPlanFeatureForm} busy={busy} plansSettled={catalogPlansSettled} activePoliciesSettled={activePoliciesSettled} selectedPlanId={settledSelectedCatalogPlanId} plans={visibleCatalogPlans} features={visibleCatalogFeatures} policies={visibleActivePolicies} onChange={setCatalogPlanFeatureForm} onSelectPlan={selectCatalogPlan} onClearPlan={() => { setSelectedCatalogPlanId(""); invalidatePlanProjectionPreview(); }} onSubmit={(event) => void submitCatalogPlanFeatureCreate(event)} />
+        <PlanProjectionEditor form={planForm} previewBinding={planPreviewBinding} busy={busy} onUpdate={updatePlanProjectionForm} onSubmit={(event) => void submitPlanPreview(event)} onApply={() => void applyPlanProjectionFromPreview()} />
+        <CatalogImportEditor text={catalogImportText} previewBinding={catalogImportPreviewBinding} preview={catalogImportPreview} busy={busy} onUpdate={catalogImport.updateText} onPreview={() => void previewCatalogImport()} onApply={requestCatalogImportApply} />
       </fieldset></aside>
       <section className="tablePane">
-        <section className="deliveriesPane"><h3>Catalog plans</h3><div className="filters"><input placeholder="project" value={catalogPlanFilter.project} onChange={(event) => setCatalogPlanFilter({ ...catalogPlanFilter, project: event.target.value })} /><select value={catalogPlanFilter.status} onChange={(event) => setCatalogPlanFilter({ ...catalogPlanFilter, status: event.target.value })}><option value="">all</option><option value="active">active</option><option value="disabled">disabled</option></select></div><table><thead><tr><th>Plan</th><th>Project</th><th>Version</th><th>Status</th><th>Actions</th></tr></thead><tbody>{catalogPlans.map((plan) => <tr key={plan.id} className={plan.id === selectedCatalogPlanId ? "selectedRow" : ""} data-focus-row={`catalog-plan:${plan.id}`}><td>{plan.name}<div className="muted">{plan.plan_key}</div></td><td>{plan.project}</td><td>{plan.version}</td><td><span className={`status ${plan.status}`}>{plan.status}</span></td><td className="actions"><button type="button" disabled={busy || operationLocked} onClick={() => selectCatalogPlan(plan)}>Use</button><button type="button" disabled={busy || operationLocked} onClick={() => beginCatalogPlanEdit(plan)}>Edit</button><button type="button" disabled={busy || operationLocked} onClick={() => void exportCatalogPlan(plan)}>Export</button><button className="danger" type="button" disabled={busy || operationLocked || !canRunCatalogAction(plan.status, "disable")} onClick={() => requestConfirm({ title: "Disable plan", body: disableCatalogPlanConfirm(plan), requiresReason: true, run: ({ idempotencyKey }: ConfirmActionContext) => catalogPlanTransition(plan, "disable", idempotencyKey), successFocusTarget: focusTargetInRow(`catalog-plan:${plan.id}`, ['button[data-focus-action="reenable"]', ".status"]), isCurrent: () => isCatalogPlanGenerationCurrent(catalogPlanGeneration) })}>Disable</button><button data-focus-action="reenable" type="button" disabled={busy || operationLocked || !canRunCatalogAction(plan.status, "reenable")} onClick={() => void runConsequenceAction({ run: ({ idempotencyKey }: ConfirmActionContext) => catalogPlanTransition(plan, "reenable", idempotencyKey), successFocusTarget: focusTargetInRow(`catalog-plan:${plan.id}`, ['button[data-focus-action="reenable"]', ".status"]), isCurrent: () => isCatalogPlanGenerationCurrent(catalogPlanGeneration) })}>Reenable</button></td></tr>)}</tbody></table><div className="tableFooter"><span className="muted">{catalogPlans.length} shown</span>{catalogPlansCursor !== null && <button type="button" disabled={busy || operationLocked} onClick={() => void loadMore(catalogPlansUrl, catalogPlansCursor, catalogPlans, setCatalogPlans, setCatalogPlansCursor, setMessage, hasCatalogPlanListData, "catalog_plans_listed", catalogPlansFence, (plan) => plan.id)}>Load more</button>}</div></section>
-        <section className="deliveriesPane"><h3>Catalog features</h3><div className="filters"><input placeholder="project" value={catalogFeatureFilter.project} onChange={(event) => setCatalogFeatureFilter({ ...catalogFeatureFilter, project: event.target.value })} /><select value={catalogFeatureFilter.status} onChange={(event) => setCatalogFeatureFilter({ ...catalogFeatureFilter, status: event.target.value })}><option value="">all</option><option value="active">active</option><option value="disabled">disabled</option></select></div><table><thead><tr><th>Feature</th><th>Project</th><th>Category</th><th>Status</th><th>Actions</th></tr></thead><tbody>{catalogFeatures.map((feature) => <tr key={feature.id} data-focus-row={`catalog-feature:${feature.id}`}><td>{feature.name}<div className="muted">{feature.feature_key}</div></td><td>{feature.project}</td><td>{feature.category || "-"}</td><td><span className={`status ${feature.status}`}>{feature.status}</span></td><td className="actions"><button type="button" disabled={busy || operationLocked} onClick={() => beginCatalogFeatureEdit(feature)}>Edit</button><button className="danger" type="button" disabled={busy || operationLocked || !canRunCatalogAction(feature.status, "disable")} onClick={() => requestConfirm({ title: "Disable feature", body: disableCatalogFeatureConfirm(feature), requiresReason: true, run: ({ idempotencyKey }: ConfirmActionContext) => catalogFeatureTransition(feature, "disable", idempotencyKey), successFocusTarget: focusTargetInRow(`catalog-feature:${feature.id}`, ['button[data-focus-action="reenable"]', ".status"]), isCurrent: () => isCatalogFeatureGenerationCurrent(catalogFeatureGeneration) })}>Disable</button><button data-focus-action="reenable" type="button" disabled={busy || operationLocked || !canRunCatalogAction(feature.status, "reenable")} onClick={() => void runConsequenceAction({ run: ({ idempotencyKey }: ConfirmActionContext) => catalogFeatureTransition(feature, "reenable", idempotencyKey), successFocusTarget: focusTargetInRow(`catalog-feature:${feature.id}`, ['button[data-focus-action="reenable"]', ".status"]), isCurrent: () => isCatalogFeatureGenerationCurrent(catalogFeatureGeneration) })}>Reenable</button></td></tr>)}</tbody></table><div className="tableFooter"><span className="muted">{catalogFeatures.length} shown</span>{catalogFeaturesCursor !== null && <button type="button" disabled={busy || operationLocked} onClick={() => void loadMore(catalogFeaturesUrl, catalogFeaturesCursor, catalogFeatures, setCatalogFeatures, setCatalogFeaturesCursor, setMessage, hasCatalogFeatureListData, "catalog_features_listed", catalogFeaturesFence, (feature) => feature.id)}>Load more</button>}</div></section>
-        <section className="deliveriesPane"><h3>{selectedCatalogPlan === null ? "Plan features" : `Plan features / ${selectedCatalogPlan.plan_key}`}</h3><table><thead><tr><th>Feature</th><th>Inclusion</th><th>Add-on</th><th>Policy</th><th>Overrides</th><th>Status</th><th>Actions</th></tr></thead><tbody>{catalogPlanFeatures.map((row) => <tr key={`${row.plan_id}:${row.feature_key}`} data-focus-row={`catalog-plan-feature:${row.plan_id}:${row.feature_key}`}><td>{row.feature_name}<div className="muted">{row.feature_key}</div></td><td>{row.feature_inclusion}</td><td>{row.addon_key ?? "-"}</td><td>{row.policy_id ?? "-"}</td><td>{catalogOverrideSummary(row)}</td><td><span className={`status ${row.status}`}>{row.status}</span></td><td className="actions"><button className="danger" type="button" disabled={busy || !canRunCatalogAction(row.status, "disable")} onClick={() => requestConfirm({ title: "Disable plan row", body: disableCatalogPlanFeatureConfirm(row), requiresReason: true, run: ({ idempotencyKey }: ConfirmActionContext) => catalogPlanFeatureTransition(row, "disable", idempotencyKey), successFocusTarget: focusTargetInRow(`catalog-plan-feature:${row.plan_id}:${row.feature_key}`, ['button[data-focus-action="reenable"]', ".status"]), isCurrent: () => isCatalogPlanFeatureGenerationCurrent(catalogPlanFeatureGeneration) })}>Disable</button><button data-focus-action="reenable" type="button" disabled={busy || !canRunCatalogAction(row.status, "reenable")} onClick={() => void runConsequenceAction({ run: ({ idempotencyKey }: ConfirmActionContext) => catalogPlanFeatureTransition(row, "reenable", idempotencyKey), successFocusTarget: focusTargetInRow(`catalog-plan-feature:${row.plan_id}:${row.feature_key}`, ['button[data-focus-action="reenable"]', ".status"]), isCurrent: () => isCatalogPlanFeatureGenerationCurrent(catalogPlanFeatureGeneration) })}>Reenable</button></td></tr>)}</tbody></table>{catalogPlanFeatures.length === 0 && <p className="muted">No rows for the selected plan.</p>}</section>
-        {planPreview === null ? <section className="deliveriesPane"><h3>Projection</h3><p className="muted">No preview loaded.</p></section> : <><section className="grid metrics"><div><span>Create</span><strong>{planPreview.summary.create}</strong></div><div><span>Update</span><strong>{planPreview.summary.update}</strong></div><div><span>Disable</span><strong>{planPreview.summary.disable}</strong></div><div><span>Blocked</span><strong>{planPreview.summary.blocked}</strong></div></section><section className="deliveriesPane"><h3>{planPreview.assignment.plan_key} / {planPreview.assignment.license_id}</h3><div className="details"><span>Project {planPreview.assignment.project}</span><span>Fingerprint {shortHash(planPreview.assignment.license_fingerprint)}</span><span>Customer {planPreview.assignment.customer_id ?? "-"}</span><span>Add-ons {planPreview.assignment.addons.length === 0 ? "-" : planPreview.assignment.addons.join(", ")}</span>{planPreviewBinding === null ? <span>Execution result; re-preview required before another Apply</span> : <><span>Server preview {planPreviewBinding.preview.preview_id}</span><span>Effective {formatEpoch(planPreviewBinding.preview.effective_at)}</span><span>Local form digest {planPreviewBinding.digest}</span></>}</div></section>{projectionRows("Create", planPreview.will_create)}{projectionRows("Update", planPreview.will_update)}{projectionRows("Disable", planPreview.will_disable)}{projectionRows("Blocked", planPreview.blocked)}{projectionRows("Unchanged", planPreview.unchanged)}</>}
+        <CatalogPlansTable plans={catalogPlans} selectedPlanId={selectedCatalogPlanId} filter={catalogPlanFilter} hasMore={catalogPlansCursor !== null} actionsDisabled={busy || operationLocked} canDisable={(plan) => canRunCatalogAction(plan.status, "disable")} canReenable={(plan) => canRunCatalogAction(plan.status, "reenable")} onFilter={setCatalogPlanFilter} onSelect={selectCatalogPlan} onEdit={beginCatalogPlanEdit} onExport={(plan) => void exportCatalogPlan(plan)} onDisable={requestPlanDisable} onReenable={runPlanReenable} onLoadMore={() => { if (catalogPlansCursor !== null) void loadMore(catalogPlansUrl, catalogPlansCursor, catalogPlans, setCatalogPlans, setCatalogPlansCursor, setMessage, hasCatalogPlanListData, "catalog_plans_listed", catalogPlansFence, (plan) => plan.id); }} />
+        <CatalogFeaturesTable features={catalogFeatures} filter={catalogFeatureFilter} hasMore={catalogFeaturesCursor !== null} actionsDisabled={busy || operationLocked} canDisable={(feature) => canRunCatalogAction(feature.status, "disable")} canReenable={(feature) => canRunCatalogAction(feature.status, "reenable")} onFilter={setCatalogFeatureFilter} onEdit={beginCatalogFeatureEdit} onDisable={requestFeatureDisable} onReenable={runFeatureReenable} onLoadMore={() => { if (catalogFeaturesCursor !== null) void loadMore(catalogFeaturesUrl, catalogFeaturesCursor, catalogFeatures, setCatalogFeatures, setCatalogFeaturesCursor, setMessage, hasCatalogFeatureListData, "catalog_features_listed", catalogFeaturesFence, (feature) => feature.id); }} />
+        <CatalogPlanFeaturesTable rows={catalogPlanFeatures} selectedPlan={selectedCatalogPlan} busy={busy} canDisable={(row) => canRunCatalogAction(row.status, "disable")} canReenable={(row) => canRunCatalogAction(row.status, "reenable")} onDisable={requestPlanFeatureDisable} onReenable={runPlanFeatureReenable} />
+        <PlanProjectionResults preview={planPreview} binding={planPreviewBinding} />
       </section>
     </section>
   );
