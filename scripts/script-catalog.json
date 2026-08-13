@@ -1,0 +1,88 @@
+{
+  "schema_version": 1,
+  "categories": [
+    {
+      "id": "architecture-contracts",
+      "purpose": "Architecture, API, evidence, capability, ownership, and maintainability contracts.",
+      "paths": [
+        "scripts/architecture-boundaries.json",
+        "scripts/canonical-contracts.mjs",
+        "scripts/capability-registry.schema.json",
+        "scripts/check-architecture.mjs",
+        "scripts/check-architecture.test.mjs",
+        "scripts/check-capability-registry.mjs",
+        "scripts/check-capability-registry.test.mjs",
+        "scripts/ci/ownership-contract.test.mjs",
+        "scripts/docs-accuracy.test.mjs",
+        "scripts/hotspot-baseline.json",
+        "scripts/report-hotspots.mjs",
+        "scripts/report-hotspots.test.mjs"
+      ]
+    },
+    {
+      "id": "build-development",
+      "purpose": "Bootstrap, type coverage, native build purity, SDK, documentation, and developer checks.",
+      "paths": [
+        "scripts/bootstrap.ps1",
+        "scripts/bootstrap.test.ps1",
+        "scripts/build-purity-static.test.mjs",
+        "scripts/check-build-purity-tool-resolution.test.ps1",
+        "scripts/check-build-purity.ps1",
+        "scripts/check-build-purity.test.ps1",
+        "scripts/check-docs.ps1",
+        "scripts/check-typecheck-coverage.mjs",
+        "scripts/ci/run-installed-device-identity-consumer.ps1",
+        "scripts/ci/run-swtpm-device-identity.sh",
+        "scripts/clean-checkout-regressions.test.mjs",
+        "scripts/cmake-projects-base.test.ps1",
+        "scripts/cmake-public-header.test.ps1",
+        "scripts/dev-check.ps1",
+        "scripts/generate-wrangler-types.mjs",
+        "scripts/generate-wrangler-types.test.mjs",
+        "scripts/test-java-sdk.mjs",
+        "scripts/windows_download_boost.bat"
+      ]
+    },
+    {
+      "id": "release-deployment",
+      "purpose": "Versioning, deploy configuration, release operations, and deterministic artifact assembly.",
+      "paths": [
+        "scripts/assemble-release-artifacts.mjs",
+        "scripts/check-release-tag.mjs",
+        "scripts/check-release-tag.test.mjs",
+        "scripts/check-version-contract.mjs",
+        "scripts/check-version-contract.test.mjs",
+        "scripts/materialize-deploy-configs.mjs",
+        "scripts/materialize-deploy-configs.test.mjs",
+        "scripts/release-artifacts.test.mjs",
+        "scripts/release/cpp-source-archive.mjs",
+        "scripts/release/output-boundary.mjs",
+        "scripts/release/worker-bundle.mjs"
+      ]
+    },
+    {
+      "id": "repository-hygiene",
+      "purpose": "Script inventory plus non-destructive local repository diagnosis and cleanup guidance.",
+      "paths": [
+        "scripts/README.md",
+        "scripts/ci/check-script-catalog.mjs",
+        "scripts/ci/check-script-catalog.test.mjs",
+        "scripts/ci/repository-doctor.mjs",
+        "scripts/ci/repository-doctor.test.mjs",
+        "scripts/script-catalog.json"
+      ]
+    },
+    {
+      "id": "security-workflow",
+      "purpose": "Secret scanning, Wrangler invariants, and fail-closed GitHub Actions workflow checks.",
+      "paths": [
+        "scripts/scan-secrets.mjs",
+        "scripts/secret-lint.mjs",
+        "scripts/secret-lint.test.mjs",
+        "scripts/workflow-action-pins.test.mjs",
+        "scripts/wrangler-env-drift.test.mjs",
+        "scripts/wrangler-pin-consistency.test.mjs"
+      ]
+    }
+  ]
+}

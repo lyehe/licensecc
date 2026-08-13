@@ -85,6 +85,25 @@ canonical-HEAD input contract, and never relax output ownership or archive
 validation to accommodate a tool. Run `npm run test:release-artifacts`; a real
 release proof additionally requires two confined, byte-identical assemblies.
 
+## Repository tooling or layout
+
+Keep stable root commands in `package.json` and stable operator-facing script
+paths intact unless a compatibility migration is part of the change. Every
+path under `scripts/` must have exactly one purpose category in
+`scripts/script-catalog.json`; internal helpers may move into a subdirectory
+when that reflects a real module boundary rather than cosmetic depth.
+
+Update `.github/CODEOWNERS` with `doc/architecture/ownership.md` whenever an
+authoritative path boundary changes. For a first-party production file already
+at or above the checked threshold, do not raise its line-count ratchet as a
+routine consequence of a feature. Extract a coherent responsibility or explain
+and review the explicit baseline change.
+
+Run `npm run test:repository`, `npm run check:scripts`, and
+`npm run check:hotspots`. `npm run doctor` is the read-only local diagnostic;
+its branch, worktree, output, remote, and optional-tool findings do not become a
+portable PR failure unless they represent a repository contract.
+
 ## SDK change
 
 Change the relevant package under `sdks/python/`, `sdks/dotnet/`, or

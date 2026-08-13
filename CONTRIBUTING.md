@@ -41,8 +41,14 @@ schema checker resolves `sqlglot` only from its checked-in lock.
 
 ```powershell
 npm ci
+npm run doctor
 npm run check:pr
 ```
+
+The doctor never deletes branches, worktrees, or output. Its local-hygiene
+findings are advisory by default; use `npm run doctor -- --strict-local` when
+you need a completely clean handoff. Repository contract violations still fail
+in either mode.
 
 For service, SDK, database-backend, and portal changes, run the relevant local gates as well:
 
@@ -112,6 +118,12 @@ Do not commit generated files or local-only state:
 
 Track Wrangler example templates such as `wrangler.example.toml` and `wrangler.example.jsonc`; keep real deployment IDs and secrets local.
 
+Keep Git worktrees and task branches only while they have an active purpose.
+Before removing either, verify that its commits are reachable from the intended
+integration branch and that it has no dirty or untracked user-owned state. Use
+`npm run doctor` to inventory these conditions; cleanup remains an explicit
+human operation rather than a script side effect.
+
 The current `main` branch now includes the C++ core plus service, SDK, database-backend, and portal slices. Changes to those areas should keep their local gates green and update docs when commands, workflows, public APIs, or support status change.
 
 Use [`doc/architecture/change-guide.md`](doc/architecture/change-guide.md) to
@@ -120,6 +132,8 @@ route API, Worker, D1, policy, UI, SDK, and OpenAPI changes. Read
 crossing a deployable boundary. The documentation split is deliberate:
 maintained project docs live under `doc/`, protected execution plans under
 `docs/superpowers/plans/`, and evidence reports under `docs/implementation/`.
+New or moved repository scripts must also be recorded once in
+[`scripts/script-catalog.json`](scripts/script-catalog.json).
 
 ## Coding Guidelines
 

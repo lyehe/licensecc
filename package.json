@@ -13,6 +13,9 @@
     "check:docs": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/check-docs.ps1",
     "check:docs:links": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/check-docs.ps1 -LinkCheck",
     "check:versions": "node scripts/check-version-contract.mjs",
+    "doctor": "node scripts/ci/repository-doctor.mjs",
+    "check:scripts": "node scripts/ci/check-script-catalog.mjs",
+    "check:hotspots": "node scripts/report-hotspots.mjs --check",
     "scan:secrets": "node scripts/scan-secrets.mjs",
     "test:scan:secrets": "node --test scripts/secret-lint.test.mjs",
     "test:docs-accuracy": "node --test scripts/docs-accuracy.test.mjs",
@@ -20,6 +23,7 @@
     "test:wrangler-env-drift": "node --test scripts/wrangler-env-drift.test.mjs",
     "test:clean-checkout": "node --test scripts/clean-checkout-regressions.test.mjs scripts/generate-wrangler-types.test.mjs && pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/check-build-purity-tool-resolution.test.ps1",
     "test:workflow-pins": "node --test scripts/workflow-action-pins.test.mjs",
+    "test:repository": "node --test scripts/ci/check-script-catalog.test.mjs scripts/ci/ownership-contract.test.mjs scripts/ci/repository-doctor.test.mjs",
     "test:versions": "node --test scripts/check-version-contract.test.mjs",
     "test:release-artifacts": "node --test scripts/release-artifacts.test.mjs",
     "test:release-operations": "node --test scripts/check-release-tag.test.mjs scripts/materialize-deploy-configs.test.mjs",
@@ -43,7 +47,7 @@
     "check:capabilities": "node scripts/check-capability-registry.mjs",
     "test:contracts": "node --test test/contracts/canonical-contracts.test.mjs && node scripts/canonical-contracts.mjs",
     "write:contract-baselines": "node scripts/canonical-contracts.mjs --write",
-    "check:pr": "npm run scan:secrets && npm run test:scan:secrets && npm run test:docs-accuracy && npm run test:wrangler-pins && npm run test:clean-checkout && npm run test:workflow-pins && npm run test:versions && npm run test:release-artifacts && npm run test:release-operations && npm run check:versions && npm run test:capabilities && npm run check:capabilities && npm run lint && npm run typecheck && npm run check:architecture && npm run test:architecture && npm run test:contracts && npm run test:services"
+    "check:pr": "npm run scan:secrets && npm run test:scan:secrets && npm run test:docs-accuracy && npm run test:wrangler-pins && npm run test:clean-checkout && npm run test:workflow-pins && npm run test:repository && npm run check:scripts && npm run test:versions && npm run test:release-artifacts && npm run test:release-operations && npm run check:versions && npm run test:capabilities && npm run check:capabilities && npm run lint && npm run typecheck && npm run check:architecture && npm run check:hotspots && npm run test:architecture && npm run test:contracts && npm run test:services"
   },
   "workspaces": [
     "packages/licensing-domain",

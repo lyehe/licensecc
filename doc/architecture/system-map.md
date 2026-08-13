@@ -93,6 +93,12 @@ trees and verified by `scripts/docs-accuracy.test.mjs`. They identify ownership
 pressure; they are not a quality score. The large files below have explicit
 owners in {doc}`ownership` and are not shared implementation by accident.
 
+`scripts/hotspot-baseline.json` adds a no-growth ratchet for every first-party
+production file at or above 500 lines. Shrinkage is always accepted; a new
+oversized file or growth above an accepted maximum requires either a coherent
+responsibility extraction or an explicit, reviewed baseline decision. The
+repository-owned third-party `src/library/ini/` sources are excluded.
+
 | Path | Lines | Responsibility audit |
 | --- | ---: | --- |
 | `src/library/licensecc.cpp` | 1,486 | C++ public API orchestration; changes pair with public ABI tests and CMake packaging. |
@@ -130,6 +136,14 @@ service-to-service, UI-to-worker,
 undeclared workspace, unresolved relative/subpath, and cross-workspace-relative
 imports. It also checks tracked repository hygiene without inspecting ignored
 local build output.
+
+The remaining repository tooling boundaries are executable too:
+
+* `.github/CODEOWNERS` mirrors the role boundaries in {doc}`ownership`;
+* `scripts/script-catalog.json` assigns every script exactly one category;
+* `npm run check:hotspots` enforces the measured-file growth ratchets; and
+* `npm run doctor` reports local branch, worktree, remote, ignored-output, and
+  toolchain drift without mutating the checkout.
 
 Use `npm run test:architecture` for mutation fixtures, `npm run test:contracts`
 for reviewed contract comparison, and `npm run write:contract-baselines` only

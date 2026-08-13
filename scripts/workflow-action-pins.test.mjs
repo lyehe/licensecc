@@ -445,6 +445,31 @@ test("lint repository-quality runs the clean-checkout regression gate", () => {
     1,
     "repository-quality must invoke check:versions exactly once",
   );
+  for (const command of ["npm run test:repository", "npm run check:scripts", "npm run check:hotspots"]) {
+    assert.equal(
+      commands.filter((candidate) => candidate === command).length,
+      1,
+      `repository-quality must invoke ${command} exactly once`,
+    );
+  }
+});
+
+test("repository organization contracts are exact-once local PR gates", () => {
+  const packageJson = JSON.parse(source("package.json"));
+  assert.equal(packageJson.scripts.doctor, "node scripts/ci/repository-doctor.mjs");
+  assert.equal(packageJson.scripts["check:scripts"], "node scripts/ci/check-script-catalog.mjs");
+  assert.equal(packageJson.scripts["check:hotspots"], "node scripts/report-hotspots.mjs --check");
+  assert.equal(
+    packageJson.scripts["test:repository"],
+    "node --test scripts/ci/check-script-catalog.test.mjs scripts/ci/ownership-contract.test.mjs scripts/ci/repository-doctor.test.mjs",
+  );
+  for (const command of ["npm run test:repository", "npm run check:scripts", "npm run check:hotspots"]) {
+    assert.equal(
+      packageJson.scripts["check:pr"].split(" && ").filter((candidate) => candidate === command).length,
+      1,
+      `check:pr must invoke ${command} exactly once`,
+    );
+  }
 });
 
 test("release artifact evidence is an exact-once local and repository-quality gate", () => {

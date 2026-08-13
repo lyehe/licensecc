@@ -49,12 +49,15 @@ jobs:
           npm run test:scan:secrets
           npm run test:clean-checkout
           npm run test:workflow-pins
+          npm run test:repository
+          npm run check:scripts
           npm run test:versions
           npm run test:release-artifacts
           npm run check:versions
           npm run lint
           npm run typecheck
           npm run check:architecture
+          npm run check:hotspots
           npm run test:architecture
           npm run test:capabilities
           npm run check:capabilities

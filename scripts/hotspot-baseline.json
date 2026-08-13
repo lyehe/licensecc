@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "threshold_lines": 500,
+  "files": {
+    "packages/cloudflare-runtime/src/d1/entitlement_mutation.mjs": 624,
+    "packages/cloudflare-runtime/src/d1/plan_projection.mjs": 1031,
+    "packages/cloudflare-runtime/src/webhooks/webhook.mjs": 638,
+    "services/cloudflare-license-admin/src/ui/features/catalog/Catalog.tsx": 740,
+    "services/cloudflare-license-admin/src/ui/features/catalog/workflow.ts": 507,
+    "services/cloudflare-license-admin/src/ui/features/entitlements/Entitlements.tsx": 704,
+    "services/cloudflare-license-admin/src/ui/shared/controls.tsx": 1159,
+    "services/cloudflare-license-admin/src/ui/shared/mutationGuards.ts": 866,
+    "services/cloudflare-license-admin/src/worker/groups/catalog/import-protocol.ts": 960,
+    "services/cloudflare-license-admin/src/worker/openapi/components.ts": 1308,
+    "services/cloudflare-licensing-backend/src/fulfillment/order_ingest.mjs": 1159,
+    "services/cloudflare-licensing-backend/src/routes/verify.ts": 983,
+    "src/library/device_identity/device_identity.cpp": 575,
+    "src/library/device_identity/providers/tpm2_openssl.cpp": 2016,
+    "src/library/device_identity/providers/windows_tpm.cpp": 602,
+    "src/library/licensecc.cpp": 1486,
+    "src/library/online_verification/OnlineVerification.cpp": 511,
+    "src/library/os/signature_verifier.hpp": 532
+  }
+}

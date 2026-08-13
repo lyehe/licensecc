@@ -30,7 +30,8 @@ See [CHANGELOG.md](CHANGELOG.md) and
 - `doc/`: documentation source and architecture notes.
 - `doc/architecture/`: system map, change guide, role ownership, and architecture decisions.
 - `docs/implementation/`: implementation evidence reports; `docs/superpowers/plans/` contains protected execution plans.
-- `scripts/`: local developer helper scripts.
+- `scripts/`: categorized developer, architecture, release, and CI tooling;
+  [`scripts/README.md`](scripts/README.md) documents the stable command boundary.
 - `patches/`: reviewed transition patches; build and check commands never apply them to vendored source.
 - `package.json`: root orchestration scripts for service, SDK, schema, and E2E checks.
 - `packages/licensing-domain/`: portable licensing values, policy transitions, contracts, and pure projections.
@@ -82,8 +83,13 @@ install the root workspace, and run the deterministic pull-request gate:
 ```powershell
 pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/bootstrap.ps1 -CheckOnly
 npm ci
+npm run doctor
 npm run check:pr
 ```
+
+`npm run doctor` is read-only. Repository contract errors fail; local branch,
+worktree, remote, ignored-output, and tool-version findings are advisory unless
+you add `-- --strict-local` for a clean-handoff audit.
 
 For C++ changes, also run the source-purity gate (it configures, builds, and
 tests the selected preset without mutating source or the generator checkout):
@@ -100,6 +106,9 @@ The root command surface is intentionally explicit:
 | `npm run lint` | Source lint for packages, services, and scripts. |
 | `npm run typecheck` | Production TypeScript/JavaScript type-check coverage. |
 | `npm run check:architecture` | Dependency direction, composition roots, and repository hygiene. |
+| `npm run check:scripts` | Exact one-category inventory for every repository script. |
+| `npm run check:hotspots` | No-growth ratchets for first-party production files at or above 500 lines. |
+| `npm run doctor` | Non-destructive local worktree, branch, remote, output, and toolchain diagnosis. |
 | `npm run check:versions` | Platform/C++ version contract and release-projection consistency. |
 | `npm run test:release-operations` | Platform-tag and protected production-config contract tests. |
 | `npm run test:contracts` | Canonical route/OpenAPI contract checks. |
