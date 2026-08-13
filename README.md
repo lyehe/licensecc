@@ -11,6 +11,11 @@ Licensecc helps applications verify local license files, bind licenses to machin
 
 The repository is licensed under the [GNU Affero General Public License v3.0 or later](https://www.gnu.org/licenses/agpl-3.0.html). See [LICENSE](LICENSE) for the full license text.
 
+**Documentation:** start with [how to use the repository](doc/usage/repository-workflows.rst),
+follow the [integration guide](doc/usage/integration.rst), browse the unified
+[API reference](doc/api/index.rst), or review the
+[capability registry](doc/capabilities/index.rst) for shipped and planned surfaces.
+
 **Versioning:** no namespaced release has been tagged yet. The C++ library carries the upstream 2.x
 lineage version (`2.1.0` in CMake); the platform packages (services, SDKs, and root/workspace Node
 packages) are `0.1.0-rc.1` and versioned independently. [`version.json`](version.json) is the
@@ -28,6 +33,7 @@ See [CHANGELOG.md](CHANGELOG.md) and
 - `cmake/`: CMake find modules and build helpers.
 - `extern/`: repository-owned, vendored license-generator source; `scripts/bootstrap.ps1` validates that the source is present without fetching it.
 - `doc/`: documentation source and architecture notes.
+- `.agents/skills/`: repository-local Agent Skills for repeatable project workflows.
 - `doc/architecture/`: system map, change guide, role ownership, and architecture decisions.
 - `docs/implementation/`: implementation evidence reports; `docs/superpowers/plans/` contains protected execution plans.
 - `scripts/`: categorized developer, architecture, release, and CI tooling;

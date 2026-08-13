@@ -305,3 +305,64 @@ test("admin browser instructions and the PR gate keep docs checks honest", () =>
   assert.equal(packageJson.scripts["test:docs-accuracy"], "node --test scripts/docs-accuracy.test.mjs");
   assert.match(packageJson.scripts["check:pr"], /npm run test:docs-accuracy/);
 });
+
+test("the API reference is generated from authoritative interfaces", () => {
+  const docsIndex = source("doc/index.rst");
+  const apiIndex = source("doc/api/index.rst");
+  const services = source("doc/api/services.rst");
+  const python = source("doc/api/python.rst");
+  const deviceHeader = source("include/licensecc/device_identity.h");
+  const docsScript = source("scripts/check-docs.ps1");
+  const readTheDocs = source(".readthedocs.yaml");
+
+  assert.match(docsIndex, /api\/index/);
+  for (const page of ["public_api", "types", "device_identity", "services", "python", "sdks"]) {
+    assert.match(apiIndex, new RegExp(`\\b${page}\\b`, "u"), `API index must include ${page}`);
+  }
+
+  for (const service of ["backend", "admin", "portal"]) {
+    assert.match(
+      services,
+      new RegExp(`licensecc-openapi::\\s+${service}`, "u"),
+      `service reference must derive ${service} operations from its canonical snapshot`,
+    );
+  }
+  assert.doesNotMatch(services, /\/v1\/verify\s+POST/u, "Worker routes must not be copied into prose tables");
+
+  assert.match(python, /autofunction:: verify_online_assertion/);
+  assert.match(python, /autoclass:: HttpClient/);
+  assert.match(docsScript, /--with\s+\$pythonSdk/u);
+  assert.match(readTheDocs, /path:\s+sdks\/python/u);
+
+  assert.match(deviceHeader, /\\defgroup deviceidentity/u);
+  assert.match(deviceHeader, /lcc_device_identity_open/u);
+  assert.match(deviceHeader, /lcc_device_identity_delete_key/u);
+});
+
+test("the repository workflow guide and Agent Skill remain discoverable", () => {
+  const readme = source("README.md");
+  const guide = source("doc/usage/repository-workflows.rst");
+  const skill = source(".agents/skills/using-licensecc/SKILL.md");
+  const skillUi = source(".agents/skills/using-licensecc/agents/openai.yaml");
+  const packageJson = JSON.parse(source("package.json"));
+
+  assert.match(readme, /doc\/usage\/repository-workflows\.rst/u);
+  assert.match(readme, /`\.agents\/skills\/`/u);
+  assert.match(guide, /\$using-licensecc/u);
+  assert.match(guide, /npm run check:pr/u);
+  assert.match(guide, /scripts\/check-build-purity\.ps1/u);
+
+  const frontmatter = /^---\r?\nname:\s*([^\r\n]+)\r?\ndescription:\s*([^\r\n]+)\r?\n---/u.exec(skill);
+  assert.ok(frontmatter, "the repository skill must have minimal YAML frontmatter");
+  assert.equal(frontmatter[1], "using-licensecc");
+  assert.ok(frontmatter[2].length > 0 && frontmatter[2].length <= 1024);
+  assert.doesNotMatch(frontmatter[2], /<[^>]+>/u, "skill descriptions cannot contain XML tags");
+  assert.doesNotMatch(skill, /\[TODO|\\\\/u, "the skill must be complete and use portable paths");
+  assert.ok(skill.split(/\r?\n/u).length < 500, "the skill must remain context-efficient");
+  assert.match(skillUi, /default_prompt:\s*"[^"]*\$using-licensecc/u);
+
+  for (const command of ["check:pr", "test:sdks", "setup:browsers", "test:e2e", "check:dry-run", "check:docs"]) {
+    assert.equal(typeof packageJson.scripts[command], "string", `skill command ${command} must remain defined`);
+    assert.match(skill, new RegExp(`npm run ${command}`, "u"));
+  }
+});

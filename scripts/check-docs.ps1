@@ -9,6 +9,7 @@ $ErrorActionPreference = "Stop"
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $docRoot = Join-Path $repoRoot "doc"
 $requirements = Join-Path $docRoot "requirements.txt"
+$pythonSdk = Join-Path $repoRoot "sdks/python"
 $doxyfile = Join-Path $docRoot "Doxyfile"
 $builder = if ($LinkCheck) { "linkcheck" } else { "html" }
 $output = Join-Path $docRoot (Join-Path "_build" $builder)
@@ -48,7 +49,7 @@ try {
         & $doxygen.Source $doxyfile
     }
     Invoke-Checked "Sphinx $builder" {
-        & $uv.Source run --no-project --with-requirements $requirements python -m sphinx -b $builder -W --keep-going $docRoot $output
+        & $uv.Source run --no-project --with-requirements $requirements --with $pythonSdk python -m sphinx -b $builder -W --keep-going $docRoot $output
     }
 } finally {
     Pop-Location

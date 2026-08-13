@@ -75,8 +75,8 @@ To verify a feature pass the feature name in the ``CallerInformations`` structur
 	CallerInformations callerInfo = {"\0", "MY_AWESOME_FEATURE"};
 	LCC_EVENT_TYPE result = acquire_license(&callerInfo, nullptr, &licenseInfo);
 	
-For a working example see `program_features <https://github.com/open-license-manager/examples/program_features>`_ in 
-examples project.
+For a complete fail-closed feature example, see
+`examples/fail_closed_host <https://github.com/lyehe/licensecc/tree/main/examples/fail_closed_host>`_.
 
 Versions
 ================

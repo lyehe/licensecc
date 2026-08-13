@@ -1,18 +1,19 @@
-###############################################
-Customize hardware signature generators 
-###############################################
+Customize hardware identifiers
+==============================
 
 Change the hardware identification strategy
 *************************************************
 
-Included with the library there are three hardware identification strategies: `IP_ADDRESS`, `STRATEGY_ETHERNET` (mac address) and 
-`STRATEGY_DISK` (partition serial number). If you want to change the strategy that is used to generate the default identifier:
+The library includes IP-address, Ethernet/MAC-address, and disk-serial
+strategies. If you want to change the strategy order used for the default
+identifier:
   
   - locate the generated ``licensecc_properties.h`` in
     ``build/<preset>/projects/<project-name>/include/licensecc/<project-name>``
     or in the explicitly external ``LCC_PROJECTS_BASE_DIR``; it is not written
     below the source checkout
-  - you can change the order of the strategies in the following code block (the strategies will be tried in sequence until the first one succeeds):
+  - change the strategy lists below; each list is tried in order until the
+    first strategy succeeds
 
 .. code-block:: c
 

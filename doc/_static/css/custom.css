@@ -1,1 +1,23 @@
 .icon-home::before { content: url("../lock_32.png"); }
+
+.licensecc-api-table td:first-child,
+.licensecc-api-table td:nth-child(2),
+.licensecc-api-table td:nth-child(3) {
+  white-space: nowrap;
+}
+
+.licensecc-api-table code.http-method {
+  border: 0;
+  color: #fff;
+  display: inline-block;
+  font-weight: 700;
+  min-width: 4.5em;
+  padding: 0.15em 0.4em;
+  text-align: center;
+}
+
+.licensecc-api-table code.http-get { background: #167d3e; }
+.licensecc-api-table code.http-post { background: #1d5fa7; }
+.licensecc-api-table code.http-put,
+.licensecc-api-table code.http-patch { background: #9a5b00; }
+.licensecc-api-table code.http-delete { background: #a4262c; }

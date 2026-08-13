@@ -1,0 +1,4 @@
+interface:
+  display_name: "Use Licensecc"
+  short_description: "Navigate, build, test, and extend Licensecc"
+  default_prompt: "Use $using-licensecc to choose and execute the correct Licensecc repository workflow."

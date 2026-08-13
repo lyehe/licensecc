@@ -49,7 +49,8 @@ and :ref:`Windows <development/Build-the-library-windows:Build - Windows>`.
 
 How to use
 **************
-Start from ``examples/minimal`` in this repository and the
+Choose a goal in :doc:`usage/repository-workflows`, then start from
+``examples/minimal`` and the
 :ref:`integration guide <usage/integration:Integrate Licensecc in your application>`.
 Issuing licenses (local files with ``lccgen``, or online entitlements through the
 backend/admin services) is covered in ``doc/usage/issue-licenses.md``.
@@ -101,10 +102,9 @@ run ``npm run check:pr`` before submitting. For C++ core changes, also run
 .. toctree::
    :maxdepth: 2
    :hidden:
-   :caption: API:
+   :caption: API reference:
 
-   api/public_api
-   api/extend
+   api/index
 
 .. toctree::
    :glob:
