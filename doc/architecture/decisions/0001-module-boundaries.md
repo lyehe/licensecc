@@ -59,8 +59,10 @@ Placement rules are:
    dispatch table.
 
 `scripts/check-architecture.mjs` is the executable enforcement of these rules.
-It scans tracked production code only, emits deterministic diagnostics, and
-fails repository hygiene debt that is expired or unused.
+It scans cached production code plus non-ignored, untracked candidate source,
+emits deterministic diagnostics, and fails repository hygiene debt that is
+expired or unused. Repository-hygiene enforcement remains cached-only so a
+local build tree cannot become part of the candidate architecture surface.
 
 ## Historical transition outcome
 

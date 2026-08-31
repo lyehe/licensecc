@@ -1,0 +1,229 @@
+name: Deploy staging Workers
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: Type deploy-staging to authorize the isolated four-Worker rollout
+        required: true
+        type: string
+      backend_url:
+        description: Canonical HTTPS staging backend URL
+        required: true
+        type: string
+      admin_url:
+        description: Canonical HTTPS staging admin URL protected by Cloudflare Access
+        required: true
+        type: string
+      portal_url:
+        description: Canonical HTTPS staging portal URL
+        required: true
+        type: string
+      backup_url:
+        description: Canonical HTTPS staging backup URL
+        required: true
+        type: string
+      portal_test_email:
+        description: Synthetic staging customer email used for the portal drill
+        required: true
+        type: string
+      portal_floating_entitlement_id:
+        description: Synthetic staging floating entitlement used for checkout/heartbeat/release
+        required: true
+        type: string
+      portal_download_entitlement_id:
+        description: Synthetic staging entitlement used for the signed download path
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: licensecc-staging-operations
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: inputs.confirmation == 'deploy-staging' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Bind checkout to approved main commit
+        run: test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+        with:
+          version: "0.5.15"
+      - name: Select npm 10.9.8
+        run: |
+          npm install --global npm@10.9.8 --no-audit --no-fund
+          test "$(npm --version)" = "10.9.8"
+      - name: Install locked workspace
+        run: npm ci
+      - name: Run deterministic deployment preflight
+        run: |
+          npm run check:pr
+          npm run check:dry-run
+      - name: Materialize protected staging configuration
+        env:
+          LICENSECC_BACKEND_WRANGLER_CONFIG_B64: ${{ secrets.LICENSECC_BACKEND_WRANGLER_CONFIG_B64 }}
+          LICENSECC_ADMIN_WRANGLER_CONFIG_B64: ${{ secrets.LICENSECC_ADMIN_WRANGLER_CONFIG_B64 }}
+          LICENSECC_PORTAL_WRANGLER_CONFIG_B64: ${{ secrets.LICENSECC_PORTAL_WRANGLER_CONFIG_B64 }}
+          LICENSECC_BACKUP_WRANGLER_CONFIG_B64: ${{ secrets.LICENSECC_BACKUP_WRANGLER_CONFIG_B64 }}
+          LICENSECC_EXPECTED_CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          LICENSECC_EXPECTED_D1_DATABASE_ID: ${{ vars.LICENSECC_D1_DATABASE_ID }}
+          LICENSECC_EXPECTED_BACKEND_ORIGIN: ${{ inputs.backend_url }}
+          LICENSECC_EXPECTED_ADMIN_ORIGIN: ${{ inputs.admin_url }}
+          LICENSECC_EXPECTED_PORTAL_ORIGIN: ${{ inputs.portal_url }}
+          LICENSECC_EXPECTED_BACKUP_ORIGIN: ${{ inputs.backup_url }}
+        run: node scripts/materialize-deploy-configs.mjs --profile staging
+      - name: Verify protected backend secret inventory
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/licensecc-deployment-evidence"
+          npm --silent run validate:secret-inventory --workspace @licensecc/cloudflare-licensing-backend -- --profile=staging > "$RUNNER_TEMP/licensecc-deployment-evidence/backend-secret-inventory.json"
+      - name: Build UI assets and validate staging bundles
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          npm run build --workspace @licensecc/cloudflare-license-admin
+          npm run build --workspace @licensecc/cloudflare-customer-portal
+          node scripts/run-protected-wrangler.mjs --operation dry-run --worker backend
+          node scripts/run-protected-wrangler.mjs --operation dry-run --worker admin
+          node scripts/run-protected-wrangler.mjs --operation dry-run --worker portal
+          node scripts/run-protected-wrangler.mjs --operation dry-run --worker backup
+      - name: Capture last-known-good Worker deployments
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/licensecc-deployment-evidence"
+          git rev-parse HEAD > "$RUNNER_TEMP/licensecc-deployment-evidence/commit.txt"
+          sha256sum services/cloudflare-licensing-backend/wrangler.toml services/cloudflare-license-admin/wrangler.jsonc services/cloudflare-customer-portal/wrangler.jsonc services/cloudflare-d1-backup/wrangler.jsonc > "$RUNNER_TEMP/licensecc-deployment-evidence/config-sha256.txt"
+          node scripts/run-protected-wrangler.mjs --operation deployments --worker backend > "$RUNNER_TEMP/licensecc-deployment-evidence/backend-before.json"
+          node scripts/run-protected-wrangler.mjs --operation deployments --worker admin > "$RUNNER_TEMP/licensecc-deployment-evidence/admin-before.json"
+          node scripts/run-protected-wrangler.mjs --operation deployments --worker portal > "$RUNNER_TEMP/licensecc-deployment-evidence/portal-before.json"
+          node scripts/run-protected-wrangler.mjs --operation deployments --worker backup > "$RUNNER_TEMP/licensecc-deployment-evidence/backup-before.json"
+      - name: Deploy and validate backup Worker before schema changes
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          BACKUP_URL: ${{ inputs.backup_url }}
+        run: |
+          node scripts/run-protected-wrangler.mjs --operation deploy --worker backup
+          npm run validate:deploy --workspace @licensecc/cloudflare-d1-backup -- --url "$BACKUP_URL" --worker-name licensecc-d1-backup-staging --workflow-name licensecc-d1-backup-staging --require-d1-rest-token --require-trigger-token --json
+      - name: Complete and verify pre-migration backup
+        env:
+          BACKUP_TRIGGER_TOKEN: ${{ secrets.BACKUP_TRIGGER_TOKEN }}
+          BACKUP_URL: ${{ inputs.backup_url }}
+          D1_DATABASE_ID: ${{ vars.LICENSECC_D1_DATABASE_ID }}
+        run: npm run backup:pre-migration --workspace @licensecc/cloudflare-d1-backup -- --url "$BACKUP_URL" --database-id "$D1_DATABASE_ID" --database-name licensecc-online-verifier-staging
+      - name: Apply backend-owned staging D1 migrations
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: node scripts/run-protected-wrangler.mjs --operation migrate --worker backend
+      - name: Deploy backend, admin, and portal Workers
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          node scripts/run-protected-wrangler.mjs --operation deploy --worker backend
+          node scripts/run-protected-wrangler.mjs --operation deploy --worker admin
+          node scripts/run-protected-wrangler.mjs --operation deploy --worker portal
+      - name: Verify scoped staging leases, proof, and signatures
+        env:
+          LICENSECC_STAGING_LEASE_DRILL_URL: ${{ inputs.backend_url }}
+          LICENSECC_STAGING_LEASE_ACCOUNT_TOKEN: ${{ secrets.LICENSECC_STAGING_LEASE_ACCOUNT_TOKEN }}
+          LICENSECC_STAGING_LEASE_DEVICE_PRIVATE_KEY_PKCS8_PEM: ${{ secrets.LICENSECC_STAGING_LEASE_DEVICE_PRIVATE_KEY_PKCS8_PEM }}
+          LICENSECC_STAGING_LEASE_PUBLIC_KEY_PKCS1_DER_BASE64: ${{ secrets.LICENSECC_STAGING_LEASE_PUBLIC_KEY_PKCS1_DER_BASE64 }}
+          LICENSECC_STAGING_LEASE_FIXTURE_JSON: ${{ secrets.LICENSECC_STAGING_LEASE_FIXTURE_JSON }}
+          LICENSECC_STAGING_LEASE_RUN_ID: ${{ github.run_id }}
+          LICENSECC_STAGING_LEASE_RUN_ATTEMPT: ${{ github.run_attempt }}
+          LICENSECC_STAGING_LEASE_COMMIT: ${{ github.sha }}
+        run: npm --silent run validate:staging-lease --workspace @licensecc/cloudflare-licensing-backend > "$RUNNER_TEMP/licensecc-deployment-evidence/backend-lease-drill.json"
+      - name: Verify signed staging order replay and idempotency
+        env:
+          LICENSECC_STAGING_ORDER_DRILL_URL: ${{ inputs.backend_url }}
+          LICENSECC_STAGING_ORDER_DRILL_KEY_ID: ${{ secrets.LICENSECC_STAGING_ORDER_DRILL_KEY_ID }}
+          LICENSECC_STAGING_ORDER_DRILL_SECRET_B64: ${{ secrets.LICENSECC_STAGING_ORDER_DRILL_SECRET_B64 }}
+          LICENSECC_STAGING_ORDER_DRILL_FIXTURE_JSON: ${{ secrets.LICENSECC_STAGING_ORDER_DRILL_FIXTURE_JSON }}
+          LICENSECC_STAGING_ORDER_DRILL_RUN_ID: ${{ github.run_id }}
+          LICENSECC_STAGING_ORDER_DRILL_RUN_ATTEMPT: ${{ github.run_attempt }}
+          LICENSECC_STAGING_ORDER_DRILL_COMMIT: ${{ github.sha }}
+        run: npm --silent run validate:staging-order --workspace @licensecc/cloudflare-licensing-backend > "$RUNNER_TEMP/licensecc-deployment-evidence/backend-order-drill.json"
+      - name: Run proof-authenticated staging verifier drill
+        env:
+          BACKEND_URL: ${{ inputs.backend_url }}
+          LICENSECC_PUBLIC_VERIFIER_PROJECT: ${{ vars.LICENSECC_PUBLIC_VERIFIER_PROJECT }}
+          LICENSECC_PUBLIC_VERIFIER_FEATURE: ${{ vars.LICENSECC_PUBLIC_VERIFIER_FEATURE }}
+          LICENSECC_PUBLIC_VERIFIER_FINGERPRINT: ${{ secrets.LICENSECC_PUBLIC_VERIFIER_FINGERPRINT }}
+          LICENSECC_PUBLIC_VERIFIER_DEVICE_PRIVATE_KEY_PKCS8_PEM: ${{ secrets.LICENSECC_PUBLIC_VERIFIER_DEVICE_PRIVATE_KEY_PKCS8_PEM }}
+          LICENSECC_PUBLIC_VERIFIER_DEVICE_KEY_ID: ${{ secrets.LICENSECC_PUBLIC_VERIFIER_DEVICE_KEY_ID }}
+        run: npm --silent run validate:public-verifier --workspace @licensecc/cloudflare-licensing-backend -- --url "$BACKEND_URL" --expect-rate-limit --json > "$RUNNER_TEMP/licensecc-deployment-evidence/backend-public-verifier-drill.json"
+      - name: Run synthetic staging tenant drills
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          BACKUP_URL: ${{ inputs.backup_url }}
+          LICENSECC_ACCESS_JWT: ${{ secrets.LICENSECC_ADMIN_ACCESS_JWT }}
+          LICENSECC_NON_ADMIN_ACCESS_JWT: ${{ secrets.LICENSECC_NON_ADMIN_ACCESS_JWT }}
+          STAGING_ADMIN_BASE_URL: ${{ inputs.admin_url }}
+          STAGING_PORTAL_BASE_URL: ${{ inputs.portal_url }}
+          STAGING_PORTAL_EMAIL: ${{ inputs.portal_test_email }}
+          STAGING_PORTAL_BOOTSTRAP_BEARER: ${{ secrets.LICENSECC_PORTAL_BOOTSTRAP_BEARER }}
+          STAGING_PORTAL_ACCESS_JWT: ${{ secrets.LICENSECC_PORTAL_ACCESS_JWT }}
+          STAGING_PORTAL_ALLOW_SEAT_MUTATION: "1"
+          STAGING_PORTAL_FLOATING_ENTITLEMENT_ID: ${{ inputs.portal_floating_entitlement_id }}
+          STAGING_PORTAL_ALLOW_DOWNLOAD: "1"
+          STAGING_PORTAL_DOWNLOAD_ENTITLEMENT_ID: ${{ inputs.portal_download_entitlement_id }}
+        run: |
+          npm run validate:access-admin --workspace @licensecc/cloudflare-license-admin -- --url "$STAGING_ADMIN_BASE_URL" --require-non-admin
+          npm run validate:staging-portal --workspace @licensecc/cloudflare-customer-portal
+          npm run validate:deploy --workspace @licensecc/cloudflare-d1-backup -- --url "$BACKUP_URL" --worker-name licensecc-d1-backup-staging --workflow-name licensecc-d1-backup-staging --require-d1-rest-token --require-trigger-token --json
+      - name: Capture deployed Worker identities
+        if: ${{ always() }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -o pipefail
+          mkdir -p "$RUNNER_TEMP/licensecc-deployment-evidence"
+          capture_status=0
+          capture_deployment() {
+            worker="$1"
+            output="$RUNNER_TEMP/licensecc-deployment-evidence/$worker-after.json"
+            temporary="$output.tmp"
+            if node scripts/capture-worker-deployment-transition.mjs --worker "$worker" < "$RUNNER_TEMP/licensecc-deployment-evidence/$worker-before.json" > "$temporary"; then
+              mv -- "$temporary" "$output"
+            else
+              rm -f -- "$temporary"
+              printf '{"schema_version":1,"worker":"%s","status":"capture_failed"}\n' "$worker" > "$output"
+              capture_status=1
+            fi
+          }
+          capture_deployment backend
+          capture_deployment admin
+          capture_deployment portal
+          capture_deployment backup
+          exit "$capture_status"
+      - name: Retain redacted deployment evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: staging-worker-deployment-${{ github.run_id }}
+          path: ${{ runner.temp }}/licensecc-deployment-evidence
+          if-no-files-found: error
+          retention-days: 30

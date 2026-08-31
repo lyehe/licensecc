@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
-import { existsSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -77,4 +79,50 @@ test("compiled OpenAPI source detects duplicate component and path-method litera
     () => assertNoDuplicateOpenApiObjectKeys(source, fixturePath, compiler),
     /Duplicate component key "Policy"/,
   );
+});
+
+test("backup VM capture links a shared dependency graph and the exact node:crypto shim", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "licensecc-contract-vm-"));
+  const dist = path.join(root, "services", "cloudflare-d1-backup", "dist");
+  try {
+    mkdirSync(dist, { recursive: true });
+    writeFileSync(path.join(dist, "shared.js"), `
+      import { createHash } from "node:crypto";
+      export const digest = createHash("sha256").update("fixture").digest("hex");
+    `, "utf8");
+    writeFileSync(path.join(dist, "left.js"), `
+      import { digest } from "./shared.js";
+      export const left = digest.length;
+    `, "utf8");
+    writeFileSync(path.join(dist, "right.js"), `
+      import { digest } from "./shared.js";
+      export const right = digest.slice(0, 1);
+    `, "utf8");
+    writeFileSync(path.join(dist, "index.js"), `
+      import { left } from "./left.js";
+      import { right } from "./right.js";
+      export class D1BackupWorkflow { run() { return left + right.length; } }
+      export default { async fetch() {}, async scheduled() {} };
+    `, "utf8");
+
+    const capture = spawnSync(process.execPath, [
+      "--experimental-vm-modules",
+      path.join(REPOSITORY_ROOT, "scripts", "canonical-contracts.mjs"),
+      "--capture-backup",
+      root,
+    ], { cwd: REPOSITORY_ROOT, encoding: "utf8", shell: false, windowsHide: true });
+    assert.equal(capture.status, 0, capture.stderr || capture.stdout);
+    assert.deepEqual(JSON.parse(capture.stdout), {
+      compiledEntry: "services/cloudflare-d1-backup/dist/index.js",
+      defaultHandlerMethods: ["fetch", "scheduled"],
+      namedExports: ["D1BackupWorkflow", "default"],
+      service: "cloudflare-d1-backup",
+      workflow: {
+        export: "D1BackupWorkflow",
+        prototypeMethods: ["run"],
+      },
+    });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });

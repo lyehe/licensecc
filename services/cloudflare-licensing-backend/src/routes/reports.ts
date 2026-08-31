@@ -30,10 +30,8 @@ export async function recordUsageEvent(
     // Best-effort: a missed analytics row must never break licensing -- but make the drop
     // observable so a silent peak_concurrent undercount is detectable in logs.
     logEvent("warn", "usage.record_dropped", {
-      project: e.project,
-      feature: e.feature,
       event_type: e.event_type,
-      error: error instanceof Error ? error.message : "unknown",
+      error_type: error instanceof Error ? error.name : "UnknownThrownValue",
     });
   }
 }
@@ -81,10 +79,8 @@ async function liveSeatsAt(
     return Math.max(0, Number(row?.baseline ?? 0));
   } catch (error) {
     logEvent("error", "usage.report_baseline_failed", {
-      project,
-      feature,
       window_from: t,
-      error: error instanceof Error ? error.message : "unknown D1 error",
+      error_type: error instanceof Error ? error.name : "UnknownThrownValue",
     });
     return null;
   }

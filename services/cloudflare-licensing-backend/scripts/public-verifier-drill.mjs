@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
+import { prepareRequestProofSigner } from "./public-verifier-capacity-lib.mjs";
 
 const HEX_64 = /^[0-9a-fA-F]{64}$/;
 const DEFAULT_PROJECT = "DEFAULT";
@@ -9,13 +10,18 @@ const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_RECOVERY_WAIT_MS = 65_000;
 const MAX_BURST_COUNT = 100;
 const MAX_RECOVERY_WAIT_MS = 180_000;
+const MAX_RESPONSE_BYTES = 32 * 1024;
+const DEVICE_KEY_ID = /^sha256:[0-9a-f]{64}$/u;
+const PROOF_NAME = /^[A-Za-z0-9_.:-]+$/u;
+const PRIVATE_KEY_BEGIN = ["-----BEGIN ", "PRIVATE KEY-----"].join("");
 
 function usage(exitCode = 2) {
   console.error(`usage:
   node scripts/public-verifier-drill.mjs --url <verifier-worker-url> [--project DEFAULT] [--feature DEFAULT] [--fingerprint <64-hex>] [--burst-count 25] [--expect-rate-limit] [--rotate-fingerprint] [--recovery-wait-ms 65000] [--json]
 
 Runs a bounded public verifier staging drill. It validates malformed request
-rejection, unsigned unknown-entitlement denial, and optionally verifies a
+rejection and either an unsigned unknown-entitlement denial (legacy mode) or a
+proof-authenticated signed allow (protected mode), and optionally verifies a
 controlled burst reaches the public rate limiter and recovers after the
 configured wait. With --rotate-fingerprint each burst request uses a fresh
 license fingerprint, so the flood is forced onto the client-network tier
@@ -98,6 +104,9 @@ function normalizeUrl(value) {
   if (parsed.protocol !== "https:" && parsed.hostname !== "127.0.0.1" && parsed.hostname !== "localhost") {
     throw new Error("url_must_be_https_or_localhost");
   }
+  if (parsed.username !== "" || parsed.password !== "") {
+    throw new Error("url_credentials_forbidden");
+  }
   parsed.pathname = parsed.pathname.replace(/\/+$/, "");
   parsed.search = "";
   parsed.hash = "";
@@ -115,13 +124,27 @@ function parseArgs(argv = process.argv.slice(2), env = process.env) {
     npmConfigValue(env, "--url") ??
     env.LICENSECC_VERIFIER_URL,
   );
-  const project = argValue(argv, "--project") ?? npmConfigValue(env, "--project") ?? DEFAULT_PROJECT;
-  const feature = argValue(argv, "--feature") ?? npmConfigValue(env, "--feature") ?? DEFAULT_FEATURE;
-  const fingerprint = argValue(argv, "--fingerprint") ??
+  const project = argValue(argv, "--project") ?? npmConfigValue(env, "--project") ?? env.LICENSECC_PUBLIC_VERIFIER_PROJECT ?? DEFAULT_PROJECT;
+  const feature = argValue(argv, "--feature") ?? npmConfigValue(env, "--feature") ?? env.LICENSECC_PUBLIC_VERIFIER_FEATURE ?? DEFAULT_FEATURE;
+  const configuredFingerprint = argValue(argv, "--fingerprint") ??
     npmConfigValue(env, "--fingerprint") ??
-    randomBytes(32).toString("hex");
+    env.LICENSECC_PUBLIC_VERIFIER_FINGERPRINT;
+  const fingerprint = configuredFingerprint ?? randomBytes(32).toString("hex");
   if (!HEX_64.test(fingerprint)) {
     throw new Error("fingerprint_must_be_64_hex");
+  }
+  const devicePrivateKeyPem = env.LICENSECC_PUBLIC_VERIFIER_DEVICE_PRIVATE_KEY_PKCS8_PEM ?? "";
+  const deviceKeyId = env.LICENSECC_PUBLIC_VERIFIER_DEVICE_KEY_ID ?? "";
+  if ((devicePrivateKeyPem === "") !== (deviceKeyId === "")) throw new Error("request_proof_key_pair_required");
+  if (devicePrivateKeyPem !== "") {
+    if (configuredFingerprint === undefined) throw new Error("request_proof_fingerprint_required");
+    if (devicePrivateKeyPem.length > 16_384 || !devicePrivateKeyPem.includes(PRIVATE_KEY_BEGIN)) {
+      throw new Error("request_proof_private_key_invalid");
+    }
+    if (!DEVICE_KEY_ID.test(deviceKeyId)) throw new Error("request_proof_device_key_id_invalid");
+    if (!PROOF_NAME.test(project) || project.length > 127 || !PROOF_NAME.test(feature) || feature.length > 15) {
+      throw new Error("request_proof_identity_invalid");
+    }
   }
   const expectRateLimit = configFlag(argv, env, "--expect-rate-limit");
   const burstCount = parsePositiveInt(
@@ -143,6 +166,8 @@ function parseArgs(argv = process.argv.slice(2), env = process.env) {
     MAX_RECOVERY_WAIT_MS,
     "recovery_wait_ms",
   );
+  const rotateFingerprint = configFlag(argv, env, "--rotate-fingerprint");
+  if (devicePrivateKeyPem !== "" && rotateFingerprint) throw new Error("request_proof_cannot_rotate_fingerprint");
   return {
     url,
     project,
@@ -150,10 +175,13 @@ function parseArgs(argv = process.argv.slice(2), env = process.env) {
     fingerprint,
     burstCount,
     expectRateLimit,
-    rotateFingerprint: configFlag(argv, env, "--rotate-fingerprint"),
+    rotateFingerprint,
     recoveryWaitMs,
     timeoutMs,
     json: configFlag(argv, env, "--json"),
+    deviceHash: "",
+    devicePrivateKeyPem,
+    deviceKeyId,
   };
 }
 
@@ -173,8 +201,38 @@ function verifyBody(options, overrides = {}) {
   };
 }
 
-async function readJsonResponse(response) {
-  const text = await response.text();
+async function readJsonResponse(response, controller) {
+  const declaredLength = Number(response.headers.get("content-length") ?? "");
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_RESPONSE_BYTES) {
+    controller.abort();
+    throw new Error("response_too_large");
+  }
+  if (response.body === null) throw new Error("invalid_response");
+  const reader = response.body.getReader();
+  const chunks = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > MAX_RESPONSE_BYTES) {
+        controller.abort();
+        void reader.cancel();
+        throw new Error("response_too_large");
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
   try {
     return JSON.parse(text);
   } catch {
@@ -190,9 +248,10 @@ async function postVerify(options, body, fetchImpl = fetch) {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
+      redirect: "error",
       signal: controller.signal,
     });
-    const parsed = await readJsonResponse(response);
+    const parsed = await readJsonResponse(response, controller);
     return {
       status: response.status,
       ok: parsed.ok,
@@ -220,6 +279,10 @@ function evaluateUnsignedDenial(result) {
     result.assertion_present === false;
 }
 
+function evaluateSignedAllow(result) {
+  return result.status === 200 && result.ok === true && result.assertion_present === true;
+}
+
 function evaluateRateLimit(result) {
   return result.status === 429 && result.ok === false && result.code === "rate_limited";
 }
@@ -227,14 +290,28 @@ function evaluateRateLimit(result) {
 async function runDrill(options, dependencies = {}) {
   const fetchImpl = dependencies.fetchImpl ?? fetch;
   const sleepImpl = dependencies.sleepImpl ?? sleep;
+  const proofConfigured = options.devicePrivateKeyPem !== "";
+  const proofSigner = proofConfigured
+    ? dependencies.proofSigner ?? await prepareRequestProofSigner(options)
+    : null;
+  const epochNow = dependencies.epochNow ?? (() => Date.now());
+  const validBody = async (overrides = {}) => {
+    const body = verifyBody(options, overrides);
+    if (proofSigner !== null) {
+      const requestTimestamp = Math.floor(epochNow() / 1_000);
+      body.client_hardening = 0;
+      Object.assign(body, await proofSigner({ nonce: body.nonce, requestTimestamp }));
+    }
+    return body;
+  };
   const malformed = await postVerify(options, verifyBody(options, { license_fingerprint: "not-hex" }), fetchImpl);
-  const unknownDenial = await postVerify(options, verifyBody(options), fetchImpl);
+  const validProbe = await postVerify(options, await validBody(), fetchImpl);
   const burst = [];
   for (let index = 0; index < options.burstCount; ++index) {
     // --rotate-fingerprint sends a distinct fingerprint per request so the burst cannot trip the
     // entitlement tier (keyed by project:feature:fingerprint); only the shared client:<ip> tier can stop it.
     const overrides = options.rotateFingerprint ? { license_fingerprint: randomBytes(32).toString("hex") } : {};
-    burst.push(await postVerify(options, verifyBody(options, overrides), fetchImpl));
+    burst.push(await postVerify(options, await validBody(overrides), fetchImpl));
     if (evaluateRateLimit(burst.at(-1)) && !options.expectRateLimit) {
       break;
     }
@@ -243,34 +320,35 @@ async function runDrill(options, dependencies = {}) {
   let recovery;
   if (options.expectRateLimit && firstRateLimitedAt !== -1 && options.recoveryWaitMs > 0) {
     await sleepImpl(options.recoveryWaitMs);
-    recovery = await postVerify(options, verifyBody(options, {
-      license_fingerprint: randomBytes(32).toString("hex"),
-    }), fetchImpl);
+    const recoveryOverrides = proofConfigured ? {} : { license_fingerprint: randomBytes(32).toString("hex") };
+    recovery = await postVerify(options, await validBody(recoveryOverrides), fetchImpl);
   }
   const failures = [];
   if (!evaluateMalformed(malformed)) {
     failures.push("malformed_request_not_rejected");
   }
-  if (!evaluateUnsignedDenial(unknownDenial)) {
-    failures.push("unknown_entitlement_not_unsigned_denial");
+  if (proofConfigured ? !evaluateSignedAllow(validProbe) : !evaluateUnsignedDenial(validProbe)) {
+    failures.push(proofConfigured ? "proof_fixture_not_signed_allow" : "unknown_entitlement_not_unsigned_denial");
   }
   if (options.expectRateLimit && firstRateLimitedAt === -1) {
     // Distinct code by mode: a rotating-fingerprint flood that is NOT limited proves the client/global tier
     // failed to bite (distinct entitlement keys cannot have tripped the entitlement tier).
     failures.push(options.rotateFingerprint ? "rotating_fingerprint_flood_not_rate_limited" : "rate_limit_not_observed");
   }
-  if (recovery !== undefined && evaluateRateLimit(recovery)) {
-    failures.push("recovery_request_still_rate_limited");
+  if (recovery !== undefined && (evaluateRateLimit(recovery) || (proofConfigured && !evaluateSignedAllow(recovery)))) {
+    failures.push(proofConfigured ? "recovery_request_not_signed_allow" : "recovery_request_still_rate_limited");
   }
   return {
     ok: failures.length === 0,
     target: "<redacted-verifier-url>",
-    project: options.project,
-    feature: options.feature,
-    fingerprint: `${options.fingerprint.slice(0, 8)}...${options.fingerprint.slice(-8)}`,
+    project: "<redacted>",
+    feature: "<redacted>",
+    fingerprint: "<redacted>",
+    request_proof_present: proofConfigured,
     rotate_fingerprint: Boolean(options.rotateFingerprint),
     malformed,
-    unknown_denial: unknownDenial,
+    valid_probe: validProbe,
+    expected_valid_probe: proofConfigured ? "signed_allow" : "unsigned_denial",
     burst: {
       attempts: burst.length,
       rate_limited_count: burst.filter(evaluateRateLimit).length,
@@ -296,7 +374,8 @@ async function main() {
       process.exit(1);
     }
   } catch (error) {
-    console.error(error instanceof Error ? error.message : String(error));
+    void error;
+    console.error("public_verifier_drill_failed");
     process.exit(2);
   }
 }
@@ -308,6 +387,7 @@ if (process.argv[1] !== undefined && fileURLToPath(import.meta.url) === process.
 export {
   evaluateMalformed,
   evaluateRateLimit,
+  evaluateSignedAllow,
   evaluateUnsignedDenial,
   normalizeUrl,
   parseArgs,

@@ -87,7 +87,7 @@ const app = {
       logEvent("error", "verify.unhandled_error", {
         request_id: requestId(request),
         path: new URL(request.url).pathname,
-        error: error instanceof Error ? error.message : "unknown Worker error",
+        error_type: error instanceof Error ? error.name : "UnknownThrownValue",
       });
       return json({ ok: false, code: "verification_error" }, 500);
     }

@@ -12,6 +12,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { handleOrderIngest } from "../../src/fulfillment/order_ingest.mjs";
+import { normalizeOrderEventForReplay } from "../../src/fulfillment/order_event.mjs";
 
 const textEncoder = new TextEncoder();
 const KEY_ID = "order-key-1";
@@ -45,22 +46,31 @@ function baseEnv(overrides = {}) {
 //   "fresh"   -> INSERT ... RETURNING yields a row,
 //   "replayed"-> yields null,
 //   "error"   -> the prepare/first throws.
-function stubDb({ nonceState = "fresh", failBatch = true } = {}) {
-  const calls = { batch: 0, prepare: 0 };
+function stubDb({ nonceState = "fresh", failBatch = true, existingEvent = null, seenNonceIds = null } = {}) {
+  const calls = { batch: 0, prepare: 0, nonceBinds: [] };
   const db = {
     prepare(sql) {
       calls.prepare += 1;
+      let boundValues = [];
       return {
-        bind() {
+        bind(...values) {
+          boundValues = values;
+          if (sql.includes("order_ingest_nonces")) calls.nonceBinds.push(values);
           return this;
         },
         async first() {
           if (sql.includes("order_ingest_nonces")) {
             if (nonceState === "error") throw new Error("nonce store down");
+            if (seenNonceIds instanceof Set) {
+              const nonceId = `${boundValues[0]}:${boundValues[1]}`;
+              if (seenNonceIds.has(nonceId)) return null;
+              seenNonceIds.add(nonceId);
+              return { event_id: nonceId };
+            }
             return nonceState === "replayed" ? null : { event_id: "x" };
           }
           if (sql.includes("FROM order_events WHERE event_id")) {
-            return null; // no prior event (dedup miss)
+            return existingEvent;
           }
           return null;
         },
@@ -148,6 +158,24 @@ function validBody(overrides = {}) {
   });
 }
 
+function stableStringify(value) {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
+  return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`).join(",")}}`;
+}
+
+async function normalizedOrderDigest(bodyText, now) {
+  const order = normalizeOrderEventForReplay(JSON.parse(bodyText), now);
+  assert.equal(order.error, undefined);
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", textEncoder.encode(stableStringify(order))));
+  return Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function rawBodyDigest(bodyText) {
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", textEncoder.encode(bodyText)));
+  return Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
 async function signedRequest(env, bodyText, { ts = Math.floor(Date.now() / 1000) } = {}) {
   const signature = await signOrder({ ts: String(ts), bodyText });
   return makeRequest({ ts: String(ts), signature, body: bodyText });
@@ -198,7 +226,7 @@ test("chunked body is assembled as raw bytes and accepts the canonical signer", 
 test("a UTF-8 code point split across chunks remains raw-byte authenticated and decodes only after assembly", async () => {
   const { db, calls } = stubDb();
   const env = baseEnv({ DB: db, ORDER_INGEST_MODE: "soft" });
-  const bodyBytes = textEncoder.encode(validBody({ provider_note: "€" }));
+  const bodyBytes = textEncoder.encode(validBody({ customer: { name: "€" } }));
   const euroStart = bodyBytes.indexOf(0xe2);
   assert.ok(euroStart >= 0);
   const ts = String(Math.floor(Date.now() / 1000));
@@ -278,8 +306,8 @@ test("missing Content-Length still cancels an actual raw-byte overflow", async (
 test("an exact-limit chunked body is accepted even when Content-Length lies low", async () => {
   const { db, calls } = stubDb();
   const env = baseEnv({ DB: db, ORDER_INGEST_MODE: "soft" });
-  const emptyPadding = validBody({ padding: "" });
-  const bodyText = validBody({ padding: "x".repeat(16384 - textEncoder.encode(emptyPadding).byteLength) });
+  const unpadded = validBody();
+  const bodyText = `${unpadded.slice(0, -1)}${" ".repeat(16384 - textEncoder.encode(unpadded).byteLength)}}`;
   const bodyBytes = textEncoder.encode(bodyText);
   assert.equal(bodyBytes.byteLength, 16384);
   const ts = String(Math.floor(Date.now() / 1000));
@@ -375,12 +403,131 @@ test("valid HMAC but unknown intent -> 400 invalid_order (no mutation)", async (
   assert.equal(calls.batch, 0, "invalid_order never reaches the mutator");
 });
 
+test("empty or misspelled quantity cannot consume the order floor", async () => {
+  for (const quantity of [{}, { lease_seconds: 60 }, { pool_szie: 5 }]) {
+    const { db, calls } = stubDb({ failBatch: true });
+    const env = baseEnv({ DB: db });
+    const bodyText = validBody({ intent: "quantity.changed", quantity });
+    const res = await handleOrderIngest(await signedRequest(env, bodyText), env);
+    assert.equal(res.status, 400, JSON.stringify(quantity));
+    assert.equal((await res.json()).code, "invalid_order", JSON.stringify(quantity));
+    assert.equal(calls.prepare, 0, "invalid quantity is rejected before nonce or order state");
+    assert.equal(calls.batch, 0);
+  }
+});
+
 test("replayed nonce -> 401 replayed", async () => {
-  const { db } = stubDb({ nonceState: "replayed" });
+  const { db, calls } = stubDb({ nonceState: "replayed" });
   const env = baseEnv({ DB: db });
-  const res = await handleOrderIngest(await signedRequest(env, validBody()), env);
+  const timestamp = Math.floor(Date.now() / 1000);
+  const res = await handleOrderIngest(await signedRequest(env, validBody(), { ts: timestamp }), env);
   assert.equal(res.status, 401);
   assert.equal((await res.json()).code, "replayed");
+  assert.equal(calls.nonceBinds.length, 1);
+  assert.match(calls.nonceBinds[0][1], new RegExp(`^${timestamp}:[0-9a-f]{64}$`, "u"));
+  assert.equal(calls.nonceBinds[0][2], timestamp, "the persisted timestamp is the authenticated signed timestamp");
+});
+
+test("an exact signed replay is denied while a freshly signed logical retry reaches the durable cache", async () => {
+  const timestamp = Math.floor(Date.now() / 1000);
+  const bodyText = validBody();
+  const digest = await normalizedOrderDigest(bodyText, timestamp);
+  const attemptDigest = await rawBodyDigest(bodyText);
+  const seenNonceIds = new Set([`${KEY_ID}:${timestamp}:${attemptDigest}`]);
+  const { db, calls } = stubDb({
+    seenNonceIds,
+    existingEvent: {
+      status: "processed",
+      payload_digest: digest,
+      result_json: JSON.stringify({ ok: true, code: "applied" }),
+    },
+  });
+  const env = baseEnv({ DB: db });
+
+  const exactReplay = await handleOrderIngest(await signedRequest(env, bodyText, { ts: timestamp }), env);
+  assert.equal(exactReplay.status, 401);
+  assert.equal((await exactReplay.json()).code, "replayed");
+
+  const freshRetry = await handleOrderIngest(await signedRequest(env, bodyText, { ts: timestamp + 1 }), env);
+  assert.equal(freshRetry.status, 200);
+  assert.equal((await freshRetry.json()).code, "applied");
+  assert.equal(seenNonceIds.size, 2);
+  assert.equal(calls.batch, 0, "the fresh retry was served from the durable processed-event cache");
+});
+
+test("independently signed JSON serializations at the same timestamp are distinct attempts", async () => {
+  const timestamp = Math.floor(Date.now() / 1000);
+  const parsed = JSON.parse(validBody());
+  const compactBody = JSON.stringify(parsed);
+  const prettyBody = JSON.stringify(parsed, null, 2);
+  const digest = await normalizedOrderDigest(compactBody, timestamp);
+  const seenNonceIds = new Set();
+  const { db, calls } = stubDb({
+    seenNonceIds,
+    existingEvent: {
+      status: "processed",
+      payload_digest: digest,
+      result_json: JSON.stringify({ ok: true, code: "applied" }),
+    },
+  });
+  const env = baseEnv({ DB: db });
+
+  const compact = await handleOrderIngest(await signedRequest(env, compactBody, { ts: timestamp }), env);
+  const pretty = await handleOrderIngest(await signedRequest(env, prettyBody, { ts: timestamp }), env);
+
+  assert.equal(compact.status, 200);
+  assert.equal(pretty.status, 200);
+  assert.equal((await compact.json()).code, "applied");
+  assert.equal((await pretty.json()).code, "applied");
+  assert.equal(seenNonceIds.size, 2, "the replay key hashes exact signed body bytes, not normalized JSON");
+  assert.equal(calls.batch, 0, "both distinct attempts were served from the durable event cache");
+});
+
+test("a historical event can reach a matching durable cache but cannot enter as a new event", async () => {
+  const timestamp = Math.floor(Date.now() / 1000);
+  const bodyText = validBody({ current_period_end: timestamp - 2 * 86_400 });
+  const digest = await normalizedOrderDigest(bodyText, timestamp);
+  const cached = stubDb({
+    seenNonceIds: new Set(),
+    existingEvent: {
+      status: "processed",
+      payload_digest: digest,
+      result_json: JSON.stringify({ ok: true, code: "applied" }),
+    },
+  });
+  const cachedResponse = await handleOrderIngest(
+    await signedRequest(baseEnv(), bodyText, { ts: timestamp }),
+    baseEnv({ DB: cached.db }),
+  );
+  assert.equal(cachedResponse.status, 200);
+  assert.equal((await cachedResponse.json()).code, "applied");
+
+  const unseen = stubDb({ seenNonceIds: new Set() });
+  const unseenResponse = await handleOrderIngest(
+    await signedRequest(baseEnv(), bodyText, { ts: timestamp + 1 }),
+    baseEnv({ DB: unseen.db }),
+  );
+  assert.equal(unseenResponse.status, 400);
+  assert.equal((await unseenResponse.json()).code, "invalid_order");
+  assert.equal(unseen.calls.batch, 0);
+});
+
+test("a malformed terminal cache fails closed instead of throwing or returning an invalid body", async () => {
+  const timestamp = Math.floor(Date.now() / 1000);
+  const bodyText = validBody();
+  const digest = await normalizedOrderDigest(bodyText, timestamp);
+  for (const resultJson of ["{", "null", JSON.stringify({ code: "applied" })]) {
+    const { db } = stubDb({
+      seenNonceIds: new Set(),
+      existingEvent: { status: "processed", payload_digest: digest, result_json: resultJson },
+    });
+    const response = await handleOrderIngest(
+      await signedRequest(baseEnv(), bodyText, { ts: timestamp }),
+      baseEnv({ DB: db }),
+    );
+    assert.equal(response.status, 503);
+    assert.equal((await response.json()).code, "write_failed");
+  }
 });
 
 test("nonce store error -> 503 write_failed (fail-closed)", async () => {
@@ -401,6 +548,17 @@ test("soft mode observes (verify+normalize) but NEVER mutates", async () => {
   assert.equal(body.code, "observed");
   assert.equal(body.license_fingerprint, null);
   assert.equal(calls.batch, 0, "soft mode never mutates");
+});
+
+test("soft mode rejects a historical new event exactly as required mode would", async () => {
+  const { db, calls } = stubDb({ failBatch: true });
+  const env = baseEnv({ ORDER_INGEST_MODE: "soft", DB: db });
+  const historical = validBody({ current_period_end: Math.floor(Date.now() / 1000) - 2 * 86_400 });
+  const res = await handleOrderIngest(await signedRequest(env, historical), env);
+  assert.equal(res.status, 400);
+  assert.equal((await res.json()).code, "invalid_order");
+  assert.equal(calls.prepare, 0, "soft mode evaluates new-event policy without reading or mutating durable state");
+  assert.equal(calls.batch, 0);
 });
 
 // --- R2.1 signer-scope authz -------------------------------------------------
@@ -441,12 +599,63 @@ test("signer scope required + no scope entry for the key -> 403 (fail-closed)", 
   assert.equal((await res.json()).code, "signer_scope_forbidden");
 });
 
+test("prototype-named signer keys require their own explicit scope entry", async () => {
+  for (const keyId of ["__proto__", "constructor", "toString"]) {
+    const { db } = stubDb();
+    const env = baseEnv({
+      DB: db,
+      ORDER_HMAC_SECRETS: JSON.stringify({ [keyId]: SECRET_B64 }),
+      ORDER_SIGNER_SCOPE_MODE: "required",
+      ORDER_SIGNER_SCOPES: JSON.stringify({ "some-other-key": { project: "DEFAULT" } }),
+    });
+    const ts = String(Math.floor(Date.now() / 1000));
+    const bodyText = validBody();
+    const signature = await signOrder({ ts, bodyText });
+    const res = await handleOrderIngest(makeRequest({ keyId, ts, signature, body: bodyText }), env);
+    assert.equal(res.status, 403, keyId);
+    assert.equal((await res.json()).code, "signer_scope_forbidden", keyId);
+  }
+});
+
+test("an own __proto__ signer scope is data and still enforces its constraints", async () => {
+  const keyId = "__proto__";
+  const { db, calls } = stubDb({ failBatch: true });
+  const env = baseEnv({
+    DB: db,
+    ORDER_HMAC_SECRETS: JSON.stringify({ [keyId]: SECRET_B64 }),
+    ORDER_SIGNER_SCOPE_MODE: "required",
+    ORDER_SIGNER_SCOPES: JSON.stringify({ [keyId]: { project: "OTHER", customer_id: "cus_other" } }),
+  });
+  const ts = String(Math.floor(Date.now() / 1000));
+  const bodyText = validBody({ customer: { id: "cus_default" } });
+  const signature = await signOrder({ ts, bodyText });
+  const res = await handleOrderIngest(makeRequest({ keyId, ts, signature, body: bodyText }), env);
+  assert.equal(res.status, 403);
+  assert.equal((await res.json()).code, "signer_scope_forbidden");
+  assert.equal(calls.batch, 0);
+});
+
 test("signer scope required but no scope map -> 503 config_error", async () => {
   const { db } = stubDb();
   const env = baseEnv({ DB: db, ORDER_SIGNER_SCOPE_MODE: "required" });
   const res = await handleOrderIngest(await signedRequest(env, validBody()), env);
   assert.equal(res.status, 503);
   assert.equal((await res.json()).code, "config_error");
+});
+
+test("empty or misspelled signer constraints fail configuration closed", async () => {
+  for (const scope of [{}, { projet: "DEFAULT" }, { project: "DEFAULT", typo: "x" }]) {
+    const { db, calls } = stubDb();
+    const env = baseEnv({
+      DB: db,
+      ORDER_SIGNER_SCOPE_MODE: "required",
+      ORDER_SIGNER_SCOPES: JSON.stringify({ [KEY_ID]: scope }),
+    });
+    const res = await handleOrderIngest(await signedRequest(env, validBody()), env);
+    assert.equal(res.status, 503, JSON.stringify(scope));
+    assert.equal((await res.json()).code, "config_error", JSON.stringify(scope));
+    assert.equal(calls.prepare, 0, "bad scope config is rejected before persistence");
+  }
 });
 
 test("signer scope required + in-scope project -> passes the scope gate", async () => {

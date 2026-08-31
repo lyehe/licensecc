@@ -10,6 +10,8 @@ import { createHash } from "node:crypto";
 
 import {
   normalizeOrderEvent,
+  normalizeOrderEventForReplay,
+  orderPeriodIsAcceptable,
   deriveFingerprint,
   clampValidUntil,
   mapIntentToMutation,
@@ -112,6 +114,24 @@ test("normalizeOrderEvent rejects an unknown intent", () => {
   assert.equal(normalizeOrderEvent(baseBody({ intent: undefined }), NOW).error, "invalid_order");
 });
 
+test("normalizeOrderEvent accepts every documented intent", () => {
+  const intents = [
+    "subscription.active", "subscription.renewed", "subscription.past_due", "subscription.paused",
+    "subscription.payment_failed", "subscription.canceled_at_period_end", "subscription.resumed",
+    "quantity.changed", "fraud.confirmed", "chargeback",
+  ];
+  for (const intent of intents) {
+    const overrides = intent === "quantity.changed" ? { intent, quantity: { pool_size: 1 } } : { intent };
+    assert.equal(normalizeOrderEvent(baseBody(overrides), NOW).error, undefined, intent);
+  }
+});
+
+test("normalizeOrderEvent rejects unknown request, customer, and quantity fields", () => {
+  assert.equal(normalizeOrderEvent(baseBody({ typo: true }), NOW).error, "invalid_order");
+  assert.equal(normalizeOrderEvent(baseBody({ customer: { id: "cus_1", emali: "x@example.test" } }), NOW).error, "invalid_order");
+  assert.equal(normalizeOrderEvent(baseBody({ quantity: { pool_size: 1, lease_seconds: 60 } }), NOW).error, "invalid_order");
+});
+
 test("normalizeOrderEvent rejects non-non-negative-integer seq/order_epoch", () => {
   assert.equal(normalizeOrderEvent(baseBody({ seq: -1 }), NOW).error, "invalid_order");
   assert.equal(normalizeOrderEvent(baseBody({ seq: 1.5 }), NOW).error, "invalid_order");
@@ -138,12 +158,27 @@ test("normalizeOrderEvent rejects bad quantity values", () => {
   assert.equal(normalizeOrderEvent(baseBody({ quantity: { pool_size: 1.5 } }), NOW).error, "invalid_order");
   assert.equal(normalizeOrderEvent(baseBody({ quantity: { max_active_devices: "3" } }), NOW).error, "invalid_order");
   assert.equal(normalizeOrderEvent(baseBody({ quantity: [] }), NOW).error, "invalid_order");
+  assert.equal(normalizeOrderEvent(baseBody({ quantity: {} }), NOW).error, "invalid_order");
+  assert.equal(normalizeOrderEvent(baseBody({ quantity: { pool_size: null } }), NOW).error, "invalid_order");
+  assert.equal(normalizeOrderEvent(baseBody({ intent: "quantity.changed", quantity: undefined }), NOW).error, "invalid_order");
+  assert.equal(normalizeOrderEvent(baseBody({ intent: "quantity.changed", quantity: {} }), NOW).error, "invalid_order");
+});
+
+test("normalizeOrderEvent rejects an empty customer object", () => {
+  assert.equal(normalizeOrderEvent(baseBody({ customer: {} }), NOW).error, "invalid_order");
 });
 
 test("normalizeOrderEvent rejects current_period_end well in the past for a non-cancel intent", () => {
   // > GRACE (1 day) in the past -> invalid_order.
   const out = normalizeOrderEvent(baseBody({ current_period_end: NOW - 2 * 86400 }), NOW);
   assert.equal(out.error, "invalid_order");
+});
+
+test("replay normalization preserves an authenticated historical event for durable lookup", () => {
+  const out = normalizeOrderEventForReplay(baseBody({ current_period_end: NOW - 2 * 86400 }), NOW);
+  assert.equal(out.error, undefined);
+  assert.equal(orderPeriodIsAcceptable(out, NOW), false);
+  assert.equal(orderPeriodIsAcceptable(out, -1), false);
 });
 
 test("normalizeOrderEvent allows a backdated period_end for a cancel intent", () => {
@@ -286,35 +321,32 @@ test("map: subscription.resumed -> reenable (missing -> no_entitlement)", () => 
   assert.deepEqual(missing, { kind: "none", terminal: "no_entitlement" });
 });
 
-test("map: quantity.changed -> capacity, plus reclaim on downgrade vs prior applied event", () => {
-  // No downgrade (no prior pool / equal) -> capacity only.
+test("map: quantity.changed -> capacity, plus reclaim against the live entitlement pool", () => {
+  // No prior live pool -> capacity only.
   const flat = mapIntentToMutation(
     order({ intent: "quantity.changed", quantity: { pool_size: 5 } }),
     ACTIVE_PREV,
-    null,
   );
   assert.equal(flat.kind, "capacity");
   assert.deepEqual(flat.capacity, { pool_size: 5 });
-  assert.equal(flat.reclaim, undefined, "no prior applied event -> no reclaim");
+  assert.equal(flat.reclaim, undefined, "no authoritative prior pool -> no reclaim");
 
   // Upgrade -> capacity only, no reclaim.
   const up = mapIntentToMutation(
     order({ intent: "quantity.changed", quantity: { pool_size: 10 } }),
-    ACTIVE_PREV,
-    { quantity: { pool_size: 5 } },
+    { ...ACTIVE_PREV, pool_size: 5 },
   );
   assert.equal(up.kind, "capacity");
   assert.equal(up.reclaim, undefined, "upgrade does not reclaim");
 
-  // Downgrade -> capacity + reclaim diff from the PRIOR APPLIED EVENT's pool_size.
+  // Downgrade -> capacity + reclaim diff from the current persisted pool_size.
   const down = mapIntentToMutation(
     order({ intent: "quantity.changed", quantity: { pool_size: 3 } }),
-    ACTIVE_PREV,
-    { quantity: { pool_size: 8 } },
+    { ...ACTIVE_PREV, pool_size: 8 },
   );
   assert.equal(down.kind, "capacity");
   assert.deepEqual(down.capacity, { pool_size: 3 });
-  assert.deepEqual(down.reclaim, { from: 8, to: 3 }, "downgrade reclaims from prior applied pool, not live state");
+  assert.deepEqual(down.reclaim, { from: 8, to: 3 }, "downgrade reclaims from authoritative persisted capacity");
 
   // quantity.changed on a missing entitlement never materializes capacity.
   const missing = mapIntentToMutation(order({ intent: "quantity.changed", quantity: { pool_size: 3 } }), null, null);

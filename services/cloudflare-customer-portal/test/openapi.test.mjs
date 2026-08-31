@@ -202,4 +202,11 @@ test("the doc routes are served without credentials or environment (behavioral)"
   const docs = await worker.fetch(new Request("http://test/docs"), {});
   assert.equal(docs.status, 200);
   assert.match(docs.headers.get("content-type") ?? "", /text\/html/);
+  const policy = docs.headers.get("content-security-policy") ?? "";
+  const nonce = /script-src 'nonce-([^']+)'/u.exec(policy)?.[1];
+  assert.ok(nonce, "docs must bind inline code to a CSP nonce");
+  assert.doesNotMatch(policy, /unsafe-(?:inline|eval)/u);
+  const html = await docs.text();
+  assert.equal(html.split(`nonce="${nonce}"`).length - 1, 2);
+  assert.doesNotMatch(html, /innerHTML/u, "docs renderer must not contain a DOM HTML injection sink");
 });

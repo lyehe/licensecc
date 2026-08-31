@@ -1,12 +1,16 @@
 -- Webhook dispatcher: a strictly READ-SIDE, cron-drained transactional outbox over the EXISTING
 -- audit tables (entitlement_events, customer_events, order_events). The dispatcher NEVER modifies
 -- any mutator/event-write path; it only READS those logs, ENQUEUEs one delivery per (endpoint,
--- event) into webhook_deliveries (the UNIQUE makes a re-run a no-op = exactly-once), then DELIVERs
--- pending rows with an HMAC-signed POST + exponential backoff. Emission is UNMETERED: it runs ONLY
+-- event) into webhook_deliveries (the UNIQUE makes enqueue re-runs idempotent), then leases and
+-- delivers pending rows with an HMAC-signed POST + exponential backoff. HTTP delivery is
+-- at-least-once; receivers deduplicate the stable event-source/delivery-id headers. It runs ONLY
 -- in scheduled() (the cron), never inline / waitUntil.
 --
 -- Signing keys live ONLY in a Worker-env map (WEBHOOK_SIGNING_SECRETS, JSON {keyId: base64secret}),
 -- mirroring ORDER_HMAC_SECRETS — NO plaintext secret is ever stored in D1 (the repo forbids it).
+-- While a row is pending, next_attempt_at is both its due time and its in-flight lease deadline.
+-- Claim and outcome writes compare-and-set that value so overlapping cron invocations cannot both
+-- send the same attempt; a crash after remote success leaves the row eligible after lease expiry.
 
 -- event_types is a csv filter; '' = all event types.
 CREATE TABLE IF NOT EXISTS webhook_endpoints (

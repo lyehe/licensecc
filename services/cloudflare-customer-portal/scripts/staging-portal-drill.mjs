@@ -17,6 +17,52 @@ const ENV_ALIASES = {
   logout: ["STAGING_PORTAL_LOGOUT", "LICENSECC_PORTAL_LOGOUT"],
 };
 
+const MAX_JSON_RESPONSE_BYTES = 256 * 1024;
+const MAX_DOCUMENT_RESPONSE_BYTES = 64 * 1024;
+const MAX_DOWNLOAD_RESPONSE_BYTES = 1024 * 1024;
+
+async function readBoundedBytes(response, limit, label) {
+  const declaredLength = response.headers.get("content-length");
+  if (declaredLength !== null && /^\d+$/u.test(declaredLength) && Number(declaredLength) > limit) {
+    await response.body?.cancel().catch(() => {});
+    throw new Error(`${label} exceeded the bounded response limit`);
+  }
+  if (response.body === null) return new Uint8Array();
+  const reader = response.body.getReader();
+  const chunks = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > limit) {
+        await reader.cancel().catch(() => {});
+        throw new Error(`${label} exceeded the bounded response limit`);
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return bytes;
+}
+
+async function readBoundedText(response, limit, label) {
+  const bytes = await readBoundedBytes(response, limit, label);
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    throw new Error(`${label} returned invalid UTF-8`);
+  }
+}
+
 function envText(env, names) {
   for (const name of names) {
     const value = env[name];
@@ -123,6 +169,7 @@ class CookieJar {
     for (const value of values) {
       this.add(value);
     }
+    return values;
   }
 
   header() {
@@ -159,15 +206,15 @@ async function requestJson(options, path, init = {}) {
     }),
     body: init.body === undefined ? undefined : JSON.stringify(init.body),
   });
-  options.cookieJar.capture(response);
-  const text = await response.text();
+  const setCookies = options.cookieJar.capture(response);
+  const text = await readBoundedText(response, MAX_JSON_RESPONSE_BYTES, `${method} ${path}`);
   let body = null;
   try {
     body = text === "" ? null : JSON.parse(text);
   } catch {
     throw new Error(`${method} ${path} returned non-JSON response with status ${response.status}`);
   }
-  return { response, body };
+  return { response, body, setCookies };
 }
 
 async function requestBytes(options, path, init = {}) {
@@ -184,21 +231,63 @@ async function requestBytes(options, path, init = {}) {
     body: init.body === undefined ? undefined : JSON.stringify(init.body),
   });
   options.cookieJar.capture(response);
-  return { response, bytes: new Uint8Array(await response.arrayBuffer()) };
+  return {
+    response,
+    bytes: await readBoundedBytes(response, MAX_DOWNLOAD_RESPONSE_BYTES, `${method} ${path}`),
+  };
+}
+
+async function requestDocument(options, path) {
+  const url = new URL(path, options.baseUrl);
+  const response = await options.fetchFn(url, {
+    method: "GET",
+    headers: jsonHeaders({
+      method: "GET",
+      origin: options.baseUrl.origin,
+      cookieJar: options.cookieJar,
+    }),
+  });
+  options.cookieJar.capture(response);
+  return {
+    status: response.status,
+    ok: response.ok,
+    contentType: response.headers.get("content-type") ?? "",
+    text: await readBoundedText(response, MAX_DOCUMENT_RESPONSE_BYTES, `GET ${path}`),
+  };
 }
 
 function assertEnvelope(result, expectedCode, label) {
   if (!result.response.ok || result.body?.ok !== true || result.body?.code !== expectedCode) {
-    throw new Error(`${label} failed: ${JSON.stringify({ status: result.response.status, body: result.body })}`);
+    throw new Error(`${label} failed: status=${result.response.status}; response_ok=${result.response.ok}; envelope_ok=${result.body?.ok === true}; code_matches=${result.body?.code === expectedCode}`);
   }
   return result.body;
 }
 
 function assertAction(result, label) {
   if (!result.response.ok || result.body?.ok !== true) {
-    throw new Error(`${label} failed: ${JSON.stringify({ status: result.response.status, body: result.body })}`);
+    throw new Error(`${label} failed: status=${result.response.status}; response_ok=${result.response.ok}; envelope_ok=${result.body?.ok === true}`);
   }
   return result.body;
+}
+
+function assertUnauthorized(result, label) {
+  if (result.response.status !== 401 || result.body?.ok !== false || result.body?.code !== "unauthorized") {
+    throw new Error(`${label} failed: status=${result.response.status}; envelope_denied=${result.body?.ok === false}; code_matches=${result.body?.code === "unauthorized"}`);
+  }
+}
+
+function assertSecureSessionCookie(result, label) {
+  const sessionCookie = result.setCookies.find((value) => /^lccp_session=/iu.test(value));
+  const requiredAttributes = [
+    /(?:^|;)\s*HttpOnly(?:;|$)/iu,
+    /(?:^|;)\s*Secure(?:;|$)/iu,
+    /(?:^|;)\s*SameSite=Lax(?:;|$)/iu,
+    /(?:^|;)\s*Path=\/(?:;|$)/iu,
+    /(?:^|;)\s*Max-Age=[1-9]\d*(?:;|$)/iu,
+  ];
+  if (sessionCookie === undefined || !requiredAttributes.every((pattern) => pattern.test(sessionCookie))) {
+    throw new Error(`${label} did not issue the required secure session cookie policy`);
+  }
 }
 
 function findStringKey(value, key) {
@@ -231,7 +320,7 @@ function selectEntitlement(items, explicitId, predicate, label) {
 async function authenticate(options) {
   if (options.authMode === "session_cookie") {
     options.cookieJar.add(options.sessionCookie);
-    return;
+    return false;
   }
 
   if (options.authMode === "bootstrap_bearer") {
@@ -248,11 +337,13 @@ async function authenticate(options) {
     if (typeof secret !== "string" || secret === "") {
       throw new Error("portal bootstrap OTP did not return a secret for the configured email");
     }
-    assertEnvelope(await requestJson(options, "/portal/v1/auth/magic-redeem", {
+    const signIn = await requestJson(options, "/portal/v1/auth/magic-redeem", {
       method: "POST",
       body: { token: secret },
-    }), "signed_in", "portal bootstrap sign-in");
-    return;
+    });
+    assertEnvelope(signIn, "signed_in", "portal bootstrap sign-in");
+    assertSecureSessionCookie(signIn, "portal bootstrap sign-in");
+    return true;
   }
 
   if (options.requestOtp) {
@@ -261,10 +352,13 @@ async function authenticate(options) {
       body: { email: options.email },
     }), "otp_requested", "portal OTP request");
   }
-  assertEnvelope(await requestJson(options, "/portal/v1/auth/verify", {
+  const signIn = await requestJson(options, "/portal/v1/auth/verify", {
     method: "POST",
     body: { email: options.email, code: options.otpCode },
-  }), "signed_in", "portal OTP sign-in");
+  });
+  assertEnvelope(signIn, "signed_in", "portal OTP sign-in");
+  assertSecureSessionCookie(signIn, "portal OTP sign-in");
+  return true;
 }
 
 async function runSeatCycle(options, entitlements) {
@@ -348,8 +442,14 @@ async function runStagingPortalDrill(options, dependencies = {}) {
     cookieJar: dependencies.cookieJar ?? new CookieJar(),
   };
 
+  const ui = await requestDocument(runtime, "/");
+  if (!ui.ok || !/^text\/html(?:;|$)/iu.test(ui.contentType) || !/<(?:!doctype\s+html|html)\b/iu.test(ui.text)) {
+    throw new Error(`portal UI failed: ${JSON.stringify({ status: ui.status, content_type: ui.contentType })}`);
+  }
   const health = assertEnvelope(await requestJson(runtime, "/health"), "healthy", "portal health");
-  await authenticate(runtime);
+  const unauthenticated = await requestJson({ ...runtime, cookieJar: new CookieJar() }, "/api/portal/me");
+  assertUnauthorized(unauthenticated, "portal unauthenticated read denial");
+  const sessionCookiePolicyChecked = await authenticate(runtime);
 
   const me = assertEnvelope(await requestJson(runtime, "/api/portal/me"), "me", "portal me");
   const entitlements = assertEnvelope(await requestJson(runtime, "/api/portal/entitlements"), "entitlements", "portal entitlements");
@@ -360,18 +460,27 @@ async function runStagingPortalDrill(options, dependencies = {}) {
   const seatCycle = await runSeatCycle(runtime, entitlementItems);
   const download = await runDownload(runtime, entitlementItems);
 
+  let postLogoutStatus = null;
   if (runtime.logout) {
     assertEnvelope(await requestJson(runtime, "/portal/v1/auth/logout", {
       method: "POST",
       body: {},
     }), "logged_out", "portal logout");
+    const postLogout = await requestJson(runtime, "/api/portal/me");
+    assertUnauthorized(postLogout, "portal post-logout read denial");
+    postLogoutStatus = postLogout.response.status;
   }
 
   return {
     ok: true,
     skipped: false,
     auth_mode: runtime.authMode,
+    ui_status: ui.status,
+    ui_content_type: ui.contentType,
     health_code: health.code,
+    unauthenticated_status: unauthenticated.response.status,
+    session_cookie_policy_checked: sessionCookiePolicyChecked,
+    post_logout_status: postLogoutStatus,
     customer_id_present: typeof me.data?.customer_id === "string" && me.data.customer_id !== "",
     entitlement_count: entitlementItems.length,
     device_count: Array.isArray(devices.data?.items) ? devices.data.items.length : null,

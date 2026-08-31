@@ -115,16 +115,18 @@ export async function accountAuth(request, env, operation, project, feature, now
 /**
  * off-mode shadow evaluation: resolve the presented token (if any) and emit a non-enforcing
  * signal so the off -> soft cutover gate (zero account.shadow_nomatch for active callers) can be
- * measured. NEVER logs the raw token or Authorization header (L10); logs only customer_id + tuple.
+ * measured. NEVER logs the raw token, Authorization header, customer identity,
+ * or entitlement tuple (L10); the fixed event and bounded result code are enough
+ * to measure cutover coverage.
  */
 export async function shadowEvalAccountToken(request, env, project, feature, now) {
   const raw = readBearer(request);
   try {
     const resolved = await resolveAccountToken(env, raw, now);
     if (resolved.ok) {
-      logShadow("account.shadow_pass", { customer_id: resolved.token.customer_id, project, feature });
+      logShadow("account.shadow_pass", { code: "resolved" });
     } else {
-      logShadow("account.shadow_nomatch", { code: resolved.code, project, feature });
+      logShadow("account.shadow_nomatch", { code: resolved.code });
     }
   } catch {
     // shadow-eval is observational; a failure here must never affect the (off) response.
@@ -133,5 +135,7 @@ export async function shadowEvalAccountToken(request, env, project, feature, now
 
 // A minimal structured logger so this module stays free of route-handler imports (avoids a cycle).
 function logShadow(event, fields) {
-  console.log(JSON.stringify({ event, ...fields }));
+  const safeEvent = event === "account.shadow_pass" ? event : "account.shadow_nomatch";
+  const code = typeof fields?.code === "string" && /^[a-z_]{1,40}$/u.test(fields.code) ? fields.code : "unknown";
+  console.log(JSON.stringify({ event: safeEvent, severity: "info", code }));
 }

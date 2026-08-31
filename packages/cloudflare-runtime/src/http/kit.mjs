@@ -10,12 +10,72 @@
 // here so every worker uses the same implementation instead of a hand-rolled digest compare.
 export { constantTimeEqual } from "../auth/primitives.mjs";
 
+const SAFE_ERROR_TYPES = new Set([
+  "AggregateError", "Error", "EvalError", "RangeError", "ReferenceError",
+  "SyntaxError", "TypeError", "URIError", "UnknownThrownValue",
+]);
+
+// Error.name is writable. Collapse arbitrary names before they cross a logging boundary so
+// provider/library text cannot masquerade as a harmless structured field.
+export function safeErrorType(value) {
+  try {
+    const name = value instanceof Error ? value.name : value;
+    if (typeof name !== "string") return "UnknownThrownValue";
+    return SAFE_ERROR_TYPES.has(name) ? name : "Error";
+  } catch {
+    return "Error";
+  }
+}
+
 // JSON response with a charset-tagged content-type.
 export function json(body, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
     headers: {
       "content-type": "application/json; charset=utf-8",
+    },
+  });
+}
+
+// API documentation pages intentionally keep their CSS and renderer inline so they have no
+// third-party dependency. A per-response nonce permits those two exact blocks without enabling
+// arbitrary inline script or style execution.
+export const HTML_NONCE_PLACEHOLDER = "__LICENSECC_HTML_NONCE__";
+
+function htmlNonce() {
+  const bytes = crypto.getRandomValues(new Uint8Array(18));
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary);
+}
+
+export function secureHtml(template, status = 200) {
+  const pieces = template.split(HTML_NONCE_PLACEHOLDER);
+  if (pieces.length !== 3) {
+    throw new Error("secure HTML must contain exactly one style nonce and one script nonce placeholder");
+  }
+  const nonce = htmlNonce();
+  const body = pieces.join(nonce);
+  return new Response(body, {
+    status,
+    headers: {
+      "cache-control": "no-store",
+      "content-security-policy": [
+        "default-src 'none'",
+        "base-uri 'none'",
+        "connect-src 'self'",
+        "frame-ancestors 'none'",
+        "form-action 'none'",
+        "object-src 'none'",
+        `script-src 'nonce-${nonce}'`,
+        `style-src 'nonce-${nonce}'`,
+      ].join("; "),
+      "content-type": "text/html; charset=utf-8",
+      "cross-origin-opener-policy": "same-origin",
+      "permissions-policy": "camera=(), geolocation=(), microphone=(), payment=(), usb=()",
+      "referrer-policy": "no-referrer",
+      "x-content-type-options": "nosniff",
+      "x-frame-options": "DENY",
     },
   });
 }

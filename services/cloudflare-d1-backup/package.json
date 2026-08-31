@@ -1,6 +1,6 @@
 {
   "name": "@licensecc/cloudflare-d1-backup",
-  "version": "0.1.0-rc.1",
+  "version": "0.1.0-rc.2",
   "private": true,
   "type": "module",
   "scripts": {
@@ -12,6 +12,7 @@
     "typecheck": "npm run generate:wrangler-types && tsc -p tsconfig.typecheck.json --noEmit",
     "dry-run": "npm run build && npx wrangler deploy --dry-run --config wrangler.example.jsonc",
     "validate:deploy": "node scripts/validate-deploy.mjs",
+    "backup:pre-migration": "node scripts/run-and-wait.mjs",
     "time-travel": "node scripts/time-travel.mjs",
     "restore-drill": "node scripts/restore-drill.mjs"
   },

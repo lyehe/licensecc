@@ -7,7 +7,7 @@
       "status": "shipped",
       "owner": "C++ ABI and core maintainer",
       "surfaces": ["C++ public API"],
-      "availability": {"release": "C++ 2.1.0 lineage; platform 0.1.0-rc.1", "platforms": ["Windows", "Linux"], "limitations": ["Implemented and covered in the accepted repository; it is not a deployed service or published platform release."]},
+      "availability": {"release": "C++ 2.1.0 lineage; platform 0.1.0-rc.2", "platforms": ["Windows", "Linux"], "limitations": ["Implemented and covered in the accepted repository; it is not a deployed service or published platform release."]},
       "replaces": [],
       "public_docs": ["doc/capabilities/index.rst", "doc/usage/concepts.rst"],
       "evidence": [
@@ -21,7 +21,7 @@
       "status": "shipped",
       "owner": "C++ ABI and core maintainer",
       "surfaces": ["C++ public API"],
-      "availability": {"release": "C++ 2.1.0 lineage; platform 0.1.0-rc.1", "platforms": ["Windows", "Linux"], "limitations": ["Hardware identifiers are environment-dependent; weak bindings remain opt-in."]},
+      "availability": {"release": "C++ 2.1.0 lineage; platform 0.1.0-rc.2", "platforms": ["Windows", "Linux"], "limitations": ["Hardware identifiers are environment-dependent; weak bindings remain opt-in."]},
       "replaces": [],
       "public_docs": ["doc/capabilities/index.rst", "doc/usage/Hardware-identifiers.rst"],
       "evidence": [
@@ -35,7 +35,7 @@
       "status": "platform_limited",
       "owner": "C++ ABI and core maintainer",
       "surfaces": ["C++ generated project configuration"],
-      "availability": {"release": "C++ 2.1.0 lineage; platform 0.1.0-rc.1", "platforms": ["Windows", "Linux"], "limitations": ["Container and cloud defaults intentionally use no hardware binding; CPU-size identification is not implemented."]},
+      "availability": {"release": "C++ 2.1.0 lineage; platform 0.1.0-rc.2", "platforms": ["Windows", "Linux"], "limitations": ["Container and cloud defaults intentionally use no hardware binding; CPU-size identification is not implemented."]},
       "replaces": [],
       "public_docs": ["doc/capabilities/index.rst", "doc/usage/Hardware-identifiers.rst"],
       "evidence": [
@@ -51,7 +51,7 @@
       "status": "shipped",
       "owner": "C++ ABI and core maintainer",
       "surfaces": ["C++ public API"],
-      "availability": {"release": "C++ 2.1.0 lineage; platform 0.1.0-rc.1", "platforms": ["Windows", "Linux"], "limitations": ["The caller must supply a valid version when a license applies start-version or end-version limits."]},
+      "availability": {"release": "C++ 2.1.0 lineage; platform 0.1.0-rc.2", "platforms": ["Windows", "Linux"], "limitations": ["The caller must supply a valid version when a license applies start-version or end-version limits."]},
       "replaces": [],
       "public_docs": ["doc/capabilities/index.rst", "doc/analysis/features.rst"],
       "evidence": [
@@ -65,7 +65,7 @@
       "status": "shipped",
       "owner": "Backend deployable maintainer",
       "surfaces": ["C++ callback contract", "licensing backend"],
-      "availability": {"release": "Platform 0.1.0-rc.1", "platforms": ["Cloudflare Workers", "C++ hosts"], "limitations": ["The repository proves implementation and automated coverage only; remote deployment and Ubuntu release evidence are not asserted here."]},
+      "availability": {"release": "Platform 0.1.0-rc.2", "platforms": ["Cloudflare Workers", "C++ hosts"], "limitations": ["The repository proves implementation and automated coverage only; remote deployment and Ubuntu release evidence are not asserted here."]},
       "replaces": [],
       "public_docs": ["doc/capabilities/index.rst", "sdks/dotnet/README.md"],
       "evidence": [
@@ -82,7 +82,7 @@
       "status": "shipped",
       "owner": "C++ ABI and core maintainer",
       "surfaces": ["C++ config API", "Python config verifier", ".NET config verifier"],
-      "availability": {"release": "Platform 0.1.0-rc.1", "platforms": ["Windows", "Linux", "Python", ".NET 8"], "limitations": ["The SDKs verify the token contract; binary enforcement stays in the C++ runtime."]},
+      "availability": {"release": "Platform 0.1.0-rc.2", "platforms": ["Windows", "Linux", "Python", ".NET 8"], "limitations": ["The SDKs verify the token contract; binary enforcement stays in the C++ runtime."]},
       "replaces": [],
       "public_docs": ["doc/capabilities/index.rst", "sdks/dotnet/README.md"],
       "evidence": [
@@ -100,7 +100,7 @@
       "status": "shipped",
       "owner": "Backend deployable maintainer",
       "surfaces": ["C++ callback contract", "licensing backend", "Python HTTP client", ".NET HTTP client"],
-      "availability": {"release": "Platform 0.1.0-rc.1", "platforms": ["Cloudflare Workers", "C++ hosts", "Python", ".NET 8"], "limitations": ["A host owns HTTP transport and seat identifiers; no remote deployment claim is made."]},
+      "availability": {"release": "Platform 0.1.0-rc.2", "platforms": ["Cloudflare Workers", "C++ hosts", "Python", ".NET 8"], "limitations": ["A host owns HTTP transport and seat identifiers; no remote deployment claim is made."]},
       "replaces": ["legacy-remote-license-type"],
       "public_docs": ["doc/capabilities/index.rst", "sdks/dotnet/README.md"],
       "evidence": [
@@ -135,7 +135,7 @@
       "status": "experimental",
       "owner": "Backend deployable maintainer",
       "surfaces": ["licensing backend"],
-      "availability": {"release": "Platform 0.1.0-rc.1", "platforms": ["Cloudflare Workers"], "limitations": ["The protocol is available for integration; repository-local Windows and Ubuntu TPM-provider implementations have automated evidence, but no universal client support or published deployment claim is made."]},
+      "availability": {"release": "Platform 0.1.0-rc.2", "platforms": ["Cloudflare Workers"], "limitations": ["The protocol is available for integration; repository-local Windows and Ubuntu TPM-provider implementations have automated evidence, but no universal client support or published deployment claim is made."]},
       "replaces": [],
       "public_docs": ["doc/capabilities/index.rst"],
       "evidence": [
@@ -150,7 +150,7 @@
       "status": "shipped",
       "owner": "Backend deployable maintainer",
       "surfaces": ["licensing backend"],
-      "availability": {"release": "Platform 0.1.0-rc.1", "platforms": ["Cloudflare Workers"], "limitations": ["Implemented locally with automated tests; operating a remote service remains deployer responsibility."]},
+      "availability": {"release": "Platform 0.1.0-rc.2", "platforms": ["Cloudflare Workers"], "limitations": ["Implemented locally with automated tests; operating a remote service remains deployer responsibility."]},
       "replaces": [],
       "public_docs": ["doc/capabilities/index.rst"],
       "evidence": [
@@ -165,7 +165,7 @@
       "status": "shipped",
       "owner": "Backend deployable maintainer",
       "surfaces": ["licensing backend"],
-      "availability": {"release": "Platform 0.1.0-rc.1", "platforms": ["Cloudflare Workers"], "limitations": ["Deployment credentials and billing-provider integration are outside the accepted repository evidence."]},
+      "availability": {"release": "Platform 0.1.0-rc.2", "platforms": ["Cloudflare Workers"], "limitations": ["Deployment credentials and billing-provider integration are outside the accepted repository evidence."]},
       "replaces": [],
       "public_docs": ["doc/capabilities/index.rst"],
       "evidence": [
@@ -179,7 +179,7 @@
       "status": "shipped",
       "owner": "Admin deployable maintainer",
       "surfaces": ["admin Worker", "admin UI"],
-      "availability": {"release": "Platform 0.1.0-rc.1", "platforms": ["Cloudflare Workers", "browser"], "limitations": ["The repository contains route, UI, and test coverage; it does not claim a hosted production console."]},
+      "availability": {"release": "Platform 0.1.0-rc.2", "platforms": ["Cloudflare Workers", "browser"], "limitations": ["The repository contains route, UI, and test coverage; it does not claim a hosted production console."]},
       "replaces": [],
       "public_docs": ["doc/capabilities/index.rst"],
       "evidence": [
@@ -196,7 +196,7 @@
       "status": "shipped",
       "owner": "Customer-portal deployable maintainer",
       "surfaces": ["customer portal Worker", "portal UI"],
-      "availability": {"release": "Platform 0.1.0-rc.1", "platforms": ["Cloudflare Workers", "browser"], "limitations": ["Email delivery and remote deployment require deployer configuration."]},
+      "availability": {"release": "Platform 0.1.0-rc.2", "platforms": ["Cloudflare Workers", "browser"], "limitations": ["Email delivery and remote deployment require deployer configuration."]},
       "replaces": [],
       "public_docs": ["doc/capabilities/index.rst"],
       "evidence": [
@@ -213,13 +213,13 @@
       "status": "shipped",
       "owner": "D1-backup deployable maintainer",
       "surfaces": ["backup Workflow/R2", "restore drill CLI"],
-      "availability": {"release": "Platform 0.1.0-rc.1", "platforms": ["Cloudflare Workers", "Cloudflare D1", "Cloudflare R2"], "limitations": ["A restore drill is a controlled scratch-database procedure; no production backup deployment is asserted."]},
+      "availability": {"release": "Platform 0.1.0-rc.2", "platforms": ["Cloudflare Workers", "Cloudflare D1", "Cloudflare R2"], "limitations": ["A restore drill is a controlled scratch-database procedure; no production backup deployment is asserted."]},
       "replaces": [],
       "public_docs": ["doc/capabilities/index.rst"],
       "evidence": [
         {"kind": "implementation", "surface": "backup Workflow/R2", "path": "services/cloudflare-d1-backup/src/index.ts", "selector": "export class D1BackupWorkflow", "assertion": "The backup deployable implements a Workflow export."},
         {"kind": "automated_test", "surface": "backup Workflow/R2", "path": "services/cloudflare-d1-backup/test/backup-core.test.mjs", "selector": "test(\"R2 save writes SQL stream and metadata manifest\"", "assertion": "The Workflow/R2 backup path has automated coverage."},
-        {"kind": "implementation", "surface": "restore drill CLI", "path": "services/cloudflare-d1-backup/scripts/restore-drill.mjs", "selector": "function restoreToScratch(options, sqlFile, execute = runWrangler)", "assertion": "The restore drill implements scratch-database restoration."},
+        {"kind": "implementation", "surface": "restore drill CLI", "path": "services/cloudflare-d1-backup/scripts/restore-drill.mjs", "selector": "function restoreToScratch(options, sqlFile, execute = runWrangler, now = () => performance.now())", "assertion": "The restore drill implements scratch-database restoration."},
         {"kind": "automated_test", "surface": "restore drill CLI", "path": "services/cloudflare-d1-backup/test/backup-restore-drill.test.mjs", "selector": "test(\"restore drill executes the SQL file against the confirmed scratch D1 database\"", "assertion": "The restore drill executes the confirmed SQL file against scratch D1 in an automated test."}
       ]
     },
@@ -229,7 +229,7 @@
       "status": "shipped",
       "owner": "SDK maintainer",
       "surfaces": ["Python token verifier", "Python HTTP client"],
-      "availability": {"release": "Platform 0.1.0-rc.1", "platforms": ["Python"], "limitations": ["The package is repository-installable and not published to PyPI; it does not provide C++ binary enforcement."]},
+      "availability": {"release": "Platform 0.1.0-rc.2", "platforms": ["Python"], "limitations": ["The package is repository-installable and not published to PyPI; it does not provide C++ binary enforcement."]},
       "replaces": [],
       "public_docs": ["doc/capabilities/index.rst", "sdks/python/README.md"],
       "evidence": [
@@ -245,7 +245,7 @@
       "status": "shipped",
       "owner": "SDK maintainer",
       "surfaces": [".NET token verifier", ".NET HTTP client"],
-      "availability": {"release": "Platform 0.1.0-rc.1", "platforms": [".NET 8"], "limitations": ["The package is project-reference/local-package ready and not published to NuGet; it does not provide C++ binary enforcement."]},
+      "availability": {"release": "Platform 0.1.0-rc.2", "platforms": [".NET 8"], "limitations": ["The package is project-reference/local-package ready and not published to NuGet; it does not provide C++ binary enforcement."]},
       "replaces": [],
       "public_docs": ["doc/capabilities/index.rst", "sdks/dotnet/README.md"],
       "evidence": [
@@ -261,7 +261,7 @@
       "status": "platform_limited",
       "owner": "C++ ABI and core maintainer",
       "surfaces": ["Linux ARM64 C++ runtime"],
-      "availability": {"release": "C++ 2.1.0 lineage; platform 0.1.0-rc.1", "platforms": ["Ubuntu 24.04 ARM64"], "limitations": ["The native ARM64 runtime is source-built and CI-tested on Linux. Windows ARM64, macOS, and published prebuilt ARM binaries are not claimed."]},
+      "availability": {"release": "C++ 2.1.0 lineage; platform 0.1.0-rc.2", "platforms": ["Ubuntu 24.04 ARM64"], "limitations": ["The native ARM64 runtime is source-built and CI-tested on Linux. Windows ARM64, macOS, and published prebuilt ARM binaries are not claimed."]},
       "replaces": [],
       "public_docs": ["doc/capabilities/index.rst"],
       "evidence": [
@@ -277,7 +277,7 @@
       "status": "shipped",
       "owner": "C++ ABI and core maintainer",
       "surfaces": ["C++ custom-limit callback", "license generator CLI"],
-      "availability": {"release": "C++ 2.1.0 lineage; platform 0.1.0-rc.1", "platforms": ["Windows", "Linux"], "limitations": ["The signed v201 custom-limit value is an opaque printable policy. The host owns its schema and deterministic evaluator; absence, denial, or evaluator failure fails closed. Legacy v200 licenses cannot carry it."]},
+      "availability": {"release": "C++ 2.1.0 lineage; platform 0.1.0-rc.2", "platforms": ["Windows", "Linux"], "limitations": ["The signed v201 custom-limit value is an opaque printable policy. The host owns its schema and deterministic evaluator; absence, denial, or evaluator failure fails closed. Legacy v200 licenses cannot carry it."]},
       "replaces": [],
       "public_docs": ["doc/capabilities/index.rst", "doc/analysis/features.rst"],
       "evidence": [
@@ -293,7 +293,7 @@
       "status": "platform_limited",
       "owner": "C++ ABI and core maintainer",
       "surfaces": ["Windows Platform KSP device-identity provider", "Ubuntu TPM2/OpenSSL device-identity provider"],
-      "availability": {"release": "C++ 2.1.0 lineage; platform 0.1.0-rc.1", "platforms": ["Windows", "Ubuntu 22.04", "Ubuntu 24.04"], "limitations": ["The conditional C++ surfaces are implemented and tested in the repository, not published binaries or a deployed service. Windows requires the Platform Crypto Provider and its host security policy; Ubuntu requires Linux, OpenSSL 3.x, and a distro tpm2-openssl provider. The Ubuntu simulator gates cover swtpm and both Ubuntu releases; real hardware, FIPS certification, remote deployment, and universal client availability are not claimed."]},
+      "availability": {"release": "C++ 2.1.0 lineage; platform 0.1.0-rc.2", "platforms": ["Windows", "Ubuntu 22.04", "Ubuntu 24.04"], "limitations": ["The conditional C++ surfaces are implemented and tested in the repository, not published binaries or a deployed service. Windows requires the Platform Crypto Provider and its host security policy; Ubuntu requires Linux, OpenSSL 3.x, and a distro tpm2-openssl provider. The Ubuntu simulator gates cover swtpm and both Ubuntu releases; real hardware, FIPS certification, remote deployment, and universal client availability are not claimed."]},
       "replaces": [],
       "public_docs": ["doc/capabilities/index.rst"],
       "evidence": [
@@ -313,7 +313,7 @@
       "status": "shipped",
       "owner": "SDK maintainer",
       "surfaces": ["Java token verifier", "Java HTTP client"],
-      "availability": {"release": "Platform 0.1.0-rc.1", "platforms": ["Java 17+"], "limitations": ["The dependency-free JAR is repository-built and included in deterministic release staging but is not published to Maven Central; it does not provide C++ binary enforcement."]},
+      "availability": {"release": "Platform 0.1.0-rc.2", "platforms": ["Java 17+"], "limitations": ["The dependency-free JAR is repository-built and included in deterministic release staging but is not published to Maven Central; it does not provide C++ binary enforcement."]},
       "replaces": [],
       "public_docs": ["doc/capabilities/index.rst", "sdks/java/README.md"],
       "evidence": [

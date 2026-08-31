@@ -10,7 +10,7 @@ that a service is deployed or an SDK is published.
 
 :download:`Download the capability registry <registry.json>`.
 
-The platform is at **0.1.0-rc.1** (a prerelease). Repository-owned, protected
+The platform is at **0.1.0-rc.2** (a prerelease). Repository-owned, protected
 publication and production-deployment workflows are present, but no successful
 remote run is inferred from source code. Cloudflare account configuration,
 trusted-publisher identities, protected-environment approvals, signing keys,

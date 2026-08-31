@@ -88,9 +88,10 @@ path guard and the build-purity script.
 
 ## Measured hotspots and responsibility audit
 
-Measurements are current tracked source lines collected from production `src`
-trees and verified by `scripts/docs-accuracy.test.mjs`. They identify ownership
-pressure; they are not a quality score. The large files below have explicit
+Measurements are current candidate source lines (tracked plus non-ignored,
+untracked files) collected from production `src` trees and verified by
+`scripts/docs-accuracy.test.mjs`. They identify ownership pressure; they are not
+a quality score. The large files below have explicit
 owners in {doc}`ownership` and are not shared implementation by accident.
 
 `scripts/hotspot-baseline.json` adds a no-growth ratchet for every first-party
@@ -103,11 +104,11 @@ repository-owned third-party `src/library/ini/` sources are excluded.
 | --- | ---: | --- |
 | `src/library/licensecc.cpp` | 1,486 | C++ public API orchestration; changes pair with public ABI tests and CMake packaging. |
 | `services/cloudflare-license-admin/src/worker/openapi/components.ts` | 1,308 | Admin contract components; API-contract ownership stays with the admin deployable. |
-| `services/cloudflare-licensing-backend/src/fulfillment/order_ingest.mjs` | 1,159 | Backend order-ingest bounded context; persistence and exactly-once tests stay backend-owned. |
-| `services/cloudflare-licensing-backend/src/routes/verify.ts` | 983 | Backend verification route and abuse controls; it is not a shared package concern. |
+| `services/cloudflare-licensing-backend/src/fulfillment/order_ingest.mjs` | 1,147 | Backend order-ingest bounded context; persistence and exactly-once tests stay backend-owned. |
+| `services/cloudflare-licensing-backend/src/routes/verify.ts` | 933 | Backend verification route and abuse controls; it is not a shared package concern. |
 | `services/cloudflare-license-admin/src/ui/features/catalog/Catalog.tsx` | 740 | Catalog list/mutation coordinator; consequence-heavy import/projection workflows and presentation stay in sibling catalog modules. |
 | `services/cloudflare-customer-portal/src/ui/features/devices/DevicesFeature.tsx` | 408 | Portal device/floating-seat workflow; portal-local state and consequences remain feature-owned. |
-| `services/cloudflare-d1-backup/src/core.ts` | 326 | D1 export/R2 backup orchestration; backup remains independently deployable. |
+| `services/cloudflare-d1-backup/src/core.ts` | 483 | D1 export/R2 backup orchestration; backup remains independently deployable. |
 
 Composition roots remain intentionally small. Current counts are:
 
@@ -119,22 +120,22 @@ Composition roots remain intentionally small. Current counts are:
 | Portal Worker `src/worker/index.ts` / `src/worker/app.ts` | 2 | 69 |
 | Portal UI `src/ui/main.tsx` / `src/ui/app/App.tsx` | 6 | 109 |
 
-Current production-source totals are 17,095 lines for license-admin, 6,590
-lines for licensing-backend, 4,672 lines for customer-portal, and 637 lines for
-D1-backup. These
-counts include TypeScript, TSX, JavaScript, and MJS under each service's
-tracked `src` tree. They are evidence for responsibility review, not a reason
+Current production-source totals are 17,098 lines for license-admin, 6,970
+lines for licensing-backend, 4,735 lines for customer-portal, and 1,269 lines for
+D1-backup. These counts include tracked and non-ignored, untracked
+TypeScript, TSX, JavaScript, and MJS under each service's `src` tree. They are
+evidence for responsibility review, not a reason
 to move code without a behavioral or ownership boundary.
 
 ## Enforced rules
 
-`npm run check:architecture` scans only tracked production
-`services/*/src` and `packages/*/src` files. It resolves relative imports,
+`npm run check:architecture` scans cached and non-ignored, untracked production
+candidate files under `services/*/src` and `packages/*/src`. It resolves relative imports,
 including TypeScript `.js` fallbacks, static literal dynamic imports, package
 manifests, exports, and declared dependencies. It rejects package-to-service,
 service-to-service, UI-to-worker,
 undeclared workspace, unresolved relative/subpath, and cross-workspace-relative
-imports. It also checks tracked repository hygiene without inspecting ignored
+imports. Repository-hygiene policy remains cached-only and does not inspect ignored
 local build output.
 
 The remaining repository tooling boundaries are executable too:

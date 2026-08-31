@@ -107,8 +107,8 @@ function clampMaxSkew(rawValue) {
  *   bodyBytes: the raw request bytes already read once by the bounded stream reader.
  *              A string remains accepted for the offline UTF-8 signer/unit-test API.
  *
- * Returns { ok, code, keyId }:
- *   - { ok:true,  code:'ok',                keyId } on success.
+ * Returns { ok, code, keyId, timestamp }:
+ *   - { ok:true,  code:'ok',                keyId, timestamp } on success.
  *   - { ok:false, code:'config_error'             } when no usable key map / audience.
  *   - { ok:false, code:'unknown_key_id'           } when the header key_id is unknown.
  *   - { ok:false, code:'stale_timestamp'          } on bad/non-canonical ts or skew.
@@ -190,5 +190,5 @@ export async function verifyOrderHmac(request, env, bodyBytes) {
   if (!valid) {
     return { ok: false, code: "bad_signature", keyId };
   }
-  return { ok: true, code: "ok", keyId };
+  return { ok: true, code: "ok", keyId, timestamp: ts.canonical };
 }

@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { createHash } from "node:crypto";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
 
@@ -19,17 +18,15 @@ function git(args, options = {}) {
   }).trim();
 }
 
-function sha256(relativePath) {
-  return createHash("sha256").update(readFileSync(resolve(repositoryRoot, relativePath))).digest("hex");
-}
-
 function lineCount(relativePath) {
   const text = source(relativePath).replaceAll("\r\n", "\n").replaceAll("\r", "\n");
   return text.length === 0 ? 0 : text.split("\n").length - (text.endsWith("\n") ? 1 : 0);
 }
 
-function trackedSourceStats(relativeRoot) {
-  const files = git(["ls-files", "--", relativeRoot])
+function candidateSourceStats(relativeRoot) {
+  // Include non-ignored, untracked source so a local pre-commit run measures the
+  // same candidate tree that CI will see after the files are committed.
+  const files = git(["ls-files", "--cached", "--others", "--exclude-standard", "--", relativeRoot])
     .split(/\r?\n/u)
     .filter((path) => /\.(?:js|mjs|ts|tsx)$/u.test(path));
   return {
@@ -45,37 +42,6 @@ function trackedChildDirectories(relativeRoot) {
     .filter((path) => path.startsWith(prefix))
     .map((path) => path.slice(prefix.length).split("/", 1)[0]))]
     .sort();
-}
-
-function sqlTableNames(relativePath) {
-  const names = [...source(relativePath).matchAll(
-    /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:"([^"]+)"|([A-Za-z_][A-Za-z0-9_]*))/giu,
-  )].map((match) => match[1] ?? match[2]);
-  return [...new Set(names)].sort();
-}
-
-function playwrightInventory(relativeWorkspace) {
-  const workspaceCli = resolve(repositoryRoot, relativeWorkspace, "node_modules", "@playwright", "test", "cli.js");
-  const cli = existsSync(workspaceCli)
-    ? workspaceCli
-    : resolve(repositoryRoot, "node_modules", "@playwright", "test", "cli.js");
-  const output = execFileSync(
-    process.execPath,
-    [cli, "test", "--config", "playwright.config.mjs", "--list"],
-    { cwd: resolve(repositoryRoot, relativeWorkspace), encoding: "utf8" },
-  );
-  const match = /Total:\s+(\d+)\s+tests?/u.exec(output);
-  assert.ok(match, `Playwright did not report a test inventory for ${relativeWorkspace}`);
-  return Number(match[1]);
-}
-
-function nodeTestInventory(relativeDirectory) {
-  return readdirSync(resolve(repositoryRoot, relativeDirectory), { withFileTypes: true })
-    .filter((entry) => entry.isFile() && entry.name.endsWith(".mjs"))
-    .reduce((total, entry) => {
-      const contents = source(`${relativeDirectory}/${entry.name}`);
-      return total + [...contents.matchAll(/(?:^|\n)\s*test\s*\(/gu)].length;
-    }, 0);
 }
 
 test("backend documentation tracks the accepted C++ online API", () => {
@@ -138,95 +104,25 @@ test("organization evidence tracks the repository-owned generator snapshot", () 
   assert.match(report, /reviewed generator snapshot\s+`74996a7d345df7b9a7cb46a08d423cb738217ed1`\s+is now ordinary tracked source/is);
   assert.match(report, /no `\.gitmodules`\s+entry, generator gitlink, or build-time source fetch remains/is);
 
-  const protectedPlans = git([
-    "ls-files",
-    "--others",
-    "--exclude-standard",
-    "--",
-    "docs/superpowers/plans",
-  ]).split(/\r?\n/u).filter(Boolean);
-  if (protectedPlans.length > 0) {
-    assert.match(report, new RegExp(`the ${protectedPlans.length} untracked .*execution\\s+plans`, "is"));
-  }
-
   assert.match(report, /until the three remaining evidence items above are\s+completed/is);
   assert.match(report, /timestamped command attestations/i);
-  assert.match(report, /does not pretend to rerun or\s+continuously prove these historical command results/is);
+  assert.match(report, /does not pretend to rerun or\s+continuously prove these historical\s+command\s+results/is);
   assert.doesNotMatch(
     report,
     /(?:reviewed generator snapshot|embedded reviewed generator source)[^\n]*`(?:f969e5f40bae55d61a98c208d6198b75cfb86fb3|dbe2601f9bc0f55a386a14140d4b722b53348df6|4a716a5(?:93748d205a67dabf789c6fb39da9a975e)?)`/i,
   );
 });
 
-test("organization evidence derives canonical, schema, source, and E2E facts", () => {
+test("organization evidence remains pinned to its reviewed tip", () => {
   const report = source("docs/implementation/a-level-organization-report.md");
-  const contractCases = [
-    ["Backend", "backend", (value) => `${value.routeCount} / ${value.openApiOperationCount}`],
-    ["Admin", "admin", (value) => `${value.routeCount} / ${value.openApiOperationCount}`],
-    ["Portal", "portal", (value) => `${value.routeCount} routes / ${value.openApiOperationCount} operations`],
-  ];
-
-  for (const [label, name, inventory] of contractCases) {
-    const relativePath = `test/contracts/${name}.json`;
-    const contract = JSON.parse(source(relativePath));
-    const row = `| ${label} | ${inventory(contract)} | \`${sha256(relativePath)}\` |`;
-    assert.ok(report.includes(row), `report must derive the current ${name} contract row`);
-  }
-  assert.ok(
-    report.includes(`\`${sha256("test/contracts/backup.json")}\``),
-    "report must derive the current backup contract hash",
-  );
-
-  const d1Tables = sqlTableNames("services/cloudflare-licensing-backend/schema.sql");
-  const pgTables = sqlTableNames("services/cloudflare-licensing-backend/supabase-postgres/schema.pg.sql");
-  assert.deepEqual(pgTables, d1Tables, "D1 and PostgreSQL documented table inventories must match");
-  assert.match(report, new RegExp(`green at ${d1Tables.length} tables`, "i"));
-
-  const sourceCases = [
-    ["Admin", "services/cloudflare-license-admin/src"],
-    ["Licensing backend", "services/cloudflare-licensing-backend/src"],
-    ["Customer portal", "services/cloudflare-customer-portal/src"],
-    ["D1 backup", "services/cloudflare-d1-backup/src"],
-  ];
-  for (const [label, relativeRoot] of sourceCases) {
-    const stats = trackedSourceStats(relativeRoot);
-    const row = `| ${label} | ${stats.files} | ${stats.lines.toLocaleString("en-US")} |`;
-    assert.ok(report.includes(row), `report must derive current source totals for ${label}`);
-  }
-
-  const compositionCases = [
-    ["Backend Worker", "services/cloudflare-licensing-backend/src/index.ts", "services/cloudflare-licensing-backend/src/app.ts"],
-    ["Admin Worker", "services/cloudflare-license-admin/src/worker/index.ts", "services/cloudflare-license-admin/src/worker/app.ts"],
-    ["Admin UI", "services/cloudflare-license-admin/src/ui/main.tsx", "services/cloudflare-license-admin/src/ui/app/App.tsx"],
-    ["Portal Worker", "services/cloudflare-customer-portal/src/worker/index.ts", "services/cloudflare-customer-portal/src/worker/app.ts"],
-    ["Portal UI", "services/cloudflare-customer-portal/src/ui/main.tsx", "services/cloudflare-customer-portal/src/ui/app/App.tsx"],
-  ];
-  for (const [label, entry, app] of compositionCases) {
-    const row = `| ${label} | ${lineCount(entry)} | ${lineCount(app)} |`;
-    assert.ok(report.includes(row), `report must derive current composition-root counts for ${label}`);
-  }
-
-  const hotspotCases = [
-    "src/library/licensecc.cpp",
-    "services/cloudflare-license-admin/src/worker/openapi/components.ts",
-    "services/cloudflare-licensing-backend/src/fulfillment/order_ingest.mjs",
-    "services/cloudflare-licensing-backend/src/routes/verify.ts",
-    "services/cloudflare-license-admin/src/ui/features/catalog/Catalog.tsx",
-    "services/cloudflare-customer-portal/src/ui/features/devices/DevicesFeature.tsx",
-    "services/cloudflare-d1-backup/src/core.ts",
-  ];
-  for (const relativePath of hotspotCases) {
-    const row = `| \`${relativePath}\` | ${lineCount(relativePath).toLocaleString("en-US")} |`;
-    assert.ok(report.includes(row), `report must derive current hotspot count for ${relativePath}`);
-  }
-
-  const adminE2e = playwrightInventory("services/cloudflare-license-admin");
-  const portalE2e = playwrightInventory("services/cloudflare-customer-portal");
-  const backendE2e = nodeTestInventory("services/cloudflare-licensing-backend/test/e2e");
+  assert.match(report, /At the reviewed tip, tracked service-source totals/i);
+  assert.ok(report.includes("| Licensing backend | 36 | 6,590 |"));
+  assert.ok(report.includes("`4c4dbc4ffc10a0f1705f5b1518b783db657d849a332309f03667920fbbf211a9`"));
   assert.match(
     report,
-    new RegExp(`current non-running inventory is backend ${backendE2e}, admin ${adminE2e}, portal ${portalE2e}`, "i"),
+    /Current contract,\s+schema, source, composition-root, and hotspot facts belong in maintained\s+architecture documentation/is,
   );
+  assert.doesNotMatch(report, /Current candidate service-source totals/i);
 });
 
 test("architecture documentation derives the SDK inventory and current measurements", () => {
@@ -259,7 +155,7 @@ test("architecture documentation derives the SDK inventory and current measureme
     ["D1-backup", "services/cloudflare-d1-backup/src"],
   ];
   for (const [label, relativeRoot] of sourceCases) {
-    const { lines } = trackedSourceStats(relativeRoot);
+    const { lines } = candidateSourceStats(relativeRoot);
     assert.match(
       systemMap,
       new RegExp(`${lines.toLocaleString("en-US")}\\s+lines for\\s+${label}`, "u"),

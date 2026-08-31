@@ -3,13 +3,14 @@
 // PostgreSQL runtime port of the Slice-1 order-ingest APPLY path (the D1/SQLite original is
 // src/fulfillment/order_ingest.mjs). It mirrors the exactly-once accept->apply pipeline as native
 // parameterized `{text, params}` statements and runs the APPLY group inside one transaction via
-// `runApplyTransaction()` (postgres.js `pool.begin`), preserving EVERY exactly-once invariant of the
-// D1 path verbatim:
+// `runApplyTransaction()` (postgres.js `pool.begin`), preserving the fenced accept/apply invariants
+// implemented in this port:
 //   - accept-then-apply ordering (ACCEPT commits in its own txn before APPLY opens one);
 //   - the apply-time monotonic floor on last_applied_order_{epoch,seq} (the count guard IS the floor:
 //     a non-advancing floor suppresses the conflict-update / matches no UPDATE rows => empty RETURNING
 //     => 'superseded', NOT an error);
-//   - fingerprint ownership (the idx_orders_fp_unique index + the Step-2 ownership SELECT — both 1:1);
+//   - ACCEPT revalidates the immutable fingerprint/origin/customer/license tuple and conditionally
+//     reserves a project/customer-compatible license before advancing the cursor;
 //   - the in-transaction processed-mark guarded on status='accepted' (a redrive no-ops; the floor
 //     independently blocks a second revocation bump).
 //
@@ -86,31 +87,65 @@ function insertedRevocationSeq(pb, key) {
 }
 
 // =============================================================================
-// Step 3 — atomic ACCEPT (two statements, run in ONE transaction).
+// Step 3 — atomic ACCEPT (one data-modifying CTE).
 // =============================================================================
 
-/** 3a guarded cursor advance + 3b guarded event claim. Both RETURNING rows must be non-null or the
- *  ACCEPT is STALE (mirrors the D1 batch atomicity). Returns [cursorAdvance, eventClaim]. */
-export function pgAcceptBatch(order, keyId, digest, rawPayload, now) {
-  const a = placeholders();
-  const cursorAdvance = {
+function guardedOrderIdentity(pb, order, fingerprint, fingerprintOrigin, table) {
+  const customerId = order.customer?.id ?? null;
+  const licenseId = order.license_id ?? null;
+  return (
+    `${table}.subscription_id = ${pb.bind(order.subscription_id)} AND ${table}.project = ${pb.bind(order.project)} AND ${table}.feature = ${pb.bind(order.feature)} AND ` +
+    `${table}.license_fingerprint = ${pb.bind(fingerprint)} AND ${table}.fingerprint_origin = ${pb.bind(fingerprintOrigin)} AND ` +
+    `(${table}.customer_id IS NULL OR ${pb.bind(customerId)} IS NULL OR ${table}.customer_id = ${pb.bind(customerId)}) AND ` +
+    `(${table}.license_id IS NULL OR ${pb.bind(licenseId)} IS NULL OR ${table}.license_id = ${pb.bind(licenseId)}) AND ` +
+    `(${table}.order_epoch < ${pb.bind(order.order_epoch)} OR (${table}.order_epoch = ${pb.bind(order.order_epoch)} AND ${table}.last_seq < ${pb.bind(order.seq)}))`
+  );
+}
+
+/** Guarded license reservation + cursor advance + event claim. PostgreSQL has no safe
+ *  cross-statement equivalent of SQLite's `changes()`, so each phase consumes the preceding DML
+ *  CTE's RETURNING relation. An empty RETURNING means no immutable/reservation/cursor winner and no
+ *  event claim. A later conflict rolls every earlier CTE mutation back with the statement. */
+export function pgAcceptBatch(order, keyId, digest, rawPayload, now, fingerprint, fingerprintOrigin) {
+  const pb = placeholders();
+  const customerId = order.customer?.id ?? null;
+  const licenseId = order.license_id ?? null;
+  let prefix = "WITH ";
+  if (licenseId !== null) {
+    prefix +=
+      "license_winner AS (" +
+      "INSERT INTO licenses (id, customer_id, project, label, metadata_json, created_at, updated_at) " +
+      `SELECT ${pb.bind(licenseId)}, ${pb.bind(customerId)}, ${pb.bind(order.project)}, '', '{}', ${pb.bind(now)}, ${pb.bind(now)} ` +
+      `WHERE EXISTS (SELECT 1 FROM orders AS reserved_order WHERE ${guardedOrderIdentity(pb, order, fingerprint, fingerprintOrigin, "reserved_order")}) ` +
+      "ON CONFLICT (id) DO UPDATE SET customer_id = COALESCE(licenses.customer_id, EXCLUDED.customer_id), updated_at = EXCLUDED.updated_at " +
+      "WHERE licenses.project = EXCLUDED.project AND " +
+      "(licenses.customer_id IS NULL OR EXCLUDED.customer_id IS NULL OR licenses.customer_id = EXCLUDED.customer_id) " +
+      "RETURNING id" +
+      "), ";
+  }
+  const cursorEpoch = pb.bind(order.order_epoch);
+  const cursorSeq = pb.bind(order.seq);
+  const cursorCustomer = pb.bind(customerId);
+  const cursorLicense = pb.bind(licenseId);
+  const cursorNow = pb.bind(now);
+  const reservationGuard = licenseId === null ? "" : `EXISTS (SELECT 1 FROM license_winner WHERE id = ${pb.bind(licenseId)}) AND `;
+  const cursorIdentityGuard = guardedOrderIdentity(pb, order, fingerprint, fingerprintOrigin, "current_order");
+  const atomicAccept = {
     text:
-      `UPDATE orders SET order_epoch = ${a.bind(order.order_epoch)}, last_seq = ${a.bind(order.seq)}, updated_at = ${a.bind(now)} ` +
-      `WHERE subscription_id = ${a.bind(order.subscription_id)} AND project = ${a.bind(order.project)} AND feature = ${a.bind(order.feature)} AND ` +
-      `(order_epoch < ${a.bind(order.order_epoch)} OR (order_epoch = ${a.bind(order.order_epoch)} AND last_seq < ${a.bind(order.seq)})) ` +
-      `RETURNING last_seq, order_epoch`,
-    params: a.params,
-  };
-  const c = placeholders();
-  const eventClaim = {
-    text:
+      prefix +
+      "cursor_winner AS (" +
+      `UPDATE orders AS current_order SET order_epoch = ${cursorEpoch}, last_seq = ${cursorSeq}, ` +
+      `customer_id = COALESCE(current_order.customer_id, ${cursorCustomer}), license_id = COALESCE(current_order.license_id, ${cursorLicense}), updated_at = ${cursorNow} ` +
+      `WHERE ${reservationGuard}${cursorIdentityGuard} ` +
+      "RETURNING current_order.subscription_id, current_order.project, current_order.feature, current_order.license_fingerprint, current_order.fingerprint_origin, current_order.customer_id, current_order.license_id, current_order.order_epoch, current_order.last_seq" +
+      ") " +
       "INSERT INTO order_events (event_id, subscription_id, project, feature, order_epoch, seq, intent, key_id, payload_digest, raw_payload, status, result_json, received_at, processed_at) " +
-      `SELECT ${c.bind(order.event_id)}, ${c.bind(order.subscription_id)}, ${c.bind(order.project)}, ${c.bind(order.feature)}, ${c.bind(order.order_epoch)}, ${c.bind(order.seq)}, ${c.bind(order.intent)}, ${c.bind(keyId)}, ${c.bind(digest)}, ${c.bind(rawPayload)}, 'accepted', '', ${c.bind(now)}, NULL ` +
-      `WHERE EXISTS (SELECT 1 FROM orders WHERE subscription_id = ${c.bind(order.subscription_id)} AND project = ${c.bind(order.project)} AND feature = ${c.bind(order.feature)} AND order_epoch = ${c.bind(order.order_epoch)} AND last_seq = ${c.bind(order.seq)}) ` +
-      `RETURNING event_id`,
-    params: c.params,
+      `SELECT ${pb.bind(order.event_id)}, winner.subscription_id, winner.project, winner.feature, winner.order_epoch, winner.last_seq, ${pb.bind(order.intent)}, ${pb.bind(keyId)}, ${pb.bind(digest)}, ${pb.bind(rawPayload)}, 'accepted', '', ${pb.bind(now)}, NULL ` +
+      "FROM cursor_winner AS winner " +
+      "RETURNING event_id, order_epoch, seq AS last_seq",
+    params: pb.params,
   };
-  return [cursorAdvance, eventClaim];
+  return [atomicAccept];
 }
 
 // =============================================================================
@@ -130,7 +165,7 @@ export function pgCreateStatement(key, fields, floor, now) {
     "valid_from = EXCLUDED.valid_from, valid_until = EXCLUDED.valid_until, notes = EXCLUDED.notes, customer_id = EXCLUDED.customer_id, license_id = EXCLUDED.license_id, " +
     "pool_size = EXCLUDED.pool_size, max_active_devices = EXCLUDED.max_active_devices, " +
     "last_applied_order_epoch = EXCLUDED.last_applied_order_epoch, last_applied_order_seq = EXCLUDED.last_applied_order_seq, updated_at = EXCLUDED.updated_at " +
-    `WHERE ${FLOOR_PREDICATE_CONFLICT} ` +
+    `WHERE (${FLOOR_PREDICATE_CONFLICT}) AND entitlements.status <> 'revoked' ` +
     `RETURNING ${ENTITLEMENT_COLUMNS}`;
   return { text, params: pb.params };
 }
@@ -142,7 +177,7 @@ export function pgPatchStatement(key, fields, floor, now) {
     `UPDATE entitlements SET device_hash = ${pb.bind(fields.device_hash)}, assertion_ttl_seconds = ${pb.bind(fields.assertion_ttl_seconds)}, cache_ttl_seconds = ${pb.bind(fields.assertion_ttl_seconds)}, ${REVOCATION_SEQ_BUMP}, ` +
     `valid_from = ${pb.bind(fields.valid_from)}, valid_until = ${pb.bind(fields.valid_until)}, notes = ${pb.bind(fields.notes)}, customer_id = ${pb.bind(fields.customer_id)}, license_id = ${pb.bind(fields.license_id)}, ` +
     `last_applied_order_epoch = ${pb.bind(floor.epoch)}, last_applied_order_seq = ${pb.bind(floor.seq)}, updated_at = ${pb.bind(now)} ` +
-    `WHERE project = ${pb.bind(key.project)} AND feature = ${pb.bind(key.feature)} AND license_fingerprint = ${pb.bind(key.license_fingerprint)} AND ${floorPredicateUpdate(pb, floor)} ` +
+    `WHERE project = ${pb.bind(key.project)} AND feature = ${pb.bind(key.feature)} AND license_fingerprint = ${pb.bind(key.license_fingerprint)} AND entitlements.status <> 'revoked' AND ${floorPredicateUpdate(pb, floor)} ` +
     `RETURNING ${ENTITLEMENT_COLUMNS}`;
   return { text, params: pb.params };
 }
@@ -150,10 +185,11 @@ export function pgPatchStatement(key, fields, floor, now) {
 /** Floor-guarded status TRANSITION (disable / reenable / revoke). */
 export function pgTransitionStatement(key, status, floor, now) {
   const pb = placeholders();
+  const terminalGuard = status === "revoked" ? "" : "AND entitlements.status <> 'revoked' ";
   const text =
     `UPDATE entitlements SET status = ${pb.bind(status)}, ${REVOCATION_SEQ_BUMP}, ` +
     `last_applied_order_epoch = ${pb.bind(floor.epoch)}, last_applied_order_seq = ${pb.bind(floor.seq)}, updated_at = ${pb.bind(now)} ` +
-    `WHERE project = ${pb.bind(key.project)} AND feature = ${pb.bind(key.feature)} AND license_fingerprint = ${pb.bind(key.license_fingerprint)} AND ${floorPredicateUpdate(pb, floor)} ` +
+    `WHERE project = ${pb.bind(key.project)} AND feature = ${pb.bind(key.feature)} AND license_fingerprint = ${pb.bind(key.license_fingerprint)} ${terminalGuard}AND ${floorPredicateUpdate(pb, floor)} ` +
     `RETURNING ${ENTITLEMENT_COLUMNS}`;
   return { text, params: pb.params };
 }
@@ -180,7 +216,7 @@ export function pgCapacityStatement(key, capacity, floor, now) {
   ].join(", ");
   const text =
     `UPDATE entitlements SET ${setClause} ` +
-    `WHERE project = ${pb.bind(key.project)} AND feature = ${pb.bind(key.feature)} AND license_fingerprint = ${pb.bind(key.license_fingerprint)} AND ${floorPredicateUpdate(pb, floor)} ` +
+    `WHERE project = ${pb.bind(key.project)} AND feature = ${pb.bind(key.feature)} AND license_fingerprint = ${pb.bind(key.license_fingerprint)} AND entitlements.status <> 'revoked' AND ${floorPredicateUpdate(pb, floor)} ` +
     `RETURNING ${ENTITLEMENT_COLUMNS}`;
   return { text, params: pb.params };
 }
@@ -189,16 +225,22 @@ export function pgCapacityStatement(key, capacity, floor, now) {
 // Step 4 — audit event, seat reclaim, processed-mark, terminal marks.
 // =============================================================================
 
-/** Order-ingest audit event — reads the POST-mutation row in the same txn (on a floor no-op it reads
- *  the unchanged row = correct 'superseded' audit). json_object(...) -> json_build_object(...)::text. */
-export function pgOrderEventStatement(key, eventType, order, now) {
+/** Order-ingest audit event — reads the POST-mutation row in the same txn, but only when its applied
+ *  floor equals this order. The equality prevents a superseded floor no-op from publishing a false
+ *  state-change audit. json_object(...) -> json_build_object(...)::text. The bound id is cast
+ *  independently because json_build_object's polymorphic input cannot infer an untyped protocol
+ *  parameter from the result cast; PostgreSQL 16 otherwise rejects that bind. */
+export function pgOrderEventStatement(key, eventType, order, now, requireNonRevoked = true) {
   const pb = placeholders();
+  const terminalGuard = requireNonRevoked ? "AND entitlements.status <> 'revoked' " : "";
   const text =
     "INSERT INTO entitlement_events (project, feature, license_fingerprint, device_hash, event_type, status, revocation_seq, detail, actor, actor_type, source, request_id, ip, prev_json, next_json, reason, idempotency_key, created_at) " +
     `SELECT project, feature, license_fingerprint, device_hash, ${pb.bind(eventType)}, status, revocation_seq, ${pb.bind(`order:${order.intent}`)}, ${pb.bind(`order:${order.subscription_id}`)}, ${pb.bind(ORDER_ACTOR_TYPE)}, '${ORDER_CTX_SOURCE}', ${pb.bind(order.event_id)}, ${pb.bind("")}, '', ` +
-    `json_build_object('project', project, 'feature', feature, 'license_fingerprint', license_fingerprint, 'status', status, 'revocation_seq', revocation_seq, 'valid_from', valid_from, 'valid_until', valid_until, 'pool_size', pool_size, 'id', ${pb.bind(entitlementId(key.project, key.feature, key.license_fingerprint))})::text, ` +
+    `json_build_object('project', project, 'feature', feature, 'license_fingerprint', license_fingerprint, 'status', status, 'revocation_seq', revocation_seq, 'valid_from', valid_from, 'valid_until', valid_until, 'pool_size', pool_size, 'id', ${pb.bind(entitlementId(key.project, key.feature, key.license_fingerprint))}::text)::text, ` +
     `${pb.bind(`order:${order.intent}`)}, ${pb.bind(order.event_id)}, ${pb.bind(now)} ` +
-    `FROM entitlements WHERE project = ${pb.bind(key.project)} AND feature = ${pb.bind(key.feature)} AND license_fingerprint = ${pb.bind(key.license_fingerprint)}`;
+    `FROM entitlements WHERE project = ${pb.bind(key.project)} AND feature = ${pb.bind(key.feature)} AND license_fingerprint = ${pb.bind(key.license_fingerprint)} ${terminalGuard}` +
+    `AND last_applied_order_epoch = ${pb.bind(order.order_epoch)} AND last_applied_order_seq = ${pb.bind(order.seq)} ` +
+    `AND EXISTS (SELECT 1 FROM order_events AS oe WHERE oe.event_id = ${pb.bind(order.event_id)} AND oe.status = 'accepted')`;
   return { text, params: pb.params };
 }
 
@@ -206,12 +248,14 @@ export function pgOrderEventStatement(key, eventType, order, now) {
  *  SAME txn. rowid -> ctid (safe: SELECT-ctid and DELETE-by-ctid run in one transaction, no intervening
  *  UPDATE to seat_checkouts); max(0, x) -> GREATEST(0, x). Tagged role:'reclaim' so the runner reads its
  *  RETURNING seat_ids. */
-export function pgReclaimStatement(key, now, newPool) {
+export function pgReclaimStatement(key, now, newPool, floor, eventId) {
   const pb = placeholders();
   const text =
     "DELETE FROM seat_checkouts WHERE ctid IN (" +
-    `SELECT ctid FROM seat_checkouts WHERE project = ${pb.bind(key.project)} AND feature = ${pb.bind(key.feature)} AND license_fingerprint = ${pb.bind(key.license_fingerprint)} AND heartbeat_deadline > ${pb.bind(now)} ` +
-    "ORDER BY heartbeat_deadline DESC LIMIT GREATEST(0, " +
+    `SELECT sc.ctid FROM seat_checkouts AS sc WHERE sc.project = ${pb.bind(key.project)} AND sc.feature = ${pb.bind(key.feature)} AND sc.license_fingerprint = ${pb.bind(key.license_fingerprint)} AND sc.heartbeat_deadline > ${pb.bind(now)} ` +
+    `AND EXISTS (SELECT 1 FROM entitlements AS e WHERE e.project = sc.project AND e.feature = sc.feature AND e.license_fingerprint = sc.license_fingerprint AND e.status <> 'revoked' AND e.last_applied_order_epoch = ${pb.bind(floor.epoch)} AND e.last_applied_order_seq = ${pb.bind(floor.seq)}) ` +
+    `AND EXISTS (SELECT 1 FROM order_events AS oe WHERE oe.event_id = ${pb.bind(eventId)} AND oe.status = 'accepted') ` +
+    "ORDER BY sc.heartbeat_deadline DESC LIMIT GREATEST(0, " +
     `(SELECT COUNT(*) FROM seat_checkouts WHERE project = ${pb.bind(key.project)} AND feature = ${pb.bind(key.feature)} AND license_fingerprint = ${pb.bind(key.license_fingerprint)} AND heartbeat_deadline > ${pb.bind(now)}) - ${pb.bind(newPool)}` +
     ")) RETURNING seat_id";
   return { text, params: pb.params, role: "reclaim" };
@@ -223,7 +267,24 @@ export function pgProcessedMark(eventId, resultJson, now) {
   const text =
     `UPDATE order_events SET status = 'processed', result_json = ${pb.bind(resultJson)}, processed_at = ${pb.bind(now)} ` +
     `WHERE event_id = ${pb.bind(eventId)} AND status = 'accepted' RETURNING event_id`;
-  return { text, params: pb.params };
+  return { text, params: pb.params, role: "mark" };
+}
+
+/** Terminal arbitration for a non-revoke mutation that lost to a current revoked entitlement. */
+export function pgRevokedOrderEventMark(key, eventId, fingerprintOrigin, now) {
+  const pb = placeholders();
+  const body = {
+    ok: false,
+    code: "entitlement_revoked",
+    license_fingerprint: key.license_fingerprint,
+    fingerprint_origin: fingerprintOrigin,
+  };
+  const text =
+    `UPDATE order_events SET status = 'rejected', result_json = ${pb.bind(JSON.stringify(body))}, processed_at = ${pb.bind(now)} ` +
+    `WHERE event_id = ${pb.bind(eventId)} AND status = 'accepted' ` +
+    `AND EXISTS (SELECT 1 FROM entitlements WHERE project = ${pb.bind(key.project)} AND feature = ${pb.bind(key.feature)} AND license_fingerprint = ${pb.bind(key.license_fingerprint)} AND status = 'revoked') ` +
+    "RETURNING event_id";
+  return { text, params: pb.params, role: "revoked_mark" };
 }
 
 /** Terminal disposition mark for the descriptor.kind==='none' branches (never reach a mutator): a
@@ -245,11 +306,19 @@ export function pgTerminalMark(eventId, terminalStatus, resultJson, now) {
 // =============================================================================
 
 /** Assemble the ordered APPLY statement list for a descriptor kind, matching the D1 batch composition
- *  [writeStatement, auditEvent, (reclaim?), processedMark]. 'accept' returns the two-statement ACCEPT
- *  group. Used by the shape test and as the canonical assembly the smoke drives. */
+ *  [writeStatement, auditEvent, (reclaim?), (revoked arbitration?), processedMark]. 'accept' returns
+ *  the atomic ACCEPT group. Used by the shape test and as the canonical assembly the smoke drives. */
 export function orderApplyStatementsFor(kind, args) {
   if (kind === "accept") {
-    return pgAcceptBatch(args.order, args.keyId, args.digest, args.rawPayload, args.now);
+    return pgAcceptBatch(
+      args.order,
+      args.keyId,
+      args.digest,
+      args.rawPayload,
+      args.now,
+      args.fingerprint,
+      args.fingerprintOrigin,
+    );
   }
   const { key, order, floor, now } = args;
   let write;
@@ -269,10 +338,14 @@ export function orderApplyStatementsFor(kind, args) {
   } else {
     throw new Error(`unknown apply kind: ${kind}`);
   }
-  const auditEvent = pgOrderEventStatement(key, eventType, order, now);
+  const requireNonRevoked = kind !== "transition" || args.status !== "revoked";
+  const auditEvent = pgOrderEventStatement(key, eventType, order, now, requireNonRevoked);
   const statements = [write, auditEvent];
   if (kind === "capacity" && typeof args.reclaimToPool === "number") {
-    statements.push(pgReclaimStatement(key, now, args.reclaimToPool));
+    statements.push(pgReclaimStatement(key, now, args.reclaimToPool, floor, order.event_id));
+  }
+  if (requireNonRevoked) {
+    statements.push(pgRevokedOrderEventMark(key, order.event_id, args.fingerprintOrigin, now));
   }
   statements.push(pgProcessedMark(order.event_id, args.resultJson ?? "", now));
   return statements;
@@ -289,11 +362,13 @@ export function orderApplyStatementsFor(kind, args) {
  * row-presence is the portable, correct signal). Any genuine DB error propagates (rollback => fail-closed
  * write_failed at the caller); an empty primary RETURNING is a normal return value, never a throw.
  *
- * @returns {Promise<{applied: boolean, data: object|null, reclaimedSeats: string[]}>}
+ * @returns {Promise<{applied: boolean, marked: boolean, revoked: boolean, data: object|null, reclaimedSeats: string[]}>}
  */
 export async function runApplyTransaction(pool, statements) {
   return pool.begin(async (sql) => {
     let mutated = null;
+    let marked = false;
+    let revoked = false;
     let reclaimedSeats = [];
     for (let i = 0; i < statements.length; ++i) {
       const { text, params, role } = statements[i];
@@ -303,8 +378,12 @@ export async function runApplyTransaction(pool, statements) {
         mutated = rows.length > 0 ? rows[0] : null;
       } else if (role === "reclaim") {
         reclaimedSeats = rows.map((row) => row.seat_id);
+      } else if (role === "mark") {
+        marked = rows.length > 0;
+      } else if (role === "revoked_mark") {
+        revoked = rows.length > 0;
       }
     }
-    return { applied: mutated !== null, data: mutated === null ? null : withId(mutated), reclaimedSeats };
+    return { applied: mutated !== null, marked, revoked, data: mutated === null ? null : withId(mutated), reclaimedSeats };
   });
 }

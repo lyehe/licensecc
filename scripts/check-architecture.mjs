@@ -612,10 +612,11 @@ function evaluateCompositionRoots(productionFiles, allResolvablePaths, compositi
 }
 
 /**
- * Pure checker core. Production code supplies only tracked source/path data;
- * fixture tests pass an in-memory equivalent to prove each policy branch.
+ * Pure checker core. Production code supplies candidate source/manifests and
+ * tracked paths for repository-hygiene checks; fixture tests pass an in-memory
+ * equivalent to prove each policy branch.
  */
-export function evaluateArchitecture({ sourceFiles = [], manifests = [], trackedPaths = [], config, now = new Date() } = {}) {
+export function evaluateArchitecture({ sourceFiles = [], manifests = [], trackedPaths = [], candidatePaths = [], config, now = new Date() } = {}) {
   const errors = [];
   if (!config || typeof config !== "object" || config.version !== 2) {
     errors.push(makeError("ARCH_MALFORMED_CONFIG", "scripts/architecture-boundaries.json", "Expected version: 2 architecture-boundaries configuration.", "setup"));
@@ -636,6 +637,7 @@ export function evaluateArchitecture({ sourceFiles = [], manifests = [], tracked
     .sort((left, right) => left.path.localeCompare(right.path));
   const allResolvablePaths = new Set([
     ...trackedPaths.map(normalizeRepoPath),
+    ...candidatePaths.map(normalizeRepoPath),
     ...productionFiles.map((entry) => entry.path),
   ]);
 
@@ -645,7 +647,7 @@ export function evaluateArchitecture({ sourceFiles = [], manifests = [], tracked
     const importerRoot = workspaceRootFor(from);
     const importer = workspaceByRoot.get(importerRoot);
     if (!importer) {
-      errors.push(makeError("ARCH_MISSING_WORKSPACE_MANIFEST", from, "Tracked production source has no tracked workspace package.json.", "setup"));
+      errors.push(makeError("ARCH_MISSING_WORKSPACE_MANIFEST", from, "Candidate production source has no candidate workspace package.json.", "setup"));
       continue;
     }
 
@@ -715,10 +717,13 @@ function formatDiagnostic(error) {
   return `[${error.code}] ${location}${edge}: ${error.message}`;
 }
 
-function trackedPathsFromGit(repoRoot) {
-  const result = spawnSync("git", ["ls-files", "-z"], { cwd: repoRoot, encoding: "buffer", shell: false });
+const TRACKED_GIT_PATH_ARGS = Object.freeze(["ls-files", "--cached", "-z"]);
+const CANDIDATE_GIT_PATH_ARGS = Object.freeze(["ls-files", "--cached", "--others", "--exclude-standard", "-z"]);
+
+function pathsFromGit(repoRoot, args) {
+  const result = spawnSync("git", args, { cwd: repoRoot, encoding: "buffer", shell: false });
   if (result.error) throw result.error;
-  if (result.status !== 0) throw new Error(`git ls-files -z exited ${result.status}: ${result.stderr?.toString("utf8") ?? ""}`);
+  if (result.status !== 0) throw new Error(`git ${args.join(" ")} exited ${result.status}: ${result.stderr?.toString("utf8") ?? ""}`);
   return result.stdout.toString("utf8").split("\0").filter(Boolean).map(normalizeRepoPath);
 }
 
@@ -730,12 +735,15 @@ function readJson(filePath) {
   }
 }
 
-function repositoryInput(repoRoot) {
-  const trackedPaths = trackedPathsFromGit(repoRoot);
-  const sourceFiles = trackedPaths
+export function repositoryInput(repoRoot) {
+  const trackedPaths = pathsFromGit(repoRoot, TRACKED_GIT_PATH_ARGS);
+  // Audit non-ignored, untracked source too so a local pre-commit run evaluates
+  // the same candidate tree that CI will see after those files are committed.
+  const candidatePaths = pathsFromGit(repoRoot, CANDIDATE_GIT_PATH_ARGS);
+  const sourceFiles = candidatePaths
     .filter(isProductionSource)
     .map((pathName) => ({ path: pathName, source: readFileSync(resolve(repoRoot, ...pathName.split("/")), "utf8") }));
-  const manifests = trackedPaths
+  const manifests = candidatePaths
     .filter((pathName) => /^(?:services|packages)\/[^/]+\/package\.json$/.test(pathName))
     .map((pathName) => ({
       root: path.posix.dirname(pathName),
@@ -745,6 +753,7 @@ function repositoryInput(repoRoot) {
     sourceFiles,
     manifests,
     trackedPaths,
+    candidatePaths,
     config: readJson(resolve(repoRoot, "scripts", "architecture-boundaries.json")),
   };
 }

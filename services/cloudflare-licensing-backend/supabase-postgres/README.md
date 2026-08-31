@@ -69,7 +69,10 @@ introduces three more translations the entitlement port never exercised — pinn
 
 - `json_object(k, v, ...)` -> `json_build_object(k, v, ...)::text`. PG16's `json_object` has
   different (array/format) argument semantics; `json_build_object` takes the positional `k,v,...`
-  form, and the `::text` cast keeps the `next_json` **TEXT** column contract.
+  form, and the result `::text` cast keeps the `next_json` **TEXT** column contract. Bound values
+  passed to its polymorphic inputs also need their own type when PostgreSQL cannot infer one: the
+  canonical entitlement-id bind is emitted as `$n::text`. Casting only the completed JSON result
+  does not type that protocol parameter and PostgreSQL 16 rejects the prepared statement.
 - `seat_checkouts.rowid` -> `ctid` (the seat-reclaim delete-by-physical-row). Safe **only** because
   the `SELECT ctid` and `DELETE … WHERE ctid IN (…)` run in the **same transaction** with no
   intervening `UPDATE` to `seat_checkouts` — exactly the window the SQLite `rowid` version relies on.

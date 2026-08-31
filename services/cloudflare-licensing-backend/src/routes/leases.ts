@@ -392,7 +392,7 @@ export async function handleLeaseIssue(
   } catch (error) {
     logEvent("error", "lease.signing_error", {
       request_id: requestId(request),
-      error: error instanceof Error ? error.message : "unknown signing error",
+      error_type: error instanceof Error ? error.name : "UnknownThrownValue",
     });
     return json({ ok: false, code: "lease_signing_error" }, 500);
   }

@@ -26,7 +26,7 @@ export const openApiDocument: OpenApiDocument = {
   openapi: "3.1.0",
   info: {
     title: "licensecc Customer Portal Worker",
-    version: "0.1.0-rc.1",
+    version: "0.1.0-rc.2",
     description:
       "Self-serve customer portal: email-OTP / magic-link sign-in, read-only session-scoped " +
       "entitlement/device/usage views, and per-action seat operations (checkout/heartbeat/" +

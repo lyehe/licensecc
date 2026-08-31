@@ -11,6 +11,8 @@
 //
 // Design: docs/superpowers/plans/2026-06-24-slice1-order-ingest-blueprint.md
 
+export { clampValidUntil, mapIntentToMutation } from "./order_mutation.mjs";
+
 // --- Self-contained validators ----------------------------------------------
 // Deliberately defined here (not imported from src/routes/verify.ts, whose copies are
 // un-exported TypeScript internals) so this module is import-free and bundles
@@ -24,6 +26,12 @@ const MAX_PROJECT_SIZE = 127;
 const MAX_FEATURE_SIZE = 15;
 const MAX_ID_SIZE = 255;
 const HEX_64 = /^[0-9a-f]{64}$/;
+const ORDER_FIELDS = new Set([
+  "event_id", "subscription_id", "project", "feature", "intent", "seq", "order_epoch",
+  "license_fingerprint", "current_period_end", "occurred_at", "license_id", "quantity", "customer",
+]);
+const QUANTITY_FIELDS = new Set(["pool_size", "max_active_devices"]);
+const CUSTOMER_FIELDS = new Set(["id", "external_ref", "name", "email"]);
 
 // Grace window (seconds) tolerated past current_period_end before a non-cancel
 // intent is rejected as invalid_order. Absorbs provider/clock skew so a renewal
@@ -86,12 +94,25 @@ export function isNonNegativeInteger(value) {
   return typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= Number.MAX_SAFE_INTEGER;
 }
 
+function hasOnlyFields(value, allowed) {
+  return Object.keys(value).every((field) => allowed.has(field));
+}
+
 /** A 64-char lowercase-hex string (sha256 fingerprint), or null. */
 function safeHex64(value) {
   return typeof value === "string" && HEX_64.test(value) ? value : null;
 }
 
 // --- normalizeOrderEvent -----------------------------------------------------
+
+export function orderPeriodIsAcceptable(order, now) {
+  if (safeUnixSeconds(now) === null || typeof order !== "object" || order === null) return false;
+  return !(
+    order.current_period_end !== undefined &&
+    !CANCEL_INTENTS.has(order.intent) &&
+    order.current_period_end <= now - GRACE_SECONDS
+  );
+}
 
 /**
  * Validate a parsed request body into an OrderEvent, or return { error: "<code>" }.
@@ -114,10 +135,11 @@ function safeHex64(value) {
  *   - current_period_end <= now - GRACE for a non-cancel intent -> invalid_order
  *     (a backdated period end can never expire/deny an active customer here).
  */
-export function normalizeOrderEvent(parsedBody, now) {
+function normalizeOrderEventInternal(parsedBody, now, enforceHistoricalPeriodEnd) {
   if (typeof parsedBody !== "object" || parsedBody === null || Array.isArray(parsedBody)) {
     return { error: "invalid_order" };
   }
+  if (!hasOnlyFields(parsedBody, ORDER_FIELDS)) return { error: "invalid_order" };
   if (safeUnixSeconds(now) === null) {
     return { error: "invalid_order" };
   }
@@ -202,7 +224,7 @@ export function normalizeOrderEvent(parsedBody, now) {
   let quantity = undefined;
   if (parsedBody.quantity !== undefined && parsedBody.quantity !== null) {
     const q = parsedBody.quantity;
-    if (typeof q !== "object" || Array.isArray(q)) {
+    if (typeof q !== "object" || Array.isArray(q) || !hasOnlyFields(q, QUANTITY_FIELDS)) {
       return { error: "invalid_order" };
     }
     const out = {};
@@ -218,15 +240,17 @@ export function normalizeOrderEvent(parsedBody, now) {
       }
       out.max_active_devices = q.max_active_devices;
     }
+    if (Object.keys(out).length === 0) return { error: "invalid_order" };
     quantity = out;
   }
+  if (intent === "quantity.changed" && quantity === undefined) return { error: "invalid_order" };
 
   // Optional customer { id?, external_ref?, name?, email? }. ids are bounded safe
   // strings; name/email are looser (not embedded into any signed line) but bounded.
   let customer = undefined;
   if (parsedBody.customer !== undefined && parsedBody.customer !== null) {
     const c = parsedBody.customer;
-    if (typeof c !== "object" || Array.isArray(c)) {
+    if (typeof c !== "object" || Array.isArray(c) || !hasOnlyFields(c, CUSTOMER_FIELDS)) {
       return { error: "invalid_order" };
     }
     const out = {};
@@ -256,17 +280,14 @@ export function normalizeOrderEvent(parsedBody, now) {
       }
       out.email = c.email;
     }
+    if (Object.keys(out).length === 0) return { error: "invalid_order" };
     customer = out;
   }
 
   // A backdated period end may not deny/expire an active customer. Reject a clearly
   // historical period_end for non-cancel intents; cancellations are exempt (their
   // whole purpose is to wind down at/after a past period end).
-  if (
-    current_period_end !== undefined &&
-    !CANCEL_INTENTS.has(intent) &&
-    current_period_end <= now - GRACE_SECONDS
-  ) {
+  if (enforceHistoricalPeriodEnd && !orderPeriodIsAcceptable({ current_period_end, intent }, now)) {
     return { error: "invalid_order" };
   }
 
@@ -286,6 +307,20 @@ export function normalizeOrderEvent(parsedBody, now) {
   if (license_id !== undefined) order.license_id = license_id;
   if (occurred_at !== undefined) order.occurred_at = occurred_at;
   return order;
+}
+
+/** Normalize a new order and enforce the historical-period safety gate. */
+export function normalizeOrderEvent(parsedBody, now) {
+  return normalizeOrderEventInternal(parsedBody, now, true);
+}
+
+/**
+ * Normalize authenticated wire data before durable event-id lookup. Callers must apply
+ * `orderPeriodIsAcceptable` on an event-id miss; matching cached/accepted rows may redrive after
+ * the grace window because their payload was already durably accepted.
+ */
+export function normalizeOrderEventForReplay(parsedBody, now) {
+  return normalizeOrderEventInternal(parsedBody, now, false);
 }
 
 // --- deriveFingerprint -------------------------------------------------------
@@ -314,165 +349,4 @@ export async function deriveFingerprint({ subscription_id, project, feature, sup
   const material = `${subscription_id}:${project}:${feature}`;
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(material));
   return { fingerprint: bytesToHex(new Uint8Array(digest)), origin: "derived" };
-}
-
-// --- clampValidUntil ---------------------------------------------------------
-
-/**
- * Monotone-forward valid_until clamp: max(currentPeriodEnd ?? 0, prevValidUntil ?? 0).
- * A stale/backdated current_period_end can never regress an already-granted window.
- */
-export function clampValidUntil(currentPeriodEnd, prevValidUntil) {
-  const a = typeof currentPeriodEnd === "number" ? currentPeriodEnd : 0;
-  const b = typeof prevValidUntil === "number" ? prevValidUntil : 0;
-  return a >= b ? a : b;
-}
-
-// --- mapIntentToMutation -----------------------------------------------------
-
-// Reversible "soft disable" intents (a payment problem the customer can fix).
-const DISABLE_INTENTS = new Set([
-  "subscription.past_due",
-  "subscription.paused",
-  "subscription.payment_failed",
-]);
-// Terminal revoke intents (fraud) -- the ONLY path that revokes.
-const REVOKE_INTENTS = new Set(["fraud.confirmed", "chargeback"]);
-
-/**
- * Map a normalized OrderEvent to a PURE mutation descriptor (no DB access). The
- * Stage-4 handler turns the descriptor into a shared-mutator call inside the atomic
- * accept/apply batch.
- *
- *   prev             = the current entitlement row (or null if none exists yet)
- *   priorAppliedEvent = the previously-applied OrderEvent for this subscription
- *                       (or null) -- used to compute a quantity downgrade diff from
- *                       the prior payload, never from live state (crash-redrive safe).
- *
- * Descriptor shape:
- *   {
- *     kind: 'create'|'patch'|'transition'|'capacity'|'reclaim'|'none',
- *     status?, valid_until?, valid_from?, capacity?, eventType?,
- *     terminal?: 'no_entitlement'|'revoked',
- *     reclaim?: { from, to },
- *   }
- *
- * Invariants enforced here:
- *   - createEntitlement is reserved STRICTLY for subscription.active.
- *   - modify-intents on a missing prev -> { kind:'none', terminal:'no_entitlement' }.
- *   - a revoked prev (terminal) -> { kind:'none', terminal:'revoked' }.
- *   - cancel never creates.
- *   - valid_until is the monotone clamp; valid_from < valid_until is asserted by
- *     surfacing valid_from only when it is strictly less than the clamped valid_until.
- */
-export function mapIntentToMutation(order, prev, priorAppliedEvent) {
-  const intent = order.intent;
-  const prevRevoked = prev !== null && prev !== undefined && prev.status === "revoked";
-
-  // A revoked entitlement is terminal for EVERY intent except a fresh revoke (which
-  // is idempotent). No modify/create/capacity may touch it.
-  if (prevRevoked && !REVOKE_INTENTS.has(intent)) {
-    return { kind: "none", terminal: "revoked" };
-  }
-
-  const prevValidUntil = prev && typeof prev.valid_until === "number" ? prev.valid_until : 0;
-  const clampedValidUntil = clampValidUntil(order.current_period_end, prevValidUntil);
-
-  // valid_from < valid_until rule: only surface a valid_from when it is strictly
-  // before the clamped valid_until (a zero/absent clamp means "non-expiring").
-  function withWindow(descriptor) {
-    if (clampedValidUntil > 0) {
-      descriptor.valid_until = clampedValidUntil;
-      const validFrom = prev && typeof prev.valid_from === "number" ? prev.valid_from : 0;
-      if (validFrom < clampedValidUntil) {
-        descriptor.valid_from = validFrom;
-      }
-    } else {
-      // Non-expiring (no finite period end and no prior window): leave open-ended.
-      descriptor.valid_until = null;
-    }
-    return descriptor;
-  }
-
-  switch (intent) {
-    case "subscription.active":
-      // The ONLY creator. Materializes (or refreshes) an active entitlement.
-      return withWindow({ kind: "create", status: "active", eventType: "create" });
-
-    case "subscription.renewed": {
-      // patchEntitlement (missing -> null). Carry-forward customer_id/license_id is
-      // the handler's job (omitted fields keep prev values); here we only assert the
-      // forward clamp + active status.
-      if (prev === null || prev === undefined) {
-        return { kind: "none", terminal: "no_entitlement" };
-      }
-      return withWindow({ kind: "patch", status: "active", eventType: "update" });
-    }
-
-    case "subscription.canceled_at_period_end": {
-      // Keep active until period end; NEVER create. valid_until clamps to the
-      // (monotone) period end so access winds down exactly when the period ends.
-      if (prev === null || prev === undefined) {
-        return { kind: "none", terminal: "no_entitlement" };
-      }
-      return withWindow({ kind: "patch", status: "active", eventType: "update" });
-    }
-
-    case "subscription.resumed": {
-      // Re-enable a reversibly-disabled entitlement.
-      if (prev === null || prev === undefined) {
-        return { kind: "none", terminal: "no_entitlement" };
-      }
-      return { kind: "transition", status: "active", eventType: "reenable" };
-    }
-
-    case "quantity.changed": {
-      // Capacity change on an existing entitlement (never creates). A downgrade
-      // (new pool_size below the prior applied pool_size) also emits a reclaim
-      // descriptor; the diff is computed against the PRIOR APPLIED EVENT's payload,
-      // not live seat state, so crash-redrive cannot lose or double-apply it.
-      if (prev === null || prev === undefined) {
-        return { kind: "none", terminal: "no_entitlement" };
-      }
-      const capacity = order.quantity ?? {};
-      const newPool = capacity.pool_size;
-      const priorPool =
-        priorAppliedEvent &&
-        priorAppliedEvent.quantity &&
-        typeof priorAppliedEvent.quantity.pool_size === "number"
-          ? priorAppliedEvent.quantity.pool_size
-          : undefined;
-      const descriptor = { kind: "capacity", capacity, eventType: "update" };
-      if (
-        typeof newPool === "number" &&
-        typeof priorPool === "number" &&
-        newPool < priorPool
-      ) {
-        descriptor.reclaim = { from: priorPool, to: newPool };
-      }
-      return descriptor;
-    }
-
-    default:
-      break;
-  }
-
-  if (DISABLE_INTENTS.has(intent)) {
-    // Reversible soft-disable. Missing prev -> never materialize access.
-    if (prev === null || prev === undefined) {
-      return { kind: "none", terminal: "no_entitlement" };
-    }
-    return { kind: "transition", status: "disabled", eventType: "disable" };
-  }
-
-  if (REVOKE_INTENTS.has(intent)) {
-    // Terminal revoke -- the ONLY revoke path. Missing prev -> nothing to revoke.
-    if (prev === null || prev === undefined) {
-      return { kind: "none", terminal: "no_entitlement" };
-    }
-    return { kind: "transition", status: "revoked", eventType: "revoke", terminal: "revoked" };
-  }
-
-  // Unreachable for normalized input (normalizeOrderEvent rejects unknown intents).
-  return { kind: "none", terminal: "no_entitlement" };
 }

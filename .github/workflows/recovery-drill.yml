@@ -1,0 +1,137 @@
+name: Staging D1 recovery drill
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: Type restore-staging-scratch to authorize a scratch-only D1 import
+        required: true
+        type: string
+      backup_object_key:
+        description: SQL object below d1/licensecc-online-verifier-staging/ in the staging backup bucket
+        required: true
+        type: string
+      scratch_database:
+        description: Empty D1 database named licensecc-restore-drill-<unique-suffix>
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: licensecc-staging-operations
+  cancel-in-progress: false
+
+jobs:
+  restore-and-verify:
+    if: inputs.confirmation == 'restore-staging-scratch' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    # The four-hour RTO applies to the restore itself. Leave time for the
+    # deterministic preflight and always-run evidence upload around that timer.
+    timeout-minutes: 300
+    environment: staging
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Bind checkout to approved main commit
+        run: test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+        with:
+          version: "0.5.15"
+      - name: Select npm 10.9.8
+        run: |
+          npm install --global npm@10.9.8 --no-audit --no-fund
+          test "$(npm --version)" = "10.9.8"
+      - name: Install locked workspace
+        run: npm ci
+      - name: Run deterministic source gate
+        run: npm run check:pr
+      - name: Materialize protected staging configuration
+        env:
+          LICENSECC_BACKEND_WRANGLER_CONFIG_B64: ${{ secrets.LICENSECC_BACKEND_WRANGLER_CONFIG_B64 }}
+          LICENSECC_ADMIN_WRANGLER_CONFIG_B64: ${{ secrets.LICENSECC_ADMIN_WRANGLER_CONFIG_B64 }}
+          LICENSECC_PORTAL_WRANGLER_CONFIG_B64: ${{ secrets.LICENSECC_PORTAL_WRANGLER_CONFIG_B64 }}
+          LICENSECC_BACKUP_WRANGLER_CONFIG_B64: ${{ secrets.LICENSECC_BACKUP_WRANGLER_CONFIG_B64 }}
+          LICENSECC_EXPECTED_CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          LICENSECC_EXPECTED_D1_DATABASE_ID: ${{ vars.LICENSECC_D1_DATABASE_ID }}
+        run: node scripts/materialize-deploy-configs.mjs --profile staging
+      - name: Validate scratch-only recovery targets
+        env:
+          BACKUP_OBJECT_KEY: ${{ inputs.backup_object_key }}
+          SCRATCH_DATABASE: ${{ inputs.scratch_database }}
+        run: |
+          node --input-type=module -e '
+            const objectKey = process.env.BACKUP_OBJECT_KEY ?? "";
+            const scratch = process.env.SCRATCH_DATABASE ?? "";
+            if (objectKey.length > 2048 || !objectKey.startsWith("d1/licensecc-online-verifier-staging/") || !objectKey.endsWith(".sql") || objectKey.startsWith("/") || objectKey.includes("\\") || objectKey.split("/").includes("..")) throw new Error("backup_object_key is outside the staging backup prefix");
+            if (!/^licensecc-restore-drill-[a-z0-9](?:[a-z0-9-]{0,47}[a-z0-9])?$/u.test(scratch)) throw new Error("scratch_database must be a unique licensecc-restore-drill-* database");
+            if (scratch === "licensecc-online-verifier-staging" || scratch === "licensecc-online-verifier") throw new Error("source or production database cannot be a scratch target");
+          '
+      - name: Restore and validate the staging backup
+        id: restore
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          BACKUP_OBJECT_KEY: ${{ inputs.backup_object_key }}
+          SCRATCH_DATABASE: ${{ inputs.scratch_database }}
+          D1_DATABASE_ID: ${{ vars.LICENSECC_D1_DATABASE_ID }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/licensecc-recovery-evidence"
+          export RECOVERY_STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          export RECOVERY_STARTED_SECONDS="$SECONDS"
+          set +e
+          node services/cloudflare-d1-backup/scripts/restore-drill.mjs \
+            --bucket licensecc-d1-backups-staging \
+            --object-key "$BACKUP_OBJECT_KEY" \
+            --expected-database-id "$D1_DATABASE_ID" \
+            --expected-database-name licensecc-online-verifier-staging \
+            --max-backup-age-seconds 3600 \
+            --scratch-database "$SCRATCH_DATABASE" \
+            --scratch-config services/cloudflare-licensing-backend/wrangler.toml \
+            --source-database licensecc-online-verifier-staging \
+            --source-config services/cloudflare-licensing-backend/wrangler.toml \
+            --r2-config services/cloudflare-d1-backup/wrangler.jsonc \
+            --require-restored-status active \
+            --require-restored-status revoked \
+            --confirm-scratch \
+            --remote > "$RUNNER_TEMP/licensecc-recovery-evidence/restore-summary.json"
+          export RECOVERY_COMMAND_STATUS="$?"
+          set -e
+          export RECOVERY_ELAPSED_SECONDS="$((SECONDS - RECOVERY_STARTED_SECONDS))"
+          node --input-type=module -e '
+            import { readFileSync, writeFileSync } from "node:fs";
+            const path = `${process.env.RUNNER_TEMP}/licensecc-recovery-evidence/restore-summary.json`;
+            let restore = null;
+            try { restore = JSON.parse(readFileSync(path, "utf8")); } catch { restore = { ok: false, code: "restore_output_invalid" }; }
+            const commandStatus = Number(process.env.RECOVERY_COMMAND_STATUS);
+            const elapsedSeconds = Number(process.env.RECOVERY_ELAPSED_SECONDS);
+            const evidence = {
+              ok: commandStatus === 0 && restore?.ok === true && elapsedSeconds < 14400,
+              code: "staging_scratch_recovery_drill",
+              commit: process.env.GITHUB_SHA,
+              started_at: process.env.RECOVERY_STARTED_AT,
+              elapsed_seconds: elapsedSeconds,
+              rto_seconds: 14400,
+              command_status: commandStatus,
+              restore,
+            };
+            writeFileSync(`${process.env.RUNNER_TEMP}/licensecc-recovery-evidence/evidence.json`, `${JSON.stringify(evidence, null, 2)}\n`, { mode: 0o600 });
+            console.log(JSON.stringify({ ok: evidence.ok, code: evidence.code, commit: evidence.commit, elapsed_seconds: evidence.elapsed_seconds, rto_seconds: evidence.rto_seconds }));
+            if (!evidence.ok) process.exitCode = 1;
+          '
+      - name: Retain recovery evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: staging-recovery-drill-${{ github.run_id }}
+          path: ${{ runner.temp }}/licensecc-recovery-evidence
+          if-no-files-found: error
+          retention-days: 30

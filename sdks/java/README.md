@@ -10,4 +10,4 @@ Run the golden-vector, malformed-input, retry, idempotency, and packaging gates 
 npm run test:java-sdk
 ```
 
-The repository builds `build/java-sdk/licensecc-client-0.1.0-rc.1.jar`. Public package publication is a separate release operation and is not implied by this source tree.
+The repository builds `build/java-sdk/licensecc-client-0.1.0-rc.2.jar`. Public package publication is a separate release operation and is not implied by this source tree.

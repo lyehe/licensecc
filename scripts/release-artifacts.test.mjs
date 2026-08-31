@@ -22,8 +22,8 @@ import {
   writeReleaseMetadata,
 } from "./assemble-release-artifacts.mjs";
 
-const PLATFORM_VERSION = "0.1.0-rc.1";
-const PYTHON_VERSION = "0.1.0rc1";
+const PLATFORM_VERSION = "0.1.0-rc.2";
+const PYTHON_VERSION = "0.1.0rc2";
 const CPP_VERSION = "2.1.0";
 const JAVA_VERSION = "17.0.20";
 const NPM_VERSION = "10.9.8";

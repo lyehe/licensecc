@@ -23,7 +23,7 @@
     }
   ],
   "triggers": {
-    "crons": ["0 3 * * *"]
+    "crons": ["*/30 * * * *"]
   },
   "r2_buckets": [
     {

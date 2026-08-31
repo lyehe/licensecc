@@ -75,7 +75,7 @@ export class D1BackupWorkflow extends WorkflowEntrypoint<Env, BackupTriggerParam
       { retries: { limit: 20, delay: "30 seconds", backoff: "exponential" }, timeout: "15 minutes" },
       async () => {
         const ready = await pollD1Export(fetch, config, token, started.bookmark);
-        return saveD1ExportToR2(this.env.BACKUP_BUCKET, fetch, config, started, ready, Date.now());
+        return saveD1ExportToR2(this.env.BACKUP_BUCKET, fetch, config, started, ready);
       },
     );
     const pruned = await step.do("prune expired R2 backups", async () => pruneExpiredBackups(this.env.BACKUP_BUCKET, config, Date.now()));
@@ -87,8 +87,8 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     try {
       return await handleBackupRequest(request, env);
-    } catch (error) {
-      console.error(JSON.stringify({ event: "backup.unhandled_error", error: error instanceof Error ? error.message : String(error) }));
+    } catch {
+      console.error(JSON.stringify({ event: "backup.unhandled_error", error_type: "Error" }));
       return new Response(JSON.stringify({ ok: false, code: "internal_error" }), {
         status: 500,
         headers: { "content-type": "application/json" },

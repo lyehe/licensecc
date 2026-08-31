@@ -1,4 +1,5 @@
 import type { Env } from "../env.js";
+import { safeErrorType } from "@licensecc/cloudflare-runtime/http/kit";
 import {
   invalidSecurityModeNames as invalidSecurityModeNamesFromEnv,
   parseAccountTokenMode,
@@ -8,8 +9,56 @@ import {
 
 export type LogSeverity = "info" | "warn" | "error";
 
+const LOG_FIELD_NAMES = new Set([
+  "assertion_ttl_seconds",
+  "attempts",
+  "client_hardening",
+  "d1_duration_ms",
+  "delivery_id",
+  "detail",
+  "endpoint_id",
+  "error_type",
+  "event_type",
+  "invalid_config_modes",
+  "last_status",
+  "method",
+  "mode",
+  "path",
+  "request_id",
+  "request_proof",
+  "request_signature_mode",
+  "result",
+  "revocation_seq",
+  "skipped",
+  "source",
+  "success",
+  "target",
+  "window_from",
+]);
+
+function safeLogValue(value: unknown): string | number | boolean | null | string[] | undefined {
+  if (value === null || typeof value === "boolean") return value;
+  if (typeof value === "number") return Number.isFinite(value) ? value : undefined;
+  if (typeof value === "string") return value.replace(/\p{Cc}/gu, "?").slice(0, 256);
+  if (Array.isArray(value) && value.length <= 16 && value.every((entry) => typeof entry === "string")) {
+    return value.map((entry) => entry.replace(/\p{Cc}/gu, "?").slice(0, 64));
+  }
+  return undefined;
+}
+
 export function logEvent(severity: LogSeverity, event: string, fields: Record<string, unknown>): void {
-  const line = JSON.stringify({ event, ...fields });
+  const safeFields: Record<string, string | number | boolean | null | string[]> = {};
+  for (const [name, value] of Object.entries(fields)) {
+    if (!LOG_FIELD_NAMES.has(name)) continue;
+    if (name === "error_type") {
+      safeFields[name] = safeErrorType(value);
+      continue;
+    }
+    const safe = safeLogValue(value);
+    if (safe !== undefined) safeFields[name] = safe;
+  }
+  const safeEvent = /^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$/u.test(event) ? event : "observability.invalid_event_name";
+  const line = JSON.stringify({ event: safeEvent, severity, ...safeFields });
   if (severity === "error") {
     console.error(line);
     return;

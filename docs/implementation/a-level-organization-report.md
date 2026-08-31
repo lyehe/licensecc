@@ -45,7 +45,8 @@ The reviewed generator snapshot
 `extern/license-generator`. Its `PROVENANCE.md` records the upstream import and
 the vendored directory retains its BSD-3-Clause `LICENSE`; no `.gitmodules`
 entry, generator gitlink, or build-time source fetch remains. The 3 untracked
-`docs/superpowers/plans/**` execution plans were preserved.
+`docs/superpowers/plans/**` execution plans present during that review were
+preserved.
 
 The documentation split is intentional:
 
@@ -80,9 +81,9 @@ fragments, service-specific persistence, UI, tests, and Wrangler configuration.
 The root `package-lock.json` is the sole npm-workspace lockfile; SDK-native lock
 files remain within their own ecosystems.
 
-Current tracked service-source totals (TypeScript, TSX, JavaScript, and MJS)
-show substantial bounded contexts without moving service behavior into a
-generic dumping-ground package:
+At the reviewed tip, tracked service-source totals (TypeScript, TSX,
+JavaScript, and MJS) showed substantial bounded contexts without moving service
+behavior into a generic dumping-ground package:
 
 | Boundary | Files | Lines |
 | --- | ---: | ---: |
@@ -155,7 +156,7 @@ attestations.
 
 ## Contract and schema evidence
 
-Current canonical fixture hashes are:
+The canonical fixture hashes captured at the reviewed tip were:
 
 | Contract | Routes / operations | SHA-256 |
 | --- | --- | --- |
@@ -172,10 +173,12 @@ and PostgreSQL structural parity are green at 38 tables.
 
 All results below are timestamped command attestations measured on the final
 integrated Windows tree on 2026-08-09, with the vendored-generator and
-documentation results refreshed on 2026-08-10. The docs-accuracy gate independently recomputes stable tree
-facts (contract hashes and inventories, schema table sets, source counts,
-vendored generator provenance, and non-running E2E inventory); it does not pretend to rerun or
-continuously prove these historical command results.
+documentation results refreshed on 2026-08-10. The docs-accuracy gate verifies
+the durable provenance assertions in this historical report. Current contract,
+schema, source, composition-root, and hotspot facts belong in maintained
+architecture documentation, primarily `doc/architecture/system-map.md`; the
+gate does not pretend to rerun or continuously prove these historical command
+results.
 
 | Command / surface | Result |
 | --- | --- |
@@ -183,7 +186,7 @@ continuously prove these historical command results.
 | `npm run check:pr` | Attested green end-to-end: scans, pins, docs accuracy, lint, typecheck, architecture, contracts, services, SQL, and D1/PostgreSQL parity |
 | `npm run check:dry-run` | Attested green for all four Workers; no deployment performed |
 | `npm run setup:browsers` | Attested installation of both retained Playwright Chromium revisions |
-| `npm run test:e2e` | Attested green; current non-running inventory is backend 2, admin 68, portal 1 |
+| `npm run test:e2e` | Attested green; the captured non-running inventory was backend 2, admin 68, portal 1 |
 | `npm run test:sdks` | Attested green: Python 70/70; .NET 43/43 |
 | `npm audit --json` | Attested 0 total vulnerabilities at all severities |
 | `pwsh -NoProfile -File scripts/check-build-purity.ps1 -Preset dev-debug` | Green on 2026-08-10: vendored generator configure/build, CTest 37/37, and unchanged source fingerprints |
@@ -197,9 +200,9 @@ packaging; a disposable superproject with that source passed Debug CTest
 37/37. The exact source and its provenance are now reviewable in the same
 repository as the C++ consumer.
 
-No tracked `node_modules`, `.wrangler`, `dist`, SDK `bin`/`obj`, or virtual
-environment output is present. The protected untracked execution plans remain
-outside normal implementation commits.
+At the reviewed tip, no tracked `node_modules`, `.wrangler`, `dist`, SDK
+`bin`/`obj`, or virtual-environment output was present. The protected untracked
+execution plans remained outside normal implementation commits.
 
 ## Remaining gaps and promotion gate
 

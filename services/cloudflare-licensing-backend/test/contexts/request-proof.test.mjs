@@ -380,6 +380,119 @@ test("request proof required mode denies invalid and stale proof", async () => {
   }
 });
 
+test("request proof device lookup exceptions use fixed telemetry detail without leaking messages", async () => {
+  const originalNow = Date.now;
+  Date.now = () => 1_000_000_000;
+  const secretMessage = "database provider said customer-secret-value";
+  try {
+    const row = {
+      ...validBody(),
+      status: "active",
+      assertion_ttl_seconds: 120,
+      cache_ttl_seconds: 600,
+      revocation_seq: 3,
+    };
+    const proof = await requestProofFixture();
+    const env = await testKeyEnv(row, { REQUEST_SIGNATURE_MODE: "required", deviceRows: [proof.deviceRow] });
+    const originalDb = env.DB;
+    env.DB = {
+      prepare(sql) {
+        if (sql.includes("FROM entitlement_devices")) {
+          return {
+            bind() {
+              return {
+                async first() {
+                  throw new Error(secretMessage);
+                },
+              };
+            },
+          };
+        }
+        return originalDb.prepare(sql);
+      },
+    };
+
+    const logs = await captureConsoleEvents(async () => {
+      const response = await worker.fetch(
+        new Request("https://example.test/v1/verify", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(proof.body),
+        }),
+        env,
+      );
+      assert.equal(response.status, 500);
+      assert.deepEqual(await response.json(), { ok: false, code: "verification_error" });
+    });
+
+    const proofLog = logs.find((entry) => entry.event === "verify.request_proof");
+    assert.equal(proofLog?.severity, "error");
+    assert.equal(proofLog?.result, "d1_error");
+    assert.equal(proofLog?.detail, "request proof device lookup failed");
+    assert.doesNotMatch(JSON.stringify(logs), /customer-secret-value/);
+  } finally {
+    Date.now = originalNow;
+  }
+});
+
+test("request proof crypto exceptions use fixed telemetry detail without leaking provider text", async () => {
+  const originalNow = Date.now;
+  Date.now = () => 1_000_000_000;
+  const secretMessage = "crypto provider included private customer material";
+  const subtle = globalThis.crypto.subtle;
+  const ownImportKeyDescriptor = Object.getOwnPropertyDescriptor(subtle, "importKey");
+  try {
+    const row = {
+      ...validBody(),
+      status: "active",
+      assertion_ttl_seconds: 120,
+      cache_ttl_seconds: 600,
+      revocation_seq: 3,
+    };
+    const proof = await requestProofFixture();
+    const env = await testKeyEnv(row, { REQUEST_SIGNATURE_MODE: "required", deviceRows: [proof.deviceRow] });
+    const originalImportKey = subtle.importKey;
+    Object.defineProperty(subtle, "importKey", {
+      configurable: true,
+      writable: true,
+      async value(format, ...args) {
+        if (format === "spki") throw new Error(secretMessage);
+        return originalImportKey.call(subtle, format, ...args);
+      },
+    });
+
+    const logs = await captureConsoleEvents(async () => {
+      const response = await worker.fetch(
+        new Request("https://example.test/v1/verify", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(proof.body),
+        }),
+        env,
+      );
+      assert.equal(response.status, 200);
+      assert.deepEqual(await response.json(), {
+        ok: false,
+        code: "request_proof_invalid",
+        server_time: 1_000_000,
+      });
+    });
+
+    const proofLog = logs.find((entry) => entry.event === "verify.request_proof");
+    assert.equal(proofLog?.severity, "warn");
+    assert.equal(proofLog?.result, "malformed_public_key");
+    assert.equal(proofLog?.detail, "request proof key validation failed");
+    assert.doesNotMatch(JSON.stringify(logs), /private customer material/);
+  } finally {
+    if (ownImportKeyDescriptor === undefined) {
+      delete subtle.importKey;
+    } else {
+      Object.defineProperty(subtle, "importKey", ownImportKeyDescriptor);
+    }
+    Date.now = originalNow;
+  }
+});
+
 test("request proof soft mode logs invalid proof but preserves allow behavior", async () => {
   const originalNow = Date.now;
   Date.now = () => 1_000_000_000;

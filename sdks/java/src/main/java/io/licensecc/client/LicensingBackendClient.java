@@ -14,7 +14,7 @@ import java.util.Set;
 
 /** Thin JDK-only HTTP client for Licensecc's documented client-facing Worker routes. */
 public final class LicensingBackendClient {
-    public static final String VERSION = "0.1.0-rc.1";
+    public static final String VERSION = "0.1.0-rc.2";
     private static final Set<Integer> RETRYABLE = Set.of(429, 502, 503, 504);
 
     private final HttpClient http;

@@ -1,3 +1,5 @@
+import { HTML_NONCE_PLACEHOLDER } from "@licensecc/cloudflare-runtime/http/kit";
+
 // A self-contained docs page that fetches /openapi.json and renders a grouped, collapsible endpoint
 // list. NO external CDN / no network dependency beyond the same-origin /openapi.json fetch.
 export const DOCS_HTML = `<!doctype html>
@@ -6,7 +8,7 @@ export const DOCS_HTML = `<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>licensecc Customer Portal — API</title>
-<style>
+<style nonce="${HTML_NONCE_PLACEHOLDER}">
   :root { color-scheme: light dark; }
   body { font: 15px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 0; padding: 0 1rem 4rem; max-width: 960px; margin-inline: auto; }
   h1 { font-size: 1.5rem; margin: 1.5rem 0 .25rem; }
@@ -37,11 +39,14 @@ export const DOCS_HTML = `<!doctype html>
 <p class="sub" id="subtitle"></p>
 <div id="err" hidden></div>
 <div id="groups"></div>
-<script>
+<script nonce="${HTML_NONCE_PLACEHOLDER}">
 (async function () {
   function el(tag, attrs, children) {
     var n = document.createElement(tag);
-    if (attrs) for (var k in attrs) { if (k === "text") n.textContent = attrs[k]; else if (k === "html") n.innerHTML = attrs[k]; else n.setAttribute(k, attrs[k]); }
+    if (attrs) for (var k in attrs) {
+      if (k === "text") n.textContent = attrs[k];
+      else if (k === "class") n.className = attrs[k];
+    }
     (children || []).forEach(function (c) { if (c) n.appendChild(c); });
     return n;
   }

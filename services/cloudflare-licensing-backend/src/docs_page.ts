@@ -1,3 +1,5 @@
+import { HTML_NONCE_PLACEHOLDER } from "@licensecc/cloudflare-runtime/http/kit";
+
 // Self-contained docs page: no external CDN, no network beyond /openapi.json. Fetches the spec and
 // renders a grouped, collapsible endpoint list. Kept deliberately minimal and dependency-free.
 export const docsHtml: string = `<!doctype html>
@@ -6,7 +8,7 @@ export const docsHtml: string = `<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>licensecc licensing-backend API</title>
-<style>
+<style nonce="${HTML_NONCE_PLACEHOLDER}">
   :root { color-scheme: light dark; }
   body { font: 15px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 0; padding: 0 1rem 4rem; max-width: 960px; }
   h1 { font-size: 1.5rem; }
@@ -32,18 +34,30 @@ export const docsHtml: string = `<!doctype html>
 <h1>licensecc licensing-backend API</h1>
 <p class="sec">OpenAPI 3.1 doc-of-existing. Source of truth: <a href="/openapi.json">/openapi.json</a>.</p>
 <div id="app"><p class="loading">Loading spec…</p></div>
-<script>
+<script nonce="${HTML_NONCE_PLACEHOLDER}">
 (function () {
   var app = document.getElementById("app");
-  function esc(s) { return String(s).replace(/[&<>"]/g, function (c) {
-    return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+  function el(tag, cls, text) {
+    var node = document.createElement(tag);
+    if (cls) node.className = cls;
+    if (text !== undefined) node.textContent = String(text);
+    return node;
+  }
+  function appendRow(table, values, header) {
+    var row = el("tr");
+    values.forEach(function (value) {
+      var cell = el(header ? "th" : "td");
+      if (value && value.code) cell.appendChild(el("code", null, value.text));
+      else cell.textContent = String(value && value.text !== undefined ? value.text : value);
+      row.appendChild(cell);
+    });
+    table.appendChild(row);
+  }
   function methodClass(m) { return "method m-" + m.toLowerCase(); }
   function render(spec) {
-    app.innerHTML = "";
+    app.replaceChildren();
     var info = spec.info || {};
-    var head = document.createElement("p");
-    head.className = "sec";
-    head.textContent = (info.title || "") + " v" + (info.version || "");
+    var head = el("p", "sec", (info.title || "") + " v" + (info.version || ""));
     app.appendChild(head);
     var paths = spec.paths || {};
     var groups = {};
@@ -70,62 +84,66 @@ export const docsHtml: string = `<!doctype html>
   }
   function refName(ref) { return ref ? ref.split("/").pop() : ""; }
   function renderEndpoint(e, spec) {
-    var d = document.createElement("details");
-    var s = document.createElement("summary");
-    s.innerHTML = '<span class="' + methodClass(e.method) + '">' + esc(e.method) + '</span>' +
-      '<span class="path">' + esc(e.path) + '</span>' +
-      '<span class="summary-text">' + esc(e.op.summary || "") + '</span>';
+    var d = el("details");
+    var s = el("summary");
+    s.appendChild(el("span", methodClass(e.method), e.method));
+    s.appendChild(el("span", "path", e.path));
+    s.appendChild(el("span", "summary-text", e.op.summary || ""));
     d.appendChild(s);
-    var body = document.createElement("div");
-    body.className = "detail-body";
-    var html = "";
-    if (e.op.description) html += '<p>' + esc(e.op.description) + '</p>';
+    var body = el("div", "detail-body");
+    if (e.op.description) body.appendChild(el("p", null, e.op.description));
     var sec = (e.op.security || []).map(function (o) { return Object.keys(o)[0]; }).filter(Boolean);
-    html += '<p class="sec">Security: ' + (sec.length ? sec.map(esc).join(" OR ") : "none") + '</p>';
+    body.appendChild(el("p", "sec", "Security: " + (sec.length ? sec.join(" OR ") : "none")));
     if (e.op.parameters && e.op.parameters.length) {
-      html += '<p class="sec">Parameters</p><table><tr><th>name</th><th>in</th><th>required</th><th>type</th></tr>';
+      body.appendChild(el("p", "sec", "Parameters"));
+      var params = el("table");
+      appendRow(params, ["name", "in", "required", "type"], true);
       e.op.parameters.forEach(function (p) {
         var t = (p.schema && (p.schema.type || (p.schema.$ref ? refName(p.schema.$ref) : ""))) || "";
-        html += '<tr><td><code>' + esc(p.name) + '</code></td><td>' + esc(p.in) + '</td><td>' +
-          (p.required ? "yes" : "no") + '</td><td>' + esc(t) + '</td></tr>';
+        appendRow(params, [{ code: true, text: p.name }, p.in, p.required ? "yes" : "no", t], false);
       });
-      html += '</table>';
+      body.appendChild(params);
     }
     if (e.op.requestBody) {
       var rb = e.op.requestBody.content && e.op.requestBody.content["application/json"];
       var ref = rb && rb.schema && rb.schema.$ref ? refName(rb.schema.$ref) : "(json)";
-      html += '<p class="sec">Request body: <code>' + esc(ref) + '</code></p>';
-      html += renderSchema(spec, ref);
+      var requestBody = el("p", "sec", "Request body: ");
+      requestBody.appendChild(el("code", null, ref));
+      body.appendChild(requestBody);
+      var schema = renderSchema(spec, ref);
+      if (schema) body.appendChild(schema);
     }
-    html += '<p class="sec">Responses</p><table><tr><th>status</th><th>description</th></tr>';
+    body.appendChild(el("p", "sec", "Responses"));
+    var responses = el("table");
+    appendRow(responses, ["status", "description"], true);
     Object.keys(e.op.responses || {}).forEach(function (code) {
-      html += '<tr><td class="err-code">' + esc(code) + '</td><td>' +
-        esc((e.op.responses[code] && e.op.responses[code].description) || "") + '</td></tr>';
+      appendRow(responses, [code, (e.op.responses[code] && e.op.responses[code].description) || ""], false);
     });
-    html += '</table>';
-    body.innerHTML = html;
+    body.appendChild(responses);
     d.appendChild(body);
     return d;
   }
   function renderSchema(spec, name) {
     var schemas = (spec.components && spec.components.schemas) || {};
     var sc = schemas[name];
-    if (!sc || !sc.properties) return "";
+    if (!sc || !sc.properties) return null;
     var req = sc.required || [];
-    var html = '<table><tr><th>field</th><th>type</th><th>required</th></tr>';
+    var table = el("table");
+    appendRow(table, ["field", "type", "required"], true);
     Object.keys(sc.properties).forEach(function (k) {
       var p = sc.properties[k];
       var t = p.type;
       if (Array.isArray(t)) t = t.join("|");
       if (p.enum) t = (t || "enum") + " (" + p.enum.join(", ") + ")";
-      html += '<tr><td><code>' + esc(k) + '</code></td><td>' + esc(t || "") + '</td><td>' +
-        (req.indexOf(k) >= 0 ? "yes" : "no") + '</td></tr>';
+      appendRow(table, [{ code: true, text: k }, t || "", req.indexOf(k) >= 0 ? "yes" : "no"], false);
     });
-    html += '</table>';
-    return html;
+    return table;
   }
-  fetch("/openapi.json").then(function (r) { return r.json(); }).then(render).catch(function (err) {
-    app.innerHTML = '<p class="error">Failed to load /openapi.json: ' + esc(err && err.message) + '</p>';
+  fetch("/openapi.json").then(function (r) {
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    return r.json();
+  }).then(render).catch(function (err) {
+    app.replaceChildren(el("p", "error", "Failed to load /openapi.json: " + (err && err.message)));
   });
 })();
 </script>

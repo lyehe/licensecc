@@ -1,0 +1,62 @@
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "23 6 * * 2"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: CodeQL (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: javascript-typescript
+            build_mode: none
+          - language: c-cpp
+            build_mode: manual
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build_mode }}
+      - name: Install native dependencies
+        if: matrix.build_mode == 'manual'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake libssl-dev zlib1g-dev \
+            libboost-dev libboost-test-dev libboost-filesystem-dev \
+            libboost-iostreams-dev libboost-program-options-dev \
+            libboost-system-dev libboost-thread-dev libboost-date-time-dev \
+            valgrind
+      - name: Bootstrap native source preflight
+        if: matrix.build_mode == 'manual'
+        run: pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/bootstrap.ps1 -CheckOnly
+      - name: Build native targets through the maintained CMake gate
+        if: matrix.build_mode == 'manual'
+        run: >-
+          pwsh -NoProfile -ExecutionPolicy Bypass
+          -File scripts/check-build-purity.ps1
+          -Preset ci-linux-core
+          -SkipTests
+      - name: Analyze
+        uses: github/codeql-action/analyze@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+        with:
+          category: "/language:${{ matrix.language }}"

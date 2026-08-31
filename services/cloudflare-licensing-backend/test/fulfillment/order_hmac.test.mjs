@@ -93,6 +93,7 @@ test("verifyOrderHmac accepts a valid signature", async () => {
   assert.equal(out.ok, true);
   assert.equal(out.code, "ok");
   assert.equal(out.keyId, KEY_ID);
+  assert.equal(out.timestamp, request.headers.get("X-LCC-Timestamp"));
 });
 
 test("verifyOrderHmac is raw-bytes exact (signs over the exact body bytes)", async () => {

@@ -1,5 +1,5 @@
 import { constantTimeEqual, readBearer } from "../auth/account_auth.mjs";
-import { json, requestId, clientIp } from "@licensecc/cloudflare-runtime/http/kit";
+import { json, requestId } from "@licensecc/cloudflare-runtime/http/kit";
 import type { Env, ExecutionContextLike, IsolationBinding } from "../env.js";
 import { logEvent } from "../observability/index.js";
 import { handleLeaseIssue } from "./leases.js";
@@ -33,7 +33,6 @@ export async function handleEmergencyRoute(
     request_id: requestId(request),
     method: request.method,
     target,
-    client_ip: clientIp(request),
   });
 
   if (request.method === "POST" && (target === "/v1/activate" || target === "/v1/renew")) {

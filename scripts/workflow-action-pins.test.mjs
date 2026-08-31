@@ -261,6 +261,56 @@ function workflowJobNames(content) {
   return names;
 }
 
+function workflowTriggerLines(content) {
+  const lines = content.split(/\r?\n/);
+  const start = lines.findIndex((line) => {
+    const mapping = yamlMapping(line);
+    return mapping && !mapping.listItem && mapping.indent === 0 && mapping.key === "on" && mapping.value === "";
+  });
+  assert.ok(start >= 0, "workflow is missing its on mapping");
+  const nextRoot = lines.findIndex((line, index) => {
+    if (index <= start || !line.trim()) return false;
+    const mapping = yamlMapping(line);
+    return mapping && !mapping.listItem && mapping.indent === 0;
+  });
+  return lines.slice(start + 1, nextRoot === -1 ? lines.length : nextRoot);
+}
+
+function workflowTriggerNames(content) {
+  return workflowTriggerLines(content).flatMap((line) => {
+    const mapping = yamlMapping(line);
+    return mapping && !mapping.listItem && mapping.indent === 2 ? [mapping.key] : [];
+  });
+}
+
+function workflowTriggerPaths(content, triggerName) {
+  const lines = workflowTriggerLines(content);
+  const triggerStart = lines.findIndex((line) => {
+    const mapping = yamlMapping(line);
+    return mapping && !mapping.listItem && mapping.indent === 2 && mapping.key === triggerName && mapping.value === "";
+  });
+  assert.ok(triggerStart >= 0, `workflow is missing its ${triggerName} mapping`);
+  const triggerEndOffset = lines.slice(triggerStart + 1).findIndex((line) => {
+    if (!line.trim()) return false;
+    const mapping = yamlMapping(line);
+    return mapping && !mapping.listItem && mapping.indent <= 2;
+  });
+  const triggerEnd = triggerEndOffset === -1 ? lines.length : triggerStart + 1 + triggerEndOffset;
+  const triggerLines = lines.slice(triggerStart + 1, triggerEnd);
+  const pathsStart = triggerLines.findIndex((line) => {
+    const mapping = yamlMapping(line);
+    return mapping && !mapping.listItem && mapping.indent === 4 && mapping.key === "paths" && mapping.value === "";
+  });
+  assert.ok(pathsStart >= 0, `${triggerName} is missing its direct paths list`);
+  const pathsEndOffset = triggerLines.slice(pathsStart + 1).findIndex((line) => line.trim() && indentation(line) <= 4);
+  const pathsEnd = pathsEndOffset === -1 ? triggerLines.length : pathsStart + 1 + pathsEndOffset;
+  return triggerLines.slice(pathsStart + 1, pathsEnd).flatMap((line) => {
+    const active = yamlWithoutComment(line);
+    if (!active.trim() || indentation(active) !== 6 || !active.trimStart().startsWith("- ")) return [];
+    return [yamlScalar(active.trimStart().slice(2))];
+  });
+}
+
 function executionRunCommands(job) {
   return job.steps.flatMap((step) => {
     const run = step.properties.get("run");
@@ -345,9 +395,24 @@ function assertExactCriticalRun(step, expected, label) {
 
 function assertPostgresWorkflowContract(workflow, relativePath = ".github/workflows/postgres-conformance.yml") {
   assertNoTopLevelWorkflowDefaults(workflow, relativePath);
-  assert.match(workflow, /^\s*schedule:\s*$/mu);
-  assert.match(workflow, /^\s*workflow_dispatch:\s*$/mu);
-  assert.doesNotMatch(workflow, /^\s*(?:push|pull_request):\s*$/mu);
+  assert.deepEqual(
+    workflowTriggerNames(workflow).sort(),
+    ["pull_request", "schedule", "workflow_dispatch"],
+    `${relativePath}: workflow triggers must be pull_request, schedule, and workflow_dispatch only`,
+  );
+  assert.deepEqual(
+    workflowTriggerPaths(workflow, "pull_request"),
+    [
+      ".github/workflows/postgres-conformance.yml",
+      "package.json",
+      "package-lock.json",
+      "packages/cloudflare-runtime/**",
+      "packages/licensing-domain/**",
+      "scripts/generate-wrangler-types.mjs",
+      "services/cloudflare-licensing-backend/**",
+    ],
+    `${relativePath}: pull_request paths must cover every input to live PostgreSQL conformance`,
+  );
   assert.match(
     workflow,
     /^\s*image:\s*postgres:16-alpine@sha256:[0-9a-f]{64}\s*$/mu,
@@ -490,7 +555,7 @@ test("release artifact evidence is an exact-once local and repository-quality ga
 
 test("release and deployment operation contracts are deterministic PR gates", () => {
   const packageJson = JSON.parse(source("package.json"));
-  assert.equal(packageJson.scripts["test:release-operations"], "node --test scripts/check-release-tag.test.mjs scripts/materialize-deploy-configs.test.mjs");
+  assert.equal(packageJson.scripts["test:release-operations"], "node --test scripts/check-release-tag.test.mjs scripts/check-worker-rollback-health.test.mjs scripts/materialize-deploy-configs.test.mjs scripts/rollback-workers.test.mjs");
   assert.equal(packageJson.scripts["check:pr"].split(" && ").filter((command) => command === "npm run test:release-operations").length, 1);
 });
 
@@ -518,19 +583,302 @@ test("platform tags build once and publish through protected trusted-publisher j
 
 test("production deployment is manual, confirmed, serialized, and uses only materialized configs", () => {
   const workflow = source(".github/workflows/deploy-production.yml");
+  const job = workflowJobLines(".github/workflows/deploy-production.yml", "deploy");
+  assertNoTopLevelWorkflowDefaults(workflow, ".github/workflows/deploy-production.yml");
   assert.match(workflow, /^\s*workflow_dispatch:\s*$/mu);
   assert.doesNotMatch(workflow, /^\s*(?:push|pull_request|schedule):\s*$/mu);
-  assert.match(workflow, /if: inputs\.confirmation == 'deploy-production'/u);
+  assert.match(workflow, /if: inputs\.confirmation == 'deploy-production' && github\.ref == 'refs\/heads\/main'/u);
   assert.match(workflow, /environment: production/u);
+  assert.match(workflow, /group: licensecc-production-operations/u);
   assert.match(workflow, /cancel-in-progress: false/u);
-  assert.match(workflow, /node scripts\/materialize-deploy-configs\.mjs/u);
-  assert.equal((workflow.match(/wrangler deploy --dry-run --config services\//gmu) ?? []).length, 4);
-  assert.equal((workflow.match(/wrangler deploy --config services\//gmu) ?? []).length, 4);
-  assert.equal((workflow.match(/wrangler d1 migrations apply DB --remote/gmu) ?? []).length, 1);
-  assert.ok(workflow.indexOf("wrangler d1 migrations apply DB --remote") < workflow.indexOf("wrangler deploy --config services/cloudflare-licensing-backend"));
+  assert.match(workflow, /persist-credentials: false/u);
+  assert.match(workflow, /ref: \$\{\{ github\.sha \}\}/u);
+  assert.match(workflow, /test "\$\(git rev-parse HEAD\)" = "\$GITHUB_SHA"/u);
+  assert.match(workflow, /node scripts\/materialize-deploy-configs\.mjs --profile production/u);
+  assert.match(workflow, /LICENSECC_EXPECTED_CLOUDFLARE_ACCOUNT_ID: \$\{\{ secrets\.CLOUDFLARE_ACCOUNT_ID \}\}/u);
+  assert.match(workflow, /LICENSECC_EXPECTED_D1_DATABASE_ID: \$\{\{ vars\.LICENSECC_D1_DATABASE_ID \}\}/u);
+  assert.equal((workflow.match(/LICENSECC_EXPECTED_(?:BACKEND|ADMIN|PORTAL|BACKUP)_ORIGIN: \$\{\{ inputs\.(?:backend|admin|portal|backup)_url \}\}/gmu) ?? []).length, 4);
+  assert.match(workflow, /npm --silent run validate:secret-inventory --workspace @licensecc\/cloudflare-licensing-backend -- --profile=production > "\$RUNNER_TEMP\/licensecc-deployment-evidence\/backend-secret-inventory\.json"/u);
+  assert.match(workflow, /Verify protected backend secret inventory[\s\S]*CLOUDFLARE_API_TOKEN: \$\{\{ secrets\.CLOUDFLARE_API_TOKEN \}\}[\s\S]*CLOUDFLARE_ACCOUNT_ID: \$\{\{ secrets\.CLOUDFLARE_ACCOUNT_ID \}\}/u);
+  assert.ok(workflow.indexOf("validate:secret-inventory") < workflow.indexOf("run-protected-wrangler.mjs --operation dry-run --worker backend"));
+  assert.doesNotMatch(workflow, /validate:staging-order/u);
+  assert.equal((workflow.match(/run-protected-wrangler\.mjs --operation dry-run --worker/gmu) ?? []).length, 4);
+  assert.equal((workflow.match(/run-protected-wrangler\.mjs --operation deploy --worker/gmu) ?? []).length, 4);
+  assert.equal((workflow.match(/run-protected-wrangler\.mjs --operation migrate --worker backend/gmu) ?? []).length, 1);
+  const backupDeploy = workflow.indexOf("run-protected-wrangler.mjs --operation deploy --worker backup");
+  const backupGate = workflow.indexOf("backup:pre-migration");
+  const migration = workflow.indexOf("run-protected-wrangler.mjs --operation migrate --worker backend");
+  const backendDeploy = workflow.indexOf("run-protected-wrangler.mjs --operation deploy --worker backend");
+  assert.ok(backupDeploy < backupGate && backupGate < migration && migration < backendDeploy,
+    "backup deployment and completed backup must precede migration and application rollout");
   assert.doesNotMatch(workflow, /wrangler\.example\.(?:toml|jsonc)/u);
   assert.match(workflow, /validate:public-verifier/u);
-  assert.match(workflow, /validate:deploy/u);
+  assert.match(workflow, /LICENSECC_PUBLIC_VERIFIER_FINGERPRINT: \$\{\{ secrets\.LICENSECC_PUBLIC_VERIFIER_FINGERPRINT \}\}/u);
+  assert.match(workflow, /LICENSECC_PUBLIC_VERIFIER_DEVICE_PRIVATE_KEY_PKCS8_PEM: \$\{\{ secrets\.LICENSECC_PUBLIC_VERIFIER_DEVICE_PRIVATE_KEY_PKCS8_PEM \}\}/u);
+  assert.match(workflow, /LICENSECC_PUBLIC_VERIFIER_DEVICE_KEY_ID: \$\{\{ secrets\.LICENSECC_PUBLIC_VERIFIER_DEVICE_KEY_ID \}\}/u);
+  const productionVerifier = namedWorkflowStep(job, "Run proof-authenticated backend post-deploy drill", ".github/workflows/deploy-production.yml");
+  assert.deepEqual(
+    Object.fromEntries([...productionVerifier.children.get("env")].map(([key, property]) => [key, property.value])),
+    {
+      BACKEND_URL: "${{ inputs.backend_url }}",
+      LICENSECC_PUBLIC_VERIFIER_PROJECT: "${{ vars.LICENSECC_PUBLIC_VERIFIER_PROJECT }}",
+      LICENSECC_PUBLIC_VERIFIER_FEATURE: "${{ vars.LICENSECC_PUBLIC_VERIFIER_FEATURE }}",
+      LICENSECC_PUBLIC_VERIFIER_FINGERPRINT: "${{ secrets.LICENSECC_PUBLIC_VERIFIER_FINGERPRINT }}",
+      LICENSECC_PUBLIC_VERIFIER_DEVICE_PRIVATE_KEY_PKCS8_PEM: "${{ secrets.LICENSECC_PUBLIC_VERIFIER_DEVICE_PRIVATE_KEY_PKCS8_PEM }}",
+      LICENSECC_PUBLIC_VERIFIER_DEVICE_KEY_ID: "${{ secrets.LICENSECC_PUBLIC_VERIFIER_DEVICE_KEY_ID }}",
+    },
+  );
+  assert.match(productionVerifier.properties.get("run")?.value ?? "", /backend-public-verifier-drill\.json/u);
+  const remainingProductionDrills = namedWorkflowStep(job, "Run remaining service post-deploy drills", ".github/workflows/deploy-production.yml");
+  assert.equal(remainingProductionDrills.children.get("env")?.has("LICENSECC_PUBLIC_VERIFIER_DEVICE_PRIVATE_KEY_PKCS8_PEM"), false);
+  assert.match(workflow, /validate:access-admin[^\n]*--read-only/u);
+  assert.match(workflow, /validate:staging-portal/u);
+  assert.match(workflow, /validate:deploy[^\n]*--require-d1-rest-token --require-trigger-token/u);
+  assert.equal((workflow.match(/run-protected-wrangler\.mjs --operation deployments --worker/gmu) ?? []).length, 4);
+  assert.equal((workflow.match(/^\s*capture_deployment (?:backend|admin|portal|backup)$/gmu) ?? []).length, 4);
+  assert.equal((workflow.match(/capture-worker-deployment-transition\.mjs/gmu) ?? []).length, 1);
+  assert.doesNotMatch(workflow, /npx --no-install wrangler (?:deploy|d1|deployments)/u);
+  assert.doesNotMatch(workflow, /wrangler deployments list --json[^\n|]*>/u);
+  assert.equal((workflow.match(/"status":"capture_failed"/gmu) ?? []).length, 1);
+  assert.match(workflow, /actions\/upload-artifact@[0-9a-f]{40}/u);
+  assert.doesNotMatch(workflow, /time-travel[^\n]*restore|--allow-nonempty-scratch/u);
+});
+
+test("staging deployment is isolated, confirmed, backup-gated, and exercises every service", () => {
+  const workflow = source(".github/workflows/deploy-staging.yml");
+  const job = workflowJobLines(".github/workflows/deploy-staging.yml", "deploy");
+  assertNoTopLevelWorkflowDefaults(workflow, ".github/workflows/deploy-staging.yml");
+  assert.match(workflow, /^\s*workflow_dispatch:\s*$/mu);
+  assert.doesNotMatch(workflow, /^\s*(?:push|pull_request|schedule):\s*$/mu);
+  assert.match(workflow, /if: inputs\.confirmation == 'deploy-staging' && github\.ref == 'refs\/heads\/main'/u);
+  assert.match(workflow, /environment: staging/u);
+  assert.match(workflow, /group: licensecc-staging-operations/u);
+  assert.match(workflow, /cancel-in-progress: false/u);
+  assert.match(workflow, /persist-credentials: false/u);
+  assert.match(workflow, /ref: \$\{\{ github\.sha \}\}/u);
+  assert.match(workflow, /test "\$\(git rev-parse HEAD\)" = "\$GITHUB_SHA"/u);
+  assert.match(workflow, /node scripts\/materialize-deploy-configs\.mjs --profile staging/u);
+  assert.match(workflow, /LICENSECC_EXPECTED_CLOUDFLARE_ACCOUNT_ID: \$\{\{ secrets\.CLOUDFLARE_ACCOUNT_ID \}\}/u);
+  assert.match(workflow, /LICENSECC_EXPECTED_D1_DATABASE_ID: \$\{\{ vars\.LICENSECC_D1_DATABASE_ID \}\}/u);
+  assert.equal((workflow.match(/LICENSECC_EXPECTED_(?:BACKEND|ADMIN|PORTAL|BACKUP)_ORIGIN: \$\{\{ inputs\.(?:backend|admin|portal|backup)_url \}\}/gmu) ?? []).length, 4);
+  assert.match(workflow, /npm --silent run validate:secret-inventory --workspace @licensecc\/cloudflare-licensing-backend -- --profile=staging > "\$RUNNER_TEMP\/licensecc-deployment-evidence\/backend-secret-inventory\.json"/u);
+  assert.ok(workflow.indexOf("validate:secret-inventory") < workflow.indexOf("run-protected-wrangler.mjs --operation dry-run --worker backend"));
+  assert.match(workflow, /LICENSECC_STAGING_LEASE_DRILL_URL: \$\{\{ inputs\.backend_url \}\}/u);
+  assert.match(workflow, /LICENSECC_STAGING_LEASE_ACCOUNT_TOKEN: \$\{\{ secrets\.LICENSECC_STAGING_LEASE_ACCOUNT_TOKEN \}\}/u);
+  assert.match(workflow, /LICENSECC_STAGING_LEASE_DEVICE_PRIVATE_KEY_PKCS8_PEM: \$\{\{ secrets\.LICENSECC_STAGING_LEASE_DEVICE_PRIVATE_KEY_PKCS8_PEM \}\}/u);
+  assert.match(workflow, /LICENSECC_STAGING_LEASE_PUBLIC_KEY_PKCS1_DER_BASE64: \$\{\{ secrets\.LICENSECC_STAGING_LEASE_PUBLIC_KEY_PKCS1_DER_BASE64 \}\}/u);
+  assert.match(workflow, /LICENSECC_STAGING_LEASE_FIXTURE_JSON: \$\{\{ secrets\.LICENSECC_STAGING_LEASE_FIXTURE_JSON \}\}/u);
+  assert.match(workflow, /LICENSECC_STAGING_LEASE_COMMIT: \$\{\{ github\.sha \}\}/u);
+  assert.match(workflow, /npm --silent run validate:staging-lease --workspace @licensecc\/cloudflare-licensing-backend > "\$RUNNER_TEMP\/licensecc-deployment-evidence\/backend-lease-drill\.json"/u);
+  const stagingLease = namedWorkflowStep(job, "Verify scoped staging leases, proof, and signatures", ".github/workflows/deploy-staging.yml");
+  assert.equal(stagingLease.children.get("env")?.get("LICENSECC_STAGING_LEASE_PUBLIC_KEY_PKCS1_DER_BASE64")?.value,
+    "${{ secrets.LICENSECC_STAGING_LEASE_PUBLIC_KEY_PKCS1_DER_BASE64 }}");
+  assert.equal((workflow.match(/LICENSECC_STAGING_LEASE_PUBLIC_KEY_PKCS1_DER_BASE64:/gmu) ?? []).length, 1);
+  assert.match(workflow, /LICENSECC_STAGING_ORDER_DRILL_URL: \$\{\{ inputs\.backend_url \}\}/u);
+  assert.doesNotMatch(workflow, /LICENSECC_STAGING_(?:LEASE|ORDER)_DRILL_URL: \$\{\{ vars\./u);
+  assert.match(workflow, /LICENSECC_STAGING_ORDER_DRILL_KEY_ID: \$\{\{ secrets\.LICENSECC_STAGING_ORDER_DRILL_KEY_ID \}\}/u);
+  assert.match(workflow, /LICENSECC_STAGING_ORDER_DRILL_SECRET_B64: \$\{\{ secrets\.LICENSECC_STAGING_ORDER_DRILL_SECRET_B64 \}\}/u);
+  assert.match(workflow, /LICENSECC_STAGING_ORDER_DRILL_FIXTURE_JSON: \$\{\{ secrets\.LICENSECC_STAGING_ORDER_DRILL_FIXTURE_JSON \}\}/u);
+  assert.match(workflow, /LICENSECC_STAGING_ORDER_DRILL_RUN_ID: \$\{\{ github\.run_id \}\}/u);
+  assert.match(workflow, /LICENSECC_STAGING_ORDER_DRILL_RUN_ATTEMPT: \$\{\{ github\.run_attempt \}\}/u);
+  assert.match(workflow, /LICENSECC_STAGING_ORDER_DRILL_COMMIT: \$\{\{ github\.sha \}\}/u);
+  assert.match(workflow, /npm --silent run validate:staging-order --workspace @licensecc\/cloudflare-licensing-backend > "\$RUNNER_TEMP\/licensecc-deployment-evidence\/backend-order-drill\.json"/u);
+  assert.doesNotMatch(workflow, /inputs\.(?:order|order_key|order_secret|order_fixture)/iu);
+  assert.equal((workflow.match(/run-protected-wrangler\.mjs --operation dry-run --worker/gmu) ?? []).length, 4);
+  assert.equal((workflow.match(/run-protected-wrangler\.mjs --operation deploy --worker/gmu) ?? []).length, 4);
+  assert.equal((workflow.match(/run-protected-wrangler\.mjs --operation migrate --worker backend/gmu) ?? []).length, 1);
+  const backupDeploy = workflow.indexOf("run-protected-wrangler.mjs --operation deploy --worker backup");
+  const backupGate = workflow.indexOf("backup:pre-migration");
+  const migration = workflow.indexOf("run-protected-wrangler.mjs --operation migrate --worker backend");
+  const backendDeploy = workflow.indexOf("run-protected-wrangler.mjs --operation deploy --worker backend");
+  assert.ok(backupDeploy < backupGate && backupGate < migration && migration < backendDeploy);
+  assert.match(workflow, /validate:public-verifier[^\n]*--expect-rate-limit --json/u);
+  assert.doesNotMatch(workflow, /validate:public-verifier[^\n]*--rotate-fingerprint/u);
+  assert.match(workflow, /LICENSECC_PUBLIC_VERIFIER_FINGERPRINT: \$\{\{ secrets\.LICENSECC_PUBLIC_VERIFIER_FINGERPRINT \}\}/u);
+  assert.match(workflow, /LICENSECC_PUBLIC_VERIFIER_DEVICE_PRIVATE_KEY_PKCS8_PEM: \$\{\{ secrets\.LICENSECC_PUBLIC_VERIFIER_DEVICE_PRIVATE_KEY_PKCS8_PEM \}\}/u);
+  assert.match(workflow, /LICENSECC_PUBLIC_VERIFIER_DEVICE_KEY_ID: \$\{\{ secrets\.LICENSECC_PUBLIC_VERIFIER_DEVICE_KEY_ID \}\}/u);
+  const stagingVerifier = namedWorkflowStep(job, "Run proof-authenticated staging verifier drill", ".github/workflows/deploy-staging.yml");
+  assert.match(stagingVerifier.properties.get("run")?.value ?? "", /backend-public-verifier-drill\.json/u);
+  const remainingStagingDrills = namedWorkflowStep(job, "Run synthetic staging tenant drills", ".github/workflows/deploy-staging.yml");
+  assert.equal(remainingStagingDrills.children.get("env")?.has("LICENSECC_PUBLIC_VERIFIER_DEVICE_PRIVATE_KEY_PKCS8_PEM"), false);
+  assert.match(workflow, /validate:access-admin/u);
+  assert.match(workflow, /LICENSECC_NON_ADMIN_ACCESS_JWT: \$\{\{ secrets\.LICENSECC_NON_ADMIN_ACCESS_JWT \}\}/u);
+  assert.match(workflow, /validate:access-admin[^\n]*--require-non-admin/u);
+  assert.match(workflow, /STAGING_PORTAL_ALLOW_SEAT_MUTATION: "1"/u);
+  assert.match(workflow, /STAGING_PORTAL_ALLOW_DOWNLOAD: "1"/u);
+  assert.match(workflow, /validate:staging-portal/u);
+  assert.match(workflow, /validate:deploy[^\n]*--require-d1-rest-token --require-trigger-token/u);
+  assert.equal((workflow.match(/run-protected-wrangler\.mjs --operation deployments --worker/gmu) ?? []).length, 4);
+  assert.equal((workflow.match(/^\s*capture_deployment (?:backend|admin|portal|backup)$/gmu) ?? []).length, 4);
+  assert.equal((workflow.match(/capture-worker-deployment-transition\.mjs/gmu) ?? []).length, 1);
+  assert.doesNotMatch(workflow, /npx --no-install wrangler (?:deploy|d1|deployments)/u);
+  assert.doesNotMatch(workflow, /wrangler deployments list --json[^\n|]*>/u);
+  assert.equal((workflow.match(/"status":"capture_failed"/gmu) ?? []).length, 1);
+  assert.match(workflow, /actions\/upload-artifact@[0-9a-f]{40}/u);
+  assert.doesNotMatch(workflow, /wrangler\.example\.(?:toml|jsonc)|time-travel[^\n]*restore|--allow-nonempty-scratch/u);
+});
+
+test("staging capacity evidence is confirmed, operator-attested, secret-backed, retained, and fail-closed", () => {
+  const relativePath = ".github/workflows/capacity.yml";
+  const workflow = source(relativePath);
+  const job = workflowJobLines(relativePath, "capacity");
+  assertNoTopLevelWorkflowDefaults(workflow, relativePath);
+  assert.deepEqual(workflowTriggerNames(workflow), ["workflow_dispatch"]);
+  assert.deepEqual(workflowJobNames(workflow), ["capacity"]);
+  assert.match(workflow, /^\s*confirmation:\s*$[\s\S]*?Type run-staging-capacity/mu);
+  assert.match(workflow, /^\s*mode:\s*$[\s\S]*?type: choice\s*\n\s*options:\s*\n\s*- burst\s*\n\s*- soak\s*$/mu);
+  assert.doesNotMatch(workflow, /^\s*- rehearsal\s*$/mu);
+  assert.match(workflow, /^\s*peak_rps:\s*$[\s\S]*?required: true[\s\S]*?type: string/mu);
+  assert.match(workflow, /^\s*max_concurrency:\s*$[\s\S]*?required: true[\s\S]*?type: string/mu);
+  assert.match(workflow, /^\s*backend_deployment_id:\s*$[\s\S]*?required: true[\s\S]*?type: string/mu);
+  assert.match(workflow, /^\s*backend_version_id:\s*$[\s\S]*?required: true[\s\S]*?type: string/mu);
+  assert.match(workflow, /^\s*operator_attested_commit_sha:\s*$[\s\S]*?required: true[\s\S]*?type: string/mu);
+  assert.doesNotMatch(workflow, /inputs\.(?:url|fingerprint|account_token|device_key|private_key|duration)/iu);
+  assert.equal(job.properties.get("if")?.value, "inputs.confirmation == 'run-staging-capacity' && github.ref == 'refs/heads/main'");
+  assert.equal(job.properties.get("environment")?.value, "staging");
+  assert.equal(job.properties.get("timeout-minutes")?.value, "300");
+  assert.match(workflow, /group: licensecc-staging-operations/u);
+  assert.match(workflow, /cancel-in-progress: false/u);
+  assert.match(workflow, /^permissions:\s*\n\s*contents: read\s*$/mu);
+
+  const externalUses = job.steps
+    .map((step) => step.properties.get("uses"))
+    .filter(Boolean);
+  assert.equal(externalUses.length, 3);
+  for (const uses of externalUses) {
+    assert.match(uses.value, /^(?:actions\/checkout|actions\/setup-node|actions\/upload-artifact)@[0-9a-f]{40}$/u);
+    assert.match(uses.comment, /^v4$/u);
+  }
+  const checkout = job.steps.find((step) => step.properties.get("uses")?.value.startsWith("actions/checkout@"));
+  assert.ok(checkout);
+  assert.equal(checkout.children.get("with")?.get("ref")?.value, "${{ github.sha }}");
+  assert.equal(checkout.children.get("with")?.get("persist-credentials")?.value, "false");
+  assertExactCriticalRun(
+    namedWorkflowStep(job, "Bind checkout to workflow commit", relativePath),
+    'test "$(git rev-parse HEAD)" = "$GITHUB_SHA"',
+    "capacity checkout binding",
+  );
+  assertExactCriticalRun(
+    namedWorkflowStep(job, "Install locked workspace", relativePath),
+    "npm ci",
+    "capacity locked install",
+  );
+  const materialize = namedWorkflowStep(job, "Materialize and bind protected staging topology", relativePath);
+  assert.equal(materialize.properties.get("run")?.value, "node scripts/materialize-deploy-configs.mjs --profile staging");
+  assert.equal(materialize.children.get("env")?.get("LICENSECC_EXPECTED_BACKEND_CREDENTIAL_ORIGIN")?.value, "${{ vars.LICENSECC_CAPACITY_URL }}");
+  assert.equal(materialize.children.get("env")?.get("LICENSECC_EXPECTED_CLOUDFLARE_ACCOUNT_ID")?.value, "${{ secrets.CLOUDFLARE_ACCOUNT_ID }}");
+  assert.equal(materialize.children.get("env")?.get("LICENSECC_EXPECTED_D1_DATABASE_ID")?.value, "${{ vars.LICENSECC_D1_DATABASE_ID }}");
+  assertExactCriticalRun(
+    namedWorkflowStep(job, "Validate capacity harness", relativePath),
+    "npm run test:capacity --workspace @licensecc/cloudflare-licensing-backend",
+    "capacity harness validation",
+  );
+
+  const validation = namedWorkflowStep(job, "Validate declared load and protected staging inputs", relativePath);
+  const validationRun = validation.properties.get("run")?.value ?? "";
+  assert.match(validationRun, /peak > 0 && peak <= 5000/u);
+  assert.match(validationRun, /concurrency >= 1 && concurrency <= 512/u);
+  assert.match(validationRun, /\^\[A-Za-z0-9_-\]\{1,128\}\$\/u\.test\(deploymentId\)/u);
+  assert.match(validationRun, /versionId/u);
+  assert.match(validationRun, /operatorAttestedCommit === process\.env\.GITHUB_SHA/u);
+  assert.match(validationRun, /CAPACITY_MODE === "burst" \|\| process\.env\.CAPACITY_MODE === "soak"/u);
+  assert.match(validationRun, /target\.protocol === "https:"/u);
+  assert.match(validationRun, new RegExp(["BEGIN", "PRIVATE KEY"].join("[\\s\\S]+"), "u"));
+  assert.match(validationRun, /privateKey\.includes\(privateKeyBegin\)/u);
+  assert.match(validationRun, /privateKey\.includes\(privateKeyEnd\)/u);
+
+  const capacity = namedWorkflowStep(job, "Run capacity harness and normalize evidence", relativePath);
+  const environment = capacity.children.get("env");
+  assert.ok(environment);
+  const expectedEnvironment = {
+    LICENSECC_CAPACITY_MODE: "${{ inputs.mode }}",
+    LICENSECC_CAPACITY_PEAK_RPS: "${{ inputs.peak_rps }}",
+    LICENSECC_CAPACITY_MAX_CONCURRENCY: "${{ inputs.max_concurrency }}",
+    LICENSECC_CAPACITY_ENVIRONMENT: "staging",
+    LICENSECC_RELEASE_COMMIT: "${{ github.sha }}",
+    CAPACITY_OPERATOR_ATTESTED_COMMIT_SHA: "${{ inputs.operator_attested_commit_sha }}",
+    LICENSECC_CAPACITY_URL: "${{ vars.LICENSECC_CAPACITY_URL }}",
+    LICENSECC_CAPACITY_PROJECT: "${{ vars.LICENSECC_CAPACITY_PROJECT }}",
+    LICENSECC_CAPACITY_FEATURE: "${{ vars.LICENSECC_CAPACITY_FEATURE }}",
+    LICENSECC_CAPACITY_FINGERPRINT: "${{ secrets.LICENSECC_CAPACITY_FINGERPRINT }}",
+    LICENSECC_CAPACITY_DEVICE_HASH: "${{ secrets.LICENSECC_CAPACITY_DEVICE_HASH }}",
+    LICENSECC_CAPACITY_DEVICE_PRIVATE_KEY_PKCS8_PEM: "${{ secrets.LICENSECC_CAPACITY_DEVICE_PRIVATE_KEY_PKCS8_PEM }}",
+    LICENSECC_CAPACITY_DEVICE_KEY_ID: "${{ secrets.LICENSECC_CAPACITY_DEVICE_KEY_ID }}",
+  };
+  assert.deepEqual(
+    Object.fromEntries([...environment].map(([key, property]) => [key, property.value])),
+    expectedEnvironment,
+  );
+  assert.doesNotMatch(workflow, /LICENSECC_CAPACITY_ACCOUNT_TOKEN|authorization_present/iu);
+  const capacityRun = capacity.properties.get("run")?.value ?? "";
+  assert.match(
+    capacityRun,
+    /npm --silent run capacity:public-verifier --workspace @licensecc\/cloudflare-licensing-backend > "\$RUNNER_TEMP\/licensecc-capacity-evidence\/evidence\.json"/u,
+  );
+  assert.match(capacityRun, /set \+e[\s\S]*capacity_status="\$\?"[\s\S]*set -e/u);
+  assert.match(capacityRun, /schema_version === "licensecc\.public-verifier-capacity\.evidence\.v1"/u);
+  assert.match(capacityRun, /evidence\.exact_commit_sha === process\.env\.GITHUB_SHA/u);
+  assert.match(capacityRun, /evidence\.target === "<redacted>"/u);
+  assert.match(capacityRun, /target_binding:/u);
+  assert.match(capacityRun, /operator_attested_commit_sha: process\.env\.CAPACITY_OPERATOR_ATTESTED_COMMIT_SHA/u);
+  assert.doesNotMatch(capacityRun, /deployed_commit_sha/u);
+  assert.match(capacityRun, /acceptance_eligible: false/u);
+  assert.match(capacityRun, /writeFileSync\(path, JSON\.stringify\(normalized/u);
+  assert.match(capacityRun, /appendFileSync\(process\.env\.GITHUB_OUTPUT, "exit_code="/u);
+  assert.doesNotMatch(capacityRun, /--(?:mode|url|peak-rps|max-concurrency|fingerprint|account-token|device-key)/u);
+
+  const uploadIndex = job.steps.findIndex((step) => step.properties.get("name")?.value === "Retain redacted capacity evidence");
+  const runIndex = job.steps.findIndex((step) => step.properties.get("name")?.value === "Run capacity harness and normalize evidence");
+  const stabilityIndex = job.steps.findIndex((step) => step.properties.get("name")?.value === "Confirm the approved backend deployment stayed active");
+  const enforceIndex = job.steps.findIndex((step) => step.properties.get("name")?.value === "Enforce capacity verdict");
+  assert.ok(runIndex >= 0 && runIndex < stabilityIndex && stabilityIndex < uploadIndex && uploadIndex < enforceIndex);
+  assert.equal(job.steps[stabilityIndex].properties.get("if")?.value, "${{ always() }}");
+  assert.equal((workflow.match(/assert-worker-deployment\.mjs/gmu) ?? []).length, 2);
+  assert.equal((workflow.match(/run-protected-wrangler\.mjs --operation deployments --worker backend/gmu) ?? []).length, 2);
+  const upload = job.steps[uploadIndex];
+  assert.equal(upload.properties.get("if")?.value, "${{ always() }}");
+  assert.match(upload.properties.get("uses")?.value ?? "", /^actions\/upload-artifact@[0-9a-f]{40}$/u);
+  assert.equal(upload.children.get("with")?.get("path")?.value, "${{ runner.temp }}/licensecc-capacity-evidence/evidence.json");
+  assert.equal(upload.children.get("with")?.get("if-no-files-found")?.value, "error");
+  const enforce = job.steps[enforceIndex];
+  assert.equal(enforce.properties.get("if")?.value, "${{ always() }}");
+  assert.equal(enforce.children.get("env")?.get("CAPACITY_EXIT_CODE")?.value, "${{ steps.capacity-run.outputs.exit_code }}");
+  assert.equal(enforce.properties.get("run")?.value, 'test "$CAPACITY_EXIT_CODE" = "0"');
+
+  const commands = executionRunCommands(job).join("\n");
+  assert.doesNotMatch(commands, /wrangler\s+(?:deploy\b|rollback\b|d1\b|secret\b)|npm publish|gh release|git tag/iu);
+  assert.doesNotMatch(workflow, /continue-on-error/iu);
+});
+
+test("recovery drill is protected, scratch-only, timed, and validates restored semantics", () => {
+  const workflow = source(".github/workflows/recovery-drill.yml");
+  assertNoTopLevelWorkflowDefaults(workflow, ".github/workflows/recovery-drill.yml");
+  assert.match(workflow, /^\s*workflow_dispatch:\s*$/mu);
+  assert.doesNotMatch(workflow, /^\s*(?:push|pull_request|schedule):\s*$/mu);
+  assert.match(workflow, /if: inputs\.confirmation == 'restore-staging-scratch' && github\.ref == 'refs\/heads\/main'/u);
+  assert.match(workflow, /environment: staging/u);
+  assert.match(workflow, /group: licensecc-staging-operations/u);
+  assert.match(workflow, /cancel-in-progress: false/u);
+  assert.match(workflow, /persist-credentials: false/u);
+  assert.match(workflow, /ref: \$\{\{ github\.sha \}\}/u);
+  assert.match(workflow, /test "\$\(git rev-parse HEAD\)" = "\$GITHUB_SHA"/u);
+  assert.match(workflow, /timeout-minutes: 300/u);
+  assert.match(workflow, /node scripts\/materialize-deploy-configs\.mjs --profile staging/u);
+  assert.match(workflow, /LICENSECC_EXPECTED_CLOUDFLARE_ACCOUNT_ID: \$\{\{ secrets\.CLOUDFLARE_ACCOUNT_ID \}\}/u);
+  assert.match(workflow, /LICENSECC_EXPECTED_D1_DATABASE_ID: \$\{\{ vars\.LICENSECC_D1_DATABASE_ID \}\}/u);
+  assert.match(workflow, /\^licensecc-restore-drill-/u);
+  assert.match(workflow, /D1_DATABASE_ID: \$\{\{ vars\.LICENSECC_D1_DATABASE_ID \}\}/u);
+  assert.match(workflow, /--expected-database-id "\$D1_DATABASE_ID"/u);
+  assert.match(workflow, /--expected-database-name licensecc-online-verifier-staging/u);
+  assert.match(workflow, /--max-backup-age-seconds 3600/u);
+  assert.match(workflow, /--scratch-database "\$SCRATCH_DATABASE"/u);
+  assert.match(workflow, /--source-database licensecc-online-verifier-staging/u);
+  assert.match(workflow, /--require-restored-status active/u);
+  assert.match(workflow, /--require-restored-status revoked/u);
+  assert.match(workflow, /--confirm-scratch/u);
+  assert.match(workflow, /elapsedSeconds < 14400/u);
+  assert.match(workflow, /actions\/upload-artifact@[0-9a-f]{40}/u);
+  assert.doesNotMatch(workflow, /--allow-nonempty-scratch|time-travel[^\n]*restore|licensecc-d1-backups(?:\s|["'])/u);
 });
 
 test("the release-candidate workflow is manual and performs only local dry-run assembly", () => {
@@ -697,7 +1045,7 @@ test("capability evidence remains a PR gate locally and in repository-quality", 
   );
 });
 
-test("scheduled PostgreSQL 16 conformance runs the real fenced implementations", () => {
+test("change-aware and scheduled PostgreSQL 16 conformance runs the real fenced implementations", () => {
   const workflow = source(".github/workflows/postgres-conformance.yml");
   assertPostgresWorkflowContract(workflow);
 });
@@ -705,6 +1053,8 @@ test("scheduled PostgreSQL 16 conformance runs the real fenced implementations",
 test("PostgreSQL workflow commands cannot be replaced by inactive or bypassed YAML", () => {
   const workflow = source(".github/workflows/postgres-conformance.yml");
   const decoys = [
+    workflow.replace("  pull_request:\n", "  # pull_request:\n"),
+    workflow.replace('      - "services/cloudflare-licensing-backend/**"\n', ""),
     workflow.replace("run: npm ci", "run: '# npm ci'"),
     workflow.replace(
       'docker exec -i "${{ job.services.postgres.id }}"',
@@ -750,7 +1100,7 @@ test("PostgreSQL workflow commands cannot be replaced by inactive or bypassed YA
   for (const [index, decoy] of decoys.entries()) {
     assert.throws(
       () => assertPostgresWorkflowContract(decoy, `postgres-decoy-${index}.yml`),
-      /critical step|direct env mapping|execution controls|top-level defaults|strictly deep-equal/u,
+      /critical step|direct env mapping|execution controls|top-level defaults|strictly deep-equal|workflow triggers|pull_request paths/u,
       `PostgreSQL workflow decoy ${index} must fail closed`,
     );
   }

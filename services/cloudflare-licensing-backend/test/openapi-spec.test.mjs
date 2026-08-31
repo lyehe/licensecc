@@ -16,6 +16,7 @@ import { openApiSpec } from "../dist/openapi/document.js";
 import { META_ROUTES, CLIENT_ROUTES, SCOPED_ROUTES, EMERGENCY_PREFIX, allCanonicalRoutes } from "../dist/routes.js";
 import worker from "../dist/index.js";
 import { BACKEND_ROUTE_KEYS } from "../dist/app.js";
+import { normalizeOrderEventForReplay } from "../src/fulfillment/order_event.mjs";
 
 const keyOf = (r) => `${r.method} ${r.path}`;
 const DISPATCHED_INVENTORY = [...META_ROUTES, ...CLIENT_ROUTES, ...SCOPED_ROUTES];
@@ -113,7 +114,7 @@ test("every documented operation has unique identity, expected auth, and a respo
     ["/docs", []],
     ["/health", []],
     ["/v1/verify", [{ requestProof: [] }]],
-    ["/v1/orders", [{ orderHmac: [] }]],
+    ["/v1/orders", [{ orderKeyId: [], orderTimestamp: [], orderSignature: [] }]],
     ["/v1/activate", [{ accountToken: [] }, { leaseBearer: [] }]],
     ["/v1/renew", [{ accountToken: [] }, { leaseBearer: [] }]],
     ["/v1/checkout", [{ accountToken: [] }, { leaseBearer: [] }]],
@@ -150,6 +151,13 @@ test("the doc routes are served without credentials or environment (behavioral)"
   const docs = await worker.fetch(new Request("http://test/docs"), {});
   assert.equal(docs.status, 200);
   assert.match(docs.headers.get("content-type") ?? "", /text\/html/);
+  const policy = docs.headers.get("content-security-policy") ?? "";
+  const nonce = /script-src 'nonce-([^']+)'/u.exec(policy)?.[1];
+  assert.ok(nonce, "docs must bind inline code to a CSP nonce");
+  assert.doesNotMatch(policy, /unsafe-(?:inline|eval)/u);
+  const html = await docs.text();
+  assert.equal(html.split(`nonce="${nonce}"`).length - 1, 2);
+  assert.doesNotMatch(html, /innerHTML/u, "docs renderer must not contain a DOM HTML injection sink");
 });
 
 test("invalid security-mode config leaves static docs available and is documented on every gated operation", async () => {
@@ -190,6 +198,19 @@ test("health documents normalized readiness fields, warnings, and invalid-mode c
 
 test("order ingest documents distinct config/write failures and raw-wire body semantics", () => {
   const operation = openApiSpec.paths["/v1/orders"].post;
+  assert.deepEqual(operation.security, [{ orderKeyId: [], orderTimestamp: [], orderSignature: [] }]);
+  assert.equal(openApiSpec.components.securitySchemes.orderKeyId.name, "X-LCC-Key-Id");
+  assert.equal(openApiSpec.components.securitySchemes.orderTimestamp.name, "X-LCC-Timestamp");
+  assert.equal(openApiSpec.components.securitySchemes.orderSignature.name, "X-LCC-Signature");
+  assert.match(operation.description, /exact raw request-body bytes|original raw wire bytes/);
+  assert.deepEqual(
+    Object.keys(operation.responses["403"].content["application/json"].examples),
+    ["signer_scope_forbidden"],
+  );
+  assert.deepEqual(
+    Object.keys(operation.responses["409"].content["application/json"].examples).sort(),
+    ["entitlement_revoked", "event_id_conflict", "fingerprint_owned", "seq_conflict"],
+  );
   const order503 = operation.responses["503"];
   const examples = order503.content["application/json"].examples;
   assert.deepEqual(Object.keys(examples).sort(), ["config_error", "write_failed"]);
@@ -197,4 +218,36 @@ test("order ingest documents distinct config/write failures and raw-wire body se
   assert.match(order503.description, /write_failed/);
   assert.match(operation.responses["400"].description, /UTF-8/);
   assert.match(operation.responses["413"].description, /raw wire bytes/);
+});
+
+test("OrderRequest matches the runtime normalizer's closed contract", () => {
+  const schema = openApiSpec.components.schemas.OrderRequest;
+  const intents = [
+    "subscription.active", "subscription.renewed", "subscription.past_due", "subscription.paused",
+    "subscription.payment_failed", "subscription.canceled_at_period_end", "subscription.resumed",
+    "quantity.changed", "fraud.confirmed", "chargeback",
+  ];
+  assert.deepEqual([...schema.required].sort(), ["event_id", "intent", "project", "seq", "subscription_id"]);
+  assert.equal(schema.properties.feature.description, "Defaults to project when omitted.");
+  assert.equal(schema.properties.ts, undefined);
+  assert.deepEqual(schema.properties.intent.enum, intents);
+  assert.deepEqual(Object.keys(schema.properties.quantity.properties).sort(), ["max_active_devices", "pool_size"]);
+  assert.equal(schema.additionalProperties, false);
+  assert.equal(schema.properties.quantity.additionalProperties, false);
+  assert.equal(schema.properties.customer.additionalProperties, false);
+
+  const now = 1_700_000_000;
+  for (const intent of intents) {
+    const body = {
+      event_id: `evt_${intent}`,
+      subscription_id: "sub_A",
+      project: "DEFAULT",
+      intent,
+      seq: 1,
+      ...(intent === "quantity.changed" ? { quantity: { pool_size: 1 } } : {}),
+    };
+    const normalized = normalizeOrderEventForReplay(body, now);
+    assert.equal(normalized.error, undefined, intent);
+    assert.equal(normalized.feature, "DEFAULT", intent);
+  }
 });

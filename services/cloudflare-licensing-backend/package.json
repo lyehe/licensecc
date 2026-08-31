@@ -1,6 +1,6 @@
 {
   "name": "@licensecc/cloudflare-licensing-backend",
-  "version": "0.1.0-rc.1",
+  "version": "0.1.0-rc.2",
   "private": true,
   "type": "module",
   "exports": {
@@ -44,7 +44,13 @@
     "generate-online-key": "node scripts/generate-online-key.mjs",
     "generate-online-assertion-fixture": "node scripts/generate-online-assertion-fixture.mjs",
     "validate:remote-cpp": "node scripts/remote-cpp-verify.mjs",
-    "validate:public-verifier": "node scripts/public-verifier-drill.mjs"
+    "validate:public-verifier": "node scripts/public-verifier-drill.mjs",
+    "validate:secret-inventory": "node scripts/backend-secret-inventory.mjs",
+    "validate:staging-lease": "node scripts/staging-lease-drill.mjs",
+    "validate:staging-order": "node scripts/staging-order-drill.mjs",
+    "capacity:public-verifier": "node scripts/public-verifier-capacity.mjs",
+    "test:capacity": "node --test test/public-verifier-capacity.test.mjs",
+    "test:deployed-readiness": "node --test test/backend-secret-inventory.test.mjs test/public-verifier-drill.test.mjs test/staging-lease-drill.test.mjs test/staging-order-drill.test.mjs"
   },
   "devDependencies": {
     "pg": "8.22.0",

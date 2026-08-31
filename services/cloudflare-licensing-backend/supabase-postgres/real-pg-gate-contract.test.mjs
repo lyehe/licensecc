@@ -319,10 +319,17 @@ function assertEntitlementCliContract(sourceText, fileName) {
 
 function assertOrderTransactionContract(sourceText, fileName) {
   const facts = moduleFacts(sourceText, fileName);
+  requireImport(facts, "@licensecc/cloudflare-runtime/d1/entitlement_mutation", { named: ["entitlementId"] });
   requireImport(facts, "./order-apply-pg.mjs", {
-    named: ["pgAcceptBatch", "pgCapacityStatement", "pgCreateStatement", "pgOrderEventStatement", "pgPatchStatement", "pgProcessedMark", "pgReclaimStatement", "runApplyTransaction"],
+    named: ["orderApplyStatementsFor", "pgAcceptBatch", "pgCapacityStatement", "pgCreateStatement", "pgOrderEventStatement", "pgPatchStatement", "pgProcessedMark", "pgReclaimStatement", "runApplyTransaction"],
   });
   requireImport(facts, "./db-postgres.mjs", { named: ["closePool", "createPool"] });
+  requireCall(
+    facts,
+    "entitlementId",
+    (args) => args.join(",") === "PROJECT,FEATURE,FP",
+    "order smoke must derive the expected canonical entitlement id independently",
+  );
   requireCall(
     facts,
     "runApplyTransaction",
@@ -333,7 +340,142 @@ function assertOrderTransactionContract(sourceText, fileName) {
   for (const builder of ["pgAcceptBatch", "pgCreateStatement", "pgPatchStatement", "pgCapacityStatement", "pgReclaimStatement", "pgProcessedMark"]) {
     requireCall(facts, builder, () => true, `order smoke must execute ${builder}`);
   }
-  assert.ok(matchingCalls(facts, "check").length >= 7, "order smoke must execute its transaction outcome assertions");
+  requireCall(
+    facts,
+    "pgAcceptBatch",
+    (args) => args.length === 7,
+    "order smoke must pass the immutable fingerprint and origin into ACCEPT",
+  );
+  requireCall(
+    facts,
+    "check",
+    (args) => args[0]?.includes("auditnext_jsonresolvesthetypedidbind")
+      && args[1] === "parsed!==null&&parsed.project===PROJECT&&parsed.id===EXPECTED_ENTITLEMENT_ID",
+    "order smoke must assert the exact id produced from the typed json_build_object bind",
+  );
+  requireCall(
+    facts,
+    "check",
+    (args) => args[0]?.includes("alaterSQLerrorrollsbacktheentitlementmutation")
+      && args[1]?.includes("rollbackErrorinstanceofError")
+      && args[1]?.includes("afterRollback.revocation_seq")
+      && args[1]?.includes('rollbackEventState==="accepted"'),
+    "order smoke must assert live transaction rollback and redrive state",
+  );
+  requireCall(
+    facts,
+    "check",
+    (args) => args[0]?.includes("ACCEPTcursorlosercannotclaimanevent")
+      && args[1]?.includes("acceptLoser.rows.length===0")
+      && args[1]?.includes("acceptLoserRows.length===0"),
+    "order smoke must prove an ACCEPT cursor loser cannot persist an event claim",
+  );
+  requireCall(
+    facts,
+    "check",
+    (args) => args[0]?.includes("processedeventcannotappendasecondentitlementaudit")
+      && args[1]?.includes("losingAudit.rowCount===0")
+      && args[1]?.includes("auditCountAfter===auditCountBefore"),
+    "order smoke must prove a processed-event loser cannot append an audit row",
+  );
+  requireCall(
+    facts,
+    "check",
+    (args) => args[0]?.includes("supersededfraudintentisprocessedwithoutafalserevokeaudit")
+      && args[1]?.includes("staleRevoke.applied===false&&staleRevoke.marked===true&&staleRevoke.revoked===false")
+      && args[1]?.includes('staleRevokeEntitlement.status==="active"')
+      && args[1]?.includes("staleRevokeAuditCount===0"),
+    "order smoke must prove a superseded fraud intent cannot publish a false revoke audit",
+  );
+  requireCall(
+    facts,
+    "check",
+    (args) => args[0]?.includes("capacityreclaimrequiresthemutation'swinningentitlementfloor")
+      && args[1]?.includes("wrongFloor.rowCount===0")
+      && args[1]?.includes("liveAfterWrongFloor===liveBeforeGuardChecks"),
+    "order smoke must prove a capacity floor loser cannot reclaim seats",
+  );
+  requireCall(
+    facts,
+    "check",
+    (args) => args[0]?.includes("capacityreclaimrequirestheeventtoremainaccepted")
+      && args[1]?.includes("processedEventReclaim.rowCount===0")
+      && args[1]?.includes("liveAfterProcessedEvent===liveBeforeGuardChecks"),
+    "order smoke must prove a processed-event loser cannot reclaim seats",
+  );
+  requireCall(
+    facts,
+    "check",
+    (args) => args[0]?.includes("ACCEPTreservedthecompatiblelicenseandimmutablyfilledcustomer/licenseidentity")
+      && args[1]?.includes("reservedOrder.license_fingerprint===FP")
+      && args[1]?.includes("reservedOrder.fingerprint_origin===FINGERPRINT_ORIGIN")
+      && args[1]?.includes("reservedLicense.project===PROJECT"),
+    "order smoke must prove first-use immutable identity fill and license reservation",
+  );
+  requireCall(
+    facts,
+    "check",
+    (args) => args[0]?.includes("ACCEPTrejectsfingerprint/origin/customer/licenseconflicts")
+      && args[1]?.includes("immutableLoserRows.every")
+      && args[1]?.includes("immutableEvents===0")
+      && args[1]?.includes("contradictoryLicense.length===0"),
+    "order smoke must prove every immutable ACCEPT mismatch is mutation-free",
+  );
+  requireCall(
+    facts,
+    "check",
+    (args) => args[0]?.includes("licensereservationrejectsconflicting")
+      && args[1]?.includes("reservationLoser.rows.length===0")
+      && args[1]?.includes("unchanged.license_id===null"),
+    "order smoke must prove incompatible global license reservations cannot advance or claim",
+  );
+  requireCall(
+    facts,
+    "check",
+    (args) => args[0]?.includes("matchingimmutablecustomer/licenseidentityadmitsalatercursorevent")
+      && args[1]?.includes("forwardAccepted.rows.length===1"),
+    "order smoke must prove a matching immutable continuation remains admissible",
+  );
+  requireCall(
+    facts,
+    "orderApplyStatementsFor",
+    (args) => args[0] === '"transition"' && args[1]?.includes('status:"revoked"'),
+    "order smoke must execute the production assembly for the winning revoke",
+  );
+  requireCall(
+    facts,
+    "orderApplyStatementsFor",
+    (args) => args[0] === "candidate.kind" && args[1]?.includes("fingerprintOrigin:FINGERPRINT_ORIGIN"),
+    "order smoke must execute every non-revoke terminal loser through the production assembly",
+  );
+  requireCall(
+    facts,
+    "check",
+    (args) => args[0]?.includes("directrevocationwinsandretainsitsnormalaudit")
+      && args[1]?.includes("revokeOutcome.applied&&revokeOutcome.marked&&!revokeOutcome.revoked")
+      && args[1]?.includes('revokedEntitlement.status==="revoked"')
+      && args[1]?.includes("revokeAuditCount===1"),
+    "order smoke must prove the direct revoke wins and is audited",
+  );
+  requireCall(
+    facts,
+    "check",
+    (args) => args[0]?.includes("terminalrevocationrejects${candidate.label}")
+      && args[1]?.includes("outcome.applied===false&&outcome.marked===false&&outcome.revoked===true")
+      && args[1]?.includes("outcome.reclaimedSeats.length===0")
+      && args[1]?.includes('stored.status==="rejected"')
+      && args[1]?.includes('result.code==="entitlement_revoked"')
+      && args[1]?.includes("auditCount===0&&currentSnapshot===revokedSnapshot"),
+    "order smoke must prove every non-revoke loser is durably rejected without mutation, audit, or reclaim",
+  );
+  requireCall(
+    facts,
+    "check",
+    (args) => args[0]?.includes("terminalrevocationpreventscapacityreclaim")
+      && args[1] === "liveSeatsAfterTerminalLosers===liveSeatsBeforeTerminalLosers",
+    "order smoke must independently prove terminal revocation preserves live seats",
+  );
+  assert.ok(matchingCalls(facts, "check").length >= 22, "order smoke must execute its transaction outcome assertions");
   requireFailureExit(facts);
   requireCall(facts, "closePool", (args) => args.length === 0, "order smoke must close its pool");
 }

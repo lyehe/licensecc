@@ -1,8 +1,9 @@
 // Webhook dispatcher: a strictly READ-SIDE, cron-drained transactional outbox over the EXISTING
 // audit tables (entitlement_events, customer_events, order_events). It NEVER touches a mutator /
 // event-write path — it only READS those logs, ENQUEUEs one pending delivery per (endpoint, event)
-// into webhook_deliveries (the UNIQUE makes a re-run a no-op = exactly-once), then DELIVERs pending
-// rows with an HMAC-signed POST + exponential backoff. Emission is UNMETERED: enqueueAndDeliver-
+// into webhook_deliveries (the UNIQUE makes enqueue re-runs a no-op), then LEASES and DELIVERs
+// pending rows with an HMAC-signed POST + exponential backoff. Network delivery is at-least-once:
+// receivers must deduplicate `(Licensecc-Event-Source, Licensecc-Webhook-Id)`. Emission is UNMETERED: enqueueAndDeliver-
 // Webhooks runs ONLY from scheduled() (the cron), never inline / waitUntil. A delivery failure NEVER
 // throws out of scheduled().
 //
@@ -21,8 +22,17 @@
 // Signature scheme: HMAC-SHA256 over "<t>.<rawjsonbody>"; header
 //   Licensecc-Signature: t=<epoch>,keyid=<id>,v1=<hex>
 // Receivers MUST recompute over the EXACT raw body bytes and enforce a 5-minute replay window on t.
+// They MUST also retain the source/id deduplication key because a crash after remote success and
+// before the D1 outcome write intentionally retries the same delivery after its lease expires.
 
 import { loadSecretMap, lookupSecret } from "../auth/secret_map.mjs";
+import { safeErrorType } from "../http/kit.mjs";
+import {
+  WEBHOOK_CLAIM_TTL_SECONDS, claimPendingWebhookDelivery, nextBackoff,
+  persistWebhookDeliveryOutcome, readWebhookClock,
+} from "./webhook_delivery_store.mjs";
+
+export { WEBHOOK_CLAIM_TTL_SECONDS, nextBackoff };
 
 const textEncoder = new TextEncoder();
 
@@ -33,7 +43,6 @@ export const WEBHOOK_REPLAY_WINDOW_SECONDS = 300;
 // Delivery tuning. Backoff schedule (seconds) is applied by attempt index; after MAX_ATTEMPTS the
 // delivery is marked 'failed'. Bounds keep one cron tick cheap and the table from unbounded growth.
 export const WEBHOOK_MAX_ATTEMPTS = 6;
-const BACKOFF_SCHEDULE_SECONDS = [30, 120, 600, 3600, 21600]; // 30s, 2m, 10m, 1h, 6h
 export const WEBHOOK_ENQUEUE_BATCH = 500;
 export const WEBHOOK_DELIVER_BATCH = 50;
 const DELIVER_TIMEOUT_MS = 5000;
@@ -41,7 +50,12 @@ const DELIVER_TIMEOUT_MS = 5000;
 // must not be able to make every retry buffer an unbounded response just because it returned non-2xx.
 export const WEBHOOK_ERROR_BODY_MAX_BYTES = 1024;
 const WEBHOOK_ERROR_TEXT_MAX_CHARS = 256;
-
+function emitWebhookEvent(logEvent, severity, event, fields) {
+  try { logEvent?.(severity, event, fields); } catch { return; }
+}
+function emitWebhookError(logEvent, event, error, fields = {}) {
+  emitWebhookEvent(logEvent, "error", event, { ...fields, error_type: safeErrorType(error) });
+}
 // ---------------------------------------------------------------------------------------------
 // Event-source descriptors. The three READ-ONLY audit tables, the monotonic integer the cursor
 // advances on, and the columns the payload builder needs. order_events has a TEXT event_id PK and
@@ -302,16 +316,6 @@ export async function verifyWebhookSignature(
 }
 
 /**
- * Exponential backoff (seconds) for a delivery that has already recorded `attempts` failures (so the
- * 1st retry uses index 0). Past the schedule's tail it clamps to the last (longest) interval. Pure.
- */
-export function nextBackoff(attempts) {
-  const i = Number.isInteger(attempts) && attempts > 0 ? attempts - 1 : 0;
-  if (i < BACKOFF_SCHEDULE_SECONDS.length) return BACKOFF_SCHEDULE_SECONDS[i];
-  return BACKOFF_SCHEDULE_SECONDS[BACKOFF_SCHEDULE_SECONDS.length - 1];
-}
-
-/**
  * Read only a bounded UTF-8 diagnostic from a non-2xx response. Once the byte cap is reached the
  * remaining body is cancelled so a streaming endpoint cannot make a retry consume unbounded data.
  * TextDecoder's non-fatal UTF-8 mode gives malformed or truncated sequences deterministic U+FFFD
@@ -453,16 +457,13 @@ async function enqueueSource(env, source, endpoints, now) {
   return rows.length;
 }
 
-/**
- * ENQUEUE across all sources. Each source drains in bounded batches until a partial batch (so a
- * backlog still catches up, but one tick is bounded by WEBHOOK_ENQUEUE_BATCH * a small loop cap).
- * Best-effort per source: one source's DB error never blocks the others.
- */
-export async function enqueueWebhooks(env, now) {
+/** ENQUEUE each source in bounded batches. One source's DB error never blocks the others. */
+export async function enqueueWebhooks(env, now, logEvent) {
   let endpoints;
   try {
     endpoints = await loadActiveEndpoints(env);
-  } catch {
+  } catch (error) {
+    emitWebhookError(logEvent, "webhook.enqueue_error", error, { source: "endpoints" });
     return; // no endpoints readable -> nothing to enqueue this tick
   }
   if (endpoints.length === 0) return;
@@ -474,30 +475,26 @@ export async function enqueueWebhooks(env, now) {
         const scanned = await enqueueSource(env, source, endpoints, now);
         if (scanned < WEBHOOK_ENQUEUE_BATCH) break;
       }
-    } catch {
+    } catch (error) {
+      emitWebhookError(logEvent, "webhook.enqueue_error", error, { source });
       // best-effort: a single source's enqueue failure must not block the others or the cron.
     }
   }
 }
 
-/**
- * DELIVER pass: pick up to WEBHOOK_DELIVER_BATCH due deliveries (pending AND next_attempt_at <= now),
- * sign + POST each, and on 2xx mark delivered, else bump attempts with exponential backoff, and after
- * MAX_ATTEMPTS mark failed. Fail-closed signing: if the env has no usable signing secret (or none for
- * the configured key id), the dispatcher LOGS + SKIPS — it never sends unsigned. Best-effort: a fetch
- * that throws/times out is caught and recorded as a retry, never escaping scheduled().
- */
-export async function deliverWebhooks(env, now, logEvent) {
+/** DELIVER up to WEBHOOK_DELIVER_BATCH due rows, sign and POST, then persist success or backoff.
+ * Missing signing configuration skips fail-closed; fetch failures become retries. */
+export async function deliverWebhooks(env, now, logEvent, clock = () => now) {
   // Fail-closed: with no usable signing secret map, do not deliver (never send unsigned). Log so the
   // skip is observable, then return — pending rows simply wait for a properly-configured tick.
   const secretsMap = loadSecretMap(env?.WEBHOOK_SIGNING_SECRETS);
   if (secretsMap === null) {
-    logEvent?.("warn", "webhook.signing_unconfigured", { skipped: true });
+    emitWebhookEvent(logEvent, "warn", "webhook.signing_unconfigured", { skipped: true });
     return;
   }
   const keyId = env?.WEBHOOK_SIGNING_KEY_ID;
   if (typeof keyId !== "string" || keyId.length === 0 || lookupSecret(secretsMap, keyId) === null) {
-    logEvent?.("warn", "webhook.signing_key_missing", { skipped: true });
+    emitWebhookEvent(logEvent, "warn", "webhook.signing_key_missing", { skipped: true });
     return;
   }
 
@@ -512,18 +509,28 @@ export async function deliverWebhooks(env, now, logEvent) {
       .bind(now, WEBHOOK_DELIVER_BATCH)
       .all();
     due = res.results ?? [];
-  } catch {
+  } catch (error) {
+    emitWebhookError(logEvent, "webhook.deliver_error", error, { source: "pending_deliveries" });
     return; // table not readable this tick -> nothing to do
   }
 
   for (const delivery of due) {
-    await deliverOne(env, delivery, secretsMap, keyId, now, logEvent);
+    const attemptNow = readWebhookClock(clock, now);
+    const claimUntil = attemptNow + WEBHOOK_CLAIM_TTL_SECONDS;
+    let claimed;
+    try {
+      claimed = await claimPendingWebhookDelivery(env.DB, Number(delivery.id), attemptNow, claimUntil);
+    } catch (error) {
+      emitWebhookError(logEvent, "webhook.deliver_error", error, { source: "claim", delivery_id: Number(delivery.id) });
+      continue;
+    }
+    if (!claimed) continue;
+    await deliverOne(env, delivery, secretsMap, keyId, attemptNow, claimUntil, logEvent, clock);
   }
 }
 
-/** Deliver a single row. All failure modes (sign throw, fetch throw/timeout, non-2xx) are caught and
- *  recorded as a retry/terminal failure — NEVER rethrown. */
-async function deliverOne(env, delivery, secretsMap, keyId, now, logEvent) {
+/** Deliver one row; failures are recorded as retry/terminal outcomes and never rethrown. */
+async function deliverOne(env, delivery, secretsMap, keyId, now, claimUntil, logEvent, clock) {
   const body = delivery.payload_json;
 
   let signatureHeader;
@@ -531,7 +538,7 @@ async function deliverOne(env, delivery, secretsMap, keyId, now, logEvent) {
     signatureHeader = await signWebhookBody(secretsMap, keyId, body, now);
   } catch {
     // Should not happen (we checked the key above), but if signing fails we must not send unsigned.
-    logEvent?.("warn", "webhook.sign_failed", { delivery_id: Number(delivery.id) });
+    emitWebhookEvent(logEvent, "warn", "webhook.sign_failed", { delivery_id: Number(delivery.id) });
     return;
   }
 
@@ -580,59 +587,43 @@ async function deliverOne(env, delivery, secretsMap, keyId, now, logEvent) {
   }
 
   try {
-    if (ok) {
-      await env.DB.prepare(
-        "UPDATE webhook_deliveries SET status = 'delivered', attempts = attempts + 1, last_status = ?, " +
-          "last_error = '', delivered_at = ? WHERE id = ?",
-      )
-        .bind(statusCode, now, Number(delivery.id))
-        .run();
-      return;
-    }
+    const completedNow = readWebhookClock(clock, now);
     const attempts = Number(delivery.attempts) + 1;
-    if (attempts >= WEBHOOK_MAX_ATTEMPTS) {
-      await env.DB.prepare(
-        "UPDATE webhook_deliveries SET status = 'failed', attempts = ?, last_status = ?, last_error = ? WHERE id = ?",
-      )
-        .bind(attempts, statusCode, errText, Number(delivery.id))
-        .run();
-      logEvent?.("warn", "webhook.delivery_failed", {
+    const terminal = !ok && attempts >= WEBHOOK_MAX_ATTEMPTS;
+    const persisted = await persistWebhookDeliveryOutcome(env.DB, {
+      deliveryId: Number(delivery.id),
+      claimUntil,
+      now: completedNow,
+      ok,
+      statusCode,
+      errorText: errText,
+      attempts,
+      terminal,
+      retryAt: ok || terminal ? null : completedNow + nextBackoff(attempts),
+    });
+    if (terminal && persisted) {
+      emitWebhookEvent(logEvent, "warn", "webhook.delivery_failed", {
         delivery_id: Number(delivery.id),
         endpoint_id: delivery.endpoint_id,
         attempts,
         last_status: statusCode,
       });
-      return;
     }
-    const backoff = nextBackoff(attempts);
-    await env.DB.prepare(
-      "UPDATE webhook_deliveries SET attempts = ?, last_status = ?, last_error = ?, next_attempt_at = ? WHERE id = ?",
-    )
-      .bind(attempts, statusCode, errText, now + backoff, Number(delivery.id))
-      .run();
-  } catch {
-    // best-effort: failing to record the attempt outcome must not break the cron.
+  } catch (error) {
+    emitWebhookError(logEvent, "webhook.deliver_error", error, { source: "persistence", delivery_id: Number(delivery.id) });
   }
 }
 
-/**
- * The single entry point wired into scheduled() AFTER the existing sweeps. ENQUEUE then DELIVER, both
- * best-effort. NEVER throws: any error is caught and logged so a webhook problem can never break the
- * seat/retention sweeps or the cron itself.
- */
-export async function enqueueAndDeliverWebhooks(env, now, logEvent) {
+/** Scheduled entry point after existing sweeps. Enqueue and deliver are best-effort and no-throw. */
+export async function enqueueAndDeliverWebhooks(env, now, logEvent, clock = () => Math.floor(Date.now() / 1000)) {
   try {
-    await enqueueWebhooks(env, now);
+    await enqueueWebhooks(env, now, logEvent);
   } catch (error) {
-    logEvent?.("error", "webhook.enqueue_error", {
-      error: error instanceof Error ? error.message : "unknown",
-    });
+    emitWebhookError(logEvent, "webhook.enqueue_error", error);
   }
   try {
-    await deliverWebhooks(env, now, logEvent);
+    await deliverWebhooks(env, now, logEvent, clock);
   } catch (error) {
-    logEvent?.("error", "webhook.deliver_error", {
-      error: error instanceof Error ? error.message : "unknown",
-    });
+    emitWebhookError(logEvent, "webhook.deliver_error", error);
   }
 }

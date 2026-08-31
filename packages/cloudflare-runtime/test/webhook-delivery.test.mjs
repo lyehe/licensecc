@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { deliverWebhooks, WEBHOOK_ERROR_BODY_MAX_BYTES } from "../src/webhooks/webhook.mjs";
+import {
+  deliverWebhooks,
+  enqueueWebhooks,
+  WEBHOOK_CLAIM_TTL_SECONDS,
+  WEBHOOK_ERROR_BODY_MAX_BYTES,
+} from "../src/webhooks/webhook.mjs";
 
 const SECRET_B64 = Buffer.alloc(32, 7).toString("base64");
 const SIGNING_ENV = {
@@ -26,20 +31,42 @@ function makeDelivery(overrides = {}) {
 function makeEnvironment(overrides = {}) {
   const row = makeDelivery(overrides.delivery);
   const state = { ...row, last_status: 0, last_error: "", next_attempt_at: 0, status: "pending" };
+  const control = { updateError: overrides.updateError, claimError: overrides.claimError };
   const db = {
     prepare(sql) {
       if (sql.includes("FROM webhook_deliveries")) {
         return {
-          bind() {
-            return { all: async () => ({ results: [state] }) };
+          bind(now) {
+            return {
+              all: async () => ({
+                results: state.status === "pending" && state.next_attempt_at <= now ? [state] : [],
+              }),
+            };
           },
         };
       }
       if (sql.startsWith("UPDATE webhook_deliveries")) {
         return {
           bind(...values) {
+            if (sql.startsWith("UPDATE webhook_deliveries SET next_attempt_at = ?")) {
+              return {
+                first: async () => {
+                  if (control.claimError !== undefined) throw control.claimError;
+                  const [claimUntil, id, dueAt] = values;
+                  if (state.id !== id || state.status !== "pending" || state.next_attempt_at > dueAt) return null;
+                  state.next_attempt_at = claimUntil;
+                  return { id };
+                },
+              };
+            }
             return {
-              run: async () => {
+              first: async () => {
+                if (control.updateError !== undefined) throw control.updateError;
+                let id = values[4];
+                if (sql.includes("status = 'delivered'")) id = values[2];
+                else if (sql.includes("status = 'failed'")) id = values[3];
+                const expectedClaimUntil = values.at(-1);
+                if (state.id !== id || state.status !== "pending" || state.next_attempt_at !== expectedClaimUntil) return null;
                 if (sql.includes("status = 'delivered'")) {
                   state.status = "delivered";
                   state.attempts += 1;
@@ -57,6 +84,7 @@ function makeEnvironment(overrides = {}) {
                   state.last_error = values[2];
                   state.next_attempt_at = values[3];
                 }
+                return { id };
               },
             };
           },
@@ -65,7 +93,7 @@ function makeEnvironment(overrides = {}) {
       throw new Error(`unexpected SQL: ${sql}`);
     },
   };
-  return { env: { ...SIGNING_ENV, ...overrides.env, DB: db }, state };
+  return { env: { ...SIGNING_ENV, ...overrides.env, DB: db }, state, control };
 }
 
 function streamedResponse(
@@ -289,7 +317,7 @@ test("successful responses cancel an endless body before committing delivery", a
   assert.equal(state.status, "delivered");
   assert.equal(state.last_status, 204);
   assert.equal(state.attempts, 1);
-  assert.equal(state.next_attempt_at, 0);
+  assert.equal(state.next_attempt_at, 200 + WEBHOOK_CLAIM_TTL_SECONDS);
   assert.equal(state.last_error, "");
   assert.equal(response.reads, 0);
   assert.equal(response.cancelAttempts, 1);
@@ -312,9 +340,270 @@ test("successful responses remain delivered when body cancellation throws", asyn
   assert.equal(state.status, "delivered");
   assert.equal(state.last_status, 200);
   assert.equal(state.attempts, 1);
-  assert.equal(state.next_attempt_at, 0);
+  assert.equal(state.next_attempt_at, 200 + WEBHOOK_CLAIM_TTL_SECONDS);
   assert.equal(state.last_error, "");
   assert.equal(response.reads, 0);
   assert.equal(response.cancelAttempts, 1);
   assert.equal(response.cancelled, false);
+});
+
+test("overlapping dispatchers atomically lease one pending delivery before fetch", async () => {
+  const { env, state } = makeEnvironment();
+  const originalFetch = globalThis.fetch;
+  let fetchCalls = 0;
+  globalThis.fetch = async () => {
+    fetchCalls += 1;
+    return new Response(null, { status: 204 });
+  };
+  try {
+    await Promise.all([
+      deliverWebhooks(env, 200, () => {}),
+      deliverWebhooks(env, 200, () => {}),
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.equal(fetchCalls, 1);
+  assert.equal(state.status, "delivered");
+  assert.equal(state.attempts, 1);
+});
+
+test("delayed multi-row delivery refreshes claim, signature, completion, and retry clocks", async () => {
+  const rows = [
+    makeDelivery({ id: 17, event_id: 1 }),
+    makeDelivery({ id: 18, event_id: 2, url: "https://hook.test/ep2" }),
+  ].map((row) => ({ ...row, next_attempt_at: 0, status: "pending" }));
+  const claims = [];
+  const outcomes = [];
+  const env = {
+    ...SIGNING_ENV,
+    DB: {
+      prepare(sql) {
+        if (sql.includes("FROM webhook_deliveries")) {
+          return {
+            bind: (dueAt) => ({
+              all: async () => ({ results: rows.filter((row) => row.next_attempt_at <= dueAt) }),
+            }),
+          };
+        }
+        if (!sql.startsWith("UPDATE webhook_deliveries")) throw new Error(`unexpected SQL: ${sql}`);
+        return {
+          bind(...values) {
+            if (sql.startsWith("UPDATE webhook_deliveries SET next_attempt_at = ?")) {
+              return {
+                first: async () => {
+                  const [claimUntil, id, dueAt] = values;
+                  claims.push({ id, dueAt, claimUntil });
+                  return { id };
+                },
+              };
+            }
+            return {
+              first: async () => {
+                if (sql.includes("status = 'delivered'")) {
+                  outcomes.push({ id: values[2], completedAt: values[1], status: "delivered" });
+                  return { id: values[2] };
+                }
+                outcomes.push({ id: values[4], retryAt: values[3], status: "pending" });
+                return { id: values[4] };
+              },
+            };
+          },
+        };
+      },
+    },
+  };
+  const clockValues = [200, 207, 400, 406];
+  const signatures = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    signatures.push(init.headers["Licensecc-Signature"]);
+    return new Response(null, { status: url.endsWith("ep1") ? 204 : 503 });
+  };
+  try {
+    await deliverWebhooks(env, 100, () => {}, () => clockValues.shift());
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(clockValues, []);
+  assert.deepEqual(claims, [
+    { id: 17, dueAt: 200, claimUntil: 200 + WEBHOOK_CLAIM_TTL_SECONDS },
+    { id: 18, dueAt: 400, claimUntil: 400 + WEBHOOK_CLAIM_TTL_SECONDS },
+  ]);
+  assert.deepEqual(signatures.map((header) => header.match(/^t=(\d+),/u)?.[1]), ["200", "400"]);
+  assert.deepEqual(outcomes, [
+    { id: 17, completedAt: 207, status: "delivered" },
+    { id: 18, retryAt: 436, status: "pending" },
+  ]);
+});
+
+test("a post-send persistence failure retries only after the lease and keeps a stable dedupe id", async () => {
+  const { env, state, control } = makeEnvironment({ updateError: new Error("simulated post-send crash") });
+  const originalFetch = globalThis.fetch;
+  const dedupeKeys = [];
+  globalThis.fetch = async (url, init) => {
+    dedupeKeys.push(`${init.headers["Licensecc-Event-Source"]}:${init.headers["Licensecc-Webhook-Id"]}`);
+    return new Response(null, { status: 204 });
+  };
+  try {
+    await deliverWebhooks(env, 200, () => {});
+    assert.equal(state.status, "pending");
+    assert.equal(state.next_attempt_at, 200 + WEBHOOK_CLAIM_TTL_SECONDS);
+    control.updateError = undefined;
+    await deliverWebhooks(env, 200 + WEBHOOK_CLAIM_TTL_SECONDS - 1, () => {});
+    assert.equal(dedupeKeys.length, 1, "the active lease suppresses premature redelivery");
+    await deliverWebhooks(env, 200 + WEBHOOK_CLAIM_TTL_SECONDS, () => {});
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.deepEqual(dedupeKeys, ["customer:17", "customer:17"]);
+  assert.equal(state.status, "delivered");
+  assert.equal(state.attempts, 1);
+});
+
+test("endpoint discovery failures emit fixed safe enqueue telemetry and remain no-throw", async () => {
+  const secretMessage = `fingerprint=${"f".repeat(64)}`;
+  const env = {
+    DB: {
+      prepare(sql) {
+        assert.match(sql, /FROM webhook_endpoints/u);
+        return {
+          all: async () => {
+            throw new TypeError(secretMessage);
+          },
+        };
+      },
+    },
+  };
+  const events = [];
+
+  await assert.doesNotReject(enqueueWebhooks(env, 200, (severity, event, fields) => {
+    events.push({ severity, event, fields });
+  }));
+  assert.deepEqual(events, [{
+    severity: "error",
+    event: "webhook.enqueue_error",
+    fields: { source: "endpoints", error_type: "TypeError" },
+  }]);
+  assert.doesNotMatch(JSON.stringify(events), /fingerprint|f{64}/u);
+  await assert.doesNotReject(enqueueWebhooks(env, 200, () => {
+    throw new Error("logger unavailable");
+  }));
+
+  const namedSecret = new Error("safe message");
+  namedSecret.name = "CustomerSecretSentinel";
+  const customNameEvents = [];
+  await enqueueWebhooks({
+    DB: {
+      prepare: () => ({ all: async () => { throw namedSecret; } }),
+    },
+  }, 200, (severity, event, fields) => customNameEvents.push({ severity, event, fields }));
+  assert.deepEqual(customNameEvents, [{
+    severity: "error",
+    event: "webhook.enqueue_error",
+    fields: { source: "endpoints", error_type: "Error" },
+  }]);
+  assert.doesNotMatch(JSON.stringify(customNameEvents), /CustomerSecretSentinel/u);
+});
+
+test("one event-source enqueue failure is observable without blocking later sources", async () => {
+  const cursorSources = [];
+  const events = [];
+  const env = {
+    DB: {
+      prepare(sql) {
+        if (sql.includes("FROM webhook_endpoints")) {
+          return { all: async () => ({ results: [{ id: "ep1" }] }) };
+        }
+        if (sql.includes("FROM webhook_cursor")) {
+          return {
+            bind(source) {
+              cursorSources.push(source);
+              return {
+                first: async () => {
+                  if (source === "entitlement") throw new RangeError("sensitive enqueue detail");
+                  return null;
+                },
+              };
+            },
+          };
+        }
+        if (sql.includes("FROM customer_events") || sql.includes("FROM order_events")) {
+          return { bind: () => ({ all: async () => ({ results: [] }) }) };
+        }
+        throw new Error(`unexpected SQL: ${sql}`);
+      },
+    },
+  };
+
+  await assert.doesNotReject(enqueueWebhooks(env, 200, (severity, event, fields) => {
+    events.push({ severity, event, fields });
+  }));
+  assert.deepEqual(cursorSources, ["entitlement", "customer", "order"]);
+  assert.deepEqual(events, [{
+    severity: "error",
+    event: "webhook.enqueue_error",
+    fields: { source: "entitlement", error_type: "RangeError" },
+  }]);
+});
+
+test("due-delivery query failures emit fixed safe delivery telemetry and remain no-throw", async () => {
+  const secretMessage = `token=${"s".repeat(80)}`;
+  const env = {
+    ...SIGNING_ENV,
+    DB: {
+      prepare(sql) {
+        assert.match(sql, /FROM webhook_deliveries/u);
+        return {
+          bind: () => ({
+            all: async () => {
+              throw new SyntaxError(secretMessage);
+            },
+          }),
+        };
+      },
+    },
+  };
+  const events = [];
+
+  await assert.doesNotReject(deliverWebhooks(env, 200, (severity, event, fields) => {
+    events.push({ severity, event, fields });
+  }));
+  assert.deepEqual(events, [{
+    severity: "error",
+    event: "webhook.deliver_error",
+    fields: { source: "pending_deliveries", error_type: "SyntaxError" },
+  }]);
+  assert.doesNotMatch(JSON.stringify(events), /token|s{80}/u);
+  await assert.doesNotReject(deliverWebhooks({}, 200, () => {
+    throw new Error("logger unavailable");
+  }));
+});
+
+test("delivery outcome persistence failures emit safe telemetry without escaping", async () => {
+  const secretMessage = `payload=${"p".repeat(80)}`;
+  const { env, state } = makeEnvironment({ updateError: new TypeError(secretMessage) });
+  const originalFetch = globalThis.fetch;
+  const events = [];
+  globalThis.fetch = async () => new Response(null, { status: 204 });
+  try {
+    await assert.doesNotReject(deliverWebhooks(env, 200, (severity, event, fields) => {
+      events.push({ severity, event, fields });
+    }));
+    await assert.doesNotReject(deliverWebhooks(env, 200, () => {
+      throw new Error("logger unavailable");
+    }));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(state.status, "pending");
+  assert.equal(state.attempts, 0);
+  assert.deepEqual(events, [{
+    severity: "error",
+    event: "webhook.deliver_error",
+    fields: { source: "persistence", delivery_id: 17, error_type: "TypeError" },
+  }]);
+  assert.doesNotMatch(JSON.stringify(events), /payload|p{80}/u);
 });

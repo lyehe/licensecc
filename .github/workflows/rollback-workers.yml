@@ -1,0 +1,148 @@
+name: Roll back Worker versions
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Protected environment whose Workers will be rolled back
+        required: true
+        type: choice
+        options:
+          - staging
+          - production
+      backend_url:
+        description: Canonical HTTPS backend URL for post-rollback readiness
+        required: true
+        type: string
+      admin_url:
+        description: Canonical HTTPS admin URL protected by Cloudflare Access
+        required: true
+        type: string
+      portal_url:
+        description: Canonical HTTPS customer portal URL for post-rollback readiness
+        required: true
+        type: string
+      backup_url:
+        description: Canonical HTTPS backup URL for post-rollback readiness
+        required: true
+        type: string
+      confirmation:
+        description: Type rollback-staging or rollback-production to match the selected environment
+        required: true
+        type: string
+      workers:
+        description: Comma-separated subset of backend,admin,portal,backup
+        required: true
+        type: string
+      backend_version:
+        description: Exact backend Worker version ID when backend is selected
+        required: false
+        type: string
+      admin_version:
+        description: Exact admin Worker version ID when admin is selected
+        required: false
+        type: string
+      portal_version:
+        description: Exact portal Worker version ID when portal is selected
+        required: false
+        type: string
+      backup_version:
+        description: Exact backup Worker version ID when backup is selected
+        required: false
+        type: string
+      reason:
+        description: Required rollback reason, at most 120 characters
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: licensecc-${{ inputs.environment }}-operations
+  cancel-in-progress: false
+
+jobs:
+  rollback:
+    if: inputs.confirmation == format('rollback-{0}', inputs.environment) && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Bind checkout to approved main commit
+        run: test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Select npm 10.9.8
+        run: |
+          npm install --global npm@10.9.8 --no-audit --no-fund
+          test "$(npm --version)" = "10.9.8"
+      - name: Install locked workspace
+        run: npm ci
+      - name: Materialize protected configuration set
+        env:
+          ROLLBACK_ENVIRONMENT: ${{ inputs.environment }}
+          LICENSECC_BACKEND_WRANGLER_CONFIG_B64: ${{ secrets.LICENSECC_BACKEND_WRANGLER_CONFIG_B64 }}
+          LICENSECC_ADMIN_WRANGLER_CONFIG_B64: ${{ secrets.LICENSECC_ADMIN_WRANGLER_CONFIG_B64 }}
+          LICENSECC_PORTAL_WRANGLER_CONFIG_B64: ${{ secrets.LICENSECC_PORTAL_WRANGLER_CONFIG_B64 }}
+          LICENSECC_BACKUP_WRANGLER_CONFIG_B64: ${{ secrets.LICENSECC_BACKUP_WRANGLER_CONFIG_B64 }}
+          LICENSECC_EXPECTED_CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          LICENSECC_EXPECTED_D1_DATABASE_ID: ${{ vars.LICENSECC_D1_DATABASE_ID }}
+          LICENSECC_EXPECTED_BACKEND_ORIGIN: ${{ inputs.backend_url }}
+          LICENSECC_EXPECTED_ADMIN_ORIGIN: ${{ inputs.admin_url }}
+          LICENSECC_EXPECTED_PORTAL_ORIGIN: ${{ inputs.portal_url }}
+          LICENSECC_EXPECTED_BACKUP_ORIGIN: ${{ inputs.backup_url }}
+        run: node scripts/materialize-deploy-configs.mjs --profile "$ROLLBACK_ENVIRONMENT"
+      - name: Validate targets and roll back selected Workers
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          ROLLBACK_ENVIRONMENT: ${{ inputs.environment }}
+          ROLLBACK_WORKERS: ${{ inputs.workers }}
+          ROLLBACK_BACKEND_VERSION: ${{ inputs.backend_version }}
+          ROLLBACK_ADMIN_VERSION: ${{ inputs.admin_version }}
+          ROLLBACK_PORTAL_VERSION: ${{ inputs.portal_version }}
+          ROLLBACK_BACKUP_VERSION: ${{ inputs.backup_version }}
+          ROLLBACK_REASON: ${{ inputs.reason }}
+        run: |
+          set -o pipefail
+          mkdir -p "$RUNNER_TEMP/licensecc-rollback-evidence"
+          node scripts/rollback-workers.mjs \
+            --environment "$ROLLBACK_ENVIRONMENT" \
+            --workers "$ROLLBACK_WORKERS" \
+            --backend-version "$ROLLBACK_BACKEND_VERSION" \
+            --admin-version "$ROLLBACK_ADMIN_VERSION" \
+            --portal-version "$ROLLBACK_PORTAL_VERSION" \
+            --backup-version "$ROLLBACK_BACKUP_VERSION" \
+            --reason "$ROLLBACK_REASON" | tee "$RUNNER_TEMP/licensecc-rollback-evidence/rollback.json"
+      - name: Verify all services after rollback without storage mutation
+        env:
+          ROLLBACK_ENVIRONMENT: ${{ inputs.environment }}
+          ROLLBACK_BACKEND_URL: ${{ inputs.backend_url }}
+          ROLLBACK_ADMIN_URL: ${{ inputs.admin_url }}
+          ROLLBACK_PORTAL_URL: ${{ inputs.portal_url }}
+          ROLLBACK_BACKUP_URL: ${{ inputs.backup_url }}
+          LICENSECC_ACCESS_JWT: ${{ secrets.LICENSECC_ADMIN_ACCESS_JWT }}
+        run: |
+          set -o pipefail
+          node scripts/check-worker-rollback-health.mjs \
+            --environment "$ROLLBACK_ENVIRONMENT" \
+            --backend-url "$ROLLBACK_BACKEND_URL" \
+            --admin-url "$ROLLBACK_ADMIN_URL" \
+            --portal-url "$ROLLBACK_PORTAL_URL" \
+            --backup-url "$ROLLBACK_BACKUP_URL" \
+            | tee "$RUNNER_TEMP/licensecc-rollback-evidence/post-rollback-health.json"
+      - name: Preserve redacted rollback evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: worker-rollback-${{ inputs.environment }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/licensecc-rollback-evidence
+          if-no-files-found: error
+          retention-days: 30

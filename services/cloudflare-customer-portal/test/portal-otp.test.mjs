@@ -5,7 +5,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { freshDb, portalEnv, seedCustomer, NOW, OTP_PEPPERS } from "./helpers.mjs";
-import { requestOtp, redeemOtp, codeFromSecretBytes } from "../src/auth/portal_otp.mjs";
+import { requestOtp, redeemOtp, codeFromSecretBytes, emitEmailDeliveryFailure } from "../src/auth/portal_otp.mjs";
 
 function env(db, overrides = {}) {
   return portalEnv(db, overrides);
@@ -51,6 +51,123 @@ test("an unknown email returns ok and writes NOTHING (no enumeration, dummy work
   assert.equal(r.code, "ok", "same shape as a known email (no oracle)");
   assert.equal(r.secret, undefined);
   assert.equal(rows(db).length, 0, "no OTP row for an unknown email");
+});
+
+test("successful email delivery emits no failure event", async () => {
+  const db = freshDb();
+  seedCustomer(db, "A", "a@x.com");
+  const emissions = [];
+  const pending = [];
+  const result = await requestOtp(env(db), {
+    email: "a@x.com",
+    clientIp: "1.1.1.1",
+    now: NOW,
+    sendEmailFn: async () => ({ ok: true, code: "sent" }),
+    emailDeliveryFailureFn: (errorType) => emissions.push(errorType),
+    waitUntil: (work) => pending.push(work),
+  });
+
+  assert.deepEqual(result, { ok: true, code: "ok" });
+  assert.equal(pending.length, 1, "delivery remains attached to the request context");
+  await Promise.all(pending);
+  assert.deepEqual(emissions, []);
+});
+
+test("resolved and rejected delivery failures emit one fixed failure class and remain no-throw", async () => {
+  const cases = [
+    ["unconfigured", () => ({ ok: false, code: "email_unconfigured" })],
+    ["send_failed", () => ({ ok: false, code: "email_send_failed" })],
+    ["invalid_result", () => ({ ok: false, code: "provider-secret-detail", body: "provider-secret-body" })],
+    ["invalid_result", () => undefined],
+    ["rejected", () => Promise.reject(new Error("provider rejection detail"))],
+    ["rejected", () => { throw new Error("synchronous provider detail"); }],
+  ];
+
+  for (const [expectedErrorType, deliver] of cases) {
+    const db = freshDb();
+    seedCustomer(db, "A", "a@x.com");
+    const emissions = [];
+    const pending = [];
+    const result = await requestOtp(env(db), {
+      email: "a@x.com",
+      clientIp: "1.1.1.1",
+      now: NOW,
+      sendEmailFn: deliver,
+      emailDeliveryFailureFn: (errorType) => emissions.push(errorType),
+      waitUntil: (work) => pending.push(work),
+    });
+
+    assert.deepEqual(result, { ok: true, code: "ok" }, `${expectedErrorType} preserves the anti-enumeration result`);
+    assert.equal(pending.length, 1);
+    await assert.doesNotReject(Promise.all(pending));
+    assert.deepEqual(emissions, [expectedErrorType]);
+    db.close();
+  }
+});
+
+test("email failure telemetry is closed-shape and cannot leak delivery inputs or exception text", async () => {
+  const recipient = "sensitive-recipient@example.test";
+  const apiKey = "sensitive-email-api-key";
+  const providerText = "sensitive-provider-response-text";
+  const exceptionText = "sensitive-exception-message";
+  const db = freshDb();
+  seedCustomer(db, "A", recipient);
+  const e = env(db, { PORTAL_EMAIL_API_KEY: apiKey });
+  const lines = [];
+  let deliveredBody = "";
+  const originalError = console.error;
+  console.error = (...args) => lines.push(args.map(String).join(" "));
+  try {
+    const result = await requestOtp(e, {
+      email: recipient,
+      clientIp: "1.1.1.1",
+      magicLinkBase: "https://portal.test",
+      now: NOW,
+      sendEmailFn: (_deliveryEnv, to, _subject, body) => {
+        deliveredBody = body;
+        return Promise.reject(new Error(`${exceptionText} ${providerText} ${apiKey} ${to} ${body}`));
+      },
+    });
+    assert.deepEqual(result, { ok: true, code: "ok" });
+  } finally {
+    console.error = originalError;
+  }
+
+  assert.match(deliveredBody, /Your sign-in code is [0-9]{8}/, "the delivery input contained an OTP");
+  assert.match(deliveredBody, /token=/, "the delivery input contained a magic-link secret");
+  assert.equal(lines.length, 1);
+  assert.deepEqual(JSON.parse(lines[0]), {
+    event: "portal.email_delivery_failed",
+    severity: "error",
+    error_type: "rejected",
+  });
+  for (const sensitive of [recipient, apiKey, providerText, exceptionText, deliveredBody]) {
+    assert.equal(lines[0].includes(sensitive), false, `telemetry excludes ${sensitive === deliveredBody ? "the OTP/magic-link body" : "a sensitive delivery value"}`);
+  }
+  db.close();
+});
+
+test("the email failure emitter bounds unsupported error types and never throws with a broken sink", () => {
+  const lines = [];
+  const originalError = console.error;
+  console.error = (...args) => lines.push(args.map(String).join(" "));
+  try {
+    emitEmailDeliveryFailure("secret-provider-error-text");
+  } finally {
+    console.error = originalError;
+  }
+  assert.deepEqual(JSON.parse(lines[0]), {
+    event: "portal.email_delivery_failed",
+    severity: "error",
+    error_type: "invalid_result",
+  });
+
+  console.error = () => { throw new Error("logging backend unavailable"); };
+  try {
+    assert.doesNotThrow(() => emitEmailDeliveryFailure("send_failed"));
+  } finally {
+    console.error = originalError;
+  }
 });
 
 test("a redeemed code mints a session-eligible result exactly once (single-use)", async () => {

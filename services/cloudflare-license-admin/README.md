@@ -68,6 +68,16 @@ for cleanup, and confirms revoked-terminal reactivation denial. Optionally set
 `LICENSECC_NON_ADMIN_ACCESS_JWT=<redacted>` to prove a valid non-admin Access
 identity cannot mutate.
 
+For a production post-deploy gate, reuse the validator in read-only mode. It
+checks unauthenticated and malformed-token rejection, loads the authenticated
+UI shell, and reads the admin summary without creating or changing records:
+
+```sh
+LICENSECC_ACCESS_JWT=<redacted-short-lived-token> npm run validate:access-admin -- \
+  --url https://licensecc-admin.example.workers.dev \
+  --read-only
+```
+
 ## Authentication
 
 Production should be protected by Cloudflare Access. Configure:

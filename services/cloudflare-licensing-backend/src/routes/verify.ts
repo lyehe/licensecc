@@ -156,28 +156,6 @@ function safeUnixSeconds(value: unknown): number | null {
   return value;
 }
 
-function shortKeyId(value: string | undefined): string | undefined {
-  if (value === undefined || value === "") {
-    return value;
-  }
-  const prefix = "sha256:";
-  if (value.startsWith(prefix) && value.length > prefix.length + 16) {
-    const digest = value.slice(prefix.length);
-    return `${prefix}${digest.slice(0, 8)}...${digest.slice(-8)}`;
-  }
-  return "[redacted]";
-}
-
-function shortHex(value: string | undefined): string | undefined {
-  if (value === undefined || value === "") {
-    return value;
-  }
-  if (value.length <= 16) {
-    return "[redacted]";
-  }
-  return `${value.slice(0, 8)}...${value.slice(-8)}`;
-}
-
 function entitlementRateLimitKey(verifyRequest: VerifyRequest): string {
   return `${verifyRequest.project}:${verifyRequest.feature}:${verifyRequest.license_fingerprint}`;
 }
@@ -245,10 +223,6 @@ function logRateLimitTier(
     logEvent("info", "verify.rate_limit_decision", {
       request_id: requestIdValue,
       source,
-      project: verifyRequest.project,
-      feature: verifyRequest.feature,
-      license_fingerprint: shortHex(verifyRequest.license_fingerprint),
-      client_ip: clientIp(request),
       success,
     });
   }
@@ -581,11 +555,6 @@ function logRequestProofDecision(
     request_id: requestIdValue,
     mode: evaluation.mode,
     result: evaluation.result,
-    project: verifyRequest.project,
-    feature: verifyRequest.feature,
-    license_fingerprint: shortHex(verifyRequest.license_fingerprint),
-    device_hash: shortHex(verifyRequest.device_hash),
-    device_key_id: shortKeyId(evaluation.device_key_id ?? verifyRequest.request_proof?.device_key_id),
     detail: evaluation.detail,
   });
 }
@@ -658,10 +627,10 @@ async function evaluateProofForRequest(
   let device: EntitlementDeviceRow | null;
   try {
     device = await lookupEntitlementDevice(env, verifyRequest);
-  } catch (error) {
+  } catch {
     return {
       result: "d1_error",
-      detail: error instanceof Error ? error.message : "device lookup failed",
+      detail: "request proof device lookup failed",
       device_key_id: proof.device_key_id,
     };
   }
@@ -684,10 +653,10 @@ async function evaluateProofForRequest(
       proof.signature,
       proof.device_key_id,
     );
-  } catch (error) {
+  } catch {
     return {
       result: "malformed_public_key",
-      detail: error instanceof Error ? error.message : "request proof verification failed",
+      detail: "request proof key validation failed",
       device_key_id: proof.device_key_id,
     };
   }
@@ -837,11 +806,6 @@ export async function handleVerify(request: Request, env: Env): Promise<Response
     logEvent("warn", "verify.rate_limited", {
       request_id: id,
       source: rateLimitDecision.source ?? "unknown",
-      project: verifyRequest.project,
-      feature: verifyRequest.feature,
-      license_fingerprint: shortHex(verifyRequest.license_fingerprint),
-      device_hash: shortHex(verifyRequest.device_hash),
-      client_ip: clientIp(request),
     });
     return json({ ok: false, code: "rate_limited" }, 429);
   }
@@ -866,10 +830,7 @@ export async function handleVerify(request: Request, env: Env): Promise<Response
   } catch (error) {
     logEvent("error", "verify.d1_error", {
       request_id: id,
-      project: verifyRequest.project,
-      feature: verifyRequest.feature,
-      license_fingerprint: shortHex(verifyRequest.license_fingerprint),
-      error: error instanceof Error ? error.message : "unknown D1 error",
+      error_type: error instanceof Error ? error.name : "UnknownThrownValue",
     });
     return json({ ok: false, code: "verification_error" }, 500);
   }
@@ -900,10 +861,6 @@ export async function handleVerify(request: Request, env: Env): Promise<Response
   if (activeRow === null) {
     logEvent("warn", "verify.denied", {
       request_id: id,
-      project: verifyRequest.project,
-      feature: verifyRequest.feature,
-      license_fingerprint: shortHex(verifyRequest.license_fingerprint),
-      device_hash: shortHex(verifyRequest.device_hash),
       client_hardening: verifyRequest.client_hardening ?? 0,
       request_signature_mode: proofEvaluation.mode,
       request_proof: proofEvaluation.result,
@@ -948,20 +905,13 @@ export async function handleVerify(request: Request, env: Env): Promise<Response
   } catch (error) {
     logEvent("error", "verify.signing_error", {
       request_id: id,
-      project: verifyRequest.project,
-      feature: verifyRequest.feature,
-      license_fingerprint: shortHex(verifyRequest.license_fingerprint),
-      error: error instanceof Error ? error.message : "unknown signing error",
+      error_type: error instanceof Error ? error.name : "UnknownThrownValue",
     });
     return json({ ok: false, code: "verification_error" }, 500);
   }
 
   logEvent("info", "verify.ok", {
     request_id: id,
-    project: verifyRequest.project,
-    feature: verifyRequest.feature,
-    license_fingerprint: shortHex(verifyRequest.license_fingerprint),
-    device_hash: shortHex(verifyRequest.device_hash),
     client_hardening: verifyRequest.client_hardening ?? 0,
     request_signature_mode: proofEvaluation.mode,
     request_proof: proofEvaluation.result,

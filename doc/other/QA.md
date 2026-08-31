@@ -13,7 +13,7 @@ keys or project material in the source checkout. See
 
 The accepted repository contains Windows and Linux C++ sources and automated
 checks, but this documentation does not claim a released binary matrix, remote
-CI attestation, or Ubuntu release evidence. The platform is at **0.1.0-rc.1** (a prerelease).
+CI attestation, or Ubuntu release evidence. The platform is at **0.1.0-rc.2** (a prerelease).
 Run the documented local checks with your compiler, dependencies, and target
 environment before relying on a deployment.
 
@@ -23,7 +23,10 @@ The repository contains implemented and automatedly tested backend, admin,
 portal, backup, and SDK surfaces. ``shipped`` in the
 [capability registry](../capabilities/index.rst) means that accepted-repository
 state only. Deployment, Cloudflare configuration, secrets, and package
-publication are separate release work.
+publication are separate release work. The maintained
+[production-readiness contract](../operations/production-readiness.md) lists
+the repository, staging, recovery, security, and pilot evidence required before
+making a production-ready claim.
 
 ### What should I do after updating the repository?
 

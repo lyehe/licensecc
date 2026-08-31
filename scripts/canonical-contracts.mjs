@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { spawn, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import * as vm from "node:vm";
 
 const SCRIPT_PATH = fileURLToPath(import.meta.url);
@@ -310,28 +311,37 @@ function collectBackupSurfaceFromVm(repoRoot) {
       }
     });
   }, { context, identifier: "cloudflare:workers" });
+  const nodeCryptoShim = new vm.SyntheticModule(["createHash"], function initializeNodeCrypto() {
+    this.setExport("createHash", createHash);
+  }, { context, identifier: "node:crypto" });
 
-  const loadModule = async (absolutePath) => {
+  const loadModule = (absolutePath) => {
     const identifier = pathToFileURL(absolutePath).href;
     const existing = cache.get(identifier);
     if (existing) return existing;
     const source = readFileSync(absolutePath, "utf8");
     const module = new vm.SourceTextModule(source, { context, identifier });
     cache.set(identifier, module);
-    await module.link(async (specifier, referencingModule) => {
-      if (specifier === "cloudflare:workers") return workflowShim;
-      if (!specifier.startsWith(".") && !specifier.startsWith("/")) {
-        throw new Error(`Backup compiled module imports unsupported external specifier ${specifier}.`);
-      }
-      const target = fileURLToPath(new URL(specifier, referencingModule.identifier));
-      return loadModule(target);
-    });
     return module;
+  };
+
+  const linker = async (specifier, referencingModule) => {
+    if (specifier === "cloudflare:workers") return workflowShim;
+    if (specifier === "node:crypto") return nodeCryptoShim;
+    if (!specifier.startsWith(".") && !specifier.startsWith("/")) {
+      throw new Error(`Backup compiled module imports unsupported external specifier ${specifier}.`);
+    }
+    const target = fileURLToPath(new URL(specifier, referencingModule.identifier));
+    return loadModule(target);
   };
 
   return (async () => {
     const entryPath = path.join(repoRoot, "services", "cloudflare-d1-backup", "dist", "index.js");
-    const module = await loadModule(entryPath);
+    const module = loadModule(entryPath);
+    // Link the graph once from its root. Calling link() recursively while a
+    // shared dependency is still linking makes Node's VM reject valid DAGs as
+    // missing from its module cache.
+    await module.link(linker);
     await module.evaluate();
     const namespace = module.namespace;
     const defaultHandler = namespace.default;

@@ -153,12 +153,49 @@ option(BUILD_BENCHMARKS "Build performance benchmarks (no extra dependencies)" O
 # configure a test tree that will later contain undeclared generator-library
 # links.
 option(BUILD_TESTING "Build the testing tree." ON)
+option(LCC_ENABLE_SANITIZERS
+	"Instrument native targets with Clang AddressSanitizer and UndefinedBehaviorSanitizer." OFF)
+option(LCC_BUILD_FUZZERS
+	"Build the bounded Clang libFuzzer parser robustness targets." OFF)
 option(LCC_ENABLE_DEVICE_IDENTITY "Build the portable device-identity ABI and proof core." OFF)
 option(LCC_ENABLE_WINDOWS_TPM "Build the Windows Platform KSP device-key provider." OFF)
 option(LCC_ENABLE_TPM2_OPENSSL "Build the OpenSSL TPM2 device-key provider." OFF)
 option(LCC_BUILD_DEVICE_IDENTITY_TEST_PROVIDER "Build the process-local software device-key test provider." OFF)
 option(LCC_BUILD_TPM2_OPENSSL_CAPABILITY_TEST
 	"Build the standalone OpenSSL tpm2-provider exact-digest capability test." OFF)
+
+# Sanitizers and fuzzers are intentionally opt-in so normal developer, release,
+# installed-consumer, and downstream builds retain their existing compiler and
+# runtime behavior.  libFuzzer is a Clang-only test dependency; fail closed
+# instead of accepting a preset that silently omits the requested hardening.
+if(LCC_ENABLE_SANITIZERS OR LCC_BUILD_FUZZERS)
+	if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+		message(FATAL_ERROR
+			"LCC_ENABLE_SANITIZERS and LCC_BUILD_FUZZERS require a Clang-family compiler")
+	endif()
+	if(NOT UNIX)
+		message(FATAL_ERROR
+			"LCC_ENABLE_SANITIZERS and LCC_BUILD_FUZZERS are supported only by the Linux/Unix native-security gate")
+	endif()
+endif()
+if(LCC_BUILD_FUZZERS AND NOT BUILD_TESTING)
+	message(FATAL_ERROR "LCC_BUILD_FUZZERS=ON requires BUILD_TESTING=ON")
+endif()
+if(LCC_BUILD_FUZZERS AND NOT LCC_ENABLE_SANITIZERS)
+	message(FATAL_ERROR "LCC_BUILD_FUZZERS=ON requires LCC_ENABLE_SANITIZERS=ON")
+endif()
+if(LCC_ENABLE_SANITIZERS)
+	add_compile_options(
+		$<$<COMPILE_LANGUAGE:CXX>:-fsanitize=address,undefined>
+		$<$<COMPILE_LANGUAGE:CXX>:-fno-omit-frame-pointer>
+		$<$<COMPILE_LANGUAGE:CXX>:-fno-sanitize-recover=all>)
+	add_link_options(-fsanitize=address,undefined -fno-sanitize-recover=all)
+endif()
+if(LCC_BUILD_FUZZERS)
+	# Instrument the production parser objects as well as the harnesses. The
+	# fuzzer executables link the engine explicitly in fuzz/CMakeLists.txt.
+	add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-fsanitize=fuzzer-no-link>)
+endif()
 
 if(LCC_ENABLE_WINDOWS_TPM AND NOT WIN32)
 	message(FATAL_ERROR "LCC_ENABLE_WINDOWS_TPM is valid only on WIN32")
@@ -336,6 +373,10 @@ message( STATUS "Project name        : " ${LCC_PROJECT_NAME} )
 message( STATUS "Project base dir    : " ${LCC_PROJECTS_BASE_DIR}/${LCC_PROJECT_NAME} )
 
 add_subdirectory(src)
+
+if(LCC_BUILD_FUZZERS)
+	add_subdirectory(fuzz)
+endif()
 
 IF(BUILD_BENCHMARKS)
 	add_subdirectory(benchmark)

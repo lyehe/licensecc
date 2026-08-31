@@ -22,8 +22,8 @@ at the same time.
 `version.json` is the single machine-readable source for the platform version.
 It contains schema version 1 and one `platform_version`: either stable SemVer
 `X.Y.Z` or a supported `X.Y.Z-(alpha|beta|rc).N` prerelease. The current platform
-prerelease is `0.1.0-rc.1`. Python projects use the mechanically equivalent PEP
-440 spelling `0.1.0rc1`; that spelling is a projection, not a second version
+prerelease is `0.1.0-rc.2`. Python projects use the mechanically equivalent PEP
+440 spelling `0.1.0rc2`; that spelling is a projection, not a second version
 authority.
 
 `scripts/check-version-contract.mjs` deterministically verifies the contract
@@ -55,7 +55,7 @@ version at this decision is `2.1.0`.
 Release tags use disjoint namespaces:
 
 * platform releases: `platform-v<platform-version>`, for example
-  `platform-v0.1.0-rc.1`;
+  `platform-v0.1.0-rc.2`;
 * future independent C++ releases: `cpp-v<cpp-version>`, for example
   `cpp-v2.1.0`; and
 * no new bare `v*` tags. Existing bare tags remain immutable legacy history and

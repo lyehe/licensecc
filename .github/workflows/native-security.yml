@@ -1,0 +1,75 @@
+name: Native security
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "CMakeLists.txt"
+      - "CMakePresets.json"
+      - "cmake/**"
+      - "extern/license-generator/**"
+      - "fuzz/**"
+      - "include/**"
+      - "scripts/native-security-contract.test.mjs"
+      - "src/**"
+      - "test/**"
+      - ".github/workflows/native-security.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "CMakeLists.txt"
+      - "CMakePresets.json"
+      - "cmake/**"
+      - "extern/license-generator/**"
+      - "fuzz/**"
+      - "include/**"
+      - "scripts/native-security-contract.test.mjs"
+      - "src/**"
+      - "test/**"
+      - ".github/workflows/native-security.yml"
+  schedule:
+    - cron: "41 7 * * 3"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sanitizers-and-parser-fuzz:
+    name: Clang ASan, UBSan, and bounded parser fuzz smoke
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      ASAN_OPTIONS: detect_leaks=1:strict_string_checks=1:check_initialization_order=1:abort_on_error=1
+      UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Install native dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build libssl-dev zlib1g-dev \
+            libboost-dev libboost-test-dev libboost-filesystem-dev \
+            libboost-iostreams-dev libboost-program-options-dev \
+            libboost-system-dev libboost-thread-dev libboost-date-time-dev
+      - name: Bootstrap native source preflight
+        run: pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/bootstrap.ps1 -CheckOnly
+      - name: Configure Clang sanitizers and parser fuzzers
+        run: cmake --preset ci-linux-sanitizers
+      - name: Build complete native test tree
+        run: cmake --build --preset ci-linux-sanitizers --parallel 2
+      - name: Run complete native test suite under ASan and UBSan
+        run: ctest --preset ci-linux-sanitizers --no-tests=error
+      - name: Fuzz activation-request parser with synthetic corpus
+        run: >-
+          timeout --signal=TERM --kill-after=5s 30s
+          build/ci-linux-sanitizers/fuzz/fuzz_activation_request
+          -max_total_time=20 -timeout=5 -max_len=16384 -rss_limit_mb=2048
+          -print_final_stats=1 fuzz/corpus/activation_request
+      - name: Fuzz online-assertion parser with synthetic corpus
+        run: >-
+          timeout --signal=TERM --kill-after=5s 30s
+          build/ci-linux-sanitizers/fuzz/fuzz_online_assertion
+          -max_total_time=20 -timeout=5 -max_len=16384 -rss_limit_mb=2048
+          -print_final_stats=1 fuzz/corpus/online_assertion

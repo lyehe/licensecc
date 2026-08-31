@@ -8,7 +8,7 @@ release streams are:
 
 - **C++ library** (`CMakeLists.txt`): `2.1.0` — continues the upstream `licensecc` 2.x lineage.
 - **Platform packages** (root/workspace Node packages, the four Cloudflare services, OpenAPI
-  documents, and the Python, .NET, and Java SDKs): `0.1.0-rc.1` (Python `0.1.0rc1`) — versioned
+  documents, and the Python, .NET, and Java SDKs): `0.1.0-rc.2` (Python `0.1.0rc2`) — versioned
   independently of the C++ core and not yet published to any registry.
 
 Platform release tags use `platform-v<version>`; future independent C++ release tags use
@@ -40,6 +40,11 @@ are recorded in [ADR 0005](doc/architecture/decisions/0005-platform-version-and-
   per-worker OpenAPI documents with artifact-based drift guards.
 
 ### Changed
+- Advanced the unpublished platform candidate from `0.1.0-rc.1` to `0.1.0-rc.2`.
+  The backend `OrderRequest` OpenAPI schema now matches the runtime's closed
+  event contract; generated clients based on `rc.1` must regenerate before
+  sending orders. The operation also documents its three required `X-LCC-*`
+  HMAC headers and the `signer_scope_forbidden` and `seq_conflict` outcomes.
 - Relicensed to AGPL-3.0-or-later; modernized to C++17, VS2022, CMake presets.
 - Worker routing is table-driven from canonical route inventories (admin, backend, portal); the
   OpenAPI crosschecks compare compiled artifacts instead of grepping source text.

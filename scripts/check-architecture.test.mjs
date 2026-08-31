@@ -1,4 +1,8 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 
 import {
@@ -6,6 +10,7 @@ import {
   evaluateArchitecture,
   normalizeRepoPath,
   parseModuleSpecifiers,
+  repositoryInput,
 } from "./check-architecture.mjs";
 
 function config(overrides = {}) {
@@ -77,12 +82,13 @@ function packageManifest(name, dependencies = {}, exports = { ".": "./src/index.
   return { root: `packages/${name}`, json: { name: `@fixture/${name}`, dependencies, exports } };
 }
 
-function fixture({ sourceFiles = [], manifests = [], trackedPaths = [], checkerConfig = config() } = {}) {
+function fixture({ sourceFiles = [], manifests = [], trackedPaths = [], candidatePaths = [], checkerConfig = config() } = {}) {
   const normalizedSourceFiles = sourceFiles.map(([path, source]) => ({ path, source }));
   return evaluateArchitecture({
     sourceFiles: normalizedSourceFiles,
     manifests,
     trackedPaths: [...trackedPaths, ...normalizedSourceFiles.map(({ path }) => path)],
+    candidatePaths,
     config: checkerConfig,
     now: new Date("2026-08-08T00:00:00.000Z"),
   });
@@ -91,6 +97,34 @@ function fixture({ sourceFiles = [], manifests = [], trackedPaths = [], checkerC
 function errorCodes(result) {
   return result.errors.map((error) => error.code);
 }
+
+test("repository input audits cached and non-ignored untracked candidates while hygiene remains cached-only", () => {
+  const root = mkdtempSync(join(tmpdir(), "licensecc-architecture-"));
+  try {
+    mkdirSync(join(root, "scripts"), { recursive: true });
+    mkdirSync(join(root, "services", "alpha", "src"), { recursive: true });
+    writeFileSync(join(root, "scripts", "architecture-boundaries.json"), JSON.stringify(config()), "utf8");
+    writeFileSync(join(root, "services", "alpha", "package.json"), JSON.stringify(serviceManifest("alpha").json), "utf8");
+    writeFileSync(join(root, "services", "alpha", "src", "main.ts"), 'import "./local.js";\n', "utf8");
+    writeFileSync(join(root, "services", "alpha", "src", "local.ts"), "export const local = true;\n", "utf8");
+    execFileSync("git", ["init", "--quiet"], { cwd: root, windowsHide: true });
+    execFileSync("git", ["-c", "core.autocrlf=false", "add", "scripts/architecture-boundaries.json", "services/alpha/package.json", "services/alpha/src/main.ts"], { cwd: root, windowsHide: true });
+
+    const includedInput = repositoryInput(root);
+    assert.equal(includedInput.trackedPaths.includes("services/alpha/src/local.ts"), false);
+    assert.equal(includedInput.candidatePaths.includes("services/alpha/src/local.ts"), true);
+    const included = evaluateArchitecture({ ...includedInput, config: config() });
+    assert.equal(included.exitCode, 0, included.diagnostics.join("\n"));
+
+    writeFileSync(join(root, ".gitignore"), "services/alpha/src/local.ts\n", "utf8");
+    const ignoredInput = repositoryInput(root);
+    assert.equal(ignoredInput.candidatePaths.includes("services/alpha/src/local.ts"), false);
+    const ignored = evaluateArchitecture({ ...ignoredInput, config: config() });
+    assert.deepEqual(errorCodes(ignored), ["ARCH_UNRESOLVED_RELATIVE"]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test("tokenizes static, re-export, require, and literal dynamic imports while ignoring comments and strings", () => {
   const source = `
@@ -127,13 +161,22 @@ test("normalizes Windows and Ubuntu repository paths identically", () => {
   assert.equal(result.exitCode, 0, result.diagnostics.join("\n"));
 });
 
-test("resolves TypeScript .js fallbacks without reading untracked source", () => {
+test("resolves TypeScript .js fallbacks from candidate source", () => {
   const result = fixture({
     sourceFiles: [
       ["services/alpha/src/main.ts", 'import "./local.js";'],
       ["services/alpha/src/local.ts", "export const local = true;"],
     ],
     manifests: [serviceManifest("alpha")],
+  });
+  assert.equal(result.exitCode, 0, result.diagnostics.join("\n"));
+});
+
+test("resolves a non-source relative import from candidate paths", () => {
+  const result = fixture({
+    sourceFiles: [["services/alpha/src/main.ts", 'import "./styles.css";']],
+    manifests: [serviceManifest("alpha")],
+    candidatePaths: ["services/alpha/src/styles.css"],
   });
   assert.equal(result.exitCode, 0, result.diagnostics.join("\n"));
 });

@@ -1,6 +1,7 @@
 import { docsHtml } from "../docs_page.js";
 import { openApiJson } from "../openapi/document.js";
 import type { RouteDescriptor } from "../route-descriptor.js";
+import { secureHtml } from "@licensecc/cloudflare-runtime/http/kit";
 
 export const metaRoutes: readonly RouteDescriptor[] = [
   {
@@ -20,7 +21,7 @@ export const metaRoutes: readonly RouteDescriptor[] = [
     authorization: "public",
     paramNames: [],
     async handle() {
-      return new Response(docsHtml, { headers: { "content-type": "text/html; charset=utf-8" } });
+      return secureHtml(docsHtml);
     },
   },
 ];

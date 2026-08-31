@@ -123,7 +123,7 @@ class HttpClient:
         base_url: str,
         account_token: str | None = None,
         timeout: float = DEFAULT_TIMEOUT_SECONDS,
-        user_agent: str = "licensecc-python-sdk/0.1.0rc1",
+        user_agent: str = "licensecc-python-sdk/0.1.0rc2",
         max_retries: int = DEFAULT_MAX_RETRIES,
         retry_backoff: float = DEFAULT_RETRY_BACKOFF_SECONDS,
     ) -> None:

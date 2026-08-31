@@ -25,13 +25,71 @@ import { portalRateLimit } from "./portal_ratelimit.mjs";
 
 /** @typedef {import("../worker/env.js").Env} PortalEnv */
 /** @typedef {{ [key: string]: Uint8Array }} PepperMap */
-/** @typedef {{ email?: unknown, clientIp?: string, sendEmailFn?: (env: PortalEnv, to: string, subject: string, body: string) => unknown, waitUntil?: (work: Promise<unknown>) => void, magicLinkBase?: string, returnSecret?: boolean, now?: number }} RequestOtpOptions */
+/** @typedef {"unconfigured" | "send_failed" | "rejected" | "invalid_result"} EmailDeliveryErrorType */
+/** @typedef {{ email?: unknown, clientIp?: string, sendEmailFn?: (env: PortalEnv, to: string, subject: string, body: string) => unknown, emailDeliveryFailureFn?: (errorType: EmailDeliveryErrorType) => unknown, waitUntil?: (work: Promise<unknown>) => void, magicLinkBase?: string, returnSecret?: boolean, now?: number }} RequestOtpOptions */
 /** @typedef {{ email?: unknown, code?: unknown, secret?: unknown, clientIp?: string, now?: number }} RedeemOtpOptions */
 
 const OTP_TTL_SEC = 600; // 10 minutes (blueprint (a)).
 const MAX_ATTEMPTS = 5;
 const SECRET_BYTES = 32;
 const textEncoder = new TextEncoder();
+const EMAIL_DELIVERY_ERROR_TYPES = new Set(["unconfigured", "send_failed", "rejected", "invalid_result"]);
+
+/**
+ * Emit the sole portal email-delivery application event. The serialized shape is deliberately
+ * closed: callers can supply only a fixed error class, never a recipient, OTP, magic secret,
+ * provider response, credential, or exception message. Cloudflare captures console JSON in the
+ * Worker's existing persisted invocation logs.
+ *
+ * @param {EmailDeliveryErrorType} errorType
+ */
+export function emitEmailDeliveryFailure(errorType) {
+  const safeErrorType = EMAIL_DELIVERY_ERROR_TYPES.has(errorType) ? errorType : "invalid_result";
+  const line = JSON.stringify({
+    event: "portal.email_delivery_failed",
+    severity: "error",
+    error_type: safeErrorType,
+  });
+  try {
+    console.error(line);
+  } catch {
+    // Observability is best effort and must never turn an anti-enumeration response into a failure.
+  }
+}
+
+/** @param {unknown} result @returns {EmailDeliveryErrorType | null} */
+function deliveryErrorType(result) {
+  if (result === null || typeof result !== "object") return "invalid_result";
+  const deliveryResult = /** @type {{ ok?: unknown, code?: unknown }} */ (result);
+  if (deliveryResult.ok === true) return null;
+  if (deliveryResult.ok !== false) return "invalid_result";
+  if (deliveryResult.code === "email_unconfigured") return "unconfigured";
+  if (deliveryResult.code === "email_send_failed") return "send_failed";
+  return "invalid_result";
+}
+
+/**
+ * @param {() => unknown} deliver
+ * @param {(errorType: EmailDeliveryErrorType) => unknown} emitFailure
+ */
+async function observeEmailDelivery(deliver, emitFailure) {
+  /** @param {EmailDeliveryErrorType} errorType */
+  const safelyEmit = (errorType) => {
+    try {
+      emitFailure(errorType);
+    } catch {
+      // A telemetry sink failure must not escape the best-effort delivery task.
+    }
+  };
+
+  try {
+    const errorType = deliveryErrorType(await Promise.resolve().then(deliver));
+    if (errorType !== null) safelyEmit(errorType);
+  } catch {
+    // Deliberately discard the exception object: its message may contain provider text or secrets.
+    safelyEmit("rejected");
+  }
+}
 
 // loadSecretMap lives on account_token via order_hmac; re-export the same contract for OTP peppers.
 /** @param {PortalEnv | null | undefined} env */
@@ -109,7 +167,7 @@ function activePepperId(peppers) {
  * on the normal login path it is false and the secret NEVER leaves this function.
  */
 /** @param {PortalEnv} env @param {RequestOtpOptions} [options] */
-export async function requestOtp(env, { email, clientIp = "", sendEmailFn, waitUntil, magicLinkBase, returnSecret = false, now = Math.floor(Date.now() / 1000) } = {}) {
+export async function requestOtp(env, { email, clientIp = "", sendEmailFn, emailDeliveryFailureFn = emitEmailDeliveryFailure, waitUntil, magicLinkBase, returnSecret = false, now = Math.floor(Date.now() / 1000) } = {}) {
   const peppers = loadOtpPeppers(env);
   if (peppers === null) return { ok: false, code: "config_error" };
   const emailLower = normalizeEmail(email);
@@ -170,12 +228,15 @@ export async function requestOtp(env, { email, clientIp = "", sendEmailFn, waitU
     const body = link.length > 0
       ? `Your sign-in code is ${code}. Or open this link to sign in:\n${link}\nThis code expires in 10 minutes.`
       : `Your sign-in code is ${code}. This code expires in 10 minutes.`;
-    const work = sendEmailFn(env, emailLower, "Your licensecc sign-in code", body);
+    const work = observeEmailDelivery(
+      () => sendEmailFn(env, emailLower, "Your licensecc sign-in code", body),
+      emailDeliveryFailureFn,
+    );
     if (typeof waitUntil === "function") {
-      waitUntil(Promise.resolve(work).catch(() => {}));
+      waitUntil(work);
     } else {
-      // No ctx: best-effort, swallow.
-      await Promise.resolve(work).catch(() => {});
+      // No ctx: best-effort delivery still settles before returning, but no failure can escape.
+      await work;
     }
   }
 

@@ -2,17 +2,14 @@
 
 import { DOCS_HTML } from "../docs_page.js";
 import { openApiDocument } from "../openapi/document.js";
+import { secureHtml } from "@licensecc/cloudflare-runtime/http/kit";
 import { backendOrigin } from "../../auth/portal_destination.mjs";
 import type { Env, ExecutionContextLike, TopRoute } from "../env.js";
 import { envelope, json } from "../support.js";
 
 export const META_DISPATCH = {
   "GET /openapi.json": () => json(openApiDocument, 200, { "cache-control": "no-store" }),
-  "GET /docs": () =>
-    new Response(DOCS_HTML, {
-      status: 200,
-      headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" },
-    }),
+  "GET /docs": () => secureHtml(DOCS_HTML),
 };
 
 const BACKEND_SERVICE = "licensecc-online-verifier";

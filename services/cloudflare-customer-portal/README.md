@@ -22,6 +22,30 @@ npm run dry-run --workspace @licensecc/cloudflare-customer-portal
 Browser smoke tests require the explicit one-time setup command
 `npm run setup:browsers`, followed by `npm run test:e2e`.
 
+The deployed portal drill also verifies that the built UI shell and health
+endpoint load before authenticating. With an existing session cookie and the
+mutation flags left unset, it is safe for a production post-deploy read gate:
+
+```powershell
+$env:LICENSECC_PORTAL_URL = "https://portal.example.workers.dev"
+$env:LICENSECC_PORTAL_SESSION_COOKIE = "<redacted-session-cookie>"
+npm run validate:staging-portal
+```
+
+The protected staging bootstrap path additionally requires an unauthenticated
+`/api/portal/me` denial, verifies the newly issued `lccp_session` cookie has
+`HttpOnly`, `Secure`, `SameSite=Lax`, `Path=/`, and a positive `Max-Age`, and
+requires another denial after logout. The existing-cookie production read gate
+does not issue or log out that operator-supplied session, so it does not claim
+cookie-issuance or post-logout coverage.
+
+The shipped browser/session workflow does not hold a native device private key.
+The standard protected four-Worker topology therefore uses
+`DEVICE_PROOF_MODE=off`: absence is permitted, but the backend still verifies
+every proof that a native client presents. Global `required` mode is a future
+client-registration/signing migration; never place a device private key in this
+Worker or in browser-delivered configuration to simulate possession.
+
 ## Credential-bearing destinations
 
 `BACKEND_ORIGIN` and the optional `PORTAL_EMAIL_API_BASE` are strict canonical

@@ -50,6 +50,8 @@
         "scripts/assemble-release-artifacts.mjs",
         "scripts/check-release-tag.mjs",
         "scripts/check-release-tag.test.mjs",
+        "scripts/check-worker-rollback-health.mjs",
+        "scripts/check-worker-rollback-health.test.mjs",
         "scripts/check-version-contract.mjs",
         "scripts/check-version-contract.test.mjs",
         "scripts/materialize-deploy-configs.mjs",
@@ -57,7 +59,12 @@
         "scripts/release-artifacts.test.mjs",
         "scripts/release/cpp-source-archive.mjs",
         "scripts/release/output-boundary.mjs",
-        "scripts/release/worker-bundle.mjs"
+        "scripts/release/worker-bundle.mjs",
+        "scripts/assert-worker-deployment.mjs",
+        "scripts/capture-worker-deployment-transition.mjs",
+        "scripts/rollback-workers.mjs",
+        "scripts/rollback-workers.test.mjs",
+        "scripts/run-protected-wrangler.mjs"
       ]
     },
     {
@@ -79,6 +86,8 @@
         "scripts/scan-secrets.mjs",
         "scripts/secret-lint.mjs",
         "scripts/secret-lint.test.mjs",
+        "scripts/ci/security-governance.test.mjs",
+        "scripts/native-security-contract.test.mjs",
         "scripts/workflow-action-pins.test.mjs",
         "scripts/wrangler-env-drift.test.mjs",
         "scripts/wrangler-pin-consistency.test.mjs"

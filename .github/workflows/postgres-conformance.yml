@@ -1,6 +1,15 @@
 name: PostgreSQL conformance
 
 on:
+  pull_request:
+    paths:
+      - ".github/workflows/postgres-conformance.yml"
+      - "package.json"
+      - "package-lock.json"
+      - "packages/cloudflare-runtime/**"
+      - "packages/licensing-domain/**"
+      - "scripts/generate-wrangler-types.mjs"
+      - "services/cloudflare-licensing-backend/**"
   schedule:
     - cron: "41 5 * * 1"
   workflow_dispatch:

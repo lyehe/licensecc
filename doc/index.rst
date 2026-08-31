@@ -98,6 +98,20 @@ run ``npm run check:pr`` before submitting. For C++ core changes, also run
 
    release-artifacts
 
+.. toctree::
+   :maxdepth: 2
+   :hidden:
+   :caption: Operate the platform:
+
+   operations/index
+
+.. toctree::
+   :maxdepth: 2
+   :hidden:
+   :caption: Security:
+
+   security/index
+
 
 .. toctree::
    :maxdepth: 2

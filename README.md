@@ -18,7 +18,7 @@ follow the [integration guide](doc/usage/integration.rst), browse the unified
 
 **Versioning:** no namespaced release has been tagged yet. The C++ library carries the upstream 2.x
 lineage version (`2.1.0` in CMake); the platform packages (services, SDKs, and root/workspace Node
-packages) are `0.1.0-rc.1` and versioned independently. [`version.json`](version.json) is the
+packages) are `0.1.0-rc.2` and versioned independently. [`version.json`](version.json) is the
 machine-readable platform source, and `npm run check:versions` verifies every projection. Platform
 tags use `platform-v*`; future independent C++ tags use `cpp-v*`; new bare `v*` tags are forbidden.
 See [CHANGELOG.md](CHANGELOG.md) and

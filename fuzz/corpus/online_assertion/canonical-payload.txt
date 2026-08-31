@@ -1,0 +1,14 @@
+purpose=licensecc-online-assertion
+version=1
+alg=rsa-pkcs1-sha256
+key-id=sha256:1111111111111111111111111111111111111111111111111111111111111111
+project=SYNTHETIC
+feature=EXPORT
+license-fingerprint=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+device-hash=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+nonce=cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+status=ok
+issued-at=1700000000
+expires-at=1700000300
+cache-until=1700000600
+revocation-seq=1

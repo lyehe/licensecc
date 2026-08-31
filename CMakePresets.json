@@ -74,6 +74,23 @@
       }
     },
     {
+      "name": "ci-linux-sanitizers",
+      "inherits": "ci-linux-debug",
+      "displayName": "CI Linux Clang Sanitizers and Parser Fuzzers",
+      "description": "Opt-in Linux Clang build with ASan, UBSan, and bounded libFuzzer parser targets.",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/ci-linux-sanitizers",
+      "environment": {
+        "CC": "clang",
+        "CXX": "clang++"
+      },
+      "cacheVariables": {
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/build/ci-linux-sanitizers/install",
+        "LCC_ENABLE_SANITIZERS": "TRUE",
+        "LCC_BUILD_FUZZERS": "TRUE"
+      }
+    },
+    {
       "name": "ci-linux-release",
       "displayName": "CI Linux Release",
       "description": "Linux CI release configure shape.",
@@ -383,6 +400,11 @@
       "targets": ["install"]
     },
     {
+      "name": "ci-linux-sanitizers",
+      "configurePreset": "ci-linux-sanitizers",
+      "configuration": "Debug"
+    },
+    {
       "name": "ci-linux-release",
       "configurePreset": "ci-linux-release",
       "configuration": "Release",
@@ -543,6 +565,19 @@
       },
       "environment": {
         "VIRTUAL_ENV": "VM"
+      }
+    },
+    {
+      "name": "ci-linux-sanitizers",
+      "configurePreset": "ci-linux-sanitizers",
+      "configuration": "Debug",
+      "output": {
+        "outputOnFailure": true
+      },
+      "environment": {
+        "VIRTUAL_ENV": "VM",
+        "ASAN_OPTIONS": "detect_leaks=1:strict_string_checks=1:check_initialization_order=1:abort_on_error=1",
+        "UBSAN_OPTIONS": "print_stacktrace=1:halt_on_error=1"
       }
     },
     {

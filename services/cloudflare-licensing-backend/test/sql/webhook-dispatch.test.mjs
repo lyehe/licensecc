@@ -24,6 +24,7 @@ import {
   deliverWebhooks,
   enqueueAndDeliverWebhooks,
   verifyWebhookSignature,
+  WEBHOOK_CLAIM_TTL_SECONDS,
   WEBHOOK_MAX_ATTEMPTS,
 } from "@licensecc/cloudflare-runtime/webhooks/webhook";
 
@@ -69,6 +70,64 @@ class D1Like {
   prepare(sql) {
     return new PreparedStatement(this.db, sql);
   }
+}
+
+// Force two dispatchers to finish the same real-SQLite due-row SELECT before either may claim it.
+// This makes the overlap deterministic while leaving the production claim UPDATE completely intact.
+function d1WithDueReadBarrier(db, expectedReads) {
+  const base = new D1Like(db);
+  let readCount = 0;
+  let claimCount = 0;
+  let claimWinners = 0;
+  let releaseReads;
+  let releaseObserved;
+  let releaseClaimsObserved;
+  const readsReleased = new Promise((resolve) => { releaseReads = resolve; });
+  const allReadsObserved = new Promise((resolve) => { releaseObserved = resolve; });
+  const allClaimsObserved = new Promise((resolve) => { releaseClaimsObserved = resolve; });
+  return {
+    allClaimsObserved,
+    allReadsObserved,
+    claimCount: () => claimCount,
+    claimWinners: () => claimWinners,
+    readCount: () => readCount,
+    adapter: {
+      prepare(sql) {
+        const prepared = base.prepare(sql);
+        const dueRead = sql.includes("FROM webhook_deliveries d JOIN webhook_endpoints e");
+        const claim = sql.startsWith("UPDATE webhook_deliveries SET next_attempt_at = ?");
+        if (!dueRead && !claim) return prepared;
+        return {
+          bind(...values) {
+            const bound = prepared.bind(...values);
+            if (claim) {
+              return {
+                async first() {
+                  const row = await bound.first();
+                  claimCount += 1;
+                  if (row !== null) claimWinners += 1;
+                  if (claimCount === expectedReads) releaseClaimsObserved();
+                  return row;
+                },
+              };
+            }
+            return {
+              async all() {
+                const result = await bound.all();
+                readCount += 1;
+                if (readCount === expectedReads) {
+                  releaseObserved();
+                  releaseReads();
+                }
+                await readsReleased;
+                return result;
+              },
+            };
+          },
+        };
+      },
+    },
+  };
 }
 
 const SECRET_B64 = Buffer.alloc(32, 7).toString("base64");
@@ -233,6 +292,72 @@ test("deliver success: a 200 marks the row delivered with the status code", asyn
   assert.equal(await verifyWebhookSignature(captured[0].init.body, header, secrets, 201), true);
   // A tampered body must fail.
   assert.equal(await verifyWebhookSignature(captured[0].init.body + "x", header, secrets, 201), false);
+  db.close();
+});
+
+test("overlapping real-SQLite dispatchers lease one selected delivery to exactly one sender", async () => {
+  const db = freshDb();
+  const overlap = d1WithDueReadBarrier(db, 2);
+  const env = { DB: overlap.adapter, ...SIGNING_ENV };
+  addEndpoint(db, "ep1");
+  addEntitlementEvent(db, "create", 100);
+  await enqueueWebhooks(env, 200);
+
+  let fetchCalls = 0;
+  let observeFetch;
+  const fetchObserved = new Promise((resolve) => { observeFetch = resolve; });
+  let releaseResponse;
+  let responseReleased = false;
+  const response = new Promise((resolve) => {
+    releaseResponse = () => {
+      if (responseReleased) return;
+      responseReleased = true;
+      resolve(new Response(null, { status: 204 }));
+    };
+  });
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => {
+    fetchCalls += 1;
+    observeFetch();
+    if (fetchCalls === 1) return response;
+    return new Response(null, { status: 204 });
+  };
+
+  const now = 300;
+  const firstDispatcher = deliverWebhooks(env, now, () => {});
+  const secondDispatcher = deliverWebhooks(env, now, () => {});
+  const dispatchers = Promise.all([firstDispatcher, secondDispatcher]);
+  try {
+    await overlap.allReadsObserved;
+    await overlap.allClaimsObserved;
+    const senderStarted = await Promise.race([
+      fetchObserved.then(() => true),
+      dispatchers.then(() => false),
+    ]);
+    assert.equal(overlap.readCount(), 2, "both dispatchers selected the same due-row snapshot");
+    assert.equal(overlap.claimCount(), 2, "both selected snapshots attempted the guarded claim");
+    assert.equal(overlap.claimWinners(), 1, "real SQLite returned exactly one claim winner");
+    assert.equal(senderStarted, true, "the claim winner proceeds to network delivery");
+    assert.equal(fetchCalls, 1, "the guarded SQLite lease admits exactly one sender");
+    const leased = db.prepare("SELECT status, attempts, next_attempt_at FROM webhook_deliveries").get();
+    assert.equal(leased.status, "pending");
+    assert.equal(leased.attempts, 0);
+    assert.equal(
+      leased.next_attempt_at,
+      now + WEBHOOK_CLAIM_TTL_SECONDS,
+      "the winner holds a bounded pending-row lease while its request is in flight",
+    );
+    releaseResponse();
+    await dispatchers;
+  } finally {
+    releaseResponse();
+    await dispatchers.catch(() => {});
+    globalThis.fetch = originalFetch;
+  }
+
+  const delivered = db.prepare("SELECT status, attempts FROM webhook_deliveries").get();
+  assert.equal(delivered.status, "delivered");
+  assert.equal(delivered.attempts, 1);
   db.close();
 });
 

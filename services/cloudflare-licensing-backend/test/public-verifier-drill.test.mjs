@@ -30,6 +30,7 @@ test("public verifier drill parses safe defaults and redacts URL input", () => {
   assert.equal(options.burstCount, 25);
   assert.equal(normalizeUrl("http://127.0.0.1:4173/"), "http://127.0.0.1:4173");
   assert.throws(() => normalizeUrl("http://example.com"), /url_must_be_https_or_localhost/);
+  assert.throws(() => normalizeUrl("https://user:password@verifier.example"), /url_credentials_forbidden/);
   assert.throws(() => parseArgs(["--url", "https://verifier.example", "--fingerprint", "z".repeat(64)]), /fingerprint_must_be_64_hex/);
 });
 
@@ -138,7 +139,8 @@ test("public verifier drill accepts malformed rejection, unsigned denial, rate l
 
   assert.equal(summary.ok, true);
   assert.equal(summary.target, "<redacted-verifier-url>");
-  assert.equal(summary.unknown_denial.assertion_present, false);
+  assert.equal(summary.valid_probe.assertion_present, false);
+  assert.equal(summary.expected_valid_probe, "unsigned_denial");
   assert.equal(summary.burst.attempts, 3);
   assert.equal(summary.burst.rate_limited_count, 2);
   assert.equal(summary.burst.first_rate_limited_at, 2);
@@ -227,4 +229,88 @@ test("rotating-fingerprint flood that is not limited reports the distinct failur
   });
   assert.equal(summary.ok, false);
   assert.deepEqual(summary.failures, ["rotating_fingerprint_flood_not_rate_limited"]);
+});
+
+test("protected drill sends fresh proof for the registered fixture and requires signed allow", async () => {
+  const privateKeySentinel = `${["-----BEGIN ", "PRIVATE KEY-----"].join("")}\nPRIVATE-FIXTURE-SENTINEL`;
+  const fingerprint = "9".repeat(64);
+  const deviceKeyId = `sha256:${"8".repeat(64)}`;
+  const options = parseArgs([
+    "--url=https://verifier.example",
+    "--burst-count=2",
+    "--expect-rate-limit",
+    "--recovery-wait-ms=1",
+  ], {
+    LICENSECC_PUBLIC_VERIFIER_PROJECT: "SYNTHETIC_PROJECT",
+    LICENSECC_PUBLIC_VERIFIER_FEATURE: "SYNTHETIC",
+    LICENSECC_PUBLIC_VERIFIER_FINGERPRINT: fingerprint,
+    LICENSECC_PUBLIC_VERIFIER_DEVICE_PRIVATE_KEY_PKCS8_PEM: privateKeySentinel,
+    LICENSECC_PUBLIC_VERIFIER_DEVICE_KEY_ID: deviceKeyId,
+  });
+  const calls = [];
+  const responses = [
+    jsonResponse(400, { ok: false, code: "invalid_request" }),
+    jsonResponse(200, { ok: true, code: "ok", assertion: "signed-assertion-secret" }),
+    jsonResponse(200, { ok: true, code: "ok", assertion: "signed-assertion-secret" }),
+    jsonResponse(429, { ok: false, code: "rate_limited" }),
+    jsonResponse(200, { ok: true, code: "ok", assertion: "signed-assertion-secret" }),
+  ];
+  const summary = await runDrill(options, {
+    fetchImpl: async (_url, init) => {
+      calls.push({ init, body: JSON.parse(init.body) });
+      return responses.shift();
+    },
+    sleepImpl: async () => {},
+    epochNow: () => 1_800_000_000_000,
+    proofSigner: async ({ requestTimestamp }) => ({
+      request_signature_version: 1,
+      device_key_id: deviceKeyId,
+      request_timestamp: requestTimestamp,
+      request_signature_algorithm: "ecdsa-p256-sha256",
+      request_signature: Buffer.alloc(64, 1).toString("base64"),
+    }),
+  });
+  assert.equal(summary.ok, true);
+  assert.equal(summary.request_proof_present, true);
+  assert.equal(summary.expected_valid_probe, "signed_allow");
+  assert.equal(summary.valid_probe.assertion_present, true);
+  assert.equal(summary.project, "<redacted>");
+  assert.equal(summary.feature, "<redacted>");
+  assert.equal(summary.fingerprint, "<redacted>");
+  assert.equal(calls[0].body.request_signature, undefined, "structurally malformed probe is rejected before proof");
+  const protectedBodies = calls.slice(1).map((call) => call.body);
+  assert.equal(protectedBodies.every((body) => body.device_key_id === deviceKeyId), true);
+  assert.equal(protectedBodies.every((body) => body.request_signature_version === 1), true);
+  assert.equal(new Set(protectedBodies.map((body) => body.nonce)).size, protectedBodies.length);
+  assert.equal(calls.every((call) => call.init.redirect === "error"), true);
+  const serialized = JSON.stringify(summary);
+  for (const forbidden of [privateKeySentinel, fingerprint, deviceKeyId, "SYNTHETIC_PROJECT", "signed-assertion-secret"]) {
+    assert.equal(serialized.includes(forbidden), false);
+  }
+  assert.throws(
+    () => parseArgs(["--url=https://verifier.example", "--rotate-fingerprint"], {
+      LICENSECC_PUBLIC_VERIFIER_FINGERPRINT: fingerprint,
+      LICENSECC_PUBLIC_VERIFIER_DEVICE_PRIVATE_KEY_PKCS8_PEM: privateKeySentinel,
+      LICENSECC_PUBLIC_VERIFIER_DEVICE_KEY_ID: deviceKeyId,
+    }),
+    /request_proof_cannot_rotate_fingerprint/u,
+  );
+});
+
+test("public verifier drill rejects oversized responses before retaining remote payloads", async () => {
+  const secretPayload = "remote-license-payload-secret-sentinel";
+  const options = parseArgs([
+    "--url=https://verifier.example",
+    `--fingerprint=${"7".repeat(64)}`,
+    "--burst-count=0",
+  ]);
+  await assert.rejects(
+    runDrill(options, {
+      fetchImpl: async () => new Response(secretPayload, {
+        status: 400,
+        headers: { "content-length": "32769" },
+      }),
+    }),
+    (error) => error instanceof Error && error.message === "response_too_large" && !error.message.includes(secretPayload),
+  );
 });

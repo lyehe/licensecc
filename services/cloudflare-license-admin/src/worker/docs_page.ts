@@ -1,3 +1,5 @@
+import { HTML_NONCE_PLACEHOLDER } from "@licensecc/cloudflare-runtime/http/kit";
+
 // Self-contained HTML API reference for GET /docs.
 //
 // No external CDN / no network dependency: the page fetches the same Worker's
@@ -10,7 +12,7 @@ export const docsHtml = `<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>License Admin API</title>
-<style>
+<style nonce="${HTML_NONCE_PLACEHOLDER}">
   :root { color-scheme: light dark; }
   * { box-sizing: border-box; }
   body { margin: 0; font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background: #0f1115; color: #e6e6e6; }
@@ -48,7 +50,7 @@ export const docsHtml = `<!doctype html>
   <p id="subtitle">Loading <a href="/openapi.json">/openapi.json</a> &hellip;</p>
 </header>
 <main id="root"><p class="muted">Loading&hellip;</p></main>
-<script>
+<script nonce="${HTML_NONCE_PLACEHOLDER}">
 (function () {
   var METHODS = ["get", "post", "patch", "put", "delete", "options", "head"];
   function el(tag, cls, text) {
@@ -107,7 +109,7 @@ export const docsHtml = `<!doctype html>
     var sub = document.getElementById("subtitle");
     sub.textContent = "v" + ((spec.info && spec.info.version) || "?") + " · " + Object.keys(spec.paths || {}).length + " paths";
     var root = document.getElementById("root");
-    root.innerHTML = "";
+    root.replaceChildren();
 
     var groups = {};
     var order = [];
@@ -155,7 +157,7 @@ export const docsHtml = `<!doctype html>
     });
   }
   fetch("/openapi.json").then(function (r) { return r.json(); }).then(render).catch(function (e) {
-    document.getElementById("root").innerHTML = "<p>Failed to load /openapi.json: " + String(e) + "</p>";
+    document.getElementById("root").replaceChildren(el("p", null, "Failed to load /openapi.json: " + String(e)));
   });
 })();
 </script>

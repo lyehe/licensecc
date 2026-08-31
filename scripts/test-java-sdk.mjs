@@ -32,5 +32,5 @@ run("javac", ["--release", "17", "--add-modules", "jdk.httpserver", "-Xlint:all"
   "-cp", classes, "-d", tests, ...files(join(sourceRoot, "test", "java"))]);
 run("java", ["--add-modules", "jdk.httpserver", "-cp", `${classes}${process.platform === "win32" ? ";" : ":"}${tests}`,
   "io.licensecc.client.SdkTest", root]);
-run("jar", ["--create", "--file", join(output, "licensecc-client-0.1.0-rc.1.jar"),
+run("jar", ["--create", "--file", join(output, "licensecc-client-0.1.0-rc.2.jar"),
   "--manifest", join(root, "sdks", "java", "MANIFEST.MF"), "-C", classes, "."]);

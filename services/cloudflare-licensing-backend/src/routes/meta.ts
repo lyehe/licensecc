@@ -1,4 +1,4 @@
-import { json } from "@licensecc/cloudflare-runtime/http/kit";
+import { json, secureHtml } from "@licensecc/cloudflare-runtime/http/kit";
 import type { Env } from "../env.js";
 import { accountTokenMode } from "../auth/account_auth.mjs";
 import { configConsistencyWarnings } from "../observability/index.js";
@@ -11,10 +11,7 @@ export function handleOpenApi(): Response {
 }
 
 export function handleDocs(): Response {
-  return new Response(docsHtml, {
-    status: 200,
-    headers: { "content-type": "text/html; charset=utf-8" },
-  });
+  return secureHtml(docsHtml);
 }
 
 export function handleHealth(_request: Request, env: Env): Response {
