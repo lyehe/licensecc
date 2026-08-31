@@ -970,7 +970,7 @@ test("workflow execution scanning accepts only actual step run mappings and quot
 });
 
 test("workflow structural checks reject inert pin decoys, quoted guards, and commands after exit", () => {
-  const toolchains = { python_version: "3.12.8", uv_version: "0.5.15", dotnet_sdk_version: "8.0.423" };
+  const toolchains = { python_version: "3.12.8", uv_version: "0.12.5", dotnet_sdk_version: "8.0.423" };
   const decoy = workflowJobLinesFromSource([
     "jobs:",
     "  release:",

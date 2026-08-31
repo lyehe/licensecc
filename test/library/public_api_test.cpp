@@ -99,10 +99,8 @@ BOOST_AUTO_TEST_CASE(lcc_strerror_known_and_unknown) {
 	BOOST_CHECK(string(lcc_strerror(LICENSE_OK)).find("OK") != string::npos);
 	BOOST_CHECK(string(lcc_strerror(LICENSE_TAMPER_DETECTED)).find("tamper") != string::npos);
 	BOOST_CHECK(string(lcc_strerror(LICENSE_ONLINE_VERIFICATION_FAILED)).find("online") != string::npos);
-	// an out-of-range value must still return a non-null, non-empty string
-	const char *unknown = lcc_strerror(static_cast<LCC_EVENT_TYPE>(9999));
-	BOOST_REQUIRE(unknown != nullptr);
-	BOOST_CHECK(strlen(unknown) > 0);
+	// Unassigned values within the enum's representable range use the fallback.
+	BOOST_CHECK_EQUAL(lcc_strerror(static_cast<LCC_EVENT_TYPE>(99)), "unknown license event");
 }
 
 #define LCC_TEST_STR2(x) #x

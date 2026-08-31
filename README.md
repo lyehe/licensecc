@@ -59,7 +59,7 @@ Generated project material is written under the CMake build tree by default, not
 - A C++17 compiler.
 - Git for clone and source history operations.
 - PowerShell 7 (`pwsh`) on any platform for bootstrap, build-purity checks, `scripts/dev-check.ps1`, and the root npm shortcuts (CI uses the same binary; Windows PowerShell 5.1 is not targeted).
-- Python 3.12 and uv 0.5.15. The repository-level `uv.toml` pins uv, and the
+- Python 3.12 and uv 0.12.5. The repository-level `uv.toml` pins uv, and the
   Python SDK and PostgreSQL parity tools each use a checked-in `uv.lock`.
 - JDK 17.0.20 for the Java SDK and deterministic release artifact gate.
 - Linux: OpenSSL, Zlib where required by the OpenSSL version, and Boost development packages for the bundled generator/tests.

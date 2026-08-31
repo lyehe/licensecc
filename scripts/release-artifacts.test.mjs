@@ -309,7 +309,7 @@ function releaseFixture({ contractDrift = false, omitDotnetLock = false } = {}) 
     ["package.json", JSON.stringify(rootManifest)],
     ["package-lock.json", JSON.stringify({ name: rootManifest.name, version: PLATFORM_VERSION, lockfileVersion: 3, packages: lockPackages })],
     ["version.json", JSON.stringify({ schema_version: 1, platform_version: PLATFORM_VERSION })],
-    ["release-toolchains.json", JSON.stringify({ schema_version: 1, python_version: "3.12.8", uv_version: "0.5.15", dotnet_sdk_version: "8.0.423", java_version: JAVA_VERSION, java_setup_version: "17.0.20+8" })],
+    ["release-toolchains.json", JSON.stringify({ schema_version: 1, python_version: "3.12.8", uv_version: "0.12.5", dotnet_sdk_version: "8.0.423", java_version: JAVA_VERSION, java_setup_version: "17.0.20+8" })],
     ["global.json", JSON.stringify({ sdk: { version: "8.0.423", rollForward: "disable", allowPrerelease: false } })],
     ["CMakeLists.txt", `cmake_minimum_required(VERSION 3.16)\nproject(licensecc VERSION ${CPP_VERSION} LANGUAGES CXX)\n`],
     ["LICENSE", "AGPL"], ["cmake/config.cmake", "# cmake"], ["include/licensecc/licensecc.h", `#define LCC_VERSION_MAJOR 2\n#define LCC_VERSION_MINOR 1\n#define LCC_VERSION_PATCH 0\n#define LCC_VERSION_STRING "${CPP_VERSION}"\n`], ["src/library/runtime.cpp", "// committed runtime"],
@@ -350,7 +350,7 @@ function fakeRun(commands, { symbols = true, failLabel, wrongSymbol = false, wro
     if (entry.label === "canonical npm version") return { status: 0, stdout: `${NPM_VERSION}\n` };
     if (entry.label === "release Python executable") return { status: 0, stdout: pythonExecutableDrift ? "relative-python\n" : `${process.execPath}\n` };
     if (entry.label === "release Python version") return { status: 0, stdout: toolVersionDrift ? "Python 3.12.9\n" : "Python 3.12.8\n" };
-    if (entry.label === "release uv version") return { status: 0, stdout: "uv 0.5.15\n" };
+    if (entry.label === "release uv version") return { status: 0, stdout: "uv 0.12.5\n" };
     if (entry.label === "release .NET SDK version") return { status: 0, stdout: "8.0.423\n" };
     if (entry.label === "release Java compiler version") return { status: 0, stdout: `javac ${JAVA_VERSION}\n` };
     if (entry.label === "canonical locked npm ci") {

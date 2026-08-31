@@ -103,6 +103,7 @@ const vector<unsigned char> CryptoHelperLinux::exportPublicKey() const {
 	RSA *rsa = EVP_PKEY_get1_RSA(m_pktmp);
 	// PEM_write_bio_RSAPublicKey(bio_public, rsa);
 	i2d_RSAPublicKey_bio(bio_public, rsa);
+	RSA_free(rsa);
 	int keylen = BIO_pending(bio_public);
 	vector<unsigned char> buffer(keylen, 0);
 	// char *pem_key = (char*) (calloc(keylen + 1, 1));

@@ -10,7 +10,7 @@ Install the platform prerequisites listed in {doc}`Dependencies`, plus:
 
 - PowerShell 7 (`pwsh`) on Windows or Linux;
 - Node.js 22 and npm 10.9.8 for repository orchestration;
-- Python 3.12 with uv 0.5.15 for SDK, schema, and documentation checks; and
+- Python 3.12 with uv 0.12.5 for SDK, schema, and documentation checks; and
 - `clang-format` for C and C++ formatting.
 
 Visual Studio 2022 is the supported Windows C++ environment. On Linux, a C++17

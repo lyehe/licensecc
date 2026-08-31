@@ -23,7 +23,7 @@ Versions come from the same hardened readers used by
 platform authority, the Python PEP 440 form is derived and checked, and the
 CMake `project(licensecc VERSION ...)` remains the independent C++ authority.
 The separately tracked `release-toolchains.json` pins Python **3.12.8**, uv
-**0.5.15**, the .NET SDK **8.0.423**, and Temurin/OpenJDK **17.0.20+8**
+**0.12.5**, the .NET SDK **8.0.423**, and Temurin/OpenJDK **17.0.20+8**
 (compiler version **17.0.20**); `global.json` repeats the exact .NET
 SDK with roll-forward disabled. These are build-tool authorities, not package
 version authorities. The assembler checks all four executable version outputs

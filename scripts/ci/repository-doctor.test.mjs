@@ -52,7 +52,7 @@ test("local hygiene and toolchain drift are advisory by default", () => {
     mainDivergence: { ahead: 2, behind: 3 },
     localOutputs: ["build"],
     tools: [
-      { name: "uv", expected: "0.5.15", available: true, actual: "uv 0.6.0", matches: false },
+      { name: "uv", expected: "0.12.5", available: true, actual: "uv 0.6.0", matches: false },
       { name: ".NET SDK", expected: "8.0.423", available: false, actual: "", matches: false },
     ],
   }));

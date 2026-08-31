@@ -7,7 +7,7 @@ const repositoryRoot = resolve(import.meta.dirname, "../../..");
 const read = (path) => readFileSync(resolve(repositoryRoot, path), "utf8");
 
 test("PostgreSQL parity uses one checked uv and Python dependency contract", () => {
-  assert.equal(read("uv.toml"), 'required-version = "==0.5.15"\n');
+  assert.equal(read("uv.toml"), 'required-version = "==0.12.5"\n');
 
   const backend = JSON.parse(read("services/cloudflare-licensing-backend/package.json"));
   assert.equal(
@@ -30,7 +30,7 @@ test("maintained contributor entry points state the PostgreSQL parity prerequisi
   for (const path of ["AGENTS.md", "CONTRIBUTING.md", "README.md"]) {
     const content = read(path);
     assert.match(content, /Python 3\.12/);
-    assert.match(content, /uv 0\.5\.15/);
+    assert.match(content, /uv 0\.12\.5/);
   }
 
   const servicesWorkflow = read(".github/workflows/services.yml");

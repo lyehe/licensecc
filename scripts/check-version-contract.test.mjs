@@ -40,7 +40,7 @@ function alignedFiles() {
   }, null, 2)}\n`;
   return {
     "version.json": `${JSON.stringify({ schema_version: 1, platform_version: platformVersion }, null, 2)}\n`,
-    "release-toolchains.json": `${JSON.stringify({ schema_version: 1, python_version: "3.12.8", uv_version: "0.5.15", dotnet_sdk_version: "8.0.423", java_version: "17.0.20", java_setup_version: "17.0.20+8" }, null, 2)}\n`,
+    "release-toolchains.json": `${JSON.stringify({ schema_version: 1, python_version: "3.12.8", uv_version: "0.12.5", dotnet_sdk_version: "8.0.423", java_version: "17.0.20", java_setup_version: "17.0.20+8" }, null, 2)}\n`,
     "global.json": `${JSON.stringify({ sdk: { version: "8.0.423", rollForward: "disable", allowPrerelease: false } }, null, 2)}\n`,
     ...manifests,
     "package-lock.json": `${JSON.stringify({ name: "licensecc", version: platformVersion, lockfileVersion: 3, packages }, null, 2)}\n`,
@@ -116,7 +116,7 @@ test("exports the strict release authority reader used by artifact assembly", ()
     });
     assert.deepEqual(releaseToolchainSchema, { schemaVersion: 1, fields: ["dotnet_sdk_version", "java_setup_version", "java_version", "python_version", "schema_version", "uv_version"] });
     assert.deepEqual(readReleaseToolchainAuthorities({ root: sample.root }), {
-      toolchains: { pythonVersion: "3.12.8", uvVersion: "0.5.15", dotnetSdkVersion: "8.0.423", javaVersion: "17.0.20", javaSetupVersion: "17.0.20+8" },
+      toolchains: { pythonVersion: "3.12.8", uvVersion: "0.12.5", dotnetSdkVersion: "8.0.423", javaVersion: "17.0.20", javaSetupVersion: "17.0.20+8" },
       errors: [],
     });
   } finally {
@@ -126,9 +126,9 @@ test("exports the strict release authority reader used by artifact assembly", ()
 
 test("rejects missing, floating, or inconsistent release toolchain authorities", () => {
   const cases = [
-    ["missing uv exact version", (files) => { files["release-toolchains.json"] = `${JSON.stringify({ schema_version: 1, python_version: "3.12", uv_version: "0.5.15", dotnet_sdk_version: "8.0.423", java_version: "17.0.20", java_setup_version: "17.0.20+8" })}\n`; }, "release-toolchains.json"],
-    ["floating Java version", (files) => { files["release-toolchains.json"] = `${JSON.stringify({ schema_version: 1, python_version: "3.12.8", uv_version: "0.5.15", dotnet_sdk_version: "8.0.423", java_version: "17", java_setup_version: "17.0.20+8" })}\n`; }, "release-toolchains.json"],
-    ["Java setup build mismatch", (files) => { files["release-toolchains.json"] = `${JSON.stringify({ schema_version: 1, python_version: "3.12.8", uv_version: "0.5.15", dotnet_sdk_version: "8.0.423", java_version: "17.0.20", java_setup_version: "17.0.19+7" })}\n`; }, "release-toolchains.json"],
+    ["missing uv exact version", (files) => { files["release-toolchains.json"] = `${JSON.stringify({ schema_version: 1, python_version: "3.12", uv_version: "0.12.5", dotnet_sdk_version: "8.0.423", java_version: "17.0.20", java_setup_version: "17.0.20+8" })}\n`; }, "release-toolchains.json"],
+    ["floating Java version", (files) => { files["release-toolchains.json"] = `${JSON.stringify({ schema_version: 1, python_version: "3.12.8", uv_version: "0.12.5", dotnet_sdk_version: "8.0.423", java_version: "17", java_setup_version: "17.0.20+8" })}\n`; }, "release-toolchains.json"],
+    ["Java setup build mismatch", (files) => { files["release-toolchains.json"] = `${JSON.stringify({ schema_version: 1, python_version: "3.12.8", uv_version: "0.12.5", dotnet_sdk_version: "8.0.423", java_version: "17.0.20", java_setup_version: "17.0.19+7" })}\n`; }, "release-toolchains.json"],
     ["global SDK mismatch", (files) => { files["global.json"] = `${JSON.stringify({ sdk: { version: "8.0.424", rollForward: "disable", allowPrerelease: false } })}\n`; }, "global.json"],
     ["floating SDK roll forward", (files) => { files["global.json"] = `${JSON.stringify({ sdk: { version: "8.0.423", rollForward: "latestFeature", allowPrerelease: false } })}\n`; }, "global.json"],
   ];

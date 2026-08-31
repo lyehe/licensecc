@@ -51,7 +51,6 @@ BOOST_AUTO_TEST_CASE(test_generate_and_sign) {
 						"Private key is in openssl pkcs#1 format");
 	const std::string signature = crypto->signString("testString");
 	BOOST_CHECK_MESSAGE(signature.size() == 512, "default generated signature uses RSA-3072");
-	crypto.release();
 	/*
 	 ofstream myfile("private_key-linux.rsa");
 	 myfile << privateK;
@@ -72,7 +71,6 @@ BOOST_AUTO_TEST_CASE(test_load_and_export_private) {
 	const vector<unsigned char> exported_pubkey = exported_crypto->exportPublicKey();
 	BOOST_CHECK_EQUAL_COLLECTIONS(original_pubkey.begin(), original_pubkey.end(), exported_pubkey.begin(),
 								  exported_pubkey.end());
-	crypto.release();
 }
 
 BOOST_AUTO_TEST_CASE(test_load_and_export_public_key) {
@@ -94,7 +92,6 @@ BOOST_AUTO_TEST_CASE(test_load_and_export_public_key) {
 	BOOST_CHECK_MESSAGE(expected_pubkey.size() == pk_exported.size(), "exported key and expected are the same size");
 	BOOST_CHECK_MESSAGE(std::equal(expected_pubkey.begin(), expected_pubkey.end(), pk_exported.begin()),
 						"exported key and expected have the same content");
-	crypto.release();
 }
 
 BOOST_AUTO_TEST_CASE(test_load_and_sign) {
@@ -104,7 +101,6 @@ BOOST_AUTO_TEST_CASE(test_load_and_sign) {
 	const std::string signature = crypto->signString("testString");
 	BOOST_CHECK_MESSAGE(signature.size() == 172, "signature is the right size");
 	BOOST_CHECK_MESSAGE(signature == SIGNATURE, "signature is repeatable");
-	crypto.release();
 }
 
 BOOST_AUTO_TEST_CASE(test_generate_export_import_and_sign) {
@@ -115,7 +111,6 @@ BOOST_AUTO_TEST_CASE(test_generate_export_import_and_sign) {
 	const string signature = crypto->signString("testString");
 	// 3072-bit RSA signatures are 384 bytes, base64 encoded without newlines.
 	BOOST_CHECK_MESSAGE(signature.size() == 512, "default generated signature uses RSA-3072");
-	crypto.release();
 }
 
 BOOST_AUTO_TEST_CASE(test_generate_legacy_rsa1024_requires_explicit_size) {
@@ -125,7 +120,6 @@ BOOST_AUTO_TEST_CASE(test_generate_legacy_rsa1024_requires_explicit_size) {
 	crypto->loadPrivateKey(pk);
 	const string signature = crypto->signString("testString");
 	BOOST_CHECK_MESSAGE(signature.size() == 172, "explicit legacy RSA-1024 signature is still supported");
-	crypto.release();
 }
 
 BOOST_AUTO_TEST_CASE(test_load_private_key_error_does_not_leak_key_material) {

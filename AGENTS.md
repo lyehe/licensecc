@@ -12,7 +12,7 @@ and never reset, clean, stage, patch, or otherwise mutate them without clear
 ownership. Do not commit generated trees, local Wrangler configuration,
 secrets, or build output.
 
-The deterministic PR gate requires Python 3.12 and uv 0.5.15 (the exact
+The deterministic PR gate requires Python 3.12 and uv 0.12.5 (the exact
 version in `uv.toml`); PostgreSQL schema-parity dependencies are lock-backed
 under the backend service. From a clean or intentionally classified worktree,
 run:
