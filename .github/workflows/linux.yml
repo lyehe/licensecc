@@ -8,7 +8,7 @@ jobs:
    build-linux-arm64:
       runs-on: ubuntu-24.04-arm
       steps:
-      -  uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      -  uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       -  name: Assert native ARM64 runner
          run: test "$(uname -m)" = "aarch64"
       -  name: Install dependencies
@@ -32,7 +32,7 @@ jobs:
           preset: ["ci-linux-debug", "ci-linux-release", "ci-linux-device-identity-test"]
 
       steps:
-      -  uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      -  uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       -  name: Install dependencies
          run: |
             sudo apt-get update
@@ -74,7 +74,7 @@ jobs:
               preset: ci-linux-release-tpm2-capability
 
       steps:
-      -  uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      -  uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       -  name: Install dependencies
          run: |
             sudo apt-get update
@@ -120,7 +120,7 @@ jobs:
               configuration: Release
 
       steps:
-      -  uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      -  uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       -  name: Install dependencies
          run: |
             sudo apt-get update
