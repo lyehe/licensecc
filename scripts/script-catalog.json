@@ -32,6 +32,8 @@
         "scripts/check-docs.ps1",
         "scripts/check-typecheck-coverage.mjs",
         "scripts/ci/run-installed-device-identity-consumer.ps1",
+        "scripts/ci/run-offline-docs-quickstart.ps1",
+        "scripts/ci/run-offline-docs-quickstart.test.mjs",
         "scripts/ci/run-swtpm-device-identity.sh",
         "scripts/clean-checkout-regressions.test.mjs",
         "scripts/cmake-projects-base.test.ps1",

@@ -73,8 +73,10 @@ SDKs and platform limits
 * TPM provider support remains platform-limited rather than universal.
 
 For exact ownership, release availability, limitations, public-document links,
-and evidence selectors, consult ``registry.json``. Historical feature prose is
-kept briefly in :doc:`../analysis/features`; it is not a second status source.
+and evidence selectors, consult ``registry.json``. Use
+:doc:`../usage/Hardware-identifiers` for maintained hardware-strategy guidance;
+historical analysis is retained only as audit evidence and is not a second
+status source.
 
 Registry identifiers: ``cpp-local-verification``, ``hardware-binding``,
 ``environment-aware-identification``, ``license-version-limits``,

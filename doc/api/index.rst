@@ -14,6 +14,8 @@ Runtime library
 * :doc:`types` — public structures, enums, callbacks, limits, and result data.
 * :doc:`device_identity` — provider-backed P-256 keys and signed request
   proofs.
+* :doc:`hardware_identifiers` — generated project strategy order and custom
+  hardware-signature implementations.
 * :doc:`extend` — supported host callbacks, hardware-identifier strategies,
   and application-owned license sources.
 
@@ -40,6 +42,7 @@ symbol, import failure, or route-count mismatch fails documentation CI.
    public_api
    types
    device_identity
+   hardware_identifiers
    services
    python
    sdks

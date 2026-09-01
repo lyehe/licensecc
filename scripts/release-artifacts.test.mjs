@@ -529,6 +529,7 @@ test("assembly uses a sanitized canonical install, four pinned Worker dry-runs, 
     assert.match(spdx.documentNamespace, new RegExp(PLATFORM_VERSION.replaceAll(".", "\\.")));
     assert.match(spdx.documentNamespace, new RegExp(CPP_VERSION.replaceAll(".", "\\.")));
     assert.match(spdx.documentNamespace, new RegExp(PYTHON_VERSION.replaceAll(".", "\\.")));
+    assert.match(spdx.documentNamespace, /^https:\/\/github\.com\/lyehe\/licensecc\/releases\//u);
     const pythonExecutable = commands.find((entry) => entry.label === "release Python executable");
     const pythonVersion = commands.find((entry) => entry.label === "release Python version");
     const uvVersion = commands.find((entry) => entry.label === "release uv version");

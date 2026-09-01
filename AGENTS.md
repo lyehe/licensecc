@@ -25,11 +25,18 @@ npm run check:pr
 Use the dedicated commands for additional surfaces:
 `npm run test:sdks`, `npm run setup:browsers` (one explicit command installing
 both retained Playwright Chromium revisions), `npm run test:e2e`,
-`npm run check:dry-run`, and `npm run check:docs`. The docs gate requires
-Doxygen; use `npm run check:docs:links` only for scheduled/manual network
-validation. Core changes also require
+`npm run check:dry-run`, `npm run check:docs`, and
+`npm run test:docs-quickstart` for the native install/issue/minimal-consumer
+documentation path. The docs gate requires Doxygen; use
+`npm run check:docs:links` only for scheduled/manual network validation. Core
+changes also require
 `pwsh -NoProfile -File scripts/check-build-purity.ps1 -Preset dev-debug`.
 
 The documentation split is deliberate: `doc/` contains maintained project and
 architecture documentation; `docs/superpowers/plans/` contains protected
 execution plans; `docs/implementation/` contains evidence reports.
+
+For multi-person or multi-agent work, use the task-packet and handoff convention
+in [`CONTRIBUTING.md`](CONTRIBUTING.md#task-packets-and-handoffs). Status must
+name the verified commit/ref, exact commands and outcomes, and relevant surfaces
+not run; a bare “all green” is not sufficient evidence.

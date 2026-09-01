@@ -45,6 +45,9 @@ jobs:
          run: pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/bootstrap.ps1 -CheckOnly
       -  name: Core build purity
          run: pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/check-build-purity.ps1 -Preset ${{ matrix.preset }}
+      -  name: Offline documentation quickstart
+         if: matrix.preset == 'ci-linux-debug'
+         run: pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/ci/run-offline-docs-quickstart.ps1
       -  name: Exact device-identity suite
          if: matrix.preset == 'ci-linux-device-identity-test'
          run: ctest --preset ci-linux-device-identity-test --no-tests=error -R "^device_identity_(abi|vectors|policy|concurrency)_test$"

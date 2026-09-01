@@ -23,20 +23,46 @@ plus telemetry. On its own it stops nothing.
 
 ## Build and run
 
-Enable examples when configuring, then build the `anti_tamper_host` target:
+This is a standalone consumer of an installed Licensecc package; it is not a
+target in the repository-root build. First complete the
+[offline-first tutorial](../../doc/tutorials/offline-first-license.rst), which
+installs the `test` project under `build/dev-debug/install` and issues the
+matching sample license. The commands below start in the Licensecc repository
+root.
 
-```console
-cmake -S . -B build -DLCC_BUILD_EXAMPLES=ON
-cmake --build build --target anti_tamper_host
+Starting directory: the Licensecc repository root. Shell: Bash on Linux or
+PowerShell 7 on Windows/MSVC.
+
+### Linux (Bash)
+
+```bash
+repo="$PWD"
+cmake -S examples/anti_tamper_host -B build/anti-tamper-host \
+  -DCMAKE_BUILD_TYPE=Debug \
+  -DCMAKE_PREFIX_PATH="$repo/build/dev-debug/install" \
+  -Dlicensecc_DIR="$repo/build/dev-debug/install/lib/cmake/licensecc" \
+  -DLCC_PROJECT_NAME=test
+cmake --build build/anti-tamper-host
+"$repo/build/anti-tamper-host/anti_tamper_host" \
+  "$repo/build/dev-debug/projects/test/licenses/quickstart.lic"
 ```
 
-Run it with an explicit license path:
+### Windows/MSVC (PowerShell 7)
 
-```console
-anti_tamper_host <license-path>
+```powershell
+$repo = (Resolve-Path ".").Path
+cmake -S examples/anti_tamper_host -B build/anti-tamper-host `
+  -G "Visual Studio 17 2022" -A x64 `
+  "-DCMAKE_PREFIX_PATH=$repo/build/dev-debug/install" `
+  "-Dlicensecc_DIR=$repo/build/dev-debug/install/cmake/licensecc" `
+  -DLCC_PROJECT_NAME=test
+cmake --build build/anti-tamper-host --config Debug
+& "$repo/build/anti-tamper-host/Debug/anti_tamper_host.exe" `
+  "$repo/build/dev-debug/projects/test/licenses/quickstart.lic"
 ```
 
 The example disables environment-sourced license lookup, then acquires the
 license with the integrity callback wired in. On success it prints that the
-runtime integrity check passed; on denial it prints `lcc_strerror()` and the
-detail from `print_error()`.
+runtime integrity check passed and exits with status 0:
+`license OK (runtime integrity check passed)`. On denial it prints
+`lcc_strerror()` and the detail from `print_error()`, then exits with status 1.

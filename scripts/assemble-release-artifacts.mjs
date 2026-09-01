@@ -1866,7 +1866,7 @@ function expectedReleaseMetadata({ root, outputDirectory, consumerId, versions, 
     dataLicense: "CC0-1.0",
     SPDXID: "SPDXRef-DOCUMENT",
     name: `licensecc-${versions.platformVersion}`,
-    documentNamespace: `https://github.com/open-license-manager/licensecc/releases/${versions.platformVersion}/${versions.cppVersion}/${versions.pythonVersion}/${consumer}/${versions.commit}/spdx`,
+    documentNamespace: `https://github.com/lyehe/licensecc/releases/${versions.platformVersion}/${versions.cppVersion}/${versions.pythonVersion}/${consumer}/${versions.commit}/spdx`,
     creationInfo: { created: versions.sourceDate, creators: ["Tool: licensecc-release-artifacts"] },
     documentDescribes: packageIds,
     packages: artifacts.map((artifact, index) => ({

@@ -91,7 +91,7 @@ function readAccessJwt(options, env = process.env, execFile = execFileSync) {
   }
   const app = requiredString(options.appUrl, "app url");
   if (options.login) {
-    execFile(options.cloudflaredBin, ["access", "login", "--quiet", "--auto-close", "--app", app], {
+    execFile(options.cloudflaredBin, ["access", "login", app], {
       encoding: "utf8",
       stdio: "inherit",
     });
@@ -103,11 +103,11 @@ function readAccessJwt(options, env = process.env, execFile = execFileSync) {
       stdio: ["ignore", "pipe", "ignore"],
     });
   } catch {
-    throw new Error(`could not read cached Cloudflare Access token; run: cloudflared access login --quiet --auto-close --app ${app}`);
+    throw new Error(`could not read cached Cloudflare Access token; run: cloudflared access login ${app}`);
   }
   const token = extractJwt(output);
   if (token === null) {
-    throw new Error(`cloudflared did not return an Access JWT; run: cloudflared access login --quiet --auto-close --app ${app}`);
+    throw new Error(`cloudflared did not return an Access JWT; run: cloudflared access login ${app}`);
   }
   return { token, source: "cloudflared" };
 }

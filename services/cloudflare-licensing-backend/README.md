@@ -2,6 +2,26 @@
 
 Reference Cloudflare Worker for low-volume online license verification.
 
+**Audience:** backend contributors and operators of the optional hosted
+platform. Native users who only need offline `.lic` files do not need this
+service.
+
+**Status:** Cloudflare D1 is the production target. The local SQLite host is
+the supported evaluation path; PostgreSQL/Supabase remains fenced and partial.
+See the [database backend status](../../doc/operations/database-backends.md).
+
+| Goal | Start here | Side effects |
+| --- | --- | --- |
+| Evaluate online verification locally | [`local-host/README.md`](local-host/README.md) | Writes a local ignored SQLite database and local signing key only |
+| Change backend behavior | Run the focused workspace checks documented below | Local build/test output only |
+| Configure a hosted environment | [Hosted setup](#hosted-setup-remote-changes) | Creates or mutates Cloudflare resources and secrets |
+| Judge production readiness | [Production readiness](../../doc/operations/production-readiness.md) | Evidence review; deployment remains an operator decision |
+
+Unless a section says otherwise, run service-local commands from
+`services/cloudflare-licensing-backend` after one `npm ci` at the repository
+root. Blocks labelled staging or production require authority for the named
+remote resources; copying this README never grants that authority.
+
 The Worker accepts `POST /v1/verify`, looks up an entitlement in D1, and returns
 a signed `lccoa1.<payload_b64>.<signature_b64>` assertion for active
 entitlements. Unknown, revoked, disabled, expired, or not-yet-valid
@@ -35,12 +55,16 @@ also supports an optional Cloudflare rate-limit binding named
 > `.wrangler/`. Run `npx --yes npm@10.9.8 ci` from the repository root; the root
 > `package-lock.json` is authoritative for every Worker workspace.
 
-## Setup
+## Hosted setup (remote changes)
+
+This section provisions or mutates Cloudflare resources. It is not the local
+quickstart. Use a dedicated non-production account/environment first and keep
+real `wrangler.toml`, `.dev.vars`, databases, and private keys untracked.
 
 1. Create a D1 database:
 
    ```console
-   wrangler d1 create licensecc-online-verifier
+   npx wrangler d1 create licensecc-online-verifier
    ```
 
 2. Copy `wrangler.example.toml` to `wrangler.toml` and set the D1 database id.
@@ -72,8 +96,8 @@ also supports an optional Cloudflare rate-limit binding named
 5. Store signing material as Worker secrets:
 
    ```console
-   wrangler secret put ONLINE_SIGNING_PRIVATE_KEY_PKCS8_PEM
-   wrangler secret put ONLINE_SIGNING_KEY_ID
+   npx wrangler secret put ONLINE_SIGNING_PRIVATE_KEY_PKCS8_PEM
+   npx wrangler secret put ONLINE_SIGNING_KEY_ID
    ```
 
    The private key must be PKCS#8 PEM. Do not commit it. `ONLINE_SIGNING_KEY_ID`
@@ -81,15 +105,19 @@ also supports an optional Cloudflare rate-limit binding named
 
 6. Insert or update an entitlement:
 
-   ```console
-   cd ../cloudflare-license-admin
-   LICENSECC_SYNC_TOKEN=<secret> npm run sync:entitlement -- ^
-     --url https://licensecc-admin.example.workers.dev ^
-     --project DEFAULT --feature DEFAULT ^
-     --fingerprint <64 hex fingerprint> ^
-     --status active --assertion-ttl 300 ^
-     --customer-id cus_123 --license-id lic_123 ^
+   From the repository root in PowerShell, with an authorized short-lived
+   staging sync credential:
+
+   ```powershell
+   $env:LICENSECC_SYNC_TOKEN = "<secret>"
+   npm run sync:entitlement --workspace @licensecc/cloudflare-license-admin -- `
+     --url https://licensecc-admin.example.workers.dev `
+     --project DEFAULT --feature DEFAULT `
+     --fingerprint <64-hex-fingerprint> `
+     --status active --assertion-ttl 300 `
+     --customer-id cus_123 --license-id lic_123 `
      --reason "initial entitlement"
+   Remove-Item Env:LICENSECC_SYNC_TOKEN
    ```
 
    The sync helper writes the base entitlement projection and is appropriate for
@@ -103,14 +131,11 @@ also supports an optional Cloudflare rate-limit binding named
 
    ```console
    npm run device-key -- generate --out-dir .device-key
-   npm run entitlement -- device-upsert ^
-     --fingerprint <64 hex fingerprint> ^
-     --device-key-id sha256:<64 hex key id> ^
-     --public-key-spki-der-base64 <base64 from .device-key/device_public_key.json> ^
-     --actor operator@example.com ^
-     --reason "initial device enrollment" ^
-     --remote
+   npm run entitlement -- device-upsert --fingerprint FINGERPRINT_64_HEX --device-key-id sha256:KEY_ID_64_HEX --public-key-spki-der-base64 PUBLIC_KEY_SPKI_DER_BASE64 --actor operator@example.com --reason "initial device enrollment" --remote
    ```
+
+   Replace the uppercase values with the entitlement fingerprint and the
+   generated public-key record before running the command.
 
    The generated private-key file is for local integration tests and bootstrap
    only. Production hosts should create or import the P-256 key through their
@@ -125,12 +150,10 @@ also supports an optional Cloudflare rate-limit binding named
    To smoke-test the signed request body fields during integration:
 
    ```console
-   npm run device-key -- sign ^
-     --private-key .device-key/device_private_key.pkcs8.pem ^
-     --device-key-id sha256:<64 hex key id> ^
-     --fingerprint <64 hex fingerprint> ^
-     --nonce <64 hex nonce>
+   npm run device-key -- sign --private-key .device-key/device_private_key.pkcs8.pem --device-key-id sha256:KEY_ID_64_HEX --fingerprint FINGERPRINT_64_HEX --nonce NONCE_64_HEX
    ```
+
+   Replace the uppercase values with the exact registration and request values.
 
 8. Deploy:
 
@@ -257,7 +280,7 @@ materialized `wrangler.toml` as the exact environment profile, requires
 for the standard portal-compatible topology, requires
 the environment-specific `ORDER_INGEST_AUDIENCE`, and requires a structured
 `ACCOUNT_TOKEN_ACTIVE_PEPPER_ID`. It then invokes one
-`wrangler secret list --format json` command with a 30-second timeout and
+`npx wrangler secret list --format json` command with a 30-second timeout and
 bounded output. Only secret names are parsed; secret values, Wrangler
 diagnostics, the account, and the Worker target are never emitted.
 
@@ -418,7 +441,7 @@ duplicate check as crash-redrive evidence.
   bearer-authenticated `/api/sync/entitlements` projection endpoint. The helper
   requires an actor for mutations, stamps events as `actor_type='cli'`,
   `source='cli'`, and increments `revocation_seq` in SQL instead of accepting
-  caller-provided sequence values. It runs mutations through `wrangler d1 execute
+  caller-provided sequence values. It runs mutations through `npx wrangler d1 execute
   --file`, which is transactional on both local (`db.batch()`) and remote (the D1
   import path), so the entitlement write and its audit event commit atomically or
   not at all — there is no path that writes the row without the event.
@@ -496,4 +519,4 @@ fraud.confirmed / chargeback) and the Worker projects them onto entitlements.
   capped at `MAX_ORDER_BODY_BYTES = 16384`; overflow cancels the stream even if
   `Content-Length` is absent or lies. The HMAC is over those original bytes,
   then the body must decode as valid UTF-8 before JSON parsing.
-- Set the HMAC key map as a secret: `wrangler secret put ORDER_HMAC_SECRETS`.
+- Set the HMAC key map as a secret: `npx wrangler secret put ORDER_HMAC_SECRETS`.

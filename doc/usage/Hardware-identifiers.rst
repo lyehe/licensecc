@@ -2,90 +2,112 @@
 Hardware Identifiers
 #######################
 
-Hardware identifiers are used to link the execution of the software to a physical hardware (a pc). 
-The software executing on client's hardware, when it finds the license is missing, calls the api 
-:ref:`identify_pc <api/public_api:Public api>`
-and generates an hardware identifier. The client has to communicate the hardware id back to the software publisher that 
-will issue a license for him (for details see: :ref:`issue licenses <usage/issue-licenses:Issue Licenses>`).   
+Hardware identifiers bind a license decision to properties observed on a
+client device. When a local license is missing, the application can call
+:ref:`identify_pc <api/public_api:Public api>`, display the resulting
+identifier, and ask the customer to send it to the publisher. The publisher
+then issues a bound license as described in
+:ref:`issue licenses <usage/issue-licenses:Issue Licenses>`.
+
+Raw identifiers can contain device, network, host, tenant, or personal data.
+Redact them from routine logs, telemetry, public issues, and support bundles;
+request the full value only through an explicit trusted support channel.
 
 .. NOTE::
 
-  Licensecc will guess the environment where the user is trying to launch the software (eg. a Virtual Machine), 
-  embed the information into the hardware id and report it to the software publisher before he is issuing the license.
+  A hardware identifier is a licensing signal, not proof of an untampered
+  physical machine. Licensecc records the selected strategy in the identifier
+  so the runtime can validate it consistently later.
 
 *****************
 Usage scenarios
 *****************
-With the recent coming of virtualized environments the installation of software directly on the machine has been less and less.
+Choose a strategy that matches where the application actually runs. Hardware
+properties that are useful on a workstation may be unstable or meaningless in
+virtual machines and orchestrated containers.
 
 
-Execution in a physical hardware
-=================================
-If the client executes the software on a physical hardware it is possible to identify the 
-hardware by various parameters (cpu type/memory/disk label/mac address) see :ref:`features <analysis/features:Features>`
-for detail of supported identification strageties.
+Execution on physical hardware
+==============================
+On a physical machine, Licensecc can derive an identifier from supported
+device properties. See :doc:`../api/hardware_identifiers` for the current
+identification strategies and project configuration points.
 
 Execution in a virtual machine
 ==============================
-If you're allowing software users to generate pc identifiers in a virtual machine
-you should ask yourself what's the real use of it, since the vm can be copied as a whole elsewhere 
-and there are few ways to detect this (without using an external license server that's not yet supported by this library).
+Treat a virtual-machine identifier as clone resistance, not clone prevention.
+A copied VM can retain many of the same properties, while ordinary VM
+maintenance can change others. A MAC address, for example, may change during a
+legitimate move or be preserved by a clone.
 
-* Usually when the machine is copied the MAC address is changed. But sometimes it changes on its own. Software publishers may want to use this as a last resort to prevent the vm for being cloned. It has to be verified case by case.
-* Software editors may want to prevent people from extracting the software from the VM. They can use an hidden registry key or a specific file in a location outside the installation directory to verify the software is distributed in the original VM. Or they can link the execution to a specific kind of virtualization (this is supported by OpenLicenseManager).
+Licensecc's supported online backend can add account-bound activation,
+node-locked leases, floating seats, renewal, and revocation controls. Those
+server decisions improve lifecycle control but do not turn a mutable VM
+property into a hardware root of trust. See
+:doc:`issue-licenses` for local evaluation and hosted runbook boundaries.
 
 .. TIP::
 
-    In this case issuing a `demo` license with just a date limitation is advised.
+    For an evaluation running in a disposable VM, prefer a short-lived trial
+    over a long-lived hardware-bound license.
 
 Execution in a container
 ========================
-Depending on how containers are used having hardware identifiers may make sense or no sense at all. 
-For instance if containers are used to avoid to pollute the external distribution it makes perfect sense to have an 
-hardware identifier, if users are running dockers in a kubernetes cluster in the cloud it makes no sense at all.
+A long-lived desktop container may inherit stable host properties, but an
+ephemeral replica in an orchestrated cluster generally does not. Prefer
+account, entitlement, lease, or seat identity for elastic workloads. Validate
+the selected strategy on every supported deployment platform before treating
+it as a binding input.
 
 *************************************************
 Hardware Identifier Generation
 *************************************************
 
-The licensed application will call the api method :ref:`identify_pc <api/public_api:Public api>` to generate an hardware 
-identifier and print it out to the user, the user then will contact the software licensor to get an appropriate license.
+Call :ref:`identify_pc <api/public_api:Public api>` to generate the identifier
+that the application displays or returns through a support workflow. Pass an
+explicit :cpp:enum:`LCC_API_HW_IDENTIFICATION_STRATEGY` when the product owns
+a tested strategy choice, or pass
+:cpp:enumerator:`LCC_API_HW_IDENTIFICATION_STRATEGY::STRATEGY_DEFAULT` to use
+the project-configured order for the detected environment.
 
-The licensed application can either decide an identification strategy by passing it in the ``identify_pc`` parameter ``hw_id_method``
-(see: :cpp:enum:`LCC_API_HW_IDENTIFICATION_STRATEGY` ) or let `licensecc` automatically choose how to generate the 
-identifier (by passing `hw_id_method=STRATEGY_DEFAULT`).   
-In this case `licensecc` is able to identify which virtual environment the user is running in and select the appropriate generation
-strategy. 
-
-Below the full identifier generation workflow used by the :ref:`identify_pc <api/public_api:Public api>` method. 
+The following diagram summarizes the default selection:
 
 .. figure:: ../_static/pc-id-selection.png
+   :alt: Default hardware-identifier strategy selection by execution environment
 
 
 Default identifier generation (implementation details)
 =======================================================
 
-This section describes the inner working of the default hardware identifer strategy.
+With
+:cpp:enumerator:`LCC_API_HW_IDENTIFICATION_STRATEGY::STRATEGY_DEFAULT`, the
+runtime:
 
-When the licensed software calls :ref:`identify_pc <api/public_api:Public api>` with :cpp:enumerator:`LCC_API_HW_IDENTIFICATION_STRATEGY::STRATEGY_DEFAULT` 
-the identifier generation will follow these steps:
+#. Uses ``IDENTIFICATION_STRATEGY`` only when the process environment provides
+   a valid numeric strategy id.
+#. Otherwise classifies the environment as bare metal, VM, cloud VM, Docker,
+   or LXC.
+#. Tries the corresponding project macros in order until a supported strategy
+   succeeds. These are :c:macro:`LCC_BARE_TO_METAL_STRATEGIES`,
+   :c:macro:`LCC_VM_STRATEGIES`, ``LCC_CLOUD_STRATEGIES``,
+   ``LCC_DOCKER_STRATEGIES``, and ``LCC_LXC_STRATEGIES``.
+#. Fails when no configured strategy produces an identifier; it does not
+   silently invent an identifier.
 
- - It will first look to the environment variable ``IDENTIFICATION_STRATEGY``. If set it will use the identification strategy in that variable.
- - It will try to determine which virtual environment the licensed software is running in. 
-    * If no virtual environment found it will use the strategies in :c:macro:`LCC_BARE_TO_METAL_STRATEGIES`, it will try them one by one until the first one succeeds.
-    * If it detects it's running in a Virtual Machine it will try the strategies in :c:macro:`LCC_VM_STRATEGIES`, it will try them one by one until the first one succeeds.
+The generated identifier records the strategy that produced it. Verification
+uses that recorded strategy even if the project's later default order changes.
+Runtime policy rejects IP-address, environment-selected, and weak disk-label
+bindings by default through ``LCC_ALLOW_RUNTIME_IP_BINDING``,
+``LCC_ALLOW_RUNTIME_ENV_SELECTED_BINDING``, and
+``LCC_ALLOW_WEAK_DISK_LABEL_BINDING``. Opt in only after a deliberate security
+review.
 
-if you're interested in implementing your own hardware identification strategy you can have a look to the library
- :ref:`extension points <api/extend:Tweak hardware signature generator>`.
+.. tip::
 
-.. TIP:
+   Use ``lccinspector`` to enumerate candidate identifiers when diagnosing an
+   unstable machine. Treat ``IDENTIFICATION_STRATEGY`` as a controlled support
+   override, not as a customer-selected production policy.
 
-    If `licensecc` is generating a bad hardware identifier (eg. 'AAAA-AAAA-AAAA') software licensor can ask the user 
-    to set the environment variable ``IDENTIFICATION_STRATEGY`` and try again. Or he can send the user the `lccinspector`
-    to generate all the possible identifiers for that machine.
-
-
-.. NOTE::
-    
-    `licensecc` will try to validate the identifier using the same strategy that was used to generate it, regardless  
-    of what is the default method now in use. eg: disk identifiers will always be validated by ``DiskStrategy``.
+To add a product-specific generator, use the
+:ref:`extension points <api/extend:Tweak hardware signature generator>` and
+test generation and validation on every supported platform.

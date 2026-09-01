@@ -14,9 +14,9 @@
   "signed_payload": "online.payload",
   "public_x": "e0ec72a1cebdb87086f3dcc62a396f4d32d422a908f1813304f88451c898a87c",
   "public_y": "bef71729cea0f7c405e32943fdc4301172d0f00b448c71b800855ebac2ae4197",
-  "generated_by": "npm --prefix services/cloudflare-licensing-backend run device-key -- verify-vectors --dir ../../test/vectors/device_proof/v1 --write-manifest",
+  "generated_by": "node services/cloudflare-licensing-backend/scripts/device-key.mjs verify-vectors --dir test/vectors/device_proof/v1 --write-manifest",
   "files": {
-    "README.md": "9efa5abaf8570cbfb9caba98f012c558c96911367e0a2bcb73f33fc8db659cd7",
+    "README.md": "93f49c74337a554fa96c33c1682a0cf3bae6c4d9c9b637c12134897207d684d1",
     "device_key_id.txt": "c48dc05c6d3f6b26cf251af2fc4a93dd9f70d2f02fbeb91e9257895726affab5",
     "lease.payload": "d70c116a6a07ebe819efa7deec4c8bd836ba7a4478a8fcebb15abb438b461824",
     "online.payload": "47316845f2d6d0b058fabb76fd1974c5c81ff9cf37d42f98640d03a6f03a1a42",

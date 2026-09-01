@@ -49,7 +49,13 @@ try {
         & $doxygen.Source $doxyfile
     }
     Invoke-Checked "Sphinx $builder" {
-        & $uv.Source run --no-project --with-requirements $requirements --with $pythonSdk python -m sphinx -b $builder -W --keep-going $docRoot $output
+        & $uv.Source run --no-project --with-requirements $requirements --with $pythonSdk python -m sphinx -E -a -b $builder -W --keep-going $docRoot $output
+    }
+    if (-not $LinkCheck) {
+        $llmsOutput = Join-Path $output "llms.txt"
+        if (-not (Test-Path -LiteralPath $llmsOutput -PathType Leaf)) {
+            throw "Sphinx HTML output is missing llms.txt; keep doc/_extra/llms.txt in html_extra_path."
+        }
     }
 } finally {
     Pop-Location

@@ -1,0 +1,28 @@
+# Licensecc documentation
+
+> Licensecc provides a native C/C++ licensing runtime plus optional online
+> services and Python, .NET, and Java verification SDKs. The repository is
+> AGPL-3.0-or-later. Follow the linked authority for the surface you change.
+
+## Start here
+
+- [Choose a workflow](/en/latest/usage/repository-workflows.html)
+- [Integrate the native runtime](/en/latest/usage/integration.html)
+- [Issue licenses](/en/latest/usage/issue-licenses.html)
+- [Capability and maturity registry](/en/latest/capabilities/index.html)
+
+## Reference and operations
+
+- [API reference](/en/latest/api/index.html)
+- [Operations](/en/latest/operations/index.html)
+- [Security](/en/latest/security/index.html)
+
+## Contributors and coding agents
+
+- [Architecture and change boundaries](/en/latest/architecture/index.html)
+- [Change guide](/en/latest/architecture/change-guide.html)
+- [Ownership map](/en/latest/architecture/ownership.html)
+- [Documentation authoring contract](/en/latest/development/documentation.html)
+
+Procedures, commands, and safety rules live on the linked maintained pages;
+this file is intentionally only a discovery index.

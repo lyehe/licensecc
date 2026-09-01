@@ -114,6 +114,75 @@ supported runtime or install behavior changes. Run `npm run test:sdks` from
 the root; this command runs Python, .NET, and Java checks without changing the
 root lockfile.
 
+## Documentation, README, or agent guidance
+
+Put information at the narrowest maintained authority that can keep it true:
+
+* `README.md` owns the product summary, status, first-success route, and links
+  into maintained documentation;
+* `doc/` owns tutorials, how-to guides, reference, operations, architecture,
+  and maintainer documentation;
+* a service, SDK, example, benchmark, or fuzz README owns commands and limits
+  that are meaningful only beside that source; and
+* `AGENTS.md` plus `.agents/skills/using-licensecc/` provide concise routing to
+  those authorities. They must not copy an architecture decision or invent a
+  competing command contract.
+
+Update every affected cross-link when a page moves, retain stable labels or an
+explicit redirect when a published target changes, and derive API/reference
+material from its authoritative source. Do not edit a protected execution plan
+under `docs/superpowers/plans/` while implementing it; record completed-work
+evidence under `docs/implementation/` instead.
+
+Run `npm run test:docs-accuracy` first, then `npm run check:docs`. Use
+`npm run check:docs:links` only for scheduled or manual network validation.
+When instructions change a service, SDK, browser, deployment, or native
+workflow, also run the owning surface's gate rather than treating a successful
+Sphinx build as behavioral proof.
+
+When documentation or examples describe the native install, local license
+issuance, or `examples/minimal` consumer journey, also run
+`npm run test:docs-quickstart`. This dedicated gate creates and removes a
+source-pure workspace below `build/docs-quickstart`; it is intentionally
+separate from `check:docs` and is not included in `check:review`.
+
+## Example, benchmark, or fuzz harness
+
+Keep a standalone integration journey under `examples/`, a performance probe
+under `benchmark/`, and an untrusted-input harness or synthetic corpus under
+`fuzz/`. Do not move production behavior into a demonstration or make the main
+build depend on an opt-in verification harness. An example change that exposes
+a new public behavior requires the owning C/C++ API change and test, not just a
+sample-only workaround.
+
+Build the affected example against an installed package. Benchmark changes use
+the opt-in benchmark configuration. Parser fuzz changes require
+`npm run test:native-security` and the Linux Clang `ci-linux-sanitizers`
+configure, build, CTest, and bounded corpus-smoke sequence. Core changes also
+require the build-purity gate from `AGENTS.md`.
+
+For `examples/minimal` or native integration documentation, the installed
+consumer proof is `npm run test:docs-quickstart`; it exercises the full
+configure, install, issue, and verify path without cloud credentials.
+
+## Vendored generator, patches, or provenance
+
+Treat `extern/license-generator/` as reviewed repository source with a separate
+license and provenance boundary. A source update must deliberately review the
+vendored diff, `LICENSE`, and `PROVENANCE.md`; it must not arrive as a build,
+bootstrap, documentation, or dependency-install side effect. Files under
+`patches/` are retained review artifacts and are never an implicit patch queue.
+
+Run the read-only source-presence check:
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/bootstrap.ps1 -CheckOnly
+```
+
+Also run the relevant generator/core tests and the build-purity gate. Do not
+fetch, initialize, repair, or overwrite vendored input merely to make a check
+pass.
+
 ## OpenAPI operation
 
 The deployable that serves the route owns both the route inventory and its
@@ -140,3 +209,10 @@ For work outside that deterministic gate, use the dedicated commands:
 `npm run test:sdks`, `npm run setup:browsers`, `npm run test:e2e`,
 `npm run check:dry-run`, and `npm run check:docs`. The docs command requires
 Doxygen; `npm run check:docs:links` is network-sensitive and scheduled/manual.
+
+`npm run check:review` is a convenience aggregate for the deterministic PR,
+SDK, Worker dry-run, and documentation gates. The legacy `npm run check:all`
+name remains as a compatibility alias to that exact aggregate; neither command
+includes browser E2E, browser installation, native build purity, or network
+link validation. Follow the task-packet and handoff convention in
+`CONTRIBUTING.md` so status reports name the exact gates and omitted surfaces.

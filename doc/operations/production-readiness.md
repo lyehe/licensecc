@@ -50,7 +50,7 @@ The initial hosted production scope is:
 PostgreSQL/Supabase remains a fenced partial adapter. A failing conformance
 test must be fixed, but the adapter is not a production runtime target until it
 passes every promotion requirement in
-[`doc/analysis/db-backends.md`](../analysis/db-backends.md).
+the {doc}`database backend promotion rule <database-backends>`.
 
 ## Accountable roles
 

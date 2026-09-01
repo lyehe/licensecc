@@ -3,33 +3,89 @@
 This example shows how a host application can implement `LCC_ONLINE_CHECK`
 without adding HTTP transport to licensecc core.
 
-Build it against an installed licensecc package. The example uses libcurl when
-available and falls back to WinHTTP on Windows:
+## Build and run
 
-```console
-cmake -S examples/online_callback -B build/online_callback ^
-  -DCMAKE_PREFIX_PATH=<licensecc install dir> ^
-  -DLCC_PROJECT_NAME=<project name>
-cmake --build build/online_callback
+This is a standalone consumer of an installed Licensecc package; it is not a
+target in the repository-root build. First complete the
+[offline-first tutorial](../../doc/tutorials/offline-first-license.rst), which
+installs the `test` project under `build/dev-debug/install` and issues the
+matching sample license. The commands below start in the Licensecc repository
+root. Linux needs a libcurl development package; otherwise CMake intentionally
+skips this target. On Windows/MSVC, CMake uses libcurl when available and
+otherwise selects the native WinHTTP implementation.
+
+Starting directory: the Licensecc repository root. Shell: Bash on Linux or
+PowerShell 7 on Windows/MSVC.
+
+### Linux (Bash)
+
+```bash
+repo="$PWD"
+cmake -S examples/online_callback -B build/online-callback \
+  -DCMAKE_BUILD_TYPE=Debug \
+  -DCMAKE_PREFIX_PATH="$repo/build/dev-debug/install" \
+  -Dlicensecc_DIR="$repo/build/dev-debug/install/lib/cmake/licensecc" \
+  -DLCC_PROJECT_NAME=test
+cmake --build build/online-callback
+"$repo/build/online-callback/online_callback" \
+  "$repo/build/dev-debug/projects/test/licenses/quickstart.lic" \
+  https://licensecc-online-verifier.example.workers.dev
 ```
 
-Run:
+### Windows/MSVC (PowerShell 7)
 
-```console
-online_callback <license-path> https://licensecc-online-verifier.example.workers.dev
+```powershell
+$repo = (Resolve-Path ".").Path
+cmake -S examples/online_callback -B build/online-callback `
+  -G "Visual Studio 17 2022" -A x64 `
+  "-DCMAKE_PREFIX_PATH=$repo/build/dev-debug/install" `
+  "-Dlicensecc_DIR=$repo/build/dev-debug/install/cmake/licensecc" `
+  -DLCC_PROJECT_NAME=test
+cmake --build build/online-callback --config Debug
+& "$repo/build/online-callback/Debug/online_callback.exe" `
+  "$repo/build/dev-debug/projects/test/licenses/quickstart.lic" `
+  https://licensecc-online-verifier.example.workers.dev
 ```
 
-You can pass backup verifier endpoints after the primary endpoint:
+Replace the example verifier URL with a deployed HTTPS endpoint that returns a
+valid signed assertion for the `test` project. With a valid local license and
+an accepted online assertion, the executable exits 0 and prints:
 
-```console
-online_callback <license-path> https://primary.example.workers.dev https://backup.example.workers.dev
+```text
+result=license OK
+license OK
+```
+
+You can pass backup verifier endpoints after the primary endpoint. From the
+same repository-root shells above:
+
+```bash
+"$repo/build/online-callback/online_callback" \
+  "$repo/build/dev-debug/projects/test/licenses/quickstart.lic" \
+  https://primary.example.workers.dev \
+  https://backup.example.workers.dev
+```
+
+```powershell
+& "$repo/build/online-callback/Debug/online_callback.exe" `
+  "$repo/build/dev-debug/projects/test/licenses/quickstart.lic" `
+  https://primary.example.workers.dev `
+  https://backup.example.workers.dev
 ```
 
 Verifier URLs must use HTTPS by default. For local development against a test
 server, pass `--allow-insecure-http-for-test` before the HTTP endpoint:
 
-```console
-online_callback <license-path> --allow-insecure-http-for-test http://127.0.0.1:8787
+```bash
+"$repo/build/online-callback/online_callback" \
+  "$repo/build/dev-debug/projects/test/licenses/quickstart.lic" \
+  --allow-insecure-http-for-test http://127.0.0.1:8787
+```
+
+```powershell
+& "$repo/build/online-callback/Debug/online_callback.exe" `
+  "$repo/build/dev-debug/projects/test/licenses/quickstart.lic" `
+  --allow-insecure-http-for-test http://127.0.0.1:8787
 ```
 
 Endpoints are tried in order. The callback falls through to the next endpoint

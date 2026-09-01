@@ -5,6 +5,21 @@ This service is intentionally separate from the public verifier and admin UI:
 it owns backup automation only, uses a least-privilege D1 REST API token, and
 stores SQL dumps plus metadata manifests in R2.
 
+**Audience:** backup/recovery contributors and authorized platform operators.
+This service is not part of native or SDK integration.
+
+| Goal | Start here | Side effects |
+| --- | --- | --- |
+| Validate code locally | [Local validation](#local-validation) | Local build/test output only |
+| Understand the service | [What it provides](#what-it-provides) | Read-only documentation |
+| Configure Cloudflare | [Cloudflare setup](#cloudflare-setup) | Creates or mutates R2, Worker, Workflow, and secret state |
+| Restore or prove readiness | [Restore runbook](#restore-runbook) and [production readiness](../../doc/operations/production-readiness.md) | Destructive/remote operator actions where labelled |
+
+Unless a block explicitly says "repository root," run service-local commands
+from `services/cloudflare-d1-backup` after the single root workspace install.
+Remote validation, backup, restore, deployment, and secret commands require
+authority for the named environment.
+
 ## Local validation
 
 Install dependencies once from the repository root; the root `package-lock.json`
@@ -24,6 +39,10 @@ this service directory; do not create a package-local lockfile.
 After deploying to staging, validate the deployed Worker and Workflow without
 printing secret values:
 
+Run this from the service directory against an explicitly authorized staging
+environment. It reads deployment state and exercises the documented staging
+surface.
+
 ```sh
 npm run validate:deploy -- \
   --url https://licensecc-d1-backup.example.workers.dev \
@@ -33,6 +52,9 @@ npm run validate:deploy -- \
 ```
 
 For production readiness, require the D1 export token:
+
+Run this from the service directory. It inspects a production credential name
+and remote deployment state and therefore requires production authorization.
 
 ```sh
 npm run validate:deploy -- \
@@ -64,10 +86,13 @@ mistakes. The R2 export path gives you longer retention and an offline SQL dump.
 
 ## Cloudflare setup
 
+The following steps create or mutate remote Cloudflare resources and secrets.
+They are not a local evaluation path.
+
 1. Create an R2 bucket:
 
    ```sh
-   wrangler r2 bucket create licensecc-d1-backups
+   npx wrangler r2 bucket create licensecc-d1-backups
    ```
 
 2. Copy `wrangler.example.jsonc` to `wrangler.jsonc` and set:
@@ -83,13 +108,13 @@ mistakes. The R2 export path gives you longer retention and an offline SQL dump.
    database, then store it as a Worker secret:
 
    ```sh
-   wrangler secret put D1_REST_API_TOKEN
+   npx wrangler secret put D1_REST_API_TOKEN
    ```
 
 4. Optional: enable manual trigger/status endpoints:
 
    ```sh
-   wrangler secret put BACKUP_TRIGGER_TOKEN
+   npx wrangler secret put BACKUP_TRIGGER_TOKEN
    ```
 
 5. Deploy:
@@ -170,8 +195,8 @@ npm run time-travel -- restore \
 For R2 SQL dumps, restore into a staging D1 database first:
 
 ```sh
-wrangler r2 object get licensecc-d1-backups/<backup-key> --file restored.sql
-wrangler d1 execute licensecc-online-verifier-staging --remote --file restored.sql
+npx wrangler r2 object get licensecc-d1-backups/<backup-key> --file restored.sql
+npx wrangler d1 execute licensecc-online-verifier-staging --remote --file restored.sql
 ```
 
 Use the restore drill wrapper for release evidence. It refuses to run without
@@ -231,7 +256,7 @@ match. This proves import fidelity against the exported snapshot rather than
 against a live database that may have advanced. It then requires
 `d1_migrations` to be present and to name an exact prefix of the checked-out
 backend migrations, records the historical schema-object digest, and runs
-`wrangler d1 migrations apply` against the scratch target when that prefix is
+`npx wrangler d1 migrations apply` against the scratch target when that prefix is
 old. Missing, divergent, ahead-of-repository, or incomplete migration history
 fails closed. A migration upgrade requires `--scratch-config` pointing at the
 backend configuration.

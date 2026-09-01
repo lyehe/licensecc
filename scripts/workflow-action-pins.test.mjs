@@ -526,7 +526,7 @@ test("repository organization contracts are exact-once local PR gates", () => {
   assert.equal(packageJson.scripts["check:hotspots"], "node scripts/report-hotspots.mjs --check");
   assert.equal(
     packageJson.scripts["test:repository"],
-    "node --test scripts/ci/check-script-catalog.test.mjs scripts/ci/ownership-contract.test.mjs scripts/ci/repository-doctor.test.mjs",
+    "node --test scripts/ci/check-script-catalog.test.mjs scripts/ci/ownership-contract.test.mjs scripts/ci/repository-doctor.test.mjs scripts/ci/run-offline-docs-quickstart.test.mjs",
   );
   for (const command of ["npm run test:repository", "npm run check:scripts", "npm run check:hotspots"]) {
     assert.equal(

@@ -29,9 +29,9 @@
     </Description>
     <PackageTags>licensecc;licensing;rsa;token;verification</PackageTags>
     <PackageLicenseExpression>AGPL-3.0-or-later</PackageLicenseExpression>
-    <RepositoryUrl>https://github.com/open-license-manager/licensecc</RepositoryUrl>
+    <RepositoryUrl>https://github.com/lyehe/licensecc</RepositoryUrl>
     <!-- R5.2 publish-readiness: project URL, a README that renders on NuGet, and a restore lockfile. -->
-    <PackageProjectUrl>https://github.com/open-license-manager/licensecc</PackageProjectUrl>
+    <PackageProjectUrl>https://github.com/lyehe/licensecc</PackageProjectUrl>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
     <IncludeSymbols>true</IncludeSymbols>

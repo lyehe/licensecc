@@ -8,21 +8,60 @@ product only after `acquire_license()` returns `LICENSE_OK`, then checks each
 optional feature separately. Any non-`LICENSE_OK` result leaves that capability
 unavailable and prints diagnostics with `lcc_strerror()` and `print_error()`.
 
-Build it against an installed Licensecc package:
+## Build and run
 
-```console
-cmake -S . -B build -DCMAKE_PREFIX_PATH=<prefix> -DLCC_PROJECT_NAME=<product>
-cmake --build build
+This is a standalone consumer of an installed Licensecc package; it is not a
+target in the repository-root build. First complete the
+[offline-first tutorial](../../doc/tutorials/offline-first-license.rst), which
+installs the `test` project under `build/dev-debug/install` and issues the
+matching sample license. The commands below start in the Licensecc repository
+root.
+
+Starting directory: the Licensecc repository root. Shell: Bash on Linux or
+PowerShell 7 on Windows/MSVC.
+
+### Linux (Bash)
+
+```bash
+repo="$PWD"
+cmake -S examples/fail_closed_host -B build/fail-closed-host \
+  -DCMAKE_BUILD_TYPE=Debug \
+  -DCMAKE_PREFIX_PATH="$repo/build/dev-debug/install" \
+  -Dlicensecc_DIR="$repo/build/dev-debug/install/lib/cmake/licensecc" \
+  -DLCC_PROJECT_NAME=test
+cmake --build build/fail-closed-host
+"$repo/build/fail-closed-host/fail_closed_host" \
+  "$repo/build/dev-debug/projects/test/licenses/quickstart.lic" 1.2.3
 ```
 
-The example uses `find_package(licensecc REQUIRED COMPONENTS <product>)` so the
-selected project is explicit in the consumer CMake configure.
+### Windows/MSVC (PowerShell 7)
 
-Run it with an explicit license path and the running application version:
-
-```console
-./build/fail_closed_host path/to/license.lic 1.2.3
+```powershell
+$repo = (Resolve-Path ".").Path
+cmake -S examples/fail_closed_host -B build/fail-closed-host `
+  -G "Visual Studio 17 2022" -A x64 `
+  "-DCMAKE_PREFIX_PATH=$repo/build/dev-debug/install" `
+  "-Dlicensecc_DIR=$repo/build/dev-debug/install/cmake/licensecc" `
+  -DLCC_PROJECT_NAME=test
+cmake --build build/fail-closed-host --config Debug
+& "$repo/build/fail-closed-host/Debug/fail_closed_host.exe" `
+  "$repo/build/dev-debug/projects/test/licenses/quickstart.lic" 1.2.3
 ```
+
+The example uses `find_package(licensecc REQUIRED COMPONENTS test)` through
+the `LCC_PROJECT_NAME=test` configure value, so the selected installed project
+is explicit in the consumer CMake configure. With the sample license, the
+process exits 0 and prints:
+
+```text
+application enabled
+REPORTS unavailable
+EXPORT unavailable
+```
+
+The optional feature lines become `enabled` only when those features are
+licensed. A base-product denial leaves every capability unavailable, prints
+`lcc_strerror()` and `print_error()` diagnostics on stderr, and exits 1.
 
 The example populates `CallerInformations.version` and sets
 `CallerInformations.magic = LCC_PROJECT_MAGIC_NUM` for every check. It reads

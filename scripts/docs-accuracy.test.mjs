@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, relative, resolve, sep } from "node:path";
 import test from "node:test";
 
 const repositoryRoot = resolve(import.meta.dirname, "..");
@@ -43,6 +43,341 @@ function trackedChildDirectories(relativeRoot) {
     .map((path) => path.slice(prefix.length).split("/", 1)[0]))]
     .sort();
 }
+
+function candidateFiles(relativeRoots) {
+  const output = git([
+    "ls-files",
+    "--cached",
+    "--others",
+    "--exclude-standard",
+    "--",
+    ...relativeRoots,
+  ]);
+  return output.length === 0 ? [] : output.split(/\r?\n/u).filter(Boolean).sort();
+}
+
+function maintainedGuidancePaths() {
+  const rootGuidance = new Set(["AGENTS.md", "CONTRIBUTING.md", "README.md"]);
+  return candidateFiles([
+    "AGENTS.md",
+    "CONTRIBUTING.md",
+    "README.md",
+    ".agents/skills/using-licensecc",
+    "benchmark",
+    "doc",
+    "examples",
+    "fuzz",
+    "packages",
+    "scripts",
+    "sdks",
+    "services",
+    "test",
+  ]).filter((path) => {
+    if (rootGuidance.has(path) || path === ".agents/skills/using-licensecc/SKILL.md") {
+      return true;
+    }
+    if (path.startsWith("doc/")) {
+      return !path.startsWith("doc/analysis/") && /\.(?:md|rst)$/u.test(path);
+    }
+    return path === "scripts/README.md" || path.endsWith("/README.md");
+  });
+}
+
+function withoutFencedCode(text) {
+  return text
+    .replace(/^```[^\r\n]*\r?\n[\s\S]*?^```\s*$/gmu, "")
+    .replace(/^~~~[^\r\n]*\r?\n[\s\S]*?^~~~\s*$/gmu, "");
+}
+
+function markdownLinkTargets(text) {
+  const prose = withoutFencedCode(text);
+  const targets = [];
+  for (const match of prose.matchAll(/!?\[[^\]\r\n]*\]\(\s*(<[^>]+>|[^\s)]+)(?:\s+["'][^)]*["'])?\s*\)/gu)) {
+    targets.push(match[1]);
+  }
+  for (const match of prose.matchAll(/^\s*\[[^\]\r\n]+\]:\s*(<[^>]+>|\S+)/gmu)) {
+    targets.push(match[1]);
+  }
+  return targets;
+}
+
+function localTargetPath(sourcePath, rawTarget) {
+  let target = rawTarget.trim();
+  if (target.startsWith("<") && target.endsWith(">")) {
+    target = target.slice(1, -1);
+  }
+  if (target.startsWith("#") || target.startsWith("//") || /^[a-z][a-z\d+.-]*:/iu.test(target)) {
+    return undefined;
+  }
+  target = target.split("#", 1)[0].split("?", 1)[0];
+  if (target.length === 0 || target.startsWith("/")) {
+    return undefined;
+  }
+  try {
+    target = decodeURIComponent(target);
+  } catch {
+    // Leave a malformed escape intact so the missing-path diagnostic is useful.
+  }
+  return resolve(dirname(resolve(repositoryRoot, sourcePath)), target);
+}
+
+function workspacePackages() {
+  const rootManifest = JSON.parse(source("package.json"));
+  return rootManifest.workspaces.map((workspacePath) => {
+    const manifest = JSON.parse(source(`${workspacePath}/package.json`));
+    return {
+      name: manifest.name,
+      path: workspacePath,
+      scripts: manifest.scripts ?? {},
+    };
+  });
+}
+
+function fencedBlocks(text) {
+  const blocks = [];
+  for (const pattern of [
+    /^```[^\r\n]*\r?\n([\s\S]*?)^```\s*$/gmu,
+    /^~~~[^\r\n]*\r?\n([\s\S]*?)^~~~\s*$/gmu,
+  ]) {
+    for (const match of text.matchAll(pattern)) {
+      blocks.push({ content: match[1], index: match.index });
+    }
+  }
+  return blocks.sort((left, right) => left.index - right.index);
+}
+
+function sectionBefore(text, index) {
+  const prefix = text.slice(0, index);
+  let start = 0;
+  for (const match of prefix.matchAll(/^#{1,6}\s+/gmu)) {
+    start = match.index;
+  }
+  return prefix.slice(start);
+}
+
+test("maintained Markdown links resolve inside the candidate checkout", () => {
+  const failures = [];
+  for (const path of maintainedGuidancePaths().filter((candidate) => candidate.endsWith(".md"))) {
+    for (const rawTarget of markdownLinkTargets(source(path))) {
+      const target = localTargetPath(path, rawTarget);
+      if (target === undefined) {
+        continue;
+      }
+      const repositoryRelative = relative(repositoryRoot, target);
+      if (repositoryRelative === ".." || repositoryRelative.startsWith(`..${sep}`)) {
+        failures.push(`${path}: local link escapes the repository: ${rawTarget}`);
+      } else if (!existsSync(target)) {
+        failures.push(`${path}: local link target does not exist: ${rawTarget}`);
+      }
+    }
+  }
+  assert.deepEqual(failures, []);
+});
+
+test("documented npm commands resolve at the declared root or workspace scope", () => {
+  const rootScripts = JSON.parse(source("package.json")).scripts;
+  const workspaces = workspacePackages();
+  const failures = [];
+
+  for (const path of maintainedGuidancePaths()) {
+    const text = source(path);
+    const owningWorkspace = workspaces.find(({ path: workspacePath }) => (
+      path === workspacePath || path.startsWith(`${workspacePath}/`)
+    ));
+    for (const match of text.matchAll(/\bnpm run\s+([A-Za-z\d:_-]+)([^\r\n]*)/gu)) {
+      const [, command, remainder] = match;
+      const line = text.slice(0, match.index).split(/\r?\n/u).length;
+      const workspaceMatch = /--workspace(?:=|\s+)([^\s`"'\\]+)/u.exec(remainder);
+      if (workspaceMatch) {
+        const workspaceSelector = workspaceMatch[1].replace(/[),.;]+$/u, "");
+        const workspace = workspaces.find(({ name, path: workspacePath }) => (
+          workspaceSelector === name || workspaceSelector === workspacePath
+        ));
+        if (!workspace) {
+          failures.push(`${path}:${line}: unknown npm workspace ${workspaceSelector}`);
+        } else if (typeof workspace.scripts[command] !== "string") {
+          failures.push(`${path}:${line}: ${workspaceSelector} does not define npm script ${command}`);
+        }
+        continue;
+      }
+      if (typeof rootScripts[command] === "string") {
+        continue;
+      }
+      if (owningWorkspace && typeof owningWorkspace.scripts[command] === "string") {
+        continue;
+      }
+      const declaringWorkspaces = workspaces
+        .filter(({ scripts }) => typeof scripts[command] === "string")
+        .map(({ name, path: workspacePath }) => ({ name, path: workspacePath }));
+      if (declaringWorkspaces.length === 1) {
+        const commandContext = text.slice(Math.max(0, match.index - 1000), match.index);
+        const workspaceDirectory = declaringWorkspaces[0].path.split("/").at(-1);
+        if (new RegExp(`(?:cd|Set-Location|Push-Location)\\s+[^\\r\\n]*${workspaceDirectory}`, "iu").test(commandContext)) {
+          continue;
+        }
+      }
+      const declaration = declaringWorkspaces.length === 0
+        ? "no package defines it"
+        : `use --workspace with ${declaringWorkspaces.map(({ name }) => name).join(" or ")}`;
+      failures.push(`${path}:${line}: unscoped npm script ${command}; ${declaration}`);
+    }
+  }
+  assert.deepEqual(failures, []);
+});
+
+test("maintained guidance uses reproducible root-managed JavaScript tools", () => {
+  const workspaces = workspacePackages();
+  const failures = [];
+
+  for (const path of maintainedGuidancePaths()) {
+    const text = source(path);
+    for (const match of text.matchAll(/^\s*(?:[$>]\s*)?npm\s+--prefix\b/gmu)) {
+      const line = text.slice(0, match.index).split(/\r?\n/u).length;
+      failures.push(`${path}:${line}: replace executable npm --prefix guidance with a root workspace command`);
+    }
+
+    for (const match of text.matchAll(/^\s*(?:[$>]\s*)?wrangler\s+\S/gmu)) {
+      const line = text.slice(0, match.index).split(/\r?\n/u).length;
+      failures.push(`${path}:${line}: replace executable global wrangler guidance with npx wrangler`);
+    }
+
+    for (const block of fencedBlocks(text)) {
+      const installsNode = /^\s*(?:[$>]\s*)?npm ci\b/mu.test(block.content);
+      if (!installsNode) {
+        continue;
+      }
+      if (/^\s*(?:[$>]\s*)?(?:cd|Set-Location|Push-Location)\s+services[\\/]/imu.test(block.content)) {
+        failures.push(`${path}: npm ci must run before entering a service directory`);
+        continue;
+      }
+      const owningWorkspace = workspaces.find(({ path: workspacePath }) => path.startsWith(`${workspacePath}/`));
+      if (owningWorkspace) {
+        const context = sectionBefore(text, block.index);
+        const establishesRoot = /(?:repository|workspace) root/iu.test(context)
+          || /^\s*(?:[$>]\s*)?(?:cd|Set-Location|Push-Location)\s+(?:<[^>]*repo[^>]*>|[^\r\n]*licensecc)\s*$/imu.test(block.content);
+        if (!establishesRoot) {
+          failures.push(`${path}: an npm ci block in a workspace README must explicitly establish the repository root`);
+        }
+      }
+    }
+  }
+  assert.deepEqual(failures, []);
+});
+
+test("the docs identity, primary navigation, and example inventory are deliberate", () => {
+  const readme = source("README.md");
+  const docsConfig = source("doc/conf.py");
+  const docsIndex = source("doc/index.rst");
+  const usageIndex = source("doc/usage/index.rst");
+  const readTheDocs = source(".readthedocs.yaml");
+  const examples = source("doc/usage/examples.rst");
+
+  assert.match(docsConfig, /READTHEDOCS_CANONICAL_URL/u);
+  assert.doesNotMatch(docsConfig, /open-license-manager\.github\.io/u);
+  assert.match(readTheDocs, /fail_on_warning:\s*true/u);
+  assert.match(readme, /\]\(doc\/index\.rst\)/u);
+
+  assert.doesNotMatch(docsIndex, /^\s+analysis\/\*/mu);
+  assert.doesNotMatch(docsIndex, /repository-dx-expansibility-implementation-plan/u);
+  assert.match(docsIndex, /^\s+usage\/index\s*$/mu);
+  assert.match(usageIndex, /^\s+examples\s*$/mu);
+  for (const directory of trackedChildDirectories("examples")) {
+    assert.ok(
+      examples.includes(`examples/${directory}`),
+      `the example catalog must include examples/${directory}`,
+    );
+  }
+});
+
+test("first-success tutorials expose the complete human and agent execution contract", () => {
+  for (const path of [
+    "doc/tutorials/offline-first-license.rst",
+    "doc/tutorials/local-online-evaluation.rst",
+  ]) {
+    const tutorial = source(path);
+    assert.match(tutorial, /^Audience and result$/mu, `${path} must name its audience and result`);
+    assert.match(tutorial, /^Prerequisites(?: and starting point)?$/mu, `${path} must declare prerequisites`);
+    assert.match(tutorial, /Starting directory:/u, `${path} must declare command cwd`);
+    assert.match(tutorial, /Shell:/u, `${path} must declare command shell`);
+    assert.match(tutorial, /(?:expected|should print|returns)/iu, `${path} must state an observable result`);
+    assert.match(tutorial, /(?:Safety boundary|private key)/iu, `${path} must state its safety boundary`);
+    assert.match(tutorial, /^Troubleshooting and next step(?:s)?$/mu, `${path} must route failures and next steps`);
+    assert.match(tutorial, /^Verification$/mu, `${path} must name its focused verification`);
+  }
+});
+
+test("native example guides are standalone, copyable installed-package contracts", () => {
+  for (const directory of trackedChildDirectories("examples")) {
+    const path = `examples/${directory}/README.md`;
+    const guide = source(path);
+    assert.match(guide, /Starting directory:/u, `${path} must declare command cwd`);
+    assert.match(guide, /Shell:/u, `${path} must declare command shell`);
+    assert.match(guide, /CMAKE_PREFIX_PATH/u, `${path} must select the installed package`);
+    assert.match(guide, /licensecc_DIR/u, `${path} must select the exact package config`);
+    assert.match(
+      guide,
+      /(?:should print|prints|On success|process exits)/iu,
+      `${path} must state an observable result`,
+    );
+    assert.doesNotMatch(guide, /LCC_BUILD_EXAMPLES/u, `${path} must not claim a nonexistent root build switch`);
+  }
+  assert.doesNotMatch(source("doc/usage/examples.rst"), /LCC_BUILD_EXAMPLES/u);
+});
+
+test("ownership, task packets, and validation status have one evidence contract", () => {
+  const ownership = source("doc/architecture/ownership.md");
+  const changeGuide = source("doc/architecture/change-guide.md");
+  const contributing = source("CONTRIBUTING.md");
+  const agentGuidance = source("AGENTS.md");
+  const skill = source(".agents/skills/using-licensecc/SKILL.md");
+  const scriptsReadme = source("scripts/README.md");
+  const packageJson = JSON.parse(source("package.json"));
+
+  for (const ownedPath of [
+    "README.md",
+    "doc/",
+    "examples/",
+    "benchmark/",
+    "fuzz/",
+    "AGENTS.md",
+    ".agents/skills/using-licensecc/",
+    "extern/license-generator/",
+    "patches/",
+  ]) {
+    assert.ok(ownership.includes(`\`${ownedPath}\``), `ownership must name ${ownedPath}`);
+  }
+  for (const route of [
+    "Documentation, README, or agent guidance",
+    "Example, benchmark, or fuzz harness",
+    "Vendored generator, patches, or provenance",
+  ]) {
+    assert.match(changeGuide, new RegExp(`^## ${route}$`, "mu"));
+  }
+
+  assert.match(contributing, /^## Task Packets and Handoffs$/mu);
+  assert.match(contributing, /commit SHA or named ref/iu);
+  assert.match(contributing, /Every exact command run/iu);
+  assert.match(contributing, /surface not run/iu);
+  assert.match(agentGuidance, /CONTRIBUTING\.md#task-packets-and-handoffs/u);
+  assert.match(skill, /verified commit or ref/iu);
+  assert.match(scriptsReadme, /not a literal completeness claim/iu);
+  assert.match(contributing, /all green/iu);
+
+  assert.equal(packageJson.scripts["check:all"], "npm run check:review");
+  assert.equal(
+    packageJson.scripts["check:review"],
+    "npm run check:pr && npm run test:sdks && npm run check:dry-run && npm run check:docs",
+  );
+  for (const excludedSurface of [
+    "Browser setup/E2E",
+    "native build purity",
+    "network link validation",
+    "staging",
+    "production evidence",
+  ]) {
+    assert.match(scriptsReadme, new RegExp(excludedSurface, "iu"));
+  }
+});
 
 test("backend documentation tracks the accepted C++ online API", () => {
   const backendReadme = source("services/cloudflare-licensing-backend/README.md");

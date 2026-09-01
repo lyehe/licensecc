@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -10,8 +11,8 @@ DOC_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(DOC_ROOT / "_ext"))
 
 project = "Licensecc"
-copyright = "2020, Open License Manager"
-author = "Open License Manager"
+copyright = "2020-2026, Licensecc contributors"
+author = "Licensecc contributors"
 version = "2.1.0"
 release = "2.1.0"
 language = "en"
@@ -28,7 +29,7 @@ extensions = [
 
 source_suffix = {".rst": "restructuredtext", ".md": "markdown"}
 master_doc = "index"
-exclude_patterns = ["_build", "_doxygen"]
+exclude_patterns = ["_build", "_doxygen", "analysis/**"]
 templates_path = ["_templates"]
 primary_domain = "py"
 pygments_style = "sphinx"
@@ -52,10 +53,14 @@ html_theme_options = {
     "titles_only": False,
 }
 html_static_path = ["_static"]
+html_extra_path = ["_extra"]
 html_css_files = ["css/custom.css"]
 html_js_files = ["https://buttons.github.io/buttons.js"]
 html_favicon = "_static/lock_32.ico"
-html_baseurl = "https://open-license-manager.github.io/licensecc/"
+# Read the Docs supplies the canonical domain plus language/version path for
+# each build.  The local fallback deliberately avoids claiming the retired
+# upstream GitHub Pages site as this fork's canonical documentation.
+html_baseurl = os.environ.get("READTHEDOCS_CANONICAL_URL", "/")
 htmlhelp_basename = "licenseccdoc"
 sitemap_url_scheme = "{link}"
 

@@ -21,9 +21,15 @@ accept ownership.
 | API-contract maintainer | Each service's route inventory, `src/**/openapi/`, `test/contracts/`, contract tests | Served route sets, OpenAPI operations/components, canonical hashes, and compatibility review. The serving deployable remains the owner. |
 | Release and CI maintainer | `.github/workflows/`, `package.json`, `package-lock.json`, `scripts/` (including `scripts/release/`), `CMakePresets.json` | Reproducible installs, local/CI command parity, purity gates, architecture/secret checks, canonical artifact assembly/validation, release evidence, and workflow configuration. |
 | Documentation and architecture maintainer | `README.md`, `CONTRIBUTING.md`, `doc/`, `docs/implementation/` | Repository map, maintainer guidance, architecture decisions, user/developer docs, and evidence reports. Protected plans remain under `docs/superpowers/plans/`. |
+| Examples and integration maintainer | `examples/` | Standalone consumer projects, focused integration demonstrations, and their source-adjacent instructions. Public API behavior remains owned by the C++ ABI and core maintainer. |
+| Native verification-harness maintainer | `benchmark/`, `fuzz/` | Performance probes, parser fuzz harnesses, bounded synthetic corpora, and their opt-in build instructions. Parser and ABI behavior remain owned by the C++ ABI and core maintainer. |
+| Repository-guidance maintainer | `AGENTS.md`, `.agents/skills/using-licensecc/` | Context-efficient task routing, safe repository entry points, and links to the maintained architecture and contribution contracts. These files do not create a second architecture authority. |
+| Vendored-generator steward | `extern/license-generator/`, `patches/` | Reviewed vendored source, provenance and license records, plus retained transition patches. Build and documentation commands never fetch, apply, or overwrite these inputs. |
 
 ## Boundary rules
 
+* When table entries overlap, the most-specific path owns the change; a broader
+  row is the fallback for files not assigned to a narrower owner.
 * A deployable owns its composition root, route dispatch, service-specific
   authorization, persistence, migrations, UI, and deployment configuration.
 * Shared code must have a named purpose and at least two consumers. A package
@@ -32,3 +38,10 @@ accept ownership.
 * `extern/license-generator` is repository-owned vendored source. Its license
   and `PROVENANCE.md` are part of the review boundary; build and documentation
   work never fetch, patch, or overwrite it.
+* A source-adjacent README is reviewed with its owning service, SDK, example,
+  harness, or vendored boundary. The documentation maintainer owns site
+  navigation and cross-project consistency, not the implementation contract
+  described by another owner.
+* `AGENTS.md` and repository skills route work to this map and the change guide.
+  They may summarize commands for context efficiency but must not redefine
+  ownership, architecture, or release authority.

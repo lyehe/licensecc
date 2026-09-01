@@ -1,5 +1,77 @@
 .icon-home::before { content: url("../lock_32.png"); }
 
+/* The RTD theme defaults all table cells to nowrap, which hides task-routing
+   columns on narrow screens. Narrative tables should wrap; the API inventory
+   keeps its explicitly selected fixed fields below. */
+.wy-table-responsive table.docutils:not(.licensecc-api-table) td,
+.wy-table-responsive table.docutils:not(.licensecc-api-table) th {
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+/* The outcome router is a comparison table on wide screens and a stack of
+   labelled task cards on phones. Keeping the table markup preserves the
+   header relationships for assistive technology. */
+@media screen and (max-width: 700px) {
+  table.licensecc-starting-points,
+  table.licensecc-starting-points tbody,
+  table.licensecc-starting-points tr,
+  table.licensecc-starting-points td {
+    display: block;
+    width: 100%;
+  }
+
+  table.licensecc-starting-points {
+    border: 0;
+  }
+
+  table.licensecc-starting-points thead {
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    height: 1px;
+    overflow: hidden;
+    position: absolute;
+    white-space: nowrap;
+    width: 1px;
+  }
+
+  table.licensecc-starting-points tr {
+    border: 1px solid #e1e4e5;
+    margin-bottom: 0.85em;
+  }
+
+  table.licensecc-starting-points td {
+    border: 0;
+    padding: 0.5em 0.75em;
+  }
+
+  table.licensecc-starting-points td + td {
+    border-top: 1px solid #e8e8e8;
+  }
+
+  table.licensecc-starting-points td::before {
+    color: #555;
+    display: block;
+    font-size: 0.72em;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    margin-bottom: 0.2em;
+    text-transform: uppercase;
+  }
+
+  table.licensecc-starting-points td:nth-child(1)::before {
+    content: "Goal";
+  }
+
+  table.licensecc-starting-points td:nth-child(2)::before {
+    content: "Start here";
+  }
+
+  table.licensecc-starting-points td:nth-child(3)::before {
+    content: "Successful result";
+  }
+}
+
 .licensecc-api-table td:first-child,
 .licensecc-api-table td:nth-child(2),
 .licensecc-api-table td:nth-child(3) {

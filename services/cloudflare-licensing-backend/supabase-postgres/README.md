@@ -122,7 +122,8 @@ D1 remains the production Cloudflare Worker database. A Worker-hosted PostgreSQL
 deployment is not supplied by this Node adapter; that would require a separately
 reviewed [Hyperdrive binding and adapter](https://developers.cloudflare.com/workers/databases/connecting-to-databases/).
 
-Export it:
+Export it in the shell that will run the adapter. The current directory does
+not matter for this environment-only step:
 
 ```bash
 export DATABASE_URL='postgresql://postgres.<ref>:<password>@aws-0-<region>.pooler.supabase.com:6543/postgres'
@@ -131,7 +132,8 @@ export DATABASE_URL='postgresql://postgres.<ref>:<password>@aws-0-<region>.poole
 ### 2. Apply the schema
 
 Use an empty, disposable database. Do not apply this file as an upgrade to a
-persistent database:
+persistent database. Run the schema command from
+`services/cloudflare-licensing-backend/supabase-postgres/`:
 
 ```bash
 psql "$DATABASE_URL" -f schema.pg.sql
@@ -153,13 +155,18 @@ psql "$DATABASE_URL" -c '\dt'
 
 ### 3. Install the locked workspace dependencies
 
-Run this from the repository root so the single workspace lockfile is authoritative:
+Switch to the repository root and run the one supported install so the single
+workspace lockfile is authoritative:
 
 ```bash
 npm ci
 ```
 
 ### 4. Wire the adapter into the Worker / host
+
+After the root install, switch to
+`services/cloudflare-licensing-backend/` for this integration example; its
+relative import below is intentionally service-root relative.
 
 ```js
 import { createPostgresDatabase } from "./supabase-postgres/db-postgres.mjs";
@@ -184,7 +191,8 @@ so no background/deferred work hook is needed; every DB call is `await`ed inline
 
 ### 5. Run
 
-For a Node host, import the handler and serve it as usual. To sanity-check connectivity:
+From `services/cloudflare-licensing-backend/`, import the handler and serve it
+as usual. To sanity-check connectivity without changing schema data:
 
 ```bash
 node -e "import('./supabase-postgres/db-postgres.mjs').then(async (m) => {
@@ -239,8 +247,18 @@ statements to PostgreSQL at `prepare()` time:
   ambiguous (the existing row **and** `excluded` both expose the column); D1/SQLite accepts
   it, which is why the Worker uses it.
 
+First run the locked install from the repository root:
+
 ```bash
-npm ci                                                        # locked adapter/runtime dependencies
+npm ci
+```
+
+Then switch to `services/cloudflare-licensing-backend/`. The remaining
+commands build ignored output, initialize only the explicitly selected
+disposable PostgreSQL database, generate an ignored local signing key, and
+start a loopback host:
+
+```bash
 npm run build                                                 # tsc -> dist/index.js
 psql "$DATABASE_URL" -f supabase-postgres/schema.pg.sql       # fresh disposable database only
 node scripts/generate-online-key.mjs --out-dir .online-key    # signing key (.online-key is gitignored)
@@ -254,8 +272,10 @@ DATABASE_URL=postgresql://user:pass@host:5432/db \
 
 **Verified 2026-06-16 on PostgreSQL 16 (Docker):** the compiled Worker served a genuine signed
 `lccoa1.` assertion for a seeded entitlement (`verify.ok`) and `entitlement_denied` (200, not
-500) for a miss. After `npm ci`, `node smoke-worker-sql.mjs` exercises the exact six-statement
-Worker inventory, including request-proof nonce first-use, replay denial, and cleanup.
+500) for a miss. After the root install, run `node smoke-worker-sql.mjs` from
+`services/cloudflare-licensing-backend/supabase-postgres/` to exercise the
+exact six-statement Worker inventory, including request-proof nonce first-use,
+replay denial, and cleanup.
 The scheduled/manual `postgres-conformance.yml` gate applies a fresh disposable PostgreSQL 16
 schema and runs `npm run test:pg:real --workspace @licensecc/cloudflare-licensing-backend`, which
 executes the compiled Worker, adapter, nonce replay, CLI SQL, and `runApplyTransaction` itself.
@@ -285,7 +305,7 @@ in `../host-common.mjs` (unit-tested in `../host-common.test.mjs`).
 directory ships a **parallel** PostgreSQL CLI with the same command surface, flags, validation,
 output, and exit codes -- but it runs against Postgres/Supabase via `postgres.js` (reusing
 `createPool` / `closePool` from `db-postgres.mjs`) instead of shelling out to
-`wrangler d1 execute`.
+`npx wrangler d1 execute`.
 
 | File | Role |
 |---|---|
@@ -320,8 +340,18 @@ device-list    --fingerprint <64-hex> [--project] [--feature]
 
 ### Run it
 
+Run the locked install from the repository root:
+
 ```bash
-npm ci                                                        # locked workspace dependencies
+npm ci
+```
+
+Then switch to
+`services/cloudflare-licensing-backend/supabase-postgres/`. The following
+commands target the single `DATABASE_URL` connection. Applying the schema and
+the CLI mutation commands change that database:
+
+```bash
 export DATABASE_URL='postgresql://postgres.<ref>:<pw>@aws-0-<region>.pooler.supabase.com:6543/postgres'
 psql "$DATABASE_URL" -f schema.pg.sql       # fresh disposable database only; never an upgrade
 
@@ -358,6 +388,8 @@ ordered statement list in one `pool.begin()` transaction (`BEGIN`/`COMMIT`, `ROL
 on a single connection -- the same all-or-nothing guarantee.
 
 ### The pg-mem test
+
+Run the hermetic workspace test from the repository root:
 
 ```bash
 npm run test:pg --workspace @licensecc/cloudflare-licensing-backend
@@ -411,8 +443,9 @@ faithfully -- the `pg-sql.mjs` output is never changed, only what is handed to `
   1→2→…→6 monotonic), the conditional `WHERE entitlements.status != 'revoked'` guard (reenable on
   a revoked row = `rowCount 0`, zero audit events), and `pgcrypto`'s `gen_random_bytes`. The
   correlated `entitlements.<col>` reference resolves natively — no rewrite needed off `pg-mem`.
-  Re-run it after `npm ci`: `DATABASE_URL=… node smoke-real-pg.mjs`
-  (after `schema.pg.sql` is applied).
+  After the root install and schema bootstrap, re-run it from
+  `services/cloudflare-licensing-backend/supabase-postgres/`:
+  `DATABASE_URL=… node smoke-real-pg.mjs`.
 - The CLI uses **`postgres.js`** (a wire-protocol client), which `pg-mem` cannot serve. The
   `pg-mem` suite therefore exercises the SQL and the row effects, not a live `entitlement-pg.mjs`
   socket connection. To smoke-test the live CLI, point `DATABASE_URL` at a real Postgres/Supabase

@@ -1,213 +1,194 @@
 # Licensecc
 
-*Copy protection, licensing library, and license generator integration for Windows and Linux.*
+*Copy protection, offline licensing, and online entitlement services for Windows and Linux.*
 
 [![Standard](https://img.shields.io/badge/c%2B%2B-17-blue.svg)](https://en.wikipedia.org/wiki/C%2B%2B#Standardization)
 [![License](https://img.shields.io/badge/License-AGPL--3.0--or--later-blue.svg)](https://www.gnu.org/licenses/agpl-3.0.html)
 [![Linux_CI](https://github.com/lyehe/licensecc/actions/workflows/linux.yml/badge.svg)](https://github.com/lyehe/licensecc/actions/workflows/linux.yml)
 [![Github_CI](https://github.com/lyehe/licensecc/actions/workflows/windows.yml/badge.svg)](https://github.com/lyehe/licensecc/actions/workflows/windows.yml)
 
-Licensecc helps applications verify local license files, bind licenses to machine identifiers, and enforce execution limits such as expiration dates and licensed features. The current `main` branch includes the C++ core library, inspector, examples, documentation, tests, service packages, SDKs, and build tooling.
+Licensecc lets a native application verify signed local license files, bind a
+license to machine identifiers, and enforce expiration dates or licensed
+features. The repository also includes an optional online verifier, operator
+and customer services, and Python, .NET, and Java client SDKs.
 
-The repository is licensed under the [GNU Affero General Public License v3.0 or later](https://www.gnu.org/licenses/agpl-3.0.html). See [LICENSE](LICENSE) for the full license text.
+The repository is licensed under the [GNU Affero General Public License v3.0
+or later](LICENSE). Review the license, including its network-use obligations,
+before integrating Licensecc into proprietary or closed-source software.
 
-**Documentation:** start with [how to use the repository](doc/usage/repository-workflows.rst),
-follow the [integration guide](doc/usage/integration.rst), browse the unified
-[API reference](doc/api/index.rst), or review the
-[capability registry](doc/capabilities/index.rst) for shipped and planned surfaces.
+**Maintained documentation source:** [documentation home](doc/index.rst) ·
+[capability status](doc/capabilities/index.rst) ·
+[API reference](doc/api/index.rst)
 
-**Versioning:** no namespaced release has been tagged yet. The C++ library carries the upstream 2.x
-lineage version (`2.1.0` in CMake); the platform packages (services, SDKs, and root/workspace Node
-packages) are `0.1.0-rc.2` and versioned independently. [`version.json`](version.json) is the
-machine-readable platform source, and `npm run check:versions` verifies every projection. Platform
-tags use `platform-v*`; future independent C++ tags use `cpp-v*`; new bare `v*` tags are forbidden.
-See [CHANGELOG.md](CHANGELOG.md) and
-[ADR 0005](doc/architecture/decisions/0005-platform-version-and-release-tags.md).
+## Choose your path
 
-## Repository Map
+| You want to... | Start here | What you need |
+| --- | --- | --- |
+| Add offline licensing to a C/C++ application | [First successful license check](#first-successful-license-check) | CMake, a C++17 compiler, and Boost |
+| Evaluate online verification without deploying | [Local online evaluation](doc/tutorials/local-online-evaluation.rst) | Node 22.5+ and the root npm workspace |
+| Verify server tokens from Python, .NET, or Java | [SDK and support entry points](doc/tutorials/sdk-and-support.rst) | Only the selected language toolchain |
+| Diagnose a customer machine or license | [SDK and support entry points](doc/tutorials/sdk-and-support.rst#support-with-lccinspector) | An installed native build |
+| Operate the hosted platform | [Production readiness](doc/operations/production-readiness.md) | Cloudflare resources and explicit operator authority |
+| Contribute code or documentation | [Repository workflows](doc/usage/repository-workflows.rst) | The contributor toolchain below |
+| Give a coding agent a bounded task | [`$using-licensecc`](.agents/skills/using-licensecc/SKILL.md) and [repository workflows](doc/usage/repository-workflows.rst) | The checkout and its owning documentation |
 
-- `src/`: C++ implementation.
-- `include/`: public C API headers.
-- `test/`: C++ unit and functional tests.
-- `examples/`: minimal integration examples.
-- `cmake/`: CMake find modules and build helpers.
-- `extern/`: repository-owned, vendored license-generator source; `scripts/bootstrap.ps1` validates that the source is present without fetching it.
-- `doc/`: documentation source and architecture notes.
-- `.agents/skills/`: repository-local Agent Skills for repeatable project workflows.
-- `doc/architecture/`: system map, change guide, role ownership, and architecture decisions.
-- `docs/implementation/`: implementation evidence reports; `docs/superpowers/plans/` contains protected execution plans.
-- `scripts/`: categorized developer, architecture, release, and CI tooling;
-  [`scripts/README.md`](scripts/README.md) documents the stable command boundary.
-- `patches/`: reviewed transition patches; build and check commands never apply them to vendored source.
-- `package.json`: root orchestration scripts for service, SDK, schema, and E2E checks.
-- `packages/licensing-domain/`: portable licensing values, policy transitions, contracts, and pure projections.
-- `packages/cloudflare-runtime/`: shared Cloudflare/Web-platform mechanics used by multiple deployables.
-- `services/cloudflare-licensing-backend/`: licensing backend service, local SQLite adapter, D1 migrations, and fenced PostgreSQL/Supabase adapter.
-- `services/cloudflare-license-admin/`: operator console Worker and React UI.
-- `services/cloudflare-customer-portal/`: customer portal Worker and React UI.
-- `services/cloudflare-d1-backup/`: D1 backup and restore-drill Worker.
-- `sdks/python/`: Python SDK for token verification and backend HTTP calls.
-- `sdks/dotnet/`: .NET SDK for token verification and backend HTTP calls.
-- `sdks/java/`: dependency-free Java 17 SDK for token verification and backend HTTP calls.
+The [examples catalog](doc/usage/examples.rst) routes native integrations from
+the minimal host through fail-closed, online, anti-tamper, and device-identity
+examples.
 
-Generated project material is written under the CMake build tree by default, not into the source checkout.
+## First successful license check
 
-## Prerequisites
+This path builds the native runtime for the sample project name `test`, issues
+a local license with that project's private key, builds the standalone minimal
+consumer, and verifies the license. It does **not** require Node, Python, Java,
+Cloudflare credentials, or a deployment.
 
-- CMake 3.16 or newer for manual builds.
-- CMake 3.21 or newer for `CMakePresets.json`.
-- A C++17 compiler.
-- Git for clone and source history operations.
-- PowerShell 7 (`pwsh`) on any platform for bootstrap, build-purity checks, `scripts/dev-check.ps1`, and the root npm shortcuts (CI uses the same binary; Windows PowerShell 5.1 is not targeted).
-- Python 3.12 and uv 0.12.5. The repository-level `uv.toml` pins uv, and the
-  Python SDK and PostgreSQL parity tools each use a checked-in `uv.lock`.
-- JDK 17.0.20 for the Java SDK and deterministic release artifact gate.
-- Linux: OpenSSL, Zlib where required by the OpenSSL version, and Boost development packages for the bundled generator/tests.
-- Windows: Visual Studio 2022 or another supported C++ toolchain. Boost is required for tests and for building the bundled license generator during configuration. If Boost is not in a default CMake search path, set `BOOST_ROOT` to the Boost install directory.
+Prerequisites for this path:
 
-Boost is not linked into the final `licensecc` runtime library.
+- Git, CMake 3.21 or newer, a C++17 compiler, and Boost development libraries.
+- On Linux, OpenSSL development headers and Zlib where required by the installed
+  OpenSSL version.
+- On Windows, the copyable sequence below uses Visual Studio 2022 x64. Other
+  supported C++ toolchains can build Licensecc, but their generator-specific
+  executable paths differ. Set `BOOST_ROOT` when Boost is not in CMake's
+  default search path.
 
-## Clone
+From a terminal, clone the repository and make it the current directory:
 
 ```console
 git clone https://github.com/lyehe/licensecc.git
 cd licensecc
 ```
 
-The generator source is already part of the clone. Validate that vendored
-source before a native build:
+The clone already contains the reviewed license-generator source. Generated
+keys and install artifacts stay under `build/dev-debug/`.
+
+On Windows, continue in PowerShell from the repository root:
 
 ```powershell
-pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/bootstrap.ps1
+$repo = (Resolve-Path ".").Path
+$project = "$repo/build/dev-debug/projects/test"
+$lccgen = "$repo/build/dev-debug/extern/license-generator/src/license_generator/Debug/lccgen.exe"
+
+cmake --preset dev-debug -G "Visual Studio 17 2022" -A x64
+cmake --build --preset dev-debug --target install
+& $lccgen license issue -p $project -o "$project/licenses/quickstart.lic"
+cmake -S examples/minimal -B build/minimal -G "Visual Studio 17 2022" -A x64 `
+  "-DCMAKE_PREFIX_PATH=$repo/build/dev-debug/install" `
+  "-Dlicensecc_DIR=$repo/build/dev-debug/install/cmake/licensecc" `
+  -DLCC_PROJECT_NAME=test
+cmake --build build/minimal --config Debug
+& "$repo/build/minimal/Debug/minimal.exe" "$project/licenses/quickstart.lic"
 ```
 
-## Recommended local checks
+On Linux, continue in Bash from the repository root:
 
-With PowerShell 7 (`pwsh`) and the pinned npm `10.9.8`, inspect bootstrap state,
-install the root workspace, and run the deterministic pull-request gate:
+```bash
+repo="$PWD"
+project="$repo/build/dev-debug/projects/test"
+lccgen="$repo/build/dev-debug/extern/license-generator/src/license_generator/lccgen"
+
+cmake --preset dev-debug
+cmake --build --preset dev-debug --target install
+"$lccgen" license issue -p "$project" -o "$project/licenses/quickstart.lic"
+cmake -S examples/minimal -B build/minimal \
+  -DCMAKE_PREFIX_PATH="$repo/build/dev-debug/install" \
+  -Dlicensecc_DIR="$repo/build/dev-debug/install/lib/cmake/licensecc" \
+  -DLCC_PROJECT_NAME=test
+cmake --build build/minimal
+"$repo/build/minimal/minimal" "$project/licenses/quickstart.lic"
+```
+
+The final command should print:
+
+```text
+license OK (days left: ...)
+```
+
+The generated `private_key.rsa` can issue licenses accepted by this build.
+Keep it out of applications and release artifacts. The
+[offline tutorial](doc/tutorials/offline-first-license.rst) explains the files,
+failure signals, and next integration steps.
+
+## Product surfaces and maturity
+
+| Surface | Purpose | Status source |
+| --- | --- | --- |
+| `licensecc` and `lccinspector` | Native enforcement, machine identity, and support diagnostics | [Capability registry](doc/capabilities/index.rst) |
+| `lccgen` | Project initialization and signed local-license issuance | [License issuance](doc/usage/issue-licenses.md) |
+| `services/` | Online verification, administration, customer self-service, and backup | [Operations](doc/operations/index.rst) |
+| `sdks/` | Signed-token verification and selected backend HTTP calls | [SDK reference](doc/api/sdks.rst) |
+
+**Versioning:** no namespaced release has been tagged yet. The C++ library
+carries the upstream 2.x lineage (`2.1.0` in CMake); platform services, SDKs,
+and Node packages are `0.1.0-rc.2` and versioned independently.
+[`version.json`](version.json) is the platform version authority. Platform tags
+use `platform-v*`, future independent C++ tags use `cpp-v*`, and new bare `v*`
+tags are forbidden. See [CHANGELOG.md](CHANGELOG.md) and
+[ADR 0005](doc/architecture/decisions/0005-platform-version-and-release-tags.md).
+
+## Contributor setup and verification
+
+The first-success path above does not require the full monorepo toolchain.
+Contributors need only the tools used by the surface they change:
+
+- PowerShell 7 (`pwsh`) for repository orchestration and purity checks.
+- Node 22+ with npm `10.9.8` for the root workspace and service checks.
+- Python 3.12 with uv 0.12.5 for repository and Python SDK checks.
+- JDK 17.0.20 for the Java SDK and deterministic release-artifact checks.
+- Doxygen for the strict documentation build.
+
+Node dependencies have one owner: run `npm ci` at the repository root. Do not
+run service-local installs or create service-local lockfiles.
 
 ```powershell
-pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/bootstrap.ps1 -CheckOnly
+pwsh -NoProfile -File scripts/bootstrap.ps1 -CheckOnly
 npm ci
 npm run doctor
 npm run check:pr
 ```
 
-`npm run doctor` is read-only. Repository contract errors fail; local branch,
-worktree, remote, ignored-output, and tool-version findings are advisory unless
-you add `-- --strict-local` for a clean-handoff audit.
+`npm run doctor` is read-only. The normal pull-request gate is deterministic;
+add the gate for each changed surface:
 
-For C++ changes, also run the source-purity gate (it configures, builds, and
-tests the selected preset without mutating source or the generator checkout):
-
-```powershell
-pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/check-build-purity.ps1 -Preset dev-debug
-```
-
-The root command surface is intentionally explicit:
-
-| Command | Scope |
+| Changed surface | Additional gate |
 | --- | --- |
-| `npm run scan:secrets` | Committed-secret and token-guard scan. |
-| `npm run lint` | Source lint for packages, services, and scripts. |
-| `npm run typecheck` | Production TypeScript/JavaScript type-check coverage. |
-| `npm run check:architecture` | Dependency direction, composition roots, and repository hygiene. |
-| `npm run check:scripts` | Exact one-category inventory for every repository script. |
-| `npm run check:hotspots` | No-growth ratchets for first-party production files at or above 500 lines. |
-| `npm run doctor` | Non-destructive local worktree, branch, remote, output, and toolchain diagnosis. |
-| `npm run check:versions` | Platform/C++ version contract and release-projection consistency. |
-| `npm run test:release-operations` | Platform-tag and protected production-config contract tests. |
-| `npm run test:contracts` | Canonical route/OpenAPI contract checks. |
-| `npm run test:services` | Package, Worker, SQL, UI workflow, and schema-parity tests. |
-| `npm run test:sdks` | Python, .NET, and Java SDK tests. |
-| `npm run setup:browsers` | One explicit setup command installing both retained Playwright Chromium revisions. |
-| `npm run test:e2e` | Browser and cross-service smoke tests; no install side effect. |
-| `npm run check:dry-run` | Credential-free Wrangler bundle/deploy dry-runs. |
-| `npm run check:docs` | Strict Doxygen then Sphinx build under ignored `doc/_build/`. |
-| `npm run check:docs:links` | Network-sensitive Sphinx link check for scheduled/manual use. |
-| `npm run check:pr` | Deterministic scan, lint, type, architecture, contract, and service gate. |
+| C/C++ core | `pwsh -NoProfile -File scripts/check-build-purity.ps1 -Preset dev-debug` |
+| SDKs | `npm run test:sdks` |
+| Browser workflows | `npm run setup:browsers`, then `npm run test:e2e` |
+| Worker packaging | `npm run check:dry-run` |
+| Documentation | `npm run check:docs` |
+| Native install, issuance, or `examples/minimal` documentation | `npm run test:docs-quickstart` |
+| External links | `npm run check:docs:links` (scheduled/manual and network-sensitive) |
 
-SDK, browser, docs, dry-run, and native CMake matrix checks are dedicated
-commands rather than hidden side effects of `check:pr`. See
-[`doc/architecture/change-guide.md`](doc/architecture/change-guide.md) for
-the smallest correct change surface and exact focused checks.
+The [architecture change guide](doc/architecture/change-guide.md) identifies
+the owning boundary and narrow checks. [`scripts/README.md`](scripts/README.md)
+documents the stable script surface. A deployment, publication, tag, or remote
+mutation always requires separate operator authority.
 
-Canonical artifact assembly, protected package publication, and the manual
-four-Worker production rollout are documented in
-[`doc/release-artifacts.md`](doc/release-artifacts.md). Their GitHub
-environments, trusted publishers, Cloudflare resources, and credentials are
-operator-owned; source control contains the fail-closed workflow contracts,
-not those external identities or secrets.
+## Repository map
 
-## Manual Build
+- `include/licensecc/`, `src/library/`, `cmake/`, and `test/`: native public
+  API, implementation, packaging, and tests.
+- `extern/license-generator/`: repository-owned vendored generator source;
+  builds validate it without fetching or patching it.
+- `examples/`: maintained standalone native integrations.
+- `packages/`: shared licensing-domain and Cloudflare-runtime packages.
+- `services/`: four independently deployable Workers and their local runbooks.
+- `sdks/`: Python, .NET, and Java client packages.
+- `doc/`: maintained project, API, operations, and architecture documentation.
+- `.agents/skills/`: repository-local Agent Skills that route work through the
+  same human-readable authorities.
+- `docs/implementation/`: implementation evidence. Protected execution plans
+  remain under `docs/superpowers/plans/`.
 
-Using presets:
-
-```console
-cmake --preset dev-debug
-cmake --build --preset dev-debug
-ctest --preset dev-debug
-```
-
-Manual fallback without presets:
-
-```console
-cmake -S . -B build/dev-debug -DCMAKE_BUILD_TYPE=Debug -DLCC_PROJECT_NAME=test -DCMAKE_INSTALL_PREFIX=build/dev-debug/install
-cmake --build build/dev-debug
-ctest --test-dir build/dev-debug --output-on-failure
-```
-
-Windows MSVC CI-style configure:
-
-```console
-cmake --preset ci-windows-msvc
-cmake --build --preset ci-windows-msvc
-ctest --preset ci-windows-msvc
-```
-
-The Windows workflow matrix also has explicit `ci-windows-msvc-debug-dynamic`, `ci-windows-msvc-debug-static`, `ci-windows-msvc-release-dynamic`, and `ci-windows-msvc-release-static` presets.
-
-Linux CI-style configure:
-
-```console
-cmake --preset ci-linux-core
-cmake --build --preset ci-linux-core
-ctest --preset ci-linux-core
-```
-
-The Linux workflow matrix uses `ci-linux-debug` and `ci-linux-release`; `ci-linux-core` remains a debug compatibility alias.
-
-## Generated License Project Files
-
-By default, generated license project files are placed under:
-
-```text
-build/<preset>/projects/<project-name>
-```
-
-Override `LCC_PROJECTS_BASE_DIR` only when you intentionally need a stable external project directory. It may be outside the checkout or inside the active binary tree; source-tree paths outside that binary tree are rejected.
-
-```console
-cmake -S . -B build/custom -DLCC_PROJECT_NAME=my-product -DLCC_PROJECTS_BASE_DIR=/path/to/projects
-```
-
-## Usage
-
-A minimal, self-contained integration example lives in [`examples/minimal`](examples/minimal). It acquires a license and reports failures with `lcc_strerror` and `print_error`.
-
-For issuing licenses, see [`doc/usage/issue-licenses.md`](doc/usage/issue-licenses.md). Local license files are issued with `lccgen`; online node-locked, floating, trial, and tiered entitlements are configured through the backend/admin policy flow documented in [`services/cloudflare-license-admin/README.md`](services/cloudflare-license-admin/README.md).
+Generated builds, project keys, local databases, Wrangler configuration,
+secrets, and documentation output are local artifacts and must not be
+committed.
 
 ## Contributing
 
-Use the current active branch policy for this repository. For normal work on this public fork, open pull requests against `main` unless an issue or maintainer says otherwise.
-
-Before opening a pull request:
-
-```powershell
-npm run check:pr
-```
-
-Do not commit generated outputs such as `build/`, `install/`, `.wrangler/`, `dist/`, `node_modules/`, `doc/_doxygen/`, Python caches, or .NET `bin/obj` directories. Create local Python environments as `.venv/`; the legacy root `pyvenv.cfg` marker is ignored.
-Do not commit local Wrangler configs or secrets such as `services/**/wrangler.toml`, `services/**/wrangler.jsonc`, `.dev.vars`, or `.online-key/`; track only the `wrangler.example.*` templates.
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for reporting and contribution guidelines.
+Open pull requests against `main` unless an issue or maintainer says otherwise.
+Read [CONTRIBUTING.md](CONTRIBUTING.md), classify existing worktree changes,
+keep changes inside the owning boundary, and report the exact checks run rather
+than only saying that CI is green.

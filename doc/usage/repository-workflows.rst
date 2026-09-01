@@ -1,134 +1,142 @@
 Use the Licensecc repository
 ============================
 
-Licensecc is both a native licensing runtime and a platform monorepo. Start by
-choosing the surface you need; most users do not need to build or deploy every
-part of the repository.
+Licensecc is a native runtime and a platform monorepo. Choose the outcome first
+and install only the toolchain that outcome needs.
 
 Choose a workflow
 -----------------
 
 .. list-table::
    :header-rows: 1
-   :widths: 23 39 38
+   :widths: 25 39 36
 
    * - Goal
      - Start here
      - Main result
-   * - Embed local license enforcement
-     - :doc:`integration` and ``examples/minimal/README.md``
-     - Installed CMake package and ``licensecc::licensecc_static`` target.
-   * - Issue local license files
-     - :doc:`issue-licenses`
-     - A consumer-specific project and signed ``.lic`` files from ``lccgen``.
-   * - Add online verification
-     - ``services/cloudflare-licensing-backend/README.md`` and
-       :doc:`../api/services`
-     - Backend contract, D1 schema, and optional local SQLite host.
-   * - Operate licenses and customers
-     - Admin, portal, and backup READMEs under ``services/``
-     - Separate operator, customer, and recovery surfaces.
-   * - Verify tokens from another language
-     - :doc:`../api/sdks` and the chosen SDK README
-     - Python, .NET, or Java token verifier and HTTP client.
+   * - Try local ``.lic`` enforcement
+     - :doc:`../tutorials/offline-first-license`
+     - The minimal consumer accepts a license you just issued.
+   * - Embed the native runtime
+     - :doc:`integration`
+     - An installed, project-specific CMake component linked by your host.
+   * - Explore stronger host policies
+     - :doc:`examples`
+     - A maintained example for fail-closed, online, integrity, or device-key
+       behavior.
+   * - Evaluate online verification locally
+     - :doc:`../tutorials/local-online-evaluation`
+     - The real backend Worker running on a loopback SQLite host.
+   * - Use a language SDK or support tool
+     - :doc:`../tutorials/sdk-and-support`
+     - Python, .NET, or Java token verification, or native support diagnostics.
+   * - Operate services
+     - :doc:`../operations/index`
+     - Explicit readiness, database, observability, security, and release gates.
    * - Contribute to the repository
-     - ``AGENTS.md``, :doc:`../architecture/index`, and
+     - :doc:`../architecture/index` and
        :doc:`../development/Development-Environment-Setup`
-     - An ownership-scoped change with reproducible validation.
+     - An ownership-scoped change with reproducible verification evidence.
 
-Prepare a checkout
-------------------
+Prerequisites by workflow
+-------------------------
 
-Clone the repository, validate the repository-owned generator, install the
-root Node workspace, and inspect local readiness:
+.. list-table::
+   :header-rows: 1
+   :widths: 24 76
 
-.. code-block:: powershell
+   * - Workflow
+     - Required tools
+   * - Native first success
+     - Git, CMake 3.21+, a C++17 compiler, Boost, and the platform dependencies
+       named in :doc:`../development/Dependencies`.
+   * - Python SDK consumer
+     - Python supported by the SDK and the package-local installation method.
+   * - .NET SDK consumer
+     - .NET 8 SDK.
+   * - Java SDK consumer
+     - JDK 17 or newer.
+   * - Local online evaluator
+     - Node 22+ and root npm ``10.9.8`` install; no Cloudflare account.
+   * - Repository contributor
+     - PowerShell 7, Node 22+, npm ``10.9.8``, Python 3.12, uv ``0.12.5``,
+       JDK 17.0.20, and only the optional platform tools required by the
+       changed surface. Doxygen is required for documentation builds.
 
-   git clone https://github.com/lyehe/licensecc.git
-   cd licensecc
-   pwsh -NoProfile -File scripts/bootstrap.ps1 -CheckOnly
-   npm ci
-   npm run doctor
+The contributor toolchain is not a product prerequisite. A native integrator
+does not need Node, Python, or Java, and an SDK consumer does not need a C++
+compiler unless the application also embeds native enforcement.
 
-``npm run doctor`` is read-only. It distinguishes repository contract failures
-from advisory local state such as an active branch or ignored build output.
-The root ``package-lock.json`` is authoritative for all Node workspaces; do not
-create service-local lockfiles.
+Prepare a product checkout
+--------------------------
 
-Build and try the native runtime
---------------------------------
-
-Build and install a runtime for one license project, then build the standalone
-minimal consumer against that install:
+Starting directory: the parent directory where you keep source checkouts.
+Shell: any shell with Git available.
 
 .. code-block:: console
 
-   cmake -S . -B build/myproject -DLCC_PROJECT_NAME=myproject -DCMAKE_INSTALL_PREFIX=<prefix>
-   cmake --build build/myproject --target install
-   cmake -S examples/minimal -B build/minimal -DCMAKE_PREFIX_PATH=<prefix> -DLCC_PROJECT_NAME=myproject
-   cmake --build build/minimal
+   git clone https://github.com/lyehe/licensecc.git
+   cd licensecc
 
-Run the resulting ``minimal`` program with a license path. The same
-``LCC_PROJECT_NAME`` must be used by the runtime, consumer, and license
-generator. Project generation creates consumer-specific signing material under
-the build tree. Protect the private key, never embed it in an application, and
-never include it in a release artifact.
-
-For fail-closed feature checks, start with ``examples/fail_closed_host``. For
-online callbacks and durable revocation floors, use
-``examples/production_decision_host``. Provider-backed request proofs are
-documented in :doc:`../api/device_identity` and
-``examples/device_identity/README.md``.
+The repository already contains the reviewed generator source. Native builds
+write generated projects, keys, and install artifacts below ``build/`` by
+default. Start with :doc:`../tutorials/offline-first-license`; do not run the
+monorepo install merely to try the C++ runtime.
 
 Use an SDK
 ----------
 
-The Python, .NET, and Java SDKs verify signed server tokens and wrap selected
-HTTP operations. They do not implement local ``.lic`` acquisition, hardware
-identification, or binary enforcement. Use the native runtime when those
-properties matter.
+The SDKs verify signed server tokens and wrap selected backend HTTP operations.
+They do not implement local ``.lic`` acquisition, hardware identification, or
+binary enforcement. Use the native runtime when those properties matter.
 
-Run all maintained SDK tests from the repository root:
+The generated Python reference and cross-language scope table are in
+:doc:`../api/python` and :doc:`../api/sdks`. Package-local installation and
+examples remain owned by each SDK README. Maintainers run all three compatibility
+suites from the repository root with:
 
 .. code-block:: console
 
    npm run test:sdks
 
-Each SDK README contains language-specific installation and examples. The
-generated Python symbols and cross-language scope table are in
-:doc:`../api/python` and :doc:`../api/sdks`.
+Evaluate or operate services
+----------------------------
 
-Work with hosted services
--------------------------
+Each directory under ``services/`` is an independent deployable with its own
+configuration example, tests, and operational README. All six Node workspaces
+share the root lockfile, so run ``npm ci`` once at the repository root; a
+service-local ``npm ci`` is unsupported.
 
-Each deployable under ``services/`` owns its Worker, configuration example,
-tests, and operational README. The public backend also provides a local SQLite
-host for end-to-end development without a Cloudflare deployment. Start at
-``services/cloudflare-licensing-backend/local-host/README.md`` when evaluating
-online verification locally.
+The backend's SQLite host provides local end-to-end evaluation without a
+Cloudflare deployment. :doc:`../tutorials/local-online-evaluation` routes to
+that service-owned runbook. Use :doc:`../operations/production-readiness` only
+when planning an authorized deployment.
 
-Run all service and schema checks with:
+From the repository root, the service and packaging checks are:
 
 .. code-block:: console
 
    npm run test:services
+   npm run check:dry-run
 
-Run ``npm run check:dry-run`` to validate all Worker bundles against example
-configuration. A dry run does not authorize deployment. Never commit real
-Wrangler configuration, ``.dev.vars``, tokens, keys, or local databases.
+``check:dry-run`` assembles bundles using example configuration. It does not
+authorize deployment. Never commit real Wrangler configuration, ``.dev.vars``,
+tokens, signing keys, or local databases.
 
-Validate a change
------------------
+Validate a repository change
+----------------------------
 
-The normal pull-request gate is deterministic from an intentionally classified
-checkout:
+Read :doc:`../architecture/change-guide` and
+:doc:`../architecture/ownership` before editing. Preserve pre-existing and
+concurrent worktree changes. The deterministic pull-request gate starts from
+one root install:
 
 .. code-block:: powershell
 
    npm ci
    npm run check:pr
 
-Add the surface-specific gate when applicable:
+Add the gate for every changed surface:
 
 .. list-table::
    :header-rows: 1
@@ -146,17 +154,22 @@ Add the surface-specific gate when applicable:
      - ``npm run check:dry-run``
    * - Documentation
      - ``npm run check:docs``
+   * - Native install, issuance, or ``examples/minimal`` documentation
+     - ``npm run test:docs-quickstart``
+   * - External links
+     - ``npm run check:docs:links`` during scheduled/manual network validation
 
-Use :doc:`../development/documentation` for documentation details and the
-:doc:`../architecture/change-guide` to find the narrow gate for a code change.
+A useful handoff names the changed ownership boundary, exact commands and
+results, remaining untested surfaces, and any generated local state. The phrase
+"all green" alone is not evidence of the dedicated SDK, browser, dry-run,
+documentation, link, or native purity gates.
 
 Use the repository Agent Skill
 ------------------------------
 
-Agentskills-compatible coding tools can discover
-``.agents/skills/using-licensecc/SKILL.md`` from the checkout. Invoke it
-explicitly when a task crosses repository surfaces or the correct gate is not
-obvious:
+Agent-Skills-compatible coding tools can discover
+``.agents/skills/using-licensecc/SKILL.md`` from the checkout. Invoke it when a
+task crosses surfaces or the owning gate is not obvious:
 
 .. code-block:: text
 
@@ -164,6 +177,6 @@ obvious:
    Use $using-licensecc to explain how to build the minimal native consumer.
    Use $using-licensecc to update the Python SDK without changing token semantics.
 
-The skill reads the same architecture, ownership, and service documentation as
-human contributors. It does not grant permission to deploy, publish, delete
-worktrees, or modify remote data.
+The skill routes an agent to these same human-readable architecture and
+service authorities. It does not grant permission to deploy, publish, delete
+worktrees, rotate secrets, or mutate remote data.

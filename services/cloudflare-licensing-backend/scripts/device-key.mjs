@@ -32,7 +32,7 @@ const LOWER_HEX_64 = /^[0-9a-f]{64}$/;
 const DEVICE_KEY_ID = /^sha256:[0-9a-f]{64}$/;
 const NAME = /^[A-Za-z0-9_.:-]+$/;
 const VECTOR_GENERATED_BY =
-  "npm --prefix services/cloudflare-licensing-backend run device-key -- verify-vectors --dir ../../test/vectors/device_proof/v1 --write-manifest";
+  "node services/cloudflare-licensing-backend/scripts/device-key.mjs verify-vectors --dir test/vectors/device_proof/v1 --write-manifest";
 const VECTOR_INVENTORY = [
   "README.md",
   "device_key_id.txt",

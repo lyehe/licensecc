@@ -63,7 +63,7 @@ const expectedManifestKeys = [
   "signed_payload",
 ];
 const generatedBy =
-  "npm --prefix services/cloudflare-licensing-backend run device-key -- verify-vectors --dir ../../test/vectors/device_proof/v1 --write-manifest";
+  "node services/cloudflare-licensing-backend/scripts/device-key.mjs verify-vectors --dir test/vectors/device_proof/v1 --write-manifest";
 
 function readVector(name) {
   return readFileSync(join(vectorDirectory, name));
@@ -140,6 +140,10 @@ test("request-proof v1 vectors have the exact inventory and manifest contract", 
   assert.equal(manifest.algorithm, REQUEST_PROOF_ALGORITHM);
   assert.equal(manifest.signed_payload, "online.payload");
   assert.equal(manifest.generated_by, generatedBy);
+  assert.ok(
+    readVectorText("README.md").includes(generatedBy.replace(" --write-manifest", "")),
+    "the vector README must publish the executable verification form of generated_by",
+  );
   assert.deepEqual(Object.keys(manifest.files), [...Object.keys(manifest.files)].sort());
   assert.deepEqual(Object.keys(manifest.files), expectedInventory.filter((name) => name !== "manifest.json"));
   for (const [name, digest] of Object.entries(manifest.files)) {

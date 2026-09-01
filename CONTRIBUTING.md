@@ -58,6 +58,7 @@ npm run setup:browsers
 npm run test:e2e
 npm run check:dry-run
 npm run check:docs
+npm run test:docs-quickstart
 ```
 
 The root `package.json` exposes the same service-oriented entry points:
@@ -67,6 +68,13 @@ npm run test:services
 npm run test:contracts
 npm run check:architecture
 ```
+
+For a portable review aggregate, `npm run check:review` runs `check:pr`, all
+three SDK suites, all Worker dry-runs, and the strict documentation build. The
+legacy `npm run check:all` command is a compatibility alias for that same
+scope. Neither name includes browser setup/E2E, native build purity, the
+offline documentation quickstart, or the network-sensitive documentation link
+check; run those explicitly when the affected surface requires them.
 
 For C++ changes, first validate the vendored generator and then run the
 non-mutating source-purity gate:
@@ -135,6 +143,34 @@ maintained project docs live under `doc/`, protected execution plans under
 New or moved repository scripts must also be recorded once in
 [`scripts/script-catalog.json`](scripts/script-catalog.json).
 
+## Task Packets and Handoffs
+
+Use a short task packet for work that may cross people, agents, sessions, or
+repository boundaries. Link to the maintained architecture instead of copying
+its rules. A task packet records:
+
+- The objective and observable acceptance criteria.
+- The owning boundary and authoritative files to read first.
+- The allowed files or surfaces, plus explicit non-goals.
+- The focused checks and integration gates required for the affected surface.
+- Any external authority needed for deployment, publication, secrets, or
+  production-data changes.
+
+A handoff records evidence rather than a generic confidence statement:
+
+- The commit SHA or named ref that was verified, plus any remaining worktree
+  changes that are not part of that ref.
+- The changed ownership surfaces and important compatibility decisions.
+- Every exact command run and whether it passed, failed, or was blocked.
+- Every relevant surface not run, with the reason and the command that still
+  provides its proof.
+- Remaining risks, follow-up work, or external evidence still required.
+
+Do not report bare “all green.” For example: “`npm run check:pr` passed at
+`<commit>`; not run: `npm run test:e2e` (no browser surface changed).” This
+keeps a local deterministic result distinct from optional, platform-specific,
+network, staging, and production evidence.
+
 ## Coding Guidelines
 
 - Keep patches focused and avoid unrelated formatting churn.
@@ -148,6 +184,8 @@ New or moved repository scripts must also be recorded once in
 - The PR explains what changed and why.
 - Related issues are linked.
 - Local verification commands are listed.
+- The verified commit/ref and any intentionally excluded validation surfaces
+  are listed.
 - Generated output is not committed.
 - New or changed behavior has tests.
 - Documentation is updated when commands, workflows, public behavior, or support status changes.

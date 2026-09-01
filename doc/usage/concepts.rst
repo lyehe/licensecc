@@ -5,18 +5,21 @@ Projects, features and versions
 Projects
 ================
 
-Licensecc is a library to protect your software from unauthorized copies. It does so generating a private key
-to sign the licenses and a public key to verify the signatures. The public key is included in binary form in the 
-compiled `licensecc-static-lib` library at compile time. 
+Licensecc protects a native application by signing licenses with a publisher
+private key and verifying those signatures with the corresponding public key.
+The public key is compiled into the installed
+``licensecc::licensecc_static`` runtime for the selected project.
 
-Since we're open source the keys can't be generated once and committed to github, we need to generate them before the 
-compilation of the library. 
+Do not commit either generated key. The private key is publisher-only signing
+authority and must never be distributed with the runtime; the build embeds only
+the public material that consumers need to verify licenses.
 
-A ``project`` in `licensecc` terms refers to a folder containing a private key, a public key and a file containing customizations. 
-Licensecc configures one project into each build. Project material is generated
-outside the source checkout (or under the active build directory); the source
-tree does not carry a pre-generated ``projects`` directory. A development build
-can generate a ``DEFAULT`` project for its selected build tree.
+A ``project`` is a signing trust domain: a directory containing the private
+key, public-key headers, license output, and project customizations. Licensecc
+configures one project into each build. Project material is generated outside
+the source checkout, normally under the active build directory; the source tree
+does not carry a pre-generated ``projects`` directory. A development build can
+generate a ``DEFAULT`` project for its selected build tree.
 
 ::
     
@@ -36,44 +39,56 @@ specify ``-DLCC_PROJECT_NAME`` and, when needed, an external
 ``-DLCC_PROJECTS_BASE_DIR``. See :doc:`../development/Build-the-library` for
 the source-tree purity constraint.
 
-A `licensecc-project` corresponds to one executable it has to be licensed. So for instance suppose you have two executables "Foo" and "Bar"
-and you want to issue licenses separately (licenses of "Foo" incompatible with "Bar") you need to: 
+A project can cover one executable or a group of executables that intentionally
+share the same licensing authority. If ``Foo`` and ``Bar`` must accept
+incompatible licenses, create two projects, such as ``FooLicensecc`` and
+``BarLicensecc``:
 
-* create two `licensecc-projects` eg. "FooLicensecc" and "BarLicensecc" (names are for example here, you can choose them as you like, remember they will appear in the license file). 
-* for each project: 
-  	* configure, compile and install `licensecc`
+* configure, build, and install Licensecc once with ``FooLicensecc``;
+* repeat with ``BarLicensecc`` and a separate build/install prefix;
+* retain each project's private key only in the publisher's signing system.
 
-In "Foo" and "Bar" (your original software) be sure to locate and link the right version of `licensecc-static-lib`. Eg. in your "Foo" CmakeLists.txt:
+In each consumer, point ``CMAKE_PREFIX_PATH`` at the matching install prefix,
+find the matching project component, and link the exported target. The
+:doc:`../tutorials/offline-first-license` tutorial shows the complete
+install-and-consume flow:
 
-Point ``CMAKE_PREFIX_PATH`` at the install prefix of the matching licensecc build
-and add the following line to your ``CMakeLists.txt`` (see
-:ref:`usage/integration:Integrate Licensecc in your application`):
-
-.. code-block::
+.. code-block:: cmake
 
   find_package(licensecc REQUIRED COMPONENTS "FooLicensecc")
+  target_link_libraries(foo PRIVATE licensecc::licensecc_static)
 
 
 Features
 ================
 
-A licensed software can have multiple functions that can be enabled or disabled independently using license files.
-Each software function takes the name of `feature` in Licensecc. 
-Each feature can (need to) be licensed separately, the licenses then are merged in one license file and sent to the customer.
+A licensed application can expose multiple functions that are enabled or
+disabled independently. Each such function is a Licensecc ``feature``.
  
-There are parameters in ``lccgen`` to produce a multi-feature license directly avoiding the manual merge:
+Issue all required features in one license instead of manually merging files.
+Follow :doc:`issue-licenses` for the platform-specific generator path and add
+the feature list to that guide's issue command:
 
-.. code-block:: 
+.. code-block:: text
 
-	lccgen license issue -f PROJECT_NAME,MY_AWESOME_FEATURE -o example.lic
+  --feature-names PROJECT_NAME,MY_AWESOME_FEATURE
 	
-To verify a feature pass the feature name in the ``CallerInformations`` structure 
-(see: :ref:`verify license <api/public_api:Verify a license>`):
+The issue command writes the selected local ``.lic`` file and has no remote
+side effects. To verify a feature, pass its name in ``CallerInformations`` (see
+:ref:`verify license <api/public_api:Verify a license>`):
 
 .. code-block:: c
 
-	CallerInformations callerInfo = {"\0", "MY_AWESOME_FEATURE"};
-	LCC_EVENT_TYPE result = acquire_license(&callerInfo, nullptr, &licenseInfo);
+  CallerInformations caller_info;
+  LicenseInfo license_info;
+  lcc_init_caller_informations(&caller_info);
+  lcc_init_license_info(&license_info);
+
+  const bool feature_set =
+      lcc_set_caller_feature_name(&caller_info, "MY_AWESOME_FEATURE");
+  const LCC_EVENT_TYPE result = feature_set
+      ? acquire_license(&caller_info, nullptr, &license_info)
+      : LICENSE_MALFORMED;  /* Fail closed when the ABI field is too small. */
 	
 For a complete fail-closed feature example, see
 `examples/fail_closed_host <https://github.com/lyehe/licensecc/tree/main/examples/fail_closed_host>`_.

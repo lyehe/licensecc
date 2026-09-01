@@ -1,6 +1,11 @@
 # Device identity provider examples
 
 This page documents the conditional Windows and Ubuntu provider examples.
+The commands below start in the Licensecc repository root and consume an
+installed package built with the matching provider capability.
+
+Starting directory: the Licensecc repository root. Shell: PowerShell 7 on
+Windows/MSVC or Bash on Linux.
 
 ## Windows TPM device identity example
 
@@ -13,7 +18,9 @@ Build it against an installed Licensecc package that was configured with
 
 ```powershell
 cmake -S examples/device_identity -B build/device-identity-example `
+  -G "Visual Studio 17 2022" -A x64 `
   -DCMAKE_PREFIX_PATH=build/ci-windows-msvc-debug-dynamic-tpm/install `
+  -Dlicensecc_DIR=build/ci-windows-msvc-debug-dynamic-tpm/install/cmake/licensecc `
   -DLCC_PROJECT_NAME=test
 cmake --build build/device-identity-example --config Debug
 ```
@@ -21,8 +28,14 @@ cmake --build build/device-identity-example --config Debug
 Open an existing user-scoped key without creating anything:
 
 ```powershell
-build/device-identity-example/Debug/licensecc_windows_tpm.exe com.example.product DEFAULT
+$repo = (Resolve-Path ".").Path
+& "$repo/build/device-identity-example/Debug/licensecc_windows_tpm.exe" com.example.product DEFAULT
 ```
+
+On success the executable exits 0 and prints `reported provider:
+windows-platform-ksp`, followed by the algorithm, device key id, and
+public SPKI. The existing key must be available to the user or machine scope
+selected by the command.
 
 Add `--create` only during explicit provisioning. Add `--machine` for a
 machine-scoped key. Creation is silent, signing-only, and non-exportable; it
@@ -45,12 +58,17 @@ must already exist, be owned by the effective user, and have mode `0700`:
 
 ```bash
 cmake -S examples/device_identity -B build/device-identity-tpm2 \
+  -DCMAKE_BUILD_TYPE=Debug \
   -DCMAKE_PREFIX_PATH=build/ci-linux-debug-tpm2/install \
+  -Dlicensecc_DIR=build/ci-linux-debug-tpm2/install/lib/cmake/licensecc \
   -DLCC_PROJECT_NAME=test
 cmake --build build/device-identity-tpm2
 build/device-identity-tpm2/licensecc_tpm2_openssl \
   com.example.product DEFAULT /var/lib/licensecc --create
 ```
+
+On success the executable exits 0 and prints `reported provider:
+tpm2-openssl`, followed by the algorithm, device key id, and public SPKI.
 
 The TPM2/OpenSSL provider signs the fixed 32-byte device-identity digest with
 the distro `tpm2` provider. The example reports provider metadata and the

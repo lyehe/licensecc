@@ -8,6 +8,13 @@ exported `fetch(request, env)`; only the `DB` binding is swapped for a SQLite
 adapter that implements the same `D1DatabaseLike` / `D1PreparedStatementLike`
 surface the Worker expects.
 
+This host is for loopback-only evaluation and development. It does not deploy
+or modify Cloudflare resources. The commands below create ignored build output,
+an untracked local SQLite database, and an ignored local test signing key; none
+of those artifacts is production configuration. Do not stage or commit the
+database or private key. Follow the backend's owning hosted runbook for a
+staging or production deployment.
+
 ## What's here
 
 | File | Role |
@@ -18,42 +25,66 @@ surface the Worker expects.
 
 ## Prerequisites
 
-- Node 22+ with `--experimental-sqlite`. The package scripts include the flag.
+- Node 22.5+ with `--experimental-sqlite`. The package scripts include the
+  flag; `node:sqlite` was introduced in Node 22.5.
+- The root npm workspace installed once from the repository root:
+
+  ```console
+  npm ci
+  ```
+
+  Do not run `npm ci` in this service and do not use `npm --prefix`; the root
+  lockfile is the dependency authority.
 - The Worker compiled to `../dist/index.js` (the host imports the **compiled**
   Worker, never edits the source).
 - An RSA signing key (PKCS#8 PEM) + key id — the Worker requires these to sign
-  `lccoa1.` assertions.
+  `lccoa1.` assertions. For local evaluation, generate a disposable key as
+  shown below and never ship or commit its private material.
 
 ## Run steps
 
-All commands are run from the service directory
-(`services/cloudflare-licensing-backend/`).
+After the root install above, all remaining commands are run from the service
+directory (`services/cloudflare-licensing-backend/`).
 
-```bash
-# 1. Build the Worker (tsc -> dist/index.js). Already wired in package.json.
+First build the Worker and generate a disposable local signing key. These
+commands are the same in PowerShell and Bash:
+
+```console
+# Build the Worker (tsc -> dist/index.js).
 npm run build
 
-# 2. Create + migrate the database.
-DB_PATH=app.db npm run db:local:init
-
-# 3. Provide a signing key. Use the project's generator (writes a PKCS#8 RSA-3072 PEM):
+# Generate a disposable local signing key (writes ignored .online-key/ files).
 node scripts/generate-online-key.mjs --out-dir .online-key
-
-# 4. Start the host (ONLINE_SIGNING_KEY_ID is any stable label for local dev).
-PORT=8787 DB_PATH=app.db \
-  ONLINE_SIGNING_PRIVATE_KEY_PKCS8_PEM="$(cat .online-key/online_private_key.pkcs8.pem)" \
-  ONLINE_SIGNING_KEY_ID="sha256:local-dev-key" \
-  npm run local:server
 ```
 
-On Windows PowerShell, set the env vars first, then run:
+In Bash, initialize the local database, set the signing environment, and start
+the foreground server:
+
+```bash
+export DB_PATH=app.db
+npm run db:local:init
+
+export PORT=8787
+export ONLINE_SIGNING_PRIVATE_KEY_PKCS8_PEM="$(cat .online-key/online_private_key.pkcs8.pem)"
+export ONLINE_SIGNING_KEY_ID="sha256:local-dev-key"
+npm run local:server
+```
+
+In PowerShell, perform the same initialization before starting the foreground
+server:
 
 ```powershell
-$env:PORT="8787"; $env:DB_PATH="app.db"
+$env:DB_PATH = "app.db"
+npm run db:local:init
+
+$env:PORT = "8787"
 $env:ONLINE_SIGNING_PRIVATE_KEY_PKCS8_PEM = Get-Content .online-key/online_private_key.pkcs8.pem -Raw
 $env:ONLINE_SIGNING_KEY_ID = "sha256:local-dev-key"
 npm run local:server
 ```
+
+Leave that terminal running. Use a second terminal in the same service
+directory for the seed and verification commands below.
 
 ## Exposing the host safely
 
@@ -76,10 +107,11 @@ in `../host-common.mjs` (unit-tested in `../host-common.test.mjs`).
 
 ## Seed an entitlement, then verify
 
-The verify path reads from `entitlements` (and optionally `entitlement_devices`).
-Seed a row with the existing CLI, or directly:
+The verify path reads from `entitlements` (and optionally
+`entitlement_devices`). In the second terminal, seed a row with the existing
+CLI, or run this shell-independent Node command directly:
 
-```bash
+```console
 # Existing project tooling (writes to the same SQLite file via its own path):
 #   node scripts/entitlement.mjs ...   (see that script's --help)
 
@@ -87,7 +119,7 @@ Seed a row with the existing CLI, or directly:
 node --experimental-sqlite -e 'import("node:sqlite").then(({DatabaseSync})=>{const db=new DatabaseSync("app.db");const now=Math.floor(Date.now()/1e3);db.prepare("INSERT OR REPLACE INTO entitlements (project,feature,license_fingerprint,device_hash,status,assertion_ttl_seconds,cache_ttl_seconds,revocation_seq,created_at,updated_at,notes) VALUES (?,?,?,?,?,?,?,?,?,?,?)").run("DEFAULT","DEFAULT","a".repeat(64),"","active",300,3600,0,now,now,"");db.close();})'
 ```
 
-Then:
+Then verify from Bash:
 
 ```bash
 curl -s http://127.0.0.1:8787/health
@@ -98,6 +130,26 @@ curl -s -X POST http://127.0.0.1:8787/v1/verify \
   -d "{\"project\":\"DEFAULT\",\"feature\":\"DEFAULT\",\"license_fingerprint\":\"$(printf 'a%.0s' {1..64})\",\"device_hash\":\"\",\"nonce\":\"$(printf 'b%.0s' {1..64})\"}"
 # {"ok":true,"code":"entitlement_ok","assertion":"lccoa1...."}
 ```
+
+Or verify from PowerShell:
+
+```powershell
+Invoke-RestMethod -Uri http://127.0.0.1:8787/health
+
+$body = @{
+  project = "DEFAULT"
+  feature = "DEFAULT"
+  license_fingerprint = "a" * 64
+  device_hash = ""
+  nonce = "b" * 64
+} | ConvertTo-Json -Compress
+
+Invoke-RestMethod -Uri http://127.0.0.1:8787/v1/verify `
+  -Method Post -ContentType "application/json" -Body $body
+```
+
+The health response reports `ok` and the service name. The verification
+response reports `ok`, `code = entitlement_ok`, and a signed `assertion`.
 
 A request for a license fingerprint with no active entitlement returns
 `{"ok":false,"code":"entitlement_denied"}` with HTTP **200** (a denial, not an

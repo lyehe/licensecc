@@ -334,7 +334,7 @@ test("access admin drill can run cloudflared login before reading token", () => 
   });
   assert.equal(token.source, "cloudflared");
   assert.deepEqual(calls, [
-    ["cloudflared", ["access", "login", "--quiet", "--auto-close", "--app", "https://admin.example/"]],
+    ["cloudflared", ["access", "login", "https://admin.example/"]],
     ["cloudflared", ["access", "token", "--app", "https://admin.example/"]],
   ]);
 });

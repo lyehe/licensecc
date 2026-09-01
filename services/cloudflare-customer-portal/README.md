@@ -6,6 +6,22 @@ deployable; it does not import another service's implementation. Shared
 portable policy and Cloudflare mechanics come from the explicit workspace
 packages documented in [`../../doc/architecture/system-map.md`](../../doc/architecture/system-map.md).
 
+**Audience:** portal contributors and authorized hosted-platform operators.
+Offline native integrations and server-token verification do not require this
+deployable.
+
+| Goal | Start here | Side effects |
+| --- | --- | --- |
+| Validate code locally | [Local checks](#local-checks) | Local build/test output only |
+| Review credential forwarding | [Credential-bearing destinations](#credential-bearing-destinations) | Read-only documentation |
+| Validate a deployed portal | Use the staged/production drill below | Sends an authorized session to the named remote origin |
+| Judge production readiness | [Production readiness](../../doc/operations/production-readiness.md) | Evidence review; deployment remains an operator decision |
+
+Unless a block explicitly says "repository root," run service-local commands
+from `services/cloudflare-customer-portal` after the single root workspace
+install. Remote validation requires authority for the target and a deliberately
+scoped credential.
+
 ## Local checks
 
 From the repository root after the pinned root install:
@@ -25,6 +41,9 @@ Browser smoke tests require the explicit one-time setup command
 The deployed portal drill also verifies that the built UI shell and health
 endpoint load before authenticating. With an existing session cookie and the
 mutation flags left unset, it is safe for a production post-deploy read gate:
+
+Run this block from the service directory. It is application-read-only but
+still transmits the supplied session cookie to the configured remote origin.
 
 ```powershell
 $env:LICENSECC_PORTAL_URL = "https://portal.example.workers.dev"

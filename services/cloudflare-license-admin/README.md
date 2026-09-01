@@ -3,6 +3,21 @@
 Private control-plane Worker and Vite + React console for managing online
 verification entitlements stored in the shared D1 database.
 
+**Audience:** contributors and authorized operators of the hosted control
+plane. It is not required for offline native licensing.
+
+| Goal | Start here | Side effects |
+| --- | --- | --- |
+| Validate code locally | [Local validation](#local-validation) | Local build/test output and a disposable local D1 database |
+| Understand authentication | [Authentication](#authentication) | Read-only documentation |
+| Exercise staging | Use the specific staging validator documented below | Mutates only where the validator explicitly says so |
+| Operate production | [Production readiness](../../doc/operations/production-readiness.md) | Protected operator action and evidence |
+
+Unless a block explicitly says "repository root," run its service-local
+command from `services/cloudflare-license-admin` after the single root
+workspace install. Commands labelled staging, remote, deploy, break-glass, or
+production require authority for the named environment.
+
 This service is intentionally separate from the public verifier Worker. The
 admin Worker does not bind or use the online assertion signing secret; it only
 reads and mutates D1 rows.
@@ -41,6 +56,10 @@ staging drill below.
 
 Remote D1 atomicity validation against a staging/test Cloudflare database:
 
+Run the following from this service directory. It creates and later deletes a
+temporary Worker and mutates the configured staging/test database; never point
+it at production as an evaluation shortcut.
+
 ```sh
 npm run validate:remote-d1-atomicity -- ../cloudflare-licensing-backend/wrangler.toml
 ```
@@ -51,11 +70,35 @@ partial entitlement or event row persisted, and deletes the temporary Worker.
 
 Cloudflare Access staging validation with a real Access JWT:
 
-```sh
-cloudflared access login --quiet --auto-close --app https://licensecc-admin.example.workers.dev
+Run the following from this service directory with an explicitly authorized,
+short-lived staging identity. This drill requires the separate `cloudflared`
+binary; it is not installed by `npm ci`. Install it from Cloudflare's
+[official downloads](https://developers.cloudflare.com/tunnel/downloads/) and
+confirm `cloudflared --version` succeeds first.
+
+In Bash:
+
+```bash
+cloudflared access login https://licensecc-admin.example.workers.dev
 LICENSECC_ACCESS_USE_CLOUDFLARED=1 node scripts/access-admin-drill.mjs \
   --url https://licensecc-admin.example.workers.dev
 ```
+
+In PowerShell:
+
+```powershell
+cloudflared access login https://licensecc-admin.example.workers.dev
+$env:LICENSECC_ACCESS_USE_CLOUDFLARED = "1"
+try {
+  node scripts/access-admin-drill.mjs `
+    --url https://licensecc-admin.example.workers.dev
+} finally {
+  Remove-Item Env:LICENSECC_ACCESS_USE_CLOUDFLARED -ErrorAction SilentlyContinue
+}
+```
+
+Successful JSON reports `ok: true`, `mode: "mutation_drill"`, and
+`final_status: "revoked"` after cleaning up the scratch entitlement.
 
 The wrapper reads `LICENSECC_ACCESS_JWT` when present, or uses the cached
 `cloudflared` application token when `LICENSECC_ACCESS_USE_CLOUDFLARED=1`.
@@ -71,6 +114,10 @@ identity cannot mutate.
 For a production post-deploy gate, reuse the validator in read-only mode. It
 checks unauthenticated and malformed-token rejection, loads the authenticated
 UI shell, and reads the admin summary without creating or changing records:
+
+Run the following from this service directory. Although the application calls
+are read-only, the command still sends a credential to the named production
+origin and therefore requires operator authorization.
 
 ```sh
 LICENSECC_ACCESS_JWT=<redacted-short-lived-token> npm run validate:access-admin -- \
@@ -300,7 +347,7 @@ operator break-glass path that **bypasses Cloudflare Access**. It stamps
 writes no audit event (the helper exits non-zero on `--remote`). To deliberately
 reactivate a revoked entitlement, run `upsert --allow-revoked-override --reason
 <text>`, which records a distinct `revoked-override` audit event. Mutations run via
-`wrangler d1 execute --file`, so the entitlement write and its audit event commit
+`npx wrangler d1 execute --file`, so the entitlement write and its audit event commit
 atomically. Prefer the authenticated admin Worker or `/api/sync/entitlements` for
 normal, audited writes.
 
@@ -314,7 +361,7 @@ Use the sync endpoint when your user database, billing system, or CRM is the
 source of truth. Configure `SYNC_API_TOKEN` as a Worker secret:
 
 ```sh
-wrangler secret put SYNC_API_TOKEN
+npx wrangler secret put SYNC_API_TOKEN
 ```
 
 Then send a bearer-authenticated projection update:

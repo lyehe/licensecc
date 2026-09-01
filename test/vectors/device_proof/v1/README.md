@@ -15,7 +15,7 @@ software-test provider introduced by a later task.
 Verify the complete inventory with:
 
 ```text
-npm --prefix services/cloudflare-licensing-backend run device-key -- verify-vectors --dir ../../test/vectors/device_proof/v1
+node services/cloudflare-licensing-backend/scripts/device-key.mjs verify-vectors --dir test/vectors/device_proof/v1
 ```
 
 `--write-manifest` may rebuild only the three payloads and manifest hashes. It

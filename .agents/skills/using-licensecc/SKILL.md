@@ -39,6 +39,8 @@ from a clean checkout, use `npm ci`; the root lockfile owns every Node workspace
 | Change a database contract | Backend migrations/schema and schema-parity scripts | Service SQL tests and both parity gates |
 | Change an SDK or token format | SDK README, `test/vectors/`, canonical server implementation | SDK-specific tests, then `npm run test:sdks` |
 | Change docs or API references | `doc/development/documentation.md`, `doc/api/index.rst` | `npm run check:docs` |
+| Change an example, benchmark, or fuzz harness | Its README, `doc/architecture/change-guide.md`, owning C/C++ API/tests | Installed consumer build, benchmark configuration, or `npm run test:native-security` |
+| Change repository or agent guidance | `CONTRIBUTING.md`, `doc/architecture/ownership.md`, `doc/architecture/change-guide.md` | `npm run test:docs-accuracy` |
 | Change CI/release tooling | `scripts/README.md`, release docs, workflow contract tests | Focused script tests and dry-run gates |
 
 Keep route dispatch and OpenAPI changes in the serving deployable. Regenerate
@@ -55,6 +57,10 @@ npm ci
 npm run check:pr
 ```
 
+`npm run check:review` additionally runs the SDK, Worker dry-run, and strict
+documentation gates. `npm run check:all` is its legacy compatibility alias;
+neither includes browser E2E, native build purity, or network link validation.
+
 Add only the gates required by the affected surface:
 
 - C/C++ core: `pwsh -NoProfile -File scripts/check-build-purity.ps1 -Preset dev-debug`
@@ -62,11 +68,17 @@ Add only the gates required by the affected surface:
 - Browser flows: `npm run setup:browsers`, then `npm run test:e2e`
 - Worker packaging: `npm run check:dry-run`
 - Documentation: `npm run check:docs`
+- Native integration documentation or `examples/minimal`: `npm run test:docs-quickstart`
 - Scheduled/manual external links: `npm run check:docs:links`
 
 Prefer root scripts over direct tool invocations because they encode pinned
 versions, service ordering, and cross-surface checks. Run a direct command only
 when a surface README makes it the maintained narrow gate.
+
+The offline docs quickstart is deliberately a separate native-consumer gate. It
+does not deploy services or require cloud credentials, and it is not hidden in
+`check:docs`; run it when a documentation change could leave the installed
+native integration journey broken.
 
 ## Preserve operational boundaries
 
@@ -106,6 +118,8 @@ Request: "Prepare a release."
 
 ## Finish
 
-Summarize the outcome, changed ownership surfaces, commands that passed, and
-any honest limitation. Do not call work complete while a required safe gate is
+Follow the task-packet and handoff convention in `CONTRIBUTING.md`. Summarize
+the outcome and changed ownership surfaces; name the verified commit or ref,
+each exact command and outcome, and every relevant surface not run. Never use a
+bare “all green” claim. Do not call work complete while a required safe gate is
 still failing.

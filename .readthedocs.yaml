@@ -15,6 +15,13 @@ sphinx:
   configuration: doc/conf.py
   fail_on_warning: true
 
+search:
+  ranking:
+    tutorials/*: 3
+    usage/*: 2
+    api/*: 1
+    architecture/*: -2
+
 python:
   install:
     - requirements: doc/requirements.txt
