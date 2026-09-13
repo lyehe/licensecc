@@ -23,16 +23,16 @@
   "dependencies": {
     "@licensecc/cloudflare-runtime": "file:../../packages/cloudflare-runtime",
     "@licensecc/licensing-domain": "file:../../packages/licensing-domain",
-    "@vitejs/plugin-react": "4.7.0",
-    "react": "19.2.7",
-    "react-dom": "19.2.7",
-    "vite": "6.4.3"
+    "@vitejs/plugin-react": "6.1.1",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "vite": "8.2.2"
   },
   "devDependencies": {
-    "@playwright/test": "1.61.1",
-    "@types/react": "19.2.18",
-    "@types/react-dom": "19.2.4",
-    "typescript": "5.9.3",
-    "wrangler": "4.120.0"
+    "@playwright/test": "1.63.0",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "typescript": "7.0.2",
+    "wrangler": "4.130.0"
   }
 }
