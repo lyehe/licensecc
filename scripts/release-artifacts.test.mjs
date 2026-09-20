@@ -304,7 +304,7 @@ function releaseFixture({ contractDrift = false, omitDotnetLock = false } = {}) 
   const rootManifest = { name: "fixture", version: PLATFORM_VERSION, private: true, workspaces: workspaceNames };
   const lockPackages = {
     "": { name: rootManifest.name, version: PLATFORM_VERSION, workspaces: workspaceNames },
-    "node_modules/wrangler": { version: "4.131.1" },
+    "node_modules/wrangler": { version: "4.134.0" },
   };
   for (const [path, name] of workspacePaths) {
     lockPackages[path] = { name, version: PLATFORM_VERSION };

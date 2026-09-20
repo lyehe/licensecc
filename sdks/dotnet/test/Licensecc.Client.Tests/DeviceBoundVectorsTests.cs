@@ -17,7 +17,7 @@ public sealed class DeviceBoundVectorsTests
     private static readonly BigInteger Order = new BigInteger(Convert.FromHexString(
         "ffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551"), true, true);
 
-    [DataTestMethod]
+    [TestMethod]
     [DataRow("protocol.json", "renew")]
     [DataRow("exchange.json", "exchange")]
     public void ProofAndOperationBytes(string filename, string purpose)

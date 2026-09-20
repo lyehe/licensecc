@@ -17,12 +17,12 @@ test("PostgreSQL parity uses one checked uv and Python dependency contract", () 
 
   const project = read("services/cloudflare-licensing-backend/scripts/pg-parity/pyproject.toml");
   assert.match(project, /^requires-python = ">=3\.12,<3\.13"$/m);
-  assert.match(project, /^\s*"sqlglot==30\.15\.0",$/m);
+  assert.match(project, /^\s*"sqlglot==30\.17\.0",$/m);
 
   const lock = read("services/cloudflare-licensing-backend/scripts/pg-parity/uv.lock");
   assert.match(lock, /^requires-python = "==3\.12\.\*"$/m);
   assert.equal((lock.match(/^name = "sqlglot"$/gm) ?? []).length, 1);
-  assert.equal((lock.match(/^version = "30\.15\.0"$/gm) ?? []).length, 1);
+  assert.equal((lock.match(/^version = "30\.17\.0"$/gm) ?? []).length, 1);
   assert.match(lock, /hash = "sha256:[0-9a-f]{64}"/);
 });
 

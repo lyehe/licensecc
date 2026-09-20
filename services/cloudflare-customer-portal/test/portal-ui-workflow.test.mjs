@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import test from "node:test";
-import ts from "typescript";
+import ts from "@typescript/typescript6";
 
 // Transpile the PURE portalWorkflow.ts (no React/DOM/node deps) and import it as an ES module — the
 // same seam the admin uses. If portalWorkflow ever pulls in a non-pure import, this fails to import.

@@ -962,7 +962,7 @@ export function OperatorControlsProvider({ children }: { children: ReactNode }):
       return;
     }
     const dialog = nativeDialogEnabled ? nativeDialogRef.current : fallbackDialogRef.current;
-    if (dialog !== null && !dialog.contains(document.activeElement)) {
+    if (dialog !== null) {
       focusSoon(confirmButtonRef.current ?? dialog);
     }
   }, [confirmAction, confirmPending, focusSoon, nativeDialogEnabled]);

@@ -16,6 +16,12 @@ the pinned CLI's JSON output. Wrappers capture bounded output and release only
 validated, redacted evidence. Mutations use error-level logging, and all three
 wrappers disable Wrangler's raw disk logs regardless of inherited settings.
 
+Workspace compilation uses TypeScript 7. Tests that inspect syntax trees or
+transpile UI modules import the explicitly pinned `@typescript/typescript6`
+package: TypeScript 7 does not expose the compatible JavaScript compiler API.
+Keep those imports separate from the workspace `tsc` commands so dependency
+hoisting cannot select a different API on another platform.
+
 ## Validation profiles
 
 | Command | Exact scope | Intentionally separate |
