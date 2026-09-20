@@ -10,6 +10,7 @@ test("A's /api/portal/entitlements returns ONLY A's entitlements", async () => {
     assert.equal(r.body.data.items[0].project, "DEFAULT");
     assert.equal(r.body.data.items[0].license_mode, "floating");
     assert.equal(r.body.data.items[0].pool_size, 5);
+    assert.equal(r.body.data.items[0].enforcement_mode, "legacy");
     assert.equal(typeof r.body.data.items[0].id, "string");
   // The response carries no fingerprint/foreign id.
   assert.ok(!JSON.stringify(r.body).includes(FP_B), "B's data never appears in A's response");
@@ -460,3 +461,15 @@ export const DIRECT_ROUTE_TESTS = Object.freeze([
   "POST /api/portal/release",
   "POST /api/portal/download",
 ]);
+
+
+test("portal entitlement projection distinguishes protected enrollment without exposing another owner", async () => {
+  const { db, env } = baseFixture();
+  try {
+    db.prepare("INSERT INTO entitlements(project,feature,license_fingerprint,customer_id,enforcement_mode,status,pool_size,max_active_devices,created_at,updated_at) VALUES ('PROTECTED','DEFAULT',?,'A','device_bound_v1','active',0,1,?,?)").run("c".repeat(64), NOW, NOW);
+    const result = await call(env, "GET", "/api/portal/entitlements", { cookie: await cookieFor(env, "A") });
+    assert.equal(result.status, 200);
+    assert.equal(result.body.data.items.find(row => row.project === "PROTECTED").enforcement_mode, "device_bound_v1");
+    assert.ok(!JSON.stringify(result.body).includes(FP_B));
+  } finally { db.close(); }
+});

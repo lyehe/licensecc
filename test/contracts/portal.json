@@ -2621,6 +2621,14 @@
                           "items": {
                             "items": {
                               "properties": {
+                                "enforcement_mode": {
+                                  "description": "Protected devices connect from the application instead of downloading a license.",
+                                  "enum": [
+                                    "legacy",
+                                    "device_bound_v1"
+                                  ],
+                                  "type": "string"
+                                },
                                 "feature": {
                                   "type": "string"
                                 },

@@ -26,6 +26,7 @@ export interface OwnedEntitlement {
   heartbeat_grace_sec: number;
   is_trial: number;
   policy_id: string | null;
+  enforcement_mode?: "legacy" | "device_bound_v1";
   license_mode: LicenseMode;
 }
 

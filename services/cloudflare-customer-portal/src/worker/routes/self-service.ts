@@ -25,7 +25,7 @@ async function apiMe(session: { customer_id: string }, reqId: string): Promise<R
 
 async function apiEntitlements(env: Env, session: { customer_id: string }, reqId: string): Promise<Response> {
   const rows = await env.DB.prepare(
-    "SELECT project, feature, license_fingerprint, status, valid_from, valid_until, pool_size, max_active_devices, max_borrow_sec, heartbeat_grace_sec, is_trial, policy_id " +
+    "SELECT project, feature, license_fingerprint, enforcement_mode, status, valid_from, valid_until, pool_size, max_active_devices, max_borrow_sec, heartbeat_grace_sec, is_trial, policy_id " +
       "FROM entitlements WHERE customer_id = ? ORDER BY project, feature, license_fingerprint",
   ).bind(session.customer_id).all<Omit<OwnedEntitlement, "id" | "license_mode">>();
   return envelope(reqId, "entitlements", { items: rows.results.map(withPortalEntitlement) });
@@ -180,7 +180,7 @@ export async function resolveOwnedEntitlement(
   const key = decodeEntitlementId(entitlementIdValue);
   if (key === null) return null;
   const row = await env.DB.prepare(
-    "SELECT project, feature, license_fingerprint, status, valid_from, valid_until, pool_size, max_active_devices, max_borrow_sec, heartbeat_grace_sec, is_trial, policy_id " +
+    "SELECT project, feature, license_fingerprint, enforcement_mode, status, valid_from, valid_until, pool_size, max_active_devices, max_borrow_sec, heartbeat_grace_sec, is_trial, policy_id " +
       "FROM entitlements WHERE customer_id = ? AND project = ? AND feature = ? AND license_fingerprint = ? AND status = 'active' LIMIT 1",
   ).bind(customerId, key.project, key.feature, key.license_fingerprint).first<Omit<OwnedEntitlement, "id" | "license_mode">>();
   return row === null ? null : withPortalEntitlement(row);

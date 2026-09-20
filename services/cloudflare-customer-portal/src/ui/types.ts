@@ -10,6 +10,7 @@ export interface EntitlementRow {
   license_fingerprint?: string;
   valid_from: number | null;
   valid_until: number | null;
+  enforcement_mode?: "legacy" | "device_bound_v1";
   license_mode: "trial" | "node_locked" | "floating";
   pool_size: number;
   max_active_devices: number;

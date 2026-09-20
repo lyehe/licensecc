@@ -129,7 +129,7 @@ function makePortalApiFixture() {
 
   const entitlements = [
     { id: "ent_floating", project: "DEFAULT", feature: "pro", status: "active", license_fingerprint: "a".repeat(64), valid_from: 1_710_000_000, valid_until: null, license_mode: "floating", pool_size: 5, max_active_devices: 1, max_borrow_sec: 0, heartbeat_grace_sec: 900, policy_id: "pol_float" },
-    { id: "ent_node", project: "DEFAULT", feature: "solo", status: "active", license_fingerprint: "b".repeat(64), valid_from: null, valid_until: 1_760_000_000, license_mode: "node_locked", pool_size: 0, max_active_devices: 1, max_borrow_sec: 0, heartbeat_grace_sec: 900, policy_id: "pol_node" },
+    { id: "ent_node", project: "DEFAULT", feature: "solo", status: "active", license_fingerprint: "b".repeat(64), valid_from: null, valid_until: 2_100_000_000, license_mode: "node_locked", pool_size: 0, max_active_devices: 1, max_borrow_sec: 0, heartbeat_grace_sec: 900, policy_id: "pol_node" },
   ];
   const devices = [
     { project: "DEFAULT", feature: "pro", license_fingerprint: "a".repeat(64), device_key_id: "d".repeat(40), created_at: 1_710_000_500 },
@@ -296,7 +296,7 @@ test("customer portal signs in with an 8-digit code and walks every screen witho
   // --- Per-app access (read-only) ---
   await page.getByRole("link", { name: "View app DEFAULT" }).click();
   await expect(page.getByText("pro", { exact: true }).first()).toBeVisible();
-  await expect(page.locator(".status.active").first()).toHaveText("active");
+  await expect(page.locator(".status.enabled").first()).toHaveText("enabled");
   await expect(page.getByText("aaaaaaaa...aaaaaaaa").first()).toBeVisible();
 
   // --- My devices/seats: floating seat checkout/heartbeat/release ---
@@ -616,4 +616,26 @@ test("usage failure stays local and removing a filtered registration keeps the s
   await expect(page.getByRole("option", { name: "DEFAULT", exact: true })).toHaveCount(1);
   await page.getByRole("combobox", { name: "App", exact: true }).selectOption("");
   await expect(page.getByText("second-node", { exact: true })).toBeVisible();
+});
+
+
+test("protected access uses app enrollment while legacy downloads respect date boundaries", async ({ page }) => {
+  const api = makePortalApiFixture();
+  api.entitlements.push({ ...api.entitlements[1], id: "protected", feature: "protected", enforcement_mode: "device_bound_v1" });
+  api.entitlements[1].valid_until = Math.floor(Date.now() / 1000) - 1;
+  await page.route("**/portal/v1/auth/**", api.route);
+  await page.route("**/api/portal/**", api.route);
+  await signIn(page, api);
+  await page.getByRole("link", { name: "View app DEFAULT" }).click();
+  await expect(page.getByRole("heading", { name: "Connect your app" })).toBeVisible();
+  await expect(page.getByRole("cell", { name: "Protected device", exact: true })).toBeVisible();
+  await expect(page.getByLabel("Device key for DEFAULT protected")).toHaveCount(0);
+  await expect(page.locator(".status.expired")).toHaveCount(2);
+  await page.getByLabel("Device key for DEFAULT solo").fill("test-device");
+  await expect(page.getByRole("button", { name: "Activate and download .lic" })).toBeDisabled();
+  expect(api.requests.downloads).toBe(0);
+  api.entitlements.splice(0, 2);
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Connect your app" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Download licenses" })).toHaveCount(0);
 });

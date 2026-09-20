@@ -224,3 +224,18 @@ test("portal UI workflow persists seat sessions across reload", async () => {
     {},
   );
 });
+
+
+test("license display preserves explicit status and handles exact date boundaries", async () => {
+  const { licenseDisplayStatus: status, canDownloadLicense: downloadable } = await loadWorkflowModule();
+  const row = { status: "active", valid_from: 100, valid_until: 200 };
+  assert.equal(status(row, 99), "not_started");
+  assert.equal(status(row, 100), "enabled");
+  assert.equal(status(row, 199), "enabled");
+  assert.equal(status(row, 200), "expired");
+  assert.equal(status({ ...row, status: "disabled" }, 300), "disabled");
+  assert.equal(status({ ...row, status: "revoked" }, 300), "revoked");
+  assert.equal(downloadable({ license_mode: "node_locked", enforcement_mode: "device_bound_v1" }), false);
+  assert.equal(downloadable({ license_mode: "trial", enforcement_mode: "legacy" }), true);
+  assert.equal(downloadable({ license_mode: "floating" }), false);
+});
