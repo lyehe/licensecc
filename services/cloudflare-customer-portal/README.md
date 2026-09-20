@@ -125,6 +125,41 @@ from `services/cloudflare-customer-portal` after the single root workspace
 install. Remote validation requires authority for the target and a deliberately
 scoped credential.
 
+## Hosted setup
+
+Start with the [Cloudflare setup guide](../../doc/operations/cloudflare-setup.md)
+for shared D1 initialization, admin Access, signing configuration and deployment
+order. Deploy the backend before this portal's named `DeviceConsent` binding.
+
+From the repository root after `npm ci`, create the ignored
+`services/cloudflare-customer-portal/wrangler.jsonc` from its example only if no
+live configuration exists. Set the intended account/Worker name, environment,
+shared D1 database ID, exact `PORTAL_PUBLIC_ORIGIN`, matching `BACKEND_ORIGIN`,
+and `DEVICE_CONSENT` service target. Configure session peppers and the chosen
+sign-in method as described below; the example is not a complete live setup.
+Keep actual configuration and secrets out of version control.
+
+From the repository root in PowerShell, build the production UI and Worker:
+
+```powershell
+npm run build --workspace @licensecc/cloudflare-customer-portal
+```
+
+Expected result: updated `dist` assets and a successful Worker compilation.
+Browser tests using the development server do not build production assets.
+From `services/cloudflare-customer-portal` in PowerShell, inspect the configured
+bundle, then deploy only to the authorized environment:
+
+```powershell
+npx wrangler deploy --dry-run --config wrangler.jsonc
+npx wrangler deploy --config wrangler.jsonc
+```
+
+Verify the reported Worker name, account, D1 binding and new version. Reload the
+public portal and validate sign-in and the documented staged portal drill.
+Preserve any deliberate dashboard variable settings when choosing Wrangler's
+variable-retention options; do not silently replace them with example values.
+
 ## Local checks
 
 From the repository root after the pinned root install:

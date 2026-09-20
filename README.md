@@ -28,6 +28,7 @@ before integrating Licensecc into proprietary or closed-source software.
 | Evaluate online verification without deploying | [Local online evaluation](doc/tutorials/local-online-evaluation.rst) | Node 22.5+ and the root npm workspace |
 | Verify server tokens from Python, .NET, or Java | [SDK and support entry points](doc/tutorials/sdk-and-support.rst) | Only the selected language toolchain |
 | Diagnose a customer machine or license | [SDK and support entry points](doc/tutorials/sdk-and-support.rst#support-with-lccinspector) | An installed native build |
+| Set up Cloudflare hosting | [Cloudflare setup](doc/operations/cloudflare-setup.md) | Workers, D1, Access and backup setup in order |
 | Operate the hosted platform | [Production readiness](doc/operations/production-readiness.md) | Cloudflare resources and explicit operator authority |
 | Contribute code or documentation | [Repository workflows](doc/usage/repository-workflows.rst) | The contributor toolchain below |
 | Give a coding agent a bounded task | [`$using-licensecc`](.agents/skills/using-licensecc/SKILL.md) and [repository workflows](doc/usage/repository-workflows.rst) | The checkout and its owning documentation |
