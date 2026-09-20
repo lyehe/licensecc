@@ -17,6 +17,7 @@ import {
   planArchiveVerification,
   planWorkerAssembly,
   validateArchiveMembers,
+  validateWorkerBundle,
   verifyReleaseArtifactReproducibility,
   verifyArchiveGenerator,
   writeReleaseMetadata,
@@ -689,6 +690,37 @@ test("NuGet restore requires the exact pack target and its tracked packages lock
     );
     assert.equal(commands.filter((entry) => entry.label === "locked NuGet restore").length, 0, "restore cannot fall back to a solution or another project lockfile");
     assert.ok(!existsSync(output));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("Worker entrypoints are parsed without linking or evaluating runtime imports", () => {
+  const root = releaseFixture();
+  const bundle = join(root, "build", "worker-entrypoints");
+  try {
+    const prefix = 'import { WorkerEntrypoint } from "cloudflare:workers";\nthrow new Error("must never execute");\n';
+    for (const entry of [
+      'export default class extends WorkerEntrypoint {}',
+      'const handler = {}; export { handler as default };',
+      'const handler = {}; export { handler as "default" };',
+      'const pattern = /[{}]/; export default {};',
+      'addEventListener("fetch", () => {});',
+    ]) {
+      write(root, "build/worker-entrypoints/worker.js", prefix + entry);
+      assert.doesNotThrow(() => validateWorkerBundle(bundle), entry);
+    }
+    for (const decoy of [
+      'export class DeviceConsent extends WorkerEntrypoint {}',
+      'const text = "export default {}";',
+      'const text = `export default {}`;',
+      'const pattern = /export default/;',
+      '// export default {}',
+      'function unused() { addEventListener("fetch", () => {}); }',
+    ]) {
+      write(root, "build/worker-entrypoints/worker.js", prefix + decoy);
+      assert.throws(() => validateWorkerBundle(bundle), /no Worker fetch or module default entrypoint/, decoy);
+    }
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
