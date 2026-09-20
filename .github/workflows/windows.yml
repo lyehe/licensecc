@@ -7,23 +7,31 @@ permissions:
 jobs:
    build-windows:
       runs-on: ${{ matrix.os }}
+      env:
+        CMAKE_GENERATOR: ${{ matrix.generator }}
       strategy:
         fail-fast: false
         max-parallel: 1
         matrix:
           include:
             # Protected transport requires WinHTTP's cross-session pooling control.
-            - os: "windows-2025"
+            - os: "windows-2025-vs2026"
+              generator: "Visual Studio 18 2026"
               preset: "ci-windows-device-identity-test"
-            - os: "windows-2025"
+            - os: "windows-2025-vs2026"
+              generator: "Visual Studio 18 2026"
               preset: "ci-windows-msvc-debug-dynamic-tpm"
             - os: "windows-2022"
+              generator: "Visual Studio 17 2022"
               preset: "ci-windows-msvc-debug-dynamic"
             - os: "windows-2022"
+              generator: "Visual Studio 17 2022"
               preset: "ci-windows-msvc-debug-static"
             - os: "windows-2022"
+              generator: "Visual Studio 17 2022"
               preset: "ci-windows-msvc-release-dynamic"
             - os: "windows-2022"
+              generator: "Visual Studio 17 2022"
               preset: "ci-windows-msvc-release-static"
 
       steps:
@@ -76,7 +84,7 @@ jobs:
          run: pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/bootstrap.ps1 -CheckOnly
       -  name: Core build purity
          shell: pwsh
-         run: pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/check-build-purity.ps1 -Preset ${{ matrix.preset }}
+         run: pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/check-build-purity.ps1 -Preset ${{ matrix.preset }} -Generator "$env:CMAKE_GENERATOR"
       -  name: Exact device-identity suite
          if: matrix.preset == 'ci-windows-device-identity-test'
          shell: pwsh
@@ -146,7 +154,7 @@ jobs:
          if: matrix.preset == 'ci-windows-msvc-debug-dynamic-tpm'
          shell: pwsh
          timeout-minutes: 10
-         run: pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/ci/run-installed-python-device-bound.ps1 -InstallPrefix build/ci-windows-msvc-debug-dynamic-tpm/install
+         run: pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/ci/run-installed-python-device-bound.ps1 -Generator "$env:CMAKE_GENERATOR" -InstallPrefix build/ci-windows-msvc-debug-dynamic-tpm/install
       -  name: .NET for installed native bridge
          if: matrix.preset == 'ci-windows-msvc-debug-dynamic-tpm'
          uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
@@ -179,7 +187,7 @@ jobs:
          if: matrix.preset == 'ci-windows-msvc-debug-dynamic-tpm'
          shell: pwsh
          timeout-minutes: 10
-         run: pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/ci/run-installed-java-device-bound.ps1 -InstallPrefix build/ci-windows-msvc-debug-dynamic-tpm/install
+         run: pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/ci/run-installed-java-device-bound.ps1 -Generator "$env:CMAKE_GENERATOR" -InstallPrefix build/ci-windows-msvc-debug-dynamic-tpm/install
       -  name: On failure print logs
          if: ${{ failure() }}
          shell: pwsh

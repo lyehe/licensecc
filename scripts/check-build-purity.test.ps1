@@ -91,7 +91,21 @@ try {
     $installChanges = Compare-SourceSnapshots -Before $changedProjects -After $changedInstall
     Assert-Condition -Condition (@($installChanges -match "install").Count -gt 0) -Message "install tree mutation was not detected"
 
-    Write-Host "Build purity snapshot fixtures passed."
+    # Exercise argument forwarding without requiring either Visual Studio version.
+    $script:recordedSteps = [System.Collections.Generic.List[object]]::new()
+    function Resolve-CmakeTool { param([string]$Name) return $Name }
+    function Invoke-CmakeStep {
+        param([string]$Tool, [string]$Name, [string[]]$Arguments)
+        $script:recordedSteps.Add(@($Arguments))
+    }
+    Invoke-BuildPurityCheck -RepositoryRoot $fixtureRoot -Preset 'ci-windows-device-identity-test' -Generator 'Visual Studio 18 2026'
+    Assert-Condition ($script:recordedSteps.Count -eq 3) 'Generator override must retain configure, build and test steps'
+    Assert-Condition (($script:recordedSteps[0] -join '|') -eq '--preset|ci-windows-device-identity-test|-G|Visual Studio 18 2026') 'Generator must be forwarded as one configure argument'
+    Assert-Condition (($script:recordedSteps[2] -join '|') -eq '--preset|ci-windows-device-identity-test|--no-tests=error') 'Generator override must preserve the test gate'
+    $script:recordedSteps.Clear()
+    Invoke-BuildPurityCheck -RepositoryRoot $fixtureRoot -Preset 'dev-debug'
+    Assert-Condition (($script:recordedSteps[0] -join '|') -eq '--preset|dev-debug') 'Default configure must preserve the preset generator'
+    Write-Host "Build purity snapshot and generator fixtures passed."
 } finally {
     if (Test-Path -LiteralPath $fixtureRoot) {
         Remove-Item -LiteralPath $fixtureRoot -Recurse -Force

@@ -203,7 +203,8 @@ test("platform CI actively runs the exact identity suite and installed consumers
     const commands = activeRunLines(item.workflow, item.job);
     assert.ok(item.workflow.split(/\r?\n/u).some((line) =>
       !line.trimStart().startsWith("#") && line.includes(item.preset)));
-    assert.ok(commands.some((line) => line === "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/check-build-purity.ps1 -Preset ${{ matrix.preset }}"));
+    const generatorArgument = item.job === "build-windows" ? ' -Generator "$env:CMAKE_GENERATOR"' : "";
+    assert.ok(commands.some((line) => line === "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/check-build-purity.ps1 -Preset ${{ matrix.preset }}" + generatorArgument));
     assert.ok(commands.some((line) => line === `ctest --preset ${item.preset} --no-tests=error -R "^device_identity_(abi|vectors|policy|concurrency)_test$"`));
     assert.ok(commands.some((line) => line.startsWith(`cmake --install build/${item.preset} `)));
     assert.ok(commands.some((line) => line === `pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/ci/run-installed-device-identity-consumer.ps1 -InstallPrefix build/${item.preset}/install -RequireC99`));
@@ -221,6 +222,21 @@ test("platform CI actively runs the exact identity suite and installed consumers
   assert.ok(windowsCommands.some((line) => /^\$directives\s*=\s*&\s*\$dumpbin\s+\/directives/u.test(line)));
   assert.ok(windowsCommands.some((line) => /^if\s*\(\$directives\s+-match\s+.*(?:ssl|crypto)/iu.test(line)));
   assert.doesNotMatch(windowsCommands.join("\n"), /&\s*dumpbin(?:\.exe)?\b/iu);
+});
+
+test("Windows CI selects matching generators for protected and legacy builds", () => {
+  const workflow = source(".github/workflows/windows.yml").replaceAll("\r\n", "\n");
+  assert.match(workflow, /CMAKE_GENERATOR: \$\{\{ matrix\.generator \}\}/u);
+  for (const preset of ["ci-windows-device-identity-test", "ci-windows-msvc-debug-dynamic-tpm"]) {
+    assert.ok(workflow.includes(`- os: "windows-2025-vs2026"\n              generator: "Visual Studio 18 2026"\n              preset: "${preset}"`));
+  }
+  const commands = activeRunLines(workflow, "build-windows");
+  for (const sdk of ["python", "java"]) {
+    assert.ok(commands.some((line) => line.includes(`run-installed-${sdk}-device-bound.ps1 -Generator "$env:CMAKE_GENERATOR"`)));
+    const script = source(`scripts/ci/run-installed-${sdk}-device-bound.ps1`);
+    assert.match(script, /\[string\]\$Generator = 'Visual Studio 17 2022'/u);
+    assert.match(script, /'-G', \$Generator, '-A', 'x64'/u);
+  }
 });
 
 test("installed consumer makes C99 mandatory only when its CI gate requests it", () => {

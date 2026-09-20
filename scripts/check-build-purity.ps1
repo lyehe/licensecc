@@ -27,6 +27,8 @@ param(
     )]
     [string]$Preset = "dev-debug",
 
+    [string]$Generator,
+
     [switch]$SkipTests
 )
 
@@ -401,6 +403,8 @@ function Invoke-BuildPurityCheck {
         [Parameter(Mandatory = $true)]
         [string]$Preset,
 
+        [string]$Generator,
+
         [switch]$SkipTests
     )
 
@@ -413,7 +417,9 @@ function Invoke-BuildPurityCheck {
     try {
         $cmake = Resolve-CmakeTool -Name "cmake"
         $ctest = Resolve-CmakeTool -Name "ctest"
-        Invoke-CmakeStep -Tool $cmake -Name "Configure $Preset" -Arguments @("--preset", $Preset)
+        $configureArguments = @("--preset", $Preset)
+        if ($Generator) { $configureArguments += @("-G", $Generator) }
+        Invoke-CmakeStep -Tool $cmake -Name "Configure $Preset" -Arguments $configureArguments
         Invoke-CmakeStep -Tool $cmake -Name "Build $Preset" -Arguments @("--build", "--preset", $Preset)
         if (-not $SkipTests) {
             Invoke-CmakeStep -Tool $ctest -Name "Test $Preset" -Arguments @("--preset", $Preset, "--no-tests=error")
@@ -448,5 +454,5 @@ function Invoke-BuildPurityCheck {
 
 if ($MyInvocation.InvocationName -ne ".") {
     $scriptRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-    Invoke-BuildPurityCheck -RepositoryRoot $scriptRoot -Preset $Preset -SkipTests:$SkipTests
+    Invoke-BuildPurityCheck -RepositoryRoot $scriptRoot -Preset $Preset -Generator $Generator -SkipTests:$SkipTests
 }

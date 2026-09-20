@@ -3,6 +3,7 @@ param(
     [Parameter(Mandatory = $true)][string]$InstallPrefix,
     [ValidateSet('Debug', 'Release')][string]$Configuration = 'Debug',
     [string]$ProjectName = 'test',
+    [string]$Generator = 'Visual Studio 17 2022',
     [string]$BuildDirectory = 'build/installed-python-device-bound'
 )
 
@@ -37,7 +38,7 @@ try {
     & (Join-Path $PSScriptRoot 'device-bound-exports.test.ps1')
     # CMake rejects a foreign cached source/generator; never delete or reset it.
     Invoke-Checked 'cmake' @('-S', $bridgeSource, '-B', $outputRoot,
-        '-G', 'Visual Studio 17 2022', '-A', 'x64', "-Dlicensecc_DIR=$packageDirectory", "-DLCC_PROJECT_NAME=$ProjectName", '-DLCC_BRIDGE_BUILD_TESTS=ON')
+        '-G', $Generator, '-A', 'x64', "-Dlicensecc_DIR=$packageDirectory", "-DLCC_PROJECT_NAME=$ProjectName", '-DLCC_BRIDGE_BUILD_TESTS=ON')
     Invoke-Checked 'cmake' @('--build', $outputRoot, '--config', $Configuration, '-j', '4')
     Invoke-Checked 'cmake' @('--install', $outputRoot, '--config', $Configuration, '--prefix', $bridgeInstall)
 

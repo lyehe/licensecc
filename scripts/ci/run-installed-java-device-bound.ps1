@@ -3,6 +3,7 @@ param(
     [Parameter(Mandatory = $true)][string]$InstallPrefix,
     [ValidateSet('Debug', 'Release')][string]$Configuration = 'Debug',
     [string]$ProjectName = 'test',
+    [string]$Generator = 'Visual Studio 17 2022',
     [string]$BuildDirectory = 'build/installed-java-device-bound'
 )
 $ErrorActionPreference = 'Stop'
@@ -34,7 +35,7 @@ Push-Location $repositoryRoot
 try {
     & (Join-Path $PSScriptRoot 'device-bound-exports.test.ps1')
     # No cleanup: a foreign cached source/generator is an error, not permission to reset it.
-    Invoke-Checked 'cmake' @('-S', $bridgeSource, '-B', $outputRoot, '-G', 'Visual Studio 17 2022', '-A', 'x64',
+    Invoke-Checked 'cmake' @('-S', $bridgeSource, '-B', $outputRoot, '-G', $Generator, '-A', 'x64',
         "-Dlicensecc_DIR=$packageDirectory", "-DLCC_PROJECT_NAME=$ProjectName", '-DLCC_JNI_BUILD_TESTS=ON')
     Invoke-Checked 'cmake' @('--build', $outputRoot, '--config', $Configuration, '-j', '4')
     Invoke-Checked 'cmake' @('--install', $outputRoot, '--config', $Configuration, '--prefix', $bridgeInstall)

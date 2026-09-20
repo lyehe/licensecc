@@ -336,7 +336,8 @@ and proof/lease audience values. Responses cannot change it. Unsupported
 security options fail closed; older Windows compatibility is not yet certified.
 Windows Server 2022 rejects the required
 ``WINHTTP_OPTION_DISABLE_GLOBAL_POOLING`` option, so protected enrollment and
-renewal are unavailable there. Protected-device CI uses Windows Server 2025;
+renewal are unavailable there. Protected-device CI uses Windows Server 2025
+with Visual Studio 2026, explicitly selected for the core and installed bridges;
 the legacy licensing builds retain Windows Server 2022 coverage. This does not
 establish a minimum supported Windows desktop version; desktop qualification
 remains separate from hosted CI.
