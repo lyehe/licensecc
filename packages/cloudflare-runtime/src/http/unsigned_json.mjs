@@ -19,10 +19,22 @@ export function parseUnsignedJson(bytes) {
     const source = utf8.decode(bytes);
     const value = JSON.parse(source);
     const stack = [];
-    const tokens = /"(?:[^"\\]|\\.)*"|[{}[\]:,]|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|true|false|null/g;
-    let match;
-    while ((match = tokens.exec(source))) {
-      const token = match[0];
+    let cursor = 0;
+    while (cursor < source.length) {
+      const start = cursor++;
+      const first = source[start];
+      if (first === '"') {
+        // JSON.parse already validated escapes. Consume each character once;
+        // never search again from a later quote inside the same string.
+        while (cursor < source.length) {
+          const character = source[cursor++];
+          if (character === "\\") cursor += 1;
+          else if (character === '"') break;
+        }
+      } else if (first === "-" || (first >= "0" && first <= "9")) {
+        while (cursor < source.length && /[0-9eE+.-]/.test(source[cursor])) cursor += 1;
+      }
+      const token = source.slice(start, cursor);
       if (token === "{" || token === "[") {
         stack.push(token === "{" ? new Set() : null);
         if (stack.length > 8) invalid();
@@ -35,7 +47,8 @@ export function parseUnsignedJson(bytes) {
       else if (token.startsWith('"')) {
         const text = JSON.parse(token);
         if (utf8.decode(encoder.encode(text)) !== text) invalid();
-        if (source.slice(tokens.lastIndex).trimStart().startsWith(":")) {
+        while (cursor < source.length && /[ \t\r\n]/.test(source[cursor])) cursor += 1;
+        if (source[cursor] === ":") {
           const keys = stack.at(-1);
           if (!keys || keys.has(text)) invalid();
           keys.add(text);
