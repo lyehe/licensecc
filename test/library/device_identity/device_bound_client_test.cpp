@@ -296,7 +296,7 @@ BOOST_AUTO_TEST_CASE(origin_is_fixed_canonical_https_and_failures_preserve_outpu
 	BOOST_CHECK_EQUAL(out.port, 8443);
 	BOOST_REQUIRE(parse_bound_http_origin("https://backend.test", out));
 	BOOST_CHECK_EQUAL(out.port, 443);
-#ifdef _WIN32
+#if defined(_WIN32) || (defined(__linux__) && LCC_ENABLE_LINUX_DESKTOP)
 	auto transport = make_bound_http_transport("https://backend.test");
 	BOOST_REQUIRE(transport);
 	BoundHttpResponse response{42, "sentinel"};

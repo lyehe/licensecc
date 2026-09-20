@@ -51,7 +51,7 @@ See Microsoft's `NCryptDeleteKey contract
 Device-bound protocol integration status
 ----------------------------------------
 
-The additive ``licensecc/device_bound.h`` C API owns the Windows desktop flow
+The additive ``licensecc/device_bound.h`` C API owns the Windows and Linux desktop flows
 through ``LccDeviceBoundClient``. It fixes user scope and hardware-required
 provider policy and exposes no caller transport, clock, raw response or storage
 root override. It preserves the version-1 identity API and key namespace.
@@ -79,7 +79,7 @@ succeeded. Cancellation immediately disables authority; if capture fails,
 save/cancel retry retains recovery until cleanup can finish. Close requires all
 other calls to have returned and never deletes a TPM key or server allocation.
 
-The installed-header-only Windows example is maintained in
+The installed-header-only desktop example is maintained in
 ``examples/device_bound/README.md`` and listed in :doc:`../usage/examples`.
 Its local build/link check does not prove the live TPM/browser/backend journey,
 which remains a release qualification requirement.
@@ -369,3 +369,36 @@ Generated C reference
 
 .. doxygengroup:: devicebound
    :content-only:
+
+Linux protected desktop requirements
+------------------------------------
+
+Build with ``LCC_ENABLE_TPM2_OPENSSL=ON``. Linux requires OpenSSL 3 with the
+TPM2 provider, TPM device permissions, libcurl 7.85 or newer with HTTPS support,
+a system CA trust store, and ``/usr/bin/xdg-open`` for browser consent. Use a
+local filesystem supporting ``flock``, atomic rename and directory ``fsync``.
+The user must have a desktop browser on the same machine as the callback
+listener. Failure to start the opener returns ``BROWSER_UNAVAILABLE``. A successful
+launch only starts consent; if the desktop cannot open a browser, the attempt
+remains pending and can be retried. Launching a browser grants no access.
+
+The native owner obtains the home directory from the OS account database.
+It uses ``~/.licensecc/device-keys`` for TPM-wrapped key references and
+``~/.licensecc/checkpoint-<namespace-hash>`` for signed checkpoints. Directories
+are private (0700), files are private (0600), and symbolic links, hard-linked
+files, changed ownership and unsafe permissions are rejected. The application
+cannot override these paths through the public protected API. Do not copy or
+remove these files to bypass enrollment or recover a lost key.
+
+Linux uses ``CLOCK_BOOTTIME`` bracketed by ``CLOCK_MONOTONIC`` readings in the
+same 100-nanosecond units as Windows. Suspend, fork, clock discontinuity or a
+process restart requires fresh online permission. Checkpoints contain signed
+recovery state, not restored authority. Linux desktop/browser/TLS and physical
+TPM qualification remains distinct from simulator and local integration tests.
+
+The Linux desktop adapters are enabled by default when device identity is built.
+For a provider-only runtime (including Ubuntu 22.04 with its older system curl),
+set ``LCC_ENABLE_LINUX_DESKTOP=OFF``. The low-level TPM proof API remains available;
+public protected enrollment and feature-session opens then return
+``UNSUPPORTED_PLATFORM``. Full desktop builds require libcurl 7.85+ with
+thread-safe global initialization and asynchronous DNS support.

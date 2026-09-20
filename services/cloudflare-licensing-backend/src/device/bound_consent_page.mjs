@@ -35,6 +35,7 @@ export const CONSENT_PAGE_SQL=`WITH context AS (
   WHERE a.current_customer_status='active' AND (a.customer_id IS NULL OR a.customer_id=?)
     AND a.status='pending' AND a.expires_at>a.now
     AND e.customer_id=? AND e.status='active' AND e.enforcement_mode='device_bound_v1'
+    AND (a.requested_feature IS NULL OR e.feature=a.requested_feature)
     AND e.pool_size=0 AND ${boundTrialSql("e","a.key_id","a.now")}
     AND (e.valid_from IS NULL OR e.valid_from<=a.now) AND (e.valid_until IS NULL OR e.valid_until>a.now)
     AND (e.feature,e.license_fingerprint)>(?,?)

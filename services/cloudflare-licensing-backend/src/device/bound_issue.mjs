@@ -5,6 +5,7 @@ import { boundRandomId, boundSecretHash } from "./bound_enrollment.mjs";
 import { sha256Hex, verifyBoundDeviceProof, signBoundDeviceLease } from "./bound_crypto.mjs";
 import { commitBoundDeviceLease } from "./bound_store.mjs";
 import { recoverBoundDeviceLease } from "./bound_recovery.mjs";
+import { limitBoundVerified } from "./bound_rate.mjs";
 import { boundTrialState } from "./bound_trial.mjs";
 
 /** @returns {never} */
@@ -121,6 +122,7 @@ export async function issueBoundLease(db, purpose, input, config, loadSigner, re
   }
   const { entitlement: e, device, binding, trial } = snapshot;
   const a = verified.subject;
+  await limitBoundVerified(db, a.key_id, e.customer_id);
   const candidate = { purpose, keyId: a.key_id, operationId: request.operation_id, requestDigest: verified.requestDigest,
     customerId: e.customer_id, customerRevision: e.customer_revision, project: e.project, feature: e.feature,
     fingerprint: e.license_fingerprint, entitlementRevision: e.authority_revision, trialStamp: trial.stamp,

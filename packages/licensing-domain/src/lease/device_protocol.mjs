@@ -47,13 +47,16 @@ export const DEVICE_COMPARISON_FIELDS = Object.freeze([
 // Display-only enrollment comparison. This is neither proof nor a credential.
 // Callers separately validate the registry, callback and imported device key.
 export function deviceEnrollmentComparisonInput(input) {
-  exactFields(input, DEVICE_COMPARISON_FIELDS);
+  const featureBound = Object.hasOwn(input ?? {}, "requested_feature");
+  const fields = featureBound ? [...DEVICE_COMPARISON_FIELDS, "requested_feature"] : DEVICE_COMPARISON_FIELDS;
+  exactFields(input, fields);
+  if (featureBound && (typeof input.requested_feature !== "string" || !/^[A-Za-z0-9_.:-]{1,15}$/.test(input.requested_feature))) throw new Error("invalid_identity");
   for(const field of ["client_id","project"])if(typeof input[field]!=="string" || !/^[A-Za-z0-9_.:-]{1,127}$/.test(input[field]))throw new Error("invalid_identity");
   for (const field of ["attempt_handle", "state", "code_challenge"]) {
     if (decodeBase64url(input[field],32).length!==32) throw new Error("invalid_identity");
   }
   if (typeof input.key_id!=="string" || !keyPattern.test(input.key_id)) throw new Error("invalid_identity");
-  return encoder.encode("lcc-device-enrollment-comparison-v1\n"+DEVICE_COMPARISON_FIELDS.map(field=>text(input[field])).join("\n")+"\n");
+  return encoder.encode((featureBound ? "lcc-device-enrollment-comparison-v2\n" : "lcc-device-enrollment-comparison-v1\n")+fields.map(field=>text(input[field])).join("\n")+"\n");
 }
 
 export function formatDeviceEnrollmentComparison(digest) {

@@ -1,5 +1,5 @@
-#ifndef LICENSECC_BOUND_CHECKPOINT_WINDOWS_HPP_
-#define LICENSECC_BOUND_CHECKPOINT_WINDOWS_HPP_
+#ifndef LICENSECC_BOUND_CHECKPOINT_PLATFORM_HPP_
+#define LICENSECC_BOUND_CHECKPOINT_PLATFORM_HPP_
 #include "bound_checkpoint.hpp"
 
 namespace license {
@@ -11,10 +11,15 @@ struct BoundCheckpointNamespace {
 // absent: key loss/rotation must not silently select an empty namespace.
 bool bound_checkpoint_namespace(const BoundCheckpointNamespace&, std::string& out) noexcept;
 std::unique_ptr<BoundCheckpointStorage> make_bound_checkpoint_storage(const BoundCheckpointNamespace&) noexcept;
+#if defined(_WIN32)
 // Private test seam: already-created private local-NTFS root, with the identical
 // ACL, reparse, hard-link and resolved-path checks as the production directory.
 std::unique_ptr<BoundCheckpointStorage> make_bound_checkpoint_storage_at_root(const std::wstring&,
 																			  unsigned wait_ms = 250) noexcept;
+#elif defined(__linux__)
+std::unique_ptr<BoundCheckpointStorage> make_bound_checkpoint_storage_at_root(const std::string&,
+																			  unsigned wait_ms = 250) noexcept;
+#endif
 }  // namespace device_identity
 }  // namespace license
 #endif

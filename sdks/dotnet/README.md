@@ -34,7 +34,7 @@ A .NET 8 client SDK for the **licensecc** online licensing backend:
 2. **A thin HTTP client wrapper** over the licensing-backend's client-facing endpoints
    (`/v1/verify`, `/v1/activate`, `/v1/renew`, `/v1/checkout`, `/v1/heartbeat`, `/v1/release`,
    `/v1/meter`, `/v1/admin/report`).
-3. **An optional Windows x64 native bridge** for protected-device enrollment,
+3. **An optional 64-bit Windows/Linux native bridge** for protected-device enrollment,
    renewal, checkpoint recovery and per-operation authorization.
 
 > ## Scope — read this
@@ -52,7 +52,7 @@ No external NuGet dependencies in the library: it uses only `System.Security.Cry
 
 ## Windows protected-device client
 
-`Licensecc.Client.DeviceBound` wraps the installed Windows x64 native owner.
+`Licensecc.Client.DeviceBound` wraps the installed Windows/Linux native owner.
 Build the shared C bridge using [the native bridge instructions](../python/native/README.md)
 and load its application-owned absolute DLL path with `DeviceBoundLibrary`.
 No native binary is bundled in this NuGet package. Loading checks every ABI size,

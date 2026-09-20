@@ -45,6 +45,7 @@
     "generate-online-assertion-fixture": "node scripts/generate-online-assertion-fixture.mjs",
     "validate:remote-cpp": "node scripts/remote-cpp-verify.mjs",
     "validate:public-verifier": "node scripts/public-verifier-drill.mjs",
+    "validate:protected-config": "node scripts/protected-device-readiness.mjs",
     "validate:secret-inventory": "node scripts/backend-secret-inventory.mjs",
     "validate:staging-lease": "node scripts/staging-lease-drill.mjs",
     "validate:staging-order": "node scripts/staging-order-drill.mjs",

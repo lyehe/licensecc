@@ -16,6 +16,8 @@ const authorization = object({ client_id: project, project, public_key_spki: { t
   pattern: "^[A-Za-z0-9_-]+$", description: "Canonical DER P-256 SPKI encoded in unpadded base64url; import/re-export equality is enforced." },
 device_label: { type: "string", description: "Trimmed display-only Unicode label, 1–80 code points." }, redirect_uri: callback,
 state: secret, code_challenge: secret, code_challenge_method: { const: "S256" } });
+Object.assign(authorization.properties, { requested_feature: { type: "string", pattern: "^[A-Za-z0-9_.:-]{1,15}$",
+  description: "Feature requested by the application; pins consent and the v2 comparison code. Omit only for older clients." } });
 const challenge = { oneOf: [object({ purpose: { const: "exchange" }, attempt_handle: secret, operation_id: secret }),
   object({ purpose: { const: "renew" }, binding_id: recordId, operation_id: secret })] };
 const lease = object({ device_id: recordId, binding_id: recordId, generation: { ...integer, minimum: 1 },

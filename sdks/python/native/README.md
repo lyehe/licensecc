@@ -7,7 +7,7 @@ The existing device-bound layout and exports retain their contracts. Rebuild
 the DLL against the current installed runtime to use the new API; older DLLs
 remain supported by the existing device-bound adapter.
 
-This optional Windows x64 DLL exposes the existing native device-bound owner
+This optional 64-bit Windows/Linux library exposes the existing native device-bound owner
 to `licensecc.device_bound`. It owns enrollment, HTTP, TPM signing, lease
 verification, clocks and checkpoint recovery in C++. Python does not receive
 raw leases, enrollment secrets or private-key handles. The bridge adds no
@@ -106,3 +106,24 @@ The installed gate also builds a test-only DLL exporting the original 16
 device-bound symbols. `LCC_TEST_OLD_DEVICE_BOUND_DLL` selects that fixture to
 verify optional feature-session rejection followed by successful old-API loading.
 The fixture is never installed or bundled with an application.
+
+
+## Linux build
+
+Install `libssl-dev`, `libcurl4-openssl-dev`, `tpm2-openssl` and `xdg-utils`.
+Build/install the runtime with `-DLCC_ENABLE_TPM2_OPENSSL=ON`; Linux device builds
+produce position-independent static objects for the SDK bridges. Then:
+
+```sh
+cmake -S sdks/python/native -B build/python-device-bound-linux \
+  -DCMAKE_PREFIX_PATH=/absolute/runtime-install -DLCC_PROJECT_NAME=your_project
+cmake --build build/python-device-bound-linux
+cmake --install build/python-device-bound-linux --prefix /absolute/app/native
+```
+
+Load `/absolute/app/native/lib/liblicensecc_device_bound_bridge.so` from Python
+or .NET. The ABI/export set is the same as Windows. Linux dependencies use the
+OS dynamic loader; protect the installation and its library search configuration.
+No bridge is bundled in the Python wheel. `LCC_TEST_DEVICE_BOUND_DLL` also accepts
+an absolute `.so` path for the installed bridge tests. See the Linux requirements
+in [the native API guide](../../../doc/api/device_identity.rst).

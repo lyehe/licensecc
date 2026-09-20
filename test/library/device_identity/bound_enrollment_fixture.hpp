@@ -131,9 +131,9 @@ struct Fixture {
 			std::string comparison;
 			const std::string handle(43, 'A');
 			BOOST_REQUIRE(
-				enrollment_comparison_code_v1({handle, field("client_id"), field("project"), field("redirect_uri"),
-											   field("state"), field("code_challenge")},
-											  key, comparison));
+				enrollment_comparison_code({handle, field("client_id"), field("project"), field("redirect_uri"),
+											field("state"), field("code_challenge"), field("requested_feature")},
+										   key, comparison));
 			if (!comparison_override.empty()) comparison = comparison_override;
 			out = {200,
 				   "{\"ok\":true,\"code\":\"authorization_created\",\"request_id\":\"trace\",\"data\":{\"attempt_"

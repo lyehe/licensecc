@@ -227,16 +227,19 @@ bool bound_proof_input_v2(const BoundProofInput& input, const std::string& key_i
 	}
 }
 
-bool enrollment_comparison_input_v1(const EnrollmentComparisonInput& input, const std::string& key_id,
-									std::vector<std::uint8_t>& out) noexcept {
+bool enrollment_comparison_input(const EnrollmentComparisonInput& input, const std::string& key_id,
+								 std::vector<std::uint8_t>& out) noexcept {
 	try {
 		if (!key_id_valid(key_id) || !name(input.client_id) || !name(input.project) ||
 			!token(input.attempt_handle, 32) || !token(input.state, 32) || !token(input.code_challenge, 32))
 			return false;
-		std::string payload = "lcc-device-enrollment-comparison-v1\n";
+		if (!input.requested_feature.empty() && !name(input.requested_feature, 15)) return false;
+		std::string payload = input.requested_feature.empty() ? "lcc-device-enrollment-comparison-v1\n"
+															  : "lcc-device-enrollment-comparison-v2\n";
 		if (!append_fields(payload, {&input.attempt_handle, &input.client_id, &input.project, &key_id,
 									 &input.redirect_uri, &input.state, &input.code_challenge}))
 			return false;
+		if (!input.requested_feature.empty() && !append_fields(payload, {&input.requested_feature})) return false;
 		std::vector<std::uint8_t> candidate(payload.begin(), payload.end());
 		out.swap(candidate);
 		return true;
@@ -245,12 +248,12 @@ bool enrollment_comparison_input_v1(const EnrollmentComparisonInput& input, cons
 	}
 }
 
-bool enrollment_comparison_code_v1(const EnrollmentComparisonInput& input, const std::string& key_id,
-								   std::string& out) noexcept {
+bool enrollment_comparison_code(const EnrollmentComparisonInput& input, const std::string& key_id,
+								std::string& out) noexcept {
 	try {
 		std::vector<std::uint8_t> payload;
 		SensitiveArray<32> digest;
-		if (!enrollment_comparison_input_v1(input, key_id, payload) ||
+		if (!enrollment_comparison_input(input, key_id, payload) ||
 			!sha256(payload.data(), payload.size(), digest.value))
 			return false;
 		std::string candidate;

@@ -4,8 +4,11 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(LCC_PROJECT_NAME "test" CACHE STRING "Installed Licensecc project component")
 find_package(licensecc CONFIG REQUIRED)
-if(NOT WIN32 OR NOT LCC_ENABLE_DEVICE_IDENTITY OR NOT LCC_ENABLE_WINDOWS_TPM)
-    message(FATAL_ERROR "This consumer requires an installed Windows package with device identity and Windows TPM enabled")
+if(NOT LCC_ENABLE_DEVICE_IDENTITY OR
+   (WIN32 AND NOT LCC_ENABLE_WINDOWS_TPM) OR
+   (CMAKE_SYSTEM_NAME STREQUAL "Linux" AND (NOT LCC_ENABLE_TPM2_OPENSSL OR NOT LCC_ENABLE_LINUX_DESKTOP)) OR
+   (NOT WIN32 AND NOT CMAKE_SYSTEM_NAME STREQUAL "Linux"))
+    message(FATAL_ERROR "This consumer requires an installed Windows or Linux package with device identity and its TPM provider enabled")
 endif()
 
 set(LCC_BOUND_FEATURE "DEFAULT" CACHE STRING "Licensed feature")

@@ -20,7 +20,7 @@ const MAX_BACKUP_MANIFEST_BYTES = 16 * 1024;
 const MAX_FUTURE_CLOCK_SKEW_MS = 5 * 60 * 1000;
 const MAX_MANIFEST_STRING_LENGTH = 2048;
 const SQL_HASH_CHUNK_BYTES = 64 * 1024;
-const EXPECTED_SCHEMA_SIGNATURE_SHA256 = "1c8f4b31ddb67a67a4a2d3b220b322e7a16c4622909fe29b8220a3f4b4f38508";
+const EXPECTED_SCHEMA_SIGNATURE_SHA256 = "fbfa4bd728359c1ea068f313cc3a06093dc701cd15a0d707d4505bea34150ffa";
 const SNAPSHOT_INVENTORY_ALGORITHM = "d1-export-sql-insert-count-v1";
 const DEFAULT_BACKEND_MIGRATIONS_DIR = resolve(
   dirname(fileURLToPath(import.meta.url)),
@@ -197,6 +197,9 @@ const EXPECTED_INDEXES = {
 };
 
 const EXPECTED_TRIGGERS = {
+  tr_bound_requested_feature_immutable: "device_bound_authorizations",
+  tr_bound_requested_feature_insert: "device_bound_authorizations",
+  tr_bound_requested_feature_update: "device_bound_authorizations",
   bump_license_plan_projection_generation_assignments_delete: "license_plan_assignments",
   bump_license_plan_projection_generation_assignments_insert: "license_plan_assignments",
   bump_license_plan_projection_generation_assignments_update: "license_plan_assignments",

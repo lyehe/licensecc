@@ -1,16 +1,19 @@
 #include "bound_public.hpp"
 #include "device_identity_handle.hpp"
-#ifdef _WIN32
+#if defined(_WIN32) || (defined(__linux__) && LCC_ENABLE_LINUX_DESKTOP)
 #include "bound_desktop.hpp"
 #endif
 #include <cstring>
+#ifdef __linux__
+#include "bound_directory_linux.hpp"
+#endif
 
 using namespace license::device_identity;
 struct LccDeviceBoundClient {
 	std::mutex mutex;
 	std::unique_ptr<BoundCheckpointStore> storage;
 	std::unique_ptr<BoundRenewalClient> renewal;
-#ifdef _WIN32
+#if defined(_WIN32) || (defined(__linux__) && LCC_ENABLE_LINUX_DESKTOP)
 	std::unique_ptr<BoundDesktopEnrollment> enrollment;
 	std::unique_ptr<BoundEnrollmentFlow> pending;
 	std::unique_ptr<BoundBrowserLauncher> browser;
@@ -22,14 +25,14 @@ struct LccDeviceBoundClient {
 	BoundResumeExport capture() {
 		if (capture_allowed && !capture_allowed()) return BoundResumeExport::error;
 		if (renewal) return renewal->capture_resume_statement(retained);
-#ifdef _WIN32
+#if defined(_WIN32) || (defined(__linux__) && LCC_ENABLE_LINUX_DESKTOP)
 		if (enrollment) return enrollment->capture_resume_statement(retained);
 		if (pending) return pending->capture_resume_statement(retained);
 #endif
 		return BoundResumeExport::absent;
 	}
 	void stop() noexcept {
-#ifdef _WIN32
+#if defined(_WIN32) || (defined(__linux__) && LCC_ENABLE_LINUX_DESKTOP)
 		enrollment.reset();
 		pending.reset();
 		browser.reset();
@@ -76,7 +79,7 @@ LCC_BOUND_RESULT checkpoint_result(LCC_BOUND_CHECKPOINT_RESULT value) {
 	if (value == LCC_BOUND_CHECKPOINT_BUSY) return LCC_BOUND_BUSY;
 	return LCC_BOUND_STORAGE_ERROR;
 }
-#ifdef _WIN32
+#if defined(_WIN32) || (defined(__linux__) && LCC_ENABLE_LINUX_DESKTOP)
 LCC_BOUND_RESULT finish(LccDeviceBoundClient& owner, const BoundRenewResult& value, LccDeviceBoundOutcome& out) {
 	if (owner.enrollment) {
 		auto renewal = owner.enrollment->take_client();
@@ -118,7 +121,7 @@ LCC_BOUND_RESULT open_bound_public(const LccDeviceBoundOptions* options, LccDevi
 	BoundPublicConfig config;
 	const auto checked = validate_bound_public_options(options, config);
 	if (checked != LCC_BOUND_OK) return checked;
-#ifndef _WIN32
+#if !defined(_WIN32) && (!defined(__linux__) || !LCC_ENABLE_LINUX_DESKTOP)
 	return LCC_BOUND_UNSUPPORTED_PLATFORM;
 #else
 	try {
@@ -169,7 +172,11 @@ LCC_BOUND_RESULT open_bound_public(const LccDeviceBoundOptions* options, LccDevi
 		}
 		LccDeviceIdentityOptions identity_options;
 		lcc_init_device_identity_options(&identity_options);
+#ifdef _WIN32
 		identity_options.backend = LCC_DEVICE_BACKEND_WINDOWS_TPM;
+#else
+		identity_options.backend = LCC_DEVICE_BACKEND_TPM2_OPENSSL;
+#endif
 		identity_options.flags = resume ? 0 : LCC_DEVICE_OPEN_CREATE_IF_MISSING;
 		std::strcpy(identity_options.application_id, config.storage.application_id.c_str());
 		std::strcpy(identity_options.project, config.storage.project.c_str());
@@ -223,10 +230,19 @@ LCC_BOUND_RESULT open_default(const LccDeviceBoundOptions* options, LccDeviceBou
 							  LccDeviceBoundOutcome* detail, bool resume) noexcept {
 	try {
 		BoundPublicHooks hooks;
-#ifdef _WIN32
+#if defined(_WIN32) || (defined(__linux__) && LCC_ENABLE_LINUX_DESKTOP)
 		hooks.identity = [](const LccDeviceIdentityOptions& in, BoundIdentityOwner& owner) {
+#ifdef __linux__
+			auto options = in;
+			std::string root;
+			if (!bound_linux_directory("device-keys", root) || root.size() >= sizeof(options.storage_directory))
+				return LCC_DEVICE_IO_ERROR;
+			std::strcpy(options.storage_directory, root.c_str());
+#else
+			const auto& options = in;
+#endif
 			LccDeviceIdentity* raw = nullptr;
-			const auto result = lcc_device_identity_open(&in, &raw);
+			const auto result = lcc_device_identity_open(&options, &raw);
 			owner.reset(raw);
 			return result;
 		};
@@ -252,7 +268,7 @@ LCC_BOUND_RESULT lcc_device_bound_prepare(LccDeviceBoundClient* client, LccDevic
 	const auto valid = bound_public_structure(out);
 	if (valid != LCC_BOUND_OK) return valid;
 	return locked(client, [&](LccDeviceBoundClient& owner) {
-#ifdef _WIN32
+#if defined(_WIN32) || (defined(__linux__) && LCC_ENABLE_LINUX_DESKTOP)
 		if (owner.cancelled) return LCC_BOUND_CANCELLED;
 		if (!owner.enrollment && owner.pending) {
 			std::string present;
@@ -286,7 +302,7 @@ LCC_BOUND_RESULT lcc_device_bound_prepare(LccDeviceBoundClient* client, LccDevic
 }
 LCC_BOUND_RESULT lcc_device_bound_launch(LccDeviceBoundClient* client) {
 	return locked(client, [](LccDeviceBoundClient& owner) {
-#ifdef _WIN32
+#if defined(_WIN32) || (defined(__linux__) && LCC_ENABLE_LINUX_DESKTOP)
 		if (owner.cancelled) return LCC_BOUND_CANCELLED;
 		if (!owner.enrollment) return LCC_BOUND_INVALID_STATE;
 		switch (owner.enrollment->launch()) {
@@ -308,7 +324,7 @@ LCC_BOUND_RESULT lcc_device_bound_launch(LccDeviceBoundClient* client) {
 LCC_BOUND_RESULT lcc_device_bound_poll(LccDeviceBoundClient* client, uint32_t wait_ms) {
 	if (wait_ms > 1000) return LCC_BOUND_INVALID_ARGUMENT;
 	return locked(client, [&](LccDeviceBoundClient& owner) {
-#ifdef _WIN32
+#if defined(_WIN32) || (defined(__linux__) && LCC_ENABLE_LINUX_DESKTOP)
 		if (owner.cancelled) return LCC_BOUND_CANCELLED;
 		if (!owner.enrollment) return LCC_BOUND_INVALID_STATE;
 		switch (owner.enrollment->poll(wait_ms)) {
@@ -334,7 +350,7 @@ LCC_BOUND_RESULT lcc_device_bound_poll(LccDeviceBoundClient* client, uint32_t wa
 LCC_BOUND_RESULT lcc_device_bound_activate(LccDeviceBoundClient* client, LccDeviceBoundOutcome* out) {
 	return outcome(client, out, [](LccDeviceBoundClient& owner, LccDeviceBoundOutcome& next) {
 		if (owner.cancelled) return LCC_BOUND_CANCELLED;
-#ifdef _WIN32
+#if defined(_WIN32) || (defined(__linux__) && LCC_ENABLE_LINUX_DESKTOP)
 		if (!owner.enrollment) return LCC_BOUND_INVALID_STATE;
 		return finish(owner, owner.enrollment->activate(), next);
 #else
@@ -346,7 +362,7 @@ LCC_BOUND_RESULT lcc_device_bound_renew(LccDeviceBoundClient* client, LccDeviceB
 	return outcome(client, out, [](LccDeviceBoundClient& owner, LccDeviceBoundOutcome& next) {
 		if (owner.cancelled) return LCC_BOUND_CANCELLED;
 		if (!owner.renewal) return LCC_BOUND_ENROLLMENT_REQUIRED;
-#ifdef _WIN32
+#if defined(_WIN32) || (defined(__linux__) && LCC_ENABLE_LINUX_DESKTOP)
 		return finish(owner, owner.renewal->renew(), next);
 #else
         return LCC_BOUND_UNSUPPORTED_PLATFORM;
@@ -371,7 +387,7 @@ LCC_BOUND_RESULT lcc_device_bound_abandon_pending(LccDeviceBoundClient* client, 
 			next.checkpoint_result = owner.save();
 			return result;
 		}
-#ifdef _WIN32
+#if defined(_WIN32) || (defined(__linux__) && LCC_ENABLE_LINUX_DESKTOP)
 		if (owner.enrollment) return finish(owner, owner.enrollment->abandon_exchange(), next);
 #endif
 		return LCC_BOUND_INVALID_STATE;

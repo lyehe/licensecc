@@ -9,6 +9,7 @@ set(_lcc_device_identity_sources
     bound_encoding.cpp
     bound_signing.cpp
     bound_lease.cpp
+    bound_checkpoint_namespace.cpp
     bound_checkpoint.cpp
     bound_checkpoint_store.cpp
     bound_anchor.cpp
@@ -26,6 +27,9 @@ set(_lcc_device_identity_sources
 if(WIN32)
     list(APPEND _lcc_device_identity_sources p256_crypto_windows.cpp bound_http_windows.cpp bound_loopback_windows.cpp bound_browser_windows.cpp bound_desktop.cpp
         bound_checkpoint_directory.cpp bound_checkpoint_windows.cpp)
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND LCC_ENABLE_LINUX_DESKTOP)
+    list(APPEND _lcc_device_identity_sources p256_crypto_openssl.cpp bound_http_linux.cpp
+        bound_loopback_linux.cpp bound_browser_linux.cpp bound_desktop.cpp bound_checkpoint_linux.cpp bound_directory_linux.cpp)
 else()
     list(APPEND _lcc_device_identity_sources p256_crypto_openssl.cpp)
 endif()
@@ -52,6 +56,7 @@ target_include_directories(device_identity
 target_compile_definitions(device_identity
     PRIVATE
         LCC_ENABLE_WINDOWS_TPM=$<BOOL:${LCC_ENABLE_WINDOWS_TPM}>
+        LCC_ENABLE_LINUX_DESKTOP=$<BOOL:${LCC_ENABLE_LINUX_DESKTOP}>
         LCC_ENABLE_TPM2_OPENSSL=$<BOOL:${LCC_ENABLE_TPM2_OPENSSL}>
         LCC_BUILD_DEVICE_IDENTITY_TEST_PROVIDER=$<BOOL:${LCC_BUILD_DEVICE_IDENTITY_TEST_PROVIDER}>)
 
@@ -65,3 +70,7 @@ else()
 endif()
 
 unset(_lcc_device_identity_sources)
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND LCC_ENABLE_LINUX_DESKTOP)
+    target_link_libraries(device_identity PRIVATE CURL::libcurl)
+endif()

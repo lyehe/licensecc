@@ -327,9 +327,9 @@ test("migration lineage fails closed when history is absent, divergent, or incom
 
 test("checked-out backend migrations are a contiguous canonical inventory", () => {
   const names = canonicalMigrationNames();
-  assert.equal(names.length, 40);
+  assert.equal(names.length, 41);
   assert.equal(names[0], "0001_create_entitlements.sql");
-  assert.equal(names.at(-1), "0040_bound_unconsumed_cleanup.sql");
+  assert.equal(names.at(-1), "0041_bound_requested_feature.sql");
   assert.equal(migrationHistorySql(), "SELECT id, name FROM d1_migrations ORDER BY id");
   assert.match(snapshotSchemaObjectSql(), /name NOT IN \('_cf_KV', 'd1_migrations'\)/);
   assert.deepEqual([...SNAPSHOT_COUNTED_TABLES], REQUIRED_TABLES);
@@ -892,7 +892,7 @@ test("table and named schema-object checks cover migrated identity", () => {
 
   assert.equal(Object.keys(EXPECTED_INDEXES).length, 74);
   assert.equal(EXPECTED_INDEXES.idx_bound_unconsumed_attempt_cleanup, "device_bound_authorizations");
-  assert.equal(Object.keys(EXPECTED_TRIGGERS).length, 50);
+  assert.equal(Object.keys(EXPECTED_TRIGGERS).length, 53);
   assert.equal(EXPECTED_INDEXES.idx_license_plan_projection_previews_expiry_id, "license_plan_projection_previews");
   assert.equal("idx_license_plan_projection_previews_expiry" in EXPECTED_INDEXES, false);
   assert.equal("idx_license_plan_projection_previews_consumed" in EXPECTED_INDEXES, false);
@@ -903,7 +903,7 @@ test("table and named schema-object checks cover migrated identity", () => {
   assert.match(schemaSql, /bump_license_plan_projection_generation_assignments_delete/);
   const snapshot = readFileSync(new URL("../../cloudflare-licensing-backend/schema.sql", import.meta.url), "utf8");
   const rows = schemaRowsFromGeneratedSnapshot(snapshot);
-  assert.equal(rows.length, 173);
+  assert.equal(rows.length, 176);
   assert.equal(schemaSignature(rows), EXPECTED_SCHEMA_SIGNATURE_SHA256);
   assert.deepEqual(validateSchemaObjectRows(rows), {
     verified: true,
@@ -911,7 +911,7 @@ test("table and named schema-object checks cover migrated identity", () => {
     digest: EXPECTED_SCHEMA_SIGNATURE_SHA256,
     table_count: 49,
     named_index_count: 74,
-    trigger_count: 50,
+    trigger_count: 53,
   });
   assert.throws(() => validateSchemaObjectRows(rows.filter((row) => row.name !== "entitlements")), /restored_schema_objects_missing:table:entitlements/);
   assert.throws(() => validateSchemaObjectRows(rows.map((row) => row.name === "entitlements"

@@ -244,7 +244,7 @@ def test_installed_windows_dll_without_provisioning():
     path = os.environ.get("LCC_TEST_DEVICE_BOUND_DLL")
     if not path:
         pytest.skip("Set LCC_TEST_DEVICE_BOUND_DLL for the installed Windows bridge test")
-    assert os.name == "nt" and Path(path).is_absolute()
+    assert Path(path).is_absolute()
     native = DeviceBoundLibrary(path)
     # Malformed public DER is rejected by native validation before provider/storage effects.
     for open_method in (native.open_enrollment, native.open_resume):

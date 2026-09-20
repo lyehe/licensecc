@@ -8,6 +8,9 @@ add_subdirectory("os")
 add_subdirectory("locate")
 add_subdirectory("hw_identifier")
 if(LCC_ENABLE_DEVICE_IDENTITY)
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND LCC_ENABLE_LINUX_DESKTOP)
+        find_package(CURL 7.85 REQUIRED)
+    endif()
     add_subdirectory("device_identity")
     set(_lcc_device_identity_objects $<TARGET_OBJECTS:device_identity>)
 endif()
@@ -80,6 +83,7 @@ target_compile_definitions(licensecc_static
         "LCC_PROJECT_CONFIG_HEADER=\"${LCC_PROJECT_CONFIG_HEADER}\""
         "LCC_PROJECT_PUBLIC_KEY_HEADER=\"${LCC_PROJECT_PUBLIC_KEY_HEADER}\""
         LCC_ENABLE_DEVICE_IDENTITY=$<BOOL:${LCC_ENABLE_DEVICE_IDENTITY}>
+        LCC_ENABLE_LINUX_DESKTOP=$<BOOL:${LCC_ENABLE_LINUX_DESKTOP}>
         LCC_ENABLE_WINDOWS_TPM=$<BOOL:${LCC_ENABLE_WINDOWS_TPM}>
         LCC_ENABLE_TPM2_OPENSSL=$<BOOL:${LCC_ENABLE_TPM2_OPENSSL}>
         LCC_BUILD_DEVICE_IDENTITY_TEST_PROVIDER=$<BOOL:${LCC_BUILD_DEVICE_IDENTITY_TEST_PROVIDER}>
@@ -175,3 +179,7 @@ install(TARGETS licensecc_static EXPORT licensecc
 install(EXPORT licensecc NAMESPACE licensecc:: DESTINATION  ${main_lib_dest}/${LCC_PROJECT_NAME}/cmake
 	COMPONENT licensecc_runtime)
 export(EXPORT licensecc NAMESPACE licensecc:: FILE ${CMAKE_BINARY_DIR}/${PROJECT_NAME}.cmake)
+
+if(LCC_ENABLE_DEVICE_IDENTITY AND CMAKE_SYSTEM_NAME STREQUAL "Linux" AND LCC_ENABLE_LINUX_DESKTOP)
+    target_link_libraries(licensecc_static PUBLIC CURL::libcurl)
+endif()

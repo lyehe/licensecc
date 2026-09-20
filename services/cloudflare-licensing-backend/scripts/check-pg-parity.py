@@ -160,6 +160,10 @@ def _canonical_sql(expression: exp.Expression | None) -> str | None:
     # sqlglot represents SQLite ``x IS NOT NULL`` as ``NOT (x IS NULL)`` but
     # PostgreSQL as a negated IS node. Collapse that parser-only difference.
     def normalize_is_not(node: exp.Expression) -> exp.Expression:
+        # Only this reviewed ASCII feature grammar is portable: SQLite GLOB
+        # matches the whole string; PostgreSQL regex searches for a bad byte.
+        if isinstance(node, exp.Glob) and isinstance(node.expression, exp.Literal) and node.expression.this == "*[^A-Za-z0-9_.:-]*":
+            return exp.RegexpLike(this=node.this.copy(), expression=exp.Literal.string("[^A-Za-z0-9_.:-]"))
         if (
             isinstance(node, exp.Not)
             and isinstance(node.this, exp.Is)

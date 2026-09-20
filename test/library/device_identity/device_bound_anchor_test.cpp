@@ -148,17 +148,17 @@ BOOST_AUTO_TEST_CASE(fresh_operation_rejects_cached_response_and_failed_creation
 	BOOST_CHECK(!BoundLeaseAnchor::create(std::move(platform)));
 }
 
-BOOST_AUTO_TEST_CASE(platform_factory_uses_windows_clocks_or_fails_closed) {
-#if defined(_WIN32)
+BOOST_AUTO_TEST_CASE(platform_factory_uses_supported_clocks_or_fails_closed) {
+#if defined(_WIN32) || defined(__linux__)
 	auto one = BoundLeaseAnchor::create(make_bound_anchor_platform());
 	auto two = BoundLeaseAnchor::create(make_bound_anchor_platform());
 	BOOST_REQUIRE(one);
 	BOOST_REQUIRE(two);
 	BOOST_CHECK_NE(one->operation_id(), two->operation_id());
 	BOOST_CHECK(bound_encoding::token(one->operation_id(), 32));
-	// Only the operation ID is deterministic here; sample the real Windows
+	// Only the operation ID is deterministic here; sample the real platform
 	// clocks before and after each verification of the independent fixture.
-	class FixtureWindowsClock final : public BoundAnchorPlatform {
+	class FixtureNativeClock final : public BoundAnchorPlatform {
 		std::unique_ptr<BoundAnchorPlatform> native_ = make_bound_anchor_platform();
 
 	public:
@@ -169,7 +169,7 @@ BOOST_AUTO_TEST_CASE(platform_factory_uses_windows_clocks_or_fails_closed) {
 		bool sample(BoundClockSample& out) noexcept override { return native_ && native_->sample(out); }
 	};
 	Fixture f;
-	auto anchor = BoundLeaseAnchor::create(std::make_unique<FixtureWindowsClock>());
+	auto anchor = BoundLeaseAnchor::create(std::make_unique<FixtureNativeClock>());
 	BOOST_REQUIRE(anchor);
 	BoundLeaseClaims out;
 	for (unsigned i = 0; i < 8; ++i) BOOST_REQUIRE(anchor->verify(f.token, f.keys, f.expected, out));

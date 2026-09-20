@@ -3,7 +3,7 @@
 #include "device_identity.h"
 
 /** @defgroup devicebound Device-bound desktop licensing
- * Windows user-scoped, hardware-required enrollment and current-process access.
+ * Windows/Linux user-scoped, hardware-required enrollment and current-process access.
  * No result from open, enrollment, renewal or storage grants permission to run
  * protected work: call lcc_device_bound_authorize immediately before that work.
  * Handles require exclusive ownership at close; other calls return BUSY on overlap.

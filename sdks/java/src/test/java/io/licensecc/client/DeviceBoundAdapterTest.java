@@ -183,19 +183,19 @@ final class DeviceBoundAdapterTest {
             check(opened.client() == null && opened.outcome().code() == DeviceBoundClient.Result.INVALID_ARGUMENT, "installed native rejects configuration before provisioning");
         }
         check(new DeviceBoundLibrary(Path.of(dll)) != null, "same library path reusable");
-        Path alternative = Path.of("build/java-sdk/alternative-jni.dll").toAbsolutePath();
+        Path alternative = Path.of("build/java-sdk/alternative-jni" + (System.getProperty("os.name").startsWith("Windows") ? ".dll" : ".so")).toAbsolutePath();
         Files.copy(Path.of(dll), alternative);
         try { new DeviceBoundLibrary(alternative); throw new AssertionError("Expected second-path rejection"); }
         catch (IllegalStateException expected) { check(expected.getMessage().contains("pinned"), "second DLL path rejected before loading"); }
         String bad = System.getenv("LCC_TEST_BAD_JNI_DLL");
         if (bad == null || bad.isBlank()) throw new AssertionError("Installed JNI gate requires incompatible-probe DLL");
-        var process = new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin/java.exe").toString(), "-Xcheck:jni",
+        var process = new ProcessBuilder(Path.of(System.getProperty("java.home"), System.getProperty("os.name").startsWith("Windows") ? "bin/java.exe" : "bin/java").toString(), "-Xcheck:jni",
             "-cp", System.getProperty("java.class.path"), DeviceBoundAdapterTest.class.getName(), "bad-version", bad, dll).inheritIO().start();
         if (!process.waitFor(15, TimeUnit.SECONDS)) { process.destroyForcibly(); throw new AssertionError("Loader subprocess timed out"); }
         check(process.exitValue() == 0, "sticky failed-probe subprocess");
         String fixture = System.getenv("LCC_TEST_JNI_FIXTURE_DLL");
         if (fixture == null || fixture.isBlank()) throw new AssertionError("Installed JNI gate requires native fault fixture");
-        var faultProcess = new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin/java.exe").toString(), "-Xcheck:jni",
+        var faultProcess = new ProcessBuilder(Path.of(System.getProperty("java.home"), System.getProperty("os.name").startsWith("Windows") ? "bin/java.exe" : "bin/java").toString(), "-Xcheck:jni",
             "-cp", System.getProperty("java.class.path"), DeviceBoundFixtureTest.class.getName(), fixture).inheritIO().start();
         if (!faultProcess.waitFor(15, TimeUnit.SECONDS)) { faultProcess.destroyForcibly(); throw new AssertionError("JNI fixture subprocess timed out"); }
         check(faultProcess.exitValue() == 0, "JNI fault fixture subprocess");

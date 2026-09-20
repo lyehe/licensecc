@@ -40,8 +40,8 @@ internal sealed unsafe partial class NativeApi : INativeApi
 
     internal NativeApi(string absoluteDllPath)
     {
-        if(!OperatingSystem.IsWindows() || RuntimeInformation.ProcessArchitecture != Architecture.X64)
-            throw new PlatformNotSupportedException("The protected bridge requires Windows x64.");
+        if((!OperatingSystem.IsWindows() && !OperatingSystem.IsLinux()) || IntPtr.Size != 8)
+            throw new PlatformNotSupportedException("The protected bridge requires 64-bit Windows or Linux.");
         if(string.IsNullOrEmpty(absoluteDllPath) || !Path.IsPathFullyQualified(absoluteDllPath) || absoluteDllPath.Contains('\0'))
             throw new ArgumentException("Supply an application-owned absolute DLL path.",nameof(absoluteDllPath));
         var path=Path.GetFullPath(absoluteDllPath);
@@ -82,7 +82,7 @@ internal sealed unsafe partial class NativeApi : INativeApi
         private static extern IntPtr LoadLibraryExW(string path,IntPtr file,uint flags);
         internal Module(string path) : base(IntPtr.Zero,true)
         {
-            SetHandle(LoadLibraryExW(path,IntPtr.Zero,0x00000100|0x00000800));
+            SetHandle(OperatingSystem.IsWindows() ? LoadLibraryExW(path,IntPtr.Zero,0x00000100|0x00000800) : NativeLibrary.Load(path));
             if(IsInvalid) throw new Win32Exception(Marshal.GetLastWin32Error());
         }
         public override bool IsInvalid => handle==IntPtr.Zero;

@@ -41,7 +41,7 @@ BOOST_AUTO_TEST_CASE(public_preconditions_leave_output_untouched_before_any_effe
 	BOOST_CHECK_EQUAL(lcc_feature_session_stop(nullptr, &out), LCC_BOUND_INVALID_ARGUMENT);
 }
 
-#ifndef _WIN32
+#if !defined(_WIN32) && (!defined(__linux__) || !LCC_ENABLE_LINUX_DESKTOP)
 BOOST_AUTO_TEST_CASE(public_owner_preserves_unsupported_platform_without_work_authority) {
 	SessionTestSigner signer;
 	LccDeviceBoundOptions options;

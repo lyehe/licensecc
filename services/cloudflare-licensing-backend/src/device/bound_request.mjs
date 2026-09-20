@@ -34,9 +34,10 @@ function proof(value) {
 // SPKI, verify proof and enforce current database authority separately.
 export function validateBoundRequest(operation, value) {
   if (operation === "authorize") {
-    exact(value, ["client_id", "project", "public_key_spki", "device_label", "redirect_uri", "state", "code_challenge", "code_challenge_method"]);
+    exact(value, ["client_id", "project", "public_key_spki", "device_label", "redirect_uri", "state", "code_challenge", "code_challenge_method", ...(Object.hasOwn(value ?? {}, "requested_feature") ? ["requested_feature"] : [])]);
     text(value.client_id, /^[A-Za-z0-9_.:-]{1,127}$/);
     text(value.project, /^[A-Za-z0-9_.:-]{1,127}$/);
+    if (Object.hasOwn(value, "requested_feature")) text(value.requested_feature, /^[A-Za-z0-9_.:-]{1,15}$/);
     if (typeof value.public_key_spki !== "string" || value.public_key_spki.length > 512) invalid();
     try { if (!decodeBase64url(value.public_key_spki, 384).length) invalid(); } catch { invalid(); }
     if (typeof value.device_label !== "string") invalid();

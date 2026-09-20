@@ -124,5 +124,19 @@
     "old": "CREATE TABLE device_bound_events (\n  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,",
     "new": "CREATE TABLE device_bound_events (\n  id BIGINT PRIMARY KEY,",
     "expected": "device_bound_events.id: generated identity mismatch"
+  },
+  {
+    "name": "requested-feature-grammar-weakened",
+    "source": "postgres",
+    "old": "requested_feature !~ '[^A-Za-z0-9_.:-]'",
+    "new": "requested_feature !~ '[^A-Za-z0-9_.:]'",
+    "expected": "device_bound_authorizations.requested_feature: check constraint mismatch"
+  },
+  {
+    "name": "requested-feature-immutability-removed",
+    "source": "postgres",
+    "old": "IF NEW.requested_feature IS DISTINCT FROM OLD.requested_feature THEN",
+    "new": "IF FALSE THEN",
+    "expected": "tr_bound_requested_feature_immutable: protected trigger/function contract mismatch"
   }
 ]
