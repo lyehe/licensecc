@@ -460,11 +460,12 @@ function csvRows(contents, label) {
 function pythonSourceClosure(root) {
   const sourcePrefix = "sdks/python/";
   const topLevel = new Set([".gitignore", "LICENSE", "README.md", "build-constraints.txt", "pyproject.toml"]);
+  const nativeSources = new Set(["native/CMakeLists.txt", "native/README.md", "native/bridge.cpp", "native/bridge.def"]);
   const entries = [];
   for (const entry of gitHeadEntries(root)) {
     if (entry.type !== "blob" || entry.mode === "120000" || !entry.path.startsWith(sourcePrefix)) continue;
     const rest = entry.path.slice(sourcePrefix.length);
-    if (rest === "uv.lock" || topLevel.has(rest)) {
+    if (rest === "uv.lock" || topLevel.has(rest) || nativeSources.has(rest)) {
       entries.push({ source: entry.path, sdist: rest });
     } else if (rest.startsWith("src/licensecc/") && rest.length > "src/licensecc/".length) {
       entries.push({ source: entry.path, wheel: rest.slice("src/".length), sdist: rest });

@@ -66,6 +66,12 @@ and portable PDB require PE/`BSJB` signatures. The secret/forbidden-member
 policy applies inside every package archive. A matching filename alone is
 never sufficient.
 
+The Python sdist includes the optional native bridge's four reviewed source
+files (`native/CMakeLists.txt`, `native/README.md`, `native/bridge.cpp` and
+`native/bridge.def`) with canonical-HEAD byte checks. They are excluded from the
+pure Python wheel; native binaries are built and supplied separately. Other
+files under `native/` are not implicitly admitted to either package.
+
 The Java artifact contains only Java 17 class files derived from tracked
 `sdks/java/src/main/java` sources, the exact tracked manifest, and the root
 license. Its ZIP order, compression, timestamp, manifest, class-file magic and
