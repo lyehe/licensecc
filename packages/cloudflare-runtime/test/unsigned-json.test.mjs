@@ -5,12 +5,14 @@ import { parseUnsignedJson } from "../src/http/unsigned_json.mjs";
 const parse = source => parseUnsignedJson(new TextEncoder().encode(source));
 
 test("unsigned JSON handles escape-heavy strings without confusing keys or structure", () => {
-  const text = '\\"'.repeat(3000);
+  const text = '\\"'.repeat(1500);
   const value = { text, nested: [{ text: "{}[],:-1e0", enabled: true, empty: null }] };
   assert.deepEqual(parse(JSON.stringify(value)), value);
   const key = JSON.stringify(text);
   assert.deepEqual(parse(`{${key} \r\n\t : 1}`), { [text]: 1 });
-  assert.throws(() => parse(`{${key}:1,${key}:2}`), /invalid_request/);
+  const duplicate = `{${key}:1,${key}:2}`;
+  assert.ok(new TextEncoder().encode(duplicate).length <= 16384);
+  assert.throws(() => parse(duplicate), /invalid_request/);
   assert.throws(() => parse(`{"text":${key.slice(0, -1)}}`), /invalid_request/);
 });
 
