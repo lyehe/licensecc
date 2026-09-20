@@ -1,0 +1,28 @@
+cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
+project(licensecc_java_device_bound LANGUAGES CXX)
+set(LCC_PROJECT_NAME "test" CACHE STRING "Installed Licensecc project component")
+find_package(licensecc CONFIG REQUIRED)
+if(NOT WIN32 OR NOT MSVC OR NOT CMAKE_SIZEOF_VOID_P EQUAL 8 OR
+   NOT LCC_ENABLE_DEVICE_IDENTITY OR NOT LCC_ENABLE_WINDOWS_TPM)
+    message(FATAL_ERROR "The JNI adapter requires an x64 MSVC Windows package with device identity and Windows TPM")
+endif()
+# Only headers are needed: this is loaded by the JVM and must not link a JVM DLL.
+find_path(LCC_JNI_INCLUDE jni.h PATHS "$ENV{JAVA_HOME}/include" NO_DEFAULT_PATH REQUIRED)
+find_path(LCC_JNI_PLATFORM_INCLUDE jni_md.h PATHS "$ENV{JAVA_HOME}/include/win32" NO_DEFAULT_PATH REQUIRED)
+add_library(licensecc_device_bound_jni SHARED bridge.cpp)
+target_compile_features(licensecc_device_bound_jni PRIVATE cxx_std_17)
+target_include_directories(licensecc_device_bound_jni PRIVATE "${LCC_JNI_INCLUDE}" "${LCC_JNI_PLATFORM_INCLUDE}")
+target_link_libraries(licensecc_device_bound_jni PRIVATE licensecc::licensecc_static)
+set_target_properties(licensecc_device_bound_jni PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS OFF)
+install(TARGETS licensecc_device_bound_jni RUNTIME DESTINATION bin)
+option(LCC_JNI_BUILD_TESTS "Build test-only incompatible JNI library" OFF)
+if(LCC_JNI_BUILD_TESTS)
+    add_library(licensecc_device_bound_jni_bad SHARED test/bad_version.cpp)
+    target_include_directories(licensecc_device_bound_jni_bad PRIVATE "${LCC_JNI_INCLUDE}" "${LCC_JNI_PLATFORM_INCLUDE}")
+    add_library(licensecc_device_bound_jni_fixture SHARED bridge.cpp test/fake_runtime.cpp)
+    target_compile_features(licensecc_device_bound_jni_fixture PRIVATE cxx_std_17)
+    target_compile_definitions(licensecc_device_bound_jni_fixture PRIVATE LCC_JNI_TEST_FIXTURE
+        "$<TARGET_PROPERTY:licensecc::licensecc_static,INTERFACE_COMPILE_DEFINITIONS>")
+    target_include_directories(licensecc_device_bound_jni_fixture PRIVATE "${LCC_JNI_INCLUDE}" "${LCC_JNI_PLATFORM_INCLUDE}"
+        "$<TARGET_PROPERTY:licensecc::licensecc_static,INTERFACE_INCLUDE_DIRECTORIES>")
+endif()

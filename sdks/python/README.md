@@ -38,6 +38,10 @@ The verifier **never raises on a bad token** — every rejection is a typed
 
 ## Install
 
+An optional [Windows device-bound bridge](native/README.md) wraps the native
+enrollment and renewal owner with typed Python results. It requires a separately
+built application-owned DLL; the existing Python HTTP client remains unchanged.
+
 The package is not published to PyPI yet — install it from this repository:
 
 ```console
@@ -184,3 +188,51 @@ asserts:
 ```console
 uv run pytest -q
 ```
+
+
+### Feature work sessions (optional native bridge)
+
+`licensecc.feature_session.FeatureSessionLibrary` uses the same application-owned
+Windows x64 bridge DLL and `device_bound.Configuration`. Enroll the configured
+feature first with `DeviceBoundLibrary`; normal feature starts never open a
+browser. Each logical job opens a **new** owner and must start online:
+
+```python
+from licensecc.device_bound import Result
+from licensecc.feature_session import FeatureSessionLibrary
+
+sessions = FeatureSessionLibrary(absolute_bridge_path)
+job, opened = sessions.open(batch_configuration)  # feature="BATCH_RUN"
+if opened.code is not Result.OK:
+    raise RuntimeError(f"Cannot open feature: {opened.code.name}")
+with job:
+    started = job.start()
+    if started.code is not Result.OK:
+        raise RuntimeError(f"Online approval required: {started.code.name}")
+    # Inspect checkpoint_result independently and recover storage if necessary.
+    for batch in batches:
+        decision = job.authorize("BATCH_RUN")
+        if decision.code is Result.OK and decision.renewal_due:
+            renewal = job.renew()  # blocking: use an application worker thread
+            # Handle renewal/checkpoint outcomes; never infer permission from renew.
+            decision = job.authorize("BATCH_RUN")
+        if decision.code is not Result.OK:
+            break  # pause/stop; do not execute the protected batch
+        run_protected_batch(batch)
+    stopped = job.stop()  # terminal local shutdown; inspect checkpoint_result
+```
+
+Only a current `authorize(required_feature)` OK permits the next operation.
+Advisory state, opening, saving a checkpoint, and successful renewal are not
+permission. Retry an unresolved start on the same handle with bounded backoff;
+never substitute an earlier job's permission. The adapter does not cache tokens,
+start a background thread or implement its own clock. Calls overlap as BUSY;
+close waits for admitted calls. Stop does not release a device slot or delete the
+shared key. Closing ends ownership; a stopped handle cannot start a new job.
+
+Build the bridge against a runtime that includes `feature_session.h`. Its
+independent `lcc_feature_session_bridge_layout` probe checks every new field.
+An older bridge raises `NotImplementedError` for this optional API; existing
+`DeviceBoundLibrary` usage stays compatible. Set `LCC_TEST_DEVICE_BOUND_DLL` to
+the newly built absolute DLL path when running pytest to include installed-ABI
+checks. Fake-adapter tests alone do not establish a live TPM/server journey.

@@ -48,6 +48,11 @@ specific policy or platform boundary you need.
      - Provider-specific and conditional; it does not perform remote
        attestation or delete keys.
      - ``licensecc_windows_tpm`` or ``licensecc_tpm2_openssl``
+   * - `examples/device_bound
+       <https://github.com/lyehe/licensecc/tree/main/examples/device_bound>`_
+     - Enroll through browser consent, resume online and authorize native work.
+     - Windows TPM pilot; live deployment and hardware qualification are separate.
+     - ``licensecc_device_bound``
 
 Build models
 ------------

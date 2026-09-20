@@ -14,6 +14,7 @@ Runtime library
 * :doc:`types` — public structures, enums, callbacks, limits, and result data.
 * :doc:`device_identity` — provider-backed P-256 keys and signed request
   proofs.
+* :doc:`feature_sessions` — fresh online permission for each protected feature job.
 * :doc:`hardware_identifiers` — generated project strategy order and custom
   hardware-signature implementations.
 * :doc:`extend` — supported host callbacks, hardware-identifier strategies,
@@ -24,6 +25,8 @@ Hosted services and SDKs
 
 * :doc:`services` — the canonical backend, admin, and customer-portal OpenAPI
   operation inventories, plus the private backup control surface.
+* :doc:`device_enrollment` — staged enrollment comparison bytes and live
+  eligible-license pagination.
 * :doc:`python` — generated Python verifier and HTTP-client reference.
 * :doc:`sdks` — scope and entry points for the Python, .NET, and Java SDKs.
 
@@ -42,8 +45,10 @@ symbol, import failure, or route-count mismatch fails documentation CI.
    public_api
    types
    device_identity
+   feature_sessions
    hardware_identifiers
    services
+   device_enrollment
    python
    sdks
    extend

@@ -58,6 +58,8 @@ std::string device_key_id(const P256Spki& spki) noexcept;
 bool der_signature_to_p1363(const std::uint8_t* der, std::size_t size, P256Signature& out) noexcept;
 bool p1363_signature_to_der(const P256Signature& signature, std::vector<std::uint8_t>& out) noexcept;
 bool p1363_signature_in_range(const P256Signature& signature) noexcept;
+bool p1363_signature_is_low_s(const P256Signature& signature) noexcept;
+bool normalize_p1363_low_s(const P256Signature& signature, P256Signature& out) noexcept;
 
 std::string encode_canonical_base64(const std::uint8_t* data, std::size_t size) noexcept;
 bool decode_canonical_base64(const std::string& encoded, std::vector<std::uint8_t>& out) noexcept;

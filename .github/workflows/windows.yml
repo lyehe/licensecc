@@ -18,6 +18,7 @@ jobs:
             - "ci-windows-msvc-release-dynamic"
             - "ci-windows-msvc-release-static"
             - "ci-windows-device-identity-test"
+            - "ci-windows-msvc-debug-dynamic-tpm"
 
       steps:
       -  uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -123,6 +124,54 @@ jobs:
       -  name: Inspector
          shell: bash
          run: ./build/${{ matrix.preset }}/install/bin/test/lccinspector.exe
+      -  name: Python for installed native bridge
+         if: matrix.preset == 'ci-windows-msvc-debug-dynamic-tpm'
+         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+         with:
+            python-version: "3.12"
+      -  name: uv for installed native bridge
+         if: matrix.preset == 'ci-windows-msvc-debug-dynamic-tpm'
+         uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+         with:
+            version: "0.12.5"
+      -  name: Installed Python device-bound bridge
+         if: matrix.preset == 'ci-windows-msvc-debug-dynamic-tpm'
+         shell: pwsh
+         timeout-minutes: 10
+         run: pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/ci/run-installed-python-device-bound.ps1 -InstallPrefix build/ci-windows-msvc-debug-dynamic-tpm/install
+      -  name: .NET for installed native bridge
+         if: matrix.preset == 'ci-windows-msvc-debug-dynamic-tpm'
+         uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
+         with:
+            dotnet-version: "8.0.423"
+      -  name: Installed .NET device-bound bridge
+         # Shared installed C bridge is built and export-checked by the Python step above.
+         if: matrix.preset == 'ci-windows-msvc-debug-dynamic-tpm'
+         shell: pwsh
+         timeout-minutes: 10
+         run: |
+            $env:LCC_TEST_DEVICE_BOUND_DLL = Join-Path $env:GITHUB_WORKSPACE 'build/installed-python-device-bound/installed/bin/licensecc_device_bound_bridge.dll'
+            if (-not (Test-Path -LiteralPath $env:LCC_TEST_DEVICE_BOUND_DLL -PathType Leaf)) { throw 'Installed bridge is missing' }
+            $env:LCC_TEST_OLD_DEVICE_BOUND_DLL = Join-Path $env:GITHUB_WORKSPACE 'build/installed-python-device-bound/Debug/licensecc_device_bound_original.dll'
+            if (-not (Test-Path -LiteralPath $env:LCC_TEST_OLD_DEVICE_BOUND_DLL -PathType Leaf)) { throw 'Original-export fixture is missing' }
+            dotnet test sdks/dotnet/Licensecc.Client.sln -p:RestoreLockedMode=true
+            if ($LASTEXITCODE -ne 0) { throw 'Installed .NET bridge tests failed' }
+      -  name: Java for installed native adapter
+         if: matrix.preset == 'ci-windows-msvc-debug-dynamic-tpm'
+         uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+         with:
+            distribution: temurin
+            java-version: "17.0.20+8"
+      -  name: Node for installed Java adapter gate
+         if: matrix.preset == 'ci-windows-msvc-debug-dynamic-tpm'
+         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+         with:
+            node-version: 22
+      -  name: Installed Java device-bound adapter
+         if: matrix.preset == 'ci-windows-msvc-debug-dynamic-tpm'
+         shell: pwsh
+         timeout-minutes: 10
+         run: pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/ci/run-installed-java-device-bound.ps1 -InstallPrefix build/ci-windows-msvc-debug-dynamic-tpm/install
       -  name: On failure print logs
          if: ${{ failure() }}
          shell: pwsh

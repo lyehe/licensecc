@@ -1,0 +1,17 @@
+#ifndef LICENSECC_EXAMPLE_BOUND_CONFIGURATION_HPP_
+#define LICENSECC_EXAMPLE_BOUND_CONFIGURATION_HPP_
+namespace configuration {
+constexpr char application_id[] = "@CONFIG_APPLICATION_ID@";
+constexpr char endpoint_origin[] = "@CONFIG_ENDPOINT_ORIGIN@";
+constexpr char portal_url[] = "@CONFIG_PORTAL_URL@";
+constexpr char issuer[] = "@CONFIG_ISSUER@";
+constexpr char lease_audience[] = "@CONFIG_LEASE_AUDIENCE@";
+constexpr char proof_audience[] = "@CONFIG_PROOF_AUDIENCE@";
+constexpr char project[] = "@CONFIG_PROJECT@";
+constexpr char feature[] = "@CONFIG_FEATURE@";
+constexpr char client_id[] = "@CONFIG_CLIENT_ID@";
+constexpr char device_label[] = "@CONFIG_DEVICE_LABEL@";
+struct SigningKey { unsigned char bytes[512]; unsigned int size; };
+constexpr SigningKey signing_keys[] = {@CONFIG_SIGNING_KEYS@};
+}
+#endif

@@ -30,7 +30,13 @@ repository; public registry publication is a separate release operation.
      - Dependency-free JDK token verification and backend HTTP calls.
      - `Java SDK guide <https://github.com/lyehe/licensecc/tree/main/sdks/java>`_
 
-All SDKs deliberately exclude local binary enforcement. A verified server
+Optional Windows device-bound adapters in Python, .NET and Java call the same
+installed C runtime for TPM identity, enrollment, renewal and local authorization.
+See each SDK guide for its native packaging and loading requirements; Java uses
+a separate JNI DLL and retains its Java 17 baseline.
+
+The HTTP/token APIs do not perform local binary enforcement. A verified server
 token proves authenticity and claim binding; it does not prove that the host
-process, license file, or hardware state is trusted. Combine an SDK with the C
-runtime when the application needs on-device enforcement.
+process, license file, or hardware state is trusted. Managed-language wrappers
+do not make application control flow tamper-resistant. Keep protected operations
+and enforcement in the native application.

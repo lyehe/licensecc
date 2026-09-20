@@ -117,6 +117,8 @@ typedef enum LCC_DEVICE_PROOF_AUDIENCE {
 #define LCC_DEVICE_IDENTITY_VERSION 1u
 #define LCC_DEVICE_PROOF_VERSION 1u
 #define LCC_DEVICE_OPEN_CREATE_IF_MISSING 0x00000001u
+/** Permit Windows provider UI only during explicit key deletion. */
+#define LCC_DEVICE_DELETE_ALLOW_UI 0x00000002u
 #define LCC_DEVICE_APPLICATION_ID_MAX 128u
 #define LCC_DEVICE_PROVIDER_NAME_MAX 63u
 #define LCC_DEVICE_ALGORITHM_MAX 31u
@@ -135,7 +137,7 @@ typedef struct LccDeviceIdentityOptions {
 	uint32_t policy; /* LCC_DEVICE_POLICY */
 	/** One of ::LCC_DEVICE_SCOPE. */
 	uint32_t scope; /* LCC_DEVICE_SCOPE */
-	/** Bitwise device-open flags, currently ::LCC_DEVICE_OPEN_CREATE_IF_MISSING. */
+	/** Open accepts ::LCC_DEVICE_OPEN_CREATE_IF_MISSING; delete accepts ::LCC_DEVICE_DELETE_ALLOW_UI. */
 	uint32_t flags;
 	/** Maximum namespace-lock wait in milliseconds. */
 	uint32_t lock_timeout_ms;
@@ -232,8 +234,18 @@ LCC_DEVICE_RESULT lcc_device_identity_get_metadata(LccDeviceIdentity*, LccDevice
 LCC_DEVICE_RESULT lcc_device_identity_get_public_spki(LccDeviceIdentity*, uint8_t* out, size_t* inout_size);
 /** Sign the canonical version-1 request-proof payload. */
 LCC_DEVICE_RESULT lcc_device_identity_build_request_proof_v1(LccDeviceIdentity*, const LccDeviceProofInput*,
-														 LccDeviceProof* out);
-/** Delete the exact key identified by ``expected_device_key_id``. */
+															 LccDeviceProof* out);
+/**
+ * Delete the exact key identified by ``expected_device_key_id``.
+ * Defaults to noninteractive deletion. Windows
+ * callers may explicitly set
+ * ::LCC_DEVICE_DELETE_ALLOW_UI to permit provider UI during deletion only.
+ * This flag
+ * is rejected by open and by non-Windows providers. A prompt is not
+ * guaranteed; applications must confirm removal
+ * before calling this function.
+ * Deletion does not retire the server binding or release its occupied slot.
+ */
 LCC_DEVICE_RESULT lcc_device_identity_delete_key(const LccDeviceIdentityOptions*, const char* expected_device_key_id);
 
 /**

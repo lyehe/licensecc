@@ -4,9 +4,11 @@
     <TargetFramework>net8.0</TargetFramework>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <ImplicitUsings>disable</ImplicitUsings>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
     <!-- Pin the repo's test/vectors directory so tests resolve it regardless of CWD. -->
     <LccTestVectorsDir>$(MSBuildThisFileDirectory)..\..\..\..\test\vectors</LccTestVectorsDir>
   </PropertyGroup>

@@ -1,10 +1,32 @@
 if(LCC_ENABLE_DEVICE_IDENTITY)
+enable_language(C)
 set(_lcc_device_identity_tests
     device_identity_abi_test
+    device_bound_public_test
+    feature_session_public_test
+    device_bound_vectors_test
+    device_bound_operations_test
+    device_bound_lease_test
+    device_bound_checkpoint_test
+    device_bound_anchor_test
+    device_bound_wire_test
+    device_bound_callback_test
     device_identity_vectors_test)
 
+if(WIN32)
+    list(APPEND _lcc_device_identity_tests device_bound_http_windows_test device_bound_browser_windows_test device_bound_checkpoint_windows_test)
+endif()
+
 if(LCC_BUILD_DEVICE_IDENTITY_TEST_PROVIDER)
+    if(WIN32)
+        list(APPEND _lcc_device_identity_tests device_bound_desktop_test device_bound_public_windows_test
+            feature_session_test feature_session_failures_test feature_session_storage_test)
+    endif()
     list(APPEND _lcc_device_identity_tests
+        device_bound_possession_test
+        device_bound_session_test
+        device_bound_client_test
+        device_bound_enrollment_test
         device_identity_policy_test
         device_identity_concurrency_test)
 endif()
@@ -23,9 +45,45 @@ foreach(_lcc_device_identity_test IN LISTS _lcc_device_identity_tests)
     set_tests_properties(${_lcc_device_identity_test}
         PROPERTIES LABELS "security;public_api;device_identity")
 endforeach()
+target_sources(device_bound_public_test PRIVATE device_bound_c_header_test.c)
+set_property(TARGET device_bound_public_test PROPERTY C_STANDARD 11)
+target_sources(feature_session_public_test PRIVATE feature_session_c_header_test.c)
+set_property(TARGET feature_session_public_test PROPERTY C_STANDARD 11)
+
+if(WIN32)
+    file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/checkpoint-tests")
+    target_compile_definitions(device_bound_checkpoint_windows_test PRIVATE LCC_CHECKPOINT_TEST_ROOT="${CMAKE_CURRENT_BINARY_DIR}/checkpoint-tests")
+endif()
+
+if(LCC_BUILD_DEVICE_IDENTITY_TEST_PROVIDER)
+    target_compile_definitions(device_identity_policy_test PRIVATE
+        LCC_TEST_WINDOWS_TPM_BUILT=$<BOOL:${LCC_ENABLE_WINDOWS_TPM}>
+        LCC_TEST_TPM2_OPENSSL_BUILT=$<BOOL:${LCC_ENABLE_TPM2_OPENSSL}>)
+    if(WIN32)
+        target_link_libraries(device_bound_session_test PRIVATE bcrypt)
+        target_link_libraries(device_bound_client_test PRIVATE bcrypt)
+        target_link_libraries(device_bound_enrollment_test PRIVATE bcrypt)
+        target_link_libraries(device_bound_desktop_test PRIVATE bcrypt)
+    else()
+        target_link_libraries(device_bound_session_test PRIVATE OpenSSL::Crypto)
+        target_link_libraries(device_bound_client_test PRIVATE OpenSSL::Crypto)
+        target_link_libraries(device_bound_enrollment_test PRIVATE OpenSSL::Crypto)
+    endif()
+endif()
 
 target_compile_definitions(device_identity_vectors_test
     PRIVATE LCC_DEVICE_IDENTITY_VECTOR_ROOT="${CMAKE_SOURCE_DIR}/test/vectors")
+target_compile_definitions(device_bound_vectors_test
+    PRIVATE LCC_DEVICE_IDENTITY_VECTOR_ROOT="${CMAKE_SOURCE_DIR}/test/vectors")
+target_compile_definitions(device_bound_lease_test
+    PRIVATE LCC_DEVICE_IDENTITY_VECTOR_ROOT="${CMAKE_SOURCE_DIR}/test/vectors")
+target_compile_definitions(device_bound_anchor_test
+    PRIVATE LCC_DEVICE_IDENTITY_VECTOR_ROOT="${CMAKE_SOURCE_DIR}/test/vectors")
+target_compile_definitions(device_bound_wire_test
+    PRIVATE LCC_DEVICE_IDENTITY_VECTOR_ROOT="${CMAKE_SOURCE_DIR}/test/vectors")
+target_compile_definitions(device_bound_operations_test PRIVATE
+    LCC_DEVICE_IDENTITY_VECTOR_ROOT="${CMAKE_SOURCE_DIR}/test/vectors"
+    LCC_BUILD_DEVICE_IDENTITY_TEST_PROVIDER=$<BOOL:${LCC_BUILD_DEVICE_IDENTITY_TEST_PROVIDER}>)
 
 if(LCC_BUILD_DEVICE_IDENTITY_TEST_PROVIDER)
     target_compile_definitions(device_identity_abi_test PRIVATE LCC_BUILD_DEVICE_IDENTITY_TEST_PROVIDER=1)
@@ -42,6 +100,9 @@ if(WIN32 AND LCC_ENABLE_WINDOWS_TPM)
     target_link_libraries(device_identity_windows_test PRIVATE licensecc_static bcrypt ncrypt)
     add_test(NAME device_identity_windows_shim COMMAND device_identity_windows_test --shim)
     add_test(NAME device_identity_windows_real COMMAND device_identity_windows_test --real)
+    add_test(NAME device_identity_windows_lifecycle COMMAND device_identity_windows_test --real-lifecycle)
+    set_tests_properties(device_identity_windows_lifecycle
+        PROPERTIES LABELS "public_api;device_identity;windows_tpm" SKIP_RETURN_CODE 77)
     set_tests_properties(device_identity_windows_shim device_identity_windows_real
         PROPERTIES LABELS "security;public_api;device_identity;windows_tpm")
     set_tests_properties(device_identity_windows_real PROPERTIES SKIP_RETURN_CODE 77)

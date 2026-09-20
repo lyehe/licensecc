@@ -1,0 +1,6 @@
+{
+  "format": "device-bound-v1",
+  "description": "Native exchange wire requests derived from the public exchange proof fixture; no private key material.",
+  "challenge_request": "{\"purpose\":\"exchange\",\"attempt_handle\":\"AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE\",\"operation_id\":\"BAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQ\"}",
+  "exchange_request": "{\"attempt_handle\":\"AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE\",\"code\":\"AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI\",\"code_verifier\":\"AwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwM\",\"redirect_uri\":\"http://127.0.0.1:45231/licensecc/callback\",\"operation_id\":\"BAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQ\",\"proof\":{\"key_id\":\"sha256:046d8f3e94a1529fca6576c517820057abf9bb3a6487ce4af698edea2fde9eb1\",\"challenge_id\":\"BQUFBQUFBQUFBQUFBQUFBQ\",\"nonce\":\"BgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgY\",\"expires_at\":2000000060,\"signature\":\"GVKkZrezM6-Crv--bg9F_lPm0gYlRzEsq8VyhLT_755dAHXhbYxV0ikSy5q_rUmew8dJG3z5x0yRXmU2wWS-Mg\"}}"
+}

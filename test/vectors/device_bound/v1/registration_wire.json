@@ -1,0 +1,17 @@
+{
+  "description": "Public deterministic registration fixture; synthetic PKCE verifier only, no private signing key.",
+  "request": {
+    "client_id": "desktop",
+    "project": "CAD",
+    "public_key_spki": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEa2UmNw5WdDyYmE1Rg0ZG6DwYzswUub_6JvJyAG0zCJcgIvg3lTCSQ0H5o02gcmTJ91Frc_SdYnQUfIGngNnJ1w",
+    "device_label": "Workstation é",
+    "redirect_uri": "http://127.0.0.1:45231/licensecc/callback",
+    "state": "CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk",
+    "code_challenge": "g77gcvvTQj90gfwWOCFjatjPtz-u8N0FgfOXnqDHMbk",
+    "code_challenge_method": "S256"
+  },
+  "request_json": "{\"client_id\":\"desktop\",\"project\":\"CAD\",\"public_key_spki\":\"MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEa2UmNw5WdDyYmE1Rg0ZG6DwYzswUub_6JvJyAG0zCJcgIvg3lTCSQ0H5o02gcmTJ91Frc_SdYnQUfIGngNnJ1w\",\"device_label\":\"Workstation é\",\"redirect_uri\":\"http://127.0.0.1:45231/licensecc/callback\",\"state\":\"CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk\",\"code_challenge\":\"g77gcvvTQj90gfwWOCFjatjPtz-u8N0FgfOXnqDHMbk\",\"code_challenge_method\":\"S256\"}",
+  "response_json": "{\"ok\":true,\"code\":\"authorization_created\",\"request_id\":\"trace\",\"data\":{\"attempt_handle\":\"AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE\",\"authorization_url\":\"https://portal.example.test/authorize#attempt_handle=AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE\",\"expires_at\":2000000300,\"comparison_code\":\"C97C-964B-DE7A\"}}",
+  "code_verifier": "AwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwM",
+  "key_id": "sha256:046d8f3e94a1529fca6576c517820057abf9bb3a6487ce4af698edea2fde9eb1"
+}

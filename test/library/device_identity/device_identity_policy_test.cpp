@@ -57,10 +57,13 @@ BOOST_AUTO_TEST_CASE(provider_policy_matrix_fails_closed_without_fallback) {
 	LccDeviceIdentity* handle = reinterpret_cast<LccDeviceIdentity*>(static_cast<std::uintptr_t>(1U));
 	LccDeviceIdentityOptions options = options_for("matrix", true);
 
+#if (defined(_WIN32) && !LCC_TEST_WINDOWS_TPM_BUILT) || (!defined(_WIN32) && !LCC_TEST_TPM2_OPENSSL_BUILT)
+	// AUTO reaches hardware when built; exercise that path only in opt-in provider tests.
 	options.backend = LCC_DEVICE_BACKEND_AUTO;
 	options.policy = LCC_DEVICE_POLICY_HARDWARE_REQUIRED;
 	BOOST_TEST(lcc_device_identity_open(&options, &handle) == LCC_DEVICE_PROVIDER_UNAVAILABLE);
 	BOOST_TEST(handle == nullptr);
+#endif
 
 	options.backend = LCC_DEVICE_BACKEND_SOFTWARE_TEST;
 	options.policy = LCC_DEVICE_POLICY_HARDWARE_REQUIRED;

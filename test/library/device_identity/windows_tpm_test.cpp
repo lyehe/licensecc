@@ -731,6 +731,25 @@ void test_create_order_policy_reopen_and_self_test() {
 	require(api->freed(kProviderHandle), "provider handle freed on close");
 }
 
+void test_generic_ecdsa_requires_valid_p256_key() {
+	for (const bool create : {false, true}) {
+		auto api = std::make_shared<FakeCngApi>();
+		api->algorithm_property = NCRYPT_ECDSA_ALGORITHM;
+		api->key_exists = !create;
+		auto provider = license::device_identity::make_windows_tpm_provider(api);
+		const auto request = request_for();
+		require_equal(create ? provider->create(request) : provider->open(request), LCC_DEVICE_OK,
+					  "generic ECDSA label with verified P-256 key");
+		P256Spki spki{};
+		require_equal(provider->public_spki(spki), LCC_DEVICE_OK, "generic ECDSA public key");
+		P256Digest digest{};
+		digest.fill(0x42U);
+		P256Signature signature{};
+		require_equal(provider->sign_digest(digest, signature), LCC_DEVICE_OK, "generic ECDSA signing");
+		require(license::device_identity::verify_p256_p1363(spki, digest, signature), "generic ECDSA signature");
+	}
+}
+
 void test_existing_invariants_fail_closed_without_delete() {
 	struct Case {
 		const char* name;
@@ -746,6 +765,24 @@ void test_existing_invariants_fail_closed_without_delete() {
 		 [](FakeCngApi& api) { api.algorithm_property = BCRYPT_ECDH_P256_ALGORITHM; }},
 		{"algorithm width", LCC_DEVICE_UNSUPPORTED_ALGORITHM,
 		 [](FakeCngApi& api) { api.algorithm_property_size = sizeof(wchar_t); }},
+		{"generic algorithm missing terminator", LCC_DEVICE_UNSUPPORTED_ALGORITHM,
+		 [](FakeCngApi& api) {
+			 api.algorithm_property = NCRYPT_ECDSA_ALGORITHM;
+			 api.algorithm_property_size = 5U * sizeof(wchar_t);
+		 }},
+		{"generic algorithm embedded terminator", LCC_DEVICE_UNSUPPORTED_ALGORITHM,
+		 [](FakeCngApi& api) { api.algorithm_property = std::wstring(L"ECDSA\0X", 7U); }},
+		{"generic algorithm wrong curve", LCC_DEVICE_KEY_CORRUPT,
+		 [](FakeCngApi& api) {
+			 api.algorithm_property = NCRYPT_ECDSA_ALGORITHM;
+			 const DWORD magic = BCRYPT_ECDSA_PUBLIC_P384_MAGIC;
+			 std::memcpy(api.mutable_public_blob().data(), &magic, sizeof(magic));
+		 }},
+		{"generic algorithm wrong width", LCC_DEVICE_KEY_CORRUPT,
+		 [](FakeCngApi& api) {
+			 api.algorithm_property = NCRYPT_ECDSA_ALGORITHM;
+			 api.mutable_public_blob()[4] = 48U;
+		 }},
 		{"usage", LCC_DEVICE_KEY_CORRUPT,
 		 [](FakeCngApi& api) { api.usage_property = NCRYPT_ALLOW_SIGNING_FLAG | NCRYPT_ALLOW_DECRYPT_FLAG; }},
 		{"usage width", LCC_DEVICE_KEY_CORRUPT, [](FakeCngApi& api) { api.usage_property_size = sizeof(DWORD) - 1U; }},
@@ -1044,6 +1081,35 @@ void test_signature_boundaries_and_delete_ownership() {
 	require(!delete_api->freed(kExistingKeyHandle), "successful delete consumes the key handle");
 	require(delete_api->freed(kProviderHandle), "provider handle remains separately owned");
 
+	for (const bool allow_ui : {false, true}) {
+		for (const SECURITY_STATUS status : {ERROR_SUCCESS, NTE_BAD_FLAGS, NTE_USER_CANCELLED}) {
+			auto api = std::make_shared<FakeCngApi>();
+			api->script("delete", {status});
+			auto provider = license::device_identity::make_windows_tpm_provider(api);
+			auto removal = request;
+			removal.delete_allow_ui = allow_ui;
+			const auto id = license::device_identity::device_key_id(api->expected_spki());
+			const auto result = status == ERROR_SUCCESS ? LCC_DEVICE_OK
+														: (status == NTE_USER_CANCELLED ? LCC_DEVICE_ACCESS_DENIED
+																						: LCC_DEVICE_INTERNAL_ERROR);
+			require_equal(provider->delete_with_expected_id(removal, id), result, "explicit deletion result");
+			require_equal(api->count("delete"), std::size_t{1U}, "no automatic deletion retry");
+			require_equal(api->nth("delete").flags, allow_ui ? 0UL : NCRYPT_SILENT_FLAG, "deletion UI opt-in");
+			require_equal(api->nth("open_key").flags, NCRYPT_MACHINE_KEY_FLAG | NCRYPT_SILENT_FLAG,
+						  "opening remains silent during removal");
+			require_equal(api->freed(kExistingKeyHandle), status != ERROR_SUCCESS, "failure releases handle");
+		}
+	}
+	{
+		auto api = std::make_shared<FakeCngApi>();
+		auto provider = license::device_identity::make_windows_tpm_provider(api);
+		auto removal = request;
+		removal.delete_allow_ui = true;
+		require_equal(provider->delete_with_expected_id(removal, mismatch), LCC_DEVICE_POLICY_VIOLATION,
+					  "UI permission does not bypass expected identity");
+		require_equal(api->count("delete"), std::size_t{0U}, "mismatch cannot prompt or delete");
+	}
+
 	auto failure_api = std::make_shared<FakeCngApi>();
 	failure_api->script("delete", {NTE_PERM});
 	auto failure_provider = license::device_identity::make_windows_tpm_provider(failure_api);
@@ -1072,6 +1138,7 @@ void run_shim() {
 	test_error_map_is_operation_aware_and_fail_closed();
 	test_open_scope_properties_spki_and_signing();
 	test_create_order_policy_reopen_and_self_test();
+	test_generic_ecdsa_requires_valid_p256_key();
 	test_existing_invariants_fail_closed_without_delete();
 	test_native_failure_edges_release_owned_handles();
 	test_post_finalize_failures_rollback_only_owned_key();
@@ -1181,7 +1248,7 @@ void fill_real_proof_input(LccDeviceProofInput& input) {
 	set_field(input.nonce, "f0e1d2c3b4a59687f0e1d2c3b4a59687f0e1d2c3b4a59687f0e1d2c3b4a59687");
 }
 
-int run_real() {
+int run_real(bool check_private_export = true) {
 	const char* enabled = std::getenv("LCC_RUN_REAL_WINDOWS_TPM_TESTS");
 	if (enabled == nullptr || std::string(enabled) != "1") {
 		std::cout << "SKIP: set LCC_RUN_REAL_WINDOWS_TPM_TESTS=1 to run the destructive real TPM case\n";
@@ -1189,6 +1256,9 @@ int run_real() {
 	}
 
 	const std::string application_id = "licensecc.test.windows-tpm." + uuid_v4();
+	const char* allow_ui = std::getenv("LCC_REAL_WINDOWS_TPM_DELETE_ALLOW_UI");
+	const std::uint32_t delete_flags =
+		allow_ui != nullptr && std::string(allow_ui) == "1" ? LCC_DEVICE_DELETE_ALLOW_UI : 0U;
 	LccDeviceIdentityOptions options;
 	lcc_init_device_identity_options(&options);
 	options.backend = LCC_DEVICE_BACKEND_WINDOWS_TPM;
@@ -1237,15 +1307,19 @@ int run_real() {
 		require(license::device_identity::derive_namespace_v1(application_id, "DEFAULT", request.scope,
 															  request.device_namespace),
 				"real namespace derivation");
-		require_private_export_denied(request);
+		if (check_private_export) require_private_export_denied(request);
+		options.flags = delete_flags;
 		require_equal(lcc_device_identity_delete_key(&options, key_id.c_str()), LCC_DEVICE_OK,
 					  "real expected-id delete");
+		options.flags = 0U;
+		require_equal(lcc_device_identity_open(&options, &identity), LCC_DEVICE_KEY_NOT_FOUND,
+					  "deleted test key is absent");
 		key_id.clear();
 		return 0;
 	} catch (...) {
 		lcc_device_identity_close(identity);
 		if (!key_id.empty()) {
-			options.flags = 0U;
+			options.flags = delete_flags;
 			(void)lcc_device_identity_delete_key(&options, key_id.c_str());
 		}
 		throw;
@@ -1265,6 +1339,9 @@ int main(int argc, char** argv) {
 		}
 		if (mode == "--real") {
 			return run_real();
+		}
+		if (mode == "--real-lifecycle") {
+			return run_real(false);
 		}
 		throw std::runtime_error("unknown mode");
 	} catch (const std::exception& error) {

@@ -115,6 +115,33 @@ bool p1363_signature_in_range(const P256Signature& signature) noexcept {
 	return scalar_in_range(signature.data()) && scalar_in_range(signature.data() + 32U);
 }
 
+bool p1363_signature_is_low_s(const P256Signature& signature) noexcept {
+	if (!p1363_signature_in_range(signature)) return false;
+	std::array<std::uint8_t, 32> half{};
+	unsigned carry = 0;
+	for (std::size_t i = 0; i < half.size(); ++i) {
+		half[i] = static_cast<std::uint8_t>((carry << 7) | (kP256Order[i] >> 1));
+		carry = kP256Order[i] & 1;
+	}
+	return !std::lexicographical_compare(half.begin(), half.end(), signature.begin() + 32, signature.end());
+}
+
+bool normalize_p1363_low_s(const P256Signature& signature, P256Signature& out) noexcept {
+	if (!p1363_signature_in_range(signature)) return false;
+	SensitiveArray<64> candidate;
+	candidate.value = signature;
+	if (!p1363_signature_is_low_s(signature)) {
+		int borrow = 0;
+		for (std::size_t i = 32; i-- > 0;) {
+			const int difference = static_cast<int>(kP256Order[i]) - signature[i + 32] - borrow;
+			candidate.value[i + 32] = static_cast<std::uint8_t>(difference);
+			borrow = difference < 0 ? 1 : 0;
+		}
+	}
+	out = candidate.value;
+	return true;
+}
+
 bool verify_p256_p1363(const P256Spki& spki, const P256Digest& digest, const P256Signature& signature) noexcept {
 	return verify_p256_p1363(spki, digest, signature.data(), signature.size());
 }
