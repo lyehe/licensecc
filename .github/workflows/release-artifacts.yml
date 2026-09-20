@@ -39,6 +39,8 @@ jobs:
         run: |
           npm install --global npm@10.9.8 --no-audit --no-fund
           test "$(npm --version)" = "10.9.8"
+      - name: Install release tooling dependencies
+        run: npm ci
       - name: Install no-install verifier toolchain
         run: |
           sudo apt-get update
