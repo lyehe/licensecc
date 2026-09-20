@@ -187,6 +187,7 @@ function normalizeOrderEventInternal(parsedBody, now, enforceHistoricalPeriodEnd
   }
 
   // Optional license_fingerprint (supplied path). When present it MUST be 64-hex.
+  /** @type {string | null | undefined} */
   let license_fingerprint = undefined;
   if (parsedBody.license_fingerprint !== undefined && parsedBody.license_fingerprint !== null) {
     license_fingerprint = safeHex64(parsedBody.license_fingerprint);
@@ -196,6 +197,7 @@ function normalizeOrderEventInternal(parsedBody, now, enforceHistoricalPeriodEnd
   }
 
   // Optional times.
+  /** @type {number | null | undefined} */
   let current_period_end = undefined;
   if (parsedBody.current_period_end !== undefined && parsedBody.current_period_end !== null) {
     current_period_end = safeUnixSeconds(parsedBody.current_period_end);
@@ -203,6 +205,7 @@ function normalizeOrderEventInternal(parsedBody, now, enforceHistoricalPeriodEnd
       return { error: "invalid_order" };
     }
   }
+  /** @type {number | null | undefined} */
   let occurred_at = undefined;
   if (parsedBody.occurred_at !== undefined && parsedBody.occurred_at !== null) {
     occurred_at = safeUnixSeconds(parsedBody.occurred_at);
@@ -212,6 +215,7 @@ function normalizeOrderEventInternal(parsedBody, now, enforceHistoricalPeriodEnd
   }
 
   // Optional license_id (a bounded id, not a fingerprint).
+  /** @type {string | null | undefined} */
   let license_id = undefined;
   if (parsedBody.license_id !== undefined && parsedBody.license_id !== null) {
     license_id = safeString(parsedBody.license_id, MAX_ID_SIZE);
@@ -221,6 +225,7 @@ function normalizeOrderEventInternal(parsedBody, now, enforceHistoricalPeriodEnd
   }
 
   // Optional quantity { pool_size?, max_active_devices? } -- non-negative ints.
+  /** @type {{pool_size?: number, max_active_devices?: number} | undefined} */
   let quantity = undefined;
   if (parsedBody.quantity !== undefined && parsedBody.quantity !== null) {
     const q = parsedBody.quantity;
@@ -247,6 +252,7 @@ function normalizeOrderEventInternal(parsedBody, now, enforceHistoricalPeriodEnd
 
   // Optional customer { id?, external_ref?, name?, email? }. ids are bounded safe
   // strings; name/email are looser (not embedded into any signed line) but bounded.
+  /** @type {{id?: string, external_ref?: string, name?: string, email?: string} | undefined} */
   let customer = undefined;
   if (parsedBody.customer !== undefined && parsedBody.customer !== null) {
     const c = parsedBody.customer;

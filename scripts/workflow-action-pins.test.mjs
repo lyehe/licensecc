@@ -747,7 +747,7 @@ test("staging capacity evidence is confirmed, operator-attested, secret-backed, 
   assert.equal(externalUses.length, 3);
   for (const uses of externalUses) {
     assert.match(uses.value, /^(?:actions\/checkout|actions\/setup-node|actions\/upload-artifact)@[0-9a-f]{40}$/u);
-    assert.match(uses.comment, /^v4$/u);
+    assert.equal(uses.comment, uses.value.startsWith("actions/setup-node@") ? "v7.0.0" : "v7.0.1");
   }
   const checkout = job.steps.find((step) => step.properties.get("uses")?.value.startsWith("actions/checkout@"));
   assert.ok(checkout);

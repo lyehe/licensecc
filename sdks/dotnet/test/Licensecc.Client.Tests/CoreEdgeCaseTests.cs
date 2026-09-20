@@ -72,7 +72,7 @@ namespace Licensecc.Client.Tests
             // exactly why a Python port must SPKI-wrap the golden DER; .NET does not.
             using (var viaSpki = RSA.Create())
             {
-                Assert.ThrowsException<CryptographicException>(() => viaSpki.ImportSubjectPublicKeyInfo(pkcs1, out _));
+                Assert.ThrowsExactly<CryptographicException>(() => viaSpki.ImportSubjectPublicKeyInfo(pkcs1, out _));
                 // ...but it DOES accept the SPKI encoding.
                 viaSpki.ImportSubjectPublicKeyInfo(spki, out int spkiRead);
                 Assert.AreEqual(spki.Length, spkiRead);

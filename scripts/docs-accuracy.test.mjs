@@ -530,7 +530,7 @@ test("admin browser instructions and the PR gate keep docs checks honest", () =>
   const packageJson = JSON.parse(source("package.json"));
 
   assert.match(adminReadme, /npm run setup:browsers/);
-  assert.match(adminReadme, /root.*setup:browsers.*both retained Playwright Chromium revisions/is);
+  assert.match(adminReadme, /root.*setup:browsers.*the Playwright Chromium browser for both UI workspaces/is);
   assert.match(adminReadme, /`npm run test:e2e` itself does not install\s+browsers/i);
   assert.doesNotMatch(adminReadme, /test:e2e` installs the Playwright/i);
   assert.equal(packageJson.scripts["test:docs-accuracy"], "node --test scripts/docs-accuracy.test.mjs");

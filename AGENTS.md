@@ -24,7 +24,7 @@ npm run check:pr
 
 Use the dedicated commands for additional surfaces:
 `npm run test:sdks`, `npm run setup:browsers` (one explicit command installing
-both retained Playwright Chromium revisions), `npm run test:e2e`,
+the Playwright Chromium browser for both UI workspaces), `npm run test:e2e`,
 `npm run check:dry-run`, `npm run check:docs`, and
 `npm run test:docs-quickstart` for the native install/issue/minimal-consumer
 documentation path. The docs gate requires Doxygen; use

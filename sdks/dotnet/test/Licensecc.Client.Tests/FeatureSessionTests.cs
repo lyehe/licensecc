@@ -62,9 +62,9 @@ public unsafe class FeatureSessionTests
         var api=new Fake(); using var library=new FeatureSessionLibrary(api);
         var session=library.Open(Config()).Session!;
         foreach(var value in new[]{"",new string('x',16),"x\0y","é"})
-            Assert.ThrowsException<ArgumentException>(()=>session.Authorize(value));
+            Assert.ThrowsExactly<ArgumentException>(()=>session.Authorize(value));
         Assert.AreEqual(Result.Ok,session.Authorize("A.b:c-d_e").Code);
-        session.Dispose(); Assert.ThrowsException<ObjectDisposedException>(()=>session.Start());
+        session.Dispose(); Assert.ThrowsExactly<ObjectDisposedException>(()=>session.Start());
         Assert.AreEqual(1,api.Closed.Count);
     }
     [TestMethod]
@@ -74,12 +74,12 @@ public unsafe class FeatureSessionTests
         for(var index=0;index<values.Length;index++)
         {
             var changed=index;
-            Assert.ThrowsException<BadImageFormatException>(()=>FeatureAbi.Verify(i=>values[i]^(i==changed?1U:0U)));
+            Assert.ThrowsExactly<BadImageFormatException>(()=>FeatureAbi.Verify(i=>values[i]^(i==changed?1U:0U)));
         }
         var raw=new FeatureAbi.Outcome{Size=56,Version=1,State=99};
-        Assert.ThrowsException<InvalidDataException>(()=>FeatureSession.Decode(0,raw));
+        Assert.ThrowsExactly<InvalidDataException>(()=>FeatureSession.Decode(0,raw));
         raw.State=0;raw=CorruptReserved(raw);
-        Assert.ThrowsException<InvalidDataException>(()=>FeatureSession.Decode(0,raw));
+        Assert.ThrowsExactly<InvalidDataException>(()=>FeatureSession.Decode(0,raw));
     }
     private static FeatureAbi.Outcome CorruptReserved(FeatureAbi.Outcome raw) { raw.Reserved[1]=1; return raw; }
     [TestMethod]
@@ -96,7 +96,7 @@ public unsafe class FeatureSessionTests
     {
         var path=Environment.GetEnvironmentVariable("LCC_TEST_OLD_DEVICE_BOUND_DLL");
         if(string.IsNullOrEmpty(path)) Assert.Inconclusive("Set LCC_TEST_OLD_DEVICE_BOUND_DLL to the original-export fixture.");
-        Assert.ThrowsException<NotSupportedException>(()=>new FeatureSessionLibrary(path!));
+        Assert.ThrowsExactly<NotSupportedException>(()=>new FeatureSessionLibrary(path!));
         using var existing=new DeviceBoundLibrary(path!);
         var opened=existing.OpenResume(Config());
         Assert.IsNull(opened.Client); Assert.AreEqual(Result.InvalidArgument,opened.Outcome.Code);

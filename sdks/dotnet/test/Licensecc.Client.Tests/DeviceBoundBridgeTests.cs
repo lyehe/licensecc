@@ -23,7 +23,7 @@ public sealed unsafe class DeviceBoundBridgeTests
         for(var altered=0;altered<expected.Length;altered++)
         {
             var copy=(uint[])expected.Clone(); copy[altered]^=1;
-            Assert.ThrowsException<BadImageFormatException>(()=>Abi.Verify(index=>copy[index]));
+            Assert.ThrowsExactly<BadImageFormatException>(()=>Abi.Verify(index=>copy[index]));
         }
     }
     [TestMethod]
@@ -39,10 +39,10 @@ public sealed unsafe class DeviceBoundBridgeTests
         var key=(Abi.TrustKey*)options.TrustKeys;
         Assert.AreEqual((uint)1,key[0].Size); Assert.AreEqual((byte)42,key[0].Spki[0]);
         Assert.AreEqual((uint)0,options.Reserved);
-        Assert.ThrowsException<ArgumentException>(()=>Config("a\0b"));
-        Assert.ThrowsException<System.Text.EncoderFallbackException>(()=>Config("\ud800"));
-        Assert.ThrowsException<ArgumentException>(()=>Config(new string('a',321)));
-        Assert.ThrowsException<ArgumentException>(()=>Config(keys:Array.Empty<TrustedSigner>()));
+        Assert.ThrowsExactly<ArgumentException>(()=>Config("a\0b"));
+        Assert.ThrowsExactly<System.Text.EncoderFallbackException>(()=>Config("\ud800"));
+        Assert.ThrowsExactly<ArgumentException>(()=>Config(new string('a',321)));
+        Assert.ThrowsExactly<ArgumentException>(()=>Config(keys:Array.Empty<TrustedSigner>()));
     }
     [TestMethod]
     public void AllCallsPreserveTypedIndependentOutcomesAndComparison()
@@ -60,8 +60,8 @@ public sealed unsafe class DeviceBoundBridgeTests
         var view=client.Prepare(); Assert.AreEqual("ABCD-0123-EF45",view.View!.ComparisonCode);
         Assert.AreEqual((ulong)1000,view.View.ExpiresAt);
         Assert.AreEqual(Result.Ok,client.Launch()); Assert.AreEqual(Result.Ok,client.Poll(1000)); Assert.AreEqual(Result.Ok,client.Cancel());
-        Assert.ThrowsException<ArgumentOutOfRangeException>(()=>client.Poll(1001));
-        api.BadComparison=true; Assert.ThrowsException<InvalidDataException>(()=>client.Prepare());
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(()=>client.Poll(1001));
+        api.BadComparison=true; Assert.ThrowsExactly<InvalidDataException>(()=>client.Prepare());
     }
     [TestMethod]
     public void MalformedNativeOutcomesNeverBecomePermission()
@@ -69,9 +69,9 @@ public sealed unsafe class DeviceBoundBridgeTests
         var api=new Fake(); using var library=new DeviceBoundLibrary(api); using var client=library.OpenResume(Config()).Client!;
         foreach(var malformed in new[]{1,2,3,4,5,6,7})
         {
-            api.Malformed=malformed; Assert.ThrowsException<InvalidDataException>(()=>client.Authorize());
+            api.Malformed=malformed; Assert.ThrowsExactly<InvalidDataException>(()=>client.Authorize());
         }
-        api.Malformed=0; api.Next=(Result)99; Assert.ThrowsException<InvalidDataException>(()=>client.Authorize());
+        api.Malformed=0; api.Next=(Result)99; Assert.ThrowsExactly<InvalidDataException>(()=>client.Authorize());
         api.Next=Result.Ok; Assert.AreEqual(Result.Ok,client.Authorize().Code);
     }
     [TestMethod]
@@ -79,10 +79,10 @@ public sealed unsafe class DeviceBoundBridgeTests
     {
         var api=new Fake(); var library=new DeviceBoundLibrary(api); var client=library.OpenResume(Config()).Client!;
         Assert.AreEqual(1,api.Pins); library.Dispose(); library.Dispose(); Assert.AreEqual(1,api.Disposals);
-        Assert.ThrowsException<ObjectDisposedException>(()=>library.OpenResume(Config()));
+        Assert.ThrowsExactly<ObjectDisposedException>(()=>library.OpenResume(Config()));
         Assert.AreEqual(Result.Ok,client.Authorize().Code);
         client.Dispose(); client.Dispose(); Assert.AreEqual(1,api.Closes); Assert.AreEqual(0,api.Pins);
-        Assert.ThrowsException<ObjectDisposedException>(()=>client.Authorize());
+        Assert.ThrowsExactly<ObjectDisposedException>(()=>client.Authorize());
     }
     [TestMethod]
     public void InvalidOpenCleansReturnedHandleAndDoesNotLeakPins()
@@ -90,7 +90,7 @@ public sealed unsafe class DeviceBoundBridgeTests
         foreach(var mode in new[]{1,2,3,4,6})
         {
             var api=new Fake { OpenMode=mode }; using var library=new DeviceBoundLibrary(api);
-            Assert.ThrowsException<InvalidDataException>(()=>library.OpenEnrollment(Config()));
+            Assert.ThrowsExactly<InvalidDataException>(()=>library.OpenEnrollment(Config()));
             Assert.AreEqual(mode==2?0:1,api.Closes); Assert.AreEqual(0,api.Pins);
         }
         var failed=new Fake { OpenMode=5 }; using var second=new DeviceBoundLibrary(failed);
@@ -141,7 +141,7 @@ public sealed unsafe class DeviceBoundBridgeTests
             native.Dispose(); Assert.AreEqual((uint)sizeof(Abi.Options),native.Options().Size);
         }
         if(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture==Architecture.X64)
-            Assert.ThrowsException<ArgumentException>(()=>new DeviceBoundLibrary("relative.dll"));
+            Assert.ThrowsExactly<ArgumentException>(()=>new DeviceBoundLibrary("relative.dll"));
     }
 
     private sealed class Pin : IDisposable

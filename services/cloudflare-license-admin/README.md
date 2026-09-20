@@ -134,8 +134,8 @@ this service directory; do not create a package-local lockfile.
 verifier share the same D1 schema.
 
 Run `npm run setup:browsers` once from the repository root before browser
-checks; that command installs both retained Playwright Chromium revisions for
-the admin and portal workspaces. `npm run test:e2e` itself does not install
+checks; that command installs the Playwright Chromium browser for both UI workspaces
+(admin and portal). `npm run test:e2e` itself does not install
 browsers. It starts a local Vite preview and runs a browser workflow with
 mocked admin API responses. It covers create, metadata/validity/TTL patch,
 disable, reenable, revoke, audit timeline display, duplicate-submit guarding,
