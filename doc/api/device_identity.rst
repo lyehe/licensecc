@@ -334,6 +334,12 @@ paths, credentials, query/fragment and IP literals/aliases are rejected. This
 origin is pinned local routing configuration, separate from the signed issuer
 and proof/lease audience values. Responses cannot change it. Unsupported
 security options fail closed; older Windows compatibility is not yet certified.
+Windows Server 2022 rejects the required
+``WINHTTP_OPTION_DISABLE_GLOBAL_POOLING`` option, so protected enrollment and
+renewal are unavailable there. Protected-device CI uses Windows Server 2025;
+the legacy licensing builds retain Windows Server 2022 coverage. This does not
+establish a minimum supported Windows desktop version; desktop qualification
+remains separate from hosted CI.
 There is no production transport on non-Windows platforms in this pilot.
 
 Headers and bodies are bounded to 16 KiB. Representation checks reject redirects,
