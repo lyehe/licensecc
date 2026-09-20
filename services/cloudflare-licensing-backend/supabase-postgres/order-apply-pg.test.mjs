@@ -198,8 +198,8 @@ test("LAYER1c ACCEPT claims only from an immutable-identity cursor winner", () =
   assert.ok(accept.text.startsWith("WITH cursor_winner AS (UPDATE orders AS current_order SET order_epoch ="));
   assert.ok(accept.text.includes("current_order.license_fingerprint = $9"));
   assert.ok(accept.text.includes("current_order.fingerprint_origin = $10"));
-  assert.ok(accept.text.includes("current_order.customer_id IS NULL OR $11 IS NULL OR current_order.customer_id = $12"));
-  assert.ok(accept.text.includes("current_order.license_id IS NULL OR $13 IS NULL OR current_order.license_id = $14"));
+  assert.ok(accept.text.includes("current_order.customer_id IS NULL OR $11::text IS NULL OR current_order.customer_id = $12"));
+  assert.ok(accept.text.includes("current_order.license_id IS NULL OR $13::text IS NULL OR current_order.license_id = $14"));
   assert.ok(accept.text.includes("RETURNING current_order.subscription_id, current_order.project, current_order.feature, current_order.license_fingerprint"));
   assert.ok(accept.text.includes("FROM cursor_winner AS winner"), "claim is sourced only from the winning UPDATE row");
   assert.ok(accept.text.includes("'accepted', '',"), "status literal 'accepted', empty result_json");

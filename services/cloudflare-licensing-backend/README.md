@@ -197,6 +197,47 @@ real `wrangler.toml`, `.dev.vars`, databases, and private keys untracked.
    Use `--flag=value` form when invoking through `npm run`; the script also
    supports direct `node scripts/public-verifier-drill.mjs --url <url> ...`.
 
+### Machine activation and renewal
+
+The hosted setup above configures online assertions. To also use
+`/v1/activate` and `/v1/renew`, configure the separate lease signer. From
+`services/cloudflare-licensing-backend`, after configuring the intended remote
+Worker, store its PKCS#8 private key and matching key id interactively:
+
+```console
+npx wrangler secret put LEASE_SIGNING_PRIVATE_KEY_PKCS8_PEM
+npx wrangler secret put LEASE_SIGNING_KEY_ID
+```
+
+Use a dedicated lease-signing key, and distribute its matching public key to
+the client license verifier. The online assertion key and lease key serve
+different verification paths; configuring only `ONLINE_SIGNING_*` does not
+enable lease issuance. Keep private keys in Worker secrets, never in D1 or the
+admin UI.
+
+Keep `ACCOUNT_TOKEN_MODE=required`, configure `ACCOUNT_TOKEN_PEPPERS`, and
+issue a scoped account token using `scripts/account-token.mjs`. An entitlement
+must belong to the token's customer. For device ownership proof on activation
+and renewal, set `DEVICE_PROOF_MODE=required` and enroll the device public key
+as described above. The client must sign each request with its device-held
+private key. `REQUEST_SIGNATURE_MODE=required` protects online verification;
+it does not replace the separate lease proof selector. This device-required
+profile is for direct device clients, not the standard portal deployment
+profile described below.
+
+Use the [admin Worker](../cloudflare-license-admin/README.md#hosted-setup)
+against the same D1 database to create entitlements, extend `valid_until`, and
+disable or re-enable licenses and enrolled device keys. D1 stores validity,
+device records, lease issuance history, and the entitlement `revocation_seq`.
+That sequence is a revocation floor, not a per-activation revision counter.
+
+There is currently no client `/v1/deactivate` route. `/v1/release` releases a
+floating seat; admin device disabling prevents subsequent proof-authorized
+use but does not release the node-locked issuance-history rebind cap. Already
+issued offline leases remain subject to their signed expiry and the client's
+online-verification policy. Applications requiring self-service machine
+transfer need an explicit deactivation contract before deployment.
+
 ## Capacity and observability evidence
 
 `npm run capacity:public-verifier` is the bounded, open-loop load harness for
@@ -520,3 +561,257 @@ fraud.confirmed / chargeback) and the Worker projects them onto entitlements.
   `Content-Length` is absent or lies. The HMAC is over those original bytes,
   then the body must decode as valid UTF-8 before JSON parsing.
 - Set the HMAC key map as a secret: `npx wrangler secret put ORDER_HMAC_SECRETS`.
+
+### Portal OAuth schema
+
+Migration `0034_portal_passwords.sql` adds portal password credentials and session
+authentication provenance. Apply it before deploying the password-capable portal,
+even if password sign-in is disabled. Login addresses are stored separately from
+customer contact emails until verified; registration grants no licensing access.
+The existing backend and admin remain compatible with this additive migration.
+
+Migration `0033_portal_oauth.sql` adds provider identities and expiring browser-bound
+OAuth state for the customer portal. Apply it before deploying the portal OAuth
+routes; existing backend/admin deployments remain compatible. New social
+registrations create customers without granting licensing access. See the
+[portal setup](../cloudflare-customer-portal/README.md#google-and-github-sign-in).
+
+### Protected-device API (staged implementation)
+
+Migration `0036_device_bound_licensing.sql` adds persistent device bindings,
+capacity holds, proof challenges, authorization attempts, exact operation
+recovery and audit records. Apply it before deploying the backend lookup changes:
+v1 verification, leases and floating-seat paths now select only legacy-mode
+entitlements. Existing entitlements default to `legacy`; no customer is opted in.
+The backend now serves `/v2/device-authorizations`, `/v2/device-challenges`,
+`/v2/device-authorizations/exchange` and `/v2/device-leases/renew`. Staged browser
+consent is implemented; the native protected consumer remains unfinished. Local
+workerd tests exercise real portal sessions, named consent RPC and backend D1;
+browser tests separately exercise the UI with API fixtures. This does not prove
+an end-to-end production enrollment workflow.
+Protected trials use the same proven-device exchange. First successful exchange
+atomically records the trial start and device key; browser approval starts no
+clock and reserves no slot. Activation-based trials expire at that persisted
+start plus their duration; `from_issue` preserves its absolute `valid_until`.
+The earliest trial, entitlement or lease deadline caps each signed lease.
+Renewal and response recovery recheck current expiry and the optional first-key
+lock without restarting the trial. Existing legacy trials retain their own path.
+Consent inspection includes optional `activation_trial_seconds` only for an
+unstarted activation-based trial. Its `valid_until` is an optional absolute cap;
+for a started trial it is the effective expiry. The portal explains activation
+timing instead of presenting a null date as “No expiry.” Deploy the portal
+validator/UI update before enabling protected trials in the backend.
+
+Scheduled maintenance deletes expired proof challenges and unconsumed
+authorization attempts using the database clock and existing expiry indexes.
+Each statement deletes at most 1,000 rows, with up to ten batches per record
+type per tick. Repeated or interrupted sweeps are safe; expired rows are already
+rejected by request admission. Consumed attempts are retained for the separate
+operation-recovery lifecycle. This sweep does not delete devices, bindings,
+leases, operation results or audit records, and cannot free a device slot.
+
+Migration `0038_bound_recovery_retention.sql` must precede deployment of recovery
+cleanup. After the 48-hour recovery deadline, a separate bounded sweep erases
+completed operation response payloads and deletes consumed authorization attempts.
+Operation identity and digest remain as immutable tombstones: retries cannot
+become new issuances after cleanup, and erased responses remain unavailable even
+if the database clock moves backward. The database rejects tombstone deletion and
+payload restoration. A restore predating the original
+operation can omit its tombstone, so backup/cutover qualification remains required.
+
+Migration `0039_bound_lease_cleanup.sql` must precede deployment of lease-table
+cleanup. An indexed sweep prunes lease rows at `accept_until`, using database time
+and at most ten batches of 1,000 rows per tick. Binding identities, generations
+and maximum holds remain unchanged. Exact operation responses retain their token
+copy for the separate 48-hour recovery window; recovering one never extends its
+original expiry. Backup lifecycle qualification remains open; device audit
+events follow the retain-until-policy-changes rule documented below.
+
+The authenticated `DeviceConsent` backend capability also exposes
+`retire(customerId, { binding_id, expected_revision, operation_id })` for an owned
+protected binding. IDs use the same canonical 16-byte binding and 32-byte operation
+encoding as the protected protocol. A successful retirement returns `binding_id`,
+`state: "retiring"`, `effective_release_at`, `revision` and `generation`.
+The backend advances generation/revision once and preserves the maximum hold;
+renewal stops immediately, while the slot remains occupied until that hold ends.
+`effective_release_at` is the later of the preserved hold and retirement commit
+time, so an already-expired hold makes the slot available at retirement.
+Expired or disabled entitlements can still be retired by their active owner.
+
+Retirement uses the existing durable operation ledger and one guarded D1 batch
+for the operation, binding and audit. Same-intent retries recover the original
+result for 48 hours; changed intent or an expired/erased result fails with
+`idempotency_conflict`. Neither retry nor retirement creates a lease or deletes
+identity. This method is a named service capability, not a public HTTP route:
+only bind authenticated callers that derive customer identity from their session.
+The customer portal exposes this capability through its session-protected
+`POST /api/portal/device-bindings/retire` route. Its Nodes screen lists protected
+bindings and confirms retirement, with exact pending-request recovery and
+instructions to connect another machine after the hold ends. Physical native
+transfer qualification remains a release gate.
+
+The separate named `DeviceOperator` capability exposes only
+`retire(actor, customerId, input)` for the admin Worker. The actor must be derived
+from verified admin authentication, with exactly `subject`, `actor_type`
+(`access` or development `dev`), and `role: "admin"`. The caller chooses the
+customer context; the backend rechecks that both device and entitlement belong
+to it and that the target customer is active. Operator authentication does not
+override this customer-state rule. Subjects must round-trip through UTF-8 exactly.
+Never bind the customer portal or an untrusted Worker to this capability.
+It cannot approve enrollment, issue leases, edit keys/ownership or shorten holds.
+
+Operator retirement uses the same atomic transition and 48-hour recovery rules.
+Its digest additionally binds the authenticated operator; another operator or
+customer self-service cannot recover the same operation key as its own intent.
+The device audit actor is `operator:<actor_type>:<subject>`; no email is required.
+Customer actor/digest encoding is unchanged. The admin Worker owns its protected
+read/event/retirement HTTP routes and profile-pinned `DEVICE_OPERATOR` binding;
+see its README for the authenticated retry contract and browser operator
+inspection/retirement workflow.
+
+Monitor scheduled protected-device cleanup using structured events:
+
+- `device.cleanup_completed` reports `source`, `target`, `affected_rows` and
+  `limit_reached: false`, including zero-row sweeps.
+- `device.cleanup_limit_reached` warns when a target reaches the 10,000-row
+  per-tick budget. It signals cleanup pressure, not a measured remaining backlog.
+  Repeated warnings warrant checking cron delivery and whether incoming expired
+  records exceed sweep throughput; do not bypass holds or tombstones to catch up.
+- `device.approval_cleanup_failed`, `device.ephemera_cleanup_failed`,
+  `device.recovery_cleanup_failed` and `device.lease_cleanup_failed` identify
+  failed jobs. Other jobs continue; a failed multi-target job may have partially
+  committed earlier batches and safely resumes on the next tick.
+- `device.cleanup_backlog` reports a post-sweep primary-database snapshot for
+  each source/target: `measured_at`, `backlog_present`, `oldest_expired_at` and
+  `backlog_age_seconds`. Present backlogs use warning severity; clear samples
+  use info with null deadline/age. A deadline equal to database time is expired
+  and has age zero. A full-budget sweep may still have a clear sample; a failed
+  sweep may have a measurable backlog. These are independent observations.
+- `device.cleanup_backlog_failed` means the snapshot is unavailable or invalid.
+  It emits no per-target samples and must not be interpreted as a zero backlog.
+
+Apply migration `0040_bound_unconsumed_cleanup.sql` before deploying this
+measurement/cleanup code. The unconsumed-attempt sweep and probe explicitly use
+its partial index to avoid scanning retained consumed recovery history. Missing
+required indexes fail visibly rather than falling back to a history scan. All
+six probes use one statement with database time and fetch only the earliest
+eligible deadline; they do not count all records, inspect account status or
+change authority. PostgreSQL schema and backup restore inventories include the
+same index; protected cleanup remains owned by the D1 backend.
+
+Sources are `approval`, `ephemera`, `recovery` and `lease`; targets distinguish
+responses, challenges, attempts and leases. Logs contain no row identifiers,
+codes, token payloads or database exception text. Alert on repeated failures or
+limit warnings, and investigate missing completion events alongside scheduler
+invocation evidence. Log absence alone cannot establish that a sweep succeeded.
+Graph backlog age by source/target and investigate sustained or growing age,
+especially ephemera approaching its 24-hour physical cleanup limit. A clear
+sample only proves absence of eligible rows at that snapshot; it says nothing
+about later arrivals, tombstones or prepared operations. Alert delivery and
+missing-schedule detection must be qualified in the deployed monitoring system;
+these structured events do not claim an external alert has been configured.
+The required thresholds, invocation/snapshot correlation rules and fault drill
+are specified by [OBS-08 in the operations runbook](../../doc/operations/observability.md#protected-device-cleanup-evaluation).
+
+Device audit events are retained without automatic expiry until a different
+policy is explicitly decided (user instruction, 2026-09-14). They are excluded
+from these cleanup jobs and backlog probes. Enforcement identities, generations,
+operation tombstones and slot holds remain protected independently of event
+retention. A future audit-history policy must not release slots or erase that
+enforcement state.
+
+In-place `legacy` to `device_bound_v1` updates fail with
+`protected_mode_migration_required`. Pruned issuance history, released borrowed
+seats and external offline licenses prevent empty current tables from proving
+that legacy authority has drained. The backend/release owner must complete the
+reviewed cutover-evidence protocol and restore tests before replacing that guard.
+Use fresh synthetic protected-only entitlements for development; this migration
+does not authorize enabling protection for existing customers.
+
+`npm run test:sql` includes deterministic SQLite boundary tests and the local
+Miniflare D1 binding tests for concurrent allocation and complete batch rollback.
+The PostgreSQL bootstrap mirrors schema and trigger guards but remains a fenced
+v1 verifier adapter; protected issuance is D1-only. Schema parity checks do not
+replace execution against a real PostgreSQL server or deployed D1.
+
+The v2 routes fail closed without `BOUND_DEVICE_CONFIG`. Its non-secret JSON
+configuration has this shape (these example hosts do not identify a deployment):
+
+```json
+{
+  "issuer": "https://licenses.example.test/",
+  "audience": "desktop",
+  "authorization_url": "https://portal.example.test/connect",
+  "clients": [{
+    "client_id": "desktop",
+    "project": "APP",
+    "display_name": "Example app",
+    "callbacks": [{ "host": "127.0.0.1", "path": "/callback" }]
+  }]
+}
+```
+
+Issuer and authorization destination must be canonical HTTPS URLs with no query,
+fragment or userinfo. Callback hosts are explicitly `127.0.0.1` or `[::1]`;
+clients supply a nonzero listener port and the exact registered path. Registry
+entries are deployment configuration, not request-supplied customer authority.
+The serving `/openapi.json` documents fields and error/retry semantics. Numeric
+wire tokens are unsigned decimal safe integers; `challenge_id` is 16 random
+bytes and `nonce` is 32, both canonical unpadded base64url.
+
+Configure `BOUND_LEASE_SIGNING_PRIVATE_KEY_PKCS8_PEM` as an independently purposed
+Worker secret and `BOUND_LEASE_SIGNING_PUBLIC_KEY_SPKI_PEM` with its public key.
+The pair must use RSA-3072/SHA-256; the key ID is derived from public SPKI. There
+is no fallback to v201/online-assertion keys. Keep the private key out of local
+tracked configuration and client artifacts. Existing health/secret-inventory
+checks cover legacy readiness; they do not yet certify this staged v2 rollout.
+Follow the [protected key rotation runbook](../../doc/operations/device-bound-key-rotation.md)
+before switching signers. Old public keys can still be required to load saved
+checkpoints after their leases expire; lease expiry alone is not a removal rule.
+
+All four routes share mandatory fixed D1 budgets of 20 requests per client per
+minute and 1,000 per backend per minute; the Cloudflare limiter also applies when
+bound. Legacy limiter/proof/account-token `off` settings do not disable v2 checks.
+Limits run before JSON parsing/key import. Responses are no-store, and 429 includes
+`Retry-After: 60`. A request URL must have no query or fragment, including empty
+delimiters; those bytes are not part of the signed protocol path.
+
+After a lost response, preserve the device key and exact operation body, obtain
+a fresh challenge and sign again. Recovery rechecks current authority and returns
+the original response without minting another lease or extending the hold. A
+denial of this request does not prove an earlier concurrent/timed-out invocation
+never committed. Native clients must preserve the original monotonic send anchor;
+a new process requires fresh online renewal. Customer/device denial stops new
+issuance, while previously signed offline authority remains bounded by its expiry.
+
+The deployment entrypoint exports `DeviceConsent`, a named Workers RPC capability
+with `inspect`, `approve`, and `deny` methods. Bind only the authenticated customer
+portal to that entrypoint; the default/public Worker does not expose these methods.
+The portal adapter derives customer identity from its session and enforces Origin,
+rate limits, idempotency keys and strict parsing of original HTTP bytes before
+invoking it. RPC cannot recover duplicate keys or numeric lexemes already lost
+through JSON parsing. The portal's browser consent screen owns interactive
+review and confirmation. The physical native/browser/backend journey still
+requires its separate release qualification.
+
+Registration and inspection return the same immutable enrollment comparison
+code. Inspection also supports bounded live keyset pages using the existing
+customer/project index; current authority and eligibility are read together.
+See the [enrollment protocol reference](../../doc/api/device_enrollment.rst)
+for byte-level comparison rules and cursor semantics. The app must independently
+recompute the comparison from its own enrollment fields before opening the
+browser; the displayed code never replaces PKCE or device-key proof.
+
+Approval recovery requires the separate Worker secret
+`BOUND_APPROVAL_ENCRYPTION_KEYS`: JSON with `active` naming a key in `keys`, whose
+values are canonical base64url encodings of 32 random bytes. Retain at most three
+keys for brief rotation overlap. Never use the lease signing secret for encryption.
+Approval recovery ends at code expiry; denial recovery ends at attempt expiry.
+Maintenance clears expired approval ciphertext from live rows in bounded indexed
+batches, up to 10,000 rows per scheduled run. Logical expiry does not depend on
+the sweep. Outages and backlog can delay erasure, and historical backups require
+their own retention policy.
+
+Node HTTP tests and the local SQLite/PostgreSQL hosts import `dist/app.js`.
+The deployed `src/index.ts` additionally loads the Cloudflare-native RPC runtime;
+local workerd tests verify that entrypoint and its service-binding isolation.

@@ -66,7 +66,7 @@ export function nullableEpoch(value: unknown): number | null | undefined {
 }
 
 export function validateEntitlementInput(value: unknown): EntitlementInput | null {
-  if (typeof value !== "object" || value === null) {
+  if (typeof value !== "object" || value === null || Array.isArray(value) || Object.hasOwn(value, "enforcement_mode")) {
     return null;
   }
   const input = value as Record<string, unknown>;
@@ -112,7 +112,7 @@ export function validateEntitlementInput(value: unknown): EntitlementInput | nul
 }
 
 export function validateEntitlementPatch(value: unknown): EntitlementPatch | null {
-  if (typeof value !== "object" || value === null) {
+  if (typeof value !== "object" || value === null || Array.isArray(value) || Object.hasOwn(value, "enforcement_mode")) {
     return null;
   }
   const input = value as Record<string, unknown>;

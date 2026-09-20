@@ -64,13 +64,14 @@ DELETE FROM rate_limit_counters WHERE expires_at < $1;
 --   ORIGINAL (D1):
 --     SELECT project, feature, license_fingerprint, device_hash, status, assertion_ttl_seconds,
 --            cache_ttl_seconds, revocation_seq, valid_from, valid_until
---     FROM entitlements WHERE project = ? AND feature = ? AND license_fingerprint = ? LIMIT 1
+--     FROM entitlements WHERE project = ? AND feature = ? AND license_fingerprint = ? AND enforcement_mode = 'legacy' LIMIT 1
 --   .bind(request.project, request.feature, request.license_fingerprint) -> 3 params.
 --   Consumed via .first<EntitlementRow>() -> row or null.
 SELECT project, feature, license_fingerprint, device_hash, status, assertion_ttl_seconds,
        cache_ttl_seconds, revocation_seq, valid_from, valid_until
 FROM entitlements
 WHERE project = $1 AND feature = $2 AND license_fingerprint = $3
+  AND enforcement_mode = 'legacy'
 LIMIT 1;
 
 

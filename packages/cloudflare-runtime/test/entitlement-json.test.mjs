@@ -129,6 +129,7 @@ function projectionProbe() {
   };
   const actions = { projection_snapshot_version: 2, created: [action], updated: [], disabled: [], assignment, assignment_snapshot: null };
   const entitlement = {
+    enforcement_mode: "legacy",
     project: "DEFAULT", feature: "core", license_fingerprint: fingerprint, device_hash: "", status: "active",
     assertion_ttl_seconds: 600, cache_ttl_seconds: 600, revocation_seq: 1, valid_from: null, valid_until: null,
     notes: "probe", customer_id: null, license_id: "lic_probe", policy_id: "pol_probe", is_trial: 0,
@@ -264,6 +265,7 @@ if connection.getlimit(sqlite3.SQLITE_LIMIT_FUNCTION_ARG) != 32:
     raise RuntimeError("failed to lower SQLITE_LIMIT_FUNCTION_ARG to 32")
 connection.executescript("""
 CREATE TABLE entitlements (
+  enforcement_mode TEXT,
   project TEXT, feature TEXT, license_fingerprint TEXT, device_hash TEXT, status TEXT,
   assertion_ttl_seconds INTEGER, cache_ttl_seconds INTEGER, revocation_seq INTEGER,
   valid_from INTEGER, valid_until INTEGER, notes TEXT, customer_id TEXT, license_id TEXT,

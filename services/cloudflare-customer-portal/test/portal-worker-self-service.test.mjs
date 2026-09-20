@@ -186,6 +186,54 @@ test("ownership transfer between the device pre-read and batch cannot revoke the
   db.close();
 });
 
+for (const state of ["active", "retiring"]) {
+  test(`stale legacy portal release rolls back every write against protected binding state ${state}`, async (t) => {
+    const { db, env } = baseFixture();
+    t.after(() => db.close());
+    seedDevice(db, { fingerprint: FP_A, deviceKeyId: "dk_a" });
+    const cookie = await cookieFor(env, "A");
+    const tables = ["entitlements", "entitlement_devices", "entitlement_events", "device_bound_devices", "device_bound_bindings"];
+    const snapshot = () => tables.map((table) => db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all());
+    const realBatch = env.DB.batch.bind(env.DB);
+    let committedBeforeRelease;
+    let rejectedByModeFence = false;
+    env.DB.batch = async (statements) => {
+      // Model an external replacement/restore after the legacy ownership read.
+      // This is adversarial state, not an authorized conversion workflow. Keep
+      // every production trigger enabled, including the in-place conversion ban.
+      assert.equal(committedBeforeRelease, undefined, "one release transaction");
+      const row = db.prepare("SELECT * FROM entitlements WHERE license_fingerprint = ?").get(FP_A);
+      assert.throws(() => db.prepare("UPDATE entitlements SET enforcement_mode='device_bound_v1' WHERE license_fingerprint=?").run(FP_A), /protected_mode_migration_required/);
+      db.prepare("DELETE FROM entitlements WHERE license_fingerprint = ?").run(FP_A);
+      // A bulk restore can load child rows before their parent with deferred
+      // foreign keys. Reproduce that mixed history without removing any fence.
+      db.exec("BEGIN; PRAGMA defer_foreign_keys=ON");
+      seedDevice(db, { fingerprint: FP_A, deviceKeyId: "dk_a" });
+      row.enforcement_mode = "device_bound_v1";
+      row.pool_size = 0;
+      const columns = Object.keys(row);
+      db.prepare(`INSERT INTO entitlements (${columns.join(",")}) VALUES (${columns.map(() => "?").join(",")})`).run(...Object.values(row));
+      db.prepare("INSERT INTO device_bound_devices(id,customer_id,project,key_id,public_key_spki,created_at,last_proof_at) VALUES('protected-device','A','DEFAULT','protected-key','public',?,?)").run(NOW, NOW);
+      db.prepare("INSERT INTO device_bound_bindings(id,project,feature,license_fingerprint,device_id,state,hold_until,created_at,updated_at) VALUES('protected-binding','DEFAULT','DEFAULT',?,'protected-device',?,?,?,?)").run(FP_A, state, NOW + 3600, NOW, NOW);
+      db.exec("COMMIT");
+      committedBeforeRelease = snapshot();
+      try {
+        return await realBatch(statements);
+      } catch (error) {
+        assert.match(String(error), /legacy_protocol_disabled/);
+        rejectedByModeFence = true;
+        throw error;
+      }
+    };
+    const response = await call(env, "POST", "/api/portal/devices/release", { cookie, body: { device_key_id: "dk_a" } });
+    assert.equal(response.status, 500);
+    assert.equal(response.body.code, "portal_error");
+    assert.equal(rejectedByModeFence, true);
+    assert.deepEqual(snapshot(), committedBeforeRelease, "revision bump, legacy device, audit, identity and occupied hold all survive unchanged");
+    assert.deepEqual(db.prepare("PRAGMA foreign_key_check").all(), []);
+  });
+}
+
 test("an audit failure rolls back the device release batch without a seq or audit side effect", async () => {
   const { db, env } = baseFixture();
   seedDevice(db, { fingerprint: FP_A, deviceKeyId: "dk_a" });

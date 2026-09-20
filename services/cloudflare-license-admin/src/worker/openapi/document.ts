@@ -1,3 +1,5 @@
+import { workspacePaths } from "./paths/workspace.js";
+import { bindingPaths } from "./paths/bindings.js";
 // OpenAPI 3.1 "doc-of-existing" for the Cloudflare License Admin Worker.
 // This document assembles bounded-context fragments; handler code remains the source of truth.
 
@@ -32,6 +34,8 @@ const paths = assemblePaths(
   metaPaths,
   summaryReportPaths,
   customerPaths,
+  workspacePaths,
+  bindingPaths,
   settingsPaths,
   policyPaths,
   catalogPaths,

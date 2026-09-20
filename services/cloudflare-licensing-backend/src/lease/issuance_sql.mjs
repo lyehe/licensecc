@@ -73,7 +73,7 @@ export function entitlementOwnershipExists(mode) {
     "AND EXISTS (SELECT 1 FROM entitlements e " +
     "WHERE e.project = ? AND e.feature = ? AND e.license_fingerprint = ? " +
     `AND ${customer} ` +
-    "AND e.status = 'active' " +
+    "AND e.status = 'active' AND e.enforcement_mode = 'legacy' " +
     "AND (e.valid_from IS NULL OR e.valid_from <= ?) " +
     "AND (e.valid_until IS NULL OR e.valid_until > ?))"
   );
@@ -130,7 +130,7 @@ export function seatHeartbeatSql(mode) {
     "AND EXISTS (SELECT 1 FROM entitlements e " +
     "WHERE e.project = seat_checkouts.project AND e.feature = seat_checkouts.feature " +
     "AND e.license_fingerprint = seat_checkouts.license_fingerprint " +
-    "AND e.status = 'active' " +
+    "AND e.status = 'active' AND e.enforcement_mode = 'legacy' " +
     "AND (e.valid_from IS NULL OR e.valid_from <= ?) " +
     "AND (e.valid_until IS NULL OR e.valid_until > ?) " +
     customer +

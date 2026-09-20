@@ -922,6 +922,10 @@ test("release workflows use exact toolchain pins and cannot bypass the real asse
     const parsed = workflowJobLines(path, job);
     assertNoTopLevelWorkflowDefaults(source(path), path);
     assertExactSetupPins(parsed, toolchains, `${path}:${job}`);
+    const commands = executionRunCommands(parsed);
+    const install = commands.indexOf("npm ci");
+    const assembly = commands.findIndex((command) => command.startsWith("node scripts/assemble-release-artifacts.mjs"));
+    assert.ok(install >= 0 && install < assembly, `${path}:${job} must install locked tooling before assembly`);
     assert.deepEqual(activeWorkflowDirectives(parsed), [], `${path}:${job} must not use if/continue-on-error/shell/working-directory/defaults`);
     assertNoCommandsAfterUnconditionalExit(parsed, `${path}:${job}`);
   }

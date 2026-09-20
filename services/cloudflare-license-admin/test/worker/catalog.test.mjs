@@ -5,7 +5,7 @@ import { MockD1, adminInternalsForTests, authed, baseEnv, json, worker } from ".
 import { assertRouteGroup, assertRouteGroupRejectsUnauthenticated } from "./route-group-assertions.mjs";
 
 test("catalog routes have direct owners and reject anonymous access", async () => {
-  assertRouteGroup("catalog", 20);
+  assertRouteGroup("catalog", 21);
   await assertRouteGroupRejectsUnauthenticated("catalog");
 });
 

@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import test from "node:test";
 
 const repositoryRoot = resolve(import.meta.dirname, "..");
-const expectedVersion = "4.120.0";
+const expectedVersion = "4.131.1";
 const workerPackages = [
   "services/cloudflare-licensing-backend",
   "services/cloudflare-license-admin",
@@ -29,5 +29,5 @@ test("all Worker workspaces use the locked Wrangler security pin", () => {
   }
 
   assert.equal(lockfile.packages["node_modules/wrangler"]?.version, expectedVersion);
-  assert.match(lockfile.packages["node_modules/wrangler"]?.resolved ?? "", /wrangler-4\.120\.0\.tgz$/);
+  assert.match(lockfile.packages["node_modules/wrangler"]?.resolved ?? "", /wrangler-4\.131\.1\.tgz$/);
 });

@@ -200,7 +200,7 @@ async function redeemAndMintSession(
   if (redeemed.code === "config_error") return envelope(reqId, "config_error", undefined, 503);
   if (redeemed.code === "rate_limited") return envelope(reqId, "rate_limited", undefined, 429);
   if (!redeemed.ok) return envelope(reqId, "invalid_otp", undefined, 401);
-  const minted = await mintSession(env, { customerId: redeemed.customerId, userAgent: request.headers.get("user-agent") ?? "", now });
+  const minted = await mintSession(env, { customerId: redeemed.customerId, authMethod: "otp", userAgent: request.headers.get("user-agent") ?? "", now });
   if (!minted.ok) return envelope(reqId, "config_error", undefined, 503);
   return envelope(reqId, "signed_in", { customer_id: redeemed.customerId }, 200, { "set-cookie": setSessionCookie(minted.raw) });
 }

@@ -5,7 +5,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import worker from "../../dist/index.js";
+import worker from "../../dist/app.js";
 import {
   canonicalRequestProofPayloadForTests,
   validateVerifyRequest,

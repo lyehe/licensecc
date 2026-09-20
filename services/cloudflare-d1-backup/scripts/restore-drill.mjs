@@ -20,7 +20,7 @@ const MAX_BACKUP_MANIFEST_BYTES = 16 * 1024;
 const MAX_FUTURE_CLOCK_SKEW_MS = 5 * 60 * 1000;
 const MAX_MANIFEST_STRING_LENGTH = 2048;
 const SQL_HASH_CHUNK_BYTES = 64 * 1024;
-const EXPECTED_SCHEMA_SIGNATURE_SHA256 = "41629ba98263e38a2bb53adbe20f7c24fae5235b392c64200004dbc698e9b0c0";
+const EXPECTED_SCHEMA_SIGNATURE_SHA256 = "1c8f4b31ddb67a67a4a2d3b220b322e7a16c4622909fe29b8220a3f4b4f38508";
 const SNAPSHOT_INVENTORY_ALGORITHM = "d1-export-sql-insert-count-v1";
 const DEFAULT_BACKEND_MIGRATIONS_DIR = resolve(
   dirname(fileURLToPath(import.meta.url)),
@@ -32,6 +32,10 @@ const DEFAULT_BACKEND_MIGRATIONS_DIR = resolve(
 // checked; count comparison is optional because a live source can advance
 // after the exported snapshot.
 const REQUIRED_TABLES = [
+  "device_bound_devices",
+  "device_bound_bindings",
+  "device_bound_events",
+  "device_bound_operations",
   "entitlements",
   "entitlement_events",
   "mutation_idempotency",
@@ -59,7 +63,13 @@ const REQUIRED_TABLES = [
 
 // High-churn, swept, delivery, meter, cursor, and preview/projection state is
 // presence-checked but deliberately not count-compared with a live source.
+// OAuth identity/state tables follow the auth-session presence policy; their
+// contents remain covered by the complete SQL export and integrity hash.
 const PRESENCE_ONLY_TABLES = [
+  "device_bound_authorizations",
+  "device_bound_challenges",
+  "device_bound_leases",
+  "device_bound_commit_checks",
   "rate_limit_counters",
   "request_proof_nonces",
   "order_ingest_nonces",
@@ -68,6 +78,9 @@ const PRESENCE_ONLY_TABLES = [
   "usage_events",
   "portal_otp",
   "portal_sessions",
+  "portal_passwords",
+  "portal_identities",
+  "portal_oauth_states",
   "portal_bootstrap_events",
   "webhook_deliveries",
   "webhook_cursor",
@@ -82,6 +95,11 @@ const PRESENCE_ONLY_TABLES = [
 // secret/PII value is ever read, logged, or placed in the summary. This list documents that guarantee
 // and is surfaced (names only) in the summary; `count SQL is content-free` test pins it.
 const SENSITIVE_TABLES = [
+  "device_bound_devices",
+  "device_bound_authorizations",
+  "device_bound_challenges",
+  "device_bound_operations",
+  "device_bound_leases",
   "customers",
   "account_tokens",
   "account_token_revocations",
@@ -89,15 +107,33 @@ const SENSITIVE_TABLES = [
   "order_ingest_nonces",
   "portal_otp",
   "portal_sessions",
+  "portal_passwords",
+  "portal_identities",
+  "portal_oauth_states",
 ];
 
 // Every table the restored database must contain (presence-asserted as one set).
 const ALL_RESTORE_TABLES = [...REQUIRED_TABLES, ...PRESENCE_ONLY_TABLES];
 
-// Final named indexes and triggers from migrations 0001-0032. SQLite's
+// Final named indexes and triggers from migrations 0001-0039. SQLite's
 // autoindexes are intentionally excluded; each named object's type, owner, and
 // normalized DDL contributes to the canonical schema signature below.
 const EXPECTED_INDEXES = {
+  idx_bound_approval_cleanup: "device_bound_authorizations",
+  idx_bound_operation_payload_cleanup: "device_bound_operations",
+  idx_bound_consumed_attempt_cleanup: "device_bound_authorizations",
+  idx_bound_lease_cleanup: "device_bound_leases",
+  idx_bound_unconsumed_attempt_cleanup: "device_bound_authorizations",
+  idx_bound_authorizations_expiry: "device_bound_authorizations",
+  idx_bound_bindings_active_device: "device_bound_bindings",
+  idx_bound_bindings_capacity: "device_bound_bindings",
+  idx_bound_bindings_device: "device_bound_bindings",
+  idx_bound_challenges_expiry: "device_bound_challenges",
+  idx_bound_devices_customer: "device_bound_devices",
+  idx_bound_events_customer: "device_bound_events",
+  idx_bound_leases_binding_expiry: "device_bound_leases",
+  idx_bound_operations_retention: "device_bound_operations",
+
   idx_account_token_events_customer: "account_token_events",
   idx_account_token_events_token: "account_token_events",
   idx_account_tokens_customer: "account_tokens",
@@ -121,6 +157,7 @@ const EXPECTED_INDEXES = {
   idx_entitlement_events_request: "entitlement_events",
   idx_entitlement_policies_name: "entitlement_policies",
   idx_entitlements_customer: "entitlements",
+  idx_entitlements_customer_project: "entitlements",
   idx_entitlements_license: "entitlements",
   idx_entitlements_project_feature_status: "entitlements",
   idx_entitlements_project_license_fingerprint: "entitlements",
@@ -144,6 +181,7 @@ const EXPECTED_INDEXES = {
   idx_portal_otp_code: "portal_otp",
   idx_portal_otp_expires: "portal_otp",
   idx_portal_otp_secret: "portal_otp",
+  idx_portal_oauth_states_expires: "portal_oauth_states",
   idx_portal_sessions_customer: "portal_sessions",
   idx_portal_sessions_expires: "portal_sessions",
   idx_portal_sessions_hmac: "portal_sessions",
@@ -158,13 +196,58 @@ const EXPECTED_INDEXES = {
   idx_webhook_events_endpoint: "webhook_events",
 };
 
-const EXPECTED_TRIGGERS = Object.fromEntries(
-  ["catalog_features", "catalog_plans", "catalog_plan_features", "entitlement_policies", "entitlements", "assignments"]
-    .flatMap((subject) => ["insert", "update", "delete"].map((operation) => [
-      `bump_license_plan_projection_generation_${subject}_${operation}`,
-      subject === "assignments" ? "license_plan_assignments" : subject,
-    ])),
-);
+const EXPECTED_TRIGGERS = {
+  bump_license_plan_projection_generation_assignments_delete: "license_plan_assignments",
+  bump_license_plan_projection_generation_assignments_insert: "license_plan_assignments",
+  bump_license_plan_projection_generation_assignments_update: "license_plan_assignments",
+  bump_license_plan_projection_generation_catalog_features_delete: "catalog_features",
+  bump_license_plan_projection_generation_catalog_features_insert: "catalog_features",
+  bump_license_plan_projection_generation_catalog_features_update: "catalog_features",
+  bump_license_plan_projection_generation_catalog_plan_features_delete: "catalog_plan_features",
+  bump_license_plan_projection_generation_catalog_plan_features_insert: "catalog_plan_features",
+  bump_license_plan_projection_generation_catalog_plan_features_update: "catalog_plan_features",
+  bump_license_plan_projection_generation_catalog_plans_delete: "catalog_plans",
+  bump_license_plan_projection_generation_catalog_plans_insert: "catalog_plans",
+  bump_license_plan_projection_generation_catalog_plans_update: "catalog_plans",
+  bump_license_plan_projection_generation_entitlement_policies_delete: "entitlement_policies",
+  bump_license_plan_projection_generation_entitlement_policies_insert: "entitlement_policies",
+  bump_license_plan_projection_generation_entitlement_policies_update: "entitlement_policies",
+  bump_license_plan_projection_generation_entitlements_delete: "entitlements",
+  bump_license_plan_projection_generation_entitlements_insert: "entitlements",
+  bump_license_plan_projection_generation_entitlements_update: "entitlements",
+  tr_bound_attempt_approval_immutable: "device_bound_authorizations",
+  tr_bound_attempt_consumption_immutable: "device_bound_authorizations",
+  tr_bound_attempt_intent_immutable: "device_bound_authorizations",
+  tr_bound_attempt_revision_no_reset: "device_bound_authorizations",
+  tr_bound_attempt_terminal: "device_bound_authorizations",
+  tr_bound_binding_hold_monotonic: "device_bound_bindings",
+  tr_bound_binding_identity_immutable: "device_bound_bindings",
+  tr_bound_binding_keep_tombstone: "device_bound_bindings",
+  tr_bound_binding_no_early_release: "device_bound_bindings",
+  tr_bound_binding_no_resurrection: "device_bound_bindings",
+  tr_bound_binding_revision_no_reset: "device_bound_bindings",
+  tr_bound_capacity_decrease: "entitlements",
+  tr_bound_challenge_immutable: "device_bound_challenges",
+  tr_bound_customer_revision: "customers",
+  tr_bound_customer_revision_no_reset: "customers",
+  tr_bound_device_disable: "device_bound_devices",
+  tr_bound_device_identity_immutable: "device_bound_devices",
+  tr_bound_device_keep_tombstone: "device_bound_devices",
+  tr_bound_device_revision_no_reset: "device_bound_devices",
+  tr_bound_entitlement_revision: "entitlements",
+  tr_bound_entitlement_revision_no_reset: "entitlements",
+  tr_bound_mode_no_downgrade: "entitlements",
+  tr_bound_mode_requires_migration: "entitlements",
+  tr_bound_operation_immutable: "device_bound_operations",
+  tr_bound_operation_tombstone: "device_bound_operations",
+  tr_bound_operation_no_replace: "device_bound_operations",
+  tr_bound_owner_change: "entitlements",
+  tr_bound_reject_legacy_device_insert: "entitlement_devices",
+  tr_bound_reject_legacy_device_update: "entitlement_devices",
+  tr_bound_reject_legacy_lease: "lease_issuance",
+  tr_bound_reject_legacy_seat_insert: "seat_checkouts",
+  tr_bound_reject_legacy_seat_update: "seat_checkouts",
+};
 
 function usage(exitCode = 2) {
   console.error(`usage:
@@ -310,13 +393,17 @@ function configArgs(config) {
 function runWrangler(args, label, spawn = spawnSync, resolveBin = wranglerBin) {
   const result = spawn(process.execPath, [resolveBin(), ...args], {
     encoding: "utf8",
+    timeout: 10 * 60 * 1000,
+    maxBuffer: 8 * 1024 * 1024,
     env: {
       ...process.env,
       CI: "1",
       NO_COLOR: "1",
+      WRANGLER_LOG: args.includes("--json") ? "log" : "error",
+      WRANGLER_WRITE_LOGS: "false",
     },
   });
-  if (result.status !== 0) {
+  if (result.status !== 0 || result.error !== undefined || (result.signal !== null && result.signal !== undefined)) {
     const operation = label.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 80) || "wrangler";
     const status = Number.isInteger(result.status) ? result.status : "unavailable";
     const errorClass = result.error !== undefined

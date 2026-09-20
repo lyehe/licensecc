@@ -2,12 +2,33 @@ import { expect, test } from "@playwright/test";
 
 import { makeAdminApiFixture } from "./admin-ui.fixture.mjs";
 
+async function openCatalogView(page, name) {
+  const back = page.getByRole("button", { name: /^Back to (features|plans)$/ });
+  if (await back.count() && await back.first().isVisible()) await back.first().click();
+  await page.getByRole("navigation", { name: "Catalog views" }).getByRole("link", { name, exact: true }).click();
+}
+
+async function openCatalogEditor(page, view, trigger, formName) {
+  await openCatalogView(page, view);
+  const form = page.getByRole("form", { name: formName });
+  if (!await form.isVisible()) await page.getByRole("button", { name: trigger, exact: true }).click();
+  return form;
+}
+
+async function openProjectionTask(page) {
+  const backToPlans = page.getByRole("button", { name: "Back to plans", exact: true });
+  if (await backToPlans.isVisible()) await backToPlans.click();
+  await openCatalogView(page, "Plans");
+  await page.getByRole("button", { name: "Prepare plan application", exact: true }).click();
+}
+
 test("admin UI makes catalog-import Apply a modal, preview-bound, single-submit consequence", async ({ page }) => {
   const api = makeAdminApiFixture();
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
-  await page.getByRole("button", { name: "Plans", exact: true }).click();
+  await page.getByRole("link", { name: "Plans", exact: true }).click();
 
+  await page.getByRole("navigation", { name: "Catalog views" }).getByRole("link", { name: "Import", exact: true }).click();
   const form = page.getByRole("form", { name: "Catalog import" });
   const apply = form.getByRole("button", { name: "Apply import" });
   await expect(apply).toBeDisabled();
@@ -73,8 +94,9 @@ test("admin UI reconciles an unknown catalog-import Apply with the original prev
   const api = makeAdminApiFixture();
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
-  await page.getByRole("button", { name: "Plans", exact: true }).click();
+  await page.getByRole("link", { name: "Plans", exact: true }).click();
 
+  await page.getByRole("navigation", { name: "Catalog views" }).getByRole("link", { name: "Import", exact: true }).click();
   const form = page.getByRole("form", { name: "Catalog import" });
   await form.getByLabel("Manifest JSON").fill(JSON.stringify({
     format_version: 1,
@@ -104,6 +126,7 @@ test("admin UI reconciles an unknown catalog-import Apply with the original prev
   expect(Object.keys(replay.body)).toEqual(["preview_id"]);
   await expect(dialog).toHaveCount(0);
   await expect(page.locator(".operatorNotice")).toHaveCount(0);
+  await openCatalogView(page, "Features");
   await expect(page.getByRole("row", { name: /Replay replay/ })).toHaveCount(1);
 });
 
@@ -111,8 +134,9 @@ test("admin UI replays a retained catalog-import Apply after a tab round-trip wi
   const api = makeAdminApiFixture();
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
-  await page.getByRole("button", { name: "Plans", exact: true }).click();
+  await page.getByRole("link", { name: "Plans", exact: true }).click();
 
+  await page.getByRole("navigation", { name: "Catalog views" }).getByRole("link", { name: "Import", exact: true }).click();
   const form = page.getByRole("form", { name: "Catalog import" });
   await form.getByLabel("Manifest JSON").fill(JSON.stringify({
     format_version: 1,
@@ -138,16 +162,18 @@ test("admin UI replays a retained catalog-import Apply after a tab round-trip wi
   // The screen that captured the dialog is now stale. Its immutable same-key
   // replay is still required to settle the retained server mutation, but may
   // not reclaim focus when the operator comes back to this pane.
-  const reportsTab = page.getByRole("button", { name: "Reports", exact: true });
+  const reportsTab = page.getByRole("link", { name: "Reports", exact: true });
   await reportsTab.focus();
   await expect(reportsTab).toBeFocused();
   await page.keyboard.press("Enter");
-  const plansTab = page.getByRole("button", { name: "Plans", exact: true });
+  const plansTab = page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Plans", exact: true });
   await plansTab.focus();
   await expect(plansTab).toBeFocused();
   await page.keyboard.press("Enter");
+  await openCatalogView(page, "Import");
   await expect(form.getByRole("button", { name: "Apply import" })).toBeDisabled();
   const catalogHeading = page.locator('[data-focus-section="catalog-import"] h2');
+  const workspaceHeading = page.locator("[data-workspace-heading]");
   const reconcile = page.getByRole("button", { name: "Reconcile catalog import" });
   await reconcile.focus();
   await expect(reconcile).toBeFocused();
@@ -161,9 +187,8 @@ test("admin UI replays a retained catalog-import Apply after a tab round-trip wi
   // The focused recovery control unmounts. Because the original Catalog
   // generation is stale, restoration must land on a live shell target rather
   // than the stale catalog heading or browser <body>.
-  await expect(plansTab).toBeVisible();
-  await expect(plansTab).toBeEnabled();
-  await expect(plansTab).toBeFocused();
+  await expect(workspaceHeading).toBeVisible();
+  await expect(workspaceHeading).toBeFocused();
   await expect.poll(() => page.evaluate(() => document.activeElement === document.body)).toBe(false);
   await expect(catalogHeading).not.toBeFocused();
 });
@@ -181,8 +206,9 @@ test("admin UI retains a substituted initial catalog-import Apply response for e
   }));
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
-  await page.getByRole("button", { name: "Plans", exact: true }).click();
+  await page.getByRole("link", { name: "Plans", exact: true }).click();
 
+  await page.getByRole("navigation", { name: "Catalog views" }).getByRole("link", { name: "Import", exact: true }).click();
   const form = page.getByRole("form", { name: "Catalog import" });
   await form.getByLabel("Manifest JSON").fill(JSON.stringify({
     format_version: 1,
@@ -210,8 +236,9 @@ test("admin UI retains a substituted replayed catalog-import response until an e
   const api = makeAdminApiFixture();
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
-  await page.getByRole("button", { name: "Plans", exact: true }).click();
+  await page.getByRole("link", { name: "Plans", exact: true }).click();
 
+  await page.getByRole("navigation", { name: "Catalog views" }).getByRole("link", { name: "Import", exact: true }).click();
   const form = page.getByRole("form", { name: "Catalog import" });
   await form.getByLabel("Manifest JSON").fill(JSON.stringify({
     format_version: 1,
@@ -253,7 +280,8 @@ test("admin UI surfaces catalog-import capability failures exactly and recovers 
   const api = makeAdminApiFixture();
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
-  await page.getByRole("button", { name: "Plans", exact: true }).click();
+  await page.getByRole("link", { name: "Plans", exact: true }).click();
+  await page.getByRole("navigation", { name: "Catalog views" }).getByRole("link", { name: "Import", exact: true }).click();
   const form = page.getByRole("form", { name: "Catalog import" });
   const manifest = JSON.stringify({
     format_version: 1,
@@ -307,6 +335,7 @@ test("admin UI surfaces catalog-import capability failures exactly and recovers 
   await page.getByRole("button", { name: "Refresh status" }).click();
   await expect(page.locator(".operatorNotice")).toHaveCount(0);
   await expect(page.locator('[data-focus-section="catalog-import"] h2')).toBeFocused();
+  await openCatalogView(page, "Features");
   await expect(page.getByRole("row", { name: /Capability capability/ })).toHaveCount(1);
 });
 
@@ -314,20 +343,24 @@ test("admin UI clears its bound preview for stale and fingerprint-conflict Apply
   const api = makeAdminApiFixture();
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
-  await page.getByRole("button", { name: "Plans" }).click();
+  await page.getByRole("link", { name: "Plans" }).click();
 
-  const featureForm = page.getByRole("form", { name: "Catalog feature" });
+  const featureForm = await openCatalogEditor(page, "Features", "New feature", "Catalog feature");
   await featureForm.getByLabel("Feature key").fill("core");
   await featureForm.getByLabel("Name").fill("Core");
   await featureForm.getByRole("button", { name: "Create feature" }).click();
-  const planForm = page.getByRole("form", { name: "Catalog plan" });
+  const planForm = await openCatalogEditor(page, "Plans", "New plan", "Catalog plan");
   await planForm.getByLabel("Plan key").fill("pro");
   await planForm.getByLabel("Name").fill("Pro");
   await planForm.getByRole("button", { name: "Create plan" }).click();
+  await page.getByRole("button", { name: "Back to plans", exact: true }).click();
+  await page.getByRole("row", { name: /Pro pro/ }).getByRole("button", { name: "View plan", exact: true }).click();
+  await page.getByRole("button", { name: "Add feature", exact: true }).click();
   const planFeatureForm = page.getByRole("form", { name: "Plan feature" });
   await planFeatureForm.getByLabel("Feature key").fill("core");
   await planFeatureForm.getByRole("button", { name: "Save plan feature" }).click();
 
+  await openProjectionTask(page);
   const projectionForm = page.getByRole("form", { name: "Plan projection" });
   await projectionForm.getByLabel("License ID").fill("lic_stale");
   await projectionForm.getByLabel("Fingerprint").fill("d".repeat(64));

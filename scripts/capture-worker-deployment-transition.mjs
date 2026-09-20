@@ -7,6 +7,7 @@ import { parseSanitizedDeployment } from "./assert-worker-deployment.mjs";
 import { parseDeploymentList } from "./rollback-workers.mjs";
 
 const execFile = promisify(execFileCallback);
+const pinnedWranglerEntrypoint = fileURLToPath(new URL("../node_modules/wrangler/bin/wrangler.js", import.meta.url));
 const maxOutputBytes = 1024 * 1024;
 const maxInputBytes = 64 * 1024;
 const configs = Object.freeze({
@@ -26,7 +27,7 @@ export function parseTransitionArguments(argv) {
 async function defaultRunCommand(command, args) {
   const result = await execFile(command, args, {
     cwd: resolve(fileURLToPath(new URL("..", import.meta.url))),
-    env: process.env,
+    env: { ...process.env, WRANGLER_LOG: "log", WRANGLER_WRITE_LOGS: "false" },
     encoding: "utf8",
     maxBuffer: maxOutputBytes,
     timeout: 120_000,
@@ -54,7 +55,7 @@ export async function captureDeploymentTransition(worker, beforeInput, {
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     let result;
     try {
-      result = await runCommand("npx", ["--no-install", "wrangler", "deployments", "list", "--json", "--config", configs[worker]]);
+      result = await runCommand(process.execPath, [pinnedWranglerEntrypoint, "deployments", "list", "--json", "--config", configs[worker]]);
     } catch {
       throw new Error("Wrangler deployment query failed");
     }

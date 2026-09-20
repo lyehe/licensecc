@@ -36,7 +36,7 @@ import {
 import { strictUtf8, validateWorkerBundle } from "./release/worker-bundle.mjs";
 
 const repositoryRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
-const LOCAL_WRANGLER_VERSION = "4.120.0";
+const LOCAL_WRANGLER_VERSION = "4.131.1";
 const REQUIRED_NPM_VERSION = "10.9.8";
 const METADATA_FILES = new Set(["checksums.sha256", "release-manifest.json", "spdx.json"]);
 const CPP_EXACT = new Set([

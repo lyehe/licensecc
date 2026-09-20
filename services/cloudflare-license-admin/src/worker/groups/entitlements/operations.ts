@@ -1,8 +1,8 @@
 import { INVALID_IDEMPOTENCY_KEY, mutationResponse, readIdempotencyKey } from "../../idempotency.js";
+import { createReplayAdmission, createWithEnforcement, validateEntitlementCreate } from "./create-enforcement.js";
 import { envelope } from "../../responses.js";
 import {
   batchReturnedRow,
-  createEntitlement,
   decodeEntitlementId,
   entitlementId,
   entitlementSelectSql,
@@ -25,7 +25,7 @@ import type { Env } from "../../env.js";
 import { requireAdmin } from "../../auth.js";
 import { parseJsonBody, safeNotes } from "../../request.js";
 import { safeString } from "@licensecc/cloudflare-runtime/http/kit";
-import { MAX_FEATURE_SIZE, MAX_PROJECT_SIZE, boundedInt, nullableEpoch, nullableSafeString, validateEntitlementInput, validateEntitlementPatch } from "./validation.js";
+import { MAX_FEATURE_SIZE, MAX_PROJECT_SIZE, boundedInt, nullableEpoch, nullableSafeString, validateEntitlementPatch } from "./validation.js";
 import { clientIp } from "../../support.js";
 import { CSV_ROW_CAP, LIMIT_ONLY_PAGINATION_OPTIONS, boundedCursor, csvResponse, wantsCsv } from "../../query.js";
 
@@ -42,12 +42,19 @@ export async function listEntitlements(request: Request, env: Env, requestIdValu
   const url = new URL(request.url);
   const filters: string[] = [];
   const values: unknown[] = [];
-  for (const [query, column] of [["project", "project"], ["feature", "feature"], ["status", "status"]] as const) {
+  for (const [query, column] of [["project", "project"], ["feature", "feature"], ["status", "status"], ["customer_id", "customer_id"]] as const) {
     const value = url.searchParams.get(query);
     if (value !== null && value !== "") {
       filters.push(`${column} = ?`);
       values.push(value);
     }
+  }
+  const selectedId = url.searchParams.get("id");
+  if (selectedId) {
+    const selected = decodeEntitlementId(selectedId);
+    if (!selected) return envelope(requestIdValue, "invalid_request", undefined, 400);
+    filters.push("project = ? AND feature = ? AND license_fingerprint = ?");
+    values.push(selected.project, selected.feature, selected.license_fingerprint);
   }
   const pagination = boundedCursor(url);
   if (pagination === null) {
@@ -106,66 +113,70 @@ export async function listEvents(request: Request, env: Env, requestIdValue: str
 }
 
 export async function createFromPolicy(request: Request, env: Env, ctx: MutationContext, body: unknown, requestIdValue: string): Promise<Response> {
-  if (!policyStampOn(env)) {
-    return envelope(requestIdValue, "policy_stamping_disabled", undefined, 400);
-  }
-  const input = body as Record<string, unknown>;
-  // Validate the target tuple the stamp MUST carry (the same constraints as a direct create).
-  const project = safeString(input.project, MAX_PROJECT_SIZE);
-  const feature = safeString(input.feature, MAX_FEATURE_SIZE);
-  const licenseFingerprint = typeof input.license_fingerprint === "string" && HEX_64.test(input.license_fingerprint)
-    ? input.license_fingerprint
-    : null;
-  const policyId = typeof input.policy_id === "string" ? input.policy_id : null;
-  if (project === null || feature === null || licenseFingerprint === null || policyId === null || policyId.length > 128) {
-    return envelope(requestIdValue, "invalid_request", undefined, 400);
-  }
-  // Optional per-field overrides; each is "absent (undefined) -> fall back to policy" or
-  // "present-but-malformed -> 400". valid_from/valid_until are only validated when present
-  // (nullableEpoch returns undefined for both absent AND malformed, so gate on presence).
-  const deviceHash = input.device_hash === undefined || input.device_hash === ""
-    ? undefined
-    : typeof input.device_hash === "string" && HEX_64.test(input.device_hash)
-      ? input.device_hash
+  const selected = validateEntitlementCreate(body);
+  if (selected === null) return envelope(requestIdValue, "invalid_request", undefined, 400);
+  const admitReplay = createReplayAdmission(selected);
+  return mutationResponse(request, env, ctx, "entitlement_saved", async (idempotency) => {
+    if (!policyStampOn(env)) {
+      return envelope(requestIdValue, "policy_stamping_disabled", undefined, 400);
+    }
+    const input = body as Record<string, unknown>;
+    // Validate the target tuple the stamp MUST carry (the same constraints as a direct create).
+    const project = safeString(input.project, MAX_PROJECT_SIZE);
+    const feature = safeString(input.feature, MAX_FEATURE_SIZE);
+    const licenseFingerprint = typeof input.license_fingerprint === "string" && HEX_64.test(input.license_fingerprint)
+      ? input.license_fingerprint
       : null;
-  const assertionTtl = input.assertion_ttl_seconds === undefined ? undefined : boundedInt(input.assertion_ttl_seconds, 1, 3600);
-  const validFrom = input.valid_from === undefined ? undefined : nullableEpoch(input.valid_from);
-  const validUntil = input.valid_until === undefined ? undefined : nullableEpoch(input.valid_until);
-  const notes = input.notes === undefined ? undefined : safeNotes(input.notes);
-  const customerId = input.customer_id === undefined ? undefined : nullableSafeString(input.customer_id, 128);
-  const licenseId = input.license_id === undefined ? undefined : nullableSafeString(input.license_id, 128);
-  if (
-    deviceHash === null ||
-    (input.assertion_ttl_seconds !== undefined && assertionTtl === undefined) ||
-    (input.valid_from !== undefined && validFrom === undefined) ||
-    (input.valid_until !== undefined && validUntil === undefined) ||
-    (typeof validFrom === "number" && typeof validUntil === "number" && validFrom >= validUntil) ||
-    (input.notes !== undefined && notes === null) ||
-    (input.customer_id !== undefined && customerId === undefined) ||
-    (input.license_id !== undefined && licenseId === undefined)
-  ) {
-    return envelope(requestIdValue, "invalid_request", undefined, 400);
-  }
-  const policy = await findPolicy(env, policyId);
-  if (policy === null || policy.status !== "active") {
-    return envelope(requestIdValue, "policy_not_found", undefined, 404);
-  }
-  const now = Math.floor(Date.now() / 1000);
-  // Build the override set; undefined fields fall back to the policy default inside stampFromPolicy.
-  const overrides: Record<string, unknown> = { project, feature, license_fingerprint: licenseFingerprint };
-  if (deviceHash !== undefined) overrides.device_hash = deviceHash;
-  if (assertionTtl !== undefined) overrides.assertion_ttl_seconds = assertionTtl;
-  if (input.valid_from !== undefined) overrides.valid_from = validFrom;
-  if (input.valid_until !== undefined) overrides.valid_until = validUntil;
-  if (notes !== undefined) overrides.notes = notes;
-  if (customerId !== undefined) overrides.customer_id = customerId;
-  if (licenseId !== undefined) overrides.license_id = licenseId;
-  const stamp = stampFromPolicy(policy as never, overrides as never, now);
-  const key = { project, feature, license_fingerprint: licenseFingerprint };
-  return mutationResponse(request, env, ctx, "entitlement_saved", (idempotency) =>
-    createEntitlement(env, stamp.input, ctx, "", undefined, idempotency, [
-      buildPolicyStampStatement(env as never, key, policy.id, stamp.capacity, stamp.trial),
-    ]));
+    const policyId = typeof input.policy_id === "string" ? input.policy_id : null;
+    if (project === null || feature === null || licenseFingerprint === null || policyId === null || policyId.length > 128) {
+      return envelope(requestIdValue, "invalid_request", undefined, 400);
+    }
+    // Optional per-field overrides; each is "absent (undefined) -> fall back to policy" or
+    // "present-but-malformed -> 400". valid_from/valid_until are only validated when present
+    // (nullableEpoch returns undefined for both absent AND malformed, so gate on presence).
+    const deviceHash = input.device_hash === undefined || input.device_hash === ""
+      ? undefined
+      : typeof input.device_hash === "string" && HEX_64.test(input.device_hash)
+        ? input.device_hash
+        : null;
+    const assertionTtl = input.assertion_ttl_seconds === undefined ? undefined : boundedInt(input.assertion_ttl_seconds, 1, 3600);
+    const validFrom = input.valid_from === undefined ? undefined : nullableEpoch(input.valid_from);
+    const validUntil = input.valid_until === undefined ? undefined : nullableEpoch(input.valid_until);
+    const notes = input.notes === undefined ? undefined : safeNotes(input.notes);
+    const customerId = input.customer_id === undefined ? undefined : nullableSafeString(input.customer_id, 128);
+    const licenseId = input.license_id === undefined ? undefined : nullableSafeString(input.license_id, 128);
+    if (
+      deviceHash === null ||
+      (input.assertion_ttl_seconds !== undefined && assertionTtl === undefined) ||
+      (input.valid_from !== undefined && validFrom === undefined) ||
+      (input.valid_until !== undefined && validUntil === undefined) ||
+      (typeof validFrom === "number" && typeof validUntil === "number" && validFrom >= validUntil) ||
+      (input.notes !== undefined && notes === null) ||
+      (input.customer_id !== undefined && customerId === undefined) ||
+      (input.license_id !== undefined && licenseId === undefined)
+    ) {
+      return envelope(requestIdValue, "invalid_request", undefined, 400);
+    }
+    const policy = await findPolicy(env, policyId);
+    if (policy === null || policy.status !== "active") {
+      return envelope(requestIdValue, "policy_not_found", undefined, 404);
+    }
+    const now = Math.floor(Date.now() / 1000);
+    // Build the override set; undefined fields fall back to the policy default inside stampFromPolicy.
+    const overrides: Record<string, unknown> = { project, feature, license_fingerprint: licenseFingerprint };
+    if (deviceHash !== undefined) overrides.device_hash = deviceHash;
+    if (assertionTtl !== undefined) overrides.assertion_ttl_seconds = assertionTtl;
+    if (input.valid_from !== undefined) overrides.valid_from = validFrom;
+    if (input.valid_until !== undefined) overrides.valid_until = validUntil;
+    if (notes !== undefined) overrides.notes = notes;
+    if (customerId !== undefined) overrides.customer_id = customerId;
+    if (licenseId !== undefined) overrides.license_id = licenseId;
+    const stamp = stampFromPolicy(policy as never, overrides as never, now);
+    const key = { project, feature, license_fingerprint: licenseFingerprint };
+    return createWithEnforcement(env, { ...stamp.input, ...(selected.enforcement_mode === undefined ? {} : { enforcement_mode: selected.enforcement_mode }) }, ctx, idempotency, [
+        buildPolicyStampStatement(env as never, key, policy.id, stamp.capacity, stamp.trial),
+      ], policy);
+  }, admitReplay);
 }
 
 export async function handleMutation(request: Request, env: Env, actor: Actor, requestIdValue: string): Promise<Response> {
@@ -195,12 +206,12 @@ export async function handleMutation(request: Request, env: Env, actor: Actor, r
     if (policyId !== undefined && policyId !== null && policyId !== "") {
       return createFromPolicy(request, env, ctx, body, requestIdValue);
     }
-    const input = validateEntitlementInput(body);
+    const input = validateEntitlementCreate(body);
     if (input === null) {
       return envelope(requestIdValue, "invalid_request", undefined, 400);
     }
     return mutationResponse(request, env, ctx, "entitlement_saved", (idempotency) =>
-      createEntitlement(env, input, ctx, "", undefined, idempotency));
+      createWithEnforcement(env, input, ctx, idempotency), createReplayAdmission(input));
   }
 
   const match = /^\/api\/admin\/entitlements\/([^/]+)(?:\/(disable|reenable|revoke))?$/.exec(url.pathname);
@@ -212,6 +223,15 @@ export async function handleMutation(request: Request, env: Env, actor: Actor, r
     return envelope(requestIdValue, "invalid_entitlement_id", undefined, 400);
   }
   const action = match[2];
+  if (body === null || typeof body !== "object" || Array.isArray(body)) return envelope(requestIdValue, "invalid_request", undefined, 400);
+  const expected = body as Record<string, unknown>;
+  if (expected.expected_customer_id !== undefined || expected.expected_revocation_seq !== undefined) {
+    if ((expected.expected_customer_id !== null && (typeof expected.expected_customer_id !== "string" || expected.expected_customer_id.length > 128)) ||
+      !Number.isSafeInteger(expected.expected_revocation_seq) || Number(expected.expected_revocation_seq) < 0) {
+      return envelope(requestIdValue, "invalid_request", undefined, 400);
+    }
+    ctx.expectedEntitlement = { customer_id: expected.expected_customer_id as string | null, revocation_seq: expected.expected_revocation_seq as number };
+  }
   if (request.method === "PATCH" && action === undefined) {
     const patch = validateEntitlementPatch(body);
     if (patch === null) {

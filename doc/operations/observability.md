@@ -69,6 +69,7 @@ deployed version beside the measurements.
 | Configuration | `/health` readiness, invalid mode names, and the count of consistency warnings |
 | Backup/recovery | last completed snapshot time, R2 upload time, backup age from `snapshot_requested_at`, Workflow result, SHA-256/size and object/manifest agreement, snapshot-count inventory status, historical migration/schema identity, migration-upgrade result, final schema digest, authenticity disposition, last scratch restore time, and measured RPO/RTO |
 | Four-Worker health | request/error/duration summaries for backend, admin, portal, and backup, split by environment |
+| Protected-device cleanup | scheduled invocation outcomes and last observed invocation time; sweep failures and limit warnings by source/target; all six backlog ages and snapshot times, with unavailable/stale measurements shown as unknown |
 
 Capacity evidence from `capacity:public-verifier` is overlaid on the same UTC
 window. The overlay must name the approved backend deployment ID, sole active
@@ -91,6 +92,62 @@ operational queue. Missing data fails closed for health and backup predicates.
 | OBS-05 | webhook delivery | `webhook.signing_unconfigured`, `webhook.signing_key_missing`, `webhook.sign_failed`, `webhook.enqueue_error`, or `webhook.deliver_error` once | `webhook.delivery_failed` once or any enqueue/deliver error for 5 minutes; page and retain the failed delivery for controlled redrive |
 | OBS-06 | emergency/security anomaly | abnormal request-proof failure or rate-limit growth versus the preceding 24-hour staging/production baseline | any `account.emergency_override_used`; page immediately and open an incident record |
 | OBS-07 | portal transactional email | any `portal.email_delivery_failed`, grouped only by its bounded `error_type` | any occurrence in production or a sustained staging occurrence for 5 minutes; page/block promotion until delivery is restored and separately proven end to end |
+| OBS-08 | protected-device cleanup health | any sweep/snapshot failure or limit warning; missing invocation or complete six-target snapshot for 10 minutes; backlog age at least 15 minutes | failures or unknown telemetry lasting 15 minutes; backlog age at least 60 minutes; page and block promotion until fresh complete measurements and the affected sweeps recover |
+
+### Protected-device cleanup evaluation
+
+OBS-08 uses the backend's five-minute cron cadence. Start qualifying freshness
+from the observed activation of the intended deployment and schedule; require a
+real successful scheduled invocation before declaring the monitor ready. A
+deployment or monitor restart must not silently turn missing history into a
+healthy sample. The notification evaluator must run independently of this cron
+so it can detect the cron's absence.
+
+Keep scheduler invocation evidence distinct from application sweep results.
+Cleanup deliberately catches individual job failures so other retention jobs
+continue; a successful Cloudflare invocation alone cannot prove cleanup success.
+Correlate application records with the provider's invocation identity, Worker,
+version and timestamp. Do not join records from separate invocations into a
+synthetic successful run. Provider invocation metadata is operational data,
+not a customer/device label; no second application identity ledger is needed.
+Require an outcome for every cleanup source within that invocation: either all
+of its expected target completion/limit events or an explicit source failure.
+A fresh backlog snapshot cannot compensate for missing sweep outcomes. Treat
+an incomplete outcome set as unknown telemetry under the same 10/15-minute
+thresholds; a source failure remains a failure even if some targets completed
+before it. Assess only terminal invocations after the monitoring system's
+measured, bounded ingestion delay so in-flight work is not mistaken for loss.
+The independent 10/15-minute freshness timer continues advancing while a run
+is in flight or never reaches terminal state. Waiting for termination or log
+ingestion must not extend those alert deadlines. Record ingestion delay during
+qualification; if it prevents meeting the deadlines, monitoring is not ready.
+
+Sweep failures are `device.approval_cleanup_failed`,
+`device.ephemera_cleanup_failed`, `device.recovery_cleanup_failed` and
+`device.lease_cleanup_failed`. `device.cleanup_backlog_failed` means unknown,
+not clear. A valid snapshot contains exactly these source/target pairs:
+`approval.responses`, `ephemera.challenges`, `ephemera.attempts`,
+`recovery.responses`, `recovery.attempts` and `lease.leases`, all with the same
+`measured_at`. Deduplicate identical exported records by the provider's unique
+event ID before validation; a conflicting reuse of that ID is invalid. Missing,
+distinct duplicate-target, malformed or mixed-snapshot records cannot
+clear an alert. Use collector receipt time as an additional freshness check;
+a future database timestamp or missing ingestion must not postpone detection.
+
+`device.cleanup_limit_reached` signals a full sweep budget, not proof of a
+remaining backlog. Graph it alongside the post-sweep snapshot. A present
+backlog with age zero is real; null age with `backlog_present=false` means clear
+at that snapshot only. A clear snapshot cannot erase a sweep-failure alert;
+require a later successful result for the affected source and fresh telemetry.
+An isolated limit warning may clear on a fresh clear snapshot, but recurring
+limit warnings for 15 minutes require investigation even if snapshots are clear.
+
+These early warning/page thresholds provide time to act before the specified
+24-hour physical ephemera-cleanup limit. They do not extend that limit or
+authorize deletion of audit events, enforcement identities, operation
+tombstones or slot holds. Device audit events remain retained until the user
+chooses a different policy. Structured events and local tests alone do not
+prove that OBS-08 is configured or that any notification reached its receiver.
 
 The backup Worker is scheduled every 30 minutes. That cadence creates room for
 export completion while the manifest freshness check enforces the one-hour RPO
@@ -126,7 +183,18 @@ control to manufacture an alert.
    `portal.email_delivery_failed` event reaches OBS-07, acknowledge and clear
    the alert, and restore the sender. This exercises failure telemetry only;
    it is not evidence that a real transactional email was delivered.
-7. Confirm every alert clears, no production resource was selected, and no
+7. Exercise OBS-08 through the actual evaluator and routing pipeline using a
+   replay or isolated canary. Cover a sweep failure with a clear snapshot, a
+   failed snapshot, missing scheduled invocations, missing log ingestion despite
+   successful invocations, a never-terminal invocation, identical log redelivery,
+   and incomplete/mixed six-target snapshots. Advance
+   controlled evaluator time across the 10/15-minute absence boundaries and
+   15/60-minute backlog boundaries. Include full-budget sweeps with both clear
+   and nonempty backlogs. Prove one alert cannot be cleared by unrelated or
+   stale success. Restore fresh complete telemetry and affected sweep success,
+   then record acknowledgement and clearing. Do not disable real cleanup or
+   populate production with expired records to manufacture these conditions.
+8. Confirm every alert clears, no production resource was selected, and no
    customer payload or credential appears in the retained evidence.
 
 If the monitoring product cannot replay a predicate safely, use a separately
@@ -177,6 +245,12 @@ requires. The bundle and summary must contain or reference:
   status, restore elapsed time, and RPO/RTO result; and
 - log-review window, sampled event count, search categories, match count, and
   reviewer disposition.
+
+For OBS-08 additionally retain the expected cron expression, selected deployment
+and invocation identities, collector/evaluator clock assumptions, complete
+six-target snapshot evidence, each boundary/recovery outcome, and proof the
+missing-schedule evaluator continues running while the canary source is absent.
+An event-producer unit test is not an alert-delivery or missed-schedule drill.
 
 Do not retain raw logs, notification payloads, configuration, customer data,
 email addresses, or secret values in the repository. Absent dashboards,

@@ -4,25 +4,41 @@ import { useSingleFlight } from "../shared/useSingleFlight";
 import { AuthFeature, usePortalAuth } from "../features/auth/AuthFeature";
 import { usePortalData } from "../features/data/usePortalData";
 import { DEVICES_REFRESH_ACTION_LABEL, DEVICES_REFRESH_FAILURE_CODE, DevicesFeature, SeatReleaseDialog, useDevicesController } from "../features/devices/DevicesFeature";
-import { DownloadsFeature, useLicenseDownloads } from "../features/downloads/DownloadsFeature";
-import { EntitlementsFeature } from "../features/entitlements/EntitlementsFeature";
-import { UsageFeature } from "../features/usage/UsageFeature";
-import type { PortalTab as Tab, StatusMessage } from "../types";
+import { useLicenseDownloads } from "../features/downloads/DownloadsFeature";
+import { AppsFeature } from "../features/apps/AppsFeature";
+import { AccountFeature } from "../features/account/AccountFeature";
+import { ConsentFeature } from "../features/consent/ConsentFeature";
+import { ProtectedNodes } from "../features/devices/ProtectedNodes";
+import { captureEnrollment, clearEnrollment } from "../features/consent/pending";
+import { usePortalLocation } from "../shared/navigation";
+import type { StatusMessage } from "../types";
 import "../styles.css";
 
 export function App(): React.ReactElement {
+  const [enrollment,setEnrollment] = useState(captureEnrollment);
+  useLayoutEffect(() => {
+    const capture = ():void => {
+      const url = new URL(window.location.href);
+      if (new URLSearchParams(url.hash.slice(1)).has("attempt_handle") || (url.pathname === "/connect" && url.hash !== "")) {
+        const captured=captureEnrollment();setEnrollment(captured);
+        if(captured && typeof captured!=="string")void auth.retrySession();
+      }
+    };
+    window.addEventListener("hashchange",capture);
+    return () => window.removeEventListener("hashchange",capture);
+  },[]);
   const [message, setMessage] = useState<StatusMessage | null>(null);
   const { busy, busyRef, runOnce } = useSingleFlight();
   const auth = usePortalAuth({ setMessage, runOnce });
 
-  const [activeTab, setActiveTab] = useState<Tab>("entitlements");
-  const { entitlements, devices, usage, refreshData, clear: clearPortalData } = usePortalData({
-    active: auth.phase === "authed",
+  const location = usePortalLocation();
+  const { entitlements, devices, usage, usageAvailable, readState, stale, refreshData, clear: clearPortalData } = usePortalData({
+    active: auth.phase === "authed" && enrollment === null,
     setMessage,
   });
   const downloads = useLicenseDownloads({ runOnce, setMessage });
   const deviceController = useDevicesController({
-    busy,
+    busy: busy || stale,
     busyRef,
     devices,
     entitlements,
@@ -31,7 +47,11 @@ export function App(): React.ReactElement {
     setMessage,
   });
   const refreshFocusRef = useRef<HTMLElement | null>(null);
-  const activeTabButtonRef = useRef<HTMLButtonElement | null>(null);
+  const activeTabButtonRef = useRef<HTMLAnchorElement | null>(null);
+
+  useLayoutEffect(() => {
+    document.getElementById("content")?.focus();
+  }, [location.page, location.project]);
 
   async function refreshPortalData(): Promise<void> {
     if (busyRef.current) return;
@@ -61,47 +81,45 @@ export function App(): React.ReactElement {
       clearPortalData();
       deviceController.clear();
       downloads.clear();
+      clearEnrollment();setEnrollment(null);
+      window.history.replaceState(null,"","/#/apps");
+      window.dispatchEvent(new HashChangeEvent("hashchange"));
     });
   }
 
-  if (auth.phase !== "authed") return <AuthFeature auth={auth} busy={busy} message={message} />;
+  function finishEnrollment():void {
+    clearEnrollment();setEnrollment(null);window.history.replaceState(null,"","/#/apps");
+  }
+  if (typeof enrollment === "string" || (enrollment && auth.phase === "authed")) return <ConsentFeature key={typeof enrollment==="string"?enrollment:`${enrollment.handle}:${enrollment.createdAt}`} entry={enrollment} customerId={auth.customerId??""} onDone={finishEnrollment} onSignOut={logout} onSessionExpired={auth.retrySession} feedback={<StatusLine message={message} fallback="" />} />;
+  if (auth.phase !== "authed") return <AuthFeature auth={auth} busy={busy} message={message} connecting={enrollment!==null} />;
 
   return (
     <>
     <main aria-hidden={deviceController.pendingSeatRelease !== null ? "true" : undefined} inert={deviceController.pendingSeatRelease !== null ? true : undefined}>
+      <a className="skipLink" href="#content" onClick={(event) => { event.preventDefault(); document.getElementById("content")?.focus(); }}>Skip to content</a>
       <header className="topbar">
-        <div>
-          <h1>licensecc customer portal</h1>
-          <StatusLine message={message} fallback="ready" />
+        <div className="headerInner">
+        <a className="brand" href="#/apps"><span aria-hidden="true">L</span>Licensecc</a>
+        <nav aria-label="Main navigation">
+          {(["apps", "nodes", "account"] as const).map((page) => <a key={page} ref={location.page === page ? activeTabButtonRef : undefined} href={`#/${page}`} aria-current={location.page === page ? "page" : undefined}>{page === "nodes" ? "Devices" : page[0].toUpperCase() + page.slice(1)}</a>)}
+        </nav>
+        <button disabled={busy} onClick={() => void logout()}>Sign out</button>
         </div>
-        <nav>
+      </header>
+      <div id="content" className="workspaceContent" tabIndex={-1}>
+        {stale && readState === "ready" && <div className="readNotice"><p>Displayed data may be out of date. Refresh before making another change.</p>{message?.code !== DEVICES_REFRESH_FAILURE_CODE && <button disabled={busy} onClick={() => void refreshPortalData()}>Refresh account</button>}</div>}
+        <div className="feedback">
+          <StatusLine message={message} fallback="" />
           {message?.code === DEVICES_REFRESH_FAILURE_CODE && (
             <button disabled={busy} onClick={() => void refreshPortalData()}>{DEVICES_REFRESH_ACTION_LABEL}</button>
           )}
-          <button ref={activeTab === "entitlements" ? activeTabButtonRef : undefined} className={activeTab === "entitlements" ? "active" : ""} onClick={() => setActiveTab("entitlements")}>My entitlements</button>
-          <button ref={activeTab === "devices" ? activeTabButtonRef : undefined} className={activeTab === "devices" ? "active" : ""} onClick={() => setActiveTab("devices")}>My devices</button>
-          <button ref={activeTab === "usage" ? activeTabButtonRef : undefined} className={activeTab === "usage" ? "active" : ""} onClick={() => setActiveTab("usage")}>Usage</button>
-          <button ref={activeTab === "download" ? activeTabButtonRef : undefined} className={activeTab === "download" ? "active" : ""} onClick={() => setActiveTab("download")}>Download</button>
-          <button disabled={busy} onClick={() => void logout()}>Log out</button>
-        </nav>
-      </header>
-
-      {activeTab === "entitlements" && (
-        <EntitlementsFeature entitlements={entitlements} />
-      )}
-
-      {activeTab === "devices" && (
-        <DevicesFeature controller={deviceController} />
-      )}
-
-      {activeTab === "usage" && (
-        <UsageFeature entitlements={entitlements} usage={usage} />
-      )}
-
-      {activeTab === "download" && (
-        <DownloadsFeature busy={busy} downloads={downloads} entitlements={entitlements} />
-      )}
-
+        </div>
+        {location.page === "nodes" && <><div className="pageHeading"><div><h1>Devices</h1><p>Manage the devices using your licenses.</p></div></div><ProtectedNodes key={auth.customerId} customer={auth.customerId??""} busy={busy} runOnce={runOnce} onSessionExpired={auth.retrySession} /></>}
+        {location.page === "account" ? <AccountFeature customerId={auth.customerId} busy={busy} logout={logout} /> : readState !== "ready" ? <section className="emptyState"><h2>{location.page==="nodes"?"Registered machines unavailable":readState === "loading" ? "Loading your account…" : "Account data unavailable"}</h2><p>{readState === "loading" ? "Fetching your licenses and devices." : "We could not refresh your account. Retry to see current access."}</p>{readState === "error" && <button disabled={busy} onClick={() => void refreshPortalData()}>Retry</button>}</section> : <>
+          {location.page === "apps" && <AppsFeature entitlements={entitlements} usage={usage} usageAvailable={usageAvailable} retry={refreshPortalData} downloads={downloads} busy={busy || stale} project={location.project} />}
+          {location.page === "nodes" && <DevicesFeature controller={deviceController} />}
+        </>}
+      </div>
     </main>
     <SeatReleaseDialog controller={deviceController} />
     </>

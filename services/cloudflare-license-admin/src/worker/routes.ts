@@ -12,11 +12,19 @@ export const META_ROUTES = [
 ] as const satisfies readonly AdminRoute[];
 
 export const API_ROUTES = [
+  { method: "GET", path: "/api/admin/customers/{id}/bindings" },
+  { method: "GET", path: "/api/admin/customers/{id}/bindings/{bindingId}/events" },
+  { method: "POST", path: "/api/admin/customers/{id}/bindings/{bindingId}/retire" },
+  { method: "POST", path: "/api/admin/customers" },
+  { method: "GET", path: "/api/admin/customers/{id}/apps" },
+  { method: "GET", path: "/api/admin/customers/{id}/resources" },
   { method: "GET", path: "/api/admin/summary" },
   { method: "GET", path: "/api/admin/report" },
   { method: "GET", path: "/api/admin/report/timeseries" },
   { method: "GET", path: "/api/admin/report/expiring" },
   { method: "GET", path: "/api/admin/audit/verify" },
+  { method: "GET", path: "/api/admin/customers/{id}/access" },
+  { method: "GET", path: "/api/admin/catalog/projects" },
   { method: "GET", path: "/api/admin/customers" },
   { method: "GET", path: "/api/admin/customers/{id}" },
   { method: "POST", path: "/api/admin/customers/{id}/disable" },

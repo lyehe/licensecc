@@ -32,6 +32,13 @@
     },
     "./usage/usage_report": {
       "default": "./src/usage/usage_report.mjs"
+    },
+    "./lease/device_protocol": {
+      "types": "./src/lease/device_protocol.d.ts",
+      "default": "./src/lease/device_protocol.mjs"
+    },
+    "./lease/device_policy": {
+      "default": "./src/lease/device_policy.mjs"
     }
   },
   "scripts": {

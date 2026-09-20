@@ -16,12 +16,15 @@ export interface UsageTimeseriesData {
 }
 
 interface UsageTimeseriesControls {
+  timeseriesLoading: boolean;
+  timeseriesError: string | null;
+  retryTimeseries: () => void;
   timeseries: UsageTimeseriesData | null;
   timeseriesRange: TimeseriesRange;
   setTimeseriesRange: React.Dispatch<React.SetStateAction<TimeseriesRange>>;
 }
 
-interface UsageTimeseriesState extends UsageTimeseriesControls {
+interface UsageTimeseriesState extends Omit<UsageTimeseriesControls, "timeseriesLoading" | "timeseriesError" | "retryTimeseries"> {
   setTimeseries: React.Dispatch<React.SetStateAction<UsageTimeseriesData | null>>;
 }
 
@@ -46,6 +49,9 @@ export function useUsageTimeseries(active: boolean): UsageTimeseriesControls {
   if (controls === null) {
     throw new Error("usage_timeseries_provider_required");
   }
+  const [retryRevision, setRetryRevision] = useState(0);
+  const [readState, setReadState] = useState<{ key: string; loading: boolean; error: string | null }>({ key: "", loading: true, error: null });
+  const readKey = `${active}:${controls.timeseriesRange}`;
   const timeseriesFence = useRequestFence(`${active ? "active" : "inactive"}\u0000${controls.timeseriesRange}`);
 
   useEffect(() => {
@@ -54,16 +60,19 @@ export function useUsageTimeseries(active: boolean): UsageTimeseriesControls {
     }
     void (async () => {
       const ticket = timeseriesFence.begin();
+      setReadState({ key: readKey, loading: true, error: null });
       const response = await api<UsageTimeseriesData>(timeseriesPath(controls.timeseriesRange));
       if (!timeseriesFence.isCurrent(ticket)) return;
+      setReadState({ key: readKey, loading: false, error: null });
       const parsed = parseExactApiSuccess<UsageTimeseriesData>(response, "report_timeseries", hasTimeseriesData);
       if (parsed !== null) {
         if (timeseriesFence.settle(ticket)) controls.setTimeseries(parsed.data);
       } else {
+        setReadState({ key: readKey, loading: false, error: apiFailureMessage(response) });
         setMessage(apiFailureMessage(response));
       }
     })();
-  }, [active, controls.setTimeseries, controls.timeseriesRange, setMessage, timeseriesFence]);
+  }, [active, controls.setTimeseries, controls.timeseriesRange, setMessage, timeseriesFence, retryRevision, readKey]);
 
-  return { ...controls, timeseries: timeseriesFence.isSettled() ? controls.timeseries : null };
+  return { ...controls, timeseriesLoading: readState.key !== readKey || readState.loading, timeseriesError: readState.key === readKey ? readState.error : null, retryTimeseries: () => setRetryRevision((value) => value + 1), timeseries: timeseriesFence.isSettled() ? controls.timeseries : null };
 }

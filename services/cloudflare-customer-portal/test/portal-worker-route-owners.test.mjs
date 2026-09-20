@@ -7,13 +7,40 @@ import { DIRECT_ROUTE_TESTS as authRoutes } from "./portal-worker-auth.test.mjs"
 import { DIRECT_ROUTE_TESTS as sessionRoutes } from "./portal-worker-session.test.mjs";
 import { DIRECT_ROUTE_TESTS as selfServiceRoutes } from "./portal-worker-self-service.test.mjs";
 
+import { DIRECT_ROUTE_TESTS as oauthRoutes } from "./portal-worker-oauth.test.mjs";
+
+import { DIRECT_ROUTE_TESTS as passwordRoutes } from "./portal-worker-password.test.mjs";
+import { DIRECT_ROUTE_TESTS as consentRoutes } from "./portal-worker-device-consent.test.mjs";
+import { DIRECT_ROUTE_TESTS as retireRoutes } from "./portal-worker-device-retire.test.mjs";
+import { DIRECT_ROUTE_TESTS as bindingRoutes } from "./portal-worker-bindings.test.mjs";
+
 const GROUPS = Object.freeze({
+  bindings: bindingRoutes,
+  retire: retireRoutes,
+  consent: consentRoutes,
+  password: passwordRoutes,
+  oauth: oauthRoutes,
   public: publicRoutes,
   auth: authRoutes,
   session: sessionRoutes,
   selfService: selfServiceRoutes,
 });
 const ROUTE_OWNER_TABLE = Object.freeze({
+  "GET /api/portal/device-bindings": "bindings",
+  "POST /api/portal/device-bindings/retire": "retire",
+  "POST /api/portal/device-authorizations/inspect": "consent",
+  "POST /api/portal/device-authorizations/approve": "consent",
+  "POST /api/portal/device-authorizations/deny": "consent",
+  "POST /portal/v1/auth/password/register": "password",
+  "POST /portal/v1/auth/password/login": "password",
+  "GET /portal/v1/auth/password": "password",
+  "POST /portal/v1/auth/password": "password",
+  "GET /portal/v1/auth/providers": "oauth",
+  "POST /portal/v1/auth/google/start": "oauth",
+  "POST /portal/v1/auth/github/start": "oauth",
+  "GET /portal/v1/auth/google/callback": "oauth",
+  "GET /portal/v1/auth/github/callback": "oauth",
+  "GET /portal/v1/auth/identities": "oauth",
   "GET /openapi.json": "public",
   "GET /docs": "public",
   "GET /health": "public",
@@ -38,7 +65,7 @@ const routeKey = (route) => `${route.method} ${route.path}`;
 const inventory = [...META_ROUTES, ...PUBLIC_ROUTES, ...SESSION_ROUTES].map(routeKey);
 
 test("every META/PUBLIC/SESSION route has one explicit direct group-test owner", () => {
-  assert.deepEqual(new Set(Object.keys(ROUTE_OWNER_TABLE)), new Set(inventory), "owner table must equal the canonical 18-route inventory");
+  assert.deepEqual(new Set(Object.keys(ROUTE_OWNER_TABLE)), new Set(inventory), "owner table must equal the canonical route inventory");
 
   for (const [key, group] of Object.entries(ROUTE_OWNER_TABLE)) {
     assert.ok(Object.hasOwn(GROUPS, group), `${key} names an unknown test group ${group}`);

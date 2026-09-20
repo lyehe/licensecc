@@ -5,6 +5,10 @@ tool. It never tags, publishes, uploads, deploys a Worker, or reads a real
 Wrangler configuration. Its only Worker operation is the lockfile-pinned local
 Wrangler `deploy --dry-run` bundle command against each tracked example config.
 
+Run `npm ci` at the repository root first to install the lock-backed release
+tooling, including the syntax parser used to inspect Worker exports without
+linking or executing Cloudflare runtime imports.
+
 The command materializes regular files from the exact Git `HEAD` tree into an
 owned temporary source tree before it builds anything. It runs a locked npm
 install there with a sanitized environment, then builds the admin and portal

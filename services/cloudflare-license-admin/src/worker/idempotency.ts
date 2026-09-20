@@ -25,12 +25,20 @@ export function readIdempotencyKey(request: Request): string | null | typeof INV
   return idempotencyKey;
 }
 
-export async function idempotentReplay(env: IdempotencyEnv, scope: string, key: string | null): Promise<Response | null> {
+export type ReplayAdmission = (body: unknown) => boolean;
+
+function replayResponse(body: unknown, admit?: ReplayAdmission, requestId = ""): Response {
+  return admit && !admit(body)
+    ? envelope(requestId, "idempotency_request_conflict", undefined, 409)
+    : json(body, 200, { "x-idempotent-replay": "1" });
+}
+
+export async function idempotentReplay(env: IdempotencyEnv, scope: string, key: string | null, admit?: ReplayAdmission, requestId = ""): Promise<Response | null> {
   const raw = await readIdempotentResponse(env.DB, scope, key);
   if (raw === null) {
     return null;
   }
-  return json(JSON.parse(raw), 200, { "x-idempotent-replay": "1" });
+  return replayResponse(JSON.parse(raw), admit, requestId);
 }
 
 export async function rememberIdempotency(
@@ -49,9 +57,11 @@ export async function mutationResponse<T>(
   ctx: MutationContext,
   code: string,
   fn: (idempotency: IdempotencyCommit | null) => Promise<MutationResult<T> | Response | null>,
+  admitReplay?: ReplayAdmission,
 ): Promise<Response> {
   const scope = `${request.method}:${new URL(request.url).pathname}:${ctx.actor.subject}`;
-  const replay = await idempotentReplay(env, scope, ctx.idempotencyKey);
+  const readReplay = (): Promise<Response | null> => idempotentReplay(env, scope, ctx.idempotencyKey, admitReplay, ctx.requestId);
+  const replay = await readReplay();
   if (replay !== null) {
     return replay;
   }
@@ -66,6 +76,10 @@ export async function mutationResponse<T>(
     // Response directly; it is never cached, matching the pre-mutationResponse ceremony
     // where only the success path called rememberIdempotency.
     if (result instanceof Response) {
+      if (admitReplay) {
+        const racedReplay = await readReplay();
+        if (racedReplay !== null) return racedReplay;
+      }
       return result;
     }
     // A same-key request can observe an empty replay cache, lose the guarded
@@ -74,7 +88,7 @@ export async function mutationResponse<T>(
     // a second, locally assembled success envelope (or an avoidable 409 from a
     // stale optimistic claim).
     if (!result.idempotencyRecorded) {
-      const racedReplay = await idempotentReplay(env, scope, ctx.idempotencyKey);
+      const racedReplay = await readReplay();
       if (racedReplay !== null) {
         return racedReplay;
       }
@@ -87,16 +101,25 @@ export async function mutationResponse<T>(
       // assembled response for the losing request.
       const stored = await rememberIdempotency(env, scope, ctx.idempotencyKey, body, Math.floor(Date.now() / 1000));
       if (stored !== null && stored !== JSON.stringify(body)) {
-        return json(JSON.parse(stored), 200, { "x-idempotent-replay": "1" });
+        return replayResponse(JSON.parse(stored), admitReplay, ctx.requestId);
       }
     }
     return json(body);
   } catch (error) {
+    if (admitReplay) {
+      const racedReplay = await readReplay();
+      if (racedReplay !== null) return racedReplay;
+    }
+    if (error instanceof Error && ["enforcement_mode_conflict", "protected_creation_conflict"].includes(error.message)) {
+      const racedReplay = await readReplay();
+      if (racedReplay !== null) return racedReplay;
+      return envelope(ctx.requestId, error.message, undefined, 409);
+    }
     if (error instanceof Error && error.message === "idempotency_conflict") {
       // A strict in-batch replay claim lost after our initial lookup. D1 rolled
       // back every loser write, including audit/side effects; publish the exact
       // winner response instead of exposing a misleading conflict or success.
-      const racedReplay = await idempotentReplay(env, scope, ctx.idempotencyKey);
+      const racedReplay = await readReplay();
       if (racedReplay !== null) {
         return racedReplay;
       }
@@ -106,7 +129,7 @@ export async function mutationResponse<T>(
       // The winner may have committed the exact same idempotency key after the
       // first replay lookup. Recheck before reporting a true concurrent-state
       // conflict so retries retain their one-result replay semantics.
-      const racedReplay = await idempotentReplay(env, scope, ctx.idempotencyKey);
+      const racedReplay = await readReplay();
       if (racedReplay !== null) {
         return racedReplay;
       }

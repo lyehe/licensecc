@@ -84,15 +84,15 @@ export function DownloadsFeature({ busy, downloads, entitlements }: {
       <p className="muted">{ACTIVATION_DOWNLOAD_DISCLOSURE}</p>
       <p className="muted">{DEVICE_KEY_HELP_COPY}</p>
       <table>
-        <thead><tr><th>Project</th><th>Feature</th><th>Status</th><th>Valid</th><th>License</th></tr></thead>
+        <thead><tr><th>App</th><th>Feature</th><th>Status</th><th>Valid</th><th>License</th></tr></thead>
         <tbody>
           {downloadable.map((item, index) => (
             <tr key={`dl/${item.id}/${index}`}>
-              <td>{item.project}</td>
-              <td>{item.feature}</td>
-              <td><span className={`status ${item.status}`}>{item.status}</span></td>
-              <td>{formatWindow(item.valid_from, item.valid_until)}</td>
-              <td className="actions">
+              <td data-label="App">{item.project}</td>
+              <td data-label="Feature">{item.feature}</td>
+              <td data-label="Status"><span className={`status ${item.status}`}>{item.status}</span></td>
+              <td data-label="Valid">{formatWindow(item.valid_from, item.valid_until)}</td>
+              <td data-label="License"><div className="downloadActions">
                 <input
                   aria-label={`Device key for ${item.project} ${item.feature}`}
                   placeholder="device key id"
@@ -100,7 +100,7 @@ export function DownloadsFeature({ busy, downloads, entitlements }: {
                   onChange={(event) => downloads.setDeviceKey(item.id, event.target.value)}
                 />
                 <button disabled={busy || item.status !== "active" || (downloads.deviceKeys[item.id] ?? "").trim() === ""} onClick={() => void downloads.download(item)}>{ACTIVATION_DOWNLOAD_ACTION_LABEL}</button>
-              </td>
+              </div></td>
             </tr>
           ))}
         </tbody>

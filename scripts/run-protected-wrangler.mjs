@@ -7,6 +7,7 @@ import { parseDeploymentList } from "./rollback-workers.mjs";
 
 const execFile = promisify(execFileCallback);
 const repositoryRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
+const pinnedWranglerEntrypoint = resolve(repositoryRoot, "node_modules/wrangler/bin/wrangler.js");
 const maxOutputBytes = 2 * 1024 * 1024;
 const configs = Object.freeze({
   backend: "services/cloudflare-licensing-backend/wrangler.toml",
@@ -31,10 +32,10 @@ export function parseProtectedWranglerArguments(argv) {
 function commandArguments(request) {
   const config = configs[request.worker];
   switch (request.operation) {
-    case "dry-run": return ["--no-install", "wrangler", "deploy", "--dry-run", "--config", config];
-    case "deploy": return ["--no-install", "wrangler", "deploy", "--strict", "--config", config];
-    case "migrate": return ["--no-install", "wrangler", "d1", "migrations", "apply", "DB", "--remote", "--config", config];
-    case "deployments": return ["--no-install", "wrangler", "deployments", "list", "--json", "--config", config];
+    case "dry-run": return ["deploy", "--dry-run", "--config", config];
+    case "deploy": return ["deploy", "--strict", "--config", config];
+    case "migrate": return ["d1", "migrations", "apply", "DB", "--remote", "--config", config];
+    case "deployments": return ["deployments", "list", "--json", "--config", config];
     default: throw new Error("protected Wrangler operation is invalid");
   }
 }
@@ -48,9 +49,10 @@ export async function runProtectedWrangler(request, { runCommand = defaultRunCom
   const args = commandArguments(request);
   let result;
   try {
-    result = await runCommand("npx", args, {
+    result = await runCommand(process.execPath, [pinnedWranglerEntrypoint, ...args], {
       cwd: repositoryRoot,
-      env: { ...process.env, WRANGLER_LOG: "error", WRANGLER_WRITE_LOGS: "false" },
+      // Wrangler gates --json output at log level; capture it before redaction.
+      env: { ...process.env, WRANGLER_LOG: request.operation === "deployments" ? "log" : "error", WRANGLER_WRITE_LOGS: "false" },
       encoding: "utf8",
       maxBuffer: maxOutputBytes,
       timeout: 10 * 60 * 1000,

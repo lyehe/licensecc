@@ -19,10 +19,10 @@
     "test": "npm run build && node --test test/*.mjs test/fulfillment/order_event.test.mjs test/fulfillment/order_hmac.test.mjs test/fulfillment/order_ingest_gates.test.mjs test/fulfillment/order_sign.test.mjs test/auth/account_token.test.mjs test/auth/account_token_cli.test.mjs",
     "test:openapi": "npm run build && node --test test/openapi-spec.test.mjs",
     "test:sql": "npm run build && node --experimental-sqlite --test test/db/*.mjs test/sql/*.mjs test/fulfillment/order_ingest_exactly_once.test.mjs test/fulfillment/account_isolation.test.mjs",
-    "test:e2e": "npm --prefix ../cloudflare-license-admin run build:worker && npm run build && node --experimental-sqlite --test test/e2e/*.mjs",
+    "test:e2e": "npm --prefix ../cloudflare-license-admin run build:worker && npm --prefix ../cloudflare-customer-portal run build:worker && npm run build && node --experimental-sqlite --test test/e2e/*.mjs",
     "test:db": "node --experimental-sqlite --test test/db/*.mjs",
     "test:pg": "npm run build && node --test supabase-postgres/translate.test.mjs supabase-postgres/verify-sql-contract.test.mjs supabase-postgres/verify-worker-pg-adapter.test.mjs supabase-postgres/entitlement-pg.test.mjs supabase-postgres/order-apply-pg.test.mjs supabase-postgres/pg-route-guard.test.mjs supabase-postgres/pg-http-handler.test.mjs supabase-postgres/real-pg-gate-contract.test.mjs",
-    "test:pg:real": "npm run build && node supabase-postgres/verify-worker-real-pg.mjs && node supabase-postgres/smoke-worker-sql.mjs && node supabase-postgres/smoke-real-pg.mjs && node supabase-postgres/order-apply-smoke-real-pg.mjs",
+    "test:pg:real": "npm run build && node supabase-postgres/verify-worker-real-pg.mjs && node supabase-postgres/smoke-worker-sql.mjs && node supabase-postgres/smoke-real-pg.mjs && node supabase-postgres/order-apply-smoke-real-pg.mjs && node supabase-postgres/bound-device-real-pg.mjs",
     "scan:secrets": "node scripts/lint.mjs",
     "lint": "eslint \"src/**/*.{js,mjs,ts,tsx}\" --max-warnings 0",
     "generate:wrangler-types": "node ../../scripts/generate-wrangler-types.mjs .wrangler/worker-configuration.d.ts wrangler.example.toml",
@@ -56,6 +56,6 @@
     "pg": "8.22.0",
     "pg-mem": "3.0.14",
     "typescript": "5.9.3",
-    "wrangler": "4.120.0"
+    "wrangler": "4.131.1"
   }
 }

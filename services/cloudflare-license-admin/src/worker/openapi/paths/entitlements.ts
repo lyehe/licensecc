@@ -23,6 +23,13 @@ import {
   transitionOkResponse,
 } from "../components.js";
 
+const expectedState = {
+  type: "object",
+  description: "Optional paired precondition. Supply the customer_id (including null) and revocation_seq from the observed grant. Mismatch returns stale_transition (409); omitted fields retain legacy behavior. Replaying a successful idempotency key returns the original result; use a new key only for a new intentional operation.",
+  properties: { expected_customer_id: { type: ["string", "null"], maxLength: 128 }, expected_revocation_seq: { type: "integer", minimum: 0, maximum: Number.MAX_SAFE_INTEGER } },
+  dependentRequired: { expected_customer_id: ["expected_revocation_seq"], expected_revocation_seq: ["expected_customer_id"] },
+};
+function withExpected(ref: string): Record<string, unknown> { return { allOf: [{ $ref: ref }, expectedState] }; }
 export const entitlementPaths: LabeledPathFragment = {
   label: "entitlements",
   entries: [
@@ -33,6 +40,8 @@ export const entitlementPaths: LabeledPathFragment = {
       operationId: "listEntitlements",
       security: ADMIN_SECURITY,
       parameters: [
+        { name: "id", in: "query", required: false, description: "Exact canonical entitlement ID.", schema: { type: "string" } },
+        { name: "customer_id", in: "query", required: false, description: "Exact customer ownership filter.", schema: { type: "string" } },
         { name: "project", in: "query", required: false, description: "Exact-match project filter.", schema: { type: "string" } },
         { name: "feature", in: "query", required: false, description: "Exact-match feature filter.", schema: { type: "string" } },
         { name: "status", in: "query", required: false, description: "Exact-match status filter.", schema: { type: "string", enum: ["active", "disabled", "revoked"] } },
@@ -53,14 +62,14 @@ export const entitlementPaths: LabeledPathFragment = {
       parameters: [idempotencyKeyHeader],
       requestBody: {
         required: true,
-        content: { "application/json": { schema: { $ref: "#/components/schemas/EntitlementInput" } } },
+        content: { "application/json": { schema: { $ref: "#/components/schemas/EntitlementCreateInput" } } },
       },
       responses: {
         "200": okResponse("Entitlement created (directly, or stamped from a policy).", "#/components/schemas/EntitlementRecord", "entitlement_saved"),
         "400": errorResponse("Invalid request / json / id / idempotency key, or a policy_id was supplied while POLICY_STAMP_MODE is off.", "invalid_entitlement_id", "invalid_idempotency_key", "invalid_json", "invalid_request", "policy_stamping_disabled"),
         ...ADMIN_MUTATION_AUTH_ERRORS,
         "404": errorResponse("Referenced resource not found, or the policy_id is unknown/disabled.", "not_found", "policy_not_found"),
-        "409": errorResponse("Target entitlement is revoked (terminal), or it changed after this request observed it; refetch and retry the latter.", "revoked_entitlement_is_terminal", "stale_transition"),
+        "409": errorResponse("Terminal or concurrent state, enforcement mismatch, protected eligibility failure, or an idempotency key already used for another tuple/mode.", "revoked_entitlement_is_terminal", "stale_transition", "enforcement_mode_conflict", "protected_creation_conflict", "idempotency_request_conflict"),
         "413": errorResponse("Request body exceeds 8192 bytes.", "body_too_large"),
         "500": errorResponse("Mutation failed, or dev bearer enabled outside development.", "mutation_failed", "dev_bearer_forbidden_in_environment"),
       },
@@ -88,7 +97,7 @@ export const entitlementPaths: LabeledPathFragment = {
       parameters: [idParam, idempotencyKeyHeader],
       requestBody: {
         required: true,
-        content: { "application/json": { schema: { $ref: "#/components/schemas/EntitlementPatch" } } },
+        content: { "application/json": { schema: withExpected("#/components/schemas/EntitlementPatch") } },
       },
       responses: {
         "200": okResponse("Entitlement updated.", "#/components/schemas/EntitlementRecord", "entitlement_patched"),
@@ -111,7 +120,7 @@ export const entitlementPaths: LabeledPathFragment = {
       parameters: [idParam, idempotencyKeyHeader],
       requestBody: {
         required: true,
-        content: { "application/json": { schema: { $ref: "#/components/schemas/ReasonRequiredBody" } } },
+        content: { "application/json": { schema: withExpected("#/components/schemas/ReasonRequiredBody") } },
       },
       responses: {
         "200": transitionOkResponse("Entitlement is disabled. Returns the authoritative current record: status and revocation_seq change only from active; an already-disabled entitlement is returned unchanged.", "#/components/schemas/EntitlementRecord", { required: ["id", "revocation_seq"], expectedStatus: "disabled" }, "entitlement_disabled"),
@@ -134,7 +143,7 @@ export const entitlementPaths: LabeledPathFragment = {
       requestBody: {
         required: false,
         description: "Empty JSON object accepted.",
-        content: { "application/json": { schema: { $ref: "#/components/schemas/EmptyBody" } } },
+        content: { "application/json": { schema: expectedState } },
       },
       responses: {
         "200": transitionOkResponse("Entitlement is active. Returns the authoritative current record: status and revocation_seq change only from disabled; an already-active entitlement is returned unchanged.", "#/components/schemas/EntitlementRecord", { required: ["id", "revocation_seq"], expectedStatus: "active" }, "entitlement_reenabled"),
@@ -156,7 +165,7 @@ export const entitlementPaths: LabeledPathFragment = {
       parameters: [idParam, idempotencyKeyHeader],
       requestBody: {
         required: true,
-        content: { "application/json": { schema: { $ref: "#/components/schemas/ReasonRequiredBody" } } },
+        content: { "application/json": { schema: withExpected("#/components/schemas/ReasonRequiredBody") } },
       },
       responses: {
         "200": transitionOkResponse("Entitlement is revoked. Returns the authoritative current record: status and revocation_seq change only from active or disabled; an already-revoked entitlement is returned unchanged.", "#/components/schemas/EntitlementRecord", { required: ["id", "revocation_seq"], expectedStatus: "revoked" }, "entitlement_revoked"),

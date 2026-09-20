@@ -10,6 +10,7 @@ const fingerprint = "a".repeat(64);
 // entitlement_mutation core). cache_ttl_seconds is present here even though withId() strips
 // it from the API response body; the drift-guard test pins this contract.
 const NEXT_JSON_KEYS = [
+  "enforcement_mode",
   "project",
   "feature",
   "license_fingerprint",
@@ -132,6 +133,7 @@ function effectiveLicenseMode(row) {
 
 function entitlementDefaults(overrides = {}) {
   const row = {
+    enforcement_mode: "legacy",
     policy_id: null,
     is_trial: 0,
     trial_expiration_basis: null,
@@ -470,6 +472,11 @@ MockD1.prototype.first = function first(sql, values) {
     };
     this.entitlements.set(key, row);
     return clone(row);
+  }
+  if (sql.startsWith("SELECT COUNT(*) AS total,")) {
+    const rows = [...this.entitlements.values()];
+    return { total: rows.length, active: rows.filter(row => row.status === "active").length,
+      revoked: rows.filter(row => row.status === "revoked").length, disabled: rows.filter(row => row.status === "disabled").length };
   }
   if (sql.startsWith("SELECT COUNT(*) AS count FROM entitlements WHERE status = 'active'")) {
     return { count: [...this.entitlements.values()].filter((row) => row.status === "active").length };

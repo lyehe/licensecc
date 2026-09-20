@@ -1,12 +1,16 @@
 # Local SQLite host for the licensecc online verifier
 
 Run the **unmodified** licensecc verifier Worker
-(`services/cloudflare-licensing-backend/src/index.ts`) off Cloudflare, on a
+HTTP composition (`services/cloudflare-licensing-backend/src/app.ts`) off Cloudflare, on a
 plain Node process backed by Node's built-in SQLite. **Zero changes
 to the Worker's security code.** The Worker is imported as-is and called via its
 exported `fetch(request, env)`; only the `DB` binding is swapped for a SQLite
 adapter that implements the same `D1DatabaseLike` / `D1PreparedStatementLike`
 surface the Worker expects.
+
+The deployment entrypoint also exports the Cloudflare-native `DeviceConsent`
+service capability. This Node host does not implement RPC; local workerd tests
+exercise that separate boundary.
 
 This host is for loopback-only evaluation and development. It does not deploy
 or modify Cloudflare resources. The commands below create ignored build output,
@@ -35,7 +39,7 @@ staging or production deployment.
 
   Do not run `npm ci` in this service and do not use `npm --prefix`; the root
   lockfile is the dependency authority.
-- The Worker compiled to `../dist/index.js` (the host imports the **compiled**
+- The Worker compiled to `../dist/app.js` (the host imports the **compiled**
   Worker, never edits the source).
 - An RSA signing key (PKCS#8 PEM) + key id — the Worker requires these to sign
   `lccoa1.` assertions. For local evaluation, generate a disposable key as
@@ -50,7 +54,7 @@ First build the Worker and generate a disposable local signing key. These
 commands are the same in PowerShell and Bash:
 
 ```console
-# Build the Worker (tsc -> dist/index.js).
+# Build the Worker (tsc -> dist/app.js).
 npm run build
 
 # Generate a disposable local signing key (writes ignored .online-key/ files).

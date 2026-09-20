@@ -1,4 +1,6 @@
 import React, { ReactNode, createContext, useCallback, useContext, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { type OperatorFeedback, useOperatorFeedback } from "./operatorFeedback";
+import { equivalentRowAction, currentContextStableFocusTarget, usableFocusTarget } from "./workspaceFocus";
 
 export type ConfirmFocusTarget = HTMLElement | null | (() => HTMLElement | null);
 
@@ -171,14 +173,17 @@ interface OperatorControls {
   busy: boolean;
   /** A retained recovery owns the operation gate after its request settles. */
   operationLocked: boolean;
+  modalActive: boolean;
   currentReason: () => string;
   message: string;
+  feedback: OperatorFeedback;
   reason: string;
   requestConfirm: (action: ConfirmAction) => void;
   runConsequenceAction: (action: ConsequenceAction) => Promise<void>;
   runMutation: <T>(work: () => Promise<T>, owner?: "consequence" | "recovery") => Promise<T | undefined>;
   runKeyedMutation: <T>(action: KeyedMutationAction<T>) => Promise<void>;
   setMessage: React.Dispatch<React.SetStateAction<string>>;
+  setFeedback: React.Dispatch<React.SetStateAction<OperatorFeedback>>;
   setReason: React.Dispatch<React.SetStateAction<string>>;
 }
 
@@ -194,10 +199,7 @@ const FOCUSABLE_SELECTOR = [
 ].join(",");
 
 function focusableElements(root: HTMLElement): HTMLElement[] {
-  return Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter((element) => {
-    const style = window.getComputedStyle(element);
-    return style.visibility !== "hidden" && style.display !== "none";
-  });
+  return Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter(usableFocusTarget);
 }
 
 function focusElement(element: HTMLElement | null): boolean {
@@ -229,14 +231,6 @@ function dataAttributeSelector(attribute: string, value: string): string {
   return `[${attribute}="${escaped}"]`;
 }
 
-function usableFocusTarget(element: HTMLElement | null): boolean {
-  if (element === null || element === document.body || !element.isConnected || element.hasAttribute("disabled") || element.getAttribute("aria-disabled") === "true") {
-    return false;
-  }
-  const style = window.getComputedStyle(element);
-  return style.visibility !== "hidden" && style.display !== "none";
-}
-
 function stableFocusTarget(
   invokingElement: HTMLElement | null,
   rowKey: string | null,
@@ -248,8 +242,10 @@ function stableFocusTarget(
 
   const row = rowKey === null
     ? invokingElement?.closest<HTMLElement>("[data-focus-row], tr, [role='row']") ?? null
-    : document.querySelector<HTMLElement>(dataAttributeSelector("data-focus-row", rowKey));
+    : Array.from(document.querySelectorAll<HTMLElement>(dataAttributeSelector("data-focus-row", rowKey))).find(usableFocusTarget) ?? null;
   if (row !== null) {
+    const equivalent = equivalentRowAction(row, invokingElement);
+    if (equivalent) return equivalent;
     const transition = Array.from(row.querySelectorAll<HTMLElement>("[data-focus-action]")).find(usableFocusTarget);
     if (transition !== undefined) {
       return transition;
@@ -280,14 +276,14 @@ function stableFocusTarget(
     }
   }
 
-  const globalHeading = document.querySelector<HTMLElement>("main h1, main h2, main h3, [role='main'] h1, [role='main'] h2, [role='main'] h3, h1, h2, h3");
+  const globalHeading = currentContextStableFocusTarget() ?? document.querySelector<HTMLElement>("main h1, main h2, main h3, [role='main'] h1, [role='main'] h2, [role='main'] h3, h1, h2, h3");
   return usableFocusTarget(globalHeading) ? globalHeading : document.documentElement;
 }
 
 export function focusTargetInRow(rowKey: string, selectors: readonly string[]): ConfirmFocusTarget {
   return () => {
-    const row = document.querySelector<HTMLElement>(dataAttributeSelector("data-focus-row", rowKey));
-    if (row === null) {
+    const row = Array.from(document.querySelectorAll<HTMLElement>(dataAttributeSelector("data-focus-row", rowKey))).find(usableFocusTarget);
+    if (row === undefined) {
       return null;
     }
     for (const selector of selectors) {
@@ -350,23 +346,8 @@ function resolvePendingFocus(pending: PendingFocus): HTMLElement | null {
   return stableFocusTarget(pending.invokingElement, pending.rowKey, pending.sectionKey);
 }
 
-/**
- * A stale retained replay is allowed to settle its immutable server request,
- * but its original row/section must not regain focus.  The shell's selected
- * navigation button is a live, current-context target that survives removal
- * of the recovery notice.
- */
-function currentContextStableFocusTarget(): HTMLElement | null {
-  const activeTab = document.querySelector<HTMLElement>("main > header.topbar nav button.active:not([disabled])");
-  if (usableFocusTarget(activeTab)) {
-    return activeTab;
-  }
-  const shellHeading = document.querySelector<HTMLElement>("main > header.topbar h1");
-  return usableFocusTarget(shellHeading) ? shellHeading : null;
-}
-
 export function OperatorControlsProvider({ children }: { children: ReactNode }): React.ReactElement {
-  const [message, setMessage] = useState("");
+  const { message, feedback, setMessage, setFeedback } = useOperatorFeedback();
   const [reason, setReason] = useState("");
   const reasonRef = useRef("");
   reasonRef.current = reason;
@@ -598,7 +579,7 @@ export function OperatorControlsProvider({ children }: { children: ReactNode }):
       unresolvedOperationRef.current = { idempotencyKey: attempt.idempotencyKey, focusTarget, reconciliation, request: attempt };
       pendingRestoreFocusRef.current = focusTarget;
       setFocusGeneration((generation) => generation + 1);
-      setMessage(CONFIRM_MUTATION_UNKNOWN_MESSAGE);
+      setFeedback({ tone: "error", message: CONFIRM_MUTATION_UNKNOWN_MESSAGE });
       publishActionNotice({
         message: CONFIRM_MUTATION_UNKNOWN_MESSAGE,
         manualRefresh: reconciliation,
@@ -628,7 +609,7 @@ export function OperatorControlsProvider({ children }: { children: ReactNode }):
         if (action.onUnapplied !== undefined) {
           action.onUnapplied(parsed);
         } else if (action.isCurrent?.() !== false) {
-          setMessage(`${parsed.code} (${parsed.requestId})`);
+          setFeedback({ tone: "error", message: `${parsed.code} (${parsed.requestId})` });
         }
         return;
       }
@@ -640,7 +621,7 @@ export function OperatorControlsProvider({ children }: { children: ReactNode }):
       }
       setOperationBusy(false);
     }
-  }, [capturePendingFocus, publishActionNotice, runMutation, setMessage, setOperationBusy]);
+  }, [capturePendingFocus, publishActionNotice, runMutation, setFeedback, setMessage, setOperationBusy]);
   const runConsequenceAction = useCallback(async (action: ConsequenceAction): Promise<void> => {
     if (operationOwnerRef.current !== null || confirmPendingRef.current || consequencePendingRef.current || noticePendingRef.current || unresolvedOperationRef.current !== null || actionNoticeRef.current !== null) {
       return;
@@ -664,7 +645,7 @@ export function OperatorControlsProvider({ children }: { children: ReactNode }):
         }
         pendingRestoreFocusRef.current = focusTarget;
         setFocusGeneration((generation) => generation + 1);
-        setMessage(message);
+        setFeedback({ tone: "error", message });
         publishActionNotice({ message, manualRefresh: unknown ? outcome.reconciliation ?? action.reconciliation : undefined, focusTarget, dismissible: !unknown, unresolvedKey: unknown ? idempotencyKey : undefined });
         return;
       }
@@ -694,7 +675,7 @@ export function OperatorControlsProvider({ children }: { children: ReactNode }):
       // saved focus target must remain usable for accessible focus restoration.
       setOperationBusy(false);
     }
-  }, [capturePendingFocus, publishActionNotice, setMessage, setOperationBusy]);
+  }, [capturePendingFocus, publishActionNotice, setFeedback, setMessage, setOperationBusy]);
   const confirmProceed = useCallback(async (): Promise<void> => {
     const action = confirmAction;
     if (action === null || (action.requiresReason && currentReason().trim() === "")) {
@@ -900,7 +881,7 @@ export function OperatorControlsProvider({ children }: { children: ReactNode }):
       // Do not leave the global status stale after a recovery resolves.  A
       // terminal Worker rejection is just as conclusive as an applied replay:
       // both release the retained key and the shared operation owner.
-      setMessage(resolution === "unapplied" ? "Mutation was not applied." : "Status reconciled.");
+      setFeedback({ tone: resolution === "unapplied" ? "info" : "success", message: resolution === "unapplied" ? "Mutation was not applied." : "Status reconciled." });
       if (focusAllowed || staleRetainedReplay) {
         setFocusGeneration((current) => current + 1);
       }
@@ -911,7 +892,7 @@ export function OperatorControlsProvider({ children }: { children: ReactNode }):
           pendingRestoreFocusRef.current = focusTarget;
           setFocusGeneration((current) => current + 1);
         }
-        setMessage("status_refresh_failed");
+        setFeedback({ tone: "error", message: "status_refresh_failed" });
         restoreNoticeFocus();
       }
     } finally {
@@ -926,7 +907,7 @@ export function OperatorControlsProvider({ children }: { children: ReactNode }):
         });
       }
     }
-  }, [clearActionNotice, focusSoon, publishActionNotice, setMessage, setOperationBusy]);
+  }, [clearActionNotice, focusSoon, publishActionNotice, setFeedback, setMessage, setOperationBusy]);
 
   const acknowledgeNotice = useCallback((): void => {
     if (noticePendingRef.current || actionNoticeRef.current === null || actionNoticeRef.current.unresolvedKey !== undefined) {
@@ -1106,7 +1087,7 @@ export function OperatorControlsProvider({ children }: { children: ReactNode }):
   const operationLocked = actionNotice?.manualRefresh !== undefined || actionNotice?.unresolvedKey !== undefined || noticePending;
 
   return (
-    <OperatorControlsContext.Provider value={{ busy, operationLocked, currentReason, message, reason, requestConfirm, runConsequenceAction, runKeyedMutation, runMutation, setMessage, setReason }}>
+    <OperatorControlsContext.Provider value={{ busy, operationLocked, modalActive: confirmAction !== null, currentReason, message, feedback, reason, requestConfirm, runConsequenceAction, runKeyedMutation, runMutation, setMessage, setFeedback, setReason }}>
       {children}
       {actionNotice !== null && (
       <div className="operatorNotice" role="status" aria-live="polite">

@@ -3,7 +3,7 @@ import { test } from "node:test";
 
 import adminWorker from "../../../cloudflare-license-admin/dist-worker/worker/index.js";
 import { createLocalSqliteDb } from "../../local-host/db-sqlite.mjs";
-import verifierWorker from "../../dist/index.js";
+import verifierWorker from "../../dist/app.js";
 
 const NOW = 1_700_000_000;
 const SUPPORT_UNTIL = 1_900_000_000;

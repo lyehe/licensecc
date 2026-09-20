@@ -18,6 +18,7 @@ type AssertNoIncompatibleGeneratedBindings<Bindings extends never> = Bindings;
 // type error rather than an unnoticed divergence from Worker composition.
 type WranglerBindings = Pick<Cloudflare.Env,
   | "DB"
+  | "DEVICE_OPERATOR"
   | "ASSETS"
   | "ENVIRONMENT"
   | "ADMIN_DEV_BEARER_ENABLED"
@@ -31,7 +32,8 @@ type WranglerBindings = Pick<Cloudflare.Env,
 // Kept beside composition so Worker bindings remain explicit without coupling route groups
 // to the entrypoint module.
 interface RuntimeEnv {
-  DB: D1DatabaseLike;
+  DB: D1DatabaseLike & { withSession?(mode: "first-primary"): D1DatabaseLike };
+  DEVICE_OPERATOR?: Cloudflare.Env["DEVICE_OPERATOR"];
   ASSETS?: { fetch(request: Request): Promise<Response> };
   ENVIRONMENT?: string;
   ADMIN_DEV_BEARER_ENABLED?: string;

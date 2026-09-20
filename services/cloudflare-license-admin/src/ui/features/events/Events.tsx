@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from "react";
 
+import { ReadNotice } from "../../shared/ReadNotice";
 import { api, apiFailureDetails, apiFailureMessage, parseExactApiSuccess } from "../../shared/api";
 import { ConfirmRefreshFailure, EXACT_READ_PROOF, type ExactReadProof, useOperatorControls } from "../../shared/controls";
 import { useCoreRefresh } from "../../shared/coreRefresh";
@@ -24,6 +25,8 @@ interface EventItem {
 
 export function Events({ active }: { active: boolean }): React.ReactElement | null {
   const [eventsSnapshot, setEvents] = useState<EventItem[]>([]);
+  const [readError, setReadError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
   const { busy: requestBusy, operationLocked, runMutation, setMessage } = useOperatorControls();
   const busy = requestBusy || operationLocked;
   const { registerCoreRefresh } = useCoreRefresh();
@@ -32,8 +35,10 @@ export function Events({ active }: { active: boolean }): React.ReactElement | nu
   const refresh = useCallback(async (strict = false, isCurrent: () => boolean = () => true): Promise<ExactReadProof | null> => {
     if (!isCurrent()) return null;
     const ticket = eventsFence.begin();
+    setLoading(true); setReadError(null);
     const response = await api<{ items: EventItem[] }>("/api/admin/events");
     if (!isCurrent() || !eventsFence.isCurrent(ticket)) return null;
+    setLoading(false);
     const parsed = parseExactApiSuccess<{ items: EventItem[] }>(response, "events_listed", hasEventListData);
     if (parsed !== null) {
       if (eventsFence.settle(ticket)) {
@@ -41,9 +46,11 @@ export function Events({ active }: { active: boolean }): React.ReactElement | nu
         return EXACT_READ_PROOF;
       }
     } else if (strict) {
+      setReadError(apiFailureMessage(response));
       const failure = apiFailureDetails(response);
       throw new ConfirmRefreshFailure(failure.code, failure.requestId);
     } else {
+      setReadError(apiFailureMessage(response));
       setMessage(apiFailureMessage(response));
     }
     return null;
@@ -64,10 +71,11 @@ export function Events({ active }: { active: boolean }): React.ReactElement | nu
   }
   return (
     <section className="tablePane full">
+      <ReadNotice label="events" loading={loading} error={readError} hasData={eventsFence.isSettled()} onRetry={() => void refresh()} />
       <div className="filters eventsToolbar">
         <button type="button" disabled={busy || operationLocked} onClick={() => void downloadCsv("/api/admin/events", "events.csv", runMutation, setMessage)}>Export CSV</button>
       </div>
-      <table>
+      <div className="tableScroll" role="region" aria-label="Audit event records" tabIndex={0}><table>
         <thead><tr><th>Time</th><th>Event</th><th>Project</th><th>Feature</th><th>Fingerprint</th><th>Source</th><th>Actor</th><th>Detail</th><th>Seq</th></tr></thead>
         <tbody>
           {events.map((item) => (
@@ -84,8 +92,9 @@ export function Events({ active }: { active: boolean }): React.ReactElement | nu
             </tr>
           ))}
         </tbody>
-      </table>
-      <div className="tableFooter"><span className="muted">{events.length} shown (most recent)</span></div>
+      </table></div>
+      {!loading && readError === null && events.length === 0 && <p className="emptyState">No recent events.</p>}
+      <div className="tableFooter"><span className="muted">{eventsFence.isSettled() ? `${events.length} shown (most recent)` : ""}</span></div>
     </section>
   );
 }

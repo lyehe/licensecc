@@ -93,11 +93,13 @@ function insertedRevocationSeq(pb, key) {
 function guardedOrderIdentity(pb, order, fingerprint, fingerprintOrigin, table) {
   const customerId = order.customer?.id ?? null;
   const licenseId = order.license_id ?? null;
+  // Each standalone IS NULL parameter needs its own type; another parameter
+  // with the same JS value in a column equality does not type this placeholder.
   return (
     `${table}.subscription_id = ${pb.bind(order.subscription_id)} AND ${table}.project = ${pb.bind(order.project)} AND ${table}.feature = ${pb.bind(order.feature)} AND ` +
     `${table}.license_fingerprint = ${pb.bind(fingerprint)} AND ${table}.fingerprint_origin = ${pb.bind(fingerprintOrigin)} AND ` +
-    `(${table}.customer_id IS NULL OR ${pb.bind(customerId)} IS NULL OR ${table}.customer_id = ${pb.bind(customerId)}) AND ` +
-    `(${table}.license_id IS NULL OR ${pb.bind(licenseId)} IS NULL OR ${table}.license_id = ${pb.bind(licenseId)}) AND ` +
+    `(${table}.customer_id IS NULL OR ${pb.bind(customerId)}::text IS NULL OR ${table}.customer_id = ${pb.bind(customerId)}) AND ` +
+    `(${table}.license_id IS NULL OR ${pb.bind(licenseId)}::text IS NULL OR ${table}.license_id = ${pb.bind(licenseId)}) AND ` +
     `(${table}.order_epoch < ${pb.bind(order.order_epoch)} OR (${table}.order_epoch = ${pb.bind(order.order_epoch)} AND ${table}.last_seq < ${pb.bind(order.seq)}))`
   );
 }

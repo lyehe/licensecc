@@ -14,7 +14,7 @@ import { test } from "node:test";
 import { assembleComponents, assemblePaths, assertUniqueOperationIds } from "../dist/openapi/assemble.js";
 import { openApiSpec } from "../dist/openapi/document.js";
 import { META_ROUTES, CLIENT_ROUTES, SCOPED_ROUTES, EMERGENCY_PREFIX, allCanonicalRoutes } from "../dist/routes.js";
-import worker from "../dist/index.js";
+import worker from "../dist/app.js";
 import { BACKEND_ROUTE_KEYS } from "../dist/app.js";
 import { normalizeOrderEventForReplay } from "../src/fulfillment/order_event.mjs";
 
@@ -129,6 +129,10 @@ test("every documented operation has unique identity, expected auth, and a respo
     ["/v1/emergency/v1/release", [{ emergencyBearer: [] }]],
     ["/v1/emergency/v1/meter", [{ emergencyBearer: [] }]],
     ["/v1/emergency/v1/admin/report", [{ emergencyBearer: [] }]],
+    ["/v2/device-authorizations", []],
+    ["/v2/device-challenges", []],
+    ["/v2/device-authorizations/exchange", []],
+    ["/v2/device-leases/renew", []],
   ]);
   for (const [path, item] of Object.entries(openApiSpec.paths)) {
     const [operation] = Object.values(item);
@@ -170,7 +174,7 @@ test("invalid security-mode config leaves static docs available and is documente
     }
     const response = operation.responses["503"];
     assert.ok(response, route.path + " documents the global invalid-config response");
-    assert.match(JSON.stringify(response), /config_error/, route.path + " 503 documents config_error");
+    assert.match(JSON.stringify(response), route.path.startsWith("/v2/") ? /temporarily_unavailable/ : /config_error/, route.path + " 503 documents its config failure envelope");
   }
 
   const invalidEnv = { REQUEST_SIGNATURE_MODE: "not-a-mode" };

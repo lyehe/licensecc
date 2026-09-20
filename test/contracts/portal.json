@@ -18,6 +18,56 @@
     {
       "inSpec": true,
       "method": "POST",
+      "path": "/portal/v1/auth/password/register"
+    },
+    {
+      "inSpec": true,
+      "method": "POST",
+      "path": "/portal/v1/auth/password/login"
+    },
+    {
+      "inSpec": true,
+      "method": "GET",
+      "path": "/portal/v1/auth/password"
+    },
+    {
+      "inSpec": true,
+      "method": "POST",
+      "path": "/portal/v1/auth/password"
+    },
+    {
+      "inSpec": true,
+      "method": "GET",
+      "path": "/portal/v1/auth/providers"
+    },
+    {
+      "inSpec": true,
+      "method": "POST",
+      "path": "/portal/v1/auth/google/start"
+    },
+    {
+      "inSpec": true,
+      "method": "POST",
+      "path": "/portal/v1/auth/github/start"
+    },
+    {
+      "inSpec": true,
+      "method": "GET",
+      "path": "/portal/v1/auth/google/callback"
+    },
+    {
+      "inSpec": true,
+      "method": "GET",
+      "path": "/portal/v1/auth/github/callback"
+    },
+    {
+      "inSpec": true,
+      "method": "GET",
+      "path": "/portal/v1/auth/identities"
+    },
+    {
+      "inSpec": true,
+      "method": "POST",
       "path": "/portal/v1/auth/request"
     },
     {
@@ -44,6 +94,31 @@
       "inSpec": true,
       "method": "POST",
       "path": "/portal/v1/admin/bootstrap-otp"
+    },
+    {
+      "inSpec": true,
+      "method": "GET",
+      "path": "/api/portal/device-bindings"
+    },
+    {
+      "inSpec": true,
+      "method": "POST",
+      "path": "/api/portal/device-bindings/retire"
+    },
+    {
+      "inSpec": true,
+      "method": "POST",
+      "path": "/api/portal/device-authorizations/inspect"
+    },
+    {
+      "inSpec": true,
+      "method": "POST",
+      "path": "/api/portal/device-authorizations/approve"
+    },
+    {
+      "inSpec": true,
+      "method": "POST",
+      "path": "/api/portal/device-authorizations/deny"
     },
     {
       "inSpec": true,
@@ -445,6 +520,1533 @@
             }
           ],
           "summary": "Seat checkout. Server-resolves the entitlement id, mints a 120s account token, proxies to backend /v1/checkout.",
+          "tags": [
+            "portal"
+          ]
+        }
+      },
+      "/api/portal/device-authorizations/approve": {
+        "post": {
+          "description": "Requires the configured portal Origin and a current session. Bodies reject duplicate/unknown keys, invalid UTF-8 and non-integer numeric lexemes, with a 16 KiB limit. Identity comes only from the session. Mutations use attempt-scoped idempotency; approval recovery ends at code expiry and denial recovery at attempt expiry. A timeout is an unknown outcome; retry the identical request and key. All responses are no-store.",
+          "operationId": "portalDeviceAuthorizationApprove",
+          "parameters": [
+            {
+              "in": "header",
+              "name": "Origin",
+              "required": true,
+              "schema": {
+                "type": "string"
+              }
+            },
+            {
+              "description": "encodeURIComponent of the customer ID displayed by the browser. Compared to the current session to reject account changes; never supplies authority.",
+              "in": "header",
+              "name": "x-expected-customer-id",
+              "required": true,
+              "schema": {
+                "type": "string"
+              }
+            },
+            {
+              "in": "header",
+              "name": "idempotency-key",
+              "required": true,
+              "schema": {
+                "pattern": "^[A-Za-z0-9_-]{16,128}$",
+                "type": "string"
+              }
+            }
+          ],
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "attempt_handle": {
+                      "pattern": "^[A-Za-z0-9_-]{43}$",
+                      "type": "string"
+                    },
+                    "entitlement_id": {
+                      "type": "string"
+                    },
+                    "expected_attempt_revision": {
+                      "maximum": 9007199254740990,
+                      "minimum": 0,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "attempt_handle",
+                    "entitlement_id",
+                    "expected_attempt_revision"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "required": true
+          },
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "code": {
+                        "const": "authorization_approved"
+                      },
+                      "data": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "callback_url": {
+                            "format": "uri",
+                            "type": "string"
+                          },
+                          "expires_at": {
+                            "maximum": 9007199254740991,
+                            "minimum": 0,
+                            "type": "integer"
+                          },
+                          "revision": {
+                            "maximum": 9007199254740991,
+                            "minimum": 0,
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "callback_url",
+                          "expires_at",
+                          "revision"
+                        ],
+                        "type": "object"
+                      },
+                      "ok": {
+                        "const": true
+                      },
+                      "request_id": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "ok",
+                      "code",
+                      "request_id",
+                      "data"
+                    ],
+                    "type": "object"
+                  }
+                }
+              },
+              "description": "Authenticated consent result."
+            },
+            "400": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "invalid_request"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Invalid bounded request or idempotency key."
+            },
+            "401": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "unauthorized"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Sign in before continuing."
+            },
+            "403": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "cross_site_forbidden",
+                          "access_denied"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Cross-origin request or current authority denied."
+            },
+            "404": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "authorization_unavailable"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Attempt unavailable."
+            },
+            "409": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "account_changed",
+                          "revision_conflict",
+                          "idempotency_conflict"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Account changed: restart enrollment. Otherwise refresh state or retry the exact original intent."
+            },
+            "410": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "authorization_expired"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Restart enrollment."
+            },
+            "429": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "rate_limited"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Global or customer budget exceeded; Retry-After is 60 seconds."
+            },
+            "503": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "config_error",
+                          "temporarily_unavailable"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Session configuration or private service unavailable; preserve pending intent."
+            }
+          },
+          "security": [
+            {
+              "sessionCookie": []
+            }
+          ],
+          "summary": "Approve a device authorization for the signed-in customer.",
+          "tags": [
+            "portal"
+          ]
+        }
+      },
+      "/api/portal/device-authorizations/deny": {
+        "post": {
+          "description": "Requires the configured portal Origin and a current session. Bodies reject duplicate/unknown keys, invalid UTF-8 and non-integer numeric lexemes, with a 16 KiB limit. Identity comes only from the session. Mutations use attempt-scoped idempotency; approval recovery ends at code expiry and denial recovery at attempt expiry. A timeout is an unknown outcome; retry the identical request and key. All responses are no-store.",
+          "operationId": "portalDeviceAuthorizationDeny",
+          "parameters": [
+            {
+              "in": "header",
+              "name": "Origin",
+              "required": true,
+              "schema": {
+                "type": "string"
+              }
+            },
+            {
+              "description": "encodeURIComponent of the customer ID displayed by the browser. Compared to the current session to reject account changes; never supplies authority.",
+              "in": "header",
+              "name": "x-expected-customer-id",
+              "required": true,
+              "schema": {
+                "type": "string"
+              }
+            },
+            {
+              "in": "header",
+              "name": "idempotency-key",
+              "required": true,
+              "schema": {
+                "pattern": "^[A-Za-z0-9_-]{16,128}$",
+                "type": "string"
+              }
+            }
+          ],
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "attempt_handle": {
+                      "pattern": "^[A-Za-z0-9_-]{43}$",
+                      "type": "string"
+                    },
+                    "expected_attempt_revision": {
+                      "maximum": 9007199254740990,
+                      "minimum": 0,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "attempt_handle",
+                    "expected_attempt_revision"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "required": true
+          },
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "code": {
+                        "const": "authorization_denied"
+                      },
+                      "data": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "revision": {
+                            "maximum": 9007199254740991,
+                            "minimum": 0,
+                            "type": "integer"
+                          },
+                          "status": {
+                            "const": "authorization_denied"
+                          }
+                        },
+                        "required": [
+                          "status",
+                          "revision"
+                        ],
+                        "type": "object"
+                      },
+                      "ok": {
+                        "const": true
+                      },
+                      "request_id": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "ok",
+                      "code",
+                      "request_id",
+                      "data"
+                    ],
+                    "type": "object"
+                  }
+                }
+              },
+              "description": "Authenticated consent result."
+            },
+            "400": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "invalid_request"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Invalid bounded request or idempotency key."
+            },
+            "401": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "unauthorized"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Sign in before continuing."
+            },
+            "403": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "cross_site_forbidden",
+                          "access_denied"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Cross-origin request or current authority denied."
+            },
+            "404": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "authorization_unavailable"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Attempt unavailable."
+            },
+            "409": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "account_changed",
+                          "revision_conflict",
+                          "idempotency_conflict"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Account changed: restart enrollment. Otherwise refresh state or retry the exact original intent."
+            },
+            "410": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "authorization_expired"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Restart enrollment."
+            },
+            "429": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "rate_limited"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Global or customer budget exceeded; Retry-After is 60 seconds."
+            },
+            "503": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "config_error",
+                          "temporarily_unavailable"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Session configuration or private service unavailable; preserve pending intent."
+            }
+          },
+          "security": [
+            {
+              "sessionCookie": []
+            }
+          ],
+          "summary": "Deny a device authorization for the signed-in customer.",
+          "tags": [
+            "portal"
+          ]
+        }
+      },
+      "/api/portal/device-authorizations/inspect": {
+        "post": {
+          "description": "Requires the configured portal Origin and a current session. Bodies reject duplicate/unknown keys, invalid UTF-8 and non-integer numeric lexemes, with a 16 KiB limit. Identity comes only from the session. Mutations use attempt-scoped idempotency; approval recovery ends at code expiry and denial recovery at attempt expiry. A timeout is an unknown outcome; retry the identical request and key. All responses are no-store.",
+          "operationId": "portalDeviceAuthorizationInspect",
+          "parameters": [
+            {
+              "in": "header",
+              "name": "Origin",
+              "required": true,
+              "schema": {
+                "type": "string"
+              }
+            },
+            {
+              "description": "encodeURIComponent of the customer ID displayed by the browser. Compared to the current session to reject account changes; never supplies authority.",
+              "in": "header",
+              "name": "x-expected-customer-id",
+              "required": true,
+              "schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "attempt_handle": {
+                      "pattern": "^[A-Za-z0-9_-]{43}$",
+                      "type": "string"
+                    },
+                    "page_cursor": {
+                      "description": "Optional opaque live keyset position. Omit for the first page; each page rechecks current eligibility. Inserts before the position appear after restarting pagination.",
+                      "pattern": "^[A-Za-z0-9_-]{1,512}$",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "attempt_handle"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "required": true
+          },
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "code": {
+                        "const": "authorization_inspected"
+                      },
+                      "data": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "app": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "name": {
+                                "type": "string"
+                              },
+                              "project": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "name",
+                              "project"
+                            ],
+                            "type": "object"
+                          },
+                          "comparison_code": {
+                            "pattern": "^[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}$",
+                            "type": "string"
+                          },
+                          "device": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "label": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "label"
+                            ],
+                            "type": "object"
+                          },
+                          "entitlements": {
+                            "items": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "activation_trial_seconds": {
+                                  "description": "Present only for an unstarted activation-based trial. Starts on successful native exchange, not browser approval; valid_until may cap its duration.",
+                                  "maximum": 9007199254740991,
+                                  "minimum": 2,
+                                  "type": "integer"
+                                },
+                                "device_limit": {
+                                  "maximum": 9007199254740991,
+                                  "minimum": 0,
+                                  "type": "integer"
+                                },
+                                "feature": {
+                                  "type": "string"
+                                },
+                                "id": {
+                                  "type": "string"
+                                },
+                                "valid_until": {
+                                  "anyOf": [
+                                    {
+                                      "maximum": 9007199254740991,
+                                      "minimum": 0,
+                                      "type": "integer"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ],
+                                  "description": "Effective expiry for a started trial; optional absolute cap for an unstarted trial."
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "feature",
+                                "valid_until",
+                                "device_limit"
+                              ],
+                              "type": "object"
+                            },
+                            "maxItems": 100,
+                            "type": "array"
+                          },
+                          "expires_at": {
+                            "maximum": 9007199254740991,
+                            "minimum": 0,
+                            "type": "integer"
+                          },
+                          "has_more": {
+                            "type": "boolean"
+                          },
+                          "next_page_cursor": {
+                            "anyOf": [
+                              {
+                                "pattern": "^[A-Za-z0-9_-]{1,512}$",
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "revision": {
+                            "maximum": 9007199254740991,
+                            "minimum": 0,
+                            "type": "integer"
+                          },
+                          "status": {
+                            "enum": [
+                              "pending",
+                              "approved",
+                              "consumed",
+                              "denied"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "app",
+                          "device",
+                          "status",
+                          "revision",
+                          "expires_at",
+                          "entitlements",
+                          "has_more",
+                          "next_page_cursor",
+                          "comparison_code"
+                        ],
+                        "type": "object"
+                      },
+                      "ok": {
+                        "const": true
+                      },
+                      "request_id": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "ok",
+                      "code",
+                      "request_id",
+                      "data"
+                    ],
+                    "type": "object"
+                  }
+                }
+              },
+              "description": "Authenticated consent result."
+            },
+            "400": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "invalid_request"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Invalid bounded request or idempotency key."
+            },
+            "401": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "unauthorized"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Sign in before continuing."
+            },
+            "403": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "cross_site_forbidden",
+                          "access_denied"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Cross-origin request or current authority denied."
+            },
+            "404": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "authorization_unavailable"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Attempt unavailable."
+            },
+            "409": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "account_changed",
+                          "revision_conflict",
+                          "idempotency_conflict"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Account changed: restart enrollment. Otherwise refresh state or retry the exact original intent."
+            },
+            "410": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "authorization_expired"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Restart enrollment."
+            },
+            "429": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "rate_limited"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Global or customer budget exceeded; Retry-After is 60 seconds."
+            },
+            "503": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "config_error",
+                          "temporarily_unavailable"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Session configuration or private service unavailable; preserve pending intent."
+            }
+          },
+          "security": [
+            {
+              "sessionCookie": []
+            }
+          ],
+          "summary": "Inspect a device authorization for the signed-in customer.",
+          "tags": [
+            "portal"
+          ]
+        }
+      },
+      "/api/portal/device-bindings": {
+        "get": {
+          "description": "Returns at most 100 bindings in ascending binding ID order. Opaque keyset pagination rechecks current ownership on every page; it is not a snapshot. Restart pagination to see inserts before the cursor. Retiring bindings at or beyond their hold deadline are logically released without waiting for cleanup. Active bindings remain occupied after lease expiry. Last proof time is authenticated contact, not live presence. All responses are no-store.",
+          "operationId": "portalDeviceBindingsList",
+          "parameters": [
+            {
+              "description": "encodeURIComponent of the displayed account ID; compared with the session.",
+              "in": "header",
+              "name": "x-expected-customer-id",
+              "required": true,
+              "schema": {
+                "type": "string"
+              }
+            },
+            {
+              "description": "next_cursor from the previous page; omit for the first page.",
+              "in": "query",
+              "name": "cursor",
+              "required": false,
+              "schema": {
+                "description": "Canonical unpadded base64url encoding of 16 bytes.",
+                "pattern": "^[A-Za-z0-9_-]{22}$",
+                "type": "string"
+              }
+            },
+            {
+              "description": "Inspect exactly this owned binding, returning zero or one item. Mutually exclusive with cursor.",
+              "in": "query",
+              "name": "binding_id",
+              "required": false,
+              "schema": {
+                "description": "Canonical unpadded base64url encoding of 16 bytes.",
+                "pattern": "^[A-Za-z0-9_-]{22}$",
+                "type": "string"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "code": {
+                        "const": "device_bindings"
+                      },
+                      "data": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "customer_id": {
+                            "type": "string"
+                          },
+                          "has_more": {
+                            "type": "boolean"
+                          },
+                          "items": {
+                            "items": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "binding_id": {
+                                  "description": "Canonical unpadded base64url encoding of 16 bytes.",
+                                  "pattern": "^[A-Za-z0-9_-]{22}$",
+                                  "type": "string"
+                                },
+                                "created_at": {
+                                  "maximum": 9007199254740991,
+                                  "minimum": 0,
+                                  "type": "integer"
+                                },
+                                "feature": {
+                                  "type": "string"
+                                },
+                                "hold_until": {
+                                  "maximum": 9007199254740991,
+                                  "minimum": 0,
+                                  "type": "integer"
+                                },
+                                "label": {
+                                  "type": "string"
+                                },
+                                "last_proof_at": {
+                                  "maximum": 9007199254740991,
+                                  "minimum": 0,
+                                  "type": "integer"
+                                },
+                                "project": {
+                                  "type": "string"
+                                },
+                                "revision": {
+                                  "maximum": 9007199254740991,
+                                  "minimum": 0,
+                                  "type": "integer"
+                                },
+                                "server_time": {
+                                  "maximum": 9007199254740991,
+                                  "minimum": 0,
+                                  "type": "integer"
+                                },
+                                "state": {
+                                  "enum": [
+                                    "active",
+                                    "retiring",
+                                    "released"
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "binding_id",
+                                "project",
+                                "feature",
+                                "revision",
+                                "hold_until",
+                                "state",
+                                "label",
+                                "last_proof_at",
+                                "created_at",
+                                "server_time"
+                              ],
+                              "type": "object"
+                            },
+                            "maxItems": 100,
+                            "type": "array"
+                          },
+                          "next_cursor": {
+                            "anyOf": [
+                              {
+                                "description": "Canonical unpadded base64url encoding of 16 bytes.",
+                                "pattern": "^[A-Za-z0-9_-]{22}$",
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "required": [
+                          "customer_id",
+                          "items",
+                          "has_more",
+                          "next_cursor"
+                        ],
+                        "type": "object"
+                      },
+                      "ok": {
+                        "const": true
+                      },
+                      "request_id": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "ok",
+                      "code",
+                      "request_id",
+                      "data"
+                    ],
+                    "type": "object"
+                  }
+                }
+              },
+              "description": "Owned protected bindings."
+            },
+            "400": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "invalid_request"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Invalid cursor, query or account precondition."
+            },
+            "401": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "unauthorized"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Sign in before continuing."
+            },
+            "409": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "account_changed"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "The displayed account no longer matches the session."
+            },
+            "503": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "config_error",
+                          "temporarily_unavailable"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Session configuration or database unavailable."
+            }
+          },
+          "security": [
+            {
+              "sessionCookie": []
+            }
+          ],
+          "summary": "List the signed-in customer's protected node connections.",
+          "tags": [
+            "portal"
+          ]
+        }
+      },
+      "/api/portal/device-bindings/retire": {
+        "post": {
+          "description": "Session-derived customer identity only. Stops new renewal immediately; existing signed access and the capacity hold are preserved. effective_release_at is the later of the hold deadline and retirement commit. Retry the identical body and idempotency key after an unknown outcome: exact recovery lasts 48 hours. Released bindings cannot be re-enabled. All responses are no-store. Bodies reject unknown/duplicate keys, invalid UTF-8 and non-integer numeric lexemes, with a 16 KiB limit.",
+          "operationId": "portalDeviceBindingRetire",
+          "parameters": [
+            {
+              "description": "Must equal the configured HTTPS portal origin.",
+              "in": "header",
+              "name": "Origin",
+              "required": true,
+              "schema": {
+                "type": "string"
+              }
+            },
+            {
+              "description": "encodeURIComponent of the displayed account ID; compared with the session, never used as authority.",
+              "in": "header",
+              "name": "x-expected-customer-id",
+              "required": true,
+              "schema": {
+                "type": "string"
+              }
+            },
+            {
+              "description": "Canonical unpadded base64url encoding of 32 random bytes; retain for exact retries.",
+              "in": "header",
+              "name": "idempotency-key",
+              "required": true,
+              "schema": {
+                "pattern": "^[A-Za-z0-9_-]{43}$",
+                "type": "string"
+              }
+            }
+          ],
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "binding_id": {
+                      "description": "Canonical unpadded base64url encoding of 16 bytes.",
+                      "pattern": "^[A-Za-z0-9_-]{22}$",
+                      "type": "string"
+                    },
+                    "expected_revision": {
+                      "maximum": 9007199254740990,
+                      "minimum": 0,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "binding_id",
+                    "expected_revision"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "required": true
+          },
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "code": {
+                        "const": "binding_retired"
+                      },
+                      "data": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "binding_id": {
+                            "description": "Canonical unpadded base64url encoding of 16 bytes.",
+                            "pattern": "^[A-Za-z0-9_-]{22}$",
+                            "type": "string"
+                          },
+                          "effective_release_at": {
+                            "maximum": 9007199254740991,
+                            "minimum": 0,
+                            "type": "integer"
+                          },
+                          "generation": {
+                            "maximum": 9007199254740991,
+                            "minimum": 2,
+                            "type": "integer"
+                          },
+                          "revision": {
+                            "maximum": 9007199254740991,
+                            "minimum": 1,
+                            "type": "integer"
+                          },
+                          "state": {
+                            "const": "retiring"
+                          }
+                        },
+                        "required": [
+                          "binding_id",
+                          "state",
+                          "effective_release_at",
+                          "revision",
+                          "generation"
+                        ],
+                        "type": "object"
+                      },
+                      "ok": {
+                        "const": true
+                      },
+                      "request_id": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "ok",
+                      "code",
+                      "request_id",
+                      "data"
+                    ],
+                    "type": "object"
+                  }
+                }
+              },
+              "description": "Committed retirement or exact recovered result."
+            },
+            "400": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "invalid_request"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Invalid request or idempotency key."
+            },
+            "401": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "unauthorized"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Sign in before continuing."
+            },
+            "403": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "cross_site_forbidden",
+                          "access_denied"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Origin or current authority denied."
+            },
+            "404": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "binding_unavailable"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Owned binding unavailable."
+            },
+            "409": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "account_changed",
+                          "revision_conflict",
+                          "idempotency_conflict"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Account changed, stale revision, changed intent, or expired recovery. Refresh before creating a new intent."
+            },
+            "429": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "rate_limited"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Shared protected-device global/customer budget exceeded; Retry-After is 60 seconds."
+            },
+            "503": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "config_error",
+                          "temporarily_unavailable"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Session configuration or backend unavailable; preserve pending intent."
+            }
+          },
+          "security": [
+            {
+              "sessionCookie": []
+            }
+          ],
+          "summary": "Retire an owned protected device binding.",
           "tags": [
             "portal"
           ]
@@ -2004,6 +3606,496 @@
           ]
         }
       },
+      "/portal/v1/auth/github/callback": {
+        "get": {
+          "description": "Validates browser binding and atomically consumes state before exchanging the code. Requires verified provider email. Stable provider subject identifies the account. A new identity registers an empty customer; existing email collisions require authenticated linking. Provider tokens are not persisted.",
+          "operationId": "authCallbackGitHub",
+          "parameters": [
+            {
+              "in": "query",
+              "name": "state",
+              "required": true,
+              "schema": {
+                "type": "string"
+              }
+            },
+            {
+              "in": "query",
+              "name": "code",
+              "required": false,
+              "schema": {
+                "type": "string"
+              }
+            },
+            {
+              "in": "query",
+              "name": "error",
+              "required": false,
+              "schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "responses": {
+            "303": {
+              "description": "No-store redirect to the provider or fixed portal origin. Callback errors use an allowlisted auth_error; credentials never appear in the final URL.",
+              "headers": {
+                "Location": {
+                  "schema": {
+                    "format": "uri",
+                    "type": "string"
+                  }
+                },
+                "Set-Cookie": {
+                  "description": "Secure HttpOnly SameSite=Lax browser binding or opaque session cookie.",
+                  "schema": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "503": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "config_error"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Public origin unavailable."
+            }
+          },
+          "security": [],
+          "summary": "Complete GitHub sign-in.",
+          "tags": [
+            "auth"
+          ]
+        }
+      },
+      "/portal/v1/auth/github/start": {
+        "post": {
+          "description": "Requires exact configured Origin. Authorization code with S256 PKCE, single-use D1 state and a browser-bound cookie. Link mode requires an active session at start and callback. No email-based automatic linking.",
+          "operationId": "authStartGitHub",
+          "parameters": [
+            {
+              "in": "query",
+              "name": "mode",
+              "required": false,
+              "schema": {
+                "enum": [
+                  "link"
+                ],
+                "type": "string"
+              }
+            }
+          ],
+          "responses": {
+            "303": {
+              "description": "No-store redirect to the provider or fixed portal origin. Callback errors use an allowlisted auth_error; credentials never appear in the final URL.",
+              "headers": {
+                "Location": {
+                  "schema": {
+                    "format": "uri",
+                    "type": "string"
+                  }
+                },
+                "Set-Cookie": {
+                  "description": "Secure HttpOnly SameSite=Lax browser binding or opaque session cookie.",
+                  "schema": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "400": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "invalid_request"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Unknown mode."
+            },
+            "401": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "unauthorized"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Linking requires a session."
+            },
+            "403": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "cross_site_forbidden"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Origin mismatch."
+            },
+            "503": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "config_error"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Session configuration unavailable."
+            }
+          },
+          "security": [
+            {},
+            {
+              "sessionCookie": []
+            }
+          ],
+          "summary": "Start GitHub sign-in or explicit account linking.",
+          "tags": [
+            "auth"
+          ]
+        }
+      },
+      "/portal/v1/auth/google/callback": {
+        "get": {
+          "description": "Validates browser binding and atomically consumes state before exchanging the code. Requires verified provider email. Stable provider subject identifies the account. A new identity registers an empty customer; existing email collisions require authenticated linking. Provider tokens are not persisted.",
+          "operationId": "authCallbackGoogle",
+          "parameters": [
+            {
+              "in": "query",
+              "name": "state",
+              "required": true,
+              "schema": {
+                "type": "string"
+              }
+            },
+            {
+              "in": "query",
+              "name": "code",
+              "required": false,
+              "schema": {
+                "type": "string"
+              }
+            },
+            {
+              "in": "query",
+              "name": "error",
+              "required": false,
+              "schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "responses": {
+            "303": {
+              "description": "No-store redirect to the provider or fixed portal origin. Callback errors use an allowlisted auth_error; credentials never appear in the final URL.",
+              "headers": {
+                "Location": {
+                  "schema": {
+                    "format": "uri",
+                    "type": "string"
+                  }
+                },
+                "Set-Cookie": {
+                  "description": "Secure HttpOnly SameSite=Lax browser binding or opaque session cookie.",
+                  "schema": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "503": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "config_error"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Public origin unavailable."
+            }
+          },
+          "security": [],
+          "summary": "Complete Google sign-in.",
+          "tags": [
+            "auth"
+          ]
+        }
+      },
+      "/portal/v1/auth/google/start": {
+        "post": {
+          "description": "Requires exact configured Origin. Authorization code with S256 PKCE, single-use D1 state and a browser-bound cookie. Link mode requires an active session at start and callback. No email-based automatic linking.",
+          "operationId": "authStartGoogle",
+          "parameters": [
+            {
+              "in": "query",
+              "name": "mode",
+              "required": false,
+              "schema": {
+                "enum": [
+                  "link"
+                ],
+                "type": "string"
+              }
+            }
+          ],
+          "responses": {
+            "303": {
+              "description": "No-store redirect to the provider or fixed portal origin. Callback errors use an allowlisted auth_error; credentials never appear in the final URL.",
+              "headers": {
+                "Location": {
+                  "schema": {
+                    "format": "uri",
+                    "type": "string"
+                  }
+                },
+                "Set-Cookie": {
+                  "description": "Secure HttpOnly SameSite=Lax browser binding or opaque session cookie.",
+                  "schema": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "400": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "invalid_request"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Unknown mode."
+            },
+            "401": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "unauthorized"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Linking requires a session."
+            },
+            "403": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "cross_site_forbidden"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Origin mismatch."
+            },
+            "503": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "config_error"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Session configuration unavailable."
+            }
+          },
+          "security": [
+            {},
+            {
+              "sessionCookie": []
+            }
+          ],
+          "summary": "Start Google sign-in or explicit account linking.",
+          "tags": [
+            "auth"
+          ]
+        }
+      },
+      "/portal/v1/auth/identities": {
+        "get": {
+          "operationId": "authIdentities",
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "properties": {
+                      "data": {
+                        "properties": {
+                          "items": {
+                            "items": {
+                              "properties": {
+                                "created_at": {
+                                  "type": "integer"
+                                },
+                                "email": {
+                                  "type": "string"
+                                },
+                                "provider": {
+                                  "enum": [
+                                    "google",
+                                    "github"
+                                  ],
+                                  "type": "string"
+                                }
+                              },
+                              "type": "object"
+                            },
+                            "type": "array"
+                          }
+                        },
+                        "type": "object"
+                      }
+                    },
+                    "type": "object"
+                  }
+                }
+              },
+              "description": "Linked providers; no provider credentials."
+            },
+            "401": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "unauthorized"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Session required."
+            },
+            "503": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "config_error"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Session configuration unavailable."
+            }
+          },
+          "security": [
+            {
+              "sessionCookie": []
+            }
+          ],
+          "summary": "List this customer's linked providers.",
+          "tags": [
+            "auth"
+          ]
+        }
+      },
       "/portal/v1/auth/logout": {
         "post": {
           "description": "No auth required (the session is optional — logout is idempotent). Marks the session row revoked and bumps account_token_revocations.revocation_seq to kill any in-flight 120s account token (invariant 9). Always clears the cookie (Max-Age=0).",
@@ -2379,6 +4471,890 @@
           ]
         }
       },
+      "/portal/v1/auth/password": {
+        "get": {
+          "operationId": "authPasswordSettings",
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "properties": {
+                      "data": {
+                        "properties": {
+                          "can_reset": {
+                            "type": "boolean"
+                          },
+                          "email": {
+                            "type": "string"
+                          },
+                          "email_verified": {
+                            "type": "boolean"
+                          },
+                          "has_password": {
+                            "type": "boolean"
+                          }
+                        },
+                        "type": "object"
+                      }
+                    },
+                    "type": "object"
+                  }
+                }
+              },
+              "description": "Email login identifier, has_password, can_reset, and email_verified flags; no hash."
+            },
+            "400": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "invalid_json",
+                          "invalid_registration"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Invalid JSON, email or password length."
+            },
+            "401": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "invalid_credentials",
+                          "unauthorized"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Invalid credentials or session."
+            },
+            "403": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "cross_site_forbidden",
+                          "verified_sign_in_required"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Origin mismatch or fresh verified sign-in required."
+            },
+            "404": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "not_found"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Password sign-in disabled."
+            },
+            "409": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "registration_unavailable",
+                          "password_change_conflict"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Registration unavailable or settings changed concurrently."
+            },
+            "413": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "body_too_large"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Request body exceeds 8192 bytes."
+            },
+            "429": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "rate_limited"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Per-IP or login-identifier limit reached."
+            },
+            "503": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "config_error"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Session/database configuration unavailable."
+            }
+          },
+          "security": [
+            {
+              "sessionCookie": []
+            }
+          ],
+          "summary": "Read this customer's password settings.",
+          "tags": [
+            "auth"
+          ]
+        },
+        "post": {
+          "description": "Requires current password or an OTP/OAuth session created within ten minutes. First set requires a recent OTP/OAuth session and customer contact email. Atomic compare-and-swap revokes all old sessions, outstanding OTPs and ephemeral account tokens, then issues a new password-authenticated session.",
+          "operationId": "authSetPassword",
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "current_password": {
+                      "description": "Required for an existing password unless this is a recent OTP/OAuth session.",
+                      "type": "string"
+                    },
+                    "email": {
+                      "format": "email",
+                      "type": "string"
+                    },
+                    "password": {
+                      "maxLength": 128,
+                      "minLength": 15,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "password"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "required": true
+          },
+          "responses": {
+            "200": {
+              "description": "Signed in with a rotated opaque HttpOnly session cookie. No password/hash is returned."
+            },
+            "400": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "invalid_json",
+                          "invalid_registration"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Invalid JSON, email or password length."
+            },
+            "401": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "invalid_credentials",
+                          "unauthorized"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Invalid credentials or session."
+            },
+            "403": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "cross_site_forbidden",
+                          "verified_sign_in_required"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Origin mismatch or fresh verified sign-in required."
+            },
+            "404": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "not_found"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Password sign-in disabled."
+            },
+            "409": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "registration_unavailable",
+                          "password_change_conflict"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Registration unavailable or settings changed concurrently."
+            },
+            "413": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "body_too_large"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Request body exceeds 8192 bytes."
+            },
+            "429": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "rate_limited"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Per-IP or login-identifier limit reached."
+            },
+            "503": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "config_error"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Session/database configuration unavailable."
+            }
+          },
+          "security": [
+            {
+              "sessionCookie": []
+            }
+          ],
+          "summary": "Set or change this customer's password.",
+          "tags": [
+            "auth"
+          ]
+        }
+      },
+      "/portal/v1/auth/password/login": {
+        "post": {
+          "description": "Requires exact Origin. Wrong password, unknown login and disabled customer return the same denial. Per-IP 30/900s and per-email 10/900s. Session creation atomically checks the verified password hash is still current.",
+          "operationId": "authLoginPassword",
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "current_password": {
+                      "description": "Required for an existing password unless this is a recent OTP/OAuth session.",
+                      "type": "string"
+                    },
+                    "email": {
+                      "format": "email",
+                      "type": "string"
+                    },
+                    "password": {
+                      "maxLength": 128,
+                      "minLength": 15,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "email",
+                    "password"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "required": true
+          },
+          "responses": {
+            "200": {
+              "description": "Signed in with a rotated opaque HttpOnly session cookie. No password/hash is returned."
+            },
+            "400": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "invalid_json",
+                          "invalid_registration"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Invalid JSON, email or password length."
+            },
+            "401": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "invalid_credentials",
+                          "unauthorized"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Invalid credentials or session."
+            },
+            "403": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "cross_site_forbidden",
+                          "verified_sign_in_required"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Origin mismatch or fresh verified sign-in required."
+            },
+            "404": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "not_found"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Password sign-in disabled."
+            },
+            "409": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "registration_unavailable",
+                          "password_change_conflict"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Registration unavailable or settings changed concurrently."
+            },
+            "413": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "body_too_large"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Request body exceeds 8192 bytes."
+            },
+            "429": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "rate_limited"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Per-IP or login-identifier limit reached."
+            },
+            "503": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "config_error"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Session/database configuration unavailable."
+            }
+          },
+          "security": [],
+          "summary": "Sign in using an email/password credential.",
+          "tags": [
+            "auth"
+          ]
+        }
+      },
+      "/portal/v1/auth/password/register": {
+        "post": {
+          "description": "Requires exact Origin and enabled password sign-in. Email is an unverified login identifier stored separately from customer contact email. Never claims an existing customer or grants licenses. Per-IP limit 5/900s and per-email 10/900s before scrypt.",
+          "operationId": "authRegisterPassword",
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "current_password": {
+                      "description": "Required for an existing password unless this is a recent OTP/OAuth session.",
+                      "type": "string"
+                    },
+                    "email": {
+                      "format": "email",
+                      "type": "string"
+                    },
+                    "password": {
+                      "maxLength": 128,
+                      "minLength": 15,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "email",
+                    "password"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "required": true
+          },
+          "responses": {
+            "200": {
+              "description": "Signed in with a rotated opaque HttpOnly session cookie. No password/hash is returned."
+            },
+            "400": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "invalid_json",
+                          "invalid_registration"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Invalid JSON, email or password length."
+            },
+            "401": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "invalid_credentials",
+                          "unauthorized"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Invalid credentials or session."
+            },
+            "403": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "cross_site_forbidden",
+                          "verified_sign_in_required"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Origin mismatch or fresh verified sign-in required."
+            },
+            "404": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "not_found"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Password sign-in disabled."
+            },
+            "409": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "registration_unavailable",
+                          "password_change_conflict"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Registration unavailable or settings changed concurrently."
+            },
+            "413": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "body_too_large"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Request body exceeds 8192 bytes."
+            },
+            "429": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "rate_limited"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Per-IP or login-identifier limit reached."
+            },
+            "503": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "config_error"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Session/database configuration unavailable."
+            }
+          },
+          "security": [],
+          "summary": "Register an empty account with email and password.",
+          "tags": [
+            "auth"
+          ]
+        }
+      },
+      "/portal/v1/auth/providers": {
+        "get": {
+          "operationId": "authProviders",
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "properties": {
+                      "data": {
+                        "properties": {
+                          "email": {
+                            "type": "boolean"
+                          },
+                          "github": {
+                            "type": "boolean"
+                          },
+                          "google": {
+                            "type": "boolean"
+                          },
+                          "password": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "google",
+                          "github",
+                          "email",
+                          "password"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "type": "object"
+                  }
+                }
+              },
+              "description": "Provider availability."
+            }
+          },
+          "security": [],
+          "summary": "List configured sign-in methods without exposing credentials.",
+          "tags": [
+            "auth"
+          ]
+        }
+      },
       "/portal/v1/auth/request": {
         "post": {
           "description": "Always returns ok (no customer enumeration). Schedules the email via ctx.waitUntil when configured. The secret is NEVER returned on this path (only via the operator bootstrap). Always-on rate limiting (per-email 5/900s + per-IP 30/900s, fail-closed).",
@@ -2741,7 +5717,7 @@
       }
     ]
   },
-  "openApiOperationCount": 16,
+  "openApiOperationCount": 31,
   "PORTAL_ROUTE_KEYS": [
     "GET /openapi.json",
     "GET /docs",
@@ -2752,6 +5728,16 @@
     "POST /portal/v1/auth/magic-redeem",
     "POST /portal/v1/auth/logout",
     "POST /portal/v1/admin/bootstrap-otp",
+    "GET /portal/v1/auth/providers",
+    "POST /portal/v1/auth/google/start",
+    "POST /portal/v1/auth/github/start",
+    "GET /portal/v1/auth/google/callback",
+    "GET /portal/v1/auth/github/callback",
+    "GET /portal/v1/auth/identities",
+    "POST /portal/v1/auth/password/register",
+    "POST /portal/v1/auth/password/login",
+    "GET /portal/v1/auth/password",
+    "POST /portal/v1/auth/password",
     "GET /api/portal/me",
     "GET /api/portal/entitlements",
     "GET /api/portal/devices",
@@ -2760,9 +5746,14 @@
     "POST /api/portal/checkout",
     "POST /api/portal/heartbeat",
     "POST /api/portal/release",
-    "POST /api/portal/download"
+    "POST /api/portal/download",
+    "POST /api/portal/device-bindings/retire",
+    "POST /api/portal/device-authorizations/inspect",
+    "POST /api/portal/device-authorizations/approve",
+    "POST /api/portal/device-authorizations/deny",
+    "GET /api/portal/device-bindings"
   ],
-  "routeCount": 18,
-  "routeKeyCount": 18,
+  "routeCount": 33,
+  "routeKeyCount": 33,
   "service": "cloudflare-customer-portal"
 }

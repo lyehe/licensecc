@@ -1,4 +1,5 @@
 import { SEAT_OVERCAP_RECLAIM_SQL } from "../lease/issuance_sql.mjs";
+import { runBoundDeviceCleanup } from "./device_cleanup.js";
 import { enqueueAndDeliverWebhooks } from "@licensecc/cloudflare-runtime/webhooks/webhook";
 import { appendAuditDigest } from "@licensecc/cloudflare-runtime/d1/audit_digest";
 import type { Env, ExecutionContextLike } from "../env.js";
@@ -68,6 +69,7 @@ export async function reclaimOvercapSeats(env: Env, now: number): Promise<void> 
 // retention on the append-only logs. Wire via [triggers] crons in wrangler.toml.
 export async function scheduled(_event: unknown, env: Env, _ctx?: ExecutionContextLike): Promise<void> {
     const now = Math.floor(Date.now() / 1000);
+    await runBoundDeviceCleanup(env.DB);
     await sweepLapsedSeats(env, now);
     await reclaimOvercapSeats(env, now);
     try {

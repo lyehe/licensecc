@@ -1,7 +1,7 @@
 // server.mjs
 //
 // A node:http front-end that runs the UNMODIFIED licensecc Worker
-// (services/cloudflare-licensing-backend/src/index.ts, compiled to dist/index.js)
+// (services/cloudflare-licensing-backend/src/app.ts, compiled to dist/app.js)
 // off Cloudflare, backed by PostgreSQL / Supabase via db-postgres.mjs.
 //
 // This is the Postgres counterpart of local-host/server.mjs (which is SQLite). It is
@@ -20,7 +20,7 @@
 //
 // Setup:
 //   npm ci                          # lock-pinned workspace dependencies
-//   npm run build                   # tsc -> dist/index.js
+//   npm run build                   # tsc -> dist/app.js
 //   psql "$DATABASE_URL" -f supabase-postgres/schema.pg.sql   # apply the schema once
 //
 // Run:
@@ -46,9 +46,9 @@ if (typeof globalThis.crypto === "undefined") {
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-// Import the COMPILED Worker (dist/index.js); we do NOT touch its source. supabase-postgres/
+// Import the COMPILED Worker (dist/app.js); we do NOT touch its source. supabase-postgres/
 // is one level under the service dir, so dist/ is one level up (same as local-host/).
-const workerModulePath = resolve(__dirname, "..", "dist", "index.js");
+const workerModulePath = resolve(__dirname, "..", "dist", "app.js");
 const workerModuleUrl = pathToFileURL(workerModulePath).href; // absolute path needs file:// on Windows
 let worker;
 try {

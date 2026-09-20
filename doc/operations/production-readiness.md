@@ -249,6 +249,12 @@ The exact dashboard, alert thresholds, drill sequence, and redacted evidence
 requirements are defined in
 [`doc/operations/observability.md`](observability.md).
 
+Protected-device rollout additionally requires the OBS-08 cleanup drill in
+that runbook, including failed/unknown sweeps, backlog age and an independently
+evaluated missing schedule. Retain its predicate, delivery, acknowledgement and
+recovery evidence separately from the existing four-alert capacity artifact;
+the capacity artifact alone does not qualify protected-device maintenance.
+
 ### PRD-06: security assurance
 
 - The maintained threat model covers public verification, admin Access,
@@ -260,6 +266,9 @@ requirements are defined in
   key/credential correctness; runtime health, positive signed operations, and
   rotation evidence remain required.
 - Credential rotation is demonstrated without printing or committing values.
+  Protected-device rollout also requires the evidence in the
+  [key rotation runbook](device-bound-key-rotation.md), including saved-checkpoint
+  compatibility before removal of old public trust.
 - No critical or high finding is untriaged. Accepted lower-severity findings
   name an owner, deadline, and rationale.
 

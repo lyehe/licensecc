@@ -10,13 +10,14 @@ import { envelope } from "./response.js";
 export const adminApp = {
   async fetch(request: Request, env: Env): Promise<Response> {
     const pathname = new URL(request.url).pathname;
+    const finish=(response:Response):Response=>{if(/^\/api\/admin\/customers\/[^/]+\/bindings(?:\/|$)/.test(pathname))response.headers.set("cache-control","no-store");return response;};
     const match = matchRoute(request.method, pathname);
 
     if (match === null) {
       if (pathname.startsWith("/api/admin/")) {
         const id = requestId(request);
         const actor = await authenticate(request, env, id);
-        return actor instanceof Response ? actor : envelope(id, "not_found", undefined, 404);
+        return finish(actor instanceof Response ? actor : envelope(id, "not_found", undefined, 404));
       }
       if (pathname.startsWith("/api/sync/")) {
         const id = requestId(request);
@@ -27,14 +28,14 @@ export const adminApp = {
     }
 
     const id = requestId(request);
-    if (rejectsCrossSiteMutation(request)) return envelope(id, "cross_site_mutation_forbidden", undefined, 403);
+    if (rejectsCrossSiteMutation(request)) return finish(envelope(id, "cross_site_mutation_forbidden", undefined, 403));
     let actor = null;
     if (match.descriptor.authorization === "reader" || match.descriptor.authorization === "admin") {
       const authenticated = await authenticate(request, env, id);
-      if (authenticated instanceof Response) return authenticated;
+      if (authenticated instanceof Response) return finish(authenticated);
       if (match.descriptor.authorization === "admin") {
         const adminError = requireAdmin(authenticated, id);
-        if (adminError !== null) return adminError;
+        if (adminError !== null) return finish(adminError);
       }
       actor = authenticated;
     } else if (match.descriptor.authorization === "sync") {
@@ -50,6 +51,6 @@ export const adminApp = {
       actor,
       params: match.params,
     };
-    return match.descriptor.handle(context);
+    return finish(await match.descriptor.handle(context));
   },
 };

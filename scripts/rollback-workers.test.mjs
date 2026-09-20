@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
+import { pathToFileURL } from "node:url";
 
 import {
   SafeRollbackError,
@@ -16,6 +17,7 @@ import { captureDeploymentTransition, parseTransitionArguments } from "./capture
 import { parseProtectedWranglerArguments, runProtectedWrangler } from "./run-protected-wrangler.mjs";
 
 const repositoryRoot = resolve(import.meta.dirname, "..");
+const pinnedWranglerEntrypoint = resolve(repositoryRoot, "node_modules/wrangler/bin/wrangler.js");
 const workflowPath = join(repositoryRoot, ".github", "workflows", "rollback-workers.yml");
 const configPaths = Object.freeze({
   backend: "services/cloudflare-licensing-backend/wrangler.toml",
@@ -92,8 +94,9 @@ test("post-deploy evidence polls through stale state and requires a new sole-act
   const sleeps = [];
   const result = await captureDeploymentTransition("backend", before, {
     attempts: 3,
-    runCommand: async (_command, args) => {
-      assert.deepEqual(args.slice(0, 5), ["--no-install", "wrangler", "deployments", "list", "--json"]);
+    runCommand: async (command, args) => {
+      assert.equal(command, process.execPath);
+      assert.deepEqual(args.slice(0, 4), [pinnedWranglerEntrypoint, "deployments", "list", "--json"]);
       return { stdout: JSON.stringify(responses.shift()), exitCode: 0 };
     },
     sleep: async (milliseconds) => sleeps.push(milliseconds),
@@ -128,10 +131,12 @@ test("protected Wrangler wrapper allowlists commands and suppresses raw output",
   });
   assert.equal(result.deployment.versions[0].version_id, targetVersions.backend);
   assert.deepEqual(calls[0].args, [
-    "--no-install", "wrangler", "deployments", "list", "--json", "--config",
+    pinnedWranglerEntrypoint, "deployments", "list", "--json", "--config",
     "services/cloudflare-licensing-backend/wrangler.toml",
   ]);
-  assert.equal(calls[0].options.env.WRANGLER_LOG, "error");
+  assert.equal(calls[0].command, process.execPath);
+  assert.equal(calls[0].options.shell, undefined);
+  assert.equal(calls[0].options.env.WRANGLER_LOG, "log");
   assert.equal(calls[0].options.env.WRANGLER_WRITE_LOGS, "false");
   assert.throws(
     () => parseProtectedWranglerArguments(["--operation", "migrate", "--worker", "portal"]),
@@ -144,6 +149,35 @@ test("protected Wrangler wrapper allowlists commands and suppresses raw output",
     }),
     (error) => error instanceof Error && !error.message.includes(secret),
   );
+});
+
+test("missing pinned Wrangler fails through the real subprocess without package installation", async t => {
+  const root = mkdtempSync(join(tmpdir(), "licensecc missing wrangler "));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  mkdirSync(join(root, "scripts"));
+  for (const filename of ["run-protected-wrangler.mjs", "rollback-workers.mjs"]) {
+    copyFileSync(join(repositoryRoot, "scripts", filename), join(root, "scripts", filename));
+  }
+  const isolated = await import(pathToFileURL(join(root, "scripts/run-protected-wrangler.mjs")).href);
+  await assert.rejects(isolated.runProtectedWrangler({ operation: "deployments", worker: "backend" }),
+    error => error.message === "protected Wrangler command failed");
+});
+
+test("protected mutation commands keep bounded capture and error-level logs", async () => {
+  for (const operation of ["dry-run", "deploy", "migrate"]) {
+    const result = await runProtectedWrangler({ operation, worker: "backend" }, {
+      runCommand: async (command, args, options) => {
+        assert.equal(command, process.execPath);
+        assert.equal(args[0], pinnedWranglerEntrypoint);
+        assert.equal(options.env.WRANGLER_LOG, "error");
+        assert.equal(options.env.WRANGLER_WRITE_LOGS, "false");
+        assert.equal(options.shell, undefined);
+        assert.ok(options.maxBuffer > 0 && options.timeout > 0);
+        return { stdout: "private output", exitCode: 0 };
+      },
+    });
+    assert.deepEqual(result, { schema_version: 1, worker: "backend", operation, status: "succeeded" });
+  }
 });
 
 function fixtureRoot({ omit } = {}) {
@@ -180,15 +214,18 @@ function deployment(worker, versionId, sequence) {
 function fakeRunner({ malformedVersionFor, mismatchVersionFor, malformedDeploymentFor, failValidationFor, failRollbackFor } = {}) {
   const calls = [];
   const rolledBack = new Set();
-  const runCommand = async (command, args) => {
-    assert.equal(command, "npx");
+  const runCommand = async (command, args, options) => {
+    assert.equal(command, process.execPath);
+    assert.equal(args[0], pinnedWranglerEntrypoint);
+    assert.equal(options.env.WRANGLER_LOG, args.includes("--json") ? "log" : "error");
+    assert.equal(options.env.WRANGLER_WRITE_LOGS, "false");
     calls.push([...args]);
     const worker = workerFromArgs(args);
-    const operation = args[2];
+    const operation = args[1];
     if (operation === "versions") {
       if (worker === failValidationFor) return { stdout: "", exitCode: 17 };
       if (worker === malformedVersionFor) return { stdout: "not-json", exitCode: 0 };
-      const requestedId = args[4];
+      const requestedId = args[3];
       return {
         stdout: JSON.stringify({
           id: worker === mismatchVersionFor ? previousVersions[worker] : requestedId,
@@ -244,16 +281,16 @@ test("validates every target before rollback and emits only redacted deployment 
       sleep: async () => assert.fail("no post-deployment retry should be needed"),
     });
 
-    assert.deepEqual(calls.slice(0, 4).map((args) => [args[2], workerFromArgs(args)]), [
+    assert.deepEqual(calls.slice(0, 4).map((args) => [args[1], workerFromArgs(args)]), [
       ["versions", "portal"],
       ["deployments", "portal"],
       ["versions", "backend"],
       ["deployments", "backend"],
     ]);
-    assert.equal(calls.slice(0, 4).some((args) => args[2] === "rollback"), false);
-    assert.deepEqual(calls.filter((args) => args[2] === "rollback").map((args) => workerFromArgs(args)), ["portal", "backend"]);
-    for (const args of calls.filter((entry) => entry[2] === "rollback")) {
-      assert.equal(args[3], targetVersions[workerFromArgs(args)]);
+    assert.equal(calls.slice(0, 4).some((args) => args[1] === "rollback"), false);
+    assert.deepEqual(calls.filter((args) => args[1] === "rollback").map((args) => workerFromArgs(args)), ["portal", "backend"]);
+    for (const args of calls.filter((entry) => entry[1] === "rollback")) {
+      assert.equal(args[2], targetVersions[workerFromArgs(args)]);
       assert.ok(args.includes("--yes"));
       assert.equal(args[args.indexOf("--message") + 1], "Incident INC-1234 approved rollback");
     }
@@ -316,7 +353,7 @@ test("malformed or mismatched Wrangler JSON prevents every rollback command", as
         rollbackWorkers(requestFor(["backend", "portal"]), { root, runCommand }),
         (error) => error instanceof SafeRollbackError && ["MALFORMED_VERSION_JSON", "INVALID_VERSION_RESPONSE", "MALFORMED_DEPLOYMENT_JSON"].includes(error.code),
       );
-      assert.equal(calls.some((args) => args[2] === "rollback"), false);
+      assert.equal(calls.some((args) => args[1] === "rollback"), false);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -331,7 +368,7 @@ test("a validation command failure prevents mutation and a rollback failure stay
       rollbackWorkers(requestFor(["backend", "portal"]), { root: validationRoot, runCommand: validationRunner.runCommand }),
       (error) => assertSafeCode(error, "WRANGLER_COMMAND_FAILED"),
     );
-    assert.equal(validationRunner.calls.some((args) => args[2] === "rollback"), false);
+    assert.equal(validationRunner.calls.some((args) => args[1] === "rollback"), false);
   } finally {
     rmSync(validationRoot, { recursive: true, force: true });
   }

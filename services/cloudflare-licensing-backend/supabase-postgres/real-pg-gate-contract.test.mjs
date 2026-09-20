@@ -255,7 +255,7 @@ function requireFailureExit(facts) {
 function assertVerifyWorkerContract(sourceText, fileName) {
   const facts = moduleFacts(sourceText, fileName);
   requireImport(facts, "node:assert/strict", { defaultName: "assert" });
-  requireImport(facts, "../dist/index.js", { defaultName: "worker" });
+  requireImport(facts, "../dist/app.js", { defaultName: "worker" });
   requireImport(facts, "../test/contexts/fixtures.mjs", { named: ["requestProofFixture", "testKeyEnv", "validBody"] });
   requireImport(facts, "./db-postgres.mjs", { named: ["closePool", "createPostgresDatabase"] });
   requireCall(facts, "createPostgresDatabase", (args) => args[1] === "{workerSql:true}", "Worker DB must enable the fenced SQL translator");
@@ -502,7 +502,7 @@ test("the live PostgreSQL command has syntax-valid exact implementation drivers"
   const backend = JSON.parse(read("services/cloudflare-licensing-backend/package.json"));
   assert.equal(
     backend.scripts["test:pg:real"],
-    "npm run build && node supabase-postgres/verify-worker-real-pg.mjs && node supabase-postgres/smoke-worker-sql.mjs && node supabase-postgres/smoke-real-pg.mjs && node supabase-postgres/order-apply-smoke-real-pg.mjs",
+    "npm run build && node supabase-postgres/verify-worker-real-pg.mjs && node supabase-postgres/smoke-worker-sql.mjs && node supabase-postgres/smoke-real-pg.mjs && node supabase-postgres/order-apply-smoke-real-pg.mjs && node supabase-postgres/bound-device-real-pg.mjs",
   );
 
   realScripts.forEach((path, index) => contracts[index](read(path), path));

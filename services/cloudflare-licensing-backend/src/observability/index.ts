@@ -10,8 +10,11 @@ import {
 export type LogSeverity = "info" | "warn" | "error";
 
 const LOG_FIELD_NAMES = new Set([
+  "affected_rows",
   "assertion_ttl_seconds",
   "attempts",
+  "backlog_age_seconds",
+  "backlog_present",
   "client_hardening",
   "d1_duration_ms",
   "delivery_id",
@@ -21,8 +24,11 @@ const LOG_FIELD_NAMES = new Set([
   "event_type",
   "invalid_config_modes",
   "last_status",
+  "limit_reached",
+  "measured_at",
   "method",
   "mode",
+  "oldest_expired_at",
   "path",
   "request_id",
   "request_proof",

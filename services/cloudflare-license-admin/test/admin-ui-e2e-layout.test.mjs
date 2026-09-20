@@ -7,10 +7,13 @@ import { fileURLToPath } from "node:url";
 const directory = dirname(fileURLToPath(import.meta.url));
 const expectedSpecs = [
   "admin-ui.catalog.e2e.mjs",
+  "admin-ui.connections.e2e.mjs",
   "admin-ui.consequences.e2e.mjs",
   "admin-ui.lifecycle.e2e.mjs",
+  "admin-ui.navigation.e2e.mjs",
   "admin-ui.reads.e2e.mjs",
   "admin-ui.recovery.e2e.mjs",
+  "admin-ui.workspace.e2e.mjs",
 ];
 
 test("admin browser coverage stays partitioned by operator concern", () => {
@@ -26,7 +29,7 @@ test("admin browser coverage stays partitioned by operator concern", () => {
     assert.ok(localTitles.length > 0, `${path} must own browser scenarios`);
     titles.push(...localTitles);
   }
-  assert.equal(titles.length, 66);
+  assert.equal(titles.length, 95);
   assert.equal(new Set(titles).size, titles.length, "browser scenario titles must be unique");
 
   const fixture = readFileSync(join(directory, "admin-ui.fixture.mjs"), "utf8");

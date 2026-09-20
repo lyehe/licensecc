@@ -173,6 +173,14 @@ intentionally no token command-line option.
 
 ## Restore runbook
 
+Restore-drill Wrangler subprocesses request termination after ten minutes and
+have an 8 MiB captured-output limit. The synchronous launcher waits for the
+child to exit; ten minutes is not a guaranteed return deadline.
+JSON reads explicitly enable captured JSON output;
+mutations suppress routine logs, and Wrangler disk logging is disabled.
+A timeout or capture failure does not prove that a remote mutation stopped:
+inspect the confirmed scratch database before retrying the operation.
+
 For recent accidental writes or migrations, prefer D1 Time Travel first:
 
 ```sh
@@ -261,8 +269,15 @@ old. Missing, divergent, ahead-of-repository, or incomplete migration history
 fails closed. A migration upgrade requires `--scratch-config` pointing at the
 backend configuration.
 
+Device operation tombstones are durable counted state from migration 0038.
+Older manifests that omit counts for an already-present `device_bound_operations`
+table fail restore validation; they require explicit restore migration and
+revalidation, not an exemption treating tombstones as temporary records. Counts
+cannot prove the safety of restoring a snapshot taken before an operation existed;
+the protected-client cutover/restore procedure must address that rollback window.
+
 After the migration suffix is applied, the drill compares the normalized
-SQLite DDL signature for all 38 tables, 58 named indexes, and 18 triggers
+SQLite DDL signature for all 49 tables, 74 named indexes, and 50 triggers
 against the canonical generated `cloudflare-licensing-backend/schema.sql`
 signature. Evidence emits only SHA-256 signatures and object/count metadata,
 not DDL or row values. High-churn/swept delivery, meter, nonce, session, and

@@ -3,9 +3,13 @@
 
 import { assembleComponents, assemblePaths, assertUniqueOperationIds } from "./assemble.js";
 import { openApiComponents } from "./components.js";
+import { passwordPaths } from "./paths/password.js";
+import { oauthPaths } from "./paths/oauth.js";
 import { authPaths } from "./paths/auth.js";
 import { opsPaths } from "./paths/ops.js";
 import { selfServicePaths } from "./paths/self-service.js";
+import { deviceConsentPaths } from "./paths/device-consent.js";
+import { deviceBindingPaths } from "./paths/device-bindings.js";
 
 export interface OpenApiDocument {
   openapi: "3.1.0";
@@ -19,7 +23,7 @@ export interface OpenApiDocument {
   };
 }
 
-const paths = assemblePaths(authPaths, selfServicePaths, opsPaths);
+const paths = assemblePaths(authPaths, oauthPaths, passwordPaths, selfServicePaths, deviceConsentPaths, deviceBindingPaths, opsPaths);
 assertUniqueOperationIds(paths);
 
 export const openApiDocument: OpenApiDocument = {

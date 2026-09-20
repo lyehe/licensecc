@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { existsSync, lstatSync, readFileSync, readdirSync } from "node:fs";
 import { join, relative } from "node:path";
 import { spawnSync } from "node:child_process";
+import { parse } from "acorn";
 
 const MAX_BUNDLE_BYTES = 128 * 1024 * 1024;
 const parsedWorkerSources = new Map();
@@ -41,117 +42,19 @@ function parseWorkerModule(bytes, label) {
   return source;
 }
 
-function workerTokens(source) {
-  const tokens = [];
-  const regexMayStartAfter = new Set(["(", "[", "{", ",", ";", ":", "=", "!", "?", "&", "|", "+", "-", "*", "%", "^", "~", "<", ">", "return", "throw", "case", "delete", "void", "typeof", "new", "in", "of", "yield", "await"]);
-  const skipQuoted = (cursor, quote) => {
-    for (let index = cursor + 1; index < source.length; index += 1) {
-      if (source[index] === "\\") index += 1;
-      else if (source[index] === quote) return index + 1;
-    }
-    return source.length;
-  };
-  let cursor = 0;
-  while (cursor < source.length) {
-    const character = source[cursor];
-    const next = source[cursor + 1];
-    if (/\s/u.test(character)) {
-      cursor += 1;
-    } else if (character === "/" && next === "/") {
-      const end = source.indexOf("\n", cursor + 2);
-      cursor = end === -1 ? source.length : end + 1;
-    } else if (character === "/" && next === "*") {
-      const end = source.indexOf("*/", cursor + 2);
-      cursor = end === -1 ? source.length : end + 2;
-    } else if (character === '"' || character === "'") {
-      let value = "";
-      let index = cursor + 1;
-      for (; index < source.length; index += 1) {
-        if (source[index] === "\\") {
-          value += source[index + 1] ?? "";
-          index += 1;
-        } else if (source[index] === character) {
-          index += 1;
-          break;
-        } else {
-          value += source[index];
-        }
-      }
-      tokens.push({ kind: "string", value });
-      cursor = index;
-    } else if (character === "`") {
-      cursor = skipQuoted(cursor, "`");
-    } else if (character === "/" && regexMayStartAfter.has(tokens.at(-1)?.value)) {
-      cursor = skipQuoted(cursor, "/");
-      while (/[A-Za-z]/u.test(source[cursor] ?? "")) cursor += 1;
-    } else if (/[A-Za-z_$]/u.test(character)) {
-      const match = /^[A-Za-z_$][\w$]*/u.exec(source.slice(cursor));
-      tokens.push({ kind: "identifier", value: match[0] });
-      cursor += match[0].length;
-    } else {
-      tokens.push({ kind: "punctuator", value: character });
-      cursor += 1;
-    }
-  }
-  return tokens;
-}
-
-/** Ask Node's module parser for exports without evaluating the bundle. */
-function moduleExportsDefault(source) {
-  const inspector = [
-    'import vm from "node:vm";',
-    'import { readFileSync } from "node:fs";',
-    'const source = readFileSync(0, "utf8");',
-    'const module = new vm.SourceTextModule(source);',
-    'await module.link(() => { throw new Error("static import is not expected in a Worker bundle"); });',
-    'process.stdout.write(JSON.stringify(Object.getOwnPropertyNames(module.namespace)));',
-  ].join("");
-  const parsed = spawnSync(process.execPath, ["--experimental-vm-modules", "--input-type=module", "-e", inspector], {
-    input: source,
-    encoding: "utf8",
-    windowsHide: true,
-  });
-  if (parsed.error || parsed.status !== 0) return false;
-  try {
-    return JSON.parse(parsed.stdout).includes("default");
-  } catch {
-    return false;
-  }
-}
-
+/** Inspect syntax only: Cloudflare runtime imports cannot be linked in Node. */
 function hasWorkerEntrypoint(source) {
-  if (moduleExportsDefault(source)) return true;
-  const tokens = workerTokens(source);
-  let depth = 0;
-  for (let index = 0; index < tokens.length; index += 1) {
-    const token = tokens[index];
-    if (token.value === "{") {
-      depth += 1;
-      continue;
+  const module = parse(source, { ecmaVersion: "latest", sourceType: "module" });
+  return module.body.some((statement) => {
+    if (statement.type === "ExportDefaultDeclaration") return true;
+    if (statement.type === "ExportNamedDeclaration") {
+      return statement.specifiers.some(({ exported }) => (exported.name ?? exported.value) === "default");
     }
-    if (token.value === "}") {
-      depth = Math.max(0, depth - 1);
-      continue;
-    }
-    if (depth !== 0) continue;
-    if (token.value === "export" && tokens[index + 1]?.value === "default") return true;
-    if (token.value === "export" && tokens[index + 1]?.value === "{") {
-      let braceDepth = 0;
-      for (let position = index + 1; position < tokens.length; position += 1) {
-        if (tokens[position].value === "{") braceDepth += 1;
-        else if (tokens[position].value === "}") {
-          braceDepth -= 1;
-          if (braceDepth === 0) break;
-        } else if (braceDepth === 1 && (tokens[position].value === "default" || (tokens[position].value === "as" && tokens[position + 1]?.value === "default"))) {
-          return true;
-        }
-      }
-    }
-    if (token.value === "addEventListener" && tokens[index + 1]?.value === "(" && tokens[index + 2]?.kind === "string" && tokens[index + 2]?.value === "fetch") {
-      return true;
-    }
-  }
-  return false;
+    const call = statement.type === "ExpressionStatement" ? statement.expression : null;
+    return call?.type === "CallExpression"
+      && call.callee.type === "Identifier" && call.callee.name === "addEventListener"
+      && call.arguments[0]?.type === "Literal" && call.arguments[0].value === "fetch";
+  });
 }
 
 /** Require a parsed non-empty JavaScript bundle and an explicit Worker fetch/module entrypoint. */

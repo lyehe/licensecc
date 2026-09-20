@@ -25,7 +25,7 @@ import { fileURLToPath } from "node:url";
 
 // The worker is imported from the COMPILED output (the established test pattern; node:test does
 // not type-strip .ts). `npm run test:sql` builds first; the standalone gate runs after a build.
-import worker from "../../dist/index.js";
+import worker from "../../dist/app.js";
 import { generateAccountToken, hashToken, _resetRevocationFloorForTests } from "../../src/auth/account_token.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));

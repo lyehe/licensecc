@@ -38,7 +38,7 @@ export function CatalogFeatureEditor({
   onCancel: () => void;
 }): React.ReactElement {
   return <>
-    <h2>{editingId === null ? "Catalog feature" : "Edit feature"}</h2>
+    <h2>{editingId === null ? "New feature" : "Edit feature"}</h2>
     <form aria-label="Catalog feature" onSubmit={onSubmit}>
       <label>Project<input disabled={editingId !== null} value={form.project} onChange={(event) => onChange({ ...form, project: event.target.value })} /></label>
       <label>Feature key<input disabled={editingId !== null} value={form.feature_key} onChange={(event) => onChange({ ...form, feature_key: event.target.value })} /></label>
@@ -48,7 +48,7 @@ export function CatalogFeatureEditor({
       <label>Description<textarea value={form.description} onChange={(event) => onChange({ ...form, description: event.target.value })} /></label>
       <div className="actions">
         <button disabled={busy || !actionable} type="submit">{editingId === null ? "Create feature" : "Update feature"}</button>
-        {editingId !== null && <button type="button" disabled={busy} onClick={onCancel}>Cancel</button>}
+        <button type="button" disabled={busy} onClick={onCancel}>Cancel</button>
       </div>
     </form>
   </>;
@@ -72,7 +72,7 @@ export function CatalogPlanEditor({
   onCancel: () => void;
 }): React.ReactElement {
   return <>
-    <h2>{editingId === null ? "Catalog plan" : "Edit plan"}</h2>
+    <h2>{editingId === null ? "New plan" : "Edit plan"}</h2>
     <form aria-label="Catalog plan" onSubmit={onSubmit}>
       <label>Project<input disabled={editingId !== null} value={form.project} onChange={(event) => onChange({ ...form, project: event.target.value })} /></label>
       <label>Plan key<input disabled={editingId !== null} value={form.plan_key} onChange={(event) => onChange({ ...form, plan_key: event.target.value })} /></label>
@@ -82,7 +82,7 @@ export function CatalogPlanEditor({
       <label>Description<textarea value={form.description} onChange={(event) => onChange({ ...form, description: event.target.value })} /></label>
       <div className="actions">
         <button disabled={busy || !actionable} type="submit">{editingId === null ? "Create plan" : "Update plan"}</button>
-        {editingId !== null && <button type="button" disabled={busy} onClick={onCancel}>Cancel</button>}
+        <button type="button" disabled={busy} onClick={onCancel}>Cancel</button>
       </div>
     </form>
   </>;
@@ -134,8 +134,8 @@ export function CatalogPlanFeatureEditor({
       <label>Status<select value={form.status} onChange={(event) => onChange({ ...form, status: event.target.value as CatalogPlanFeature["status"] })}><option value="active">active</option><option value="disabled">disabled</option></select></label>
       <label>Pool size<input type="number" value={form.pool_size} onChange={(event) => onChange({ ...form, pool_size: event.target.value })} /></label>
       <label>Max devices<input type="number" value={form.max_active_devices} onChange={(event) => onChange({ ...form, max_active_devices: event.target.value })} /></label>
-      <label>Max borrow<input type="number" value={form.max_borrow_sec} onChange={(event) => onChange({ ...form, max_borrow_sec: event.target.value })} /></label>
-      <button disabled={busy || !plansSettled || !activePoliciesSettled || selectedPlanId === ""} type="submit">Save plan feature</button>
+      <label>Max borrow (seconds)<input type="number" value={form.max_borrow_sec} onChange={(event) => onChange({ ...form, max_borrow_sec: event.target.value })} /></label>
+      <button disabled={busy || !plansSettled || !activePoliciesSettled || !selectedPlanId || !plans.some((plan) => plan.id === selectedPlanId)} type="submit">Save plan feature</button>
     </form>
   </>;
 }
@@ -157,6 +157,7 @@ export function PlanProjectionEditor({
 }): React.ReactElement {
   return <>
     <h2>Plan projection</h2>
+    <p>Preview the access records this plan will create, update, or disable for a license, then apply the reviewed result.</p>
     <form aria-label="Plan projection" onSubmit={onSubmit}>
       <label>Project<input value={form.project} onChange={(event) => onUpdate((current) => ({ ...current, project: event.target.value }))} /></label>
       <label>License ID<input value={form.license_id} onChange={(event) => onUpdate((current) => ({ ...current, license_id: event.target.value }))} /></label>
@@ -191,6 +192,7 @@ export function CatalogImportEditor({
 }): React.ReactElement {
   return <section data-focus-section="catalog-import">
     <h2>Catalog import</h2>
+    <p>Preview a catalog manifest and review every planned transition before applying it.</p>
     <form aria-label="Catalog import" onSubmit={(event) => { event.preventDefault(); onPreview(); }}>
       <label>Manifest JSON<textarea value={text} onChange={(event) => onUpdate(event.target.value)} /></label>
       <div className="actions"><button type="submit" disabled={busy || text.trim() === ""}>Preview import</button><button type="button" disabled={busy || previewBinding === null} onClick={onApply}>Apply import</button></div>

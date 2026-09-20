@@ -23,6 +23,7 @@ export interface EntitlementDeviceRecord {
 
 export interface EntitlementRecord {
   id: string;
+  enforcement_mode: "legacy" | "device_bound_v1";
   project: string;
   feature: string;
   license_fingerprint: string;
@@ -69,6 +70,11 @@ export interface EntitlementInput {
   notes?: string;
   customer_id?: string | null;
   license_id?: string | null;
+}
+
+/** Admin create only; ordinary sync and PATCH cannot select enforcement. */
+export interface EntitlementCreateInput extends EntitlementInput {
+  enforcement_mode?: "legacy" | "device_bound_v1";
 }
 
 export interface EntitlementPatch {

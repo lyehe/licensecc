@@ -95,11 +95,13 @@ export function usePlanProjectionWorkflow({
       try {
         digest = await planProjectionInputDigest(body);
       } catch (error) {
+        if (revision !== revisionRef.current) return;
         setMessage(error instanceof Error ? error.message : "plan_projection_digest_failed");
         setPreviewBinding(null);
         setApplyResult(null);
         return;
       }
+      if (revision !== revisionRef.current) return;
       setPreviewBinding(null);
       setApplyResult(null);
       const result = await api<PlanProjectionPreviewResponse>(planProjectionPreviewPath(), {
@@ -175,10 +177,15 @@ export function usePlanProjectionWorkflow({
         appliedResult = parsed.data;
       },
       refresh: async (): Promise<ExactReadProof | null> => {
-        const proof = await refreshCore(true, isCurrent);
-        if (proof !== EXACT_READ_PROOF || !isCurrent() || appliedResult === null) return null;
-        invalidate();
-        setApplyResult(appliedResult);
+        // A retained replay may settle after the editor has been hidden. The
+        // current core readers still require their own committed fenced GETs;
+        // an old form revision must not make GET-only recovery impossible.
+        const proof = await refreshCore(true);
+        if (proof !== EXACT_READ_PROOF) return null;
+        if (isCurrent() && appliedResult !== null) {
+          invalidate();
+          setApplyResult(appliedResult);
+        }
         return EXACT_READ_PROOF;
       },
       isCurrent,

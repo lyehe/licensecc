@@ -61,6 +61,8 @@ export function makeAdminApiFixture() {
     orderCursors: [],
     entitlementReads: [],
     entitlementDetailReads: [],
+    customerReads: [],
+    customerCursors: [],
   };
   const catalogFeatures = [];
   const catalogPlans = [];
@@ -154,6 +156,12 @@ export function makeAdminApiFixture() {
     // must echo.
     catalogImportApplyResponseTransforms: [],
     catalogImportAbortAfterApply: false,
+    // Optional list fixture controls. Defaults preserve the compact two-row
+    // customer fixture used by the existing browser suite.
+    customerRows: null,
+    customerPageSize: null,
+    settingsFailure: null,
+    settingsResponse: null,
   };
   let nextProjectionPreviewId = 1;
   let nextCatalogImportPreviewId = 1;
@@ -466,11 +474,135 @@ export function makeAdminApiFixture() {
     { id: "cus_globex", name: "Globex", email: "billing@globex.test", status: "disabled", external_ref: "", created_at: 1_700_000_500, updated_at: 1_700_000_900, entitlement_count: 0, active_entitlement_count: 0 },
   ];
 
+  /**
+   * Opt-in layout data helpers. `seed.customers(50)` adds ordinary customer
+   * rows; `seed.realistic()` adds 50 customers and 50 entitlements containing
+   * long identifiers/names, blank names, lifecycle states, and validity edge
+   * cases. Set `behavior.customerPageSize` (for example, 25) to exercise the
+   * normal cursor append flow without changing the production-like default.
+   */
+  function seedCustomer(overrides = {}) {
+    const index = customers.length + 1;
+    const row = {
+      id: `cus_seed_${String(index).padStart(3, "0")}`,
+      name: `Seed customer ${index}`,
+      email: `customer-${index}@example.test`,
+      status: index % 4 === 0 ? "disabled" : "active",
+      external_ref: `seed-${index}`,
+      created_at: now - index * 60,
+      updated_at: now - index * 30,
+      entitlement_count: 0,
+      active_entitlement_count: 0,
+      ...overrides,
+    };
+    customers.push(row);
+    return row;
+  }
+
+  function seedCustomers(countOrRows = 50) {
+    if (Array.isArray(countOrRows)) return countOrRows.map((row) => seedCustomer(row));
+    const count = Number.isInteger(countOrRows) && countOrRows >= 0 ? countOrRows : 50;
+    return Array.from({ length: count }, () => seedCustomer());
+  }
+
+  function seedEntitlement(overrides = {}) {
+    const index = nextEntitlementId;
+    const status = overrides.status ?? "active";
+    const poolSize = overrides.pool_size ?? 0;
+    const row = {
+      id: `ent-${index}`,
+      project: "DEFAULT",
+      feature: `seed-${index}`,
+      license_fingerprint: index.toString(16).padStart(64, "0"),
+      device_hash: "",
+      status,
+      assertion_ttl_seconds: 300,
+      revocation_seq: 1,
+      valid_from: null,
+      valid_until: null,
+      notes: "",
+      customer_id: null,
+      license_id: null,
+      policy_id: null,
+      is_trial: 0,
+      trial_expiration_basis: null,
+      trial_duration_sec: 0,
+      trial_one_per_device: 0,
+      trial_require_device_proof: 0,
+      trial_started_at: null,
+      trial_device_hash: null,
+      max_active_devices: 1,
+      lease_seconds: 0,
+      rebind_window_sec: 0,
+      pool_size: poolSize,
+      heartbeat_grace_sec: 300,
+      max_borrow_sec: 0,
+      allow_overdraft: 0,
+      meter_quota: 0,
+      meter_period_sec: 2_592_000,
+      license_mode: poolSize > 0 ? "floating" : "node_locked",
+      created_at: now,
+      updated_at: now,
+      ...overrides,
+    };
+    nextEntitlementId += 1;
+    entitlements.push(row);
+    return row;
+  }
+
+  function seedEntitlements(countOrRows = 50) {
+    if (Array.isArray(countOrRows)) return countOrRows.map((row) => seedEntitlement(row));
+    const count = Number.isInteger(countOrRows) && countOrRows >= 0 ? countOrRows : 50;
+    return Array.from({ length: count }, () => seedEntitlement());
+  }
+
+  function seedRealisticRecords({ customerCount = 50, entitlementCount = 50 } = {}) {
+    const seededCustomers = Array.from({ length: customerCount }, (_unused, index) => seedCustomer({
+      id: index === 0 ? "cus_enterprise_northwind_global_licensing_operations_0001" : `cus_layout_${String(index + 1).padStart(3, "0")}`,
+      name: index === 0
+        ? "Northwind Global Infrastructure and Licensing Operations for Distributed Manufacturing"
+        : index === 1 ? "" : `Layout customer ${index + 1}`,
+      email: `layout-${index + 1}@example.test`,
+      status: index % 4 === 0 ? "disabled" : "active",
+      external_ref: `layout-${index + 1}`,
+    }));
+    const seededEntitlements = Array.from({ length: entitlementCount }, (_unused, index) => {
+      const validity = index % 5;
+      const status = ["active", "active", "active", "active", "disabled", "revoked"][index % 6];
+      return seedEntitlement({
+        id: index === 0 ? "ent_enterprise_northwind_global_licensing_operations_0001" : `ent-layout-${String(index + 1).padStart(3, "0")}`,
+        feature: index === 0 ? "distributed-manufacturing-enterprise" : `layout-feature-${index + 1}`,
+        license_fingerprint: (index + 1000).toString(16).padStart(64, "0"),
+        customer_id: seededCustomers[index % seededCustomers.length]?.id ?? null,
+        status,
+        valid_from: validity === 1 ? now + 7 * 86_400 : null,
+        valid_until: validity === 2 ? now - 86_400 : validity === 3 ? now + 7 * 86_400 : null,
+        pool_size: index % 4 === 0 ? 5 : 0,
+        license_mode: index % 4 === 0 ? "floating" : "node_locked",
+      });
+    });
+    for (const customer of seededCustomers) {
+      const linked = seededEntitlements.filter((item) => item.customer_id === customer.id);
+      customer.entitlement_count = linked.length;
+      customer.active_entitlement_count = linked.filter((item) => item.status === "active").length;
+    }
+    return { customers: seededCustomers, entitlements: seededEntitlements };
+  }
+
   function customerDetail(id) {
     const customer = customers.find((item) => item.id === id);
     return {
       customer: { ...customer, metadata_json: "{}" },
-      entitlements: [],
+      entitlements: entitlements.filter((item) => item.customer_id === id).map((item) => ({
+        project: item.project,
+        feature: item.feature,
+        license_fingerprint: item.license_fingerprint,
+        status: item.status,
+        valid_from: item.valid_from,
+        valid_until: item.valid_until,
+        revocation_seq: item.revocation_seq,
+        updated_at: item.updated_at,
+      })),
       account_tokens: [],
       licenses: [],
       orders: [],
@@ -570,6 +702,23 @@ export function makeAdminApiFixture() {
     if (method === "GET" && path === "/api/admin/summary") {
       return fulfill(200, makeEnvelope("summary", summary()));
     }
+    if (method === "GET" && path === "/api/admin/settings") {
+      if (behavior.settingsResponse !== null) {
+        const response = behavior.settingsResponse;
+        return fulfill(response.status ?? 200, fixtureResponseBody(response));
+      }
+      if (behavior.settingsFailure === "malformed") {
+        return route.fulfill({ status: 200, contentType: "application/json", body: "not-json" });
+      }
+      if (behavior.settingsFailure === "response-error") {
+        return fulfill(503, { ok: false, code: "settings_unavailable", request_id: "ui-e2e-settings-unavailable" });
+      }
+      return fulfill(200, makeEnvelope("settings", {
+        environment: "staging",
+        public_verifier_url: "https://verifier.example.test",
+        auth: "cloudflare-access",
+      }));
+    }
     // Workstream C — global search. Fans out a fixed set keyed off the loaded entitlements + customers.
     if (method === "GET" && path === "/api/admin/search") {
       const q = url.searchParams.get("q") ?? "";
@@ -635,7 +784,7 @@ export function makeAdminApiFixture() {
       return fulfill(200, makeEnvelope("report", {
         generated_at: now,
         entitlements: reportEntitlements,
-        customers: { total: customers.length, active: 1, disabled: 1 },
+        customers: { total: customers.length, active: customers.filter((item) => item.status === "active").length, disabled: customers.filter((item) => item.status === "disabled").length },
         account_tokens: { active: 0 },
         licenses: { total: 0 },
         fulfillment: { accepted: 0, processed: 0, superseded: 0, rejected: 0, stale_accepted: 0, events_24h: 0, events_7d: 0 },
@@ -691,10 +840,59 @@ export function makeAdminApiFixture() {
       }));
     }
     if (method === "GET" && path === "/api/admin/customers") {
-      return fulfill(200, makeEnvelope("customers_listed", { items: customers.map((item) => ({ ...item })), next_cursor: null }));
+      const cursor = url.searchParams.get("cursor");
+      const limitParam = url.searchParams.get("limit");
+      const start = cursor === null || cursor === "" ? 0 : Number(cursor);
+      const requestedLimit = limitParam === null || limitParam === "" ? null : Number(limitParam);
+      const pageSize = behavior.customerPageSize ?? requestedLimit ?? 50;
+      if (!Number.isSafeInteger(start) || start < 0 || !Number.isSafeInteger(pageSize) || pageSize < 1 || pageSize > 100) {
+        return fulfill(400, { ok: false, code: "invalid_request", request_id: "ui-e2e-customers-invalid-page" });
+      }
+      const status = url.searchParams.get("status");
+      const query = url.searchParams.get("q")?.toLowerCase() ?? "";
+      const rows = (behavior.customerRows ?? customers).filter((item) =>
+        (status === null || item.status === status) &&
+        (query === "" || item.id.toLowerCase().includes(query) || (item.login_email ?? "").toLowerCase().includes(query) || item.email.toLowerCase().includes(query) || item.name.toLowerCase().includes(query)),
+      );
+      requests.customerReads.push(url.search);
+      requests.customerCursors.push(cursor);
+      const items = rows.slice(start, start + pageSize).map((item) => ({ ...item }));
+      return fulfill(200, makeEnvelope("customers_listed", {
+        items,
+        next_cursor: start + pageSize < rows.length ? String(start + pageSize) : null,
+      }));
     }
     if (method === "GET" && path === "/api/admin/licenses") {
       return fulfill(200, makeEnvelope("licenses_listed", { items: behavior.licenseRows.map((item) => ({ ...item })), next_cursor: null }));
+    }
+    if (method === "GET" && path === "/api/admin/catalog/projects") {
+      const projects = [...new Set([...entitlements, ...catalogFeatures, ...catalogPlans].map(item => item.project))].sort();
+      return fulfill(200, makeEnvelope("projects_listed", { items: projects.map(project => ({ project })), next_cursor: null }));
+    }
+    const protectedListMatch = /^\/api\/admin\/customers\/([^/]+)\/bindings$/.exec(path);
+    if(method === "GET" && protectedListMatch) return fulfill(200,makeEnvelope("customer_bindings",{
+      customer:{id:decodeURIComponent(protectedListMatch[1]),status:"active"},operator:{subject:"test-admin",actor_type:"access",role:"admin"},server_time:now,items:[],next_cursor:null,
+    }));
+    const workspaceMatch = /^\/api\/admin\/customers\/([^/]+)\/(apps|access|resources)$/.exec(path);
+    if (method === "GET" && workspaceMatch) {
+      const customerId = decodeURIComponent(workspaceMatch[1]);
+      const detail = customerDetail(customerId);
+      if (!detail) return fulfill(404, makeEnvelope("not_found", undefined, false));
+      const owned = entitlements.filter(item => item.customer_id === customerId && (!url.searchParams.has("project") || item.project === url.searchParams.get("project")));
+      const view = workspaceMatch[2];
+      const items = view === "access" ? owned.map(publicRecord) : view === "resources" ? [] : [...new Set(owned.map(item => item.project))].sort().map(project => {
+        const grants = owned.filter(item => item.project === project);
+        const expiries = grants.map(item => item.valid_until).filter(value => value !== null);
+        return { project, grant_count: grants.length, enabled_count: grants.filter(item => item.status === "active").length,
+          in_date_count: grants.filter(item => item.status === "active" && (item.valid_from === null || item.valid_from <= now) && (item.valid_until === null || item.valid_until > now)).length,
+          earliest_expiry: expiries.length ? Math.min(...expiries) : null, latest_expiry: expiries.length ? Math.max(...expiries) : null, no_expiry_count: grants.length - expiries.length };
+      });
+      const offset = Number(url.searchParams.get("cursor") || 0);
+      const limit = Number(url.searchParams.get("limit") || 100);
+      return fulfill(200, makeEnvelope(view === "apps" ? "customer_apps" : view === "access" ? "entitlements_listed" : "customer_resources", {
+        items: items.slice(offset, offset + limit), next_cursor: items.length > offset + limit ? String(offset + limit) : null,
+        ...(view === "access" ? {} : { customer: detail.customer, server_time: now }),
+      }));
     }
     const customerDetailMatch = /^\/api\/admin\/customers\/([^/]+)$/.exec(path);
     if (method === "GET" && customerDetailMatch !== null) {
@@ -797,6 +995,8 @@ export function makeAdminApiFixture() {
       const feature = url.searchParams.get("feature");
       const status = url.searchParams.get("status");
       const filteredEntitlements = entitlements.filter((item) =>
+        (!url.searchParams.has("id") || item.id === url.searchParams.get("id")) &&
+        (!url.searchParams.has("customer_id") || item.customer_id === url.searchParams.get("customer_id")) &&
         (project === null || item.project === project) &&
         (feature === null || item.feature === feature) &&
         (status === null || item.status === status),
@@ -1438,6 +1638,7 @@ export function makeAdminApiFixture() {
       const floating = body.feature === "float" || (body.pool_size ?? 0) > 0;
       const row = {
         id: `ent-${nextEntitlementId}`,
+        enforcement_mode: body.enforcement_mode ?? "legacy",
         project: body.project,
         feature: body.feature,
         license_fingerprint: body.license_fingerprint,
@@ -1624,6 +1825,40 @@ export function makeAdminApiFixture() {
     behavior,
     projectionState,
     catalogImportState,
-    seed: { policy: seedPolicy, webhook: seedWebhook, catalogFeature: seedCatalogFeature, catalogPlan: seedCatalogPlan },
+    seed: {
+      policy: seedPolicy,
+      webhook: seedWebhook,
+      catalogFeature: seedCatalogFeature,
+      catalogPlan: seedCatalogPlan,
+      customer: seedCustomer,
+      customers: seedCustomers,
+      entitlement: seedEntitlement,
+      entitlements: seedEntitlements,
+      realistic: seedRealisticRecords,
+    },
   };
+}
+
+export function makeProtectedConnectionsFixture(){
+  const base=makeAdminApiFixture(),id=Buffer.alloc(16,1).toString('base64url'),posts=[];
+  const behavior={drop:false,failRead:false,malformed:false,role:'admin',subject:'operator-one',status:'active',postFailure:null,reviewGate:null,detailFailure:false};
+  const row={binding_id:id,label:'Design workstation',project:'COLMAP',feature:'PRO',license_fingerprint:'a'.repeat(64),state:'active',generation:1,revision:0,hold_until:1900000000,last_proof_at:1760000000,created_at:1750000000};
+  const context=()=>({customer:{id:'cus_acme',status:behavior.status},operator:{subject:behavior.subject,actor_type:'access',role:behavior.role},server_time:1760000000});
+  return {behavior,posts,row,async route(route){
+    const request=route.request(),url=new URL(request.url());
+    if(behavior.detailFailure && url.pathname==='/api/admin/customers/cus_acme')return route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({ok:false,code:'temporarily_unavailable',request_id:'detail-failure'})});
+    if(!url.pathname.includes('/customers/cus_acme/bindings'))return base.route(route);
+    const send=(status,body)=>route.fulfill({status,contentType:'application/json',body:JSON.stringify(body)});
+    if(request.method()==='POST'){
+      posts.push({body:request.postData(),key:request.headers()['idempotency-key'],operator:request.headers()['x-expected-operator']});
+      if(behavior.postFailure)return send(404,{ok:false,code:behavior.postFailure,request_id:'post-failure'});
+      row.state='retiring';row.revision=1;row.generation=2;
+      if(behavior.drop){behavior.drop=false;return route.abort();}
+      return send(200,makeEnvelope('binding_retired',{binding_id:id,state:'retiring',revision:1,generation:2,effective_release_at:row.hold_until}));
+    }
+    if(behavior.failRead)return send(503,{ok:false,code:'temporarily_unavailable',request_id:'read-failure'});
+    if(url.searchParams.has('binding_id') && behavior.reviewGate)await behavior.reviewGate;
+    if(url.pathname.endsWith('/events'))return send(200,makeEnvelope('binding_events',{...context(),binding_id:id,items:posts.length?[{id:1,event_type:'retire',actor:'operator:access:operator-one',occurred_at:1760000000}]:[],next_cursor:null}));
+    return send(200,makeEnvelope('customer_bindings',{...context(),items:behavior.malformed===true?[null]:behavior.malformed==='array-state'?[{...row,state:['active']}]:[{...row}],next_cursor:null}));
+  }};
 }

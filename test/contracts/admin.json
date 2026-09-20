@@ -10,6 +10,30 @@
     },
     {
       "method": "GET",
+      "path": "/api/admin/customers/{id}/bindings"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/customers/{id}/bindings/{bindingId}/events"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/customers/{id}/bindings/{bindingId}/retire"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/customers"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/customers/{id}/apps"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/customers/{id}/resources"
+    },
+    {
+      "method": "GET",
       "path": "/api/admin/summary"
     },
     {
@@ -27,6 +51,14 @@
     {
       "method": "GET",
       "path": "/api/admin/audit/verify"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/customers/{id}/access"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/catalog/projects"
     },
     {
       "method": "GET",
@@ -262,12 +294,20 @@
     }
   ],
   "API_BINDING_KEYS": [
+    "GET /api/admin/customers/{id}/bindings",
+    "GET /api/admin/customers/{id}/bindings/{bindingId}/events",
+    "POST /api/admin/customers/{id}/bindings/{bindingId}/retire",
+    "GET /api/admin/customers/{id}/apps",
+    "GET /api/admin/customers/{id}/resources",
     "GET /api/admin/summary",
     "GET /api/admin/report",
     "GET /api/admin/report/timeseries",
     "GET /api/admin/report/expiring",
     "GET /api/admin/audit/verify",
+    "GET /api/admin/customers/{id}/access",
+    "GET /api/admin/catalog/projects",
     "GET /api/admin/customers",
+    "POST /api/admin/customers",
     "GET /api/admin/customers/{id}",
     "POST /api/admin/customers/{id}/disable",
     "POST /api/admin/customers/{id}/reenable",
@@ -1257,6 +1297,13 @@
                 "id": {
                   "type": "string"
                 },
+                "login_email": {
+                  "description": "Password login address; not proof of email ownership.",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
                 "metadata_json": {
                   "type": [
                     "string",
@@ -1447,6 +1494,13 @@
             "id": {
               "type": "string"
             },
+            "login_email": {
+              "description": "Password login address; not proof of email ownership.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "name": {
               "type": "string"
             },
@@ -1534,6 +1588,85 @@
                 "code",
                 "data"
               ],
+              "type": "object"
+            }
+          ]
+        },
+        "EntitlementCreateInput": {
+          "allOf": [
+            {
+              "$ref": "#/components/schemas/EntitlementInput"
+            },
+            {
+              "if": {
+                "properties": {
+                  "enforcement_mode": {
+                    "const": "device_bound_v1"
+                  }
+                },
+                "required": [
+                  "enforcement_mode"
+                ]
+              },
+              "properties": {
+                "enforcement_mode": {
+                  "description": "Create-only selection. Omission inserts legacy or preserves existing mode. Explicit mode must match an existing row; no in-place conversion. Protected grants require an active customer, matching license/project, zero pool, no legacy device hash/history, and usable policy. Explicit retries require the same tuple and mode; historical missing-mode replies conflict.",
+                  "enum": [
+                    "legacy",
+                    "device_bound_v1"
+                  ],
+                  "type": "string"
+                }
+              },
+              "then": {
+                "properties": {
+                  "customer_id": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "device_hash": {
+                    "const": ""
+                  },
+                  "feature": {
+                    "pattern": "^[A-Za-z0-9_.:-]{1,15}(?![\\s\\S])",
+                    "type": "string"
+                  },
+                  "license_fingerprint": {
+                    "maxLength": 64,
+                    "minLength": 64,
+                    "pattern": "^[a-f0-9]{64}$",
+                    "type": "string"
+                  },
+                  "license_id": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "project": {
+                    "pattern": "^[A-Za-z0-9_.:-]{1,127}(?![\\s\\S])",
+                    "type": "string"
+                  },
+                  "valid_from": {
+                    "maximum": 9007199254740991,
+                    "minimum": 0,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "valid_until": {
+                    "maximum": 9007199254740991,
+                    "minimum": 0,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "customer_id",
+                  "license_id"
+                ]
+              },
               "type": "object"
             }
           ]
@@ -1680,13 +1813,17 @@
           "required": [
             "project",
             "feature",
-            "license_fingerprint",
-            "device_hash"
+            "license_fingerprint"
           ],
           "type": "object"
         },
         "EntitlementPatch": {
           "description": "All fields optional; only provided fields are updated. project/feature/license_fingerprint/status are NOT patchable.",
+          "not": {
+            "required": [
+              "enforcement_mode"
+            ]
+          },
           "properties": {
             "assertion_ttl_seconds": {
               "maximum": 3600,
@@ -1747,6 +1884,15 @@
               ]
             },
             "device_hash": {
+              "type": "string"
+            },
+            "enforcement_mode": {
+              "description": "Stored enforcement protocol, independent of commercial license_mode. Historical cached mutation responses may omit this field; read the current entitlement to establish its mode.",
+              "enum": [
+                "legacy",
+                "device_bound_v1"
+              ],
+              "readOnly": true,
               "type": "string"
             },
             "feature": {
@@ -1884,7 +2030,12 @@
               },
               "type": "object"
             }
-          ]
+          ],
+          "not": {
+            "required": [
+              "enforcement_mode"
+            ]
+          }
         },
         "ErrorEnvelope": {
           "properties": {
@@ -7561,6 +7712,180 @@
           ]
         }
       },
+      "/api/admin/catalog/projects": {
+        "get": {
+          "description": "Union of catalog features/plans, policies, entitlements, licenses, orders and order events, including disabled and unassigned records. No independent app registry. Lexical project ordering; offset pages can shift under concurrent changes. Audit-only and token-scope-only project names are not configuration records.",
+          "operationId": "listCatalogProjects",
+          "parameters": [
+            {
+              "allowEmptyValue": true,
+              "description": "Page size (default 50 when omitted or empty; explicit values must be safe integers from 1 through 100; malformed values return 400 invalid_request).",
+              "in": "query",
+              "name": "limit",
+              "required": false,
+              "schema": {
+                "default": 50,
+                "maximum": 100,
+                "minimum": 1,
+                "type": "integer"
+              }
+            },
+            {
+              "allowEmptyValue": true,
+              "description": "Non-negative safe integer offset cursor (default 0 when omitted or empty; use `next_cursor` from the previous page; malformed values return 400 invalid_request).",
+              "in": "query",
+              "name": "cursor",
+              "required": false,
+              "schema": {
+                "default": "0",
+                "pattern": "^[0-9]+$",
+                "type": "string"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "properties": {
+                      "code": {
+                        "const": "projects_listed"
+                      },
+                      "data": {
+                        "properties": {
+                          "items": {
+                            "items": {
+                              "properties": {
+                                "project": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "project"
+                              ],
+                              "type": "object"
+                            },
+                            "type": "array"
+                          },
+                          "next_cursor": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "items",
+                          "next_cursor"
+                        ],
+                        "type": "object"
+                      },
+                      "ok": {
+                        "const": true
+                      },
+                      "request_id": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "ok",
+                      "code",
+                      "request_id",
+                      "data"
+                    ],
+                    "type": "object"
+                  }
+                }
+              },
+              "description": "Project page."
+            },
+            "400": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "invalid_request": {
+                      "value": {
+                        "code": "invalid_request",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "Invalid limit/cursor pagination bounds."
+            },
+            "401": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "admin_auth_not_configured": {
+                      "value": {
+                        "code": "admin_auth_not_configured",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    },
+                    "missing_access_jwt": {
+                      "value": {
+                        "code": "missing_access_jwt",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "Authentication failed."
+            },
+            "403": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "admin_role_denied": {
+                      "value": {
+                        "code": "admin_role_denied",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    },
+                    "invalid_access_jwt": {
+                      "value": {
+                        "code": "invalid_access_jwt",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "Authorization failed."
+            }
+          },
+          "security": [
+            {
+              "cloudflareAccess": []
+            },
+            {
+              "devBearer": []
+            }
+          ],
+          "summary": "Discover projects from configuration and retained business records",
+          "tags": [
+            "admin:catalog"
+          ]
+        }
+      },
       "/api/admin/customers": {
         "get": {
           "operationId": "listCustomers",
@@ -7739,6 +8064,254 @@
           "tags": [
             "admin:customers"
           ]
+        },
+        "post": {
+          "description": "Admin-only. Creates a new customer and password credential atomically. Does not attach an existing account, mark email verified, send email, mint a session, or grant licenses. Password sign-in must be enabled on the portal. A required idempotency key replays the original success without creating another user. Creator attribution is stored in customer metadata; passwords/hashes never enter the response or replay cache.",
+          "operationId": "createPortalUser",
+          "parameters": [
+            {
+              "description": "Optional idempotency key (max 128 chars). Mutations with the same scope+key+actor are cached and replayed from D1. An invalid (over-long/empty) value returns 400 invalid_idempotency_key.",
+              "in": "header",
+              "name": "idempotency-key",
+              "required": true,
+              "schema": {
+                "maxLength": 128,
+                "type": "string"
+              }
+            }
+          ],
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "email": {
+                      "format": "email",
+                      "maxLength": 254,
+                      "type": "string"
+                    },
+                    "name": {
+                      "maxLength": 128,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "password": {
+                      "description": "15–128 Unicode characters, at most 512 UTF-8 bytes.",
+                      "maxLength": 128,
+                      "minLength": 15,
+                      "type": "string",
+                      "writeOnly": true
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "email",
+                    "password"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "required": true
+          },
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/SuccessEnvelope"
+                      },
+                      {
+                        "properties": {
+                          "code": {
+                            "const": "customer_created"
+                          },
+                          "data": {
+                            "$ref": "#/components/schemas/CustomerRow"
+                          }
+                        },
+                        "required": [
+                          "data"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  }
+                }
+              },
+              "description": "Created customer with unverified login_email; email remains empty."
+            },
+            "400": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "invalid_idempotency_key": {
+                      "value": {
+                        "code": "invalid_idempotency_key",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    },
+                    "invalid_json": {
+                      "value": {
+                        "code": "invalid_json",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    },
+                    "invalid_request": {
+                      "value": {
+                        "code": "invalid_request",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "Invalid body or missing/invalid idempotency key."
+            },
+            "401": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "admin_auth_not_configured": {
+                      "value": {
+                        "code": "admin_auth_not_configured",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    },
+                    "missing_access_jwt": {
+                      "value": {
+                        "code": "missing_access_jwt",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "Authentication failed."
+            },
+            "403": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "admin_role_denied": {
+                      "value": {
+                        "code": "admin_role_denied",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    },
+                    "admin_role_required": {
+                      "value": {
+                        "code": "admin_role_required",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    },
+                    "invalid_access_jwt": {
+                      "value": {
+                        "code": "invalid_access_jwt",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "Authorization failed (RBAC / invalid JWT / admin role required)."
+            },
+            "409": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "email_in_use": {
+                      "value": {
+                        "code": "email_in_use",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "Email belongs to an existing verified customer or password account."
+            },
+            "413": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "body_too_large": {
+                      "value": {
+                        "code": "body_too_large",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "Body exceeds 8192 bytes."
+            },
+            "500": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "dev_bearer_forbidden_in_environment": {
+                      "value": {
+                        "code": "dev_bearer_forbidden_in_environment",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    },
+                    "mutation_failed": {
+                      "value": {
+                        "code": "mutation_failed",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "Creation failed or development authentication is forbidden here."
+            }
+          },
+          "security": [
+            {
+              "cloudflareAccess": []
+            },
+            {
+              "devBearer": []
+            }
+          ],
+          "summary": "Create a customer portal user with an initial password",
+          "tags": [
+            "admin:customers"
+          ]
         }
       },
       "/api/admin/customers/{id}": {
@@ -7865,6 +8438,1397 @@
             }
           ],
           "summary": "Get detailed customer profile with related entitlements, tokens, licenses, orders, and events",
+          "tags": [
+            "admin:customers"
+          ]
+        }
+      },
+      "/api/admin/customers/{id}/access": {
+        "get": {
+          "description": "Grant-level page; not a complete app summary. Sorted by project, feature, fingerprint. Offset cursors are not snapshots: concurrent insertion/deletion may shift pages. Refresh after mutations. A customer_id query parameter cannot override the path customer. Returns enabled and disabled customers' records for authorized operators.",
+          "operationId": "listCustomerAccess",
+          "parameters": [
+            {
+              "description": "Resource identifier from the URL path. For entitlements this is the encoded entitlement id; for customers it is the URI-decoded customer id.",
+              "in": "path",
+              "name": "id",
+              "required": true,
+              "schema": {
+                "type": "string"
+              }
+            },
+            {
+              "in": "query",
+              "name": "project",
+              "required": false,
+              "schema": {
+                "type": "string"
+              }
+            },
+            {
+              "allowEmptyValue": true,
+              "description": "Page size (default 50 when omitted or empty; explicit values must be safe integers from 1 through 100; malformed values return 400 invalid_request).",
+              "in": "query",
+              "name": "limit",
+              "required": false,
+              "schema": {
+                "default": 50,
+                "maximum": 100,
+                "minimum": 1,
+                "type": "integer"
+              }
+            },
+            {
+              "allowEmptyValue": true,
+              "description": "Non-negative safe integer offset cursor (default 0 when omitted or empty; use `next_cursor` from the previous page; malformed values return 400 invalid_request).",
+              "in": "query",
+              "name": "cursor",
+              "required": false,
+              "schema": {
+                "default": "0",
+                "pattern": "^[0-9]+$",
+                "type": "string"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/SuccessEnvelope"
+                      },
+                      {
+                        "properties": {
+                          "code": {
+                            "const": "entitlements_listed"
+                          },
+                          "data": {
+                            "$ref": "#/components/schemas/EntitlementsListData"
+                          }
+                        },
+                        "required": [
+                          "data"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  }
+                }
+              },
+              "description": "Exact grants, including independent dates and version fields. Use each returned id with existing entitlement actions and device reads."
+            },
+            "400": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "invalid_request": {
+                      "value": {
+                        "code": "invalid_request",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "Invalid limit/cursor pagination bounds."
+            },
+            "401": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "admin_auth_not_configured": {
+                      "value": {
+                        "code": "admin_auth_not_configured",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    },
+                    "missing_access_jwt": {
+                      "value": {
+                        "code": "missing_access_jwt",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "Authentication failed."
+            },
+            "403": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "admin_role_denied": {
+                      "value": {
+                        "code": "admin_role_denied",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    },
+                    "invalid_access_jwt": {
+                      "value": {
+                        "code": "invalid_access_jwt",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "Authorization failed."
+            },
+            "404": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "not_found": {
+                      "value": {
+                        "code": "not_found",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "Customer not found."
+            }
+          },
+          "security": [
+            {
+              "cloudflareAccess": []
+            },
+            {
+              "devBearer": []
+            }
+          ],
+          "summary": "Page through exact grants belonging to one customer",
+          "tags": [
+            "admin:customers"
+          ]
+        }
+      },
+      "/api/admin/customers/{id}/apps": {
+        "get": {
+          "description": "Aggregates all grants for each returned project before pagination. Enabled counts are stored state; in_date_count checks grant dates only, not customer or runtime authorization. Earliest/latest expiry exclude nulls; no_expiry_count preserves non-expiring grants. Nodes and sessions are read separately.",
+          "operationId": "listCustomerApps",
+          "parameters": [
+            {
+              "description": "Resource identifier from the URL path. For entitlements this is the encoded entitlement id; for customers it is the URI-decoded customer id.",
+              "in": "path",
+              "name": "id",
+              "required": true,
+              "schema": {
+                "type": "string"
+              }
+            },
+            {
+              "allowEmptyValue": true,
+              "description": "Page size (default 50 when omitted or empty; explicit values must be safe integers from 1 through 100; malformed values return 400 invalid_request).",
+              "in": "query",
+              "name": "limit",
+              "required": false,
+              "schema": {
+                "default": 50,
+                "maximum": 100,
+                "minimum": 1,
+                "type": "integer"
+              }
+            },
+            {
+              "allowEmptyValue": true,
+              "description": "Non-negative safe integer offset cursor (default 0 when omitted or empty; use `next_cursor` from the previous page; malformed values return 400 invalid_request).",
+              "in": "query",
+              "name": "cursor",
+              "required": false,
+              "schema": {
+                "default": "0",
+                "pattern": "^[0-9]+$",
+                "type": "string"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "properties": {
+                      "code": {
+                        "const": "customer_apps"
+                      },
+                      "data": {
+                        "properties": {
+                          "customer": {
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "status": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "status"
+                            ],
+                            "type": "object"
+                          },
+                          "items": {
+                            "items": {
+                              "properties": {
+                                "earliest_expiry": {
+                                  "type": [
+                                    "integer",
+                                    "null"
+                                  ]
+                                },
+                                "enabled_count": {
+                                  "type": "integer"
+                                },
+                                "grant_count": {
+                                  "type": "integer"
+                                },
+                                "in_date_count": {
+                                  "type": "integer"
+                                },
+                                "latest_expiry": {
+                                  "type": [
+                                    "integer",
+                                    "null"
+                                  ]
+                                },
+                                "no_expiry_count": {
+                                  "type": "integer"
+                                },
+                                "project": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "project",
+                                "grant_count",
+                                "enabled_count",
+                                "in_date_count",
+                                "earliest_expiry",
+                                "latest_expiry",
+                                "no_expiry_count"
+                              ],
+                              "type": "object"
+                            },
+                            "type": "array"
+                          },
+                          "next_cursor": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "server_time": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "customer",
+                          "server_time",
+                          "items",
+                          "next_cursor"
+                        ],
+                        "type": "object"
+                      },
+                      "ok": {
+                        "const": true
+                      },
+                      "request_id": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "ok",
+                      "code",
+                      "request_id",
+                      "data"
+                    ],
+                    "type": "object"
+                  }
+                }
+              },
+              "description": "Customer-scoped page. Offset cursors are not snapshots; refresh after changes."
+            },
+            "400": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "invalid_request": {
+                      "value": {
+                        "code": "invalid_request",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "Invalid limit/cursor pagination bounds."
+            },
+            "401": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "admin_auth_not_configured": {
+                      "value": {
+                        "code": "admin_auth_not_configured",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    },
+                    "missing_access_jwt": {
+                      "value": {
+                        "code": "missing_access_jwt",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "Authentication failed."
+            },
+            "403": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "admin_role_denied": {
+                      "value": {
+                        "code": "admin_role_denied",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    },
+                    "invalid_access_jwt": {
+                      "value": {
+                        "code": "invalid_access_jwt",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "Authorization failed."
+            },
+            "404": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "not_found": {
+                      "value": {
+                        "code": "not_found",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "Customer not found."
+            }
+          },
+          "security": [
+            {
+              "cloudflareAccess": []
+            },
+            {
+              "devBearer": []
+            }
+          ],
+          "summary": "Page through complete per-app grant summaries",
+          "tags": [
+            "admin:customers"
+          ]
+        }
+      },
+      "/api/admin/customers/{id}/bindings": {
+        "get": {
+          "description": "At most 100 rows ordered by binding ID. Live keyset pages recheck both device and entitlement ownership; refresh to see inserts before a cursor. State is projected using database server_time: active bindings retain capacity after lease expiry; retiring bindings at the hold deadline are released. Last verified contact is not live presence. No private keys or proofs are exposed. The operator object comes from current authentication and supports the retirement precondition.",
+          "operationId": "listCustomerBindings",
+          "parameters": [
+            {
+              "description": "Resource identifier from the URL path. For entitlements this is the encoded entitlement id; for customers it is the URI-decoded customer id.",
+              "in": "path",
+              "name": "id",
+              "required": true,
+              "schema": {
+                "type": "string"
+              }
+            },
+            {
+              "in": "query",
+              "name": "cursor",
+              "schema": {
+                "description": "Canonical unpadded base64url encoding of 16 bytes.",
+                "pattern": "^[A-Za-z0-9_-]{22}$",
+                "type": "string"
+              }
+            },
+            {
+              "description": "Exact lookup; mutually exclusive with cursor.",
+              "in": "query",
+              "name": "binding_id",
+              "schema": {
+                "description": "Canonical unpadded base64url encoding of 16 bytes.",
+                "pattern": "^[A-Za-z0-9_-]{22}$",
+                "type": "string"
+              }
+            },
+            {
+              "in": "query",
+              "name": "project",
+              "schema": {
+                "maxLength": 256,
+                "minLength": 1,
+                "type": "string"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "code": {
+                        "const": "customer_bindings"
+                      },
+                      "data": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "customer": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "status": {
+                                "enum": [
+                                  "active",
+                                  "disabled"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "status"
+                            ],
+                            "type": "object"
+                          },
+                          "items": {
+                            "items": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "binding_id": {
+                                  "description": "Canonical unpadded base64url encoding of 16 bytes.",
+                                  "pattern": "^[A-Za-z0-9_-]{22}$",
+                                  "type": "string"
+                                },
+                                "created_at": {
+                                  "maximum": 9007199254740991,
+                                  "minimum": 0,
+                                  "type": "integer"
+                                },
+                                "feature": {
+                                  "type": "string"
+                                },
+                                "generation": {
+                                  "maximum": 9007199254740991,
+                                  "minimum": 0,
+                                  "type": "integer"
+                                },
+                                "hold_until": {
+                                  "maximum": 9007199254740991,
+                                  "minimum": 0,
+                                  "type": "integer"
+                                },
+                                "label": {
+                                  "type": "string"
+                                },
+                                "last_proof_at": {
+                                  "maximum": 9007199254740991,
+                                  "minimum": 0,
+                                  "type": "integer"
+                                },
+                                "license_fingerprint": {
+                                  "type": "string"
+                                },
+                                "project": {
+                                  "type": "string"
+                                },
+                                "revision": {
+                                  "maximum": 9007199254740991,
+                                  "minimum": 0,
+                                  "type": "integer"
+                                },
+                                "state": {
+                                  "enum": [
+                                    "active",
+                                    "retiring",
+                                    "released"
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "binding_id",
+                                "project",
+                                "feature",
+                                "license_fingerprint",
+                                "generation",
+                                "revision",
+                                "hold_until",
+                                "state",
+                                "label",
+                                "last_proof_at",
+                                "created_at"
+                              ],
+                              "type": "object"
+                            },
+                            "maxItems": 100,
+                            "type": "array"
+                          },
+                          "next_cursor": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "operator": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "actor_type": {
+                                "enum": [
+                                  "access",
+                                  "dev"
+                                ]
+                              },
+                              "role": {
+                                "enum": [
+                                  "reader",
+                                  "admin"
+                                ]
+                              },
+                              "subject": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "subject",
+                              "actor_type",
+                              "role"
+                            ],
+                            "type": "object"
+                          },
+                          "server_time": {
+                            "maximum": 9007199254740991,
+                            "minimum": 0,
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "customer",
+                          "operator",
+                          "server_time",
+                          "items",
+                          "next_cursor"
+                        ],
+                        "type": "object"
+                      },
+                      "ok": {
+                        "const": true
+                      },
+                      "request_id": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "ok",
+                      "code",
+                      "request_id",
+                      "data"
+                    ],
+                    "type": "object"
+                  }
+                }
+              },
+              "description": "Authenticated result; no-store."
+            },
+            "400": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "invalid_request": {
+                      "value": {
+                        "code": "invalid_request",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "Invalid path or bounded keyset query."
+            },
+            "401": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "admin_auth_not_configured": {
+                      "value": {
+                        "code": "admin_auth_not_configured",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    },
+                    "missing_access_jwt": {
+                      "value": {
+                        "code": "missing_access_jwt",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "Authentication failed."
+            },
+            "403": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "admin_role_denied": {
+                      "value": {
+                        "code": "admin_role_denied",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    },
+                    "invalid_access_jwt": {
+                      "value": {
+                        "code": "invalid_access_jwt",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "Authorization failed."
+            },
+            "404": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "binding_unavailable": {
+                      "value": {
+                        "code": "binding_unavailable",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    },
+                    "not_found": {
+                      "value": {
+                        "code": "not_found",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "Customer or owned binding unavailable."
+            },
+            "503": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "temporarily_unavailable": {
+                      "value": {
+                        "code": "temporarily_unavailable",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "Database unavailable."
+            }
+          },
+          "security": [
+            {
+              "cloudflareAccess": []
+            },
+            {
+              "devBearer": []
+            }
+          ],
+          "summary": "List owned protected connections, including disabled customers' retained records.",
+          "tags": [
+            "admin:customers"
+          ]
+        }
+      },
+      "/api/admin/customers/{id}/bindings/{bindingId}/events": {
+        "get": {
+          "description": "Current ownership is rechecked. At most 100 events in ascending event-ID order; next_cursor is an exclusive event ID. Operator actors use operator:<type>:<subject>; customer retirement uses customer. This is authenticated history, not a claim of immediate revocation of offline access.",
+          "operationId": "listBindingEvents",
+          "parameters": [
+            {
+              "description": "Resource identifier from the URL path. For entitlements this is the encoded entitlement id; for customers it is the URI-decoded customer id.",
+              "in": "path",
+              "name": "id",
+              "required": true,
+              "schema": {
+                "type": "string"
+              }
+            },
+            {
+              "in": "path",
+              "name": "bindingId",
+              "required": true,
+              "schema": {
+                "description": "Canonical unpadded base64url encoding of 16 bytes.",
+                "pattern": "^[A-Za-z0-9_-]{22}$",
+                "type": "string"
+              }
+            },
+            {
+              "description": "Canonical decimal safe-integer event ID from next_cursor; no whitespace.",
+              "in": "query",
+              "name": "cursor",
+              "schema": {
+                "pattern": "^(0|[1-9][0-9]{0,15})(?![\\s\\S])",
+                "type": "string"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "code": {
+                        "const": "binding_events"
+                      },
+                      "data": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "binding_id": {
+                            "description": "Canonical unpadded base64url encoding of 16 bytes.",
+                            "pattern": "^[A-Za-z0-9_-]{22}$",
+                            "type": "string"
+                          },
+                          "customer": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "status": {
+                                "enum": [
+                                  "active",
+                                  "disabled"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "status"
+                            ],
+                            "type": "object"
+                          },
+                          "items": {
+                            "items": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "actor": {
+                                  "type": "string"
+                                },
+                                "event_type": {
+                                  "enum": [
+                                    "exchange",
+                                    "renew",
+                                    "retire"
+                                  ]
+                                },
+                                "id": {
+                                  "maximum": 9007199254740991,
+                                  "minimum": 0,
+                                  "type": "integer"
+                                },
+                                "occurred_at": {
+                                  "maximum": 9007199254740991,
+                                  "minimum": 0,
+                                  "type": "integer"
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "event_type",
+                                "actor",
+                                "occurred_at"
+                              ],
+                              "type": "object"
+                            },
+                            "maxItems": 100,
+                            "type": "array"
+                          },
+                          "next_cursor": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "operator": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "actor_type": {
+                                "enum": [
+                                  "access",
+                                  "dev"
+                                ]
+                              },
+                              "role": {
+                                "enum": [
+                                  "reader",
+                                  "admin"
+                                ]
+                              },
+                              "subject": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "subject",
+                              "actor_type",
+                              "role"
+                            ],
+                            "type": "object"
+                          },
+                          "server_time": {
+                            "maximum": 9007199254740991,
+                            "minimum": 0,
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "customer",
+                          "operator",
+                          "server_time",
+                          "binding_id",
+                          "items",
+                          "next_cursor"
+                        ],
+                        "type": "object"
+                      },
+                      "ok": {
+                        "const": true
+                      },
+                      "request_id": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "ok",
+                      "code",
+                      "request_id",
+                      "data"
+                    ],
+                    "type": "object"
+                  }
+                }
+              },
+              "description": "Authenticated result; no-store."
+            },
+            "400": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "invalid_request": {
+                      "value": {
+                        "code": "invalid_request",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "Invalid path or bounded keyset query."
+            },
+            "401": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "admin_auth_not_configured": {
+                      "value": {
+                        "code": "admin_auth_not_configured",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    },
+                    "missing_access_jwt": {
+                      "value": {
+                        "code": "missing_access_jwt",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "Authentication failed."
+            },
+            "403": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "admin_role_denied": {
+                      "value": {
+                        "code": "admin_role_denied",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    },
+                    "invalid_access_jwt": {
+                      "value": {
+                        "code": "invalid_access_jwt",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "Authorization failed."
+            },
+            "404": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "binding_unavailable": {
+                      "value": {
+                        "code": "binding_unavailable",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    },
+                    "not_found": {
+                      "value": {
+                        "code": "not_found",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "Customer or owned binding unavailable."
+            },
+            "503": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "temporarily_unavailable": {
+                      "value": {
+                        "code": "temporarily_unavailable",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "Database unavailable."
+            }
+          },
+          "security": [
+            {
+              "cloudflareAccess": []
+            },
+            {
+              "devBearer": []
+            }
+          ],
+          "summary": "Read a protected connection's audit history.",
+          "tags": [
+            "admin:customers"
+          ]
+        }
+      },
+      "/api/admin/customers/{id}/bindings/{bindingId}/retire": {
+        "post": {
+          "description": "Requires admin role and an active target customer. The named backend capability rechecks ownership, commits retirement/audit atomically and preserves the maximum hold. effective_release_at is the later of that hold and commit time. Identical body/key/operator retries recover for 48 hours; a timeout is an unknown outcome and must retain the same key. No legacy fallback, ownership edit or force-release override. Strict JSON rejects unknown/duplicate fields, malformed UTF-8 and noninteger numeric lexemes; maximum body 16 KiB. All responses are no-store.",
+          "operationId": "retireCustomerBinding",
+          "parameters": [
+            {
+              "description": "Resource identifier from the URL path. For entitlements this is the encoded entitlement id; for customers it is the URI-decoded customer id.",
+              "in": "path",
+              "name": "id",
+              "required": true,
+              "schema": {
+                "type": "string"
+              }
+            },
+            {
+              "in": "path",
+              "name": "bindingId",
+              "required": true,
+              "schema": {
+                "description": "Canonical unpadded base64url encoding of 16 bytes.",
+                "pattern": "^[A-Za-z0-9_-]{22}$",
+                "type": "string"
+              }
+            },
+            {
+              "description": "Canonical base64url encoding of 32 random bytes.",
+              "in": "header",
+              "name": "idempotency-key",
+              "required": true,
+              "schema": {
+                "pattern": "^[A-Za-z0-9_-]{43}$",
+                "type": "string"
+              }
+            },
+            {
+              "description": "encodeURIComponent(JSON.stringify([operator.actor_type,operator.subject])) from the displayed binding read. A precondition only; authority comes from authentication.",
+              "in": "header",
+              "name": "x-expected-operator",
+              "required": true,
+              "schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "expected_revision": {
+                      "maximum": 9007199254740990,
+                      "minimum": 0,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "expected_revision"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "required": true
+          },
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "code": {
+                        "const": "binding_retired"
+                      },
+                      "data": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "binding_id": {
+                            "description": "Canonical unpadded base64url encoding of 16 bytes.",
+                            "pattern": "^[A-Za-z0-9_-]{22}$",
+                            "type": "string"
+                          },
+                          "effective_release_at": {
+                            "maximum": 9007199254740991,
+                            "minimum": 0,
+                            "type": "integer"
+                          },
+                          "generation": {
+                            "maximum": 9007199254740991,
+                            "minimum": 2,
+                            "type": "integer"
+                          },
+                          "revision": {
+                            "maximum": 9007199254740991,
+                            "minimum": 1,
+                            "type": "integer"
+                          },
+                          "state": {
+                            "const": "retiring"
+                          }
+                        },
+                        "required": [
+                          "binding_id",
+                          "state",
+                          "effective_release_at",
+                          "revision",
+                          "generation"
+                        ],
+                        "type": "object"
+                      },
+                      "ok": {
+                        "const": true
+                      },
+                      "request_id": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "ok",
+                      "code",
+                      "request_id",
+                      "data"
+                    ],
+                    "type": "object"
+                  }
+                }
+              },
+              "description": "Authenticated result; no-store."
+            },
+            "400": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "invalid_request": {
+                      "value": {
+                        "code": "invalid_request",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "Invalid bounded request or retry key."
+            },
+            "401": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "admin_auth_not_configured": {
+                      "value": {
+                        "code": "admin_auth_not_configured",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    },
+                    "missing_access_jwt": {
+                      "value": {
+                        "code": "missing_access_jwt",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "Authentication failed."
+            },
+            "403": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "access_denied": {
+                      "value": {
+                        "code": "access_denied",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    },
+                    "admin_role_denied": {
+                      "value": {
+                        "code": "admin_role_denied",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    },
+                    "admin_role_required": {
+                      "value": {
+                        "code": "admin_role_required",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    },
+                    "cross_site_mutation_forbidden": {
+                      "value": {
+                        "code": "cross_site_mutation_forbidden",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    },
+                    "invalid_access_jwt": {
+                      "value": {
+                        "code": "invalid_access_jwt",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "Role, origin or backend authority denied."
+            },
+            "404": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "binding_unavailable": {
+                      "value": {
+                        "code": "binding_unavailable",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "Binding unavailable in the active customer context."
+            },
+            "409": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "idempotency_conflict": {
+                      "value": {
+                        "code": "idempotency_conflict",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    },
+                    "operator_changed": {
+                      "value": {
+                        "code": "operator_changed",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    },
+                    "revision_conflict": {
+                      "value": {
+                        "code": "revision_conflict",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "Operator changed, stale revision, changed intent or expired recovery. Review before a new action."
+            },
+            "503": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "temporarily_unavailable": {
+                      "value": {
+                        "code": "temporarily_unavailable",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "Private backend capability unavailable. Preserve pending intent."
+            }
+          },
+          "security": [
+            {
+              "cloudflareAccess": []
+            },
+            {
+              "devBearer": []
+            }
+          ],
+          "summary": "Retire a protected connection as the authenticated administrator.",
           "tags": [
             "admin:customers"
           ]
@@ -8416,10 +10380,335 @@
           ]
         }
       },
+      "/api/admin/customers/{id}/resources": {
+        "get": {
+          "description": "kind selects nodes (default) or sessions; optional project limits scope. Node registrations are not floating sessions. Session records may have expired deadlines; compare with server_time. No device public keys, secrets, or notes are selected. Customer ownership is enforced by a grant join.",
+          "operationId": "listCustomerResources",
+          "parameters": [
+            {
+              "description": "Resource identifier from the URL path. For entitlements this is the encoded entitlement id; for customers it is the URI-decoded customer id.",
+              "in": "path",
+              "name": "id",
+              "required": true,
+              "schema": {
+                "type": "string"
+              }
+            },
+            {
+              "in": "query",
+              "name": "kind",
+              "schema": {
+                "default": "nodes",
+                "enum": [
+                  "nodes",
+                  "sessions"
+                ],
+                "type": "string"
+              }
+            },
+            {
+              "in": "query",
+              "name": "project",
+              "schema": {
+                "type": "string"
+              }
+            },
+            {
+              "allowEmptyValue": true,
+              "description": "Page size (default 50 when omitted or empty; explicit values must be safe integers from 1 through 100; malformed values return 400 invalid_request).",
+              "in": "query",
+              "name": "limit",
+              "required": false,
+              "schema": {
+                "default": 50,
+                "maximum": 100,
+                "minimum": 1,
+                "type": "integer"
+              }
+            },
+            {
+              "allowEmptyValue": true,
+              "description": "Non-negative safe integer offset cursor (default 0 when omitted or empty; use `next_cursor` from the previous page; malformed values return 400 invalid_request).",
+              "in": "query",
+              "name": "cursor",
+              "required": false,
+              "schema": {
+                "default": "0",
+                "pattern": "^[0-9]+$",
+                "type": "string"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "properties": {
+                      "code": {
+                        "const": "customer_resources"
+                      },
+                      "data": {
+                        "properties": {
+                          "customer": {
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "status": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "status"
+                            ],
+                            "type": "object"
+                          },
+                          "items": {
+                            "items": {
+                              "oneOf": [
+                                {
+                                  "properties": {
+                                    "device_key_id": {
+                                      "type": "string"
+                                    },
+                                    "feature": {
+                                      "type": "string"
+                                    },
+                                    "last_seen_at": {
+                                      "type": [
+                                        "integer",
+                                        "null"
+                                      ]
+                                    },
+                                    "license_fingerprint": {
+                                      "type": "string"
+                                    },
+                                    "project": {
+                                      "type": "string"
+                                    },
+                                    "status": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "project",
+                                    "feature",
+                                    "license_fingerprint",
+                                    "device_key_id",
+                                    "status",
+                                    "last_seen_at"
+                                  ],
+                                  "type": "object"
+                                },
+                                {
+                                  "properties": {
+                                    "client_instance_id": {
+                                      "type": "string"
+                                    },
+                                    "feature": {
+                                      "type": "string"
+                                    },
+                                    "heartbeat_deadline": {
+                                      "type": "integer"
+                                    },
+                                    "license_fingerprint": {
+                                      "type": "string"
+                                    },
+                                    "mode": {
+                                      "enum": [
+                                        "live",
+                                        "borrowed"
+                                      ],
+                                      "type": "string"
+                                    },
+                                    "project": {
+                                      "type": "string"
+                                    },
+                                    "seat_id": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "project",
+                                    "feature",
+                                    "license_fingerprint",
+                                    "seat_id",
+                                    "client_instance_id",
+                                    "mode",
+                                    "heartbeat_deadline"
+                                  ],
+                                  "type": "object"
+                                }
+                              ]
+                            },
+                            "type": "array"
+                          },
+                          "next_cursor": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "server_time": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "customer",
+                          "server_time",
+                          "items",
+                          "next_cursor"
+                        ],
+                        "type": "object"
+                      },
+                      "ok": {
+                        "const": true
+                      },
+                      "request_id": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "ok",
+                      "code",
+                      "request_id",
+                      "data"
+                    ],
+                    "type": "object"
+                  }
+                }
+              },
+              "description": "Customer-scoped page. Offset cursors are not snapshots; refresh after changes."
+            },
+            "400": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "invalid_request": {
+                      "value": {
+                        "code": "invalid_request",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "Invalid kind or limit/cursor pagination bounds."
+            },
+            "401": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "admin_auth_not_configured": {
+                      "value": {
+                        "code": "admin_auth_not_configured",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    },
+                    "missing_access_jwt": {
+                      "value": {
+                        "code": "missing_access_jwt",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "Authentication failed."
+            },
+            "403": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "admin_role_denied": {
+                      "value": {
+                        "code": "admin_role_denied",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    },
+                    "invalid_access_jwt": {
+                      "value": {
+                        "code": "invalid_access_jwt",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "Authorization failed."
+            },
+            "404": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "not_found": {
+                      "value": {
+                        "code": "not_found",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "Customer not found."
+            }
+          },
+          "security": [
+            {
+              "cloudflareAccess": []
+            },
+            {
+              "devBearer": []
+            }
+          ],
+          "summary": "Independently page registered nodes or floating-session records",
+          "tags": [
+            "admin:customers"
+          ]
+        }
+      },
       "/api/admin/entitlements": {
         "get": {
           "operationId": "listEntitlements",
           "parameters": [
+            {
+              "description": "Exact canonical entitlement ID.",
+              "in": "query",
+              "name": "id",
+              "required": false,
+              "schema": {
+                "type": "string"
+              }
+            },
+            {
+              "description": "Exact customer ownership filter.",
+              "in": "query",
+              "name": "customer_id",
+              "required": false,
+              "schema": {
+                "type": "string"
+              }
+            },
             {
               "description": "Exact-match project filter.",
               "in": "query",
@@ -8622,7 +10911,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/EntitlementInput"
+                  "$ref": "#/components/schemas/EntitlementCreateInput"
                 }
               }
             },
@@ -8793,6 +11082,27 @@
               "content": {
                 "application/json": {
                   "examples": {
+                    "enforcement_mode_conflict": {
+                      "value": {
+                        "code": "enforcement_mode_conflict",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    },
+                    "idempotency_request_conflict": {
+                      "value": {
+                        "code": "idempotency_request_conflict",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    },
+                    "protected_creation_conflict": {
+                      "value": {
+                        "code": "protected_creation_conflict",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    },
                     "revoked_entitlement_is_terminal": {
                       "value": {
                         "code": "revoked_entitlement_is_terminal",
@@ -8813,7 +11123,7 @@
                   }
                 }
               },
-              "description": "Target entitlement is revoked (terminal), or it changed after this request observed it; refetch and retry the latter."
+              "description": "Terminal or concurrent state, enforcement mismatch, protected eligibility failure, or an idempotency key already used for another tuple/mode."
             },
             "413": {
               "content": {
@@ -9049,7 +11359,37 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/EntitlementPatch"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/EntitlementPatch"
+                    },
+                    {
+                      "dependentRequired": {
+                        "expected_customer_id": [
+                          "expected_revocation_seq"
+                        ],
+                        "expected_revocation_seq": [
+                          "expected_customer_id"
+                        ]
+                      },
+                      "description": "Optional paired precondition. Supply the customer_id (including null) and revocation_seq from the observed grant. Mismatch returns stale_transition (409); omitted fields retain legacy behavior. Replaying a successful idempotency key returns the original result; use a new key only for a new intentional operation.",
+                      "properties": {
+                        "expected_customer_id": {
+                          "maxLength": 128,
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "expected_revocation_seq": {
+                          "maximum": 9007199254740991,
+                          "minimum": 0,
+                          "type": "integer"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
                 }
               }
             },
@@ -10346,7 +12686,37 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ReasonRequiredBody"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ReasonRequiredBody"
+                    },
+                    {
+                      "dependentRequired": {
+                        "expected_customer_id": [
+                          "expected_revocation_seq"
+                        ],
+                        "expected_revocation_seq": [
+                          "expected_customer_id"
+                        ]
+                      },
+                      "description": "Optional paired precondition. Supply the customer_id (including null) and revocation_seq from the observed grant. Mismatch returns stale_transition (409); omitted fields retain legacy behavior. Replaying a successful idempotency key returns the original result; use a new key only for a new intentional operation.",
+                      "properties": {
+                        "expected_customer_id": {
+                          "maxLength": 128,
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "expected_revocation_seq": {
+                          "maximum": 9007199254740991,
+                          "minimum": 0,
+                          "type": "integer"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
                 }
               }
             },
@@ -10785,7 +13155,30 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/EmptyBody"
+                  "dependentRequired": {
+                    "expected_customer_id": [
+                      "expected_revocation_seq"
+                    ],
+                    "expected_revocation_seq": [
+                      "expected_customer_id"
+                    ]
+                  },
+                  "description": "Optional paired precondition. Supply the customer_id (including null) and revocation_seq from the observed grant. Mismatch returns stale_transition (409); omitted fields retain legacy behavior. Replaying a successful idempotency key returns the original result; use a new key only for a new intentional operation.",
+                  "properties": {
+                    "expected_customer_id": {
+                      "maxLength": 128,
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "expected_revocation_seq": {
+                      "maximum": 9007199254740991,
+                      "minimum": 0,
+                      "type": "integer"
+                    }
+                  },
+                  "type": "object"
                 }
               }
             },
@@ -11292,7 +13685,37 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ReasonRequiredBody"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ReasonRequiredBody"
+                    },
+                    {
+                      "dependentRequired": {
+                        "expected_customer_id": [
+                          "expected_revocation_seq"
+                        ],
+                        "expected_revocation_seq": [
+                          "expected_customer_id"
+                        ]
+                      },
+                      "description": "Optional paired precondition. Supply the customer_id (including null) and revocation_seq from the observed grant. Mismatch returns stale_transition (409); omitted fields retain legacy behavior. Replaying a successful idempotency key returns the original result; use a new key only for a new intentional operation.",
+                      "properties": {
+                        "expected_customer_id": {
+                          "maxLength": 128,
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "expected_revocation_seq": {
+                          "maximum": 9007199254740991,
+                          "minimum": 0,
+                          "type": "integer"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
                 }
               }
             },
@@ -16925,8 +19348,8 @@
       }
     ]
   },
-  "openApiOperationCount": 65,
-  "routeCount": 65,
-  "routeKeyCount": 63,
+  "openApiOperationCount": 73,
+  "routeCount": 73,
+  "routeKeyCount": 71,
   "service": "cloudflare-license-admin"
 }

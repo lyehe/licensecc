@@ -16,7 +16,10 @@ import {
 import { api, localMessage, resultMessage, StatusLine } from "../../shared/api";
 import type { PortalMe, StatusMessage } from "../../types";
 
-export type AuthPhase = "loading" | "request" | "verify" | "authed";
+import { PasswordSignIn } from "./PasswordSignIn";
+import { ProviderButtons, ProviderResult, useProviders } from "./ProviderSignIn";
+
+export type AuthPhase = "loading" | "request" | "verify" | "authed" | "error";
 
 interface AuthOptions {
   setMessage: React.Dispatch<React.SetStateAction<StatusMessage | null>>;
@@ -24,6 +27,8 @@ interface AuthOptions {
 }
 
 export interface PortalAuth {
+  customerId: string | null;
+  retrySession(): Promise<boolean>;
   phase: AuthPhase;
   email: string;
   code: string;
@@ -40,16 +45,22 @@ export function usePortalAuth({ setMessage, runOnce }: AuthOptions): PortalAuth 
   const [phase, setPhase] = useState<AuthPhase>("loading");
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
+  const [customerId, setCustomerId] = useState<string | null>(null);
 
   const loadMe = useCallback(async (): Promise<boolean> => {
-    const result = await api<PortalMe>(mePath());
-    if (result.ok && result.data) {
-      setPhase("authed");
-      return true;
-    }
-    setPhase("request");
+    setPhase("loading");
+    try {
+      const result = await api<PortalMe>(mePath());
+      if (result.ok && result.data) {
+        setCustomerId(result.data.customer_id);
+        setMessage(null);
+        setPhase("authed");
+        return true;
+      }
+      setPhase(result.code === "unauthorized" ? "request" : "error");
+      } catch { setPhase("error"); }
     return false;
-  }, []);
+  }, [setMessage]);
 
   useEffect(() => {
     void loadMe();
@@ -119,7 +130,9 @@ export function usePortalAuth({ setMessage, runOnce }: AuthOptions): PortalAuth 
     await runOnce(async () => {
       const result = await api(logoutPath(), { method: "POST", body: "{}" });
       setMessage(resultMessage(result));
+      if (!result.ok) return;
       afterLogout();
+      setCustomerId(null);
       setEmail("");
       setCode("");
       setPhase("request");
@@ -127,6 +140,8 @@ export function usePortalAuth({ setMessage, runOnce }: AuthOptions): PortalAuth 
   }
 
   return {
+    customerId,
+    retrySession: loadMe,
     phase,
     email,
     code,
@@ -140,37 +155,40 @@ export function usePortalAuth({ setMessage, runOnce }: AuthOptions): PortalAuth 
   };
 }
 
-export function AuthFeature({ auth, busy, message }: {
+export function AuthFeature({ auth, busy, message, connecting = false }: {
   auth: PortalAuth;
   busy: boolean;
   message: StatusMessage | null;
+  connecting?: boolean;
 }): React.ReactElement | null {
+  const { providers, failed, retry } = useProviders();
+  const [emailCode, setEmailCode] = useState(false);
   if (auth.phase === "authed") return null;
-  if (auth.phase === "loading") {
+  if (auth.phase === "loading" || auth.phase === "error") {
     return (
-      <main>
-        <header className="topbar">
-          <div>
-            <h1>licensecc customer portal</h1>
-            <p>loading…</p>
-          </div>
-        </header>
+      <main className="authPane">
+        <section className="authCard"><h1>{auth.phase === "loading" ? "Checking your session…" : "Unable to check your session"}</h1>
+          <p>{auth.phase === "loading" ? "Your account will appear shortly." : "Please try again when your connection is available."}</p>
+          {auth.phase === "error" && <button onClick={() => void auth.retrySession()}>Retry</button>}
+        </section>
       </main>
     );
   }
 
   return (
-    <main>
-      <header className="topbar">
-        <div>
-          <h1>licensecc customer portal</h1>
-          <StatusLine message={message} fallback="sign in to manage your licenses" />
-        </div>
-      </header>
-      <section className="authPane">
-        {auth.phase === "request" && (
+    <main className="authPane">
+      <div className="authBrand brand"><span aria-hidden="true">L</span>Licensecc</div>
+      <section className="authCard">
+        <h1>Sign in</h1>
+        <p>{connecting ? "Sign in to approve this device connection." : "Sign in to manage your licenses and devices."}</p>
+        <StatusLine message={message} fallback="" />
+        <ProviderResult />
+        {auth.phase === "request" && failed && <p>Unable to load sign-in options. <button onClick={retry}>Retry sign-in options</button></p>}
+        {auth.phase === "request" && !providers && !failed && <p>Loading sign-in options…</p>}
+        {auth.phase === "request" && providers && !providers.google && !providers.github && !providers.email && !providers.password && <p>Sign-in is not configured yet. Contact your administrator.</p>}
+        {auth.phase === "request" && providers?.password && !emailCode && <PasswordSignIn onSignedIn={auth.retrySession} />}
+        {auth.phase === "request" && providers?.email && (!providers.password || emailCode) && (
           <form onSubmit={(event) => void auth.submitRequest(event)}>
-            <h2>Sign in</h2>
             <label>
               Email
               <input
@@ -180,8 +198,19 @@ export function AuthFeature({ auth, busy, message }: {
                 onChange={(event) => auth.setEmail(event.target.value)}
               />
             </label>
-            <button disabled={busy} type="submit">Send code</button>
+            <button className="primary" disabled={busy} type="submit">Send code</button>
+            <p>Use the email associated with your customer account.</p>
           </form>
+        )}
+        {auth.phase === "request" && providers && (
+          providers.password ? <>
+            {emailCode && <button type="button" onClick={() => setEmailCode(false)}>Use a password instead</button>}
+            {(providers.google || providers.github || (providers.email && !emailCode)) && <details className="otherSignIn">
+              <summary>Other sign-in options</summary>
+              <ProviderButtons providers={providers} />
+              {providers.email && !emailCode && <button type="button" onClick={() => setEmailCode(true)}>Use an email code instead</button>}
+            </details>}
+          </> : <ProviderButtons providers={providers} />
         )}
         {auth.phase === "verify" && (
           <form onSubmit={(event) => void auth.submitVerify(event)}>

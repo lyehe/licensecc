@@ -1,3 +1,4 @@
+import { accessCounts } from "./access-counts.js";
 import { envelope, json } from "../../responses.js";
 import type { TimeseriesBucket, ExpiringEntitlement } from "../../../shared/api";
 import { verifyAuditChain } from "@licensecc/cloudflare-runtime/d1/audit_digest";
@@ -12,18 +13,7 @@ const EXPIRING_DEFAULT_WITHIN_DAYS = 30;
 const EXPIRING_MAX_WITHIN_DAYS = 365;
 const SECONDS_PER_DAY = 86400;
 export async function summary(env: Env, requestIdValue: string): Promise<Response> {
-  const total = await env.DB.prepare("SELECT COUNT(*) AS count FROM entitlements").first<{ count: number }>();
-  const active = await env.DB.prepare("SELECT COUNT(*) AS count FROM entitlements WHERE status = 'active'").first<{ count: number }>();
-  const revoked = await env.DB.prepare("SELECT COUNT(*) AS count FROM entitlements WHERE status = 'revoked'").first<{ count: number }>();
-  const disabled = await env.DB.prepare("SELECT COUNT(*) AS count FROM entitlements WHERE status = 'disabled'").first<{ count: number }>();
-  return envelope(requestIdValue, "summary", {
-    entitlements: {
-      total: total?.count ?? 0,
-      active: active?.count ?? 0,
-      revoked: revoked?.count ?? 0,
-      disabled: disabled?.count ?? 0,
-    },
-  });
+  return envelope(requestIdValue, "summary", { entitlements: await accessCounts(env) });
 }
 
 export async function settings(env: Env, requestIdValue: string): Promise<Response> {
@@ -34,12 +24,6 @@ export async function settings(env: Env, requestIdValue: string): Promise<Respon
   });
 }
 
-// Create an entitlement by STAMPING a policy (POST /api/admin/entitlements with a policy_id).
-// Gated by POLICY_STAMP_MODE: off (default) rejects 400 policy_stamping_disabled; on stamps.
-// The policy must exist and be status=active (else 404 policy_not_found). stampFromPolicy yields
-// the EXACT EntitlementInput createEntitlement already writes byte-identically PLUS the capacity +
-// frozen-trial side-state, which rides createEntitlement's extraStatements seam to land in the SAME
-// atomic batch as the INSERT. The body's target tuple + any per-field overrides flow through `overrides`.
 export async function report(env: Env, requestIdValue: string): Promise<Response> {
   const now = Math.floor(Date.now() / 1000);
   const count = async (sql: string, ...binds: unknown[]): Promise<number> =>
@@ -52,12 +36,7 @@ export async function report(env: Env, requestIdValue: string): Promise<Response
   }
   return envelope(requestIdValue, "report", {
     generated_at: now,
-    entitlements: {
-      total: await count("SELECT COUNT(*) AS count FROM entitlements"),
-      active: await count("SELECT COUNT(*) AS count FROM entitlements WHERE status = 'active'"),
-      revoked: await count("SELECT COUNT(*) AS count FROM entitlements WHERE status = 'revoked'"),
-      disabled: await count("SELECT COUNT(*) AS count FROM entitlements WHERE status = 'disabled'"),
-    },
+    entitlements: await accessCounts(env),
     customers: {
       total: await count("SELECT COUNT(*) AS count FROM customers"),
       active: await count("SELECT COUNT(*) AS count FROM customers WHERE status = 'active'"),

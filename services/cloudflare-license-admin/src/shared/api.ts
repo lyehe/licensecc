@@ -8,6 +8,7 @@ export type {
   EntitlementStatus,
   EntitlementRecord,
   EntitlementInput,
+  EntitlementCreateInput,
   EntitlementPatch,
   DeviceStatus,
   EntitlementDeviceRecord,

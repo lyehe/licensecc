@@ -10,6 +10,10 @@ export interface BackupSnapshotInventory {
 // backup-local test suite compares the two exported constants so drift fails
 // before a deployment. High-churn/ephemeral tables remain schema-only checks.
 export const SNAPSHOT_COUNTED_TABLES = [
+  "device_bound_devices",
+  "device_bound_bindings",
+  "device_bound_events",
+  "device_bound_operations",
   "entitlements",
   "entitlement_events",
   "mutation_idempotency",

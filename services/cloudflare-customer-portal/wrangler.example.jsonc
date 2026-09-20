@@ -3,6 +3,9 @@
   "name": "licensecc-customer-portal",
   "main": "src/worker/index.ts",
   "compatibility_date": "2026-06-24",
+  "services": [
+    { "binding": "DEVICE_CONSENT", "service": "licensecc-online-verifier", "entrypoint": "DeviceConsent" }
+  ],
   "observability": {
     "enabled": true,
     "head_sampling_rate": 1
@@ -27,6 +30,9 @@
   ],
   "vars": {
     "ENVIRONMENT": "development",
+    "PORTAL_PASSWORD_ENABLED": "1",
+    "PORTAL_GOOGLE_CLIENT_ID": "",
+    "PORTAL_GITHUB_CLIENT_ID": "",
     // The portal's public origin — used to build magic-link URLs. NEVER taken from the request
     // Host header (invariant 6); always this configured value.
     "PORTAL_PUBLIC_ORIGIN": "https://portal.example.com",
@@ -40,6 +46,8 @@
     // This optional Resend-compatible destination has the same strict HTTPS-origin policy.
     "PORTAL_EMAIL_API_BASE": "https://api.resend.com"
     // Secrets (wrangler secret put):
+    //   PORTAL_GOOGLE_CLIENT_SECRET  Google web OAuth client secret
+    //   PORTAL_GITHUB_CLIENT_SECRET  GitHub OAuth app client secret
     //   PORTAL_OTP_PEPPERS         JSON { key_id: base64-secret(>=32 bytes) } — OTP HMAC-at-rest
     //   PORTAL_SESSION_PEPPERS     JSON { key_id: base64-secret(>=32 bytes) } — session HMAC-at-rest
     //   ACCOUNT_TOKEN_PEPPERS      JSON { key_id: base64-secret } — mints the per-action account token

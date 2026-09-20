@@ -23,6 +23,19 @@ export const customerPaths: LabeledPathFragment = {
   label: "customers",
   entries: [
     ["/api/admin/customers", {
+    post: {
+      tags: ["admin:customers"], operationId: "createPortalUser", summary: "Create a customer portal user with an initial password", security: ADMIN_SECURITY,
+      description: "Admin-only. Creates a new customer and password credential atomically. Does not attach an existing account, mark email verified, send email, mint a session, or grant licenses. Password sign-in must be enabled on the portal. A required idempotency key replays the original success without creating another user. Creator attribution is stored in customer metadata; passwords/hashes never enter the response or replay cache.",
+      parameters: [{ ...idempotencyKeyHeader, required: true }],
+      requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["name", "email", "password"], properties: {
+        name: { type: "string", minLength: 1, maxLength: 128 }, email: { type: "string", format: "email", maxLength: 254 }, password: { type: "string", minLength: 15, maxLength: 128, writeOnly: true, description: "15–128 Unicode characters, at most 512 UTF-8 bytes." },
+      } } } } },
+      responses: { "200": okResponse("Created customer with unverified login_email; email remains empty.", "#/components/schemas/CustomerRow", "customer_created"),
+        "400": errorResponse("Invalid body or missing/invalid idempotency key.", "invalid_request", "invalid_json", "invalid_idempotency_key"),
+        "409": errorResponse("Email belongs to an existing verified customer or password account.", "email_in_use"),
+        "413": errorResponse("Body exceeds 8192 bytes.", "body_too_large"),
+        "500": errorResponse("Creation failed or development authentication is forbidden here.", "mutation_failed", "dev_bearer_forbidden_in_environment"), ...ADMIN_MUTATION_AUTH_ERRORS },
+    },
     get: {
       tags: ["admin:customers"],
       summary: "List customers with pagination and optional filtering",
