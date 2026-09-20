@@ -280,14 +280,29 @@ test("admin UI invalidates a batch selection when its entitlement filter context
   await selectRow.check();
   await expect(page.locator(".bulkBar")).toContainText("1 selected");
 
+  let releaseFilteredRead;
+  let filteredReadStarted = false;
+  const filteredRead = new Promise((resolve) => { releaseFilteredRead = resolve; });
+  await page.route("**/api/admin/entitlements?**", async (route) => {
+    if (new URL(route.request().url()).searchParams.get("project") === "no-such-project") {
+      filteredReadStarted = true;
+      await filteredRead;
+    }
+    await route.fallback();
+  });
   const projectFilter = page.locator('input[aria-label="Filter by project"]');
   await projectFilter.fill("no-such-project");
+  await expect.poll(() => filteredReadStarted).toBe(true);
   await expect(page.locator(".tablePane table tbody tr")).toHaveCount(0);
   await expect(page.locator(".bulkBar")).toHaveCount(0);
   expect(api.requests.batches).toHaveLength(0);
 
   await projectFilter.fill("selection-context");
-  await expect(selectRow).not.toBeChecked();
+  try {
+    await expect(selectRow).not.toBeChecked();
+  } finally {
+    releaseFilteredRead();
+  }
 });
 
 test("admin UI fences ordinary device and meter reads across an ABA selection", async ({ page }) => {
