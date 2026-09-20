@@ -1,0 +1,27 @@
+import React from "react";
+import type { EntitlementDeviceRecord } from "../../../shared/api";
+import { ActionMenu } from "../../shared/ActionMenu";
+import { ReadNotice } from "../../shared/ReadNotice";
+import { focusTargetInRow, type ConfirmActionOutcome, useOperatorControls } from "../../shared/controls";
+import { formatEpoch } from "../../shared/format";
+import type { useEntitlementInspection } from "./useEntitlementInspection";
+import { canRunDeviceAction, disableDeviceConfirm, revokeDeviceConfirm, type DeviceAction } from "./workflow";
+
+export function EntitlementInspectors({ inspection, busy, onDeviceTransition }: { inspection: ReturnType<typeof useEntitlementInspection>; busy: boolean; onDeviceTransition: (device: EntitlementDeviceRecord, action: DeviceAction, key: string) => Promise<ConfirmActionOutcome> }): React.ReactElement {
+  const { requestConfirm, runConsequenceAction } = useOperatorControls();
+  const { deviceEntitlementId, meterEntitlementId, devices, meterStatus, deviceGeneration, isDeviceGenerationCurrent } = inspection;
+  const locked = busy || !inspection.devicesReady;
+  function deviceActions(device: EntitlementDeviceRecord): React.ReactElement {
+    const focus = focusTargetInRow(`device:${device.device_key_id}`, [".status"]);
+    const isCurrent = (): boolean => isDeviceGenerationCurrent(deviceGeneration);
+    return <ActionMenu label="Device actions"><button disabled={locked || !canRunDeviceAction(device.status, "disable")} onClick={() => requestConfirm({ title: "Disable device", body: disableDeviceConfirm(device), requiresReason: true, run: ({ idempotencyKey }) => onDeviceTransition(device, "disable", idempotencyKey), successFocusTarget: focus, isCurrent })}>Disable</button><button data-focus-action="reenable" disabled={locked || !canRunDeviceAction(device.status, "reenable")} onClick={() => void runConsequenceAction({ run: ({ idempotencyKey }) => onDeviceTransition(device, "reenable", idempotencyKey), successFocusTarget: focus, isCurrent })}>Reenable</button><button className="danger" disabled={locked || !canRunDeviceAction(device.status, "revoke")} onClick={() => requestConfirm({ title: "Revoke device", body: revokeDeviceConfirm(device), requiresReason: true, run: ({ idempotencyKey }) => onDeviceTransition(device, "revoke", idempotencyKey), successFocusTarget: focus, isCurrent })}>Revoke</button><p className="muted">{device.status === "revoked" ? "Revocation is permanent; this device cannot be changed." : "Disable applies to active devices; Reenable applies to disabled devices. Revoke is permanent."}</p></ActionMenu>;
+  }
+  return <>
+    {deviceEntitlementId !== null && <section className="tablePane" aria-label="Registered devices"><div className="listHeader"><h3>Devices</h3><button type="button" disabled={busy} onClick={() => inspection.toggleDevices(deviceEntitlementId)}>Close devices</button></div><p className="muted">Entitlement <code>{deviceEntitlementId}</code>. Disable pauses a device until re-enabled. Revoke is permanent. Changes apply on its next online verification.</p><ReadNotice {...inspection.deviceRead} hasData={devices.length > 0} label="registered devices" onRetry={() => void inspection.loadDevices(deviceEntitlementId)} />
+      <div className="desktopRecords tableScroll" role="region" aria-label="Registered device records" tabIndex={0}><table><caption className="srOnly">Registered device keys</caption><thead><tr><th>Device key</th><th>Status</th><th>Created</th><th>Last seen</th><th>Actions</th></tr></thead><tbody>{devices.map((device) => <tr key={device.device_key_id} data-focus-row={`device:${device.device_key_id}`}><td><code>{device.device_key_id}</code></td><td><span className={`status ${device.status}`}>{device.status}</span></td><td>{formatEpoch(device.created_at)}</td><td>{formatEpoch(device.last_seen_at)}</td><td>{deviceActions(device)}</td></tr>)}</tbody></table></div>
+      <div className="recordCards">{devices.map((device) => <article key={device.device_key_id} className="recordCard" data-focus-row={`device:${device.device_key_id}`}><code>{device.device_key_id}</code><span className={`status ${device.status}`}>{device.status}</span><p>Last seen {formatEpoch(device.last_seen_at)}</p>{deviceActions(device)}<details><summary>Device details</summary><p>Created {formatEpoch(device.created_at)}</p></details></article>)}</div>
+      {inspection.devicesReady && devices.length === 0 && <p className="emptyState">No devices registered for this entitlement.</p>}
+    </section>}
+    {meterEntitlementId !== null && <section className="tablePane" aria-label="Metering status"><div className="listHeader"><h3>Metering</h3><button type="button" disabled={busy} onClick={() => inspection.toggleMeter(meterEntitlementId)}>Close metering</button></div><p className="muted">Entitlement <code>{meterEntitlementId}</code></p><ReadNotice {...inspection.meterRead} hasData={meterStatus !== null} label="metering status" onRetry={() => void inspection.loadMeterStatus(meterEntitlementId)} />{meterStatus && <div className="summaryCards"><p>Consumed this period: <strong>{meterStatus.units_consumed}</strong>{meterStatus.meter_quota > 0 ? ` / ${meterStatus.meter_quota}` : " (quota off — count-only)"}</p><p>Period: {formatEpoch(meterStatus.period_start)} → {formatEpoch(meterStatus.period_end)} ({meterStatus.meter_period_sec} seconds)</p><p className="muted">Reading this does not increment the counter.</p></div>}{inspection.meterReady && meterStatus === null && <p className="emptyState">No metering data.</p>}</section>}
+  </>;
+}

@@ -208,6 +208,53 @@ function seedSeats(db, fingerprint, count, { now = NOW, deadline = NOW + 100000 
 // =============================================================================
 // CASE 1 — fresh apply
 // =============================================================================
+for (const state of ["active", "retiring"]) {
+  test(`protected ${state} capacity failure remains recoverable without processed-order or authority corruption`, async t => {
+    const { db, env } = freshEnv(); t.after(() => db.close());
+    const rejected = makeOrder({ seq: 1, intent: "quantity.changed", quantity: { max_active_devices: 0 } });
+    const fingerprint = await fpOf(rejected);
+    db.exec(`INSERT INTO customers(id,name,created_at,updated_at) VALUES('owner','Owner',1,1),('other','Other',1,1);
+      INSERT INTO entitlements(project,feature,license_fingerprint,status,customer_id,enforcement_mode,max_active_devices,created_at,updated_at)
+        VALUES('${PROJECT}','${FEATURE}','${fingerprint}','active','owner','device_bound_v1',1,1,1);
+      INSERT INTO device_bound_devices(id,customer_id,project,key_id,public_key_spki,created_at,last_proof_at)
+        VALUES('device','owner','${PROJECT}','key','synthetic-public',1,1);
+      INSERT INTO device_bound_bindings(id,project,feature,license_fingerprint,device_id,state,generation,revision,hold_until,created_at,updated_at)
+        VALUES('binding','${PROJECT}','${FEATURE}','${fingerprint}','device','${state}',2,3,4102444800,1,1);`);
+    const authority = () => ["entitlements", "device_bound_bindings", "entitlement_events"]
+      .map(table => db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all());
+    const before = authority();
+    for (let retry = 0; retry < 2; retry += 1) {
+      const response = await submit(env, rejected, { now: NOW + retry });
+      assert.equal(response.status, 503);
+      assert.equal(response.body.code, "write_failed");
+      assert.equal(eventRow(db, rejected.event_id).status, "accepted");
+      assert.deepEqual(authority(), before);
+    }
+    const permitted = makeOrder({ seq: 2, intent: "quantity.changed", quantity: { max_active_devices: 2 } });
+    const applied = await submit(env, permitted, { now: NOW + 2 });
+    assert.equal(applied.status, 200); assert.equal(applied.body.code, "applied");
+    const row = entRow(db, fingerprint);
+    assert.equal(row.enforcement_mode, "device_bound_v1");
+    assert.equal(row.customer_id, "owner");
+    assert.equal(row.max_active_devices, 2);
+    assert.equal(row.authority_revision, 1);
+    assert.equal(row.last_applied_order_seq, 2);
+    assert.deepEqual(authority()[1], before[1]);
+    assert.equal(authority()[2].length, 1);
+    const committed = authority();
+    const replay = await submit(env, permitted, { now: NOW + 3 });
+    assert.equal(replay.status, 200); assert.deepEqual(authority(), committed);
+    const superseded = await submit(env, rejected, { now: NOW + 4 });
+    assert.equal(superseded.status, 200); assert.deepEqual(authority(), committed);
+    const reassignment = makeOrder({ seq: 3, customer: { id: "other" } });
+    const ownerFailure = await submit(env, reassignment, { now: NOW + 5 });
+    assert.equal(ownerFailure.status, 503); assert.equal(ownerFailure.body.code, "write_failed");
+    assert.equal(eventRow(db, reassignment.event_id).status, "accepted");
+    assert.deepEqual(authority(), committed);
+    assert.deepEqual(db.prepare("PRAGMA foreign_key_check").all(), []);
+  });
+}
+
 test("case 1: fresh subscription.active apply (active, clamp, fingerprint, floor seq)", async () => {
   const { db, env } = freshEnv();
   const order = makeOrder({ seq: 5, current_period_end: NOW + 30 * 86400 });

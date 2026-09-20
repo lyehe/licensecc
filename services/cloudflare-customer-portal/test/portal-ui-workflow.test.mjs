@@ -59,7 +59,7 @@ test("portal UI workflow maps floating-seat release confirmation copy to its con
   assert.equal(workflow.FLOATING_SEAT_RELEASE_CONFIRM_TITLE, "Release floating seat?");
   assert.match(workflow.FLOATING_SEAT_RELEASE_CONFIRM_COPY, /cannot be undone/i);
   assert.match(workflow.FLOATING_SEAT_RELEASE_CONFIRM_COPY, /available to another user/i);
-  assert.match(workflow.FLOATING_SEAT_RELEASE_CONFIRM_COPY, /device must check out a new seat/i);
+  assert.match(workflow.FLOATING_SEAT_RELEASE_CONFIRM_COPY, /browser must check out a new seat/i);
   assert.match(workflow.FLOATING_SEAT_RELEASE_NETWORK_ERROR_COPY, /outcome is unknown/i);
   assert.match(workflow.FLOATING_SEAT_RELEASE_NETWORK_ERROR_COPY, /check the seat status/i);
   assert.equal(workflow.FLOATING_SEAT_RELEASE_REFRESH_FAILED_CODE, "floating_seat_release_refresh_failed");
@@ -94,7 +94,7 @@ test("portal UI workflow maps raw result codes to human-readable copy", async ()
   );
   assert.equal(
     workflow.describeResultCode("device_limit_exceeded"),
-    "This license's device limit is reached — release a device on the Devices tab.",
+    "This license's device limit is reached — release a device under Devices.",
   );
   assert.equal(
     workflow.describeResultCode("expired_subscription"),

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import worker from "../../dist/index.js";
+import worker from "../../dist/app.js";
 import { testKeyEnv, validBody } from "./fixtures.mjs";
 
 test("rate limited request returns 429 before D1 lookup", async () => {

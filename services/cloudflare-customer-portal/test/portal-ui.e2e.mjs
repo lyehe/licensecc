@@ -1,4 +1,6 @@
 import { expect, test } from "@playwright/test";
+import "./portal-ui.consent.e2e.mjs";
+import "./portal-ui.nodes.e2e.mjs";
 
 function makeEnvelope(code, data) {
   makeEnvelope.nextRequestId += 1;
@@ -11,6 +13,110 @@ function makeEnvelope(code, data) {
 }
 makeEnvelope.nextRequestId = 0;
 
+test("email/password registration opens an empty account and does not request an email code", async ({ page }) => {
+  let authed = false;
+  const submissions = [];
+  await page.route("**/portal/v1/auth/**", (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path.endsWith("/providers")) return route.fulfill({ json: makeEnvelope("auth_providers", { google: false, github: false, email: false, password: true }) });
+    if (path.endsWith("/password/register")) { submissions.push(route.request().postDataJSON()); authed = true; return route.fulfill({ json: makeEnvelope("signed_in", { customer_id: "new-customer" }) }); }
+    throw new Error(`Unexpected auth route ${path}`);
+  });
+  await page.route("**/api/portal/**", (route) => {
+    if (!authed) return route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" } });
+    return route.fulfill({ json: makeEnvelope("ok", route.request().url().endsWith("/me") ? { customer_id: "new-customer" } : { items: [] }) });
+  });
+  await page.goto("/");
+  await expect(page.getByRole("button", { name: "Send code" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Create an account", exact: true }).click();
+  await page.getByLabel("Email", { exact: true }).fill("new@example.com");
+  await page.getByLabel("Password", { exact: true }).fill("A long testing passphrase 1!");
+  await expect(page.getByText(/your email is not verified/)).toBeVisible();
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.getByRole("button", { name: "Create account", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Apps", exact: true })).toBeVisible();
+  expect(submissions).toEqual([{ email: "new@example.com", password: "A long testing passphrase 1!" }]);
+  await expect(page.locator('input[type="password"]')).toHaveCount(0);
+});
+
+test("password login errors clear the secret and explain recovery", async ({ page }) => {
+  await page.route("**/api/portal/me", (route) => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" } }));
+  await page.route("**/portal/v1/auth/providers", (route) => route.fulfill({ json: makeEnvelope("auth_providers", { google: true, github: true, email: false, password: true }) }));
+  await page.route("**/portal/v1/auth/password/login", (route) => route.fulfill({ status: 401, json: { ok: false, code: "invalid_credentials" } }));
+  await page.goto("/");
+  await expect(page.getByRole("button", { name: "Continue with Google" })).toBeHidden();
+  await page.getByText("Other sign-in options", { exact: true }).click();
+  await expect(page.getByRole("button", { name: "Continue with Google" })).toBeVisible();
+  await page.getByLabel("Email", { exact: true }).fill("new@example.com");
+  await page.getByLabel("Password", { exact: true }).fill("A wrong testing passphrase");
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await expect(page.getByRole("alert")).toHaveText("Email or password is incorrect.");
+  await expect(page.getByLabel("Password", { exact: true })).toHaveValue("");
+  await page.getByText("Forgot your password?", { exact: true }).click();
+  await expect(page.getByText(/contact your administrator for recovery/)).toBeVisible();
+});
+
+test("Account password change requires the current password and confirms session rotation", async ({ page }) => {
+  let submitted;
+  await page.route("**/api/portal/**", (route) => route.fulfill({ json: makeEnvelope("ok", route.request().url().endsWith("/me") ? { customer_id: "cus_self" } : { items: [] }) }));
+  await page.route("**/portal/v1/auth/providers", (route) => route.fulfill({ json: makeEnvelope("auth_providers", { google: false, github: false, email: false, password: true }) }));
+  await page.route("**/portal/v1/auth/identities", (route) => route.fulfill({ json: makeEnvelope("identities", { items: [] }) }));
+  await page.route("**/portal/v1/auth/password", (route) => {
+    if (route.request().method() === "POST") { submitted = route.request().postDataJSON(); return route.fulfill({ json: makeEnvelope("signed_in") }); }
+    return route.fulfill({ json: makeEnvelope("password_settings", { has_password: true, can_reset: false, email_verified: false, email: "new@example.com" }) });
+  });
+  await page.goto("/#/account");
+  await expect(page.getByRole("heading", { name: "Connected accounts" })).toHaveCount(0);
+  await expect(page.getByLabel("Current password", { exact: true })).toBeHidden();
+  await page.locator("summary").filter({ hasText: /^Change password$/ }).click();
+  await page.getByLabel("Current password", { exact: true }).fill("A long testing passphrase 1!");
+  await page.getByLabel("New password", { exact: true }).fill("A replacement passphrase 2!");
+  await page.getByRole("button", { name: "Change password", exact: true }).click();
+  await expect(page.getByText("Password saved. Other browser sessions have been signed out.")).toBeVisible();
+  expect(submitted).toEqual({ current_password: "A long testing passphrase 1!", password: "A replacement passphrase 2!" });
+  await expect(page.getByLabel("New password", { exact: true })).toHaveValue("");
+});
+
+test("social sign-in buttons submit to their own start routes and hide unavailable email", async ({ page }) => {
+  await page.route("**/api/portal/me", (route) => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" } }));
+  await page.route("**/portal/v1/auth/providers", (route) => route.fulfill({ json: makeEnvelope("auth_providers", { google: true, github: true, email: false }) }));
+  await page.goto("/?auth_error=sign_in_cancelled");
+  await expect(page.getByText("Sign-in was cancelled. You can try again.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Send code", exact: true })).toHaveCount(0);
+  for (const [provider, label] of [["google", "Google"], ["github", "GitHub"]]) {
+    await expect(page.getByRole("button", { name: `Continue with ${label}` })).toBeVisible();
+    await expect(page.locator(`form[action="/portal/v1/auth/${provider}/start"]`)).toHaveAttribute("method", "post");
+  }
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  const navigation = page.waitForRequest((request) => request.url().endsWith("/portal/v1/auth/github/start") && request.method() === "POST");
+  await page.route("**/portal/v1/auth/github/start", (route) => route.fulfill({ contentType: "text/html", body: "<h1>Provider redirect boundary</h1>" }));
+  await page.getByRole("button", { name: "Continue with GitHub" }).click();
+  await navigation;
+  await expect(page.getByRole("heading", { name: "Provider redirect boundary" })).toBeVisible();
+});
+
+test("unconfigured providers show a clear unavailable state", async ({ page }) => {
+  await page.route("**/api/portal/me", (route) => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" } }));
+  await page.route("**/portal/v1/auth/providers", (route) => route.fulfill({ json: makeEnvelope("auth_providers", { google: false, github: false, email: false }) }));
+  await page.goto("/");
+  await expect(page.getByText("Sign-in is not configured yet. Contact your administrator.")).toBeVisible();
+  await expect(page.getByRole("button", { name: /Continue with|Send code/ })).toHaveCount(0);
+});
+
+test("Account shows connected methods and keeps linking failures visible", async ({ page }) => {
+  await page.route("**/api/portal/**", (route) => route.fulfill({ json: makeEnvelope("ok", route.request().url().endsWith("/me") ? { customer_id: "cus_self" } : { items: [] }) }));
+  await page.route("**/portal/v1/auth/providers", (route) => route.fulfill({ json: makeEnvelope("auth_providers", { google: true, github: true, email: false }) }));
+  await page.route("**/portal/v1/auth/identities", (route) => route.fulfill({ json: makeEnvelope("identities", { items: [{ provider: "google", email: "customer@example.com" }] }) }));
+  await page.goto("/?auth_error=link_failed#/account");
+  await expect(page.getByText("Unable to connect this provider. Sign in again and retry from Account.")).toBeVisible();
+  await expect(page.getByText("Google · customer@example.com")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Connect Google" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Connect GitHub" })).toBeVisible();
+  await expect(page.locator('form[action="/portal/v1/auth/github/start?mode=link"]')).toHaveAttribute("method", "post");
+});
+
 // In-memory portal backend. The fixture mints NO real session: a successful verify simply flips an
 // `authed` flag (the SPA gates on me() succeeding, exactly as it would behind the HttpOnly cookie).
 // Crucially the fixtures NEVER return a bearer/token/private-key/another-customer's id — the leak
@@ -18,7 +124,7 @@ makeEnvelope.nextRequestId = 0;
 function makePortalApiFixture() {
   const VALID_CODE = "80315426";
   let authed = false;
-  const controls = { failNextRelease: false, deferNextRelease: false, rejectNextRelease: false, rejectRefreshes: 0, resolveRelease: null };
+  const controls = { rejectUsage: false, failMe: false, failNextRelease: false, deferNextRelease: false, rejectNextRelease: false, rejectRefreshes: 0, resolveRelease: null };
   const requests = { authRequests: 0, verifies: 0, checkouts: 0, heartbeats: 0, releases: 0, refreshRejects: 0, downloads: 0, logouts: 0, seatActions: [] };
 
   const entitlements = [
@@ -54,6 +160,8 @@ function makePortalApiFixture() {
     });
 
     // ---- Auth ----
+    if (path === "/portal/v1/auth/providers") return fulfill(200, makeEnvelope("auth_providers", { google: true, github: true, email: true }));
+    if (path === "/portal/v1/auth/identities") return fulfill(200, makeEnvelope("identities", { items: [] }));
     if (method === "POST" && path === "/portal/v1/auth/request") {
       requests.authRequests += 1;
       return fulfill(200, makeEnvelope("otp_requested"));
@@ -75,6 +183,7 @@ function makePortalApiFixture() {
 
     // ---- Session-scoped reads ----
     if (method === "GET" && path === "/api/portal/me") {
+      if (controls.failMe) return fulfill(503, { ok: false, code: "unavailable", request_id: "session-check" });
       if (!authed) return fulfill(401, { ok: false, code: "unauthorized", request_id: "portal-e2e-401" });
       return fulfill(200, makeEnvelope("me", { customer_id: "cus_self" }));
     }
@@ -97,6 +206,7 @@ function makePortalApiFixture() {
       return fulfill(200, makeEnvelope("devices", { items: devices.map((item) => ({ ...item })) }));
     }
     if (method === "GET" && path === "/api/portal/usage") {
+      if (controls.rejectUsage) return route.abort("failed");
       if (controls.rejectRefreshes > 0) {
         controls.rejectRefreshes -= 1;
         requests.refreshRejects += 1;
@@ -104,6 +214,13 @@ function makePortalApiFixture() {
       }
       if (!authed) return fulfill(401, { ok: false, code: "unauthorized", request_id: "portal-e2e-401" });
       return fulfill(200, makeEnvelope("usage", { items: usage.map((item) => ({ ...item })) }));
+    }
+
+    if (method === "POST" && path === "/api/portal/devices/release") {
+      const body = await jsonBody(request);
+      const index = devices.findIndex((item) => item.device_key_id === body.device_key_id);
+      if (index >= 0) devices.splice(index, 1);
+      return fulfill(200, makeEnvelope("device_released"));
     }
 
     // ---- Per-seat actions: body MUST target an entitlement id, never a raw fingerprint. ----
@@ -153,7 +270,7 @@ function makePortalApiFixture() {
     return fulfill(404, { ok: false, code: "not_found", request_id: "portal-e2e-unhandled" });
   }
 
-  return { route, requests, VALID_CODE, controls };
+  return { route, requests, VALID_CODE, controls, entitlements, devices };
 }
 
 test("customer portal signs in with an 8-digit code and walks every screen without leaking secrets", async ({ page }) => {
@@ -162,7 +279,7 @@ test("customer portal signs in with an 8-digit code and walks every screen witho
   await page.route("**/api/portal/**", api.route);
 
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "licensecc customer portal" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Sign in", exact: true })).toBeVisible();
 
   // --- Login: email -> request code ---
   await page.getByLabel("Email").fill("user@example.com");
@@ -173,16 +290,17 @@ test("customer portal signs in with an 8-digit code and walks every screen witho
   // --- Login: enter the 8-digit code -> me() -> dashboard ---
   await page.getByLabel("8-digit code").fill(api.VALID_CODE);
   await page.getByRole("button", { name: "Verify" }).click();
-  await expect(page.getByRole("button", { name: "My entitlements" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Apps", exact: true })).toBeVisible();
   await expect.poll(() => api.requests.verifies).toBe(1);
 
-  // --- My entitlements (read-only) ---
-  await expect(page.getByText("pro", { exact: true })).toBeVisible();
+  // --- Per-app access (read-only) ---
+  await page.getByRole("link", { name: "View app DEFAULT" }).click();
+  await expect(page.getByText("pro", { exact: true }).first()).toBeVisible();
   await expect(page.locator(".status.active").first()).toHaveText("active");
   await expect(page.getByText("aaaaaaaa...aaaaaaaa").first()).toBeVisible();
 
   // --- My devices/seats: floating seat checkout/heartbeat/release ---
-  await page.getByRole("button", { name: "My devices" }).click();
+  await page.getByRole("link", { name: "Devices", exact: true }).click();
   const seatCard = page.locator(".seatCard").filter({ hasText: "pro" }).first();
   await expect(seatCard.getByRole("button", { name: "Start seat" })).toBeEnabled();
   await expect(seatCard.getByRole("button", { name: "Refresh" })).toBeDisabled();
@@ -372,26 +490,27 @@ test("customer portal signs in with an 8-digit code and walks every screen witho
   await expect.poll(() => api.requests.releases).toBe(refreshFailureReleaseCount + 1);
   await expect(refreshFailedDialog).toHaveCount(0);
   await expect.poll(() => api.requests.refreshRejects).toBe(3);
-  await expect(page.locator('header p[role="status"]')).toContainText(/released; status refresh failed/i);
+  await expect(page.locator('.feedback p[role="status"]')).toContainText(/released; status refresh failed/i);
   await expect(page.getByRole("button", { name: "Refresh status" })).toBeVisible();
   await expect.poll(() => page.evaluate(() => window.localStorage.getItem("licensecc.portal.seats.v1"))).toBe("{}");
-  await expect(seatCard.getByRole("button", { name: "Start seat" })).toBeEnabled();
-  await expect(seatCard.getByRole("button", { name: "Start seat" })).toBeFocused();
+  await expect(seatCard.getByRole("button", { name: "Start seat" })).toBeDisabled();
+  await expect(seatCard).toBeFocused();
   expect(await page.evaluate(() => document.activeElement?.tagName)).not.toBe("BODY");
 
   await page.getByRole("button", { name: "Refresh status" }).click();
   await expect(page.getByRole("button", { name: "Refresh status" })).toHaveCount(0);
-  await expect(page.locator('header p[role="status"]')).toContainText("ready");
-  await expect(page.getByRole("button", { name: "My devices" })).toBeFocused();
+  await expect(page.locator('.feedback p[role="status"]')).toHaveText("");
+  await expect(page.getByRole("link", { name: "Devices", exact: true })).toBeFocused();
   expect(await page.evaluate(() => document.activeElement?.tagName)).not.toBe("BODY");
 
   // --- Usage ---
-  await page.getByRole("button", { name: "Usage" }).click();
-  await expect(page.getByText("Recent usage")).toBeVisible();
+  await page.getByRole("link", { name: "Apps", exact: true }).click();
+  await page.getByRole("link", { name: "View app DEFAULT" }).click();
+  await expect(page.getByText("Recorded usage")).toBeVisible();
   await expect(page.getByText("87", { exact: true })).toBeVisible();
 
   // --- Download: triggers a browser download of the streamed attachment ---
-  await page.getByRole("button", { name: "Download" }).click();
+  // License download is part of the app details.
   await page.getByLabel("Device key for DEFAULT solo").fill("device-e2e");
   const downloadPromise = page.waitForEvent("download");
   await page.getByRole("button", { name: "Activate and download .lic" }).first().click();
@@ -406,7 +525,95 @@ test("customer portal signs in with an 8-digit code and walks every screen witho
   }
 
   // --- Logout returns to the sign-in screen ---
-  await page.getByRole("button", { name: "Log out" }).click();
+  await page.getByRole("button", { name: "Sign out" }).click();
   await expect(page.getByRole("button", { name: "Send code" })).toBeVisible();
   await expect.poll(() => api.requests.logouts).toBe(1);
+});
+
+async function signIn(page, api) {
+  await page.route("**/portal/v1/auth/**", api.route);
+  await page.route("**/api/portal/**", api.route);
+  await page.goto("/");
+  await page.getByLabel("Email").fill("user@example.com");
+  await page.getByRole("button", { name: "Send code" }).click();
+  await page.getByLabel("8-digit code").fill(api.VALID_CODE);
+  await page.getByRole("button", { name: "Verify", exact: true }).click();
+}
+
+test("app grouping, browser history and mobile reflow preserve the customer context", async ({ page }) => {
+  const api = makePortalApiFixture();
+  api.entitlements.push({ ...api.entitlements[0], id: "second_app", project: "SECOND_APP", feature: "second-feature" });
+  await signIn(page, api);
+  await expect(page.locator(".appRow")).toHaveCount(2);
+  await page.getByRole("link", { name: "View app SECOND_APP" }).click();
+  await expect(page.getByRole("heading", { name: "SECOND_APP", exact: true })).toBeVisible();
+  await expect(page.getByText("solo", { exact: true })).toHaveCount(0);
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "SECOND_APP", exact: true })).toBeVisible();
+  await page.getByRole("link", { name: "Devices", exact: true }).click();
+  await page.goBack();
+  await expect(page.getByRole("heading", { name: "SECOND_APP", exact: true })).toBeVisible();
+  for (const width of [320, 390, 768, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    await expect(page.getByRole("link", { name: "Account", exact: true })).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  }
+  await page.getByRole("link", { name: "Devices", exact: true }).click();
+  await page.setViewportSize({ width: 320, height: 900 });
+  await page.screenshot({ path: "../../build/worker-staging/portal-redesign-nodes-mobile.png", fullPage: true });
+  await page.getByRole("searchbox", { name: "Find a node" }).fill("missing");
+  await expect(page.getByRole("heading", { name: "No matching nodes" })).toBeVisible();
+  await page.getByRole("searchbox", { name: "Find a node" }).fill("");
+  await expect(page.getByText("d".repeat(40), { exact: true })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.getByRole("link", { name: "Account", exact: true }).click();
+  await expect(page.getByText("cus_self", { exact: true })).toBeHidden();
+  await page.getByText("Account details", { exact: true }).click();
+  await expect(page.getByText("cus_self", { exact: true })).toBeVisible();
+  await expect(page.getByText("Your apps and devices stay connected.")).toBeVisible();
+});
+
+test("session and account-read failures do not masquerade as an empty account", async ({ page }) => {
+  const api = makePortalApiFixture();
+  api.controls.failMe = true;
+  await page.route("**/portal/v1/auth/**", api.route);
+  await page.route("**/api/portal/**", api.route);
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: "Unable to check your session" })).toBeVisible();
+  await expect(page.getByLabel("Email")).toHaveCount(0);
+  api.controls.failMe = false;
+  await page.getByRole("button", { name: "Retry" }).click();
+  await page.getByLabel("Email").fill("user@example.com");
+  await page.getByRole("button", { name: "Send code" }).click();
+  await page.getByLabel("8-digit code").fill(api.VALID_CODE);
+  api.controls.rejectRefreshes = 3;
+  await page.getByRole("button", { name: "Verify", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Account data unavailable" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "No apps assigned yet" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Retry", exact: true }).click();
+  await expect(page.getByRole("link", { name: "View app DEFAULT" })).toBeVisible();
+});
+
+test("usage failure stays local and removing a filtered registration keeps the selected app truthful", async ({ page }) => {
+  const api = makePortalApiFixture();
+  api.controls.rejectUsage = true;
+  api.entitlements.push({ ...api.entitlements[1], id: "second_app", project: "SECOND_APP" });
+  api.devices.push({ ...api.devices[0], project: "SECOND_APP", device_key_id: "second-node" });
+  await signIn(page, api);
+  await page.getByRole("link", { name: "View app DEFAULT" }).click();
+  await expect(page.getByText(/Usage is unavailable/)).toBeVisible();
+  await page.getByLabel("Device key for DEFAULT solo").fill("device-e2e");
+  await expect(page.getByRole("button", { name: "Activate and download .lic" })).toBeEnabled();
+  api.controls.rejectUsage = false;
+  await page.getByRole("button", { name: "Retry usage" }).click();
+  await expect(page.getByText("87", { exact: true })).toBeVisible();
+  await page.getByRole("link", { name: "Devices", exact: true }).click();
+  await page.getByRole("combobox", { name: "App", exact: true }).selectOption("DEFAULT");
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.locator(".registrations").getByRole("button", { name: "Release", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "No matching nodes" })).toBeVisible();
+  await expect(page.getByRole("combobox", { name: "App", exact: true })).toHaveValue("DEFAULT");
+  await expect(page.getByRole("option", { name: "DEFAULT", exact: true })).toHaveCount(1);
+  await page.getByRole("combobox", { name: "App", exact: true }).selectOption("");
+  await expect(page.getByText("second-node", { exact: true })).toBeVisible();
 });

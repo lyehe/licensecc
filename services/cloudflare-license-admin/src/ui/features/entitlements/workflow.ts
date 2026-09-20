@@ -1,5 +1,5 @@
 import type {
-  EntitlementInput,
+  EntitlementCreateInput,
   EntitlementPatch,
   EntitlementRecord,
   EntitlementStatus,
@@ -11,12 +11,15 @@ import { shortHash } from "../../shared/format";
 export type EntitlementAction = "disable" | "reenable" | "revoke";
 
 export interface EntitlementFilter {
+  id?: string;
+  customer_id?: string;
   project: string;
   feature: string;
   status: string;
 }
 
 export interface EntitlementFormState {
+  enforcement_mode: "legacy" | "device_bound_v1";
   policy_id: string;
   project: string;
   feature: string;
@@ -41,6 +44,7 @@ export interface EntitlementEditState {
 }
 
 export const emptyEntitlementForm: EntitlementFormState = {
+  enforcement_mode: "legacy",
   policy_id: "",
   project: "DEFAULT",
   feature: "DEFAULT",
@@ -66,6 +70,8 @@ export const emptyEntitlementEditForm: EntitlementEditState = {
 
 export function entitlementsPath(filter: EntitlementFilter): string {
   const params = new URLSearchParams();
+  if (filter.id) params.set("id", filter.id);
+  if (filter.customer_id) params.set("customer_id", filter.customer_id);
   if (filter.project !== "") params.set("project", filter.project);
   if (filter.feature !== "") params.set("feature", filter.feature);
   if (filter.status !== "") params.set("status", filter.status);
@@ -77,8 +83,9 @@ export function entitlementDetailPath(id: string): string {
   return `/api/admin/entitlements/${encodeURIComponent(id)}`;
 }
 
-export function normalizeEntitlementForm(form: EntitlementFormState): EntitlementInput {
+export function normalizeEntitlementForm(form: EntitlementFormState): EntitlementCreateInput {
   return {
+    enforcement_mode: form.enforcement_mode,
     project: form.project,
     feature: form.feature,
     license_fingerprint: form.license_fingerprint,
@@ -92,8 +99,9 @@ export function normalizeEntitlementForm(form: EntitlementFormState): Entitlemen
   };
 }
 
-export function normalizeCreateFromPolicy(form: EntitlementFormState): EntitlementInput & { policy_id: string } {
-  const body: EntitlementInput & { policy_id: string } = {
+export function normalizeCreateFromPolicy(form: EntitlementFormState): EntitlementCreateInput & { policy_id: string } {
+  const body: EntitlementCreateInput & { policy_id: string } = {
+    enforcement_mode: form.enforcement_mode,
     policy_id: form.policy_id,
     project: form.project,
     feature: form.feature,
@@ -123,12 +131,12 @@ export function editFormFromEntitlement(item: EntitlementRecord): EntitlementEdi
   };
 }
 
-export function normalizeEntitlementPatch(form: EntitlementEditState): EntitlementPatch {
+export function normalizeEntitlementPatch(form: EntitlementEditState, original?: Pick<EntitlementRecord, "valid_from" | "valid_until">): EntitlementPatch {
   return {
     device_hash: form.device_hash,
     assertion_ttl_seconds: parseBoundedInteger(form.assertion_ttl_seconds, "assertion_ttl_seconds", 1, 3600),
-    valid_from: dateInputToEpoch(form.valid_from, "valid_from"),
-    valid_until: dateInputToEpoch(form.valid_until, "valid_until"),
+    valid_from: original && form.valid_from === epochToDateInput(original.valid_from) ? original.valid_from : dateInputToEpoch(form.valid_from, "valid_from"),
+    valid_until: original && form.valid_until === epochToDateInput(original.valid_until) ? original.valid_until : dateInputToEpoch(form.valid_until, "valid_until"),
     notes: parseNotes(form.notes),
     customer_id: parseNullableIdentifier(form.customer_id, "customer_id"),
     license_id: parseNullableIdentifier(form.license_id, "license_id"),
@@ -136,11 +144,11 @@ export function normalizeEntitlementPatch(form: EntitlementEditState): Entitleme
 }
 
 export function patchPath(item: Pick<EntitlementRecord, "id">): string {
-  return `/api/admin/entitlements/${item.id}`;
+  return `/api/admin/entitlements/${encodeURIComponent(item.id)}`;
 }
 
 export function transitionPath(item: Pick<EntitlementRecord, "id">, action: EntitlementAction): string {
-  return `/api/admin/entitlements/${item.id}/${action}`;
+  return `/api/admin/entitlements/${encodeURIComponent(item.id)}/${action}`;
 }
 
 export function canEditEntitlement(status: EntitlementStatus): boolean {
@@ -251,7 +259,44 @@ export function summarizeBatchResults(results: ReadonlyArray<BatchRowResult>): s
 }
 
 export function releaseSeatsPath(id: string): string {
-  return `/api/admin/entitlements/${id}/release-seats`;
+  return `/api/admin/entitlements/${encodeURIComponent(id)}/release-seats`;
+}
+
+export function entitlementFormErrors(form: EntitlementEditState | EntitlementFormState, original?: Pick<EntitlementRecord, "valid_from" | "valid_until">): Record<string, string> {
+  const errors: Record<string, string> = {};
+  if ("license_fingerprint" in form) {
+    if (form.project.trim() === "" || form.project.length > 127 || /[=\n\r\0]/.test(form.project)) errors.project = "Enter a project of 1–127 characters, without line breaks or =.";
+    if (form.feature.trim() === "" || form.feature.length > 15 || /[=\n\r\0]/.test(form.feature)) errors.feature = "Enter a feature of 1–15 characters, without line breaks or =.";
+    if (!/^[0-9a-fA-F]{64}$/.test(form.license_fingerprint)) errors.license_fingerprint = "Enter the full 64-character hexadecimal license fingerprint.";
+  }
+  if (form.device_hash !== "" && !/^[0-9a-fA-F]{64}$/.test(form.device_hash)) errors.device_hash = "Enter 64 hexadecimal characters or leave this blank.";
+  if (!Number.isInteger(form.assertion_ttl_seconds) || form.assertion_ttl_seconds < 1 || form.assertion_ttl_seconds > 3600) errors.assertion_ttl_seconds = "Enter a whole number from 1 to 3600 seconds.";
+  for (const field of ["valid_from", "valid_until"] as const) {
+    try {
+      const epoch = dateInputToEpoch(form[field], field);
+      if (epoch !== null && epochToDateInput(epoch) !== form[field]) throw new Error("invalid_date");
+    } catch { errors[field] = "Enter a valid date on or after January 1, 1970."; }
+  }
+  if (!errors.valid_from && !errors.valid_until) {
+    const patch = { valid_from: original && form.valid_from === epochToDateInput(original.valid_from) ? original.valid_from : dateInputToEpoch(form.valid_from, "valid_from"), valid_until: original && form.valid_until === epochToDateInput(original.valid_until) ? original.valid_until : dateInputToEpoch(form.valid_until, "valid_until") };
+    if (patch.valid_from !== null && patch.valid_until !== null && patch.valid_until <= patch.valid_from) errors.valid_until = "Choose an expiry after the start date.";
+  }
+  for (const field of ["customer_id", "license_id"] as const) {
+    try { parseNullableIdentifier(form[field], field); } catch { errors[field] = "Use a complete ID of at most 128 characters with no line breaks."; }
+  }
+  try { parseNotes(form.notes); } catch { errors.notes = "Use one line of notes, at most 1000 characters."; }
+  if ("enforcement_mode" in form) {
+    if (!["legacy", "device_bound_v1"].includes(form.enforcement_mode)) errors.enforcement_mode = "Choose a protection mode.";
+    if (form.enforcement_mode === "device_bound_v1") {
+      if (!/^[A-Za-z0-9_.:-]{1,127}(?![\s\S])/.test(form.project)) errors.project = "Protected project IDs use ASCII letters, numbers, _, ., :, or -.";
+      if (!/^[A-Za-z0-9_.:-]{1,15}(?![\s\S])/.test(form.feature)) errors.feature = "Protected feature IDs use 1–15 ASCII letters, numbers, _, ., :, or -.";
+      if (form.license_fingerprint.length !== 64 || !/^[a-f0-9]{64}$/.test(form.license_fingerprint)) errors.license_fingerprint = "Protected licenses require the exact 64-character lowercase hexadecimal fingerprint.";
+      if (!form.customer_id.trim()) errors.customer_id = "Choose the customer who owns this license.";
+      if (!form.license_id.trim()) errors.license_id = "Choose a license for this customer and project.";
+      if (form.device_hash !== "") errors.device_hash = "Protected enrollment establishes the device identity. Leave this field empty.";
+    }
+  }
+  return errors;
 }
 
 export function releaseSeatsConfirm(item: { project: string; feature: string; license_fingerprint: string }): string {

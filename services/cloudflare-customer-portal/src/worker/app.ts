@@ -3,12 +3,17 @@
 import { requestId } from "@licensecc/cloudflare-runtime/http/kit";
 import { ALL_ROUTES, META_ROUTES, PUBLIC_ROUTES, SESSION_ROUTES } from "./routes.js";
 import { HEALTH_DISPATCH, META_DISPATCH } from "./routes/meta.js";
+import { PASSWORD_DISPATCH } from "./routes/password.js";
+import { OAUTH_DISPATCH } from "./routes/oauth.js";
 import { AUTH_DISPATCH, authSession } from "./routes/auth.js";
-import { SESSION_DISPATCH, resolveOwnedEntitlement } from "./routes/self-service.js";
+import { SESSION_DISPATCH as SELF_SERVICE_DISPATCH, resolveOwnedEntitlement } from "./routes/self-service.js";
+import { CONSENT_DISPATCH } from "./routes/device-consent.js";
+import { BINDING_DISPATCH } from "./routes/device-bindings.js";
 import { envelope, isCrossSite, constantTimeEqual, decodeEntitlementId, entitlementId } from "./support.js";
 import type { Env, ExecutionContextLike, TopRoute } from "./env.js";
 
 export type { Env } from "./env.js";
+const SESSION_DISPATCH = { ...SELF_SERVICE_DISPATCH, ...CONSENT_DISPATCH, ...BINDING_DISPATCH };
 
 // Top-level routes are composed in canonical inventory order. Session lookup remains a separate
 // boundary so every /api/portal request authenticates before its method/path is inspected.
@@ -16,14 +21,24 @@ const TOP_DISPATCH: Record<string, TopRoute> = {
   ...META_DISPATCH,
   ...HEALTH_DISPATCH,
   ...AUTH_DISPATCH,
+  ...OAUTH_DISPATCH,
+  ...PASSWORD_DISPATCH,
 };
 
 async function handleApiPortal(request: Request, env: Env, reqId: string, now: number, pathname: string): Promise<Response> {
-  const session = await authSession(request, env, reqId, now);
-  if (session instanceof Response) return session;
+  let session: Awaited<ReturnType<typeof authSession>>;
+  try { session = await authSession(request, env, reqId, now); }
+  catch (error) {
+    if (pathname.startsWith("/api/portal/device-authorizations/") || pathname.startsWith("/api/portal/device-bindings")) return envelope(reqId,"temporarily_unavailable",undefined,503,{"cache-control":"no-store"});
+    throw error;
+  }
+  if (session instanceof Response) {
+    session.headers.set("cache-control", "no-store");
+    return session;
+  }
   const route = SESSION_DISPATCH[`${request.method} ${pathname}` as keyof typeof SESSION_DISPATCH];
   if (route !== undefined) return await route(request, env, session, reqId, now);
-  return envelope(reqId, "not_found", undefined, 404);
+  return envelope(reqId, "not_found", undefined, 404, { "cache-control": "no-store" });
 }
 
 // Startup guard: dispatch entries and the canonical route inventory must agree in both directions.
@@ -42,7 +57,7 @@ async function handleApiPortal(request: Request, env: Env, reqId: string, now: n
   for (const key of session) {
     if (!(key in SESSION_DISPATCH)) throw new Error(`route without session dispatch entry: ${key}`);
   }
-  if (ALL_ROUTES.length !== 18) throw new Error(`portal route inventory changed: expected 18, got ${ALL_ROUTES.length}`);
+  if (ALL_ROUTES.length !== 33) throw new Error(`portal route inventory changed: expected 33, got ${ALL_ROUTES.length}`);
 }
 
 export const PORTAL_ROUTE_KEYS: readonly string[] = [...Object.keys(TOP_DISPATCH), ...Object.keys(SESSION_DISPATCH)];

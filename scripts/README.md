@@ -4,6 +4,18 @@ The root command surface in `package.json` is the public entry point for normal
 development and CI. Files in this directory implement those commands; callers
 should not depend on an internal module merely because it is executable.
 
+Protected Wrangler commands, deployment-transition capture and rollback launch
+the current Node executable with the repository's locked
+`node_modules/wrangler/bin/wrangler.js` entry point. They do not invoke a shell,
+an npm command shim or an installation fallback. An alternate rollback root
+selects configuration and working directory; it does not select a different
+Wrangler installation. Run `npm ci` before using these wrappers.
+
+Wrangler JSON reads require `WRANGLER_LOG=log`; error-only logging suppresses
+the pinned CLI's JSON output. Wrappers capture bounded output and release only
+validated, redacted evidence. Mutations use error-level logging, and all three
+wrappers disable Wrangler's raw disk logs regardless of inherited settings.
+
 ## Validation profiles
 
 | Command | Exact scope | Intentionally separate |

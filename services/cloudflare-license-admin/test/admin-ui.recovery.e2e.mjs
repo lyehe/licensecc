@@ -2,29 +2,65 @@ import { expect, test } from "@playwright/test";
 
 import { makeAdminApiFixture, makeEnvelope } from "./admin-ui.fixture.mjs";
 
-test("admin UI disables hidden catalog-plan controls while its filtered page one is unsettled", async ({ page }) => {
+// These scenarios deliberately leave unsent drafts; custom consequence dialogs
+// remain under each test's explicit control.
+test.beforeEach(async ({ page }) => {
+  page.on("dialog", async (dialog) => {
+    expect(dialog.type()).toBe("confirm");
+    await dialog.accept();
+  });
+});
+
+async function newEntitlementForm(page) {
+  await page.getByRole("button", { name: "New entitlement", exact: true }).click();
+  return page.getByRole("form", { name: "New entitlement", exact: true });
+}
+
+async function newWebhookForm(page) {
+  await page.getByRole("button", { name: "New endpoint", exact: true }).click();
+  return page.locator("aside.editorLayout form");
+}
+
+async function openActionMenu(button) {
+  await button.waitFor({ state: "attached" });
+  const details = button.locator("xpath=ancestor::details[1]");
+  if (await details.count()) {
+    if (!(await details.evaluate((element) => element.open))) {
+      await details.locator("summary").click();
+    }
+  }
+}
+
+async function clickAction(button) {
+  await openActionMenu(button);
+  await button.click();
+}
+
+test("admin UI keeps selected catalog-plan controls unavailable after returning to an unsettled filtered list", async ({ page }) => {
   const api = makeAdminApiFixture();
   api.seed.catalogPlan("plan_old", "OLD", "old");
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
-  await page.getByRole("button", { name: "Plans", exact: true }).click();
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Plans", exact: true }).click();
   const plansPane = page.getByRole("heading", { name: "Catalog plans" }).locator("..");
-  await expect(plansPane.getByText("Plan old")).toBeVisible();
-  await plansPane.getByRole("button", { name: "Use", exact: true }).click();
+  await expect(plansPane.locator(".desktopRecords").getByText("Plan old")).toBeVisible();
+  await plansPane.getByRole("button", { name: "View plan", exact: true }).click();
+  await page.getByRole("button", { name: "Add feature", exact: true }).click();
   const planFeatureForm = page.getByRole("form", { name: "Plan feature" });
   await expect(planFeatureForm.getByLabel("Selected plan")).toHaveValue("plan_old");
 
+  await page.getByRole("button", { name: "Back to plans", exact: true }).click();
   const deferredRead = "catalog-plans:HIDDEN::page-1";
   api.behavior.deferReads.add(deferredRead);
   await plansPane.getByPlaceholder("project").fill("HIDDEN");
   await expect.poll(() => api.behavior.releaseReads.has(deferredRead)).toBe(true);
-  await expect(planFeatureForm.getByLabel("Selected plan")).toBeDisabled();
-  await expect(planFeatureForm.getByRole("button", { name: "Save plan feature" })).toBeDisabled();
+  await expect(planFeatureForm.getByLabel("Selected plan")).toHaveCount(0);
+  await expect(planFeatureForm.getByRole("button", { name: "Save plan feature" })).toHaveCount(0);
   expect(api.requests.catalogPlanFeatures).toHaveLength(0);
 
   api.behavior.releaseReads.get(deferredRead)();
   await expect(plansPane.locator("tbody tr")).toHaveCount(0);
-  await expect(planFeatureForm.getByRole("button", { name: "Save plan feature" })).toBeDisabled();
+  await expect(planFeatureForm.getByRole("button", { name: "Save plan feature" })).toHaveCount(0);
   expect(api.requests.catalogPlanFeatures).toHaveLength(0);
 });
 
@@ -41,7 +77,7 @@ test("admin UI rejects repeated cursors and duplicate rows from shared and custo
   api.behavior.deliveryPagination = true;
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
-  await page.getByRole("button", { name: "Plans", exact: true }).click();
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Plans", exact: true }).click();
   const plansPane = page.getByRole("heading", { name: "Catalog plans" }).locator("..");
   await expect(plansPane.locator("tbody tr")).toHaveCount(1);
   api.behavior.catalogPlanRepeatCursor = true;
@@ -54,16 +90,16 @@ test("admin UI rejects repeated cursors and duplicate rows from shared and custo
   // page-one snapshot instead of expecting a second unsafe append from it.
   api.behavior.catalogPlanRepeatCursor = false;
   api.behavior.catalogPlanDuplicatePage = true;
-  await page.getByRole("button", { name: "Entitlements", exact: true }).click();
-  await page.getByRole("button", { name: "Plans", exact: true }).click();
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Entitlements", exact: true }).click();
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Plans", exact: true }).click();
   await expect(plansPane.locator("tbody tr")).toHaveCount(1);
   await plansPane.getByRole("button", { name: "Load more" }).click();
   await expect(page.getByText("invalid_api_response (duplicate_page_item)")).toBeVisible();
   await expect(plansPane.locator("tbody tr")).toHaveCount(1);
   await expect(plansPane.getByRole("button", { name: "Load more" })).toHaveCount(0);
 
-  await page.getByRole("button", { name: "Webhooks", exact: true }).click();
-  const webhookRow = page.locator(".tablePane > table tbody tr").filter({ hasText: "https://hooks.example.test/pager" });
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Webhooks", exact: true }).click();
+  const webhookRow = page.locator(".tablePane table tbody tr").filter({ hasText: "https://hooks.example.test/pager" });
   await webhookRow.getByRole("button", { name: "Deliveries", exact: true }).click();
   const deliveries = page.getByRole("region", { name: "Recent webhook deliveries" });
   await expect(deliveries.locator("tbody tr")).toHaveCount(1);
@@ -76,8 +112,8 @@ test("admin UI rejects repeated cursors and duplicate rows from shared and custo
   // Re-entering the feature establishes a new delivery page-one snapshot.
   api.behavior.deliveryDuplicatePage = false;
   api.behavior.deliveryRepeatCursor = true;
-  await page.getByRole("button", { name: "Entitlements", exact: true }).click();
-  await page.getByRole("button", { name: "Webhooks", exact: true }).click();
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Entitlements", exact: true }).click();
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Webhooks", exact: true }).click();
   await expect(deliveries.locator("tbody tr")).toHaveCount(1);
   await deliveries.getByRole("button", { name: "Load more" }).click();
   await expect(page.getByText("invalid_api_response (repeated_cursor)")).toBeVisible();
@@ -95,8 +131,8 @@ test("admin UI clears a definitive pre-mutation attempt so the next ordinary ret
   });
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
-  await page.getByRole("button", { name: "Webhooks", exact: true }).click();
-  const form = page.locator("aside form");
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Webhooks", exact: true }).click();
+  const form = await newWebhookForm(page);
   await form.getByLabel("URL").fill("https://hooks.example.test/new-key");
   await form.getByRole("button", { name: "Create endpoint" }).click();
   await expect.poll(() => api.requests.webhookCreateAttempts.length).toBe(1);
@@ -117,14 +153,16 @@ test("admin UI keeps a same-key replay conflict indeterminate after a post-commi
   );
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
-  await page.getByRole("button", { name: "Entitlements", exact: true }).click();
-  const createForm = page.locator("aside form");
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Entitlements", exact: true }).click();
+  const createForm = await newEntitlementForm(page);
   await createForm.getByLabel("Project").fill("replay-conflict");
   await createForm.getByLabel("Feature").fill("pro");
-  await createForm.getByLabel("Fingerprint").fill("1".repeat(64));
-  await createForm.getByRole("button", { name: "Save" }).click();
-  const row = page.locator(".tablePane > table tbody tr").first();
-  await row.getByRole("button", { name: "Disable", exact: true }).click();
+  await createForm.getByLabel("License fingerprint").fill("1".repeat(64));
+  await createForm.getByRole("button", { name: "Create entitlement" }).click();
+  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
+  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
+  const row = page.getByRole("region", { name: "Entitlement records", exact: true }).locator("tbody tr").first();
+  await clickAction(row.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first());
   const dialog = page.getByRole("dialog");
   await dialog.getByLabel("Reason (required)").fill("operator review");
   await dialog.getByRole("button", { name: "Confirm" }).click();
@@ -142,31 +180,35 @@ test("admin UI accepts a legitimate empty customer name in a transition RETURNIN
   api.behavior.customerTransitionEmptyName = true;
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
-  await page.getByRole("button", { name: "Customers", exact: true }).click();
-  await page.getByRole("button", { name: "cus_acme", exact: true }).click();
-  await expect(page.getByRole("button", { name: "Disable", exact: true })).toBeEnabled();
-  await page.getByRole("button", { name: "Disable", exact: true }).click();
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Customers", exact: true }).click();
+  await page.locator("#customer-open-cus_acme").click();
+  const disable = page.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first();
+  await openActionMenu(disable);
+  await expect(disable).toBeEnabled();
+  await clickAction(disable);
   const dialog = page.getByRole("dialog");
   await dialog.getByLabel("Reason (required)").fill("empty name is valid");
   await dialog.getByRole("button", { name: "Confirm" }).click();
   await expect(page.locator(".operatorNotice")).toHaveCount(0);
   await expect(page.locator(".modalError")).toHaveCount(0);
-  await expect(page.locator(".details .status")).toContainText("disabled");
+  await expect(page.locator(".recordDetail .status")).toContainText("disabled");
 });
 
 test("admin UI reconciles release seats through the exact entitlement GET even when the target is off page one", async ({ page }) => {
   const api = makeAdminApiFixture();
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
-  await page.getByRole("button", { name: "Entitlements", exact: true }).click();
-  const createForm = page.locator("aside form");
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Entitlements", exact: true }).click();
+  const createForm = await newEntitlementForm(page);
   await createForm.getByLabel("Project").fill("release-page-two");
   await createForm.getByLabel("Feature").fill("float");
-  await createForm.getByLabel("Fingerprint").fill("2".repeat(64));
-  await createForm.getByRole("button", { name: "Save" }).click();
-  const row = page.locator(".tablePane > table tbody tr").first();
+  await createForm.getByLabel("License fingerprint").fill("2".repeat(64));
+  await createForm.getByRole("button", { name: "Create entitlement" }).click();
+  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
+  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
+  const row = page.getByRole("region", { name: "Entitlement records", exact: true }).locator("tbody tr").first();
   api.behavior.releaseSeatTargetOnSecondPage = true;
-  await row.getByRole("button", { name: "Release seats", exact: true }).click();
+  await clickAction(row.getByRole("button", { name: "Release seats", exact: true, includeHidden: true }).first());
   const dialog = page.getByRole("dialog");
   await dialog.getByLabel("Reason (required)").fill("stuck host");
   await dialog.getByRole("button", { name: "Confirm" }).click();
@@ -184,14 +226,16 @@ test("admin UI keeps a release-seat result unknown when same-key replay evidence
   );
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
-  await page.getByRole("button", { name: "Entitlements", exact: true }).click();
-  const createForm = page.locator("aside form");
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Entitlements", exact: true }).click();
+  const createForm = await newEntitlementForm(page);
   await createForm.getByLabel("Project").fill("release-evidence");
   await createForm.getByLabel("Feature").fill("float");
-  await createForm.getByLabel("Fingerprint").fill("3".repeat(64));
-  await createForm.getByRole("button", { name: "Save" }).click();
-  const row = page.locator(".tablePane > table tbody tr").first();
-  await row.getByRole("button", { name: "Release seats", exact: true }).click();
+  await createForm.getByLabel("License fingerprint").fill("3".repeat(64));
+  await createForm.getByRole("button", { name: "Create entitlement" }).click();
+  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
+  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
+  const row = page.getByRole("region", { name: "Entitlement records", exact: true }).locator("tbody tr").first();
+  await clickAction(row.getByRole("button", { name: "Release seats", exact: true, includeHidden: true }).first());
   const dialog = page.getByRole("dialog");
   await dialog.getByLabel("Reason (required)").fill("compare replay proof");
   await dialog.getByRole("button", { name: "Confirm" }).click();
@@ -210,14 +254,16 @@ test("admin UI keeps an undocumented release-seat 4xx indeterminate", async ({ p
   });
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
-  await page.getByRole("button", { name: "Entitlements", exact: true }).click();
-  const createForm = page.locator("aside form");
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Entitlements", exact: true }).click();
+  const createForm = await newEntitlementForm(page);
   await createForm.getByLabel("Project").fill("release-wrong-route");
   await createForm.getByLabel("Feature").fill("float");
-  await createForm.getByLabel("Fingerprint").fill("4".repeat(64));
-  await createForm.getByRole("button", { name: "Save" }).click();
-  const row = page.locator(".tablePane > table tbody tr").first();
-  await row.getByRole("button", { name: "Release seats", exact: true }).click();
+  await createForm.getByLabel("License fingerprint").fill("4".repeat(64));
+  await createForm.getByRole("button", { name: "Create entitlement" }).click();
+  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
+  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
+  const row = page.getByRole("region", { name: "Entitlement records", exact: true }).locator("tbody tr").first();
+  await clickAction(row.getByRole("button", { name: "Release seats", exact: true, includeHidden: true }).first());
   const dialog = page.getByRole("dialog");
   await dialog.getByLabel("Reason (required)").fill("unexpected response");
   await dialog.getByRole("button", { name: "Confirm" }).click();
@@ -238,8 +284,8 @@ test("admin UI clears known webhook recovery only after an additional current-co
   });
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
-  await page.getByRole("button", { name: "Webhooks", exact: true }).click();
-  const form = page.locator("aside form");
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Webhooks", exact: true }).click();
+  const form = await newWebhookForm(page);
   await form.getByLabel("URL").fill("https://hooks.example.test/stale-refresh");
   api.behavior.webhookRefreshFailures.push("response-error");
   await form.getByRole("button", { name: "Create endpoint" }).click();
@@ -250,7 +296,7 @@ test("admin UI clears known webhook recovery only after an additional current-co
   // no-op: it needs a new exact GET for the visible context, or must retain
   // the recovery notice.
   await page.getByLabel("Filter endpoints by status").selectOption("disabled");
-  await expect(page.locator(".tablePane > table tbody tr")).toHaveCount(0);
+  await expect(page.locator(".tablePane table tbody tr")).toHaveCount(0);
   await expect.poll(() => api.requests.webhookReads.some((search) => new URLSearchParams(search).get("status") === "disabled")).toBe(true);
   const readsBeforeRecovery = api.requests.webhookReads.length;
   api.behavior.deferReads.add("webhooks:disabled");
@@ -275,8 +321,8 @@ test("admin UI retains known webhook recovery after its current read becomes sta
   });
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
-  await page.getByRole("button", { name: "Webhooks", exact: true }).click();
-  const form = page.locator("aside form");
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Webhooks", exact: true }).click();
+  const form = await newWebhookForm(page);
   await form.getByLabel("URL").fill("https://hooks.example.test/noop-refresh");
   api.behavior.webhookRefreshFailures.push("response-error");
   await form.getByRole("button", { name: "Create endpoint" }).click();
@@ -284,7 +330,7 @@ test("admin UI retains known webhook recovery after its current read becomes sta
 
   const filter = page.getByLabel("Filter endpoints by status");
   await filter.selectOption("disabled");
-  await expect(page.locator(".tablePane > table tbody tr")).toHaveCount(0);
+  await expect(page.locator(".tablePane table tbody tr")).toHaveCount(0);
   const readsBeforeRecovery = api.requests.webhookReads.length;
   api.behavior.deferReads.add("webhooks:disabled");
   await page.getByRole("button", { name: "Refresh status" }).click({ noWaitAfter: true });
@@ -302,6 +348,73 @@ test("admin UI retains known webhook recovery after its current read becomes sta
   await expect(page.getByRole("button", { name: "Refresh status", exact: true })).toBeEnabled();
   await expect(page.locator(".operatorNotice")).toContainText("Action succeeded; status refresh failed");
   expect(api.requests.webhookCreateAttempts).toHaveLength(1);
+});
+
+test("admin UI reconciles unknown customer transitions from the list using the original request", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  const attempts = [];
+  await page.route("**/api/admin/**", async (route) => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname;
+    if (request.method() === "POST" && /^\/api\/admin\/customers\/[^/]+\/(disable|reenable)$/u.test(path)) {
+      attempts.push({ path, body: request.postData(), key: request.headers()["idempotency-key"] });
+      if (attempts.filter((attempt) => attempt.path === path).length === 1) {
+        // Let the fixture commit the transition, then lose its success reply.
+        return api.route({
+          request: () => request,
+          fulfill: () => route.fulfill({ status: 500, json: { ok: false, code: "mutation_failed", request_id: "ui-e2e-customer-post-commit" } }),
+        });
+      }
+    }
+    return api.route(route);
+  });
+  await page.goto("/#/customers");
+
+  for (const scenario of [
+    { id: "cus_acme", action: "Disable", status: "disabled" },
+    { id: "cus_globex", action: "Reenable", status: "active" },
+  ]) {
+    const openCustomer = page.locator(`#customer-open-${scenario.id}`);
+    await openCustomer.click();
+    await clickAction(page.locator(".recordDetail").getByRole("button", { name: scenario.action, exact: true, includeHidden: true }));
+    if (scenario.action === "Disable") {
+      const dialog = page.getByRole("dialog");
+      await dialog.getByLabel("Reason (required)").fill("review while returning to the customer list");
+      await dialog.getByRole("button", { name: "Confirm", exact: true }).click();
+      await expect(page.locator(".operatorNotice")).toContainText("Mutation outcome unknown; do not retry.");
+      await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+    } else {
+      await expect(page.locator(".operatorNotice")).toContainText("Mutation outcome unknown; do not retry.");
+    }
+    // A retained recovery notice must not cover mobile navigation or search.
+    await page.setViewportSize({ width: 320, height: 740 });
+    await page.getByRole("button", { name: "Menu", exact: true }).click();
+    await expect(page.getByRole("navigation", { name: "Main navigation" })).toBeVisible();
+    await page.getByRole("button", { name: "Close menu", exact: true }).click();
+    await page.getByRole("button", { name: "Search", exact: true }).click();
+    const globalSearch = page.getByRole("searchbox", { name: "Global search" });
+    await expect(globalSearch).toBeVisible();
+    await globalSearch.press("Escape");
+    await page.setViewportSize({ width: 1280, height: 900 });
+    const path = `/api/admin/customers/${scenario.id}/${scenario.action.toLowerCase()}`;
+    const original = attempts.find((attempt) => attempt.path === path);
+    expect(original.key).toBeTruthy();
+    expect(attempts.filter((attempt) => attempt.path === path)).toHaveLength(1);
+    await page.getByRole("button", { name: "Back to customers", exact: true }).click();
+    await expect(page.locator(".recordDetail")).toHaveCount(0);
+    await expect(openCustomer).toBeDisabled();
+    const readsBeforeRecovery = api.requests.customerReads.length;
+
+    await page.getByRole("button", { name: "Reconcile status", exact: true }).click();
+    await expect.poll(() => attempts.filter((attempt) => attempt.path === path).length).toBe(2);
+    expect(attempts.filter((attempt) => attempt.path === path)[1]).toEqual(original);
+    await expect.poll(() => api.requests.customerReads.length).toBeGreaterThan(readsBeforeRecovery);
+    await expect(page.locator(".operatorNotice")).toHaveCount(0);
+    await expect(page.locator(".recordDetail")).toHaveCount(0);
+    await expect(openCustomer).toBeEnabled();
+    await expect(page.locator(`.desktopRecords [data-focus-row="customer:${scenario.id}"] .status`)).toHaveText(scenario.status);
+  }
+  expect(api.requests.customerTransitions).toHaveLength(4);
 });
 
 test("admin UI rejects A-to-B-to-A cursor cycles before shared or custom pagers commit a third page", async ({ page }) => {
@@ -322,7 +435,7 @@ test("admin UI rejects A-to-B-to-A cursor cycles before shared or custom pagers 
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
 
-  await page.getByRole("button", { name: "Plans", exact: true }).click();
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Plans", exact: true }).click();
   const plansPane = page.getByRole("heading", { name: "Catalog plans" }).locator("..");
   await expect(plansPane.locator("tbody tr")).toHaveCount(1);
   await plansPane.getByRole("button", { name: "Load more", exact: true }).click();
@@ -332,8 +445,8 @@ test("admin UI rejects A-to-B-to-A cursor cycles before shared or custom pagers 
   await expect(plansPane.locator("tbody tr")).toHaveCount(2);
   await expect(plansPane.getByRole("button", { name: "Load more", exact: true })).toHaveCount(0);
 
-  await page.getByRole("button", { name: "Webhooks", exact: true }).click();
-  const endpointRow = page.locator(".tablePane > table tbody tr").filter({ hasText: "https://hooks.example.test/cycle" });
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Webhooks", exact: true }).click();
+  const endpointRow = page.locator(".tablePane table tbody tr").filter({ hasText: "https://hooks.example.test/cycle" });
   await endpointRow.getByRole("button", { name: "Deliveries", exact: true }).click();
   const deliveries = page.getByRole("region", { name: "Recent webhook deliveries" });
   await expect(deliveries.locator("tbody tr")).toHaveCount(1);

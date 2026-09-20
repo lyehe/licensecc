@@ -23,8 +23,8 @@ export async function listCustomers(request: Request, env: Env, requestIdValue: 
     if (like === null) {
       return envelope(requestIdValue, "invalid_request", undefined, 400);
     }
-    filters.push("(lower(c.id) LIKE ? ESCAPE '\\' OR lower(c.email) LIKE ? ESCAPE '\\' OR lower(c.name) LIKE ? ESCAPE '\\')");
-    values.push(like, like, like);
+    filters.push("(lower(c.id) LIKE ? ESCAPE '\\' OR lower(c.email) LIKE ? ESCAPE '\\' OR lower(c.name) LIKE ? ESCAPE '\\' OR EXISTS (SELECT 1 FROM portal_passwords p WHERE p.customer_id=c.id AND p.email_lower LIKE ? ESCAPE '\\'))");
+    values.push(like, like, like, like);
   }
   const where = filters.length === 0 ? "" : `WHERE ${filters.join(" AND ")}`;
   const pagination = boundedCursor(url);
@@ -33,6 +33,7 @@ export async function listCustomers(request: Request, env: Env, requestIdValue: 
   }
   const projection =
     `SELECT c.id, c.name, c.email, c.status, c.external_ref, c.created_at, c.updated_at,
+       (SELECT p.email_lower FROM portal_passwords p WHERE p.customer_id=c.id) AS login_email,
        (SELECT COUNT(*) FROM entitlements e WHERE e.customer_id = c.id) AS entitlement_count,
        (SELECT COUNT(*) FROM entitlements e WHERE e.customer_id = c.id AND e.status = 'active') AS active_entitlement_count
      FROM customers c ${where}`;
@@ -57,7 +58,7 @@ export async function listCustomers(request: Request, env: Env, requestIdValue: 
 
 export async function getCustomer(env: Env, customerId: string, requestIdValue: string): Promise<Response> {
   const customer = await env.DB.prepare(
-    "SELECT id, name, email, status, external_ref, metadata_json, created_at, updated_at FROM customers WHERE id = ?",
+    "SELECT id, name, email, status, external_ref, metadata_json, created_at, updated_at, (SELECT p.email_lower FROM portal_passwords p WHERE p.customer_id=customers.id) AS login_email FROM customers WHERE id = ?",
   ).bind(customerId).first();
   if (customer === null) {
     return envelope(requestIdValue, "not_found", undefined, 404);

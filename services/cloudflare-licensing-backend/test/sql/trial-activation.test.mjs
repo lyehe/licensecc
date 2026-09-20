@@ -24,7 +24,7 @@ import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import worker from "../../dist/index.js";
+import worker from "../../dist/app.js";
 import { canonicalRequestProofPayloadForTests } from "../../dist/routes/verify.js";
 import { resetLeaseSigningKeyCacheForTests } from "../../dist/routes/leases.js";
 

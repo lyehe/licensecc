@@ -71,6 +71,9 @@ SDKs and platform limits
   Ubuntu 24.04 ARM64 runner. Windows ARM64, macOS, and prebuilt ARM packages are
   not claimed.
 * TPM provider support remains platform-limited rather than universal.
+* The **Windows device-bound desktop client** has an additive public C API and
+  installed example with local workflow/build evidence. Live TPM/browser/backend
+  qualification remains open; see :doc:`../api/device_identity`.
 
 For exact ownership, release availability, limitations, public-document links,
 and evidence selectors, consult ``registry.json``. Use
@@ -85,4 +88,4 @@ Registry identifiers: ``cpp-local-verification``, ``hardware-binding``,
 ``backend-metering``, ``backend-order-fulfillment``, ``admin-control-plane``,
 ``portal-self-service``, ``d1-backup-and-restore-drill``, ``python-sdk``,
 ``dotnet-sdk``, ``arm-support``, ``custom-execution-limits``,
-``tpm-request-proof-provider``, and ``java-sdk``.
+``tpm-request-proof-provider``, ``windows-device-bound-client``, and ``java-sdk``.

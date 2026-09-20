@@ -108,6 +108,7 @@ simple = { limit = 20, period = 60 }
 function adminConfig(values) {
   return {
     ...routedConfig(`licensecc-admin${values.suffix}`, "src/worker/index.ts", values.adminHost),
+    services: [{binding:"DEVICE_OPERATOR",service:`licensecc-online-verifier${values.suffix}`,entrypoint:"DeviceOperator"}],
     assets: { directory: "./dist", binding: "ASSETS", not_found_handling: "single-page-application" },
     d1_databases: [{
       binding: "DB",
@@ -132,6 +133,7 @@ function adminConfig(values) {
 function portalConfig(values) {
   return {
     ...routedConfig(`licensecc-customer-portal${values.suffix}`, "src/worker/index.ts", values.portalHost),
+    services: [{binding:"DEVICE_CONSENT",service:`licensecc-online-verifier${values.suffix}`,entrypoint:"DeviceConsent"}],
     assets: { directory: "./dist", binding: "ASSETS", not_found_handling: "single-page-application" },
     d1_databases: [{
       binding: "DB",
@@ -395,8 +397,41 @@ test("rejects D1 split-brain and unsafe backend or backup operations", () => {
   }
 });
 
+test("consent binding cannot cross deployment profiles or select another capability", () => {
+  const mutations=[
+    config=>{config.services[0].service="licensecc-online-verifier";},
+    config=>{config.services[0].entrypoint="default";},
+    config=>{delete config.services[0].entrypoint;},
+    config=>{config.services.push({...config.services[0]});},
+    config=>{delete config.services;},
+    config=>{config.services[0].environment="production";},
+    config=>{config.env={production:{services:config.services}};},
+  ];
+  for(const mutate of mutations){
+    const root=mkdtempSync(join(tmpdir(),"licensecc-consent-binding-"));
+    try {
+      const environment=validEnvironment("staging");
+      mutateJson(environment,"LICENSECC_PORTAL_WRANGLER_CONFIG_B64",mutate);
+      assert.throws(()=>materializeDeploymentConfigs({root,environment,profile:"staging"}),/consent|DEVICE_CONSENT/iu);
+      assertNoConfigsWritten(root,"invalid consent capability");
+    } finally {rmSync(root,{recursive:true,force:true});}
+  }
+});
+
+test("operator binding cannot cross profiles, target consent, or accept hidden overrides",()=>{
+  const mutations=[config=>{config.services[0].service="licensecc-online-verifier";},config=>{config.services[0].entrypoint="DeviceConsent";},
+    config=>{delete config.services;},config=>{delete config.services[0].entrypoint;},config=>{config.services.push({...config.services[0]});},
+    config=>{config.services[0].environment="production";},config=>{config.env={staging:{services:config.services}};}];
+  for(const mutate of mutations){const root=mkdtempSync(join(tmpdir(),"licensecc-operator-binding-"));try{
+    const environment=validEnvironment("staging");mutateJson(environment,"LICENSECC_ADMIN_WRANGLER_CONFIG_B64",mutate);
+    assert.throws(()=>materializeDeploymentConfigs({root,environment,profile:"staging"}),/DEVICE_OPERATOR/u);assertNoConfigsWritten(root,"invalid operator capability");
+  }finally{rmSync(root,{recursive:true,force:true});}}
+});
+
 test("rejects plaintext Worker secrets in every service while ignoring comment-only examples", () => {
   const cases = [
+    ["bound approval encryption key", (env) => mutateBackend(env, (source) => source.replace('[vars]', '[vars]\nBOUND_APPROVAL_ENCRYPTION_KEYS = "plaintext"')), /Worker secret/u],
+    ["bound lease private key", (env) => mutateBackend(env, (source) => source.replace('[vars]', '[vars]\nBOUND_LEASE_SIGNING_PRIVATE_KEY_PKCS8_PEM = "plaintext"')), /Worker secret/u],
     ["backend secret", (env) => mutateBackend(env, (source) => source.replace('[vars]', '[vars]\nORDER_HMAC_SECRETS = "plaintext"')), /Worker secret/u],
     ["backend lease private key", (env) => mutateBackend(env, (source) => source.replace('[vars]', '[vars]\nLEASE_SIGNING_PRIVATE_KEY_PKCS8_PEM = "plaintext"')), /Worker secret/u],
     ["admin secret", (env) => mutateJson(env, "LICENSECC_ADMIN_WRANGLER_CONFIG_B64", (config) => { config.vars.SYNC_API_TOKEN = "plaintext"; }), /Worker secret/u],

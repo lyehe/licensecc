@@ -1,6 +1,9 @@
-import React, { useCallback, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 
-import type { AdminTab, NavigationIntent, NavigationTarget } from "./types";
+import { AdminNavigationProvider, useAdminNavigation } from "./navigation";
+import { EnvironmentBadge } from "./EnvironmentBadge";
+import { Sidebar } from "./Sidebar";
+import { descriptions, tabs } from "./shellContent";
 import { Catalog } from "../features/catalog/Catalog";
 import { Customers } from "../features/customers/Customers";
 import { Entitlements } from "../features/entitlements/Entitlements";
@@ -15,27 +18,18 @@ import { Webhooks } from "../features/webhooks/Webhooks";
 import { OperatorControlsProvider, useOperatorControls } from "../shared/controls";
 import { CoreRefreshProvider } from "../shared/coreRefresh";
 import { UsageTimeseriesProvider } from "../shared/usageTimeseries";
+import { focusWorkspaceTarget } from "../shared/workspaceFocus";
 import "../styles.css";
-
-const tabs: ReadonlyArray<{ id: AdminTab; label: string }> = [
-  { id: "overview", label: "Overview" },
-  { id: "entitlements", label: "Entitlements" },
-  { id: "policies", label: "Policies" },
-  { id: "plans", label: "Plans" },
-  { id: "webhooks", label: "Webhooks" },
-  { id: "events", label: "Events" },
-  { id: "customers", label: "Customers" },
-  { id: "licenses", label: "Licenses" },
-  { id: "fulfillment", label: "Fulfillment" },
-  { id: "reports", label: "Reports" },
-];
+import "../shared/console.css";
 
 export function App(): React.ReactElement {
   return (
     <OperatorControlsProvider>
       <CoreRefreshProvider>
         <UsageTimeseriesProvider>
-          <ConsoleShell />
+          <AdminNavigationProvider>
+            <ConsoleShell />
+          </AdminNavigationProvider>
         </UsageTimeseriesProvider>
       </CoreRefreshProvider>
     </OperatorControlsProvider>
@@ -43,39 +37,47 @@ export function App(): React.ReactElement {
 }
 
 function ConsoleShell(): React.ReactElement {
-  const [activeTab, setActiveTab] = useState<AdminTab>("overview");
-  const [navigationIntent, setNavigationIntent] = useState<NavigationIntent | null>(null);
-  const nextIntentId = useRef(0);
-  const { message } = useOperatorControls();
-
-  const navigate = useCallback((target: NavigationTarget): void => {
-    nextIntentId.current += 1;
-    setNavigationIntent({ ...target, id: nextIntentId.current });
-    setActiveTab(target.tab);
-  }, []);
-  const handleNavigation = useCallback((intent: NavigationIntent): void => {
-    setNavigationIntent((current) => current?.id === intent.id ? null : current);
-  }, []);
+  const { route, navigationIntent, navigationNotice, navigationVersion, navigate, navigateTab, onNavigationHandled } = useAdminNavigation();
+  const { feedback, modalActive, operationLocked } = useOperatorControls();
+  const activeTab = route.tab;
+  const label = tabs.find((tab) => tab.id === activeTab)?.label;
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => { setMenuOpen(false); }, [modalActive, navigationVersion]);
 
   return (
-    <main>
-      <header className="topbar">
-        <div><h1>licensecc admin</h1><p>{message || "ready"}</p></div>
-        <Search onNavigate={navigate} />
-        <nav>
-          {tabs.map((tab) => <button key={tab.id} className={activeTab === tab.id ? "active" : ""} onClick={() => setActiveTab(tab.id)}>{tab.label}</button>)}
-        </nav>
-      </header>
-      <Overview active={activeTab === "overview"} />
-      <Entitlements active={activeTab === "entitlements"} navigationIntent={navigationIntent} onNavigationHandled={handleNavigation} />
-      <Policies active={activeTab === "policies"} />
-      <Catalog active={activeTab === "plans"} />
-      <Webhooks active={activeTab === "webhooks"} />
-      <Events active={activeTab === "events"} />
-      <Customers active={activeTab === "customers"} navigationIntent={navigationIntent} onNavigationHandled={handleNavigation} />
-      <Licenses active={activeTab === "licenses"} navigationIntent={navigationIntent} onNavigationHandled={handleNavigation} />
-      <Fulfillment active={activeTab === "fulfillment"} navigationIntent={navigationIntent} onNavigationHandled={handleNavigation} />
-      <Reports active={activeTab === "reports"} onNavigate={navigate} />
+    <main className={`consoleShell${operationLocked ? " hasOperationNotice" : ""}`}>
+      <a className="skipLink" href="#workspace-content" onClick={(event) => {
+        event.preventDefault();
+        const content = document.getElementById("workspace-content");
+        focusWorkspaceTarget(content);
+        content?.scrollIntoView({ block: "start" });
+      }}>Skip to workspace</a>
+      <Sidebar open={menuOpen && !modalActive} onClose={() => setMenuOpen(false)} menuRef={menuRef} />
+      <div className="consoleBody">
+        <header className="topbar">
+          <button ref={menuRef} type="button" className="mobileMenuTrigger" data-workspace-menu aria-controls="workspace-navigation" aria-expanded={menuOpen && !modalActive} onClick={() => setMenuOpen((current) => !current)}>Menu</button>
+          <span className="workspaceLabel"><span className="workspacePrefix">Workspace <span aria-hidden="true">/</span> </span>{label}</span>
+          <EnvironmentBadge />
+          <Search onNavigate={navigate} onOpen={() => setMenuOpen(false)} closeSignal={navigationVersion} hiddenByMenu={menuOpen} />
+        </header>
+        <div id="workspace-content" className="workspaceContent" tabIndex={-1}>
+          <div className="pageHeading"><div><p className="eyebrow">License operations</p><h2 data-workspace-heading tabIndex={-1}>{label}</h2><p>{descriptions[activeTab]}</p></div></div>
+          {navigationNotice !== null && <p className="activityMessage" data-tone="info" role="status">{navigationNotice}</p>}
+          {feedback.message && <div className="activityMessage" data-tone={feedback.tone} role={feedback.tone === "error" ? "alert" : "status"}>{feedback.message}</div>}
+          {activeTab === "overview" && <div className="quickActions"><button className="primary" onClick={() => navigateTab("entitlements")}>Manage access <span aria-hidden="true">→</span></button><button onClick={() => navigateTab("reports")}>View usage</button></div>}
+          <Overview active={activeTab === "overview"} />
+          <Entitlements active={activeTab === "entitlements"} navigationIntent={navigationIntent} onNavigationHandled={onNavigationHandled} />
+          <Policies active={activeTab === "policies"} />
+          <Catalog active={activeTab === "plans"} />
+          <Webhooks active={activeTab === "webhooks"} />
+          <Events active={activeTab === "events"} />
+          <Customers active={activeTab === "customers"} navigationIntent={navigationIntent} onNavigationHandled={onNavigationHandled} />
+          <Licenses active={activeTab === "licenses"} navigationIntent={navigationIntent} onNavigationHandled={onNavigationHandled} />
+          <Fulfillment active={activeTab === "fulfillment"} navigationIntent={navigationIntent} onNavigationHandled={onNavigationHandled} />
+          <Reports active={activeTab === "reports"} onNavigate={navigate} />
+        </div>
+      </div>
     </main>
   );
 }

@@ -139,7 +139,7 @@ async function lookupLeaseEntitlement(env: Env, body: LeaseIssueBody): Promise<L
     "SELECT status, valid_from, valid_until, max_active_devices, lease_seconds, rebind_window_sec, " +
       "is_trial, trial_expiration_basis, trial_duration_sec, trial_one_per_device, " +
       "trial_require_device_proof, trial_started_at, trial_device_hash " +
-      "FROM entitlements WHERE project = ? AND feature = ? AND license_fingerprint = ? LIMIT 1",
+      "FROM entitlements WHERE project = ? AND feature = ? AND license_fingerprint = ? AND enforcement_mode = 'legacy' LIMIT 1",
   )
     .bind(body.project, body.feature, body.license_fingerprint)
     .first<LeaseEntitlementRow>();

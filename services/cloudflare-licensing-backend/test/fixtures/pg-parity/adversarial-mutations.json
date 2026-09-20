@@ -89,5 +89,40 @@
     "old": "  SET generation = generation + 1,",
     "new": "  SET generation = generation + 2,",
     "expected": "bump_license_plan_projection_generation: function body mismatch"
+  },
+  {
+    "name": "protected-hold-guard-weakened",
+    "source": "postgres",
+    "old": "IF NEW.hold_until < OLD.hold_until THEN",
+    "new": "IF NEW.hold_until < 0 THEN",
+    "expected": "tr_bound_binding_hold_monotonic: protected trigger/function contract mismatch"
+  },
+  {
+    "name": "protected-device-delete-trigger-removed",
+    "source": "postgres",
+    "old": "CREATE TRIGGER tr_bound_device_keep_tombstone BEFORE DELETE ON device_bound_devices\nFOR EACH ROW EXECUTE FUNCTION tr_bound_device_keep_tombstone_fn();",
+    "new": "",
+    "expected": "tr_bound_device_keep_tombstone: protected trigger/function contract mismatch"
+  },
+  {
+    "name": "protected-consumption-identity-altered",
+    "source": "postgres",
+    "old": "RAISE EXCEPTION 'authorization_consumption_immutable';",
+    "new": "RETURN NEW;",
+    "expected": "tr_bound_attempt_consumption_immutable: protected trigger/function contract mismatch"
+  },
+  {
+    "name": "protected-expiry-equality-weakened",
+    "source": "postgres",
+    "old": "IF NEW.state = 'released' AND (OLD.state = 'active' OR OLD.hold_until > FLOOR(EXTRACT(EPOCH FROM clock_timestamp()))::BIGINT) THEN",
+    "new": "IF NEW.state = 'released' AND OLD.state = 'active' THEN",
+    "expected": "tr_bound_binding_no_early_release: protected trigger/function contract mismatch"
+  },
+  {
+    "name": "protected-event-identity-removed",
+    "source": "postgres",
+    "old": "CREATE TABLE device_bound_events (\n  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,",
+    "new": "CREATE TABLE device_bound_events (\n  id BIGINT PRIMARY KEY,",
+    "expected": "device_bound_events.id: generated identity mismatch"
   }
 ]

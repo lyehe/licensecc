@@ -33,6 +33,7 @@ class PgParityContractTest(unittest.TestCase):
             (service / "scripts").mkdir()
             (service / "supabase-postgres").mkdir()
             shutil.copy2(CHECKER, service / "scripts" / CHECKER.name)
+            shutil.copy2(CHECKER.with_name("bound_trigger_contract.py"), service / "scripts" / "bound_trigger_contract.py")
 
             sqlite_sql = SQLITE_SCHEMA.read_text(encoding="utf-8")
             postgres_sql = POSTGRES_SCHEMA.read_text(encoding="utf-8")

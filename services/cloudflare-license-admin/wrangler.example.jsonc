@@ -12,6 +12,9 @@
     "binding": "ASSETS",
     "not_found_handling": "single-page-application"
   },
+  "services": [
+    { "binding": "DEVICE_OPERATOR", "service": "licensecc-online-verifier", "entrypoint": "DeviceOperator" }
+  ],
   // Single source of truth: bind the SAME entitlements D1 as the licensing-backend
   // Worker (database_name/database_id identical to its wrangler). One database, one
   // audit log, no split-brain. The licensing-backend owns the migrations; the admin

@@ -7,7 +7,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { generateKeyPairSync, createPublicKey, verify as nodeVerify } from "node:crypto";
-import worker from "../dist/index.js";
+import worker from "../dist/app.js";
 import { resetSigningKeyCacheForTests } from "../dist/routes/verify.js";
 
 function bytesToPem(bytes, label) {

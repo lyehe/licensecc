@@ -1,7 +1,7 @@
 // server.mjs
 //
 // A node:http front-end that runs the UNMODIFIED licensecc Worker
-// (services/cloudflare-licensing-backend/src/index.ts, compiled to dist/index.js)
+// (services/cloudflare-licensing-backend/src/app.ts, compiled to dist/app.js)
 // off Cloudflare, backed by standard SQLite via db-sqlite.mjs.
 //
 // It does three things per request:
@@ -16,12 +16,12 @@
 //
 // ZERO changes to the Worker's security code: we import its default export and
 // call .fetch(request, env) exactly as the existing test harness does
-// (test/online-verifier.test.mjs imports `worker` from ../dist/index.js and
+// (test/online-verifier.test.mjs imports `worker` from ../dist/app.js and
 // calls `worker.fetch(new Request(...), env)`). The Worker's fetch signature is
 // `async fetch(request, env)` — there is no ctx/ExecutionContext, so no
 // waitUntil hook is needed.
 //
-// Build the Worker first:  npm run build   (tsc -> dist/index.js)
+// Build the Worker first:  npm run build   (tsc -> dist/app.js)
 //
 // Run:
 //   PORT=8787 DB_PATH=app.db \
@@ -47,9 +47,9 @@ if (typeof globalThis.crypto === "undefined") {
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-// Import the COMPILED Worker (dist/index.js). We do NOT touch its source.
+// Import the COMPILED Worker (dist/app.js). We do NOT touch its source.
 // local-host/ is inside the service dir, so dist/ is one level up.
-const workerModulePath = resolve(__dirname, "..", "dist", "index.js");
+const workerModulePath = resolve(__dirname, "..", "dist", "app.js");
 // Dynamic import() of an absolute path needs a file:// URL on Windows
 // (a bare "C:\\..." path is rejected by the ESM loader).
 const workerModuleUrl = pathToFileURL(workerModulePath).href;

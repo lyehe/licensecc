@@ -628,7 +628,7 @@ test("every assembled Worker API 2xx response has a JSON schema that requires da
       }
     }
   }
-  assert.equal(checked, 63, "the assembled Worker contract currently has 63 JSON 2xx responses; add a schema when adding one");
+  assert.equal(checked, 71, "the assembled Worker contract currently has 71 JSON 2xx responses; add a schema when adding one");
 });
 
 test("compiled device transition state matrix distinguishes changes, no-ops, and terminal conflicts", async () => {

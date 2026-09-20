@@ -1,3 +1,5 @@
+import { entitlementRecordSchema, entitlementCreateSchema } from "./entitlement-schema.js";
+import { customerRowSchema } from "./customer-schema.js";
 import type { LabeledComponentFragment } from "./assemble.js";
 import {
   CATALOG_IMPORT_MAX_MUTABLE_ACTIONS,
@@ -335,7 +337,7 @@ export const openApiComponents: LabeledComponentFragment = {
       }],
       ["EntitlementInput", {
         type: "object",
-        required: ["project", "feature", "license_fingerprint", "device_hash"],
+        required: ["project", "feature", "license_fingerprint"],
         properties: {
           project: { type: "string", maxLength: 127 },
           feature: { type: "string", maxLength: 15 },
@@ -358,6 +360,7 @@ export const openApiComponents: LabeledComponentFragment = {
       }],
       ["EntitlementPatch", {
         type: "object",
+        not: { required: ["enforcement_mode"] },
         description: "All fields optional; only provided fields are updated. project/feature/license_fingerprint/status are NOT patchable.",
         properties: {
           device_hash: { type: "string", description: "64-char hex, or empty string." },
@@ -370,6 +373,7 @@ export const openApiComponents: LabeledComponentFragment = {
         },
       }],
       ["EntitlementSyncInput", {
+        not: { required: ["enforcement_mode"] },
         allOf: [
           { $ref: "#/components/schemas/EntitlementInput" },
           { type: "object", properties: { reason: { type: "string", maxLength: 1000, description: "Optional; required (non-empty) when status is disabled or revoked." } } },
@@ -744,34 +748,8 @@ export const openApiComponents: LabeledComponentFragment = {
           preview_id: { type: "string", maxLength: 128, pattern: "^civ_[A-Za-z0-9_-]{1,124}$" },
         },
       }],
-      ["EntitlementRecord", {
-        type: "object",
-        properties: {
-          id: { type: "string", description: "Encoded entitlement id (project/feature/license_fingerprint)." },
-          project: { type: "string" },
-          feature: { type: "string" },
-          license_fingerprint: { type: "string" },
-          device_hash: { type: "string" },
-          status: { type: "string", enum: ["active", "disabled", "revoked"] },
-          assertion_ttl_seconds: { type: "integer" },
-          revocation_seq: { type: "integer" },
-          valid_from: { type: ["integer", "null"] },
-          valid_until: { type: ["integer", "null"] },
-          notes: { type: "string" },
-          customer_id: { type: ["string", "null"] },
-          license_id: { type: ["string", "null"] },
-          created_at: { type: "integer" },
-          updated_at: { type: "integer" },
-          policy_id: { type: ["string", "null"], description: "Advisory provenance: the policy this row was stamped from (frozen; no live link)." },
-          is_trial: { type: "integer", description: "1 when stamped from a trial policy, else 0. Frozen on the row." },
-          trial_expiration_basis: { type: ["string", "null"], enum: ["from_issue", "from_first_activation", "from_first_use", null] },
-          trial_duration_sec: { type: "integer" },
-          trial_one_per_device: { type: "integer", enum: [0, 1] },
-          trial_require_device_proof: { type: "integer", enum: [0, 1] },
-          trial_started_at: { type: ["integer", "null"] },
-          trial_device_hash: { type: ["string", "null"] },
-        },
-      }],
+      ["EntitlementRecord", entitlementRecordSchema],
+      ["EntitlementCreateInput", entitlementCreateSchema],
       ["Policy", {
         type: "object",
         description: "A license-policy template (entitlement_policies row). Frozen at stamp time onto a new entitlement.",
@@ -900,18 +878,7 @@ export const openApiComponents: LabeledComponentFragment = {
           delivered_at: { type: ["integer", "null"] },
         },
       }],
-      ["CustomerRow", {
-        type: "object",
-        properties: {
-          id: { type: "string" },
-          name: { type: "string" },
-          email: { type: "string" },
-          status: { type: "string", enum: ["active", "disabled"] },
-          external_ref: { type: ["string", "null"] },
-          created_at: { type: "integer" },
-          updated_at: { type: "integer" },
-        },
-      }],
+      ["CustomerRow", customerRowSchema],
       ["CustomerListItem", {
         allOf: [
           { $ref: "#/components/schemas/CustomerRow" },
@@ -967,6 +934,7 @@ export const openApiComponents: LabeledComponentFragment = {
             type: "object",
             properties: {
               id: { type: "string" }, name: { type: "string" }, email: { type: "string" }, status: { type: "string" },
+              login_email: { type: ["string", "null"], description: "Password login address; not proof of email ownership." },
               external_ref: { type: ["string", "null"] }, metadata_json: { type: ["string", "null"] },
               created_at: { type: "integer" }, updated_at: { type: "integer" },
             },

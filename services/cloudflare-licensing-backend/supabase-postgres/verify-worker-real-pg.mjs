@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-import worker from "../dist/index.js";
+import worker from "../dist/app.js";
 import { requestProofFixture, testKeyEnv, validBody } from "../test/contexts/fixtures.mjs";
 import { closePool, createPostgresDatabase } from "./db-postgres.mjs";
 

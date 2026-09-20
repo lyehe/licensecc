@@ -22,6 +22,22 @@
     },
     {
       "method": "POST",
+      "path": "/v2/device-authorizations"
+    },
+    {
+      "method": "POST",
+      "path": "/v2/device-challenges"
+    },
+    {
+      "method": "POST",
+      "path": "/v2/device-authorizations/exchange"
+    },
+    {
+      "method": "POST",
+      "path": "/v2/device-leases/renew"
+    },
+    {
+      "method": "POST",
       "path": "/v1/activate"
     },
     {
@@ -83,6 +99,10 @@
     "GET /health",
     "POST /v1/verify",
     "POST /v1/orders",
+    "POST /v2/device-authorizations",
+    "POST /v2/device-challenges",
+    "POST /v2/device-authorizations/exchange",
+    "POST /v2/device-leases/renew",
     "POST /v1/activate",
     "POST /v1/renew",
     "POST /v1/checkout",
@@ -91,7 +111,7 @@
     "POST /v1/meter",
     "GET /v1/admin/report"
   ],
-  "openApiOperationCount": 19,
+  "openApiOperationCount": 23,
   "openApiSpec": {
     "components": {
       "schemas": {
@@ -1054,7 +1074,7 @@
       }
     },
     "info": {
-      "description": "Cloudflare Worker that issues signed online assertions (lccoa1) and hardware-bound v201 leases / floating seats, ingests signed subscription orders, and reports usage. All responses use a FLAT { ok, code, ... } envelope. This spec documents the routes the Worker's fetch handler dispatches.",
+      "description": "Cloudflare Worker that issues online assertions (lccoa1), legacy v201 leases, floating seats and protected device leases (lccdl1), ingests subscription orders, and reports usage. Legacy responses use { ok, code, ... }; device v2 responses use { ok, code, request_id, data? }. Protected enrollment remains staged until browser consent and native integration are delivered. This spec documents the routes the Worker's fetch handler dispatches.",
       "title": "licensecc online verifier / licensing-backend",
       "version": "0.1.0-rc.2"
     },
@@ -3609,6 +3629,1966 @@
             "client"
           ]
         }
+      },
+      "/v2/device-authorizations": {
+        "post": {
+          "description": "Protected device protocol, independent of legacy proof/account-token switches. Requests are bounded to 16 KiB, fatal UTF-8 JSON objects with no duplicate/unknown fields or unpaired surrogates. Mandatory rate limits apply before parsing and key import. Exchange and renewal require fresh proof in the body; security: [] does not waive that proof. A stable operation ID identifies exact semantic intent; retry with fresh challenge/signature. Successful recovery returns the exact original response, including request_id and lease times. Native clients must preserve their original monotonic send anchor across retries.",
+          "operationId": "createDeviceAuthorization",
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "client_id": {
+                      "pattern": "^[A-Za-z0-9_.:-]{1,127}$",
+                      "type": "string"
+                    },
+                    "code_challenge": {
+                      "description": "32-byte value in canonical unpadded base64url.",
+                      "pattern": "^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$",
+                      "type": "string"
+                    },
+                    "code_challenge_method": {
+                      "const": "S256"
+                    },
+                    "device_label": {
+                      "description": "Trimmed display-only Unicode label, 1–80 code points.",
+                      "type": "string"
+                    },
+                    "project": {
+                      "pattern": "^[A-Za-z0-9_.:-]{1,127}$",
+                      "type": "string"
+                    },
+                    "public_key_spki": {
+                      "description": "Canonical DER P-256 SPKI encoded in unpadded base64url; import/re-export equality is enforced.",
+                      "maxLength": 512,
+                      "minLength": 1,
+                      "pattern": "^[A-Za-z0-9_-]+$",
+                      "type": "string"
+                    },
+                    "redirect_uri": {
+                      "description": "Exact registered HTTP loopback IP/path with an explicit nonzero port. Only 127.0.0.1 or [::1]. No query, fragment, userinfo, DNS host or URL normalization aliases.",
+                      "maxLength": 1024,
+                      "type": "string"
+                    },
+                    "state": {
+                      "description": "32-byte value in canonical unpadded base64url.",
+                      "pattern": "^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "client_id",
+                    "project",
+                    "public_key_spki",
+                    "device_label",
+                    "redirect_uri",
+                    "state",
+                    "code_challenge",
+                    "code_challenge_method"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "required": true
+          },
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "code": {
+                        "const": "authorization_created"
+                      },
+                      "data": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "attempt_handle": {
+                            "description": "32-byte value in canonical unpadded base64url.",
+                            "pattern": "^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$",
+                            "type": "string"
+                          },
+                          "authorization_url": {
+                            "description": "Fixed configured portal destination; secret attempt_handle is carried in the fragment, not query parameters.",
+                            "format": "uri",
+                            "type": "string"
+                          },
+                          "comparison_code": {
+                            "description": "Display-only 48-bit enrollment comparison. The app recomputes it from its original enrollment transcript before showing it; never use as a credential or proof.",
+                            "pattern": "^[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}$",
+                            "type": "string"
+                          },
+                          "expires_at": {
+                            "description": "Wire token must use unsigned decimal digits: 0 or a nonzero digit followed by digits. No fraction, exponent or negative zero.",
+                            "maximum": 9007199254740991,
+                            "minimum": 0,
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "attempt_handle",
+                          "authorization_url",
+                          "expires_at",
+                          "comparison_code"
+                        ],
+                        "type": "object"
+                      },
+                      "ok": {
+                        "const": true
+                      },
+                      "request_id": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "ok",
+                      "code",
+                      "request_id",
+                      "data"
+                    ],
+                    "type": "object"
+                  }
+                }
+              },
+              "description": "authorization_created",
+              "headers": {
+                "Cache-Control": {
+                  "description": "Never cache protocol responses.",
+                  "schema": {
+                    "const": "no-store"
+                  }
+                }
+              }
+            },
+            "400": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "invalid_request",
+                          "unsupported_protocol"
+                        ],
+                        "type": "string"
+                      },
+                      "ok": {
+                        "const": false
+                      },
+                      "request_id": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "ok",
+                      "code",
+                      "request_id"
+                    ],
+                    "type": "object"
+                  }
+                }
+              },
+              "description": "A denial describes this request/current authority; it does not prove an earlier concurrent or timed-out invocation never committed.",
+              "headers": {
+                "Cache-Control": {
+                  "description": "Never cache protocol responses.",
+                  "schema": {
+                    "const": "no-store"
+                  }
+                }
+              }
+            },
+            "401": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "proof_required",
+                          "invalid_proof"
+                        ],
+                        "type": "string"
+                      },
+                      "ok": {
+                        "const": false
+                      },
+                      "request_id": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "ok",
+                      "code",
+                      "request_id"
+                    ],
+                    "type": "object"
+                  }
+                }
+              },
+              "description": "A denial describes this request/current authority; it does not prove an earlier concurrent or timed-out invocation never committed.",
+              "headers": {
+                "Cache-Control": {
+                  "description": "Never cache protocol responses.",
+                  "schema": {
+                    "const": "no-store"
+                  }
+                }
+              }
+            },
+            "403": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "access_denied",
+                          "device_retired",
+                          "legacy_protocol_disabled"
+                        ],
+                        "type": "string"
+                      },
+                      "ok": {
+                        "const": false
+                      },
+                      "request_id": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "ok",
+                      "code",
+                      "request_id"
+                    ],
+                    "type": "object"
+                  }
+                }
+              },
+              "description": "A denial describes this request/current authority; it does not prove an earlier concurrent or timed-out invocation never committed.",
+              "headers": {
+                "Cache-Control": {
+                  "description": "Never cache protocol responses.",
+                  "schema": {
+                    "const": "no-store"
+                  }
+                }
+              }
+            },
+            "404": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "authorization_unavailable",
+                          "binding_unavailable"
+                        ],
+                        "type": "string"
+                      },
+                      "ok": {
+                        "const": false
+                      },
+                      "request_id": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "ok",
+                      "code",
+                      "request_id"
+                    ],
+                    "type": "object"
+                  }
+                }
+              },
+              "description": "A denial describes this request/current authority; it does not prove an earlier concurrent or timed-out invocation never committed.",
+              "headers": {
+                "Cache-Control": {
+                  "description": "Never cache protocol responses.",
+                  "schema": {
+                    "const": "no-store"
+                  }
+                }
+              }
+            },
+            "409": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "device_limit_reached",
+                          "revision_conflict",
+                          "idempotency_conflict"
+                        ],
+                        "type": "string"
+                      },
+                      "ok": {
+                        "const": false
+                      },
+                      "request_id": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "ok",
+                      "code",
+                      "request_id"
+                    ],
+                    "type": "object"
+                  }
+                }
+              },
+              "description": "A denial describes this request/current authority; it does not prove an earlier concurrent or timed-out invocation never committed.",
+              "headers": {
+                "Cache-Control": {
+                  "description": "Never cache protocol responses.",
+                  "schema": {
+                    "const": "no-store"
+                  }
+                }
+              }
+            },
+            "410": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "authorization_expired",
+                          "challenge_expired"
+                        ],
+                        "type": "string"
+                      },
+                      "ok": {
+                        "const": false
+                      },
+                      "request_id": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "ok",
+                      "code",
+                      "request_id"
+                    ],
+                    "type": "object"
+                  }
+                }
+              },
+              "description": "A denial describes this request/current authority; it does not prove an earlier concurrent or timed-out invocation never committed.",
+              "headers": {
+                "Cache-Control": {
+                  "description": "Never cache protocol responses.",
+                  "schema": {
+                    "const": "no-store"
+                  }
+                }
+              }
+            },
+            "429": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "rate_limited"
+                        ],
+                        "type": "string"
+                      },
+                      "ok": {
+                        "const": false
+                      },
+                      "request_id": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "ok",
+                      "code",
+                      "request_id"
+                    ],
+                    "type": "object"
+                  }
+                }
+              },
+              "description": "A denial describes this request/current authority; it does not prove an earlier concurrent or timed-out invocation never committed.",
+              "headers": {
+                "Cache-Control": {
+                  "description": "Never cache protocol responses.",
+                  "schema": {
+                    "const": "no-store"
+                  }
+                },
+                "Retry-After": {
+                  "description": "Wait before retrying, with backoff and jitter.",
+                  "schema": {
+                    "const": "60"
+                  }
+                }
+              }
+            },
+            "503": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "temporarily_unavailable"
+                        ],
+                        "type": "string"
+                      },
+                      "ok": {
+                        "const": false
+                      },
+                      "request_id": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "ok",
+                      "code",
+                      "request_id"
+                    ],
+                    "type": "object"
+                  }
+                }
+              },
+              "description": "Unknown outcome or unavailable configuration/service. Keep the key and exact operation; obtain a fresh challenge to reconcile.",
+              "headers": {
+                "Cache-Control": {
+                  "description": "Never cache protocol responses.",
+                  "schema": {
+                    "const": "no-store"
+                  }
+                }
+              }
+            }
+          },
+          "security": [],
+          "summary": "Begin browser-authorized device enrollment.",
+          "tags": [
+            "device"
+          ]
+        }
+      },
+      "/v2/device-authorizations/exchange": {
+        "post": {
+          "description": "Protected device protocol, independent of legacy proof/account-token switches. Requests are bounded to 16 KiB, fatal UTF-8 JSON objects with no duplicate/unknown fields or unpaired surrogates. Mandatory rate limits apply before parsing and key import. Exchange and renewal require fresh proof in the body; security: [] does not waive that proof. A stable operation ID identifies exact semantic intent; retry with fresh challenge/signature. Successful recovery returns the exact original response, including request_id and lease times. Native clients must preserve their original monotonic send anchor across retries.",
+          "operationId": "exchangeDeviceAuthorization",
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "attempt_handle": {
+                      "description": "32-byte value in canonical unpadded base64url.",
+                      "pattern": "^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$",
+                      "type": "string"
+                    },
+                    "code": {
+                      "description": "32-byte value in canonical unpadded base64url.",
+                      "pattern": "^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$",
+                      "type": "string"
+                    },
+                    "code_verifier": {
+                      "description": "32-byte value in canonical unpadded base64url.",
+                      "pattern": "^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$",
+                      "type": "string"
+                    },
+                    "operation_id": {
+                      "description": "32-byte value in canonical unpadded base64url.",
+                      "pattern": "^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$",
+                      "type": "string"
+                    },
+                    "proof": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "challenge_id": {
+                          "description": "Opaque 16-byte record ID, canonical unpadded base64url.",
+                          "pattern": "^[A-Za-z0-9_-]{21}[AQgw]$",
+                          "type": "string"
+                        },
+                        "expires_at": {
+                          "description": "Wire token must use unsigned decimal digits: 0 or a nonzero digit followed by digits. No fraction, exponent or negative zero.",
+                          "maximum": 9007199254740991,
+                          "minimum": 0,
+                          "type": "integer"
+                        },
+                        "key_id": {
+                          "pattern": "^sha256:[a-f0-9]{64}$",
+                          "type": "string"
+                        },
+                        "nonce": {
+                          "description": "32-byte value in canonical unpadded base64url.",
+                          "pattern": "^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$",
+                          "type": "string"
+                        },
+                        "signature": {
+                          "description": "Low-S P-256 IEEE P1363 signature over the canonical v2 proof input.",
+                          "pattern": "^[A-Za-z0-9_-]{85}[AQgw]$",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "key_id",
+                        "challenge_id",
+                        "nonce",
+                        "expires_at",
+                        "signature"
+                      ],
+                      "type": "object"
+                    },
+                    "redirect_uri": {
+                      "description": "Exact registered HTTP loopback IP/path with an explicit nonzero port. Only 127.0.0.1 or [::1]. No query, fragment, userinfo, DNS host or URL normalization aliases.",
+                      "maxLength": 1024,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "attempt_handle",
+                    "code",
+                    "code_verifier",
+                    "redirect_uri",
+                    "operation_id",
+                    "proof"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "required": true
+          },
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "code": {
+                        "const": "device_activated"
+                      },
+                      "data": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "accept_until": {
+                            "description": "Server capacity hold deadline (expires_at + 120). Clients stop at expires_at, without this allowance.",
+                            "maximum": 9007199254740991,
+                            "minimum": 0,
+                            "type": "integer"
+                          },
+                          "binding_id": {
+                            "description": "Opaque 16-byte record ID, canonical unpadded base64url.",
+                            "pattern": "^[A-Za-z0-9_-]{21}[AQgw]$",
+                            "type": "string"
+                          },
+                          "device_id": {
+                            "description": "Opaque 16-byte record ID, canonical unpadded base64url.",
+                            "pattern": "^[A-Za-z0-9_-]{21}[AQgw]$",
+                            "type": "string"
+                          },
+                          "entitlement": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "feature": {
+                                "pattern": "^[A-Za-z0-9_.:-]{1,15}$",
+                                "type": "string"
+                              },
+                              "license_fingerprint": {
+                                "pattern": "^[a-f0-9]{64}$",
+                                "type": "string"
+                              },
+                              "project": {
+                                "pattern": "^[A-Za-z0-9_.:-]{1,127}$",
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "project",
+                              "feature",
+                              "license_fingerprint"
+                            ],
+                            "type": "object"
+                          },
+                          "expires_at": {
+                            "description": "Wire token must use unsigned decimal digits: 0 or a nonzero digit followed by digits. No fraction, exponent or negative zero.",
+                            "maximum": 9007199254740991,
+                            "minimum": 0,
+                            "type": "integer"
+                          },
+                          "generation": {
+                            "description": "Wire token must use unsigned decimal digits: 0 or a nonzero digit followed by digits. No fraction, exponent or negative zero.",
+                            "maximum": 9007199254740991,
+                            "minimum": 1,
+                            "type": "integer"
+                          },
+                          "lease": {
+                            "description": "Signed lccdl1 device lease. Verify signature and all expected claims in the native consumer; this string alone is not local authorization.",
+                            "maxLength": 8192,
+                            "type": "string"
+                          },
+                          "renew_after": {
+                            "description": "Wire token must use unsigned decimal digits: 0 or a nonzero digit followed by digits. No fraction, exponent or negative zero.",
+                            "maximum": 9007199254740991,
+                            "minimum": 0,
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "device_id",
+                          "binding_id",
+                          "generation",
+                          "entitlement",
+                          "lease",
+                          "renew_after",
+                          "expires_at",
+                          "accept_until"
+                        ],
+                        "type": "object"
+                      },
+                      "ok": {
+                        "const": true
+                      },
+                      "request_id": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "ok",
+                      "code",
+                      "request_id",
+                      "data"
+                    ],
+                    "type": "object"
+                  }
+                }
+              },
+              "description": "device_activated",
+              "headers": {
+                "Cache-Control": {
+                  "description": "Never cache protocol responses.",
+                  "schema": {
+                    "const": "no-store"
+                  }
+                }
+              }
+            },
+            "400": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "invalid_request",
+                          "unsupported_protocol"
+                        ],
+                        "type": "string"
+                      },
+                      "ok": {
+                        "const": false
+                      },
+                      "request_id": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "ok",
+                      "code",
+                      "request_id"
+                    ],
+                    "type": "object"
+                  }
+                }
+              },
+              "description": "A denial describes this request/current authority; it does not prove an earlier concurrent or timed-out invocation never committed.",
+              "headers": {
+                "Cache-Control": {
+                  "description": "Never cache protocol responses.",
+                  "schema": {
+                    "const": "no-store"
+                  }
+                }
+              }
+            },
+            "401": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "proof_required",
+                          "invalid_proof"
+                        ],
+                        "type": "string"
+                      },
+                      "ok": {
+                        "const": false
+                      },
+                      "request_id": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "ok",
+                      "code",
+                      "request_id"
+                    ],
+                    "type": "object"
+                  }
+                }
+              },
+              "description": "A denial describes this request/current authority; it does not prove an earlier concurrent or timed-out invocation never committed.",
+              "headers": {
+                "Cache-Control": {
+                  "description": "Never cache protocol responses.",
+                  "schema": {
+                    "const": "no-store"
+                  }
+                }
+              }
+            },
+            "403": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "access_denied",
+                          "device_retired",
+                          "legacy_protocol_disabled"
+                        ],
+                        "type": "string"
+                      },
+                      "ok": {
+                        "const": false
+                      },
+                      "request_id": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "ok",
+                      "code",
+                      "request_id"
+                    ],
+                    "type": "object"
+                  }
+                }
+              },
+              "description": "A denial describes this request/current authority; it does not prove an earlier concurrent or timed-out invocation never committed.",
+              "headers": {
+                "Cache-Control": {
+                  "description": "Never cache protocol responses.",
+                  "schema": {
+                    "const": "no-store"
+                  }
+                }
+              }
+            },
+            "404": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "authorization_unavailable",
+                          "binding_unavailable"
+                        ],
+                        "type": "string"
+                      },
+                      "ok": {
+                        "const": false
+                      },
+                      "request_id": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "ok",
+                      "code",
+                      "request_id"
+                    ],
+                    "type": "object"
+                  }
+                }
+              },
+              "description": "A denial describes this request/current authority; it does not prove an earlier concurrent or timed-out invocation never committed.",
+              "headers": {
+                "Cache-Control": {
+                  "description": "Never cache protocol responses.",
+                  "schema": {
+                    "const": "no-store"
+                  }
+                }
+              }
+            },
+            "409": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "device_limit_reached",
+                          "revision_conflict",
+                          "idempotency_conflict"
+                        ],
+                        "type": "string"
+                      },
+                      "ok": {
+                        "const": false
+                      },
+                      "request_id": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "ok",
+                      "code",
+                      "request_id"
+                    ],
+                    "type": "object"
+                  }
+                }
+              },
+              "description": "A denial describes this request/current authority; it does not prove an earlier concurrent or timed-out invocation never committed.",
+              "headers": {
+                "Cache-Control": {
+                  "description": "Never cache protocol responses.",
+                  "schema": {
+                    "const": "no-store"
+                  }
+                }
+              }
+            },
+            "410": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "authorization_expired",
+                          "challenge_expired"
+                        ],
+                        "type": "string"
+                      },
+                      "ok": {
+                        "const": false
+                      },
+                      "request_id": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "ok",
+                      "code",
+                      "request_id"
+                    ],
+                    "type": "object"
+                  }
+                }
+              },
+              "description": "A denial describes this request/current authority; it does not prove an earlier concurrent or timed-out invocation never committed.",
+              "headers": {
+                "Cache-Control": {
+                  "description": "Never cache protocol responses.",
+                  "schema": {
+                    "const": "no-store"
+                  }
+                }
+              }
+            },
+            "429": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "rate_limited"
+                        ],
+                        "type": "string"
+                      },
+                      "ok": {
+                        "const": false
+                      },
+                      "request_id": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "ok",
+                      "code",
+                      "request_id"
+                    ],
+                    "type": "object"
+                  }
+                }
+              },
+              "description": "A denial describes this request/current authority; it does not prove an earlier concurrent or timed-out invocation never committed.",
+              "headers": {
+                "Cache-Control": {
+                  "description": "Never cache protocol responses.",
+                  "schema": {
+                    "const": "no-store"
+                  }
+                },
+                "Retry-After": {
+                  "description": "Wait before retrying, with backoff and jitter.",
+                  "schema": {
+                    "const": "60"
+                  }
+                }
+              }
+            },
+            "503": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "temporarily_unavailable"
+                        ],
+                        "type": "string"
+                      },
+                      "ok": {
+                        "const": false
+                      },
+                      "request_id": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "ok",
+                      "code",
+                      "request_id"
+                    ],
+                    "type": "object"
+                  }
+                }
+              },
+              "description": "Unknown outcome or unavailable configuration/service. Keep the key and exact operation; obtain a fresh challenge to reconcile.",
+              "headers": {
+                "Cache-Control": {
+                  "description": "Never cache protocol responses.",
+                  "schema": {
+                    "const": "no-store"
+                  }
+                }
+              }
+            }
+          },
+          "security": [],
+          "summary": "Exchange consent, PKCE and key proof for a device-bound lease.",
+          "tags": [
+            "device"
+          ]
+        }
+      },
+      "/v2/device-challenges": {
+        "post": {
+          "description": "Protected device protocol, independent of legacy proof/account-token switches. Requests are bounded to 16 KiB, fatal UTF-8 JSON objects with no duplicate/unknown fields or unpaired surrogates. Mandatory rate limits apply before parsing and key import. Exchange and renewal require fresh proof in the body; security: [] does not waive that proof. A stable operation ID identifies exact semantic intent; retry with fresh challenge/signature. Successful recovery returns the exact original response, including request_id and lease times. Native clients must preserve their original monotonic send anchor across retries.",
+          "operationId": "createDeviceChallenge",
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "attempt_handle": {
+                          "description": "32-byte value in canonical unpadded base64url.",
+                          "pattern": "^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$",
+                          "type": "string"
+                        },
+                        "operation_id": {
+                          "description": "32-byte value in canonical unpadded base64url.",
+                          "pattern": "^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$",
+                          "type": "string"
+                        },
+                        "purpose": {
+                          "const": "exchange"
+                        }
+                      },
+                      "required": [
+                        "purpose",
+                        "attempt_handle",
+                        "operation_id"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "binding_id": {
+                          "description": "Opaque 16-byte record ID, canonical unpadded base64url.",
+                          "pattern": "^[A-Za-z0-9_-]{21}[AQgw]$",
+                          "type": "string"
+                        },
+                        "operation_id": {
+                          "description": "32-byte value in canonical unpadded base64url.",
+                          "pattern": "^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$",
+                          "type": "string"
+                        },
+                        "purpose": {
+                          "const": "renew"
+                        }
+                      },
+                      "required": [
+                        "purpose",
+                        "binding_id",
+                        "operation_id"
+                      ],
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "required": true
+          },
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "code": {
+                        "const": "challenge_created"
+                      },
+                      "data": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "challenge_id": {
+                            "description": "Opaque 16-byte record ID, canonical unpadded base64url.",
+                            "pattern": "^[A-Za-z0-9_-]{21}[AQgw]$",
+                            "type": "string"
+                          },
+                          "expires_at": {
+                            "description": "Wire token must use unsigned decimal digits: 0 or a nonzero digit followed by digits. No fraction, exponent or negative zero.",
+                            "maximum": 9007199254740991,
+                            "minimum": 0,
+                            "type": "integer"
+                          },
+                          "nonce": {
+                            "description": "32-byte value in canonical unpadded base64url.",
+                            "pattern": "^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$",
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "challenge_id",
+                          "nonce",
+                          "expires_at"
+                        ],
+                        "type": "object"
+                      },
+                      "ok": {
+                        "const": true
+                      },
+                      "request_id": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "ok",
+                      "code",
+                      "request_id",
+                      "data"
+                    ],
+                    "type": "object"
+                  }
+                }
+              },
+              "description": "challenge_created",
+              "headers": {
+                "Cache-Control": {
+                  "description": "Never cache protocol responses.",
+                  "schema": {
+                    "const": "no-store"
+                  }
+                }
+              }
+            },
+            "400": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "invalid_request",
+                          "unsupported_protocol"
+                        ],
+                        "type": "string"
+                      },
+                      "ok": {
+                        "const": false
+                      },
+                      "request_id": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "ok",
+                      "code",
+                      "request_id"
+                    ],
+                    "type": "object"
+                  }
+                }
+              },
+              "description": "A denial describes this request/current authority; it does not prove an earlier concurrent or timed-out invocation never committed.",
+              "headers": {
+                "Cache-Control": {
+                  "description": "Never cache protocol responses.",
+                  "schema": {
+                    "const": "no-store"
+                  }
+                }
+              }
+            },
+            "401": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "proof_required",
+                          "invalid_proof"
+                        ],
+                        "type": "string"
+                      },
+                      "ok": {
+                        "const": false
+                      },
+                      "request_id": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "ok",
+                      "code",
+                      "request_id"
+                    ],
+                    "type": "object"
+                  }
+                }
+              },
+              "description": "A denial describes this request/current authority; it does not prove an earlier concurrent or timed-out invocation never committed.",
+              "headers": {
+                "Cache-Control": {
+                  "description": "Never cache protocol responses.",
+                  "schema": {
+                    "const": "no-store"
+                  }
+                }
+              }
+            },
+            "403": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "access_denied",
+                          "device_retired",
+                          "legacy_protocol_disabled"
+                        ],
+                        "type": "string"
+                      },
+                      "ok": {
+                        "const": false
+                      },
+                      "request_id": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "ok",
+                      "code",
+                      "request_id"
+                    ],
+                    "type": "object"
+                  }
+                }
+              },
+              "description": "A denial describes this request/current authority; it does not prove an earlier concurrent or timed-out invocation never committed.",
+              "headers": {
+                "Cache-Control": {
+                  "description": "Never cache protocol responses.",
+                  "schema": {
+                    "const": "no-store"
+                  }
+                }
+              }
+            },
+            "404": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "authorization_unavailable",
+                          "binding_unavailable"
+                        ],
+                        "type": "string"
+                      },
+                      "ok": {
+                        "const": false
+                      },
+                      "request_id": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "ok",
+                      "code",
+                      "request_id"
+                    ],
+                    "type": "object"
+                  }
+                }
+              },
+              "description": "A denial describes this request/current authority; it does not prove an earlier concurrent or timed-out invocation never committed.",
+              "headers": {
+                "Cache-Control": {
+                  "description": "Never cache protocol responses.",
+                  "schema": {
+                    "const": "no-store"
+                  }
+                }
+              }
+            },
+            "409": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "device_limit_reached",
+                          "revision_conflict",
+                          "idempotency_conflict"
+                        ],
+                        "type": "string"
+                      },
+                      "ok": {
+                        "const": false
+                      },
+                      "request_id": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "ok",
+                      "code",
+                      "request_id"
+                    ],
+                    "type": "object"
+                  }
+                }
+              },
+              "description": "A denial describes this request/current authority; it does not prove an earlier concurrent or timed-out invocation never committed.",
+              "headers": {
+                "Cache-Control": {
+                  "description": "Never cache protocol responses.",
+                  "schema": {
+                    "const": "no-store"
+                  }
+                }
+              }
+            },
+            "410": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "authorization_expired",
+                          "challenge_expired"
+                        ],
+                        "type": "string"
+                      },
+                      "ok": {
+                        "const": false
+                      },
+                      "request_id": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "ok",
+                      "code",
+                      "request_id"
+                    ],
+                    "type": "object"
+                  }
+                }
+              },
+              "description": "A denial describes this request/current authority; it does not prove an earlier concurrent or timed-out invocation never committed.",
+              "headers": {
+                "Cache-Control": {
+                  "description": "Never cache protocol responses.",
+                  "schema": {
+                    "const": "no-store"
+                  }
+                }
+              }
+            },
+            "429": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "rate_limited"
+                        ],
+                        "type": "string"
+                      },
+                      "ok": {
+                        "const": false
+                      },
+                      "request_id": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "ok",
+                      "code",
+                      "request_id"
+                    ],
+                    "type": "object"
+                  }
+                }
+              },
+              "description": "A denial describes this request/current authority; it does not prove an earlier concurrent or timed-out invocation never committed.",
+              "headers": {
+                "Cache-Control": {
+                  "description": "Never cache protocol responses.",
+                  "schema": {
+                    "const": "no-store"
+                  }
+                },
+                "Retry-After": {
+                  "description": "Wait before retrying, with backoff and jitter.",
+                  "schema": {
+                    "const": "60"
+                  }
+                }
+              }
+            },
+            "503": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "temporarily_unavailable"
+                        ],
+                        "type": "string"
+                      },
+                      "ok": {
+                        "const": false
+                      },
+                      "request_id": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "ok",
+                      "code",
+                      "request_id"
+                    ],
+                    "type": "object"
+                  }
+                }
+              },
+              "description": "Unknown outcome or unavailable configuration/service. Keep the key and exact operation; obtain a fresh challenge to reconcile.",
+              "headers": {
+                "Cache-Control": {
+                  "description": "Never cache protocol responses.",
+                  "schema": {
+                    "const": "no-store"
+                  }
+                }
+              }
+            }
+          },
+          "security": [],
+          "summary": "Obtain a fresh, single-use device-proof challenge.",
+          "tags": [
+            "device"
+          ]
+        }
+      },
+      "/v2/device-leases/renew": {
+        "post": {
+          "description": "Protected device protocol, independent of legacy proof/account-token switches. Requests are bounded to 16 KiB, fatal UTF-8 JSON objects with no duplicate/unknown fields or unpaired surrogates. Mandatory rate limits apply before parsing and key import. Exchange and renewal require fresh proof in the body; security: [] does not waive that proof. A stable operation ID identifies exact semantic intent; retry with fresh challenge/signature. Successful recovery returns the exact original response, including request_id and lease times. Native clients must preserve their original monotonic send anchor across retries.",
+          "operationId": "renewDeviceLease",
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "binding_id": {
+                      "description": "Opaque 16-byte record ID, canonical unpadded base64url.",
+                      "pattern": "^[A-Za-z0-9_-]{21}[AQgw]$",
+                      "type": "string"
+                    },
+                    "generation": {
+                      "description": "Wire token must use unsigned decimal digits: 0 or a nonzero digit followed by digits. No fraction, exponent or negative zero.",
+                      "maximum": 9007199254740991,
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "operation_id": {
+                      "description": "32-byte value in canonical unpadded base64url.",
+                      "pattern": "^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$",
+                      "type": "string"
+                    },
+                    "proof": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "challenge_id": {
+                          "description": "Opaque 16-byte record ID, canonical unpadded base64url.",
+                          "pattern": "^[A-Za-z0-9_-]{21}[AQgw]$",
+                          "type": "string"
+                        },
+                        "expires_at": {
+                          "description": "Wire token must use unsigned decimal digits: 0 or a nonzero digit followed by digits. No fraction, exponent or negative zero.",
+                          "maximum": 9007199254740991,
+                          "minimum": 0,
+                          "type": "integer"
+                        },
+                        "key_id": {
+                          "pattern": "^sha256:[a-f0-9]{64}$",
+                          "type": "string"
+                        },
+                        "nonce": {
+                          "description": "32-byte value in canonical unpadded base64url.",
+                          "pattern": "^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$",
+                          "type": "string"
+                        },
+                        "signature": {
+                          "description": "Low-S P-256 IEEE P1363 signature over the canonical v2 proof input.",
+                          "pattern": "^[A-Za-z0-9_-]{85}[AQgw]$",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "key_id",
+                        "challenge_id",
+                        "nonce",
+                        "expires_at",
+                        "signature"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "binding_id",
+                    "generation",
+                    "operation_id",
+                    "proof"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "required": true
+          },
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "code": {
+                        "const": "device_renewed"
+                      },
+                      "data": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "accept_until": {
+                            "description": "Server capacity hold deadline (expires_at + 120). Clients stop at expires_at, without this allowance.",
+                            "maximum": 9007199254740991,
+                            "minimum": 0,
+                            "type": "integer"
+                          },
+                          "binding_id": {
+                            "description": "Opaque 16-byte record ID, canonical unpadded base64url.",
+                            "pattern": "^[A-Za-z0-9_-]{21}[AQgw]$",
+                            "type": "string"
+                          },
+                          "device_id": {
+                            "description": "Opaque 16-byte record ID, canonical unpadded base64url.",
+                            "pattern": "^[A-Za-z0-9_-]{21}[AQgw]$",
+                            "type": "string"
+                          },
+                          "entitlement": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "feature": {
+                                "pattern": "^[A-Za-z0-9_.:-]{1,15}$",
+                                "type": "string"
+                              },
+                              "license_fingerprint": {
+                                "pattern": "^[a-f0-9]{64}$",
+                                "type": "string"
+                              },
+                              "project": {
+                                "pattern": "^[A-Za-z0-9_.:-]{1,127}$",
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "project",
+                              "feature",
+                              "license_fingerprint"
+                            ],
+                            "type": "object"
+                          },
+                          "expires_at": {
+                            "description": "Wire token must use unsigned decimal digits: 0 or a nonzero digit followed by digits. No fraction, exponent or negative zero.",
+                            "maximum": 9007199254740991,
+                            "minimum": 0,
+                            "type": "integer"
+                          },
+                          "generation": {
+                            "description": "Wire token must use unsigned decimal digits: 0 or a nonzero digit followed by digits. No fraction, exponent or negative zero.",
+                            "maximum": 9007199254740991,
+                            "minimum": 1,
+                            "type": "integer"
+                          },
+                          "lease": {
+                            "description": "Signed lccdl1 device lease. Verify signature and all expected claims in the native consumer; this string alone is not local authorization.",
+                            "maxLength": 8192,
+                            "type": "string"
+                          },
+                          "renew_after": {
+                            "description": "Wire token must use unsigned decimal digits: 0 or a nonzero digit followed by digits. No fraction, exponent or negative zero.",
+                            "maximum": 9007199254740991,
+                            "minimum": 0,
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "device_id",
+                          "binding_id",
+                          "generation",
+                          "entitlement",
+                          "lease",
+                          "renew_after",
+                          "expires_at",
+                          "accept_until"
+                        ],
+                        "type": "object"
+                      },
+                      "ok": {
+                        "const": true
+                      },
+                      "request_id": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "ok",
+                      "code",
+                      "request_id",
+                      "data"
+                    ],
+                    "type": "object"
+                  }
+                }
+              },
+              "description": "device_renewed",
+              "headers": {
+                "Cache-Control": {
+                  "description": "Never cache protocol responses.",
+                  "schema": {
+                    "const": "no-store"
+                  }
+                }
+              }
+            },
+            "400": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "invalid_request",
+                          "unsupported_protocol"
+                        ],
+                        "type": "string"
+                      },
+                      "ok": {
+                        "const": false
+                      },
+                      "request_id": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "ok",
+                      "code",
+                      "request_id"
+                    ],
+                    "type": "object"
+                  }
+                }
+              },
+              "description": "A denial describes this request/current authority; it does not prove an earlier concurrent or timed-out invocation never committed.",
+              "headers": {
+                "Cache-Control": {
+                  "description": "Never cache protocol responses.",
+                  "schema": {
+                    "const": "no-store"
+                  }
+                }
+              }
+            },
+            "401": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "proof_required",
+                          "invalid_proof"
+                        ],
+                        "type": "string"
+                      },
+                      "ok": {
+                        "const": false
+                      },
+                      "request_id": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "ok",
+                      "code",
+                      "request_id"
+                    ],
+                    "type": "object"
+                  }
+                }
+              },
+              "description": "A denial describes this request/current authority; it does not prove an earlier concurrent or timed-out invocation never committed.",
+              "headers": {
+                "Cache-Control": {
+                  "description": "Never cache protocol responses.",
+                  "schema": {
+                    "const": "no-store"
+                  }
+                }
+              }
+            },
+            "403": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "access_denied",
+                          "device_retired",
+                          "legacy_protocol_disabled"
+                        ],
+                        "type": "string"
+                      },
+                      "ok": {
+                        "const": false
+                      },
+                      "request_id": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "ok",
+                      "code",
+                      "request_id"
+                    ],
+                    "type": "object"
+                  }
+                }
+              },
+              "description": "A denial describes this request/current authority; it does not prove an earlier concurrent or timed-out invocation never committed.",
+              "headers": {
+                "Cache-Control": {
+                  "description": "Never cache protocol responses.",
+                  "schema": {
+                    "const": "no-store"
+                  }
+                }
+              }
+            },
+            "404": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "authorization_unavailable",
+                          "binding_unavailable"
+                        ],
+                        "type": "string"
+                      },
+                      "ok": {
+                        "const": false
+                      },
+                      "request_id": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "ok",
+                      "code",
+                      "request_id"
+                    ],
+                    "type": "object"
+                  }
+                }
+              },
+              "description": "A denial describes this request/current authority; it does not prove an earlier concurrent or timed-out invocation never committed.",
+              "headers": {
+                "Cache-Control": {
+                  "description": "Never cache protocol responses.",
+                  "schema": {
+                    "const": "no-store"
+                  }
+                }
+              }
+            },
+            "409": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "device_limit_reached",
+                          "revision_conflict",
+                          "idempotency_conflict"
+                        ],
+                        "type": "string"
+                      },
+                      "ok": {
+                        "const": false
+                      },
+                      "request_id": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "ok",
+                      "code",
+                      "request_id"
+                    ],
+                    "type": "object"
+                  }
+                }
+              },
+              "description": "A denial describes this request/current authority; it does not prove an earlier concurrent or timed-out invocation never committed.",
+              "headers": {
+                "Cache-Control": {
+                  "description": "Never cache protocol responses.",
+                  "schema": {
+                    "const": "no-store"
+                  }
+                }
+              }
+            },
+            "410": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "authorization_expired",
+                          "challenge_expired"
+                        ],
+                        "type": "string"
+                      },
+                      "ok": {
+                        "const": false
+                      },
+                      "request_id": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "ok",
+                      "code",
+                      "request_id"
+                    ],
+                    "type": "object"
+                  }
+                }
+              },
+              "description": "A denial describes this request/current authority; it does not prove an earlier concurrent or timed-out invocation never committed.",
+              "headers": {
+                "Cache-Control": {
+                  "description": "Never cache protocol responses.",
+                  "schema": {
+                    "const": "no-store"
+                  }
+                }
+              }
+            },
+            "429": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "rate_limited"
+                        ],
+                        "type": "string"
+                      },
+                      "ok": {
+                        "const": false
+                      },
+                      "request_id": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "ok",
+                      "code",
+                      "request_id"
+                    ],
+                    "type": "object"
+                  }
+                }
+              },
+              "description": "A denial describes this request/current authority; it does not prove an earlier concurrent or timed-out invocation never committed.",
+              "headers": {
+                "Cache-Control": {
+                  "description": "Never cache protocol responses.",
+                  "schema": {
+                    "const": "no-store"
+                  }
+                },
+                "Retry-After": {
+                  "description": "Wait before retrying, with backoff and jitter.",
+                  "schema": {
+                    "const": "60"
+                  }
+                }
+              }
+            },
+            "503": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "temporarily_unavailable"
+                        ],
+                        "type": "string"
+                      },
+                      "ok": {
+                        "const": false
+                      },
+                      "request_id": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "ok",
+                      "code",
+                      "request_id"
+                    ],
+                    "type": "object"
+                  }
+                }
+              },
+              "description": "Unknown outcome or unavailable configuration/service. Keep the key and exact operation; obtain a fresh challenge to reconcile.",
+              "headers": {
+                "Cache-Control": {
+                  "description": "Never cache protocol responses.",
+                  "schema": {
+                    "const": "no-store"
+                  }
+                }
+              }
+            }
+          },
+          "security": [],
+          "summary": "Renew an active binding with fresh device proof.",
+          "tags": [
+            "device"
+          ]
+        }
       }
     },
     "servers": [
@@ -3624,6 +5604,10 @@
       {
         "description": "Unauthenticated client-facing online verification.",
         "name": "client"
+      },
+      {
+        "description": "Protected device enrollment, mandatory fresh key proof and signed leases. No emergency override.",
+        "name": "device"
       },
       {
         "description": "HMAC-signed subscription order ingest.",
@@ -3647,7 +5631,7 @@
       }
     ]
   },
-  "routeCount": 19,
-  "routeKeyCount": 12,
+  "routeCount": 23,
+  "routeKeyCount": 16,
   "service": "cloudflare-licensing-backend"
 }

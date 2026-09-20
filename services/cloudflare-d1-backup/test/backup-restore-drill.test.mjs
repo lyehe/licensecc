@@ -253,6 +253,15 @@ test("snapshot fidelity fails when the imported scratch loses a manifest-pinned 
   ]);
 });
 
+test("operation tombstones require manifest counts and cannot disappear during restore",()=>{
+  const options={scratchDatabase:'scratch',mode:'local'};
+  const snapshotInventory={algorithm:SNAPSHOT_INVENTORY_ALGORITHM,table_counts:{device_bound_operations:2,entitlements:1}};
+  const deps={existingUserTables:()=>['device_bound_operations','entitlements'],tableCounts:()=>({device_bound_operations:2,entitlements:1})};
+  assert.equal(validateSnapshotFidelity(options,{snapshotInventory},deps).verified,true);
+  assert.throws(()=>validateSnapshotFidelity(options,{snapshotInventory},{...deps,tableCounts:()=>({device_bound_operations:1,entitlements:1})}),/snapshot_row_count_mismatch/);
+  assert.throws(()=>validateSnapshotFidelity(options,{snapshotInventory:{...snapshotInventory,table_counts:{entitlements:1}}},deps),/snapshot_inventory_table_set_mismatch/);
+});
+
 test("canonical migration lineage upgrades an old snapshot before current-schema validation", () => {
   const canonicalNames = ["0001_initial.sql", "0002_current.sql"];
   let upgraded = false;
@@ -318,9 +327,9 @@ test("migration lineage fails closed when history is absent, divergent, or incom
 
 test("checked-out backend migrations are a contiguous canonical inventory", () => {
   const names = canonicalMigrationNames();
-  assert.equal(names.length, 32);
+  assert.equal(names.length, 40);
   assert.equal(names[0], "0001_create_entitlements.sql");
-  assert.equal(names.at(-1), "0032_plan_projection_remediation.sql");
+  assert.equal(names.at(-1), "0040_bound_unconsumed_cleanup.sql");
   assert.equal(migrationHistorySql(), "SELECT id, name FROM d1_migrations ORDER BY id");
   assert.match(snapshotSchemaObjectSql(), /name NOT IN \('_cf_KV', 'd1_migrations'\)/);
   assert.deepEqual([...SNAPSHOT_COUNTED_TABLES], REQUIRED_TABLES);
@@ -395,6 +404,33 @@ test("Wrangler failures expose stable metadata but never raw command output", ()
       return true;
     },
   );
+});
+
+test("restore subprocess bounds execution and preserves captured JSON without disk logs", () => {
+  for (const args of [["d1", "execute", "--json"], ["d1", "migrations", "apply"]]) {
+    const result = runWrangler(args, "bounded restore", (command, argv, options) => {
+      assert.equal(command, process.execPath);
+      assert.deepEqual(argv, ["wrangler.js", ...args]);
+      assert.equal(options.timeout, 600000);
+      assert.equal(options.maxBuffer, 8388608);
+      assert.equal(options.shell, undefined);
+      assert.equal(options.env.WRANGLER_LOG, args.includes("--json") ? "log" : "error");
+      assert.equal(options.env.WRANGLER_WRITE_LOGS, "false");
+      return { status: 0, stdout: "[]", stderr: "" };
+    }, () => "wrangler.js");
+    assert.equal(result.stdout, "[]");
+  }
+  for (const code of ["ETIMEDOUT", "ENOBUFS"]) {
+    for (const status of [null, 0]) {
+    assert.throws(() => runWrangler([], "bounded restore", () => ({
+      status, signal: null, error: Object.assign(new Error("private SQL"), { code }),
+      stdout: "private SQL", stderr: "private SQL",
+    }), () => "wrangler.js"), new RegExp(`^Error: wrangler_command_failed:operation=bounded_restore;status=${status ?? "unavailable"};error_class=spawn_error$`));
+    }
+  }
+  assert.throws(() => runWrangler([], "bounded restore", () => ({
+    status: 0, signal: "SIGTERM", stdout: "private SQL", stderr: "private SQL",
+  }), () => "wrangler.js"), /status=0;error_class=signal_exit$/);
 });
 
 test("restore drill supports local sql-file source", () => {
@@ -799,24 +835,27 @@ test("wrangler json parser tolerates advisory text before json", () => {
   assert.equal(parsed[0].results[0].x, 1);
 });
 
-test("restore inventory pins all migrated tables through migration 0032", () => {
+test("restore inventory pins all migrated tables through migration 0039", () => {
   const migratedTables = [
     "account_token_events", "account_token_revocations", "account_tokens", "audit_digests",
     "catalog_events", "catalog_features", "catalog_import_previews", "catalog_plan_features", "catalog_plans",
-    "customer_events", "customers", "entitlement_devices", "entitlement_events", "entitlement_policies", "entitlements",
+    "customer_events", "customers",
+    "device_bound_authorizations", "device_bound_bindings", "device_bound_challenges", "device_bound_commit_checks",
+    "device_bound_devices", "device_bound_events", "device_bound_leases", "device_bound_operations",
+    "entitlement_devices", "entitlement_events", "entitlement_policies", "entitlements",
     "lease_issuance", "license_plan_assignment_events", "license_plan_assignments",
     "license_plan_projection_generations", "license_plan_projection_previews", "licenses", "mutation_idempotency",
-    "order_events", "order_ingest_nonces", "orders", "policy_events", "portal_bootstrap_events", "portal_otp",
+    "order_events", "order_ingest_nonces", "orders", "policy_events", "portal_bootstrap_events", "portal_identities", "portal_oauth_states", "portal_otp", "portal_passwords",
     "portal_sessions", "rate_limit_counters", "request_proof_nonces", "seat_checkouts", "usage_events", "usage_meters",
     "webhook_cursor", "webhook_deliveries", "webhook_endpoints", "webhook_events",
   ];
   assert.deepEqual([...ALL_RESTORE_TABLES].sort(), migratedTables);
-  assert.equal(ALL_RESTORE_TABLES.length, 38);
+  assert.equal(ALL_RESTORE_TABLES.length, 49);
 
   for (const durable of [
     "entitlements", "entitlement_policies", "catalog_features", "catalog_plans",
     "catalog_plan_features", "license_plan_assignments", "license_plan_assignment_events",
-    "audit_digests", "webhook_endpoints", "webhook_events",
+    "audit_digests", "webhook_endpoints", "webhook_events", "device_bound_operations",
   ]) {
     assert.ok(REQUIRED_TABLES.includes(durable), `durable count inventory missing ${durable}`);
   }
@@ -851,8 +890,9 @@ test("table and named schema-object checks cover migrated identity", () => {
     assert.ok(sql.includes(`'${table}'`), `tableListSql does not assert ${table} present`);
   }
 
-  assert.equal(Object.keys(EXPECTED_INDEXES).length, 58);
-  assert.equal(Object.keys(EXPECTED_TRIGGERS).length, 18);
+  assert.equal(Object.keys(EXPECTED_INDEXES).length, 74);
+  assert.equal(EXPECTED_INDEXES.idx_bound_unconsumed_attempt_cleanup, "device_bound_authorizations");
+  assert.equal(Object.keys(EXPECTED_TRIGGERS).length, 50);
   assert.equal(EXPECTED_INDEXES.idx_license_plan_projection_previews_expiry_id, "license_plan_projection_previews");
   assert.equal("idx_license_plan_projection_previews_expiry" in EXPECTED_INDEXES, false);
   assert.equal("idx_license_plan_projection_previews_consumed" in EXPECTED_INDEXES, false);
@@ -863,15 +903,15 @@ test("table and named schema-object checks cover migrated identity", () => {
   assert.match(schemaSql, /bump_license_plan_projection_generation_assignments_delete/);
   const snapshot = readFileSync(new URL("../../cloudflare-licensing-backend/schema.sql", import.meta.url), "utf8");
   const rows = schemaRowsFromGeneratedSnapshot(snapshot);
-  assert.equal(rows.length, 114);
+  assert.equal(rows.length, 173);
   assert.equal(schemaSignature(rows), EXPECTED_SCHEMA_SIGNATURE_SHA256);
   assert.deepEqual(validateSchemaObjectRows(rows), {
     verified: true,
     algorithm: "sha256",
     digest: EXPECTED_SCHEMA_SIGNATURE_SHA256,
-    table_count: 38,
-    named_index_count: 58,
-    trigger_count: 18,
+    table_count: 49,
+    named_index_count: 74,
+    trigger_count: 50,
   });
   assert.throws(() => validateSchemaObjectRows(rows.filter((row) => row.name !== "entitlements")), /restored_schema_objects_missing:table:entitlements/);
   assert.throws(() => validateSchemaObjectRows(rows.map((row) => row.name === "entitlements"

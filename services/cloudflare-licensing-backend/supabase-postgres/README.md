@@ -150,7 +150,7 @@ Verify:
 
 ```bash
 psql "$DATABASE_URL" -c '\dt'
-# expect the same 38 application tables reported by `npm run schema:parity:pg`
+# expect the same 49 application tables reported by `npm run schema:parity:pg`
 ```
 
 ### 3. Install the locked workspace dependencies
@@ -236,7 +236,7 @@ rows, and the adapter never swallows errors, so this contract holds.
 
 ## Run the verify Worker on Postgres (server.mjs)
 
-`server.mjs` runs the **unmodified** compiled Worker (`dist/index.js`) on Postgres — the
+`server.mjs` runs the **unmodified** compiled Worker (`dist/app.js`) on Postgres — the
 counterpart of `local-host/server.mjs` (SQLite). The Worker emits D1/SQLite SQL, so the host
 wires the adapter with `{ workerSql: true }`, which translates the Worker's verify-path
 statements to PostgreSQL at `prepare()` time:
@@ -259,7 +259,7 @@ disposable PostgreSQL database, generate an ignored local signing key, and
 start a loopback host:
 
 ```bash
-npm run build                                                 # tsc -> dist/index.js
+npm run build                                                 # tsc -> dist/app.js
 psql "$DATABASE_URL" -f supabase-postgres/schema.pg.sql       # fresh disposable database only
 node scripts/generate-online-key.mjs --out-dir .online-key    # signing key (.online-key is gitignored)
 
@@ -278,7 +278,11 @@ exact six-statement Worker inventory, including request-proof nonce first-use,
 replay denial, and cleanup.
 The scheduled/manual `postgres-conformance.yml` gate applies a fresh disposable PostgreSQL 16
 schema and runs `npm run test:pg:real --workspace @licensecc/cloudflare-licensing-backend`, which
-executes the compiled Worker, adapter, nonce replay, CLI SQL, and `runApplyTransaction` itself.
+executes the compiled Worker, adapter, nonce replay, CLI SQL, `runApplyTransaction`
+and the protected-device row guards. The latter conformance driver rolls back its
+synthetic rows. Protected-device issuance is still D1-only; the PostgreSQL v1
+lookup excludes protected entitlements. Nullable standalone identity predicates
+use explicit text casts so PostgreSQL can type each protocol parameter.
 
 ## Exposing the host safely
 

@@ -9,7 +9,7 @@ export function ProjectionRows({ title, items }: { title: string; items: PlanPro
   return (
     <section className="deliveriesPane">
       <h3>{title}</h3>
-      <table>
+      <div className="tableScroll" role="region" aria-label={`${title} table`} tabIndex={0}><table>
         <thead><tr><th>Feature</th><th>Mode</th><th>Policy</th><th>Window</th><th>Capacity</th><th>Source</th></tr></thead>
         <tbody>{items.map((item) => (
           <tr key={`${title}:${item.feature}`}>
@@ -19,7 +19,7 @@ export function ProjectionRows({ title, items }: { title: string; items: PlanPro
             <td>{item.addon_key ?? item.source}{item.reason ? ` / ${item.reason}` : ""}</td>
           </tr>
         ))}</tbody>
-      </table>
+      </table></div>
     </section>
   );
 }
@@ -44,7 +44,7 @@ export function CatalogImportRows({ title, effects }: { title: string; effects: 
   return (
     <section className="deliveriesPane">
       <h3>{title}</h3>
-      <table>
+      <div className="tableScroll" role="region" aria-label={`${title} table`} tabIndex={0}><table>
         <thead><tr><th>Transition</th><th>Target</th><th>Delta</th></tr></thead>
         <tbody>{effects.map((effect) => {
           const changes = catalogImportEffectChanges(effect);
@@ -57,7 +57,7 @@ export function CatalogImportRows({ title, effects }: { title: string; effects: 
             </tr>
           );
         })}</tbody>
-      </table>
+      </table></div>
     </section>
   );
 }

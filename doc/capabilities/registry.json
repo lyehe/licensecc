@@ -308,6 +308,22 @@
       ]
     },
     {
+      "id": "windows-device-bound-client",
+      "title": "Windows device-bound desktop client",
+      "status": "platform_limited",
+      "owner": "C++ ABI and core maintainer",
+      "surfaces": ["Windows device-bound C API"],
+      "availability": {"release": "platform 0.1.0-rc.2", "platforms": ["Windows"], "limitations": ["Repository implementation; not a published binary. Requires the optional device-identity build, Windows TPM and local NTFS user storage. Opaque workflow tests use private software/HTTP/storage fixtures; installed example build and no-provisioning checks are local evidence. Live TPM/browser/backend enrollment, platform clock qualification, power-loss durability and hardware attestation are not established."]},
+      "replaces": [],
+      "public_docs": ["doc/api/device_identity.rst"],
+      "evidence": [
+        {"kind": "implementation", "surface": "Windows device-bound C API", "path": "include/licensecc/device_bound.h", "selector": "LCC_BOUND_RESULT lcc_device_bound_authorize(", "assertion": "The additive opaque-client API separates enrollment, renewal, persistence and protected-operation authorization."},
+        {"kind": "automated_test", "surface": "Windows device-bound C API", "path": "test/library/device_identity/device_bound_public_windows_test.cpp", "selector": "BOOST_AUTO_TEST_CASE(public_owner_transitions_to_renewal_and_restart_requires_online_operation)", "assertion": "The opaque workflow tests prove same-owner activation and online-only restart with private protocol/provider fixtures."},
+        {"kind": "platform", "surface": "Windows device-bound C API", "path": "examples/device_bound/CMakeLists.txt", "selector": "if(NOT WIN32 OR NOT LCC_ENABLE_DEVICE_IDENTITY OR NOT LCC_ENABLE_WINDOWS_TPM)", "assertion": "The installed consumer enforces its Windows/provider build prerequisites."},
+        {"kind": "limitation", "surface": "Windows device-bound C API", "path": "examples/device_bound/README.md", "selector": "A complete release also", "assertion": "The example documents the remaining live and hardware qualification requirements."}
+      ]
+    },
+    {
       "id": "java-sdk",
       "title": "Java SDK token verification and HTTP client",
       "status": "shipped",

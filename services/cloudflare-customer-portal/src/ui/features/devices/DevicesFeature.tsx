@@ -1,19 +1,17 @@
 import React, { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { DeviceRegistrations } from "./DeviceRegistrations";
 
 import {
   checkoutPath,
-  DEVICE_RELEASE_ACTION_LABEL,
   DEVICE_RELEASE_CONFIRM_COPY,
   deviceReleasePath,
   FLOATING_SEAT_RELEASE_CONFIRM_COPY,
   FLOATING_SEAT_RELEASE_CONFIRM_TITLE,
   FLOATING_SEAT_RELEASE_NETWORK_ERROR_COPY,
   FLOATING_SEAT_RELEASE_REFRESH_FAILED_CODE,
-  formatTimestamp,
   heartbeatPath,
   hydrateSeatSessions,
-  NO_DEVICES_EMPTY_COPY,
   PORTAL_STATUS_REFRESH_ACTION_LABEL,
   releasePath,
   SEATS_KEY,
@@ -321,29 +319,11 @@ export function useDevicesController(options: DeviceFeatureOptions): DevicesCont
 export function DevicesFeature({ controller }: { controller: DevicesController }): React.ReactElement {
   const floatingEntitlements = controller.entitlements.filter((item) => item.license_mode === "floating");
   return (
-    <section className="tablePane full">
-      <h2>My devices &amp; seats</h2>
-      <table>
-        <thead><tr><th>Project</th><th>Feature</th><th>Fingerprint</th><th>Device</th><th>Since</th><th>Actions</th></tr></thead>
-        <tbody>
-          {controller.devices.map((item, index) => (
-            <tr key={`${item.device_key_id}/${index}`}>
-              <td>{item.project}</td>
-              <td>{item.feature}</td>
-              <td><code>{shortHash(item.license_fingerprint)}</code></td>
-              <td><code>{shortHash(item.device_key_id)}</code></td>
-              <td>{formatTimestamp(item.created_at)}</td>
-              <td className="actions">
-                <button disabled={controller.busy} onClick={() => void controller.releaseDevice(item)}>{DEVICE_RELEASE_ACTION_LABEL}</button>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      {controller.devices.length === 0 && <p className="muted">{NO_DEVICES_EMPTY_COPY}</p>}
+    <div>
+      {controller.devices.length>0 && <DeviceRegistrations devices={controller.devices} busy={controller.busy} releaseDevice={controller.releaseDevice} />}
       {floatingEntitlements.length > 0 && (
         <div className="seatGrid">
-          <h2>Seats by entitlement</h2>
+          <div className="seatHeading"><h2>Browser-managed seats</h2><p>These controls manage seats created in this browser. They do not list or control native app sessions on other machines.</p></div>
           {floatingEntitlements.map((item, index) => (
             <div
               className="seatCard"
@@ -369,7 +349,7 @@ export function DevicesFeature({ controller }: { controller: DevicesController }
           ))}
         </div>
       )}
-    </section>
+    </div>
   );
 }
 

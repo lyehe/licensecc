@@ -18,6 +18,16 @@ export const META_ROUTES = [
 // Cookie-less public routes: health plus the auth handshake (each handler does its own gating).
 export const PUBLIC_ROUTES = [
   { method: "GET", path: "/health", inSpec: true },
+  { method: "POST", path: "/portal/v1/auth/password/register", inSpec: true },
+  { method: "POST", path: "/portal/v1/auth/password/login", inSpec: true },
+  { method: "GET", path: "/portal/v1/auth/password", inSpec: true },
+  { method: "POST", path: "/portal/v1/auth/password", inSpec: true },
+  { method: "GET", path: "/portal/v1/auth/providers", inSpec: true },
+  { method: "POST", path: "/portal/v1/auth/google/start", inSpec: true },
+  { method: "POST", path: "/portal/v1/auth/github/start", inSpec: true },
+  { method: "GET", path: "/portal/v1/auth/google/callback", inSpec: true },
+  { method: "GET", path: "/portal/v1/auth/github/callback", inSpec: true },
+  { method: "GET", path: "/portal/v1/auth/identities", inSpec: true },
   { method: "POST", path: "/portal/v1/auth/request", inSpec: true },
   { method: "POST", path: "/portal/v1/auth/verify", inSpec: true },
   { method: "GET", path: "/portal/v1/auth/magic", inSpec: true },
@@ -28,6 +38,11 @@ export const PUBLIC_ROUTES = [
 
 // Session-scoped routes served under the /api/portal/ prefix gate, after authSession() succeeds.
 export const SESSION_ROUTES = [
+  { method: "GET", path: "/api/portal/device-bindings", inSpec: true },
+  { method: "POST", path: "/api/portal/device-bindings/retire", inSpec: true },
+  { method: "POST", path: "/api/portal/device-authorizations/inspect", inSpec: true },
+  { method: "POST", path: "/api/portal/device-authorizations/approve", inSpec: true },
+  { method: "POST", path: "/api/portal/device-authorizations/deny", inSpec: true },
   { method: "GET", path: "/api/portal/me", inSpec: true },
   { method: "GET", path: "/api/portal/entitlements", inSpec: true },
   { method: "GET", path: "/api/portal/devices", inSpec: true },

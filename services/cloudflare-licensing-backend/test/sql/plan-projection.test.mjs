@@ -311,6 +311,43 @@ function projectionApplyState(db, previewId, idempotencyKey) {
   };
 }
 
+for (const state of ["active", "retiring"]) {
+  test(`projection rolls back every write when protected ${state} capacity is occupied`, async t => {
+    const db = freshDb(); t.after(() => db.close()); seedCatalog(db);
+    db.exec(`INSERT INTO customers(id,name,created_at,updated_at) VALUES('cus_1','Customer',1,1);
+      INSERT INTO licenses(id,customer_id,project,label,created_at,updated_at) VALUES('lic_1','cus_1','DEFAULT','License',1,1);
+      INSERT INTO entitlements(project,feature,license_fingerprint,status,customer_id,license_id,enforcement_mode,max_active_devices,created_at,updated_at)
+        VALUES('DEFAULT','export','${FP}','active','cus_1','lic_1','device_bound_v1',1,1,1);
+      INSERT INTO device_bound_devices(id,customer_id,project,key_id,public_key_spki,created_at,last_proof_at)
+        VALUES('device','cus_1','DEFAULT','key','synthetic-public',1,1);
+      INSERT INTO device_bound_bindings(id,project,feature,license_fingerprint,device_id,state,generation,revision,hold_until,created_at,updated_at)
+        VALUES('binding','DEFAULT','export','${FP}','device','${state}',2,3,4102444800,1,1);
+      UPDATE entitlement_policies SET max_active_devices=0 WHERE id='pol_node';`);
+    const env = { DB: new D1Like(db) };
+    const input = projectionInput({ addons: [] });
+    const preview = await previewPlanProjection(env, input, "admin", NOW);
+    const tables = ["entitlements", "device_bound_bindings", "entitlement_events", "license_plan_assignments",
+      "license_plan_assignment_events", "mutation_idempotency", "license_plan_projection_previews", "license_plan_projection_generations"];
+    const snapshot = () => tables.map(table => db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all());
+    const before = snapshot();
+    const mutation = { scope: "protected-projection", responseCode: "license_plan_projection_applied" };
+    await assert.rejects(applyPlanProjection(env, preview.preview_id, ctx({ idempotencyKey: "protected-fail" }), mutation, NOW + 1), /capacity_in_use/);
+    assert.deepEqual(snapshot(), before);
+    db.exec("UPDATE entitlement_policies SET max_active_devices=2 WHERE id='pol_node'");
+    const replacement = await previewPlanProjection(env, input, "admin", NOW + 2);
+    await applyPlanProjection(env, replacement.preview_id, ctx({ idempotencyKey: "protected-success" }), mutation, NOW + 3);
+    const protectedRow = db.prepare("SELECT enforcement_mode,customer_id,max_active_devices,authority_revision FROM entitlements WHERE feature='export'").get();
+    assert.equal(protectedRow.enforcement_mode, "device_bound_v1");
+    assert.equal(protectedRow.customer_id, "cus_1");
+    assert.equal(protectedRow.max_active_devices, 2);
+    assert.ok(protectedRow.authority_revision > before[0][0].authority_revision);
+    assert.deepEqual(snapshot()[1], before[1]);
+    assert.equal(db.prepare("SELECT count(*) AS n FROM entitlements").get().n, 2);
+    assert.equal(db.prepare("SELECT count(*) AS n FROM mutation_idempotency").get().n, 1);
+    assert.deepEqual(db.prepare("PRAGMA foreign_key_check").all(), []);
+  });
+}
+
 test("projection preview migrations upgrade a pre-0028 D1 database without rewriting catalog data", async () => {
   const db = preProjectionProtocolDb();
   seedCatalog(db);

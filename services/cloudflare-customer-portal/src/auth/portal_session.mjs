@@ -15,7 +15,7 @@ import { loadSecretMap } from "@licensecc/cloudflare-runtime/auth/secret_map";
 
 /** @typedef {import("../worker/env.js").Env} PortalEnv */
 /** @typedef {{ [key: string]: Uint8Array }} PepperMap */
-/** @typedef {{ customerId?: string, userAgent?: string, now?: number }} MintSessionOptions */
+/** @typedef {{ customerId?: string, userAgent?: string, now?: number, authMethod?: "legacy" | "otp" | "oauth" | "password", passwordHash?: string }} MintSessionOptions */
 /** @typedef {{ id?: string, customer_id?: string, status?: string, expires_at: number }} SessionRow */
 
 const SESSION_PREFIX = "lccp_";
@@ -76,7 +76,7 @@ function newSessionId() {
  * and never lands in the DB or a log.
  */
 /** @param {PortalEnv} env @param {MintSessionOptions} [options] */
-export async function mintSession(env, { customerId, userAgent = "", now = Math.floor(Date.now() / 1000) } = {}) {
+export async function mintSession(env, { customerId, userAgent = "", now = Math.floor(Date.now() / 1000), authMethod = "legacy", passwordHash } = {}) {
   const peppers = loadSessionPeppers(env);
   if (peppers === null) return { ok: false, code: "config_error" };
   const activeId = activePepperId(peppers);
@@ -87,10 +87,13 @@ export async function mintSession(env, { customerId, userAgent = "", now = Math.
   crypto.getRandomValues(random);
   const raw = SESSION_PREFIX + base64Url(random);
   const sessionHmac = await hmac(pepperBytes, raw);
-  await env.DB.prepare(
-    "INSERT INTO portal_sessions (id, customer_id, session_hmac, pepper_key_id, account_token_id, status, user_agent, created_at, last_used_at, expires_at) " +
-      "VALUES (?, ?, ?, ?, NULL, 'active', ?, ?, ?, ?)",
-  ).bind(newSessionId(), customerId, sessionHmac, activeId, userAgent.slice(0, 256), now, now, now + SESSION_TTL_SEC).run();
+  const statement = "INSERT INTO portal_sessions (id, customer_id, session_hmac, pepper_key_id, account_token_id, status, user_agent, created_at, last_used_at, expires_at, auth_method) " +
+    "SELECT ?, ?, ?, ?, NULL, 'active', ?, ?, ?, ?, ? FROM customers c WHERE c.id = ? AND c.status = 'active'";
+  const values = [newSessionId(), customerId, sessionHmac, activeId, userAgent.slice(0, 256), now, now, now + SESSION_TTL_SEC, authMethod, customerId];
+  const guard = passwordHash === undefined ? "" : " AND EXISTS (SELECT 1 FROM portal_passwords p WHERE p.customer_id = c.id AND p.password_hash = ?)";
+  if (passwordHash !== undefined) values.push(passwordHash);
+  const inserted = await env.DB.prepare(statement + guard + " RETURNING id").bind(...values).first();
+  if (inserted === null) return { ok: false, code: "unauthorized" };
   return { ok: true, raw, code: "ok" };
 }
 

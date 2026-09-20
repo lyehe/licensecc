@@ -12,9 +12,9 @@ const BASELINE_DIRECTORY = path.join(REPOSITORY_ROOT, "test", "contracts");
 const HTTP_METHODS = new Set(["get", "put", "post", "delete", "options", "head", "patch", "trace"]);
 
 const DEPLOYABLES = Object.freeze([
-  { id: "backend", directory: "services/cloudflare-licensing-backend", expectedRoutes: 19 },
-  { id: "admin", directory: "services/cloudflare-license-admin", expectedRoutes: 65 },
-  { id: "portal", directory: "services/cloudflare-customer-portal", expectedRoutes: 18 },
+  { id: "backend", directory: "services/cloudflare-licensing-backend", expectedRoutes: 23 },
+  { id: "admin", directory: "services/cloudflare-license-admin", expectedRoutes: 73 },
+  { id: "portal", directory: "services/cloudflare-customer-portal", expectedRoutes: 33 },
   { id: "backup", directory: "services/cloudflare-d1-backup" },
 ]);
 
@@ -388,7 +388,7 @@ async function captureContracts(repoRoot) {
   const portalRoot = path.join(repoRoot, "services", "cloudflare-customer-portal", "dist-worker", "worker");
   const [backendRoutes, backendWorker, backendOpenApi, adminRoutes, adminWorker, adminOpenApi, portalRoutes, portalWorker, portalOpenApi] = await Promise.all([
     importCompiled(path.join(backendRoot, "routes.js")),
-    importCompiled(path.join(backendRoot, "index.js")),
+    importCompiled(path.join(backendRoot, "app.js")),
     importCompiled(path.join(backendRoot, "openapi", "document.js")),
     importCompiled(path.join(adminRoot, "routes.js")),
     importCompiled(path.join(adminRoot, "index.js")),
@@ -407,7 +407,7 @@ async function captureContracts(repoRoot) {
       routeKeysField: "BACKEND_ROUTE_KEYS",
       openApi: backendOpenApi.openApiSpec,
       openApiField: "openApiSpec",
-      expectedRoutes: 19,
+      expectedRoutes: 23,
     }),
     admin: makeRouteContract({
       service: "cloudflare-license-admin",
@@ -417,7 +417,7 @@ async function captureContracts(repoRoot) {
       routeKeysField: "API_BINDING_KEYS",
       openApi: adminOpenApi.openApiDocument,
       openApiField: "openApiDocument",
-      expectedRoutes: 65,
+      expectedRoutes: 73,
     }),
     portal: makeRouteContract({
       service: "cloudflare-customer-portal",
@@ -427,7 +427,7 @@ async function captureContracts(repoRoot) {
       routeKeysField: "PORTAL_ROUTE_KEYS",
       openApi: portalOpenApi.openApiDocument,
       openApiField: "openApiDocument",
-      expectedRoutes: 18,
+      expectedRoutes: 33,
     }),
     backup: captureBackupSurface(repoRoot),
   };

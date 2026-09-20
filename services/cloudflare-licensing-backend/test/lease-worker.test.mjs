@@ -8,7 +8,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { generateKeyPairSync, createHash, createPublicKey, verify as nodeVerify } from "node:crypto";
-import worker from "../dist/index.js";
+import worker from "../dist/app.js";
 import { resetLeaseSigningKeyCacheForTests } from "../dist/routes/leases.js";
 import { buildV201CanonicalPayload } from "../scripts/lease-sign.mjs";
 

@@ -6,6 +6,8 @@ import { promisify } from "node:util";
 
 const execFile = promisify(execFileCallback);
 const repositoryRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
+// An injected root selects configuration/cwd, never a different executable.
+const pinnedWranglerEntrypoint = resolve(repositoryRoot, "node_modules/wrangler/bin/wrangler.js");
 
 const workerDefinitions = Object.freeze({
   backend: Object.freeze({ config: "services/cloudflare-licensing-backend/wrangler.toml" }),
@@ -225,8 +227,7 @@ function validateConfigPaths(root) {
 }
 
 async function defaultRunCommand(command, args, options) {
-  const executable = process.platform === "win32" && command === "npx" ? "npx.cmd" : command;
-  const result = await execFile(executable, args, {
+  const result = await execFile(command, args, {
     cwd: options.cwd,
     env: options.env,
     encoding: "utf8",
@@ -241,7 +242,10 @@ async function defaultRunCommand(command, args, options) {
 async function runWrangler(runCommand, root, processEnvironment, args, worker) {
   let result;
   try {
-    result = await runCommand("npx", ["--no-install", "wrangler", ...args], { cwd: root, env: processEnvironment });
+    result = await runCommand(process.execPath, [pinnedWranglerEntrypoint, ...args], {
+      cwd: root,
+      env: { ...processEnvironment, WRANGLER_LOG: args.includes("--json") ? "log" : "error", WRANGLER_WRITE_LOGS: "false" },
+    });
   } catch {
     fail("WRANGLER_COMMAND_FAILED", "Wrangler command failed.", worker);
   }

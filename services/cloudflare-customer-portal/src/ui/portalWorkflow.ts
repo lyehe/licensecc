@@ -80,7 +80,7 @@ export const ACTIVATION_DOWNLOAD_DISCLOSURE =
   "Downloading a license activates this entitlement and can start activation-based trial time.";
 
 export const DEVICE_KEY_HELP_COPY =
-  "The device key id is shown by the licensed application on the device you are activating; devices that are already registered also list it under the Devices tab.";
+  "The device key ID is shown by the licensed application on the device you are activating. Registered IDs are also listed under Devices.";
 
 export const DEVICE_RELEASE_ACTION_LABEL = "Release";
 
@@ -95,7 +95,7 @@ export const DEVICE_RELEASE_CONFIRM_COPY =
 export const FLOATING_SEAT_RELEASE_CONFIRM_TITLE = "Release floating seat?";
 
 export const FLOATING_SEAT_RELEASE_CONFIRM_COPY =
-  "This release cannot be undone. It ends the active checkout immediately, makes the seat available to another user, and this device must check out a new seat before using the license again.";
+  "This release cannot be undone. It ends renewal for this checkout and makes the seat available to another user. An issued grant may remain usable until it expires. This browser must check out a new seat to renew access.";
 
 export const FLOATING_SEAT_RELEASE_NETWORK_ERROR_COPY =
   "The release request outcome is unknown because the service was unreachable. Check the seat status before taking another action.";
@@ -121,8 +121,9 @@ export const NO_DOWNLOADS_EMPTY_COPY = "No downloadable licenses yet — they ap
 // so the caller can fall back to showing the raw code (kept visible as small print for support). Codes
 // mirror the backend envelope `code` field; this is the single source of humane portal feedback strings.
 const RESULT_CODE_COPY: Record<string, string> = {
+  account_refresh_failed: "Account refresh failed. Displayed data may be out of date; retry to refresh it.",
   pool_exhausted: "All seats are in use — release one or ask your administrator.",
-  device_limit_exceeded: "This license's device limit is reached — release a device on the Devices tab.",
+  device_limit_exceeded: "This license's device limit is reached — release a device under Devices.",
   expired_subscription: "This subscription has expired — renew it to continue.",
   invalid_otp: "That code is wrong or expired — request a new one.",
   seat_reclaimed: "Your seat was reclaimed after inactivity — check out again.",

@@ -4,6 +4,10 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./http/unsigned_json": {
+      "types": "./src/http/unsigned_json.d.ts",
+      "default": "./src/http/unsigned_json.mjs"
+    },
     "./d1/audit_digest": {
       "types": "./src/d1/audit_digest.d.ts",
       "default": "./src/d1/audit_digest.mjs"
@@ -57,10 +61,15 @@
     },
     "./webhooks/webhook": {
       "default": "./src/webhooks/webhook.mjs"
+    },
+    "./auth/password": {
+      "types": "./src/auth/password.d.ts",
+      "default": "./src/auth/password.mjs"
     }
   },
   "dependencies": {
-    "@licensecc/licensing-domain": "file:../licensing-domain"
+    "@licensecc/licensing-domain": "file:../licensing-domain",
+    "@noble/hashes": "2.4.0"
   },
   "scripts": {
     "build": "npm run typecheck",

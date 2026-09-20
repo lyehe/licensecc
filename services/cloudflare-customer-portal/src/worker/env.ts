@@ -39,8 +39,12 @@ type AssertNoIncompatibleGeneratedBindings<Bindings extends never> = Bindings;
 // deliberately not inferred from local names so config drift fails closed.
 type WranglerBindings = Pick<Cloudflare.Env,
   | "DB"
+  | "DEVICE_CONSENT"
   | "ASSETS"
   | "ENVIRONMENT"
+  | "PORTAL_PASSWORD_ENABLED"
+  | "PORTAL_GOOGLE_CLIENT_ID"
+  | "PORTAL_GITHUB_CLIENT_ID"
   | "PORTAL_PUBLIC_ORIGIN"
   | "BACKEND_ORIGIN"
   | "PORTAL_EMAIL_FROM"
@@ -48,15 +52,21 @@ type WranglerBindings = Pick<Cloudflare.Env,
 >;
 
 interface RuntimeEnv {
+  DEVICE_CONSENT?: Cloudflare.Env["DEVICE_CONSENT"];
   DB: D1DatabaseLike;
   ASSETS?: { fetch(request: Request): Promise<Response> };
   ENVIRONMENT?: string;
+  PORTAL_PASSWORD_ENABLED?: string;
   PORTAL_PUBLIC_ORIGIN?: string;
   BACKEND_ORIGIN?: string;
   PORTAL_OTP_PEPPERS?: string;
   PORTAL_SESSION_PEPPERS?: string;
   ACCOUNT_TOKEN_PEPPERS?: string;
   ACCOUNT_TOKEN_ACTIVE_PEPPER_ID?: string;
+  PORTAL_GOOGLE_CLIENT_ID?: string;
+  PORTAL_GOOGLE_CLIENT_SECRET?: string;
+  PORTAL_GITHUB_CLIENT_ID?: string;
+  PORTAL_GITHUB_CLIENT_SECRET?: string;
   PORTAL_EMAIL_API_KEY?: string;
   PORTAL_EMAIL_FROM?: string;
   PORTAL_EMAIL_API_BASE?: string;

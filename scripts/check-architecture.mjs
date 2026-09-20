@@ -10,7 +10,7 @@ const TASK2 = "org/02-build-purity";
 const COMPOSITION_ROOTS = Object.freeze({
   backend: {
     entry: "services/cloudflare-licensing-backend/src/index.ts",
-    entryImports: ["./app.js"],
+    entryImports: ["./app.js", "./device/consent_entrypoint.js", "./device/operator_entrypoint.js"],
     app: "services/cloudflare-licensing-backend/src/app.ts",
     appImports: ["./env.js", "./maintenance/**", "./observability/**", "./routes.js", "./routes/**"],
   },
@@ -32,7 +32,7 @@ const COMPOSITION_ROOTS = Object.freeze({
     mount: "services/cloudflare-license-admin/src/ui/main.tsx",
     mountImports: ["./app/App"],
     app: "services/cloudflare-license-admin/src/ui/app/App.tsx",
-    appImports: ["./types", "../features/**", "../shared/**", "../styles.css"],
+    appImports: ["./types", "./navigation", "./EnvironmentBadge", "./Sidebar", "./shellContent", "../features/**", "../shared/**", "../styles.css"],
     appForbiddenTargets: ["services/cloudflare-license-admin/src/ui/shared/api.ts"],
     appForbiddenSuffixes: ["/workflow.ts"],
   },

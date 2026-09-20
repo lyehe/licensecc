@@ -19,6 +19,10 @@ export const META_ROUTES = [
 export const CLIENT_ROUTES = [
   { method: "POST", path: "/v1/verify" },
   { method: "POST", path: "/v1/orders" },
+  { method: "POST", path: "/v2/device-authorizations" },
+  { method: "POST", path: "/v2/device-challenges" },
+  { method: "POST", path: "/v2/device-authorizations/exchange" },
+  { method: "POST", path: "/v2/device-leases/renew" },
 ] as const satisfies readonly BackendRoute[];
 
 // Account-token scoped lease/seat/report routes — exactly the set the emergency prefix re-serves.

@@ -59,6 +59,7 @@ export function entitlementCurrentJsonSql(alias, idExpression, { includeCacheTtl
     ["feature", value("feature")],
     ["license_fingerprint", value("license_fingerprint")],
     ["device_hash", value("device_hash")],
+    ["enforcement_mode", value("enforcement_mode")],
     ["status", value("status")],
     ["assertion_ttl_seconds", value("assertion_ttl_seconds")],
   ];

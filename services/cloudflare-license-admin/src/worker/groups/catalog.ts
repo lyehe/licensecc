@@ -1,6 +1,7 @@
 import { operationDescriptor } from "../route-descriptor.js";
 
 export const catalogRoutes = [
+  operationDescriptor("catalog", "reader", "GET", "/api/admin/catalog/projects"),
   operationDescriptor("catalog", "reader", "GET", "/api/admin/catalog/features"),
   operationDescriptor("catalog", "admin", "POST", "/api/admin/catalog/features"),
   operationDescriptor("catalog", "reader", "GET", "/api/admin/catalog/features/{id}", ["id"]),

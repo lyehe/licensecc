@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import worker from "../dist/index.js";
+import worker from "../dist/app.js";
 import { requestProofFixture, testKeyEnv, validBody } from "../test/contexts/fixtures.mjs";
 import { PostgresDatabase } from "./db-postgres.mjs";
 import { translateWorkerSqlToPg } from "./sql-translate.mjs";

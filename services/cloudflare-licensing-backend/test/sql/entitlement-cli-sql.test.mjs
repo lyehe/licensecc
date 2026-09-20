@@ -21,6 +21,46 @@ const fingerprint = "a".repeat(64);
 const deviceKeyId = `sha256:${"1".repeat(64)}`;
 const publicKeySpkiDerBase64 = Buffer.from("test-p256-spki").toString("base64");
 
+for (const bindingState of ["active", "retiring"]) {
+  test(`CLI preserves protected ${bindingState} capacity and refuses ownership/device bypass`, t => {
+    const db = freshDb(); t.after(() => db.close());
+    db.exec(`INSERT INTO customers(id,name,created_at,updated_at) VALUES
+      ('owner','Owner',1,1),('other','Other',1,1);
+      INSERT INTO entitlements(project,feature,license_fingerprint,status,customer_id,enforcement_mode,
+        max_active_devices,revocation_seq,created_at,updated_at)
+      VALUES('DEFAULT','DEFAULT','${fingerprint}','active','owner','device_bound_v1',1,4,1,1);
+      INSERT INTO device_bound_devices(id,customer_id,project,key_id,public_key_spki,created_at,last_proof_at)
+      VALUES('device','owner','DEFAULT','protected-key','synthetic-public',1,1);
+      INSERT INTO device_bound_bindings(id,project,feature,license_fingerprint,device_id,state,generation,revision,hold_until,created_at,updated_at)
+      VALUES('binding','DEFAULT','DEFAULT','${fingerprint}','device','${bindingState}',3,4,4102444800,1,1);`);
+    const binding = () => db.prepare("SELECT * FROM device_bound_bindings").get();
+    const authority = () => db.prepare("SELECT * FROM entitlements").get();
+    const originalBinding = binding(), originalAuthority = authority();
+    assert.throws(() => db.exec(sqlFor("device-upsert", { fingerprint, actor: "operator",
+      "device-key-id": deviceKeyId, "public-key-spki-der-base64": publicKeySpkiDerBase64 })), /legacy_protocol_disabled/);
+    assert.throws(() => db.exec(sqlFor("upsert", { fingerprint, actor: "operator", "customer-id": "other" })), /capacity_in_use/);
+    assert.deepEqual(authority(), originalAuthority);
+    assert.deepEqual(binding(), originalBinding);
+    assert.equal(eventCount(db), 0);
+    assert.equal(db.prepare("SELECT count(*) AS n FROM entitlement_devices").get().n, 0);
+
+    db.exec(sqlFor("upsert", { fingerprint, actor: "operator", "customer-id": "owner", "valid-until": 4102445000 }));
+    assert.equal(authority().enforcement_mode, "device_bound_v1");
+    assert.equal(authority().authority_revision, originalAuthority.authority_revision + 1);
+    assert.equal(authority().valid_until, 4102445000);
+    assert.equal(authority().max_active_devices, 1);
+    db.exec(sqlFor("disable", { fingerprint, actor: "operator", reason: "support" }));
+    assert.equal(authority().status, "disabled");
+    db.exec(sqlFor("reenable", { fingerprint, actor: "operator" }));
+    assert.equal(authority().status, "active");
+    assert.equal(authority().authority_revision, originalAuthority.authority_revision + 3);
+    assert.equal(authority().enforcement_mode, "device_bound_v1");
+    assert.deepEqual(binding(), originalBinding);
+    assert.equal(eventCount(db), 3);
+    assert.deepEqual(db.prepare("PRAGMA foreign_key_check").all(), []);
+  });
+}
+
 function freshDb() {
   const db = new DatabaseSync(":memory:");
   const files = readdirSync(migrationsDir)

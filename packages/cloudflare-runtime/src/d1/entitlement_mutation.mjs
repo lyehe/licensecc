@@ -10,6 +10,7 @@ import {
   entitlementMatchesInput,
   syncEventType,
 } from "@licensecc/licensing-domain/entitlements/contracts";
+import { assertExpectedEntitlement, CAPACITY_COLUMNS, isNonNegativeInteger } from "./entitlement_guards.mjs";
 import { entitlementCurrentJsonSql } from "./entitlement_json.mjs";
 
 export {
@@ -32,7 +33,7 @@ export {
  *  statements off the same single source of truth without re-coupling the admin
  *  mutators below — keeping the admin write path byte-identical. */
 export const ENTITLEMENT_COLUMNS =
-  "project, feature, license_fingerprint, device_hash, status, assertion_ttl_seconds, cache_ttl_seconds, revocation_seq, valid_from, valid_until, notes, customer_id, license_id, policy_id, is_trial, trial_expiration_basis, trial_duration_sec, trial_one_per_device, trial_require_device_proof, trial_started_at, trial_device_hash, max_active_devices, lease_seconds, rebind_window_sec, pool_size, heartbeat_grace_sec, max_borrow_sec, allow_overdraft, meter_quota, meter_period_sec, created_at, updated_at";
+  "project, feature, license_fingerprint, device_hash, enforcement_mode, status, assertion_ttl_seconds, cache_ttl_seconds, revocation_seq, valid_from, valid_until, notes, customer_id, license_id, policy_id, is_trial, trial_expiration_basis, trial_duration_sec, trial_one_per_device, trial_require_device_proof, trial_started_at, trial_device_hash, max_active_devices, lease_seconds, rebind_window_sec, pool_size, heartbeat_grace_sec, max_borrow_sec, allow_overdraft, meter_quota, meter_period_sec, created_at, updated_at";
 
 /** UPDATE assignment that re-derives the revocation_seq floor from the audit log
  *  and bumps it. Security-relevant (monotonic revocation counter) — keep identical
@@ -338,8 +339,15 @@ export async function createEntitlement(
   idempotency = null,
   extraStatements = [],
 ) {
+  const mode = input.enforcement_mode;
+  if (mode !== undefined && mode !== "legacy" && mode !== "device_bound_v1") throw new Error("invalid_patch");
   const now = Math.floor(Date.now() / 1000);
   const prev = await findEntitlement(env, input);
+  if (mode !== undefined && prev !== null && prev.enforcement_mode !== mode) throw new Error("enforcement_mode_conflict");
+  // Interpolated values are the two validated literals above, never request SQL.
+  const modeColumn = mode === undefined ? "" : ", enforcement_mode";
+  const modeValue = mode === undefined ? "" : `, '${mode}'`;
+  const modeGuard = mode === undefined ? "" : ` AND entitlements.enforcement_mode = '${mode}'`;
   if (prev?.status === "revoked") {
     throw new Error("revoked_terminal");
   }
@@ -349,7 +357,7 @@ export async function createEntitlement(
     // landed between findEntitlement() and this batch.  When the observation was
     // "missing", a concurrent insert instead returns no row (never an implicit
     // update of an unknown newer entitlement).
-    `INSERT INTO entitlements (project, feature, license_fingerprint, device_hash, status, assertion_ttl_seconds, cache_ttl_seconds, revocation_seq, valid_from, valid_until, notes, customer_id, license_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT MAX(revocation_seq) + 1 FROM entitlement_events WHERE project = ? AND feature = ? AND license_fingerprint = ?), 1), ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(project, feature, license_fingerprint) DO UPDATE SET device_hash = excluded.device_hash, status = excluded.status, assertion_ttl_seconds = excluded.assertion_ttl_seconds, cache_ttl_seconds = excluded.cache_ttl_seconds, revocation_seq = max(entitlements.revocation_seq, COALESCE((SELECT MAX(revocation_seq) FROM entitlement_events WHERE project = entitlements.project AND feature = entitlements.feature AND license_fingerprint = entitlements.license_fingerprint), entitlements.revocation_seq)) + 1, valid_from = excluded.valid_from, valid_until = excluded.valid_until, notes = excluded.notes, customer_id = excluded.customer_id, license_id = excluded.license_id, updated_at = excluded.updated_at WHERE ? IS NOT NULL AND entitlements.status = ? AND entitlements.revocation_seq = ? RETURNING ${ENTITLEMENT_COLUMNS}`,
+    `INSERT INTO entitlements (project, feature, license_fingerprint, device_hash, status, assertion_ttl_seconds, cache_ttl_seconds, revocation_seq, valid_from, valid_until, notes, customer_id, license_id, created_at, updated_at${modeColumn}) VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT MAX(revocation_seq) + 1 FROM entitlement_events WHERE project = ? AND feature = ? AND license_fingerprint = ?), 1), ?, ?, ?, ?, ?, ?, ?${modeValue}) ON CONFLICT(project, feature, license_fingerprint) DO UPDATE SET device_hash = excluded.device_hash, status = excluded.status, assertion_ttl_seconds = excluded.assertion_ttl_seconds, cache_ttl_seconds = excluded.cache_ttl_seconds, revocation_seq = max(entitlements.revocation_seq, COALESCE((SELECT MAX(revocation_seq) FROM entitlement_events WHERE project = entitlements.project AND feature = entitlements.feature AND license_fingerprint = entitlements.license_fingerprint), entitlements.revocation_seq)) + 1, valid_from = excluded.valid_from, valid_until = excluded.valid_until, notes = excluded.notes, customer_id = excluded.customer_id, license_id = excluded.license_id, updated_at = excluded.updated_at WHERE ? IS NOT NULL AND entitlements.status = ? AND entitlements.revocation_seq = ?${modeGuard} RETURNING ${ENTITLEMENT_COLUMNS}`,
   ).bind(
     input.project,
     input.feature,
@@ -398,6 +406,7 @@ export async function patchEntitlement(env, key, patch, ctx, idempotency) {
   if (prev === null) {
     return null;
   }
+  assertExpectedEntitlement(prev, ctx);
   if (prev.status === "revoked") {
     throw new Error("revoked_terminal");
   }
@@ -438,6 +447,7 @@ export async function transitionEntitlement(env, key, status, eventType, reason,
   if (prev === null) {
     return null;
   }
+  assertExpectedEntitlement(prev, ctx);
   if (prev.status === "revoked" && eventType !== "revoke") {
     throw new Error("revoked_terminal");
   }
@@ -549,22 +559,6 @@ export async function syncEntitlement(env, input, reason, ctx, idempotency) {
 // quota is CONFIGURABLE through the supported capacity path (order-ingest / admin),
 // not just via raw SQL; both are non-negative integers (meterUsage treats a 0/absent
 // period_sec as the 30d default), so isNonNegativeInteger validates them unchanged.
-const CAPACITY_COLUMNS = new Set([
-  "max_active_devices",
-  "lease_seconds",
-  "rebind_window_sec",
-  "pool_size",
-  "heartbeat_grace_sec",
-  "max_borrow_sec",
-  "allow_overdraft",
-  "meter_quota",
-  "meter_period_sec",
-]);
-
-function isNonNegativeInteger(value) {
-  return typeof value === "number" && Number.isInteger(value) && value >= 0;
-}
-
 /**
  * Update ONLY the seat/device capacity columns provided in `capacity` on an
  * EXISTING entitlement, preserving every other column (including the entitlement

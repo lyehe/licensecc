@@ -20,6 +20,7 @@ const migrationsDir = join(here, "..", "..", "..", "cloudflare-licensing-backend
 
 // The audit payload contract: the exact keys the production json_object emits (+ no others).
 const NEXT_JSON_KEYS = [
+  "enforcement_mode",
   "project",
   "feature",
   "license_fingerprint",
@@ -88,6 +89,7 @@ test("real SQLite json_object emits exactly the audit contract keys with preserv
   const next = JSON.parse(nextJson);
 
   assert.deepEqual(Object.keys(next).sort(), [...NEXT_JSON_KEYS].sort());
+  assert.equal(next.enforcement_mode, "legacy");
   // Numbers must stay numbers (not stringified) so audit consumers and idempotency replay see the real types.
   assert.equal(typeof next.assertion_ttl_seconds, "number");
   assert.equal(next.assertion_ttl_seconds, 321);

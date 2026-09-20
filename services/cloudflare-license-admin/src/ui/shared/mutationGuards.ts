@@ -57,7 +57,7 @@ export const mutationFailurePolicies = {
   entitlementCreate: documentedMutationPolicy(
     { status: 400, codes: ["invalid_entitlement_id", ...invalidRequest, "policy_stamping_disabled"] },
     { status: 404, codes: ["not_found", "policy_not_found"] },
-    { status: 409, codes: ["revoked_entitlement_is_terminal"] },
+    { status: 409, codes: ["revoked_entitlement_is_terminal", "enforcement_mode_conflict", "protected_creation_conflict", "idempotency_request_conflict"] },
   ),
   entitlementPatch: documentedMutationPolicy(
     { status: 400, codes: ["invalid_entitlement_id", ...invalidRequest] },

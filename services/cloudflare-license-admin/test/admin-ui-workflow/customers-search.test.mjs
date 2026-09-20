@@ -3,6 +3,20 @@ import test from "node:test";
 
 import { loadWorkflowModule } from "./helpers.mjs";
 
+test("protected connection pages reject malformed identities, enum coercion and pagination",async()=>{
+  const workflow=await loadWorkflowModule('features/customers/connectionWorkflow.ts');
+  const row={binding_id:Buffer.alloc(16,1).toString('base64url'),project:'APP',feature:'PRO',license_fingerprint:'a'.repeat(64),label:'Workstation',state:'active',generation:1,revision:0,hold_until:2000,last_proof_at:900,created_at:900};
+  const page={customer:{id:'owner',status:'active'},operator:{subject:'operator',actor_type:'access',role:'admin'},server_time:1000,items:[row],next_cursor:null};
+  assert.equal(workflow.validPage(page,'owner'),true);
+  for(const mutate of [v=>{v.customer.id='other';},v=>{v.customer.status=['active'];},v=>{v.operator.role=['admin'];},v=>{v.items[0].state=['active'];},
+    v=>{v.items[0].state='released';},v=>{v.items[0].state='retiring';v.items[0].hold_until=1000;},v=>{v.items.push({...v.items[0]});},
+    v=>{v.next_cursor=v.items[0].binding_id;},v=>{v.items[0].extra='unexpected';},v=>{v.operator.subject='\ud800';}]) {
+    const invalid=structuredClone(page);mutate(invalid);assert.equal(workflow.validPage(invalid,'owner'),false);
+  }
+  assert.equal(workflow.validPage(page,'owner',row.binding_id),false);
+  assert.equal(workflow.validPage(page,'owner','',row.binding_id),true);
+});
+
 test("admin UI workflow builds filtered customer API paths", async () => {
   const workflow = await loadWorkflowModule("features/customers/workflow.ts");
   assert.equal(workflow.customersPath({ status: "", q: "" }), "/api/admin/customers");

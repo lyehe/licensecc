@@ -76,6 +76,8 @@ const workerSecretNames = new Set([
   "ACCOUNT_TOKEN_PEPPERS",
   "ADMIN_DEV_BEARER",
   "BACKUP_TRIGGER_TOKEN",
+  "BOUND_APPROVAL_ENCRYPTION_KEYS",
+  "BOUND_LEASE_SIGNING_PRIVATE_KEY_PKCS8_PEM",
   "D1_REST_API_TOKEN",
   "EMERGENCY_OPERATOR_BEARER",
   "LEASE_ISSUE_BEARER",
@@ -379,6 +381,7 @@ function validateAccess(vars, target) {
 }
 
 function validateAdmin(config, target, profile, profileName) {
+  validateDeviceService(config,target,profile,"DEVICE_OPERATOR","DeviceOperator");
   const vars = objectValue(config.vars, target, "vars");
   exactString(vars.ENVIRONMENT, profile.environment, target, "vars.ENVIRONMENT");
   exactString(vars.ADMIN_DEV_BEARER_ENABLED, "0", target, "vars.ADMIN_DEV_BEARER_ENABLED");
@@ -391,7 +394,18 @@ function validateAdmin(config, target, profile, profileName) {
   };
 }
 
+function validateDeviceService(config,target,profile,binding,entrypoint) {
+  if(config.env!==undefined)fail(target,`must not define environment overrides for ${binding}`);
+  if(!Array.isArray(config.services)||config.services.length!==1)fail(target,`must define exactly one ${binding} service binding`);
+  const service=objectValue(config.services[0],target,"services[0]");
+  if(Object.keys(service).length!==3||["binding","service","entrypoint"].some(key=>!Object.hasOwn(service,key)))fail(target,`${binding} must contain only binding, service and entrypoint`);
+  exactString(service.binding,binding,target,`${binding} binding`);
+  exactString(service.service,profile.serviceNames.backend,target,`${binding} service`);
+  exactString(service.entrypoint,entrypoint,target,`${binding} entrypoint`);
+}
+
 function validatePortal(config, target, profile, profileName) {
+  validateDeviceService(config,target,profile,"DEVICE_CONSENT","DeviceConsent");
   const vars = objectValue(config.vars, target, "vars");
   exactString(vars.ENVIRONMENT, profile.environment, target, "vars.ENVIRONMENT");
   exactString(vars.PORTAL_BOOTSTRAP_REQUIRE_ACCESS, "1", target, "vars.PORTAL_BOOTSTRAP_REQUIRE_ACCESS");

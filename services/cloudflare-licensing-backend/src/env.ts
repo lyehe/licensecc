@@ -85,6 +85,12 @@ interface RuntimeEnv {
   // online assertion key and from the cold-root project key (design doc D2/D6).
   LEASE_SIGNING_PRIVATE_KEY_PKCS8_PEM?: string;
   LEASE_SIGNING_KEY_ID?: string;
+  // Protected device v2: explicit registry/issuer and independently purposed
+  // RSA-3072 signer. Missing configuration fails closed; no legacy key fallback.
+  BOUND_DEVICE_CONFIG?: string;
+  BOUND_APPROVAL_ENCRYPTION_KEYS?: string;
+  BOUND_LEASE_SIGNING_PRIVATE_KEY_PKCS8_PEM?: string;
+  BOUND_LEASE_SIGNING_PUBLIC_KEY_SPKI_PEM?: string;
   LEASE_ISSUE_BEARER?: string; // phase-1 placeholder authn; replaced by account_token (phase 2)
   LEASE_SKEW_DAYS?: string; // signed valid-from backdate, default 2
   // Device-proof (ECDSA relay-resistance) gate for lease/seat issuance: off | required.

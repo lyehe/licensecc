@@ -19,6 +19,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
+import { scryptSync } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 
@@ -203,6 +204,182 @@ async function createEntitlementFor(env, customerId, fingerprint) {
   assert.equal(res.status, 200, "seed entitlement");
 }
 
+test("console: admin creates an isolated password user atomically with safe same-key replay", async () => {
+  const db = freshDb(); seed(db); db.exec("PRAGMA foreign_keys=ON"); const env = devEnv(db);
+  const password = "A long initial passphrase 123!";
+  const create = (email, key = "new-user-1", name = "New user") => worker.fetch(devReq("/api/admin/customers", { method: "POST", headers: { "idempotency-key": key }, body: JSON.stringify({ name, email, password }) }), env);
+  assert.equal((await worker.fetch(devReq("/api/admin/customers", { method: "POST", body: "{}" }), env)).status, 400);
+  assert.equal((await create("OPS@ACME.EXAMPLE")).status, 409, "never claim existing customer");
+  const responses = await Promise.all([create(" New@Example.test "), create(" New@Example.test ")]);
+  for (const response of responses) assert.equal(response.status, 200);
+  const first = await responses[0].json(); const second = await responses[1].json();
+  assert.deepEqual(first, second); assert.equal(first.code, "customer_created");
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM customers").get().n, 3);
+  const credential = db.prepare("SELECT * FROM portal_passwords").get();
+  assert.equal(credential.email_lower, "new@example.test");
+  const [, salt, digest] = credential.password_hash.split("$");
+  assert.equal(digest, scryptSync(password, Buffer.from(salt, "hex"), 32, { N: 32768, r: 8, p: 3, maxmem: 64 * 1024 * 1024 }).toString("hex"));
+  assert.equal(db.prepare("SELECT email FROM customers WHERE id=?").get(credential.customer_id).email, "");
+  assert.equal((await create("new@example.test", "different-key")).status, 409);
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM entitlements WHERE customer_id=?").get(credential.customer_id).n, 0);
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM portal_sessions").get().n, 0);
+  const cache = db.prepare("SELECT response_json FROM mutation_idempotency WHERE idempotency_key='new-user-1'").get().response_json;
+  for (const secret of [password, credential.password_hash]) assert.ok(!JSON.stringify(first).includes(secret) && !cache.includes(secret));
+  const search = await body(await worker.fetch(devReq("/api/admin/customers?q=new%40example.test"), env));
+  assert.equal(search.data.items[0].login_email, "new@example.test");
+  const before = db.prepare("SELECT COUNT(*) AS n FROM customers").get().n;
+  db.exec("CREATE TRIGGER fail_password_insert BEFORE INSERT ON portal_passwords BEGIN SELECT RAISE(ABORT,'forced'); END");
+  assert.equal((await create("rollback@example.test", "rollback-key")).status, 500);
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM customers").get().n, before, "credential failure rolls back customer creation");
+});
+
+test("console: customer access pagination exceeds legacy detail cap and cannot change customer scope", async () => {
+  const db = freshDb(); seed(db); const env = devEnv(db);
+  for (let i = 1; i <= 205; i++) await createEntitlementFor(env, "cus_a", i.toString(16).padStart(64, "0"));
+  await createEntitlementFor(env, "cus_b", FP_B);
+  const ids = new Set(); let cursor = "0";
+  do {
+    const response = await worker.fetch(devReq(`/api/admin/customers/cus_a/access?limit=100&cursor=${cursor}&customer_id=cus_b`), env);
+    assert.equal(response.status, 200);
+    const page = (await response.json()).data;
+    for (const item of page.items) { assert.equal(item.customer_id, "cus_a"); assert.ok(!ids.has(item.id)); ids.add(item.id); }
+    cursor = page.next_cursor;
+  } while (cursor !== null);
+  assert.equal(ids.size, 205);
+  const missing = await worker.fetch(devReq("/api/admin/customers/missing/access"), env);
+  assert.equal(missing.status, 404);
+  const empty = await worker.fetch(devReq("/api/admin/customers/cus_a/access?project=OTHER"), env);
+  assert.deepEqual((await empty.json()).data, { items: [], next_cursor: null });
+  const invalid = await worker.fetch(devReq("/api/admin/customers/cus_a/access?limit=101"), env);
+  assert.equal(invalid.status, 400);
+  const id = [...ids][0];
+  const exact = await worker.fetch(devReq(`/api/admin/entitlements/${encodeURIComponent(id)}`), env);
+  assert.equal(exact.status, 200);
+  assert.equal((await exact.json()).data.customer_id, "cus_a");
+});
+
+test("console: complete app summaries and paginated resources stay within customer ownership", async () => {
+  const db = freshDb(); seed(db); const env = devEnv(db);
+  for (let i = 1; i <= 105; i++) await createEntitlementFor(env, "cus_a", i.toString(16).padStart(64, "0"));
+  await createEntitlementFor(env, "cus_b", FP_B);
+  const fp = (1).toString(16).padStart(64, "0");
+  db.prepare("INSERT INTO entitlements (project,feature,license_fingerprint,status,customer_id,created_at,updated_at) VALUES ('Z_EXTRA','base',?,'active','cus_a',?,?)").run(FP_A, NOW, NOW);
+  db.exec("UPDATE customers SET status='disabled' WHERE id='cus_a'");
+  db.prepare("UPDATE entitlements SET valid_until=? WHERE license_fingerprint=?").run(NOW - 10, fp);
+  const node = db.prepare("INSERT INTO entitlement_devices (project,feature,license_fingerprint,device_key_id,public_key_spki_der_base64,status,created_at,updated_at) VALUES ('DEFAULT','DEFAULT',?,?,'private-fixture-material','active',?,?)");
+  const seat = db.prepare("INSERT INTO seat_checkouts (project,feature,license_fingerprint,seat_id,client_instance_id,mode,checked_out_at,heartbeat_deadline) VALUES ('DEFAULT','DEFAULT',?,?,?,'live',?,?)");
+  for (const fingerprint of [fp, FP_B]) for (let i = 0; i < 3; i++) {
+    node.run(fingerprint, `node-${i}`, NOW, NOW);
+    seat.run(fingerprint, `seat-${i}`, `client-${i}`, NOW, NOW + (i - 1) * 60);
+  }
+  const apps = (await body(await worker.fetch(devReq("/api/admin/customers/cus_a/apps?limit=1"), env))).data;
+  assert.equal(apps.items[0].grant_count, 105, "aggregation must precede pagination");
+  assert.equal(apps.items[0].in_date_count, 104);
+  assert.equal(apps.items[0].no_expiry_count, 104);
+  assert.equal(apps.customer.status, "disabled", "enabled/in-date grant counts do not override customer suspension");
+  assert.equal(apps.next_cursor, "1");
+  const secondApp = (await body(await worker.fetch(devReq("/api/admin/customers/cus_a/apps?limit=1&cursor=1"), env))).data;
+  assert.equal(secondApp.items[0].project, "Z_EXTRA"); assert.equal(secondApp.items[0].grant_count, 1); assert.equal(secondApp.next_cursor, null);
+  for (const kind of ["nodes", "sessions"]) {
+    const records = []; let cursor = "0";
+    do {
+      const response = await worker.fetch(devReq(`/api/admin/customers/cus_a/resources?kind=${kind}&project=DEFAULT&limit=2&cursor=${cursor}&customer_id=cus_b`), env);
+      assert.equal(response.status, 200);
+      const raw = await response.clone().text(); assert.ok(!raw.includes("private-fixture-material"));
+      const page = (await body(response)).data;
+      records.push(...page.items); cursor = page.next_cursor;
+    } while (cursor !== null);
+    assert.equal(records.length, 3);
+    assert.ok(records.every(row => row.license_fingerprint === fp));
+    assert.equal(new Set(records.map(row => row.device_key_id ?? row.seat_id)).size, 3);
+  }
+  assert.equal((await worker.fetch(devReq("/api/admin/customers/cus_a/resources?kind=invalid"), env)).status, 400);
+  for (const view of ["apps", "resources"]) assert.equal((await worker.fetch(devReq(`/api/admin/customers/missing/${view}`), env)).status, 404);
+});
+
+test("console: exact grant selection and optional owner/revision preconditions reject stale writes", async () => {
+  const db = freshDb(); seed(db); const env = devEnv(db);
+  await createEntitlementFor(env, "cus_a", FP_A); await createEntitlementFor(env, "cus_b", FP_B);
+  const observed = (await body(await worker.fetch(devReq("/api/admin/customers/cus_a/access"), env))).data.items[0];
+  const query = new URLSearchParams({ id: observed.id, customer_id: "cus_a" });
+  assert.equal((await body(await worker.fetch(devReq(`/api/admin/entitlements?${query}`), env))).data.items.length, 1);
+  query.set("customer_id", "cus_b");
+  assert.equal((await body(await worker.fetch(devReq(`/api/admin/entitlements?${query}`), env))).data.items.length, 0);
+  const path = `/api/admin/entitlements/${encodeURIComponent(observed.id)}`;
+  const expected = { expected_customer_id: "cus_a", expected_revocation_seq: observed.revocation_seq };
+  const patch = (fields, key) => worker.fetch(devReq(path, { method: "PATCH", headers: key ? { "idempotency-key": key } : {}, body: JSON.stringify({ notes: "edited", ...fields }) }), env);
+  assert.equal((await patch({ expected_customer_id: "cus_a" })).status, 400);
+  assert.equal((await patch({ ...expected, expected_customer_id: "cus_b" })).status, 409);
+  assert.equal((await patch({ ...expected, expected_revocation_seq: observed.revocation_seq + 1 })).status, 409);
+  assert.equal((await patch(expected, "observed-edit")).status, 200);
+  const replay = await patch(expected, "observed-edit");
+  assert.equal(replay.status, 200); assert.equal(replay.headers.get("x-idempotent-replay"), "1");
+  assert.equal((await patch(expected)).status, 409);
+  const staleDisable = await worker.fetch(devReq(`${path}/disable`, { method: "POST", body: JSON.stringify({ ...expected, reason: "old view" }) }), env);
+  assert.equal(staleDisable.status, 409);
+  assert.equal((await patch({})).status, 200, "legacy callers remain supported");
+  assert.equal(db.prepare("SELECT status FROM entitlements WHERE license_fingerprint=?").get(FP_A).status, "active");
+});
+
+test("console: workspace query plans and bounded responses at 20000 grants", async t => {
+  const db = freshDb(); seed(db); const env = devEnv(db);
+  const insert = db.prepare("INSERT INTO entitlements (project,feature,license_fingerprint,status,customer_id,created_at,updated_at) VALUES (?,'base',?,'active','cus_a',?,?)");
+  db.exec("BEGIN");
+  for (let i = 0; i < 20000; i++) insert.run(`APP_${String(i % 250).padStart(3, "0")}`, i.toString(16).padStart(64, "0"), NOW, NOW);
+  db.exec("COMMIT");
+  db.exec("INSERT INTO entitlement_devices (project,feature,license_fingerprint,device_key_id,public_key_spki_der_base64,status,created_at,updated_at) SELECT project,feature,license_fingerprint,'node','fixture','active',created_at,updated_at FROM entitlements LIMIT 1000");
+  db.exec("INSERT INTO seat_checkouts (project,feature,license_fingerprint,seat_id,client_instance_id,mode,checked_out_at,heartbeat_deadline) SELECT project,feature,license_fingerprint,'seat','client','live',created_at,updated_at+600 FROM entitlements LIMIT 1000");
+  const captured = [];
+  const prepare = env.DB.prepare.bind(env.DB);
+  env.DB.prepare = sql => {
+    const statement = prepare(sql); const bind = statement.bind.bind(statement);
+    statement.bind = (...values) => { captured.push({ sql, values }); return bind(...values); };
+    return statement;
+  };
+  for (const suffix of ["apps?limit=100", "apps?limit=100&cursor=200", "access?limit=100", "access?limit=100&cursor=19000", "resources?kind=nodes&limit=100", "resources?kind=sessions&limit=100"]) {
+    captured.length = 0; const started = performance.now();
+    const response = await worker.fetch(devReq(`/api/admin/customers/cus_a/${suffix}`), env);
+    const raw = await response.text(); const data = JSON.parse(raw).data;
+    assert.equal(response.status, 200); assert.ok(data.items.length <= 100); assert.equal(captured.length, 2, "no per-record query fan-out");
+    if (suffix.startsWith("apps")) assert.ok(data.items.every(item => item.grant_count === 80));
+    const elapsed = performance.now() - started;
+    const query = captured[1];
+    const plan = db.prepare(`EXPLAIN QUERY PLAN ${query.sql}`).all(...query.values).map(row => row.detail);
+    t.diagnostic(JSON.stringify({ suffix, rows: data.items.length, bytes: Buffer.byteLength(raw), queries: captured.length, local_ms: Number(elapsed.toFixed(2)), plan }));
+  }
+});
+
+test("console: summary and report share stored-state counts using one entitlement query", async () => {
+  const db = freshDb(); seed(db); const env = devEnv(db);
+  await createEntitlementFor(env, "cus_a", FP_A);
+  db.prepare("UPDATE entitlements SET valid_until = ? WHERE customer_id = 'cus_a'").run(NOW - 1);
+  const queries = [];
+  const prepare = env.DB.prepare.bind(env.DB);
+  env.DB.prepare = sql => { queries.push(sql); return prepare(sql); };
+  const summary = await (await worker.fetch(devReq("/api/admin/summary"), env)).json();
+  assert.equal(queries.length, 1, "four sequential count statements become one aggregate");
+  assert.deepEqual(summary.data.entitlements, { total: 1, active: 1, revoked: 0, disabled: 0 });
+  queries.length = 0;
+  const report = await (await worker.fetch(devReq("/api/admin/report"), env)).json();
+  assert.deepEqual(report.data.entitlements, summary.data.entitlements);
+  assert.equal(queries.filter(sql => sql.includes("FROM entitlements")).length, 1);
+});
+
+test("console: project inventory includes empty configured apps and legacy records with stable pages", async () => {
+  const db = freshDb(); seed(db); const env = devEnv(db);
+  db.prepare("INSERT INTO catalog_features (id,project,feature_key,name,status,created_at,updated_at) VALUES ('empty','EMPTY','base','Empty','disabled',?,?)").run(NOW,NOW);
+  db.prepare("INSERT INTO entitlement_policies (id,project,name,type,created_at,updated_at) VALUES ('policy-only','POLICY_ONLY','No grants','node_locked',?,?)").run(NOW,NOW);
+  const projects = []; let cursor = "0";
+  do {
+    const response = await worker.fetch(devReq(`/api/admin/catalog/projects?limit=1&cursor=${cursor}`), env);
+    assert.equal(response.status, 200);
+    const page = (await response.json()).data;
+    projects.push(...page.items.map(item => item.project)); cursor = page.next_cursor;
+  } while (cursor !== null);
+  assert.deepEqual(projects, ["DEFAULT", "EMPTY", "OTHER", "POLICY_ONLY"]);
+  assert.equal((await worker.fetch(devReq("/api/admin/catalog/projects?cursor=-1"), env)).status, 400);
+});
+
 test("console: customers list returns seeded rows with entitlement counts + filters", async () => {
   const db = freshDb();
   seed(db);
@@ -366,8 +543,9 @@ test("console: reader can read every endpoint but cannot run the kill-switch", a
   const fixture = await accessFixture(t);
   const env = accessEnv(db, fixture);
   const reader = await accessToken(fixture, "reader@example.com");
+  assert.equal((await worker.fetch(accessReq("/api/admin/customers", reader, { method: "POST", body: "{}" }), env)).status, 403);
 
-  for (const path of ["/api/admin/customers", "/api/admin/customers/cus_a", "/api/admin/licenses", "/api/admin/orders", "/api/admin/report"]) {
+  for (const path of ["/api/admin/customers/cus_a/apps", "/api/admin/customers/cus_a/resources", "/api/admin/customers/cus_a/resources?kind=sessions", "/api/admin/customers/cus_a/access", "/api/admin/catalog/projects", "/api/admin/customers", "/api/admin/customers/cus_a", "/api/admin/licenses", "/api/admin/orders", "/api/admin/report"]) {
     const res = await worker.fetch(accessReq(path, reader), env);
     assert.equal(res.status, 200, `reader GET ${path}`);
   }

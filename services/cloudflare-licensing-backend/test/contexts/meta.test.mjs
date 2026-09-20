@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import worker from "../../dist/index.js";
+import worker from "../../dist/app.js";
 import { testKeyEnv } from "./fixtures.mjs";
 
 test("health route returns status", async () => {

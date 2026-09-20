@@ -4,6 +4,7 @@ import type {
   EntitlementDeviceRecord,
   EntitlementEventType,
   EntitlementInput,
+  EntitlementCreateInput,
   EntitlementKey,
   EntitlementPatch,
   EntitlementRecord,
@@ -51,6 +52,7 @@ export interface MutationContext {
   ip: string;
   idempotencyKey: string | null;
   source: "admin" | "sync";
+  expectedEntitlement?: { customer_id: string | null; revocation_seq: number };
 }
 
 export interface IdempotencyCommit {
@@ -107,7 +109,7 @@ export function writeEntitlementWithAudit(
 
 export function createEntitlement(
   env: MutationEnv,
-  input: EntitlementInput,
+  input: EntitlementCreateInput,
   ctx: MutationContext,
   reason?: string,
   eventTypeOverride?: EntitlementEventType,

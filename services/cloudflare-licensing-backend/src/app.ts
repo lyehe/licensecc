@@ -10,6 +10,7 @@ import { handleOrders } from "./routes/orders.js";
 import { handleUsageReport } from "./routes/reports.js";
 import { handleSeatCheckout, handleSeatHeartbeat, handleSeatRelease } from "./routes/seats.js";
 import { handleVerify } from "./routes/verify.js";
+import { handleBoundDevice } from "./routes/bound_devices.mjs";
 import { META_ROUTES, CLIENT_ROUTES, SCOPED_ROUTES } from "./routes.js";
 
 type RouteHandler = (request: Request, env: Env, ctx?: ExecutionContextLike) => Promise<Response> | Response;
@@ -24,6 +25,10 @@ const DISPATCH: Record<string, RouteHandler> = {
   "GET /health": (request, env) => handleHealth(request, env),
   "POST /v1/verify": (request, env) => handleVerify(request, env),
   "POST /v1/orders": (request, env) => handleOrders(request, env),
+  "POST /v2/device-authorizations": (request, env) => handleBoundDevice(request, env, "authorize"),
+  "POST /v2/device-challenges": (request, env) => handleBoundDevice(request, env, "challenge"),
+  "POST /v2/device-authorizations/exchange": (request, env) => handleBoundDevice(request, env, "exchange"),
+  "POST /v2/device-leases/renew": (request, env) => handleBoundDevice(request, env, "renew"),
   "POST /v1/activate": (request, env, ctx) => handleLeaseIssue(request, env, "activate", ctx),
   "POST /v1/renew": (request, env, ctx) => handleLeaseIssue(request, env, "renew", ctx),
   "POST /v1/checkout": (request, env, ctx) => handleSeatCheckout(request, env, ctx),
@@ -70,6 +75,11 @@ const app = {
           path: url.pathname,
           invalid_config_modes: invalidConfigModes,
         });
+        if (url.pathname.startsWith("/v2/")) {
+          const response = json({ ok: false, code: "temporarily_unavailable", request_id: crypto.randomUUID() }, 503);
+          response.headers.set("cache-control", "no-store");
+          return response;
+        }
         return json({ ok: false, code: "config_error" }, 503);
       }
       // D10 break-glass: a SEPARATE /v1/emergency/* route gated ONLY by EMERGENCY_OPERATOR_BEARER

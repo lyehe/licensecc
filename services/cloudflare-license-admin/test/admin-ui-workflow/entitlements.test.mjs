@@ -3,6 +3,17 @@ import test from "node:test";
 
 import { loadWorkflowModule } from "./helpers.mjs";
 
+test("protected form carries mode through both creation paths and reports incompatible identifiers", async () => {
+  const workflow = await loadWorkflowModule("features/entitlements/workflow.ts");
+  const form = { ...workflow.emptyEntitlementForm, enforcement_mode: "device_bound_v1", license_fingerprint: "a".repeat(64), customer_id: "owner", license_id: "license" };
+  assert.equal(workflow.normalizeEntitlementForm(form).enforcement_mode, "device_bound_v1");
+  assert.equal(workflow.normalizeCreateFromPolicy({ ...form, policy_id: "policy" }).enforcement_mode, "device_bound_v1");
+  assert.deepEqual(workflow.entitlementFormErrors(form), {});
+  for (const [field, value] of [["project", "APP\u2029"], ["feature", "PRO SPACE"], ["license_fingerprint", "A".repeat(64)], ["customer_id", ""], ["license_id", ""], ["device_hash", "d".repeat(64)]]) {
+    assert.ok(workflow.entitlementFormErrors({ ...form, [field]: value })[field]);
+  }
+});
+
 test("admin UI workflow builds filtered entitlement API paths", async () => {
   const workflow = await loadWorkflowModule("features/entitlements/workflow.ts");
   assert.equal(workflow.entitlementsPath({ project: "", feature: "", status: "" }), "/api/admin/entitlements");
@@ -26,6 +37,7 @@ test("admin UI workflow normalizes create form payloads", async () => {
   });
 
   assert.deepEqual(body, {
+    enforcement_mode: "legacy",
     project: "DEFAULT",
     feature: "DEFAULT",
     license_fingerprint: "a".repeat(64),
@@ -261,4 +273,25 @@ test("force-release confirm copy echoes the exact target and warns it frees all 
   assert.match(copy, /Force-release ALL live seats for DEFAULT \/ pro/);
   assert.match(copy, new RegExp(format.shortHash("a".repeat(64))));
   assert.match(copy, /dead\/unreachable machine/);
+});
+
+test("entitlement date edits preserve stored instants and use UTC midnight for changed dates", async () => {
+  const workflow = await loadWorkflowModule("features/entitlements/workflow.ts");
+  const original = {
+    ...workflow.emptyEntitlementForm,
+    valid_from: Date.parse("2026-09-07T13:25:17Z") / 1000,
+    valid_until: Date.parse("2026-09-08T18:42:03Z") / 1000,
+    customer_id: null,
+    license_id: null,
+  };
+  const edit = workflow.editFormFromEntitlement(original);
+  const unchanged = workflow.normalizeEntitlementPatch({ ...edit, notes: "Updated note" }, original);
+  assert.equal(unchanged.valid_from, original.valid_from);
+  assert.equal(unchanged.valid_until, original.valid_until);
+  const extended = workflow.normalizeEntitlementPatch({ ...edit, valid_until: "2026-09-10" }, original);
+  assert.equal(extended.valid_until, Date.parse("2026-09-10T00:00:00Z") / 1000);
+  assert.equal(workflow.normalizeEntitlementPatch({ ...edit, valid_until: "" }, original).valid_until, null);
+  assert.deepEqual(workflow.entitlementFormErrors(edit, original), {});
+  assert.ok(workflow.entitlementFormErrors({ ...edit, valid_until: "2026-09-07" }, original).valid_until);
+  assert.ok(workflow.entitlementFormErrors({ ...edit, valid_until: "2026-02-30" }, original).valid_until);
 });

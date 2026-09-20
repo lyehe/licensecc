@@ -1,3 +1,8 @@
+import { customerAccess } from "./groups/customers/access.js";
+import { createPortalUser } from "./groups/customers/create.js";
+import { customerWorkspace } from "./groups/customers/workspace.js";
+import { adminBindings,adminRetireBinding } from "./groups/customers/bindings.js";
+import { listProjects } from "./groups/catalog/projects.js";
 // Operation registry only: route groups retain their SQL, validation, and transition orchestration.
 import type { Actor } from "@licensecc/cloudflare-runtime/d1/entitlement_mutation";
 import { decodeEntitlementId, entitlementId } from "@licensecc/cloudflare-runtime/d1/entitlement_mutation";
@@ -57,12 +62,20 @@ type BoundRun = (
 ) => Promise<Response>;
 
 const HANDLERS: Record<string, BoundRun> = {
+  "GET /api/admin/customers/{id}/bindings": (r,e,g,id,a)=>adminBindings(r,e,a,g[0]??"",id),
+  "GET /api/admin/customers/{id}/bindings/{bindingId}/events": (r,e,g,id,a)=>adminBindings(r,e,a,g[0]??"",id,g[1]??""),
+  "POST /api/admin/customers/{id}/bindings/{bindingId}/retire": (r,e,g,id,a)=>adminRetireBinding(r,e,a,g[0]??"",g[1]??"",id),
+  "GET /api/admin/customers/{id}/apps": (request, env, g, rid) => customerWorkspace(request, env, decodeURIComponent(g[0] ?? ""), rid, "apps"),
+  "GET /api/admin/customers/{id}/resources": (request, env, g, rid) => customerWorkspace(request, env, decodeURIComponent(g[0] ?? ""), rid, "resources"),
   "GET /api/admin/summary": (_r, env, _g, rid) => summary(env, rid),
   "GET /api/admin/report": (_r, env, _g, rid) => report(env, rid),
   "GET /api/admin/report/timeseries": (request, env, _g, rid) => reportTimeseries(request, env, rid),
   "GET /api/admin/report/expiring": (request, env, _g, rid) => reportExpiring(request, env, rid),
   "GET /api/admin/audit/verify": (_r, env, _g, rid) => auditVerify(env, rid),
+  "GET /api/admin/customers/{id}/access": (request, env, g, rid) => customerAccess(request, env, decodeURIComponent(g[0] ?? ""), rid),
+  "GET /api/admin/catalog/projects": (request, env, _g, rid) => listProjects(request, env, rid),
   "GET /api/admin/customers": (request, env, _g, rid) => listCustomers(request, env, rid),
+  "POST /api/admin/customers": (request, env, _g, rid, actor) => createPortalUser(request, env, actor, rid),
   "GET /api/admin/customers/{id}": (_r, env, g, rid) => getCustomer(env, decodeURIComponent(g[0] ?? ""), rid),
   "POST /api/admin/customers/{id}/disable": (request, env, g, rid, actor) => handleCustomerTransition(request, env, actor, decodeURIComponent(g[0] ?? ""), "disable", rid),
   "POST /api/admin/customers/{id}/reenable": (request, env, g, rid, actor) => handleCustomerTransition(request, env, actor, decodeURIComponent(g[0] ?? ""), "reenable", rid),

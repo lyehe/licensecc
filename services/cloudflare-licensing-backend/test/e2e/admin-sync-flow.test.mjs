@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import adminWorker from "../../../cloudflare-license-admin/dist-worker/worker/index.js";
-import verifierWorker from "../../dist/index.js";
+import verifierWorker from "../../dist/app.js";
 
 const fingerprint = "a".repeat(64);
 

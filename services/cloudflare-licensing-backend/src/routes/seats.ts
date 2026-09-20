@@ -98,7 +98,7 @@ function parseSeatBody(raw: unknown, needSeatId: boolean): SeatRequestBody | nul
 
 async function lookupSeatEntitlement(env: Env, body: SeatRequestBody): Promise<SeatEntitlementRow | null> {
   return env.DB.prepare(
-    "SELECT status, valid_from, valid_until, pool_size, heartbeat_grace_sec, max_borrow_sec, allow_overdraft, revocation_seq FROM entitlements WHERE project = ? AND feature = ? AND license_fingerprint = ? LIMIT 1",
+    "SELECT status, valid_from, valid_until, pool_size, heartbeat_grace_sec, max_borrow_sec, allow_overdraft, revocation_seq FROM entitlements WHERE project = ? AND feature = ? AND license_fingerprint = ? AND enforcement_mode = 'legacy' LIMIT 1",
   )
     .bind(body.project, body.feature, body.license_fingerprint)
     .first<SeatEntitlementRow>();

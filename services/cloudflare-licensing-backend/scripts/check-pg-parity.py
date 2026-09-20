@@ -7,7 +7,8 @@ PostgreSQL bootstrap against that final D1 shape. It deliberately compares the
 parts on which queries and invariants depend: table/column presence, the
 reviewed INTEGER-to-PostgreSQL type policy, nullability and defaults, primary
 and unique keys, foreign keys, CHECK constraints, explicit indexes, generated
-audit/event ids, and the plan-projection generation triggers.
+audit/event ids, the plan-projection generation triggers and protected-device
+row-trigger conditions and bodies.
 
 The contract is dialect-aware rather than text-equal. D1 ``INTEGER`` values are
 ``BIGINT`` in PostgreSQL except for the explicit INT4 boolean-flag allowlist;
@@ -29,6 +30,7 @@ from pathlib import Path
 
 import sqlglot
 from sqlglot import exp
+from bound_trigger_contract import compare_bound_trigger_contract
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -57,6 +59,7 @@ POSTGRES_IDENTITY_COLUMNS = frozenset(
         ("audit_digests", "id"),
         ("catalog_events", "id"),
         ("customer_events", "id"),
+        ("device_bound_events", "id"),
         ("entitlement_events", "id"),
         ("lease_issuance", "id"),
         ("license_plan_assignment_events", "id"),
@@ -683,6 +686,7 @@ def check_parity(sqlite_path: Path, pg_path: Path) -> tuple[list[str], int, int]
     pg_schema = parse_schema(pg_sql, "postgres")
     problems = compare_relational_contract(sqlite_schema, pg_schema)
     problems.extend(compare_generation_contract(sqlite_sql, pg_sql))
+    problems.extend(compare_bound_trigger_contract(sqlite_sql, pg_sql))
     return problems, len(sqlite_schema.tables), len(sqlite_schema.indexes)
 
 
