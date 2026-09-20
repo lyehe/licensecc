@@ -118,6 +118,7 @@ repository for auditability but is not part of the maintained reader path.
    architecture/decisions/0003-route-openapi-ownership
    architecture/decisions/0004-build-bootstrap-purity
    architecture/decisions/0005-platform-version-and-release-tags
+   architecture/decisions/0006-device-bound-licensing
 
 .. toctree::
    :maxdepth: 1

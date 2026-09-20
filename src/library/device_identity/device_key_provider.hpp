@@ -32,6 +32,7 @@ struct ProviderOpenRequest {
 	std::uint32_t scope = LCC_DEVICE_SCOPE_UNSPECIFIED;
 	std::uint32_t lock_timeout_ms = 0U;
 	std::string storage_directory;
+	bool delete_allow_ui = false;
 };
 
 struct ProviderMetadata {

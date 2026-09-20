@@ -21,6 +21,8 @@ Start here:
   purity rules.
 * :doc:`decisions/0005-platform-version-and-release-tags` — platform version
   projections, independent C++ versioning, and release tag namespaces.
+* :doc:`decisions/0006-device-bound-licensing` — protected-device authority,
+  persistent capacity, recovery, clock policy and legacy cutover boundaries.
 
 Documentation split
 -------------------

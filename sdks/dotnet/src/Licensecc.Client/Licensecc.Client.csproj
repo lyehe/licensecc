@@ -10,6 +10,7 @@
     <TargetFramework>net8.0</TargetFramework>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <ImplicitUsings>disable</ImplicitUsings>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
@@ -25,7 +26,8 @@
       .NET client SDK for the licensecc online licensing backend: a fail-closed offline verifier
       for the lccoa1 online-assertion and lcccfg1 config-attestation signed tokens (RSA-PKCS1-SHA256),
       plus a thin HttpClient wrapper for the licensing-backend HTTP API. Covers the HTTP + token
-      contract only; binary anti-tamper / hardware fingerprinting stays in the C++ library.
+      contract, plus an optional Windows x64 bridge to the native protected-device owner.
+      Binary anti-tamper and hardware enforcement stay in the C++ library.
     </Description>
     <PackageTags>licensecc;licensing;rsa;token;verification</PackageTags>
     <PackageLicenseExpression>AGPL-3.0-or-later</PackageLicenseExpression>

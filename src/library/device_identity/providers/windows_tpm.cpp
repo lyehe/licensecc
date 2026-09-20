@@ -1,11 +1,11 @@
 #include "windows_cng_api.hpp"
+#include "windows_p256_algorithm.hpp"
 
 #include <bcrypt.h>
 
 #include <algorithm>
 #include <array>
 #include <cstring>
-#include <cwchar>
 #include <memory>
 #include <string>
 #include <utility>
@@ -278,7 +278,7 @@ public:
 				release_key();
 				return LCC_DEVICE_POLICY_VIOLATION;
 			}
-			const SECURITY_STATUS status = api_->delete_key(key_, NCRYPT_SILENT_FLAG);
+			const SECURITY_STATUS status = api_->delete_key(key_, request.delete_allow_ui ? 0U : NCRYPT_SILENT_FLAG);
 			if (status == ERROR_SUCCESS) {
 				key_ = 0U;
 				validated_ = false;
@@ -377,9 +377,7 @@ private:
 			if (status != ERROR_SUCCESS) {
 				return map_windows_cng_error(status, WindowsCngOperation::get_property);
 			}
-			const DWORD expected_algorithm_size =
-				static_cast<DWORD>((std::wcslen(NCRYPT_ECDSA_P256_ALGORITHM) + 1U) * sizeof(wchar_t));
-			if (written != expected_algorithm_size || std::wcscmp(algorithm.data(), NCRYPT_ECDSA_P256_ALGORITHM) != 0) {
+			if (!is_windows_p256_algorithm(algorithm, written)) {
 				return LCC_DEVICE_UNSUPPORTED_ALGORITHM;
 			}
 

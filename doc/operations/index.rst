@@ -11,3 +11,4 @@ deployment.
    production-readiness
    database-backends
    observability
+   device-bound-key-rotation

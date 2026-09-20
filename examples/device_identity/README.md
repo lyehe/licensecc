@@ -50,6 +50,31 @@ The example deliberately does not delete keys. Local deletion is irreversible
 for bindings that depend on the key and should be a separate, explicit workflow
 using the exact expected device-key id.
 
+The Windows provider accepts either `ECDSA_P256` or the Platform KSP's generic
+`ECDSA` algorithm-property name. It still requires an exact P-256 public blob,
+valid curve point and successful signing checks; the generic name does not
+enable other curves. A local Windows 25H2 probe confirmed create/reopen behavior
+with the generic property. That host rejects the silent flag on key deletion;
+the native API reports failure by default rather than retrying interactively.
+After explicit user confirmation, callers can set `LCC_DEVICE_DELETE_ALLOW_UI`
+for `lcc_device_identity_delete_key` to permit provider UI during deletion only.
+The flag is rejected by open/create; clear it before reusing those options.
+Cancellation returns `LCC_DEVICE_ACCESS_DENIED`. Removal still requires the exact
+expected key id and does not retire the server binding or free a slot.
+Creation rollback remains silent and can therefore leave a newly created key
+when a later validation step fails on that provider. Keep provisioning ownership
+records and investigate failed cleanup before retrying; do not delete keys by
+prefix or substitute this probe for attestation or full release qualification.
+
+The opt-in real Windows CTest creates a unique test key and verifies its absence
+after removal. To permit a provider prompt for that test's cleanup, set both
+`LCC_RUN_REAL_WINDOWS_TPM_TESTS=1` and `LCC_REAL_WINDOWS_TPM_DELETE_ALLOW_UI=1`
+before running `ctest -R device_identity_windows_real -C Debug --output-on-failure`
+in the configured build. Ordinary test runs do not enable either setting.
+The separate `device_identity_windows_lifecycle` test uses the same opt-in and
+checks create, sign, reopen, delete and absence without the private-export probe.
+Passing that lifecycle test does not qualify the full hardware-assurance test.
+
 ## Ubuntu TPM2/OpenSSL provider
 
 The same installed example builds as `licensecc_tpm2_openssl` when the package

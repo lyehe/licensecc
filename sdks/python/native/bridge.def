@@ -1,0 +1,27 @@
+LIBRARY licensecc_device_bound_bridge
+EXPORTS
+    lcc_device_bound_bridge_layout
+    lcc_init_device_bound_options
+    lcc_init_device_bound_view
+    lcc_init_device_bound_outcome
+    lcc_device_bound_open_enrollment
+    lcc_device_bound_open_resume
+    lcc_device_bound_prepare
+    lcc_device_bound_launch
+    lcc_device_bound_poll
+    lcc_device_bound_activate
+    lcc_device_bound_renew
+    lcc_device_bound_authorize
+    lcc_device_bound_save_checkpoint
+    lcc_device_bound_abandon_pending
+    lcc_device_bound_cancel
+    lcc_device_bound_close
+    lcc_feature_session_bridge_layout
+    lcc_init_feature_session_outcome
+    lcc_feature_session_open
+    lcc_feature_session_start
+    lcc_feature_session_authorize
+    lcc_feature_session_renew
+    lcc_feature_session_stop
+    lcc_feature_session_save_checkpoint
+    lcc_feature_session_close

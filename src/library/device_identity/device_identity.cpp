@@ -2,6 +2,7 @@
 
 #include "device_key_provider.hpp"
 #include "p256_crypto.hpp"
+#include "device_identity_handle.hpp"
 
 #include <algorithm>
 #include <array>
@@ -14,15 +15,6 @@
 #include <type_traits>
 #include <utility>
 #include <vector>
-
-struct LccDeviceIdentity {
-	std::unique_ptr<license::device_identity::DeviceKeyProvider> provider;
-	license::device_identity::P256Spki spki{};
-	license::device_identity::ProviderMetadata provider_metadata;
-	std::string device_key_id;
-	std::string project;
-	std::mutex signing_mutex;
-};
 
 namespace license {
 namespace device_identity {
@@ -192,7 +184,7 @@ LCC_DEVICE_RESULT validate_options(const LccDeviceIdentityOptions* options, bool
 		!known_policy(options->policy) || !known_scope(options->scope)) {
 		return LCC_DEVICE_INVALID_ARGUMENT;
 	}
-	if ((deleting && options->flags != 0U) ||
+	if ((deleting && (options->flags & ~LCC_DEVICE_DELETE_ALLOW_UI) != 0U) ||
 		(!deleting && (options->flags & ~LCC_DEVICE_OPEN_CREATE_IF_MISSING) != 0U)) {
 		return LCC_DEVICE_INVALID_ARGUMENT;
 	}
@@ -223,7 +215,12 @@ LCC_DEVICE_RESULT validate_options(const LccDeviceIdentityOptions* options, bool
 		}
 	}
 
+	const bool delete_allow_ui = deleting && (options->flags & LCC_DEVICE_DELETE_ALLOW_UI) != 0U;
+	if (delete_allow_ui && resolved_backend != LCC_DEVICE_BACKEND_WINDOWS_TPM) {
+		return LCC_DEVICE_INVALID_ARGUMENT;
+	}
 	ValidatedOptions candidate;
+	candidate.request.delete_allow_ui = delete_allow_ui;
 	if (!derive_namespace_v1(application_id, project, options->scope, candidate.request.device_namespace)) {
 		return LCC_DEVICE_INTERNAL_ERROR;
 	}

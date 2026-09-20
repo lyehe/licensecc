@@ -24,6 +24,9 @@ public final class SdkTest {
         onlineGolden(root);
         configGolden(root);
         failClosedParsing(root);
+        DeviceBoundVectorsTest.run(root);
+        DeviceBoundAdapterTest.run();
+        FeatureSessionAdapterTest.run();
         httpContract();
         System.out.println("Java SDK tests passed");
     }

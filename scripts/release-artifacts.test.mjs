@@ -134,7 +134,7 @@ function wheelArtifact({ version = PYTHON_VERSION, name = "licensecc", metadataN
   return zip([...entries, { name: `${distInfo}/RECORD`, contents: record }]);
 }
 
-function sdistArtifact({ version = PYTHON_VERSION, name = "licensecc", metadataName = name, trailingZeroBlocks, extraEntries = [] } = {}) {
+function sdistArtifact({ version = PYTHON_VERSION, name = "licensecc", metadataName = name, trailingZeroBlocks, extraEntries = [], nativeBridgeSource = "// optional native bridge source\n" } = {}) {
   const root = `${name}-${version}`;
   return tarGzip([
     { name: `${root}/PKG-INFO`, contents: `Metadata-Version: 2.3\nName: ${metadataName}\nVersion: ${version}\n` },
@@ -147,6 +147,10 @@ function sdistArtifact({ version = PYTHON_VERSION, name = "licensecc", metadataN
     { name: `${root}/src/${name}/__init__.py`, contents: `__version__ = "${version}"\n` },
     { name: `${root}/src/${name}/http_client.py`, contents: `user_agent: str = "licensecc-python-sdk/${version}"\n` },
     { name: `${root}/tests/test_http_client.py`, contents: "def test_fixture():\n    assert True\n" },
+    { name: `${root}/native/CMakeLists.txt`, contents: "# optional native bridge build\n" },
+    { name: `${root}/native/README.md`, contents: "# Build the optional native bridge separately\n" },
+    { name: `${root}/native/bridge.cpp`, contents: nativeBridgeSource },
+    { name: `${root}/native/bridge.def`, contents: "LIBRARY licensecc_device_bound_bridge\nEXPORTS\n" },
     ...extraEntries,
   ], { trailingZeroBlocks });
 }
@@ -322,6 +326,12 @@ function releaseFixture({ contractDrift = false, omitDotnetLock = false } = {}) 
     ["services/cloudflare-licensing-backend/src/openapi/document.ts", `export const openApiSpec = { info: { version: "${PLATFORM_VERSION}" } };\n`], ["services/cloudflare-license-admin/src/worker/openapi/document.ts", `export const openApiDocument = { info: { version: "${PLATFORM_VERSION}" } };\n`], ["services/cloudflare-customer-portal/src/worker/openapi/document.ts", `export const openApiDocument = { info: { version: "${PLATFORM_VERSION}" } };\n`], ["test/contracts/backend.json", JSON.stringify({ openApiSpec: { info: { version: PLATFORM_VERSION } } })], ["test/contracts/admin.json", JSON.stringify({ openApiDocument: { info: { version: PLATFORM_VERSION } } })], ["test/contracts/portal.json", JSON.stringify({ openApiDocument: { info: { version: PLATFORM_VERSION } } })],
     ["README.md", `**Versioning:** Platform packages use \`${PLATFORM_VERSION}\`; C++ uses \`${CPP_VERSION}\` in CMake.\n`], ["CHANGELOG.md", `- **Platform packages** \`${PLATFORM_VERSION}\` Python \`${PYTHON_VERSION}\`\n- **C++ library** \`${CPP_VERSION}\`\n`], ["sdks/dotnet/README.md", `  src/Licensecc.Client/ # the library (PackageId Licensecc.Client, ${PLATFORM_VERSION})\n`], ["doc/conf.py", `version = "${CPP_VERSION}"\nrelease = "${CPP_VERSION}"\n`], ["doc/capabilities/index.rst", `The platform is at **${PLATFORM_VERSION}** (a prerelease)\n`], ["doc/development/Build-the-library.md", `The platform is at **${PLATFORM_VERSION}** (a prerelease)\n`], ["doc/development/Build-the-library-windows.rst", `The platform is at **${PLATFORM_VERSION}** (a prerelease)\n`], ["doc/other/QA.md", `The platform is at **${PLATFORM_VERSION}** (a prerelease)\n`], ["doc/capabilities/registry.json", JSON.stringify({ capabilities: [] })],
   ]) write(root, path, contents);
+  for (const [name, contents] of [
+    ["CMakeLists.txt", "# optional native bridge build\n"],
+    ["README.md", "# Build the optional native bridge separately\n"],
+    ["bridge.cpp", "// optional native bridge source\n"],
+    ["bridge.def", "LIBRARY licensecc_device_bound_bridge\nEXPORTS\n"],
+  ]) write(root, `sdks/python/native/${name}`, contents);
   for (const [path, name] of workspacePaths) write(root, `${path}/package.json`, JSON.stringify({ name, version: PLATFORM_VERSION }));
   for (const [worker, config] of workers) {
     write(root, `services/${worker}/${config}`, "name = \"example\"\n");
@@ -714,6 +724,9 @@ test("inspector parses Worker, wheel, sdist, NuGet, Java, and symbol payload byt
     [`python/licensecc-${PYTHON_VERSION}.tar.gz`, Buffer.alloc(0), /sdist/i],
     [`python/licensecc-${PYTHON_VERSION}.tar.gz`, sdistArtifact().subarray(0, 8), /sdist|archive/i],
     [`python/licensecc-${PYTHON_VERSION}.tar.gz`, sdistArtifact({ metadataName: "other" }), /sdist metadata/i],
+    [`python/licensecc-${PYTHON_VERSION}.tar.gz`, sdistArtifact({ nativeBridgeSource: "// changed after canonical HEAD\n" }), /differs from canonical HEAD.*native\/bridge\.cpp/i],
+    [`python/licensecc-${PYTHON_VERSION}.tar.gz`, sdistArtifact({ extraEntries: [{ name: `licensecc-${PYTHON_VERSION}/native/unreviewed.cpp`, contents: "// unexpected source" }] }), /member closure/i],
+    [`python/licensecc-${PYTHON_VERSION}-py3-none-any.whl`, wheelArtifact({ extraEntries: [{ name: "native/bridge.cpp", contents: "// source belongs in sdist" }] }), /member closure/i],
     [`dotnet/Licensecc.Client.${PLATFORM_VERSION}.nupkg`, Buffer.alloc(0), /NuGet package/i],
     [`dotnet/Licensecc.Client.${PLATFORM_VERSION}.nupkg`, nugetArtifact().subarray(0, 8), /ZIP|NuGet package/i],
     [`dotnet/Licensecc.Client.${PLATFORM_VERSION}.nupkg`, nugetArtifact({ metadataId: "Other.Client" }), /NuGet package metadata/i],

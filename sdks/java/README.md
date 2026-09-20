@@ -1,15 +1,38 @@
 # Licensecc Java client
 
+## Optional feature sessions
+
+`FeatureSessionLibrary` loads the installed Windows JNI bridge. Use
+`open(configuration)` with a feature already enrolled through the device-bound
+flow. Every job needs a new session and a successful `start()` online decision.
+Call `authorize("BATCH_RUN")` before the first protected unit, every subsequent
+unit, and publication; only `DeviceBoundClient.Result.OK` permits work.
+
+When `renewalDue()` is set, call `renew()` and authorize again. Serialize these
+blocking calls on an application worker thread. Retry transient starts on the
+same handle with bounded backoff. Handle checkpoint failures independently with
+`saveCheckpoint()`; persistence success never grants permission.
+
+Call `stop()` to end local authority and use try-with-resources to close the
+session. Stop does not retire the machine or release a device slot. Another
+feature, such as `EXPORT`, needs its own enrolled configuration and session.
+Older JNI DLLs explicitly reject this optional API while remaining usable by
+`DeviceBoundLibrary`. See the [installed adapter guide](native/README.md) and
+[native session contract](../../doc/api/feature_sessions.rst).
+
 The Java 17 SDK is a dependency-free client for Licensecc's HTTP and
 signed-token contracts. It verifies `lccoa1` online assertions and
 `lcccfg1` configuration attestations locally, and wraps the documented
-licensing-backend routes with the JDK HTTP client.
+licensing-backend routes with the JDK HTTP client. An optional Windows x64
+[device-bound JNI adapter](native/README.md) calls the installed native runtime
+for browser enrollment, TPM identity, renewal and local authorization.
 
 > [!IMPORTANT]
-> This SDK covers the HTTP and signed-token contract, not native enforcement.
+> The HTTP and signed-token APIs do not perform native enforcement.
 > Anti-tamper checks, hardware fingerprinting, offline `.lic` acquisition,
 > and TPM-backed identity remain responsibilities of the C++ runtime
-> (`licensecc::licensecc_static`). A valid server token proves the signed
+> (`licensecc::licensecc_static`), including when called through the JNI adapter.
+> A valid server token proves the signed
 > claims and request bindings; it does not prove that the Java process or host
 > is untampered.
 
@@ -26,7 +49,9 @@ npm run test:java-sdk
 ```
 
 This compiles production code with `--release 17 -Xlint:all -Werror`, runs
-the parity and HTTP-contract tests, and writes only ignored build output.
+the parity, HTTP-contract and native-adapter ownership tests against the built
+JAR, and writes only ignored build output. Actual JNI loading requires the
+separate installed-adapter gate below; portable tests do not provision a device.
 
 The repository builds `build/java-sdk/licensecc-client-0.1.0-rc.2.jar`.
 
@@ -199,3 +224,10 @@ npm run test:sdks
 That command tests the Python, .NET, and Java clients against the same
 repository-owned vectors. Public publication is a separate release operation
 and is not implied by either test command.
+
+For the optional JNI surface, follow the [installed adapter guide](native/README.md)
+and run its Windows gate with an installed TPM-enabled Licensecc package:
+
+```powershell
+pwsh -NoProfile -File scripts/ci/run-installed-java-device-bound.ps1 -InstallPrefix C:/your-install
+```

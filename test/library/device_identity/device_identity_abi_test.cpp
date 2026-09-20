@@ -48,6 +48,7 @@ static_assert(LCC_DEVICE_PROOF_AUDIENCE_UNSPECIFIED == 0 && LCC_DEVICE_PROOF_AUD
 static_assert(LCC_DEVICE_IDENTITY_VERSION == 1U, "identity version ABI drift");
 static_assert(LCC_DEVICE_PROOF_VERSION == 1U, "proof version ABI drift");
 static_assert(LCC_DEVICE_OPEN_CREATE_IF_MISSING == 0x00000001U, "open flag ABI drift");
+static_assert(LCC_DEVICE_DELETE_ALLOW_UI == 0x00000002U, "delete flag ABI drift");
 static_assert(LCC_DEVICE_APPLICATION_ID_MAX == 128U, "application-id maximum ABI drift");
 static_assert(LCC_DEVICE_PROVIDER_NAME_MAX == 63U, "provider-name maximum ABI drift");
 static_assert(LCC_DEVICE_ALGORITHM_MAX == 31U, "algorithm maximum ABI drift");
@@ -147,6 +148,23 @@ LccDeviceIdentityOptions valid_options(const char* application_id = "licensecc.t
 }
 
 }  // namespace
+
+BOOST_AUTO_TEST_CASE(deletion_ui_flag_is_operation_and_provider_specific) {
+	auto options = valid_options();
+	options.flags = LCC_DEVICE_DELETE_ALLOW_UI;
+	LccDeviceIdentity* identity = nullptr;
+	BOOST_TEST(lcc_device_identity_open(&options, &identity) == LCC_DEVICE_INVALID_ARGUMENT);
+	BOOST_TEST(identity == nullptr);
+	const std::string id = "sha256:" + std::string(64U, '0');
+	BOOST_TEST(lcc_device_identity_delete_key(&options, id.c_str()) == LCC_DEVICE_INVALID_ARGUMENT);
+	options.backend = LCC_DEVICE_BACKEND_WINDOWS_TPM;
+	options.policy = LCC_DEVICE_POLICY_HARDWARE_REQUIRED;
+	for (const auto flags : {LCC_DEVICE_OPEN_CREATE_IF_MISSING,
+							 LCC_DEVICE_OPEN_CREATE_IF_MISSING | LCC_DEVICE_DELETE_ALLOW_UI, 0x80000000U}) {
+		options.flags = flags;
+		BOOST_TEST(lcc_device_identity_delete_key(&options, id.c_str()) == LCC_DEVICE_INVALID_ARGUMENT);
+	}
+}
 
 BOOST_AUTO_TEST_CASE(initializers_write_only_the_v1_prefix_and_secure_defaults) {
 	struct ExtendedOptions {
