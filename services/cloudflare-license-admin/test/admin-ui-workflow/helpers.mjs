@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, normalize, relative } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import ts from "typescript";
+import ts from "@typescript/typescript6";
 
 const sourceExtensions = [".ts", ".tsx", ".js", ".jsx", ".mjs"];
 const relativeModulePattern = /(\b(?:from\s*|import\s*\(\s*|import\s+))(["'])(\.\.?\/[^"']+)\2/g;

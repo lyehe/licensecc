@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
-import ts from "typescript";
+import ts from "@typescript/typescript6";
 
 const repositoryRoot = resolve(import.meta.dirname, "../../..");
 const read = (path) => readFileSync(resolve(repositoryRoot, path), "utf8");

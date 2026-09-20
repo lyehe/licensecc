@@ -53,6 +53,7 @@
     "test:deployed-readiness": "node --test test/backend-secret-inventory.test.mjs test/public-verifier-drill.test.mjs test/staging-lease-drill.test.mjs test/staging-order-drill.test.mjs"
   },
   "devDependencies": {
+    "@typescript/typescript6": "6.0.2",
     "pg": "8.23.0",
     "pg-mem": "3.0.14",
     "typescript": "7.0.2",
