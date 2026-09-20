@@ -10,6 +10,12 @@ packages documented in [`../../doc/architecture/system-map.md`](../../doc/archit
 Offline native integrations and server-token verification do not require this
 deployable.
 
+## License access in the portal
+
+App details distinguish protected-device grants from legacy license downloads. Protected grants direct customers to Connect in their application; they never offer a device-key field or a `.lic` download. Legacy downloads remain available for compatible non-floating grants.
+
+The status label preserves disabled/revoked state and marks past or future validity windows as Expired or Not started. Enabled describes the listed dates only: the backend still checks device, trial and account eligibility. The browser clock updates these labels without server polling; it does not authorize access.
+
 ## Protected binding retirement API
 
 `POST /api/portal/device-bindings/retire` accepts exactly `binding_id` and

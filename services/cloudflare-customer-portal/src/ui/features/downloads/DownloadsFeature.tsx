@@ -6,10 +6,13 @@ import {
   ACTIVATION_DOWNLOAD_DISCLOSURE,
   DEVICE_KEY_HELP_COPY,
   downloadPath,
+  canDownloadLicense,
+  licenseDisplayStatus,
   formatWindow,
   NO_DOWNLOADS_EMPTY_COPY,
 } from "../../portalWorkflow";
 import { localMessage, resultMessage } from "../../shared/api";
+import { useLicenseClock } from "../../shared/useLicenseClock";
 import type { EntitlementRow, StatusMessage } from "../../types";
 
 interface DownloadOptions {
@@ -32,6 +35,10 @@ export function useLicenseDownloads({ runOnce, setMessage }: DownloadOptions): L
   }
 
   async function download(item: EntitlementRow): Promise<void> {
+    if (!canDownloadLicense(item) || licenseDisplayStatus(item, Math.floor(Date.now() / 1000)) !== "enabled") {
+      setMessage(localMessage("license_unavailable", false));
+      return;
+    }
     await runOnce(async () => {
       const deviceKeyId = (deviceKeys[item.id] ?? "").trim();
       if (deviceKeyId === "") {
@@ -77,7 +84,8 @@ export function DownloadsFeature({ busy, downloads, entitlements }: {
   downloads: LicenseDownloads;
   entitlements: EntitlementRow[];
 }): React.ReactElement {
-  const downloadable = entitlements.filter((item) => item.license_mode !== "floating");
+  const now = useLicenseClock();
+  const downloadable = entitlements.filter(canDownloadLicense);
   return (
     <section className="tablePane full">
       <h2>Download licenses</h2>
@@ -90,7 +98,7 @@ export function DownloadsFeature({ busy, downloads, entitlements }: {
             <tr key={`dl/${item.id}/${index}`}>
               <td data-label="App">{item.project}</td>
               <td data-label="Feature">{item.feature}</td>
-              <td data-label="Status"><span className={`status ${item.status}`}>{item.status}</span></td>
+              <td data-label="Status"><span className={`status ${licenseDisplayStatus(item, now)}`}>{licenseDisplayStatus(item, now).replace("_", " ")}</span></td>
               <td data-label="Valid">{formatWindow(item.valid_from, item.valid_until)}</td>
               <td data-label="License"><div className="downloadActions">
                 <input
@@ -99,7 +107,7 @@ export function DownloadsFeature({ busy, downloads, entitlements }: {
                   value={downloads.deviceKeys[item.id] ?? ""}
                   onChange={(event) => downloads.setDeviceKey(item.id, event.target.value)}
                 />
-                <button disabled={busy || item.status !== "active" || (downloads.deviceKeys[item.id] ?? "").trim() === ""} onClick={() => void downloads.download(item)}>{ACTIVATION_DOWNLOAD_ACTION_LABEL}</button>
+                <button disabled={busy || licenseDisplayStatus(item, now) !== "enabled" || (downloads.deviceKeys[item.id] ?? "").trim() === ""} onClick={() => void downloads.download(item)}>{ACTIVATION_DOWNLOAD_ACTION_LABEL}</button>
               </div></td>
             </tr>
           ))}

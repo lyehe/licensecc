@@ -369,17 +369,20 @@ code {
   background:#292929
 }
 
-.status.active {
+.status.active,
+.status.enabled {
   background:#203026;
   color:#9bc49b
 }
 
-.status.disabled {
+.status.disabled,
+.status.not_started {
   background:#30291f;
   color:#d6b783
 }
 
-.status.revoked {
+.status.revoked,
+.status.expired {
   background:#302020;
   color:#db9292
 }

@@ -78,6 +78,7 @@ export const selfServicePaths: LabeledPathFragment = {
                               project: { type: "string" },
                               feature: { type: "string" },
                               license_fingerprint: { type: "string" },
+                              enforcement_mode: { type: "string", enum: ["legacy", "device_bound_v1"], description: "Protected devices connect from the application instead of downloading a license." },
                               status: { type: "string" },
                               valid_from: { type: ["integer", "null"] },
                               valid_until: { type: ["integer", "null"] },

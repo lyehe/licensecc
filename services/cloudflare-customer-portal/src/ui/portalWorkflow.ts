@@ -260,3 +260,15 @@ export function normalizeCode(value: string): string {
 export function isValidCode(value: string): boolean {
   return /^[0-9]{8}$/.test(normalizeCode(value));
 }
+
+// Display only: date eligibility does not establish device or trial authorization.
+export function licenseDisplayStatus(item: { status: string; valid_from: number | null; valid_until: number | null }, now: number): string {
+  if (item.status !== "active") return item.status;
+  if (item.valid_until !== null && item.valid_until <= now) return "expired";
+  if (item.valid_from !== null && item.valid_from > now) return "not_started";
+  return "enabled";
+}
+
+export function canDownloadLicense(item: { enforcement_mode?: string; license_mode: string }): boolean {
+  return (item.enforcement_mode === undefined || item.enforcement_mode === "legacy") && item.license_mode !== "floating";
+}
