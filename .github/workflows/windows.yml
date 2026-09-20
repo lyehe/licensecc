@@ -13,12 +13,12 @@ jobs:
         matrix:
           os: ["windows-2022"]
           preset:
+            - "ci-windows-device-identity-test"
+            - "ci-windows-msvc-debug-dynamic-tpm"
             - "ci-windows-msvc-debug-dynamic"
             - "ci-windows-msvc-debug-static"
             - "ci-windows-msvc-release-dynamic"
             - "ci-windows-msvc-release-static"
-            - "ci-windows-device-identity-test"
-            - "ci-windows-msvc-debug-dynamic-tpm"
 
       steps:
       -  uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4

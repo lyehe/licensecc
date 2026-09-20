@@ -337,7 +337,9 @@ BOOST_AUTO_TEST_CASE(host_winhttp_accepts_the_required_security_profile_without_
 		  {WINHTTP_OPTION_DISABLE_GLOBAL_POOLING, TRUE},
 		  {WINHTTP_OPTION_DISABLE_SECURE_PROTOCOL_FALLBACK, TRUE}}) {
 		auto value = item.second;
-		BOOST_REQUIRE(WinHttpSetOption(session.get(), item.first, &value, sizeof(value)));
+		const auto accepted = WinHttpSetOption(session.get(), item.first, &value, sizeof(value));
+		const auto error = accepted ? ERROR_SUCCESS : GetLastError();
+		BOOST_CHECK_MESSAGE(accepted, "WinHTTP session option " << item.first << " rejected with error " << error);
 	}
 	std::unique_ptr<void, Close> connection(WinHttpConnect(session.get(), L"localhost", 443, 0));
 	BOOST_REQUIRE(connection);
@@ -351,7 +353,9 @@ BOOST_AUTO_TEST_CASE(host_winhttp_accepts_the_required_security_profile_without_
 							{WINHTTP_OPTION_AUTOLOGON_POLICY, WINHTTP_AUTOLOGON_SECURITY_LEVEL_HIGH},
 							{WINHTTP_OPTION_MAX_RESPONSE_HEADER_SIZE, 16384}}) {
 		auto value = item.second;
-		BOOST_REQUIRE(WinHttpSetOption(request.get(), item.first, &value, sizeof(value)));
+		const auto accepted = WinHttpSetOption(request.get(), item.first, &value, sizeof(value));
+		const auto error = accepted ? ERROR_SUCCESS : GetLastError();
+		BOOST_CHECK_MESSAGE(accepted, "WinHTTP request option " << item.first << " rejected with error " << error);
 	}
 }
 #endif
