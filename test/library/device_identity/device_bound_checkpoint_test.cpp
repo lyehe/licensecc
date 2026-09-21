@@ -42,6 +42,14 @@ struct Fixture {
 	BoundCheckpointDecision compare(const std::string& next, const std::string* current) {
 		return compare_bound_checkpoints(next, current, {{signer.spki, false}}, expected);
 	}
+	std::string change(const std::string& token, const std::string& field, const std::string& value) {
+		ParsedBoundLease parsed;
+		BOOST_REQUIRE(decode_bound_lease(token, parsed));
+		std::string payload(parsed.payload.begin(), parsed.payload.end());
+		const auto start = payload.find(field + '=') + field.size() + 1;
+		payload.replace(start, payload.find('\n', start) - start, value);
+		return signer.sign(payload);
+	}
 };
 struct Files {
 	std::mutex lock;
@@ -114,13 +122,18 @@ BOOST_AUTO_TEST_CASE(revision_dominates_signed_time_and_arrival_order) {
 	const auto newer = f.token(8, 2000000000);
 	BOOST_CHECK(f.compare(current, &newer) == BoundCheckpointDecision::stale);
 }
-BOOST_AUTO_TEST_CASE(equal_revision_requires_signed_freshness_or_exact_idempotency) {
+BOOST_AUTO_TEST_CASE(equal_revision_requires_signed_freshness_or_equivalent_resume_policy) {
 	Fixture f;
 	auto current = f.token(7, 2000000100);
 	BOOST_CHECK(f.compare(f.token(7, 2000000101), &current) == BoundCheckpointDecision::replace);
 	BOOST_CHECK(f.compare(f.token(7, 2000000099), &current) == BoundCheckpointDecision::stale);
 	BOOST_CHECK(f.compare(f.token(7, 2000000100, std::string(42, 'B') + "A"), &current) ==
-				BoundCheckpointDecision::conflict);
+				BoundCheckpointDecision::unchanged);
+	for (const auto* field : {"renew-after", "expires-at"}) {
+		const auto different =
+			f.change(current, field, field == std::string("renew-after") ? "2000043301" : "2000086499");
+		BOOST_CHECK(f.compare(different, &current) == BoundCheckpointDecision::conflict);
+	}
 	// Both keys stay trusted while a newer signed checkpoint migrates storage.
 	SessionTestSigner rotated;
 	ParsedBoundLease parsed;
@@ -150,6 +163,28 @@ BOOST_AUTO_TEST_CASE(authenticated_different_binding_generation_or_license_needs
 		if (field == 2) f.context.lease.generation = 2;
 		BOOST_CHECK(f.compare(f.token(8), &current) == BoundCheckpointDecision::conflict);
 	}
+}
+BOOST_AUTO_TEST_CASE(same_second_independent_requests_survive_restart_and_mirror_recovery) {
+	Fixture f;
+	auto files = std::make_shared<Files>();
+	auto owner = store(f, files);
+	const auto first = f.token(7);
+	const auto second = f.change(f.token(7, 2000000000, std::string(42, 'B') + "A"), "lease-id",
+								 bound_encoding::base64url(std::string(21, 'B') + "A"));
+	BOOST_REQUIRE(first != second);
+	BOOST_REQUIRE(owner->save(first) == BoundCheckpointStatus::saved);
+	owner = store(f, files);  // Reopen existing persistent identity, as after restart.
+	files->fault = Files::Fault::before;
+	files->fail_write = files->writes + 2;
+	BOOST_CHECK(owner->save(second) == BoundCheckpointStatus::mirror_pending);
+	owner = store(f, files);
+	std::string recovered;
+	BOOST_CHECK(owner->load(recovered) == BoundCheckpointStatus::loaded);
+	BOOST_CHECK(recovered == first || recovered == second);
+	BOOST_CHECK(owner->save(second) == BoundCheckpointStatus::saved);
+	BOOST_CHECK_EQUAL(files->slots[0], second);
+	BOOST_CHECK_EQUAL(files->slots[1], second);
+	BOOST_CHECK(owner->save(second) == BoundCheckpointStatus::unchanged);
 }
 BOOST_AUTO_TEST_CASE(invalid_stored_record_is_distinct_from_missing_and_cannot_be_overwritten) {
 	Fixture f;
@@ -252,7 +287,7 @@ BOOST_AUTO_TEST_CASE(only_second_slot_can_resume_but_conflicting_committed_recor
 	BOOST_CHECK(owner->save(token) == BoundCheckpointStatus::saved);
 	BOOST_CHECK_EQUAL(files->slots[0], token);
 	const auto writes = files->writes;
-	files->slots[0] = f.token(7, 2000000000, std::string(42, 'B') + "A");
+	files->slots[0] = f.change(token, "renew-after", "2000043201");
 	out = "unchanged";
 	BOOST_CHECK(owner->load(out) == BoundCheckpointStatus::conflict);
 	BOOST_CHECK_EQUAL(out, "unchanged");

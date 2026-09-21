@@ -24,6 +24,7 @@ import {
   compareCounts,
   countMapFromRows,
   countSql,
+  tableCounts,
   entitlementSemanticsFromRows,
   entitlementSemanticsSql,
   liveSourceCountObservation,
@@ -863,6 +864,22 @@ test("restore inventory pins all migrated tables through migration 0039", () => 
   assert.match(sql, /FROM entitlements/);
   assert.match(sql, /FROM catalog_plans/);
   assert.match(sql, /FROM license_plan_assignment_events/);
+});
+
+test("remote count inspection avoids compound SELECT limits and retains every table", () => {
+  const seen = [];
+  const counts = tableCounts("scratch", "config.json", "remote", ALL_RESTORE_TABLES, "counts",
+    (database, config, mode, sql, label) => {
+      assert.deepEqual([database, config, mode, label], ["scratch", "config.json", "remote", "counts"]);
+      assert.doesNotMatch(sql, /UNION/);
+      const table = sql.match(/FROM ([a-z_]+)$/)[1];
+      seen.push(table);
+      return [{ table_name: table, row_count: seen.length }];
+    });
+  assert.deepEqual(seen, ALL_RESTORE_TABLES);
+  assert.deepEqual(counts, Object.fromEntries(ALL_RESTORE_TABLES.map((table, i) => [table, i + 1])));
+  assert.throws(() => tableCounts("scratch", undefined, "remote", REQUIRED_TABLES, "counts",
+    () => { throw new Error("query_failed"); }), /query_failed/);
 });
 
 test("high-churn and internal tables are presence-only and disjoint from durable count checks", () => {

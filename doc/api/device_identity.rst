@@ -172,8 +172,13 @@ retry after a provider failure, before client handoff. The public owner uses a
 typed capture result to distinguish absence from busy or failed capture.
 
 The internal checkpoint coordinator compares authenticated records by revision,
-then signed issue time. Exact bytes are idempotent; distinct records with equal
-ordering values conflict. Binding, fingerprint and generation must match. Every
+then signed issue time. Exact bytes are idempotent. Independent requests issued
+in the same second can differ only in operation and lease IDs when all signed
+identity, signer, revision and validity fields match; these are equivalent
+resume checkpoints and can be mirrored normally. Other equal-ordering differences
+conflict, including signer or validity changes. This equivalence never restores
+an operation's clock anchor or grants work authority after restart.
+Binding, fingerprint and generation must match. Every
 present committed slot must authenticate, including a secondary slot; corrupt
 or untrusted records cannot be silently discarded in favor of an older copy.
 

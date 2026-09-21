@@ -72,7 +72,7 @@ export class D1BackupWorkflow extends WorkflowEntrypoint<Env, BackupTriggerParam
     );
     const saved = await step.do(
       "poll export and store SQL dump in R2",
-      { retries: { limit: 20, delay: "30 seconds", backoff: "exponential" }, timeout: "15 minutes" },
+      { retries: { limit: 20, delay: "30 seconds", backoff: "constant" }, timeout: "15 minutes" },
       async () => {
         const ready = await pollD1Export(fetch, config, token, started.bookmark);
         return saveD1ExportToR2(this.env.BACKUP_BUCKET, fetch, config, started, ready);

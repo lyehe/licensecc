@@ -127,8 +127,8 @@ BoundCheckpointStatus BoundCheckpointStore::save(const std::string& candidate) n
 			expected_);
 		if (compared != BoundCheckpointDecision::replace && compared != BoundCheckpointDecision::unchanged)
 			return decision(compared);
-		if (compared == BoundCheckpointDecision::unchanged && slots.present[1 - slots.winner] &&
-			slots.token[1 - slots.winner] == candidate) {
+		if (compared == BoundCheckpointDecision::unchanged && slots.token[slots.winner] == candidate &&
+			slots.present[1 - slots.winner] && slots.token[1 - slots.winner] == candidate) {
 			publishing = true;
 			if (storage_->confirm(0, candidate) != BoundCheckpointIo::ok ||
 				storage_->confirm(1, candidate) != BoundCheckpointIo::ok)

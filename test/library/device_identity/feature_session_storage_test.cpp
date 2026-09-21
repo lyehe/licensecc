@@ -2,6 +2,33 @@
 #include "feature_session_fixture.hpp"
 using namespace feature_test;
 
+BOOST_AUTO_TEST_CASE(same_second_restart_saves_fresh_lease_but_still_requires_online_start) {
+	Fixture f;
+	++f.revision;  // Supersede the short historical seed before keeping policy fixed.
+	const auto normal = f.call;
+	f.call = [&](BoundWireOperation op, std::string_view body, BoundHttpResponse& out) {
+		// Issuing another lease does not itself advance the entitlement revision.
+		if (op == BoundWireOperation::renew) --f.revision;
+		return normal(op, body, out);
+	};
+	std::string prior_operation;
+	for (unsigned restart = 0; restart < 3; ++restart) {
+		auto owner = f.open();
+		const auto before = f.requests;
+		BOOST_CHECK_EQUAL(lcc_feature_session_authorize(owner.get(), "BATCH_RUN", &f.detail),
+						  LCC_BOUND_ONLINE_REQUIRED);
+		BOOST_CHECK_EQUAL(f.requests, before);
+		BOOST_REQUIRE_EQUAL(lcc_feature_session_start(owner.get(), &f.detail), LCC_BOUND_OK);
+		BOOST_CHECK_EQUAL(f.detail.checkpoint_result, LCC_BOUND_CHECKPOINT_SAVED);
+		BOOST_CHECK_EQUAL(f.requests, before + 2);
+		BOOST_REQUIRE(f.operations.back() != prior_operation);
+		prior_operation = f.operations.back();
+		BOOST_CHECK_EQUAL(lcc_feature_session_authorize(owner.get(), "BATCH_RUN", &f.detail), LCC_BOUND_OK);
+		BOOST_CHECK_EQUAL(*f.memory()->slots[0], *f.memory()->slots[1]);
+		// Close without stop, retaining the last committed checkpoint.
+	}
+}
+
 BOOST_AUTO_TEST_CASE(missing_checkpoint_or_key_and_corrupt_storage_never_create_or_overwrite_state) {
 	Fixture f;
 	for (unsigned scenario = 0; scenario < 4; ++scenario) {
