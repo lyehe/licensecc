@@ -81,6 +81,15 @@ npm run validate:deploy -- \
 - Deploy validator that checks Worker health, unauthenticated manual-trigger
   fail-closed behavior, Worker secret-name presence, and Workflow registration.
 
+Export polling uses the D1 REST API's nested completion result and includes
+`output_format: "polling"` on every request. The Workflow retries an unfinished
+export at 30-second intervals (at most 20 retries), without a busy polling loop.
+Downloads must provide a positive, safe-integer `Content-Length` and no content
+encoding other than `identity`. The Worker streams SQL through inventory/hash
+validation and a `FixedLengthStream` into R2; missing or mismatched lengths fail
+without publishing a manifest. Upload failures cancel the upstream stream before
+retrying. Dumps are never buffered in full in Worker memory.
+
 Cloudflare D1 Time Travel remains the first emergency recovery tool for recent
 mistakes. The R2 export path gives you longer retention and an offline SQL dump.
 

@@ -15,6 +15,26 @@ import {
   timingSafeTokenEqual,
 } from "../dist/core.js";
 
+// Node adapter for unit tests; backup-runtime.test.mjs covers the real Workers
+// FixedLengthStream and R2 binding, including exact-length enforcement.
+globalThis.FixedLengthStream = class extends TransformStream {
+  constructor(length) {
+    let count = 0;
+    super({
+      transform(chunk, controller) {
+        count += chunk.byteLength;
+        if (count > length) throw new Error("length mismatch");
+        controller.enqueue(chunk);
+      },
+      flush() { if (count !== length) throw new Error("length mismatch"); },
+    });
+  }
+};
+
+function sqlResponse(body, length = Buffer.byteLength(body)) {
+  return new Response(body, { headers: { "content-length": String(length) } });
+}
+
 const D1_EXPORT_SQL = `-- exact snapshot export
 CREATE TABLE "entitlements" (id TEXT PRIMARY KEY, note TEXT);
 INSERT INTO "entitlements" VALUES ('one', 'semicolon; inside value');
@@ -99,7 +119,7 @@ test("backup config validates required values and normalizes prefix", () => {
 
 test("D1 export responses parse expected Cloudflare envelopes", () => {
   assert.deepEqual(parseStartExportResponse({ success: true, result: { at_bookmark: "bookmark-1" } }), { bookmark: "bookmark-1" });
-  assert.deepEqual(parseReadyExportResponse({ success: true, result: { signed_url: "https://dump.example/sql", filename: "dump.sql" } }), {
+  assert.deepEqual(parseReadyExportResponse({ success: true, result: { status: "complete", result: { signed_url: "https://dump.example/sql", filename: "dump.sql" } } }), {
     signedUrl: "https://dump.example/sql",
     filename: "dump.sql",
   });
@@ -113,7 +133,7 @@ test("D1 export start and poll use the REST API payloads", async () => {
     if (calls.length === 1) {
       return jsonResponse({ success: true, result: { at_bookmark: "bookmark-1" } });
     }
-    return jsonResponse({ success: true, result: { signed_url: "https://dump.example/sql", filename: "dump.sql" } });
+    return jsonResponse({ success: true, result: { status: "complete", result: { signed_url: "https://dump.example/sql", filename: "dump.sql" } } });
   };
 
   const started = await startD1Export(fetcher, config, "token", Date.parse("2026-06-05T01:02:03.004Z"));
@@ -125,14 +145,14 @@ test("D1 export start and poll use the REST API payloads", async () => {
   assert.equal(ready.signedUrl, "https://dump.example/sql");
   assert.equal(calls[0].authorization, "Bearer token");
   assert.equal(calls[0].body, JSON.stringify({ output_format: "polling" }));
-  assert.equal(calls[1].body, JSON.stringify({ current_bookmark: "bookmark-1" }));
+  assert.equal(calls[1].body, JSON.stringify({ output_format: "polling", current_bookmark: "bookmark-1" }));
   assert.match(calls[0].input, /accounts\/account-123\/d1\/database\/database-456\/export$/);
 });
 
 test("R2 save writes SQL stream and metadata manifest", async () => {
   const bucket = new MockR2(new Date("2026-06-05T01:03:04.005Z"));
   bucket.includeSha256 = true;
-  const fetcher = async () => new Response(D1_EXPORT_SQL, { status: 200 });
+  const fetcher = async () => sqlResponse(D1_EXPORT_SQL);
   const started = { bookmark: "bookmark-1", snapshotRequestedAt: "2026-06-05T01:02:03.004Z" };
   const ready = { signedUrl: "https://dump.example/sql", filename: "../dump.sql" };
   const result = await saveD1ExportToR2(bucket, fetcher, config, started, ready);
@@ -191,7 +211,7 @@ test("snapshot inventory remains exact across arbitrary export-stream chunk boun
   const bucket = new MockR2(new Date("2026-06-05T01:03:04.005Z"));
   const result = await saveD1ExportToR2(
     bucket,
-    async () => new Response(body, { status: 200 }),
+    async () => sqlResponse(body, bytes.byteLength),
     config,
     { bookmark: "bookmark-chunks", snapshotRequestedAt: "2026-06-05T01:02:03.004Z" },
     { signedUrl: "https://dump.example/chunks", filename: "chunks.sql" },
@@ -202,7 +222,7 @@ test("snapshot inventory remains exact across arbitrary export-stream chunk boun
 test("R2 save fails closed before manifest creation on returned size or SHA-256 mismatch", async () => {
   const started = { bookmark: "bookmark-1", snapshotRequestedAt: "1970-01-01T00:00:00.000Z" };
   const ready = { signedUrl: "https://dump.example/sql", filename: "dump.sql" };
-  const fetcher = async () => new Response(D1_EXPORT_SQL, { status: 200 });
+  const fetcher = async () => sqlResponse(D1_EXPORT_SQL);
 
   const wrongSize = new MockR2();
   wrongSize.sizeDelta = 1;
@@ -227,7 +247,7 @@ test("R2 save rejects an empty export without publishing a manifest", async () =
   await assert.rejects(
     saveD1ExportToR2(
       bucket,
-      async () => new Response("", { status: 200 }),
+      async () => sqlResponse(""),
       config,
       { bookmark: "bookmark-1", snapshotRequestedAt: "1970-01-01T00:00:00.000Z" },
       { signedUrl: "https://dump.example/sql", filename: "dump.sql" },
@@ -242,7 +262,7 @@ test("R2 save rejects object metadata that predates the requested snapshot", asy
   await assert.rejects(
     saveD1ExportToR2(
       bucket,
-      async () => new Response(D1_EXPORT_SQL, { status: 200 }),
+      async () => sqlResponse(D1_EXPORT_SQL),
       config,
       { bookmark: "bookmark-1", snapshotRequestedAt: "2026-06-05T00:05:00.001Z" },
       { signedUrl: "https://dump.example/sql", filename: "dump.sql" },
@@ -282,4 +302,42 @@ test("timing-safe token comparison preserves equality semantics", async () => {
   assert.equal(await timingSafeTokenEqual("secret", "secret"), true);
   assert.equal(await timingSafeTokenEqual("secret", "other"), false);
   assert.equal(await timingSafeTokenEqual("secret", "secret "), false);
+});
+
+
+test("D1 polling rejects incomplete and failed exports even with a nested URL", async () => {
+  for (const status of [undefined, "error", "running"]) {
+    const value = { success: true, result: { status, result: { signed_url: "https://dump.example/sql" } } };
+    await assert.rejects(pollD1Export(async () => jsonResponse(value), config, "token", "bookmark"),
+      status === "error" ? /provider_failed/ : /not_ready/);
+  }
+  assert.throws(() => parseReadyExportResponse({ success: true, result: {
+    status: "complete", success: false, result: { signed_url: "https://dump.example/sql" },
+  } }), /provider_failed/);
+});
+
+test("invalid export lengths cancel the download without publishing objects", async () => {
+  for (const header of [null, "", "-1", "1.5", "9007199254740992", "abc"]) {
+    let cancelled = false;
+    const body = new ReadableStream({ cancel() { cancelled = true; } });
+    const headers = header === null ? {} : { "content-length": header };
+    const bucket = new MockR2();
+    await assert.rejects(saveD1ExportToR2(bucket, async () => new Response(body, { headers }), config,
+      { bookmark: "b", snapshotRequestedAt: "1970-01-01T00:00:00.000Z" },
+      { filename: "dump.sql", signedUrl: "https://dump.example/sql" }), /invalid_content_length/);
+    assert.equal(cancelled, true);
+    assert.equal(bucket.objects.size, 0);
+  }
+});
+
+test("R2 rejection cancels a blocked producer and never writes a manifest", { timeout: 5000 }, async () => {
+  let cancelled = false;
+  let puts = 0;
+  const body = new ReadableStream({ cancel() { cancelled = true; } });
+  const bucket = { put() { puts++; throw new Error("upload unavailable"); } };
+  await assert.rejects(saveD1ExportToR2(bucket, async () => sqlResponse(body, 100), config,
+    { bookmark: "b", snapshotRequestedAt: "1970-01-01T00:00:00.000Z" },
+    { filename: "dump.sql", signedUrl: "https://dump.example/sql" }), /upload unavailable/);
+  assert.equal(cancelled, true);
+  assert.equal(puts, 1);
 });

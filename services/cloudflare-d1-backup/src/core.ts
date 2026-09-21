@@ -1,3 +1,4 @@
+import { exportContentLength, putKnownLengthStream } from "./export-upload.js";
 import {
   type BackupSnapshotInventory,
   streamWithSnapshotInventory,
@@ -230,8 +231,15 @@ export function parseStartExportResponse(value: unknown): Pick<D1ExportStarted, 
 
 export function parseReadyExportResponse(value: unknown): D1ExportReady {
   const result = envelopeResult(value, "d1_export_poll");
-  const signedUrl = result.signed_url;
-  const filename = result.filename;
+  if (result.status === "error" || result.success === false) {
+    throw new Error("d1_export_provider_failed");
+  }
+  if (result.status !== "complete") {
+    throw new Error("d1_export_not_ready");
+  }
+  const ready = asRecord(result.result);
+  const signedUrl = ready?.signed_url;
+  const filename = ready?.filename;
   if (typeof signedUrl !== "string" || signedUrl === "") {
     throw new Error("d1_export_not_ready");
   }
@@ -268,7 +276,7 @@ export async function pollD1Export(fetcher: Fetcher, config: BackupConfig, token
   const response = await fetcher(d1ExportUrl(config), {
     method: "POST",
     headers: authHeaders(token),
-    body: JSON.stringify({ current_bookmark: bookmark }),
+    body: JSON.stringify({ output_format: "polling", current_bookmark: bookmark }),
   });
   return parseReadyExportResponse(await responseJson(response, "d1_export_poll"));
 }
@@ -383,8 +391,9 @@ export async function saveD1ExportToR2(
     throw new Error(`d1_export_download_failed:${dumpResponse.status}`);
   }
   const objectKey = backupObjectKey(config, ready, started);
+  const length = await exportContentLength(dumpResponse);
   const streamingDigest = streamWithSnapshotInventory(dumpResponse.body);
-  const putResult = await bucket.put(objectKey, streamingDigest.readable, {
+  const putResult = await putKnownLengthStream(bucket, objectKey, streamingDigest.readable, length, {
     httpMetadata: { contentType: "application/sql" },
     customMetadata: {
       database_id: config.databaseId,
