@@ -170,7 +170,7 @@ BOOST_AUTO_TEST_CASE(same_second_independent_requests_survive_restart_and_mirror
 	auto owner = store(f, files);
 	const auto first = f.token(7);
 	const auto second = f.change(f.token(7, 2000000000, std::string(42, 'B') + "A"), "lease-id",
-								bound_encoding::base64url(std::string(21, 'B') + "A"));
+								 bound_encoding::base64url(std::string(21, 'B') + "A"));
 	BOOST_REQUIRE(first != second);
 	BOOST_REQUIRE(owner->save(first) == BoundCheckpointStatus::saved);
 	owner = store(f, files);  // Reopen existing persistent identity, as after restart.

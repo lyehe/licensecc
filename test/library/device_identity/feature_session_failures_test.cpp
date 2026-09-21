@@ -272,8 +272,8 @@ BOOST_AUTO_TEST_CASE(stale_and_conflicting_checkpoint_save_never_overwrite_or_gr
 		Fixture f;
 		auto owner = f.open();
 		BOOST_REQUIRE_EQUAL(lcc_feature_session_start(owner.get(), &f.detail), LCC_BOUND_OK);
-		const auto other =
-			f.signer.lease(f.context("BATCH_RUN"), std::string(43, 'A'), f.revision + (newer ? 1 : 0), newer ? 900 : 899);
+		const auto other = f.signer.lease(f.context("BATCH_RUN"), std::string(43, 'A'), f.revision + (newer ? 1 : 0),
+										  newer ? 900 : 899);
 		auto storage = f.memory();
 		storage->slots[0] = other;
 		storage->slots[1] = other;
