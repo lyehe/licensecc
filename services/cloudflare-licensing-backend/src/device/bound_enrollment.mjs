@@ -25,16 +25,17 @@ export async function createBoundAuthorization(db, input, config) {
   const handle = boundRandomId(32);
   const hash = await boundSecretHash(handle);
   const row = await db.prepare(`INSERT INTO device_bound_authorizations
-    (handle_hash,client_id,project,key_id,public_key_spki,device_label,redirect_uri,client_state,pkce_challenge,created_at,expires_at)
-    VALUES(?,?,?,?,?,?,?,?,?,unixepoch(),unixepoch()+300) RETURNING expires_at`)
+    (handle_hash,client_id,project,key_id,public_key_spki,device_label,redirect_uri,client_state,pkce_challenge,requested_feature,created_at,expires_at)
+    VALUES(?,?,?,?,?,?,?,?,?,?,unixepoch(),unixepoch()+300) RETURNING expires_at`)
     .bind(hash, request.client_id, request.project, device.keyId, request.public_key_spki,
-      request.device_label, request.redirect_uri, request.state, request.code_challenge).first();
+      request.device_label, request.redirect_uri, request.state, request.code_challenge, request.requested_feature ?? null).first();
   if (!row) throw new BoundRequestError("temporarily_unavailable", 503);
   // Fragment keeps the secret handle out of the portal's initial HTTP URL/logs.
   // The browser UI later posts it to the authenticated inspection endpoint.
   destination.hash = new URLSearchParams({ attempt_handle: handle }).toString();
   const comparison_code=await boundEnrollmentComparison({attempt_handle:handle,client_id:request.client_id,project:request.project,key_id:device.keyId,
-    redirect_uri:request.redirect_uri,state:request.state,code_challenge:request.code_challenge});
+    redirect_uri:request.redirect_uri,state:request.state,code_challenge:request.code_challenge,
+    ...(request.requested_feature ? {requested_feature:request.requested_feature} : {})});
   return { attempt_handle: handle, authorization_url: destination.href, expires_at: row.expires_at, comparison_code };
 }
 

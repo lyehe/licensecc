@@ -38,7 +38,7 @@ The verifier **never raises on a bad token** — every rejection is a typed
 
 ## Install
 
-An optional [Windows device-bound bridge](native/README.md) wraps the native
+An optional [Windows/Linux device-bound bridge](native/README.md) wraps the native
 enrollment and renewal owner with typed Python results. It requires a separately
 built application-owned DLL; the existing Python HTTP client remains unchanged.
 
@@ -193,7 +193,7 @@ uv run pytest -q
 ### Feature work sessions (optional native bridge)
 
 `licensecc.feature_session.FeatureSessionLibrary` uses the same application-owned
-Windows x64 bridge DLL and `device_bound.Configuration`. Enroll the configured
+64-bit Windows/Linux bridge library and `device_bound.Configuration`. Enroll the configured
 feature first with `DeviceBoundLibrary`; normal feature starts never open a
 browser. Each logical job opens a **new** owner and must start online:
 

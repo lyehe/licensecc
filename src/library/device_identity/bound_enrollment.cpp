@@ -33,6 +33,7 @@ std::unique_ptr<BoundEnrollmentFlow> BoundEnrollmentFlow::create(
 		auto flow = std::unique_ptr<BoundEnrollmentFlow>(new BoundEnrollmentFlow);
 		flow->request_.client_id = options.client_id;
 		flow->request_.project = options.session.project;
+		flow->request_.requested_feature = options.session.feature;
 		flow->request_.device_label = options.device_label;
 		flow->request_.public_key_spki = bound_encoding::base64url(identity->spki.data(), identity->spki.size());
 		flow->key_id_ = device_key_id(identity->spki);
@@ -138,9 +139,9 @@ BoundEnrollmentResult BoundEnrollmentFlow::begin(const std::string& redirect, Bo
 			std::string comparison;
 			if (decoded.authorization_url !=
 					options_.portal_authorization_url + "#attempt_handle=" + decoded.attempt_handle ||
-				!enrollment_comparison_code_v1({decoded.attempt_handle, request_.client_id, request_.project, redirect,
-												request_.state, request_.code_challenge},
-											   key_id_, comparison) ||
+				!enrollment_comparison_code({decoded.attempt_handle, request_.client_id, request_.project, redirect,
+											 request_.state, request_.code_challenge, request_.requested_feature},
+											key_id_, comparison) ||
 				comparison != decoded.comparison_code)
 				return result(BoundEnrollmentStatus::invalid_response);
 			BoundEnrollmentView candidate{decoded.authorization_url, comparison, decoded.authorization_expires_at};

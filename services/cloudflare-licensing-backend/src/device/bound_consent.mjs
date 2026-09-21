@@ -52,7 +52,8 @@ export async function inspectBoundAuthorization(db, customerId, handle, config, 
   const client=validateBoundClient({client_id:a.client_id,project:a.project,redirect_uri:a.redirect_uri},config.clients);
   const rows=result.results.filter(row=>row.page_fingerprint!==null),has_more=rows.length>100;
   const comparison_code=await boundEnrollmentComparison({attempt_handle:handle,client_id:a.client_id,project:a.project,key_id:a.key_id,
-    redirect_uri:a.redirect_uri,state:a.client_state,code_challenge:a.pkce_challenge});
+    redirect_uri:a.redirect_uri,state:a.client_state,code_challenge:a.pkce_challenge,
+    ...(a.requested_feature ? {requested_feature:a.requested_feature} : {})});
   return { app: { name: client.display_name, project: a.project }, device: { label: a.device_label },
     status: a.status, revision: a.revision, expires_at: a.expires_at, comparison_code,
     entitlements: rows.slice(0,100).map(row=>({id:entitlementId({project:a.project,feature:row.page_feature,license_fingerprint:row.page_fingerprint}),
@@ -73,6 +74,7 @@ async function approvedResponse(db, a, customerId, input, digest, keyRing) {
     JOIN customers c ON c.id=a.customer_id AND c.id=e.customer_id
     WHERE a.handle_hash=? AND a.revision=? AND a.approval_ciphertext=? AND a.customer_id=? AND a.status='approved'
       AND a.code_expires_at>unixepoch() AND a.expires_at>unixepoch()
+      AND (a.requested_feature IS NULL OR a.feature=a.requested_feature)
       AND e.status='active' AND c.status='active' AND e.enforcement_mode='device_bound_v1' AND e.pool_size=0
       AND ${boundTrialSql("e","a.key_id")}
       AND (e.valid_from IS NULL OR e.valid_from<=unixepoch()) AND (e.valid_until IS NULL OR e.valid_until>unixepoch())`)
@@ -89,7 +91,7 @@ export async function approveBoundAuthorization(db, customerId, input, config, k
       || !/^[A-Za-z0-9_-]{16,128}$/.test(input.operation_id)) deny("invalid_request", 400);
   const tuple = selectedId(input.entitlement_id);
   const { attempt: a, owner } = await attemptForCustomer(db, customerId, input.attempt_handle, config);
-  if (tuple[0] !== a.project) deny("access_denied", 403);
+  if (tuple[0] !== a.project || (a.requested_feature != null && tuple[1] !== a.requested_feature)) deny("access_denied", 403);
   const digest = await boundSecretHash(JSON.stringify(["approve-v1", customerId, input.entitlement_id, input.expected_attempt_revision]));
   if (a.status !== "pending") return approvedResponse(db, a, customerId, input, digest, keyRing);
   if (a.expires_at <= a.now) deny("authorization_expired", 410);
@@ -110,6 +112,7 @@ export async function approveBoundAuthorization(db, customerId, input, config, k
     WHERE handle_hash=? AND status='pending' AND revision=? AND expires_at>unixepoch() AND ?>unixepoch()
       AND EXISTS(SELECT 1 FROM customers WHERE id=? AND status='active' AND authority_revision=?)
       AND EXISTS(SELECT 1 FROM entitlements e WHERE project=? AND feature=? AND license_fingerprint=? AND customer_id=?
+        AND (device_bound_authorizations.requested_feature IS NULL OR e.feature=device_bound_authorizations.requested_feature)
         AND status='active' AND authority_revision=? AND enforcement_mode='device_bound_v1' AND pool_size=0
         AND ${boundTrialSql("e","device_bound_authorizations.key_id")}
         AND (valid_from IS NULL OR valid_from<=unixepoch()) AND (valid_until IS NULL OR valid_until>unixepoch()))

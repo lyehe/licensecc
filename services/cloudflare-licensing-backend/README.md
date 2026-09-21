@@ -815,3 +815,25 @@ their own retention policy.
 Node HTTP tests and the local SQLite/PostgreSQL hosts import `dist/app.js`.
 The deployed `src/index.ts` additionally loads the Cloudflare-native RPC runtime;
 local workerd tests verify that entrypoint and its service-binding isolation.
+
+
+### Protected enrollment compatibility and readiness
+
+Migration 0041 adds immutable optional `requested_feature` to enrollment attempts.
+New native clients always send it; consent and approval enforce it and the
+comparison transcript uses `lcc-device-enrollment-comparison-v2`. Older clients
+without the field retain v1 comparison and project-wide consent selection.
+Deploy the migration and backend before distributing new native clients.
+
+Protected traffic has a 1,000/minute global ceiling, a 20/minute registration IP
+limit, and a separate 600/minute session-traffic IP limit. After proof and current
+authority checks, issuance/recovery has 60/minute device-key and 240/minute
+customer limits. These gates are independent of legacy optional-proof switches.
+The configured legacy `VERIFY_RATE_LIMITER` additionally protects registration;
+it does not impose a low shared-IP budget on short feature jobs.
+
+Use `npm run validate:protected-config -- --config=<private-json-config>
+--secrets=<private-json-secrets>` for local protected registry/signer/key-ring
+validation. It does not claim live issuance or renewal. Follow the protected
+readiness section of [Cloudflare setup](../../doc/operations/cloudflare-setup.md)
+for deployment order and native live qualification.

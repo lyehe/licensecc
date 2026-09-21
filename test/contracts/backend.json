@@ -3672,6 +3672,11 @@
                       "maxLength": 1024,
                       "type": "string"
                     },
+                    "requested_feature": {
+                      "description": "Feature requested by the application; pins consent and the v2 comparison code. Omit only for older clients.",
+                      "pattern": "^[A-Za-z0-9_.:-]{1,15}$",
+                      "type": "string"
+                    },
                     "state": {
                       "description": "32-byte value in canonical unpadded base64url.",
                       "pattern": "^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$",

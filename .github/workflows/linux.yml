@@ -14,7 +14,7 @@ jobs:
       -  name: Install dependencies
          run: |
             sudo apt-get update
-            sudo apt-get install -y cmake libssl-dev zlib1g-dev \
+            sudo apt-get install -y cmake libssl-dev libcurl4-openssl-dev zlib1g-dev \
               libboost-dev libboost-test-dev libboost-filesystem-dev \
               libboost-iostreams-dev libboost-program-options-dev \
               libboost-system-dev libboost-thread-dev libboost-date-time-dev \
@@ -36,7 +36,7 @@ jobs:
       -  name: Install dependencies
          run: |
             sudo apt-get update
-            sudo apt-get install -y cmake libssl-dev zlib1g-dev \
+            sudo apt-get install -y cmake libssl-dev libcurl4-openssl-dev zlib1g-dev \
               libboost-dev libboost-test-dev libboost-filesystem-dev \
               libboost-iostreams-dev libboost-program-options-dev \
               libboost-system-dev libboost-thread-dev libboost-date-time-dev \
@@ -92,7 +92,7 @@ jobs:
             sudo apt-get install -y software-properties-common
             sudo add-apt-repository --yes universe
             sudo apt-get update
-            sudo apt-get install -y cmake libssl-dev zlib1g-dev \
+            sudo apt-get install -y cmake libssl-dev libcurl4-openssl-dev zlib1g-dev \
               libboost-dev libboost-test-dev libboost-filesystem-dev \
               libboost-iostreams-dev libboost-program-options-dev \
               libboost-system-dev libboost-thread-dev libboost-date-time-dev \
@@ -138,7 +138,7 @@ jobs:
             sudo apt-get install -y software-properties-common
             sudo add-apt-repository --yes universe
             sudo apt-get update
-            sudo apt-get install -y cmake libssl-dev zlib1g-dev \
+            sudo apt-get install -y cmake libssl-dev libcurl4-openssl-dev zlib1g-dev \
               libboost-dev libboost-test-dev libboost-filesystem-dev \
               libboost-iostreams-dev libboost-program-options-dev \
               libboost-system-dev libboost-thread-dev libboost-date-time-dev \
@@ -149,6 +149,9 @@ jobs:
             openssl version -a
       -  name: Bootstrap preflight
          run: pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/bootstrap.ps1 -CheckOnly
+      -  name: Keep Ubuntu 22 provider-only coverage with its older libcurl
+         if: matrix.os == 'ubuntu-22.04'
+         run: cmake --preset ${{ matrix.preset }} -DLCC_ENABLE_LINUX_DESKTOP=OFF
       -  name: Production TPM2 build purity
          run: pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/check-build-purity.ps1 -Preset ${{ matrix.preset }}
       -  name: Exact production TPM2 shim
@@ -157,6 +160,43 @@ jobs:
          run: cmake --install build/${{ matrix.preset }} --prefix build/${{ matrix.preset }}/install
       -  name: OpenSSL TPM2 simulator, installed consumer, and example
          run: scripts/ci/run-swtpm-device-identity.sh build/${{ matrix.preset }} build/${{ matrix.preset }}/install ${{ matrix.configuration }}
+      -  name: Node for installed SDK tests
+         if: matrix.os == 'ubuntu-24.04' && matrix.configuration == 'Debug'
+         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+         with:
+            node-version: 22
+      -  name: Python for installed bridge
+         if: matrix.os == 'ubuntu-24.04' && matrix.configuration == 'Debug'
+         uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+      -  name: .NET for installed bridge
+         if: matrix.os == 'ubuntu-24.04' && matrix.configuration == 'Debug'
+         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+         with:
+            dotnet-version: "8.0.423"
+      -  name: Java for installed bridge
+         if: matrix.os == 'ubuntu-24.04' && matrix.configuration == 'Debug'
+         uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+         with:
+            distribution: temurin
+            java-version: "17"
+      -  name: Linux installed protected SDK bridges
+         if: matrix.os == 'ubuntu-24.04' && matrix.configuration == 'Debug'
+         run: |
+            prefix="$PWD/build/${{ matrix.preset }}/install"
+            cmake -S sdks/python/native -B build/linux-python-bridge -DCMAKE_PREFIX_PATH="$prefix"
+            cmake --build build/linux-python-bridge -j 4
+            export LCC_TEST_DEVICE_BOUND_DLL="$PWD/build/linux-python-bridge/liblicensecc_device_bound_bridge.so"
+            nm -D --defined-only "$LCC_TEST_DEVICE_BOUND_DLL" | awk '{print $3}' | sort > build/linux-bridge-exports.txt
+            awk '/^[ ]+lcc_/ {print $1}' sdks/python/native/bridge.def | sort > build/linux-bridge-expected.txt
+            diff -u build/linux-bridge-expected.txt build/linux-bridge-exports.txt
+            uv run --directory sdks/python --locked --python 3.12 python -m pytest tests/test_device_bound_bridge.py tests/test_feature_session_bridge.py
+            dotnet test sdks/dotnet/test/Licensecc.Client.Tests/Licensecc.Client.Tests.csproj --configuration Release
+            cmake -S sdks/java/native -B build/linux-java-bridge -DCMAKE_PREFIX_PATH="$prefix" -DLCC_JNI_BUILD_TESTS=ON
+            cmake --build build/linux-java-bridge -j 4
+            export LCC_TEST_DEVICE_BOUND_JNI_DLL="$PWD/build/linux-java-bridge/liblicensecc_device_bound_jni.so"
+            export LCC_TEST_BAD_JNI_DLL="$PWD/build/linux-java-bridge/liblicensecc_device_bound_jni_bad.so"
+            export LCC_TEST_JNI_FIXTURE_DLL="$PWD/build/linux-java-bridge/liblicensecc_device_bound_jni_fixture.so"
+            node scripts/test-java-sdk.mjs
       -  name: On failure print simulator logs
          if: ${{ failure() }}
          run: find build/${{ matrix.preset }} -name swtpm.log -type f -print -exec cat {} \; || true

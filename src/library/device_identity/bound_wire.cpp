@@ -185,6 +185,7 @@ bool encode_bound_authorization(const BoundAuthorizationInput& input, SensitiveV
 	try {
 		std::string label;
 		if (!bound_encoding::name(input.client_id) || !bound_encoding::name(input.project) ||
+			(!input.requested_feature.empty() && !bound_encoding::name(input.requested_feature, 15)) ||
 			!device_label(input.device_label, label) || !bound_encoding::loopback_uri(input.redirect_uri) ||
 			!bound_encoding::token(input.state, 32) || !bound_encoding::token(input.code_challenge, 32))
 			return false;
@@ -200,6 +201,10 @@ bool encode_bound_authorization(const BoundAuthorizationInput& input, SensitiveV
 		quoted(candidate, input.client_id);
 		append(candidate, ",\"project\":");
 		quoted(candidate, input.project);
+		if (!input.requested_feature.empty()) {
+			append(candidate, ",\"requested_feature\":");
+			quoted(candidate, input.requested_feature);
+		}
 		append(candidate, ",\"public_key_spki\":");
 		quoted(candidate, input.public_key_spki);
 		append(candidate, ",\"device_label\":");

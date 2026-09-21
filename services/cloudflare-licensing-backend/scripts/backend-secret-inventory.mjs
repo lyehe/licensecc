@@ -15,6 +15,8 @@ const MAX_INVENTORY_ENTRIES = 256;
 
 export const REQUIRED_BACKEND_SECRET_NAMES = Object.freeze([
   "ACCOUNT_TOKEN_PEPPERS",
+  "BOUND_APPROVAL_ENCRYPTION_KEYS",
+  "BOUND_LEASE_SIGNING_PRIVATE_KEY_PKCS8_PEM",
   "LEASE_SIGNING_KEY_ID",
   "LEASE_SIGNING_PRIVATE_KEY_PKCS8_PEM",
   "ONLINE_SIGNING_KEY_ID",
@@ -211,6 +213,9 @@ function evidence({ profile, discoveredCount, missingSecretNames, verdict, failu
   const result = {
     schema_version: "licensecc.backend-secret-inventory.v1",
     check: "protected_backend_secret_inventory",
+    verification_scope: "secret_names_only",
+    live_issuance: "not_run",
+    live_renewal: "not_run",
     environment: profile ?? "unknown",
     target: "redacted",
     required_secret_count: REQUIRED_BACKEND_SECRET_NAMES.length,

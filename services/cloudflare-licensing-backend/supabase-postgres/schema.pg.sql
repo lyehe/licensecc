@@ -879,6 +879,8 @@ CREATE TABLE device_bound_authorizations (
   revision BIGINT NOT NULL DEFAULT 0 CHECK (revision = CAST(revision AS BIGINT) AND revision BETWEEN 0 AND 9007199254740991),
   customer_id TEXT REFERENCES customers(id),
   feature TEXT,
+  requested_feature TEXT CHECK(requested_feature IS NULL OR (length(requested_feature) BETWEEN 1 AND 15
+    AND requested_feature !~ '[^A-Za-z0-9_.:-]')),
   license_fingerprint TEXT,
   code_hash TEXT,
   code_expires_at BIGINT CHECK (code_expires_at = CAST(code_expires_at AS BIGINT) AND code_expires_at BETWEEN 0 AND 9007199254740991),
@@ -1461,3 +1463,34 @@ CREATE INDEX idx_bound_lease_cleanup ON device_bound_leases(accept_until);
 
 CREATE INDEX idx_bound_unconsumed_attempt_cleanup ON device_bound_authorizations(expires_at)
 WHERE status IN ('pending','approved','denied');
+
+CREATE OR REPLACE FUNCTION tr_bound_requested_feature_immutable_fn() RETURNS TRIGGER AS $$
+BEGIN
+  IF NEW.requested_feature IS DISTINCT FROM OLD.requested_feature THEN
+    RAISE EXCEPTION 'authorization_intent_immutable';
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+CREATE TRIGGER tr_bound_requested_feature_immutable BEFORE UPDATE OF requested_feature ON device_bound_authorizations
+FOR EACH ROW EXECUTE FUNCTION tr_bound_requested_feature_immutable_fn();
+CREATE OR REPLACE FUNCTION tr_bound_requested_feature_insert_fn() RETURNS TRIGGER AS $$
+BEGIN
+  IF NEW.requested_feature IS NOT NULL AND NEW.feature IS NOT NULL AND NEW.feature<>NEW.requested_feature THEN
+    RAISE EXCEPTION 'authorization_feature_mismatch';
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+CREATE TRIGGER tr_bound_requested_feature_insert BEFORE INSERT ON device_bound_authorizations
+FOR EACH ROW EXECUTE FUNCTION tr_bound_requested_feature_insert_fn();
+CREATE OR REPLACE FUNCTION tr_bound_requested_feature_update_fn() RETURNS TRIGGER AS $$
+BEGIN
+  IF NEW.requested_feature IS NOT NULL AND NEW.feature IS NOT NULL AND NEW.feature<>NEW.requested_feature THEN
+    RAISE EXCEPTION 'authorization_feature_mismatch';
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+CREATE TRIGGER tr_bound_requested_feature_update BEFORE UPDATE OF feature,requested_feature ON device_bound_authorizations
+FOR EACH ROW EXECUTE FUNCTION tr_bound_requested_feature_update_fn();

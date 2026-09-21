@@ -78,7 +78,8 @@ ctest --test-dir build/device-bound-public-example -C Debug --output-on-failure
 For the live journey, the backend must register the client, project, callback
 path `/callback` with dynamic IPv4 loopback port, and consent origin. The customer
 needs a protected entitlement for the configured feature with available device
-capacity. The current Windows user needs a usable TPM and local NTFS LocalAppData.
+capacity. Windows needs a usable TPM and local NTFS LocalAppData. Linux needs the
+TPM2/OpenSSL provider, libcurl, private local user storage and a desktop browser.
 Use a text file containing whitespace-separated finite `x y z` triples:
 
 ```powershell
@@ -160,3 +161,15 @@ requires the live TPM/browser/backend journey, copied-checkpoint rejection on a
 different key, and platform clock/storage qualification. This example does not
 establish hardware attestation, power-loss durability or resistance to a patched
 application binary. See the [native API documentation](../../doc/api/device_identity.rst).
+
+
+### Linux
+
+Build/install the native runtime with `LCC_ENABLE_TPM2_OPENSSL=ON` and libcurl
+7.85+. Configure this example with the same `LCC_BOUND_*` public values and
+`CMAKE_PREFIX_PATH=/absolute/runtime-install`; use a Linux build directory and
+omit the Visual Studio generator/architecture. `licensecc_device_bound` and
+`licensecc_feature_sessions` have the same commands as their Windows executables.
+The native owner selects the TPM2 provider and private user directories; there
+is no application-supplied key-storage override. See
+[Linux requirements](../../doc/api/device_identity.rst).

@@ -6,6 +6,7 @@ import { createPublicKey, verify } from "node:crypto";
 import worker from "../../dist/app.js";
 import { boundRandomId, boundSecretHash } from "../../src/device/bound_enrollment.mjs";
 import { expireBoundRecovery, purgeExpiredBoundLeases } from "../../src/device/bound_cleanup.mjs";
+import { limitBoundRequest, limitBoundVerified } from "../../src/device/bound_rate.mjs";
 import { retireBoundBinding } from "../../src/device/bound_retire.mjs";
 import { encodeBase64url, deviceOperationBody, deviceProofSigningInput, decodeDeviceLeaseEnvelope, deviceLeaseSigningInput } from "@licensecc/licensing-domain/lease/device_protocol";
 import { sha256Hex, normalizeDeviceSignature, importBoundDeviceKey } from "../../src/device/bound_crypto.mjs";
@@ -346,7 +347,7 @@ test("HTTP current denial is not hidden by a competing successful operation",asy
 test("HTTP rate infrastructure errors never reach issuance or expose exceptions",async t=>{
   const f=fixture(t),d=await enrollment(f),request=await signed(f,d,"exchange");
   f.env.VERIFY_RATE_LIMITER={async limit(){throw new Error("private binding details");}};
-  const response=await f.call("/v2/device-authorizations/exchange",request);
+  const response=await f.call("/v2/device-authorizations",{});
   assert.equal(response.status,503); assert.equal(response.body.code,"temporarily_unavailable");
   assert.equal(JSON.stringify(response.body).includes("private"),false);
   delete f.env.VERIFY_RATE_LIMITER;
@@ -360,10 +361,10 @@ test("HTTP global denial cannot grow per-client rows for rotating source identit
   const f=fixture(t);
   f.sql.exec("INSERT INTO rate_limit_counters VALUES('device-v2-global','global',960,1000,1080,1000)");
   for(let i=0;i<25;i++) assert.equal((await f.call("/v2/device-authorizations","malformed",{"cf-connecting-ip":`2001:db8::${i}`})).status,429);
-  assert.equal(f.sql.prepare("SELECT count(*) n FROM rate_limit_counters WHERE namespace='device-v2-client'").get().n,0);
+  assert.equal(f.sql.prepare("SELECT count(*) n FROM rate_limit_counters WHERE namespace IN ('device-v2-client','device-v2-registration')").get().n,0);
   f.clock(1020);
   assert.equal((await f.call("/v2/device-authorizations","malformed")).status,400);
-  assert.equal(f.sql.prepare("SELECT count(*) n FROM rate_limit_counters WHERE namespace='device-v2-client'").get().n,1);
+  assert.equal(f.sql.prepare("SELECT count(*) n FROM rate_limit_counters WHERE namespace IN ('device-v2-client','device-v2-registration')").get().n,1);
 });
 
 test("HTTP limiter fails closed if its batch straddles the minute boundary",async t=>{
@@ -380,7 +381,7 @@ test("HTTP limiter fails closed if its batch straddles the minute boundary",asyn
     return batch(statements);
   };
   assert.equal((await f.call("/v2/device-authorizations","malformed")).status,503);
-  assert.equal(f.sql.prepare("SELECT count(*) n FROM rate_limit_counters WHERE namespace='device-v2-client'").get().n,0);
+  assert.equal(f.sql.prepare("SELECT count(*) n FROM rate_limit_counters WHERE namespace IN ('device-v2-client','device-v2-registration')").get().n,0);
   assert.equal((await f.call("/v2/device-authorizations","malformed")).status,400);
 });
 
@@ -468,4 +469,25 @@ test("two feature entitlements share a device key but keep permissions and capac
   assert.equal(exportRenewal.status,200,JSON.stringify(exportRenewal.body));
   assert.equal(decodeDeviceLeaseEnvelope(exportRenewal.body.data.lease).claims.feature,"EXPORT");
   assert.equal(f.sql.prepare("SELECT count(*) n FROM device_bound_bindings WHERE state='active'").get().n,2);
+});
+
+
+test("session traffic behind one NAT exceeds ten jobs without trusting claimed device ids", async t => {
+  const f = fixture(t);
+  const request = new Request("https://backend.test/v2/device-leases/renew", {headers:{"cf-connecting-ip":"192.0.2.20"}});
+  for (let i=0;i<100;i++) await limitBoundRequest(request, f.env, f.db);
+  assert.equal(f.sql.prepare("SELECT count(*) n FROM rate_limit_counters WHERE namespace='device-v2-device'").get().n, 0);
+  for (let i=0;i<60;i++) await limitBoundVerified(f.db, "sha256:" + "a".repeat(64), "owner");
+  await assert.rejects(limitBoundVerified(f.db, "sha256:" + "a".repeat(64), "owner"), /rate_limited/);
+  await limitBoundVerified(f.db, "sha256:" + "b".repeat(64), "other");
+  f.clock(1060);
+  await limitBoundVerified(f.db, "sha256:" + "a".repeat(64), "owner");
+});
+
+test("invalid possession proofs cannot consume verified customer budgets", async t => {
+  const f = fixture(t), d = await enrollment(f);
+  const request = await signed(f,d,"exchange");
+  request.proof.signature = "A".repeat(86);
+  assert.equal((await f.call("/v2/device-authorizations/exchange",request)).status,401);
+  assert.equal(f.sql.prepare("SELECT count(*) n FROM rate_limit_counters WHERE namespace IN ('device-v2-device','device-v2-customer')").get().n,0);
 });

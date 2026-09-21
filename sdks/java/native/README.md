@@ -8,7 +8,7 @@ and device-bound operations. The installed gate tests this fallback in a
 separate JVM as well as the current library's no-effect and malformed-input paths.
 
 The optional Java 17 JNI adapter calls the installed public
-`licensecc/device_bound.h` owner. Enrollment secrets, TPM handles, WinHTTP,
+`licensecc/device_bound.h` owner. Enrollment secrets, TPM handles, platform HTTPS,
 proofs, lease validation, current-process clocks and checkpoints stay in C++.
 It adds no Java authority ledger, caller-supplied clock or transport, software
 provider fallback, or raw lease API. Python, .NET and Java use the same native
@@ -130,3 +130,24 @@ fixture are test-only and are never installed.
 Windows CI runs this gate for the existing TPM-enabled installed package.
 Physical TPM/browser/backend, copied-checkpoint and host deployment qualification
 remain separate release requirements; this gate does not claim those results.
+
+
+## Linux build
+
+Use a 64-bit JDK 17+ and an installed Linux runtime built with
+`LCC_ENABLE_TPM2_OPENSSL=ON`. Set `JAVA_HOME` to that JDK. Install the runtime's
+OpenSSL 3/TPM2, libcurl and desktop-browser prerequisites described in
+[the native API guide](../../../doc/api/device_identity.rst).
+
+```sh
+cmake -S sdks/java/native -B build/java-device-bound-linux \
+  -DCMAKE_PREFIX_PATH=/absolute/runtime-install -DLCC_PROJECT_NAME=your_project
+cmake --build build/java-device-bound-linux
+cmake --install build/java-device-bound-linux --prefix /absolute/app/native
+```
+
+Pass `/absolute/app/native/lib/liblicensecc_device_bound_jni.so` to
+`DeviceBoundLibrary`. Linux uses the same JNI protocol and pinned-path lifetime.
+The OS dynamic loader resolves dependent libraries; protect those paths as part
+of the application installation. `LCC_TEST_DEVICE_BOUND_JNI_DLL` also accepts a
+Linux `.so` for installed adapter tests.

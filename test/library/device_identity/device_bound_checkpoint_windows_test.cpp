@@ -1,6 +1,6 @@
 #define BOOST_TEST_MODULE device_bound_checkpoint_windows_test
 #include "bound_checkpoint_directory.hpp"
-#include "bound_checkpoint_windows.hpp"
+#include "bound_checkpoint_platform.hpp"
 #include "bound_session_signer.hpp"
 #include "bound_http.hpp"
 #include <sddl.h>
@@ -85,13 +85,11 @@ BOOL WINAPI read(HANDLE file, LPVOID data, DWORD size, LPDWORD count, LPOVERLAPP
 #define GetTickCount64 fault::tick
 #define Sleep fault::sleep
 #define LockFileEx fault::lock
-#define bound_checkpoint_namespace test_checkpoint_namespace
 #define make_bound_checkpoint_storage test_checkpoint_storage
 #define make_bound_checkpoint_storage_at_root test_checkpoint_storage_at_root
 #include "bound_checkpoint_windows.cpp"
 #undef make_bound_checkpoint_storage_at_root
 #undef make_bound_checkpoint_storage
-#undef bound_checkpoint_namespace
 #undef ReadFile
 #undef LockFileEx
 #undef Sleep

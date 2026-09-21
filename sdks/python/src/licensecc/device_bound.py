@@ -1,6 +1,6 @@
-"""Typed Windows native-owner bridge; no Python lease or authorization state.
+"""Typed Windows/Linux native-owner bridge; no Python lease or authorization state.
 
-Build the matching DLL under ``sdks/python/native`` against an installed runtime.
+Build the matching native library under ``sdks/python/native`` against an installed runtime.
 Only ``authorize().code is Result.OK`` permits the next protected operation.
 Keep valuable protected work in native code when process tampering matters.
 """
@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import ctypes as ct
 import os
+import sys
 from pathlib import Path
 import re
 import threading
@@ -188,8 +189,8 @@ class DeviceBoundLibrary:
     """
 
     def __init__(self, dll_path: str | os.PathLike[str]):
-        if os.name != "nt" or ct.sizeof(ct.c_void_p) != 8:
-            raise OSError("The device-bound Python bridge requires 64-bit Windows")
+        if (os.name != "nt" and not sys.platform.startswith("linux")) or ct.sizeof(ct.c_void_p) != 8:
+            raise OSError("The device-bound Python bridge requires 64-bit Windows or Linux")
         path = Path(dll_path)
         if not path.is_absolute():
             raise ValueError("An absolute application-owned DLL path is required")
@@ -198,7 +199,9 @@ class DeviceBoundLibrary:
             raise ValueError("The DLL path must name a file")
         # LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32.
         # Do not inherit cwd, PATH or process-added DLL directories.
-        self._api = abi.NativeApi(ct.CDLL(str(path), winmode=0x00000100 | 0x00000800))
+        library = (ct.CDLL(str(path), winmode=0x00000100 | 0x00000800)
+                   if os.name == "nt" else ct.CDLL(str(path), mode=os.RTLD_LOCAL | os.RTLD_NOW))
+        self._api = abi.NativeApi(library)
 
     def open_enrollment(self, configuration: Configuration) -> tuple[DeviceBoundClient | None, Outcome]:
         """Explicitly allow key creation when native storage proves no prior state."""

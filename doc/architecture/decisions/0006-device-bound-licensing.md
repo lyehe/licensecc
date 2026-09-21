@@ -1,8 +1,8 @@
 # ADR 0006: Device-bound licensing authority and persistent slots
 
 - Status: Accepted for staged implementation; public v2 endpoints and a reviewed
-  browser consent flow exist. The public Windows owner and installed consumer
-  build exist; their live TPM/browser/backend journey remains a release gate.
+  browser consent flow exist. Public Windows and Linux owners and installed
+  consumers exist; each live TPM/browser/backend journey remains a release gate.
 - Date: 2026-09-13
 - Decision owners: licensing backend, native runtime, portal and release maintainers.
 
@@ -29,8 +29,8 @@ one slot of that entitlement. The backend owns these mutations. Portal sessions
 authorize browser consent through a named internal service binding; a public
 customer-id header is never an ownership assertion.
 
-The first native delivery uses a Windows user-scoped, application-specific TPM
-key and system-browser enrollment. The server verifies key possession. Provider
+The native desktop flow uses a user-scoped, application-specific Windows TPM
+or Linux TPM2/OpenSSL key and system-browser enrollment. The server verifies key possession. Provider
 metadata alone never establishes hardware attestation. Any hardware-only policy
 needs a separately reviewed attestation verifier and trust lifecycle.
 

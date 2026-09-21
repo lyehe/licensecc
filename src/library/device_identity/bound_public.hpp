@@ -2,7 +2,7 @@
 #define LICENSECC_BOUND_PUBLIC_HPP_
 #include <licensecc/device_bound.h>
 #include "bound_enrollment.hpp"
-#include "bound_checkpoint_windows.hpp"
+#include "bound_checkpoint_platform.hpp"
 #include "bound_browser.hpp"
 
 namespace license {

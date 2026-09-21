@@ -28,6 +28,7 @@ struct EnrollmentComparisonInput {
 	std::string redirect_uri;
 	std::string state;
 	std::string code_challenge;
+	std::string requested_feature;	// Empty only for legacy comparison vectors.
 };
 struct BoundExchangeInput {
 	std::string attempt_handle, code, code_verifier, redirect_uri, operation_id;
@@ -86,10 +87,9 @@ LCC_DEVICE_RESULT sign_bound_proof_v2(LccDeviceIdentity*, const BoundLocalContex
 // key_id must come from the local provider, never the server response.
 // On failure outputs remain unchanged. No signing or browser launch occurs.
 bool bound_proof_input_v2(const BoundProofInput&, const std::string& key_id, std::vector<std::uint8_t>& out) noexcept;
-bool enrollment_comparison_input_v1(const EnrollmentComparisonInput&, const std::string& key_id,
-									std::vector<std::uint8_t>& out) noexcept;
-bool enrollment_comparison_code_v1(const EnrollmentComparisonInput&, const std::string& key_id,
-								   std::string& out) noexcept;
+bool enrollment_comparison_input(const EnrollmentComparisonInput&, const std::string& key_id,
+								 std::vector<std::uint8_t>& out) noexcept;
+bool enrollment_comparison_code(const EnrollmentComparisonInput&, const std::string& key_id, std::string& out) noexcept;
 
 }  // namespace device_identity
 }  // namespace license

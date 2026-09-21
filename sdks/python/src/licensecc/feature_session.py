@@ -64,7 +64,7 @@ class _Owner:
 
 
 class FeatureSessionLibrary:
-    """Load the same application-owned absolute Windows x64 bridge DLL.
+    """Load the same application-owned absolute 64-bit Windows/Linux bridge library.
 
     An older DLL raises NotImplementedError here; old DeviceBoundLibrary APIs
     remain available. Calls block and belong on an application worker thread.

@@ -4,8 +4,8 @@ Feature work sessions
 Use a feature work session when each new job must obtain fresh permission from
 the licensing Worker. This is an additional native API in
 ``licensecc/feature_session.h``. Existing device-bound enrollment and renewal
-APIs retain their behavior. The initial supported public platform is Windows
-with the existing user-scoped TPM provider.
+APIs retain their behavior. Windows uses the user-scoped TPM provider; Linux
+uses the TPM2/OpenSSL provider. Both expose the same C API and SDK adapters.
 
 One session authorizes one immutable feature, such as ``BATCH_RUN`` or ``EXPORT``.
 Feature IDs contain 1–15 ASCII letters, digits, underscores, dots, colons or
@@ -15,10 +15,10 @@ Enrollment and starting work
 ----------------------------
 
 First enroll each feature with the existing :doc:`device_identity` browser
-flow. The app must show its expected feature and the user must select the
-matching entitlement in the portal. Registration currently selects from a
-project's entitlements; approving a different feature cannot authorize the
-requested feature and may leave a server binding needing explicit review.
+flow. The app shows its expected feature and includes it in registration.
+The portal lists only matching entitlements; approval cannot change the requested
+feature. The comparison code binds the feature as well as the app, key and callback.
+Older clients that omit the feature retain their project-wide selection behavior.
 One approval does not enroll all features.
 
 Features in the same application/project reuse the device key, but have separate
@@ -109,3 +109,14 @@ Generated C reference
 
 .. doxygengroup:: featuresession
    :content-only:
+
+Session traffic limits
+----------------------
+
+Protected endpoints keep a global 1,000-request/minute ceiling. Registration is
+limited to 20 requests/minute per source IP; challenge and issuance traffic share
+a separate 600-request/minute IP ceiling so machines behind one NAT can start
+short jobs. After proof and current-authority validation, issuance and recovery
+share limits of 60 requests/minute per device key and 240 per customer. A job
+normally uses two HTTP requests. These limits do not change lease lifetimes or
+the existing conservative retry interval.

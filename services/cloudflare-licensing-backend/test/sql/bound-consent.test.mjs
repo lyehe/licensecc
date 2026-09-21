@@ -8,7 +8,7 @@ import { openBoundApproval } from "../../src/device/bound_approval_crypto.mjs";
 import { ERASE_EXPIRED_BOUND_APPROVALS_SQL, purgeExpiredBoundApprovals } from "../../src/device/bound_cleanup.mjs";
 import { CONSENT_PAGE_SQL } from "../../src/device/bound_consent_page.mjs";
 
-async function fixture(t) {
+async function fixture(t, requestedFeature = null) {
   const sql=new DatabaseSync(":memory:");t.after(()=>sql.close());let now=1000,before=()=>{};
   sql.function("unixepoch",()=>BigInt(now));sql.exec("PRAGMA foreign_keys=ON");
   sql.exec(readFileSync(new URL("../../schema.sql",import.meta.url),"utf8"));
@@ -16,7 +16,7 @@ async function fixture(t) {
   sql.exec(`INSERT INTO customers(id,name,created_at,updated_at) VALUES('owner','Owner',1000,1000),('other','Other',1000,1000);
     INSERT INTO entitlements(project,feature,license_fingerprint,customer_id,status,enforcement_mode,created_at,updated_at)
     VALUES('APP','DEFAULT','${fingerprint}','owner','active','device_bound_v1',1000,1000);`);
-  sql.prepare("INSERT INTO device_bound_authorizations(handle_hash,client_id,project,key_id,public_key_spki,device_label,redirect_uri,client_state,pkce_challenge,created_at,expires_at) VALUES(?,'desktop','APP',?,'pinned-spki','Workstation','http://127.0.0.1:45678/callback',?,?,1000,1300)").run(hash,`sha256:${"b".repeat(64)}`,"A".repeat(43),"A".repeat(43));
+  sql.prepare("INSERT INTO device_bound_authorizations(handle_hash,client_id,project,key_id,public_key_spki,device_label,redirect_uri,client_state,pkce_challenge,requested_feature,created_at,expires_at) VALUES(?,'desktop','APP',?,'pinned-spki','Workstation','http://127.0.0.1:45678/callback',?,?,?,1000,1300)").run(hash,`sha256:${"b".repeat(64)}`,"A".repeat(43),"A".repeat(43),requestedFeature);
   class Statement {constructor(query,params=[]){this.query=query;this.params=params;}bind(...params){return new Statement(this.query,params);}async first(){before(this.query);return sql.prepare(this.query).get(...this.params)??null;}async all(){before(this.query);return {results:sql.prepare(this.query).all(...this.params)};}}
   const db={prepare:query=>new Statement(query),async batch(statements){
     sql.exec("BEGIN");try{const results=statements.map(s=>{before(s.query);return sql.prepare(s.query).all(...s.params);});sql.exec("COMMIT");return results;}
@@ -302,4 +302,19 @@ test("lost approval response recovers the committed callback without code or rev
   await assert.rejects(approveBoundAuthorization(f.db,"owner",{...f.input,expected_attempt_revision:1},f.config,f.ring),/idempotency_conflict/);
   const changedId=Buffer.from(JSON.stringify(["APP","OTHER","a".repeat(64)])).toString("base64url");
   await assert.rejects(approveBoundAuthorization(f.db,"owner",{...f.input,entitlement_id:changedId},f.config,f.ring),/idempotency_conflict/);
+});
+
+
+test("requested feature constrains consent, approval, recovery and immutable intent", async t => {
+  const f = await fixture(t, "DEFAULT");
+  f.sql.exec(`INSERT INTO entitlements(project,feature,license_fingerprint,customer_id,status,enforcement_mode,created_at,updated_at)
+    VALUES('APP','EXPORT','${"c".repeat(64)}','owner','active','device_bound_v1',1000,1000)`);
+  const page = await inspectBoundAuthorization(f.db, "owner", f.input.attempt_handle, f.config);
+  assert.deepEqual(page.entitlements.map(row => row.feature), ["DEFAULT"]);
+  const otherId = Buffer.from(JSON.stringify(["APP", "EXPORT", "c".repeat(64)])).toString("base64url");
+  await assert.rejects(approveBoundAuthorization(f.db,"owner",{...f.input,entitlement_id:otherId},f.config,f.ring), /access_denied/);
+  assert.throws(() => f.sql.exec("UPDATE device_bound_authorizations SET requested_feature='EXPORT'"), /authorization_intent_immutable/);
+  const approved = await approveBoundAuthorization(f.db,"owner",f.input,f.config,f.ring);
+  assert.deepEqual(await approveBoundAuthorization(f.db,"owner",f.input,f.config,f.ring), approved);
+  await assert.rejects(approveBoundAuthorization(f.db,"owner",{...f.input,entitlement_id:otherId},f.config,f.ring), /access_denied/);
 });

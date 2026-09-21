@@ -17,6 +17,7 @@ enum class BoundWireKind {
 };
 struct BoundAuthorizationInput {
 	std::string client_id, project, public_key_spki, device_label, redirect_uri, state, code_challenge;
+	std::string requested_feature;
 };
 struct BoundWireResponse {
 	BoundWireKind kind = BoundWireKind::request_rejected;

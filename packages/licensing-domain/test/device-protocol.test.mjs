@@ -107,3 +107,16 @@ test("proof signs full request intent and rejects unsupported operations", () =>
   assert.throws(() => deviceProofSigningInput({...input, path: "/v1/renew"}));
   assert.throws(() => deviceProofSigningInput({...input, expires_at: -1}));
 });
+
+
+test("feature-specific comparison matches independent bytes and cannot silently downgrade", () => {
+  const vector = JSON.parse(readFileSync(new URL("../../../test/vectors/device_bound/v1/enrollment_comparison_feature.json", import.meta.url), "utf8"));
+  const bytes = deviceEnrollmentComparisonInput(vector.input);
+  assert.equal(Buffer.from(bytes).toString("hex"), vector.input_hex);
+  assert.equal(formatDeviceEnrollmentComparison(createHash("sha256").update(bytes).digest()), vector.comparison_code);
+  const legacy = {...vector.input}; delete legacy.requested_feature;
+  assert.notDeepEqual(deviceEnrollmentComparisonInput(legacy), bytes);
+  assert.notDeepEqual(deviceEnrollmentComparisonInput({...vector.input,requested_feature:"BATCH_RUN"}), bytes);
+  for (const value of [null,"",123,"TOO_LONG_FEATURE_NAME"])
+    assert.throws(() => deviceEnrollmentComparisonInput({...vector.input,requested_feature:value}));
+});

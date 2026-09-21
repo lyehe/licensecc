@@ -1,10 +1,24 @@
 #ifndef LICENSECC_BOUND_LOOPBACK_FIXTURE_HPP_
 #define LICENSECC_BOUND_LOOPBACK_FIXTURE_HPP_
+#ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <windows.h>
+#else
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <unistd.h>
+#include <chrono>
+using SOCKET = int;
+constexpr int INVALID_SOCKET = -1;
+inline int closesocket(int fd) { return close(fd); }
+inline unsigned long long GetTickCount64() {
+	return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch())
+		.count();
+}
+#endif
 #include "bound_loopback.hpp"
 #include <boost/test/unit_test.hpp>
 using namespace license::device_identity;
@@ -12,8 +26,12 @@ namespace {
 struct LocalSocket {
 	SOCKET value = INVALID_SOCKET;
 	explicit LocalSocket(int family) {
+#ifdef _WIN32
 		value =
 			WSASocketW(family, SOCK_STREAM, IPPROTO_TCP, nullptr, 0, WSA_FLAG_OVERLAPPED | WSA_FLAG_NO_HANDLE_INHERIT);
+#else
+		value = socket(family, SOCK_STREAM | SOCK_CLOEXEC, IPPROTO_TCP);
+#endif
 		BOOST_REQUIRE(value != INVALID_SOCKET);
 	}
 	~LocalSocket() {
@@ -43,7 +61,11 @@ void connect_local(LocalSocket& socket, const std::string& uri, bool ipv6) {
 	BOOST_REQUIRE_EQUAL(
 		connect(socket.value, reinterpret_cast<sockaddr*>(&address), ipv6 ? sizeof(sockaddr_in6) : sizeof(sockaddr_in)),
 		0);
+#ifdef _WIN32
 	DWORD timeout = 2000;
+#else
+	timeval timeout{2, 0};
+#endif
 	BOOST_REQUIRE_EQUAL(
 		setsockopt(socket.value, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&timeout), sizeof(timeout)), 0);
 }

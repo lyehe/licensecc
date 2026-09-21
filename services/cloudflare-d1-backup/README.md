@@ -277,7 +277,7 @@ cannot prove the safety of restoring a snapshot taken before an operation existe
 the protected-client cutover/restore procedure must address that rollback window.
 
 After the migration suffix is applied, the drill compares the normalized
-SQLite DDL signature for all 49 tables, 74 named indexes, and 50 triggers
+SQLite DDL signature for all 49 tables, 74 named indexes, and 53 triggers
 against the canonical generated `cloudflare-licensing-backend/schema.sql`
 signature. Evidence emits only SHA-256 signatures and object/count metadata,
 not DDL or row values. High-churn/swept delivery, meter, nonce, session, and

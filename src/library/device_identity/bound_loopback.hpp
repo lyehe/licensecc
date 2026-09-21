@@ -5,7 +5,7 @@
 namespace license {
 namespace device_identity {
 enum class BoundLoopbackStatus { waiting, rejected, received, expired, closed, busy, failed };
-// Internal Windows transport, not a public callback-authority API. Open before
+// Internal desktop transport, not a public callback-authority API. Open before
 // registration; poll feeds only strict HTTP callbacks to the enrollment owner.
 // Destruction requires callers to have stopped using this object.
 class BoundLoopbackListener {

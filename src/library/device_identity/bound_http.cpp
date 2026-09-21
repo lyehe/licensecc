@@ -52,7 +52,7 @@ bool parse_bound_http_origin(const std::string& value, BoundHttpOrigin& out) noe
 		return false;
 	}
 }
-#ifndef _WIN32
+#if !defined(_WIN32) && (!defined(__linux__) || !LCC_ENABLE_LINUX_DESKTOP)
 std::unique_ptr<BoundHttpTransport> make_bound_http_transport(const std::string&) noexcept { return nullptr; }
 #endif
 }  // namespace device_identity

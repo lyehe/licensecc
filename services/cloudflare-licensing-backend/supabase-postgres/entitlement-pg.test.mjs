@@ -120,6 +120,19 @@ function registerPgcrypto(db) {
 
 // Load schema.pg.sql, working around pg-mem's partial DDL coverage (caveats #2/#3).
 function loadSchema(db) {
+  db.public.registerFunction({
+    name: "length", args: [DataType.text], returns: DataType.integer,
+    implementation: (value) => Array.from(value).length,
+  });
+  // pg-mem has no PostgreSQL regex operator. Preserve the new ASCII feature
+  // constraint with an equivalent implementation for this bounded pattern.
+  db.public.registerOperator({
+    operator: "!~", left: DataType.text, right: DataType.text, returns: DataType.bool,
+    implementation: (value, pattern) => {
+      assert.equal(pattern, "[^A-Za-z0-9_.:-]");
+      return !/[^A-Za-z0-9_.:-]/u.test(value);
+    },
+  });
   let sql = readFileSync(schemaPath, "utf8");
   // The schema's own `CREATE EXTENSION IF NOT EXISTS pgcrypto;` is satisfied by our shim above;
   // strip the line so a duplicate CREATE EXTENSION does not error on pg-mem.

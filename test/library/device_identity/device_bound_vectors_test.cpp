@@ -98,13 +98,13 @@ BOOST_AUTO_TEST_CASE(comparison_matches_independent_python_bytes_digest_and_disp
 	const auto input = comparison(fields);
 	const auto key_id = fields.get<std::string>("key_id");
 	std::vector<std::uint8_t> bytes;
-	BOOST_REQUIRE(enrollment_comparison_input_v1(input, key_id, bytes));
+	BOOST_REQUIRE(enrollment_comparison_input(input, key_id, bytes));
 	BOOST_CHECK_EQUAL(lowercase_hex(bytes.data(), bytes.size()), value.get<std::string>("input_hex"));
 	P256Digest digest;
 	BOOST_REQUIRE(sha256(bytes.data(), bytes.size(), digest));
 	BOOST_CHECK_EQUAL(lowercase_hex(digest.data(), digest.size()), value.get<std::string>("sha256_hex"));
 	std::string code;
-	BOOST_REQUIRE(enrollment_comparison_code_v1(input, key_id, code));
+	BOOST_REQUIRE(enrollment_comparison_code(input, key_id, code));
 	BOOST_CHECK_EQUAL(code, value.get<std::string>("comparison_code"));
 	for (auto field : {&EnrollmentComparisonInput::attempt_handle, &EnrollmentComparisonInput::state,
 					   &EnrollmentComparisonInput::code_challenge, &EnrollmentComparisonInput::client_id,
@@ -112,11 +112,11 @@ BOOST_AUTO_TEST_CASE(comparison_matches_independent_python_bytes_digest_and_disp
 		auto changed = input;
 		(changed.*field)[0] = (changed.*field)[0] == 'A' ? 'B' : 'A';
 		std::string other;
-		BOOST_REQUIRE(enrollment_comparison_code_v1(changed, key_id, other));
+		BOOST_REQUIRE(enrollment_comparison_code(changed, key_id, other));
 		BOOST_CHECK(other != code);
 	}
 	std::string other;
-	BOOST_REQUIRE(enrollment_comparison_code_v1(input, "sha256:" + std::string(64, 'b'), other));
+	BOOST_REQUIRE(enrollment_comparison_code(input, "sha256:" + std::string(64, 'b'), other));
 	BOOST_CHECK(other != code);
 	for (const std::string bad :
 		 {std::string("\xc0\xaf", 2), std::string("\xed\xa0\x80", 3), std::string("\xe0\x80\xaf", 3),
@@ -125,13 +125,33 @@ BOOST_AUTO_TEST_CASE(comparison_matches_independent_python_bytes_digest_and_disp
 		auto changed = input;
 		changed.redirect_uri = bad;
 		other = "unchanged";
-		BOOST_CHECK(!enrollment_comparison_code_v1(changed, key_id, other));
+		BOOST_CHECK(!enrollment_comparison_code(changed, key_id, other));
 		BOOST_CHECK_EQUAL(other, "unchanged");
 	}
 	auto changed = input;
 	changed.redirect_uri.clear();
 	for (int i = 0; i < 512; ++i) changed.redirect_uri += "\xc3\xa9";
-	BOOST_REQUIRE(enrollment_comparison_code_v1(changed, key_id, other));
+	BOOST_REQUIRE(enrollment_comparison_code(changed, key_id, other));
 	changed.redirect_uri += "x";
-	BOOST_CHECK(!enrollment_comparison_code_v1(changed, key_id, other));
+	BOOST_CHECK(!enrollment_comparison_code(changed, key_id, other));
+}
+
+BOOST_AUTO_TEST_CASE(feature_intent_matches_independent_comparison_vector) {
+	const auto value = fixture("enrollment_comparison_feature.json");
+	const auto fields = value.get_child("input");
+	auto input = comparison(fields);
+	input.requested_feature = fields.get<std::string>("requested_feature");
+	const auto key = fields.get<std::string>("key_id");
+	std::vector<std::uint8_t> bytes;
+	BOOST_REQUIRE(enrollment_comparison_input(input, key, bytes));
+	BOOST_CHECK_EQUAL(lowercase_hex(bytes.data(), bytes.size()), value.get<std::string>("input_hex"));
+	std::string code;
+	BOOST_REQUIRE(enrollment_comparison_code(input, key, code));
+	BOOST_CHECK_EQUAL(code, value.get<std::string>("comparison_code"));
+	input.requested_feature = "BATCH_RUN";
+	std::string changed;
+	BOOST_REQUIRE(enrollment_comparison_code(input, key, changed));
+	BOOST_CHECK_NE(code, changed);
+	input.requested_feature = "feature too long";
+	BOOST_CHECK(!enrollment_comparison_code(input, key, changed));
 }

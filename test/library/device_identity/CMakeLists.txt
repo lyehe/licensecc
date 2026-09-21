@@ -17,8 +17,12 @@ if(WIN32)
     list(APPEND _lcc_device_identity_tests device_bound_http_windows_test device_bound_browser_windows_test device_bound_checkpoint_windows_test)
 endif()
 
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND LCC_ENABLE_LINUX_DESKTOP)
+    list(APPEND _lcc_device_identity_tests device_bound_linux_test)
+endif()
+
 if(LCC_BUILD_DEVICE_IDENTITY_TEST_PROVIDER)
-    if(WIN32)
+    if(WIN32 OR (CMAKE_SYSTEM_NAME STREQUAL "Linux" AND LCC_ENABLE_LINUX_DESKTOP))
         list(APPEND _lcc_device_identity_tests device_bound_desktop_test device_bound_public_windows_test
             feature_session_test feature_session_failures_test feature_session_storage_test)
     endif()

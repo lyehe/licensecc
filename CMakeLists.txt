@@ -160,6 +160,7 @@ option(LCC_BUILD_FUZZERS
 option(LCC_ENABLE_DEVICE_IDENTITY "Build the portable device-identity ABI and proof core." OFF)
 option(LCC_ENABLE_WINDOWS_TPM "Build the Windows Platform KSP device-key provider." OFF)
 option(LCC_ENABLE_TPM2_OPENSSL "Build the OpenSSL TPM2 device-key provider." OFF)
+option(LCC_ENABLE_LINUX_DESKTOP "Build Linux protected enrollment and feature-session platform adapters." ON)
 option(LCC_BUILD_DEVICE_IDENTITY_TEST_PROVIDER "Build the process-local software device-key test provider." OFF)
 option(LCC_BUILD_TPM2_OPENSSL_CAPABILITY_TEST
 	"Build the standalone OpenSSL tpm2-provider exact-digest capability test." OFF)
@@ -214,6 +215,10 @@ if(LCC_ENABLE_WINDOWS_TPM OR LCC_ENABLE_TPM2_OPENSSL OR LCC_BUILD_DEVICE_IDENTIT
 	set(LCC_ENABLE_DEVICE_IDENTITY ON CACHE BOOL
 		"Build the portable device-identity ABI and proof core." FORCE)
 endif()
+if(LCC_ENABLE_DEVICE_IDENTITY AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+endif()
+
 if(LCC_BUILD_DEVICE_IDENTITY_TEST_PROVIDER AND NOT BUILD_TESTING)
 	message(FATAL_ERROR
 		"LCC_BUILD_DEVICE_IDENTITY_TEST_PROVIDER=ON requires BUILD_TESTING=ON; the software provider is test-only")

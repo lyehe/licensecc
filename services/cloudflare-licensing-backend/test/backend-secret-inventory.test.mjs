@@ -85,8 +85,8 @@ test("inventory validator invokes one bounded JSON name-only Wrangler command", 
     });
     assert.equal(result.ok, true);
     assert.equal(result.evidence.verdict, "pass");
-    assert.equal(result.evidence.required_secret_count, 9);
-    assert.equal(result.evidence.discovered_secret_count, 10);
+    assert.equal(result.evidence.required_secret_count, 11);
+    assert.equal(result.evidence.discovered_secret_count, 12);
     assert.deepEqual(result.evidence.missing_required_secret_names, []);
     assert.deepEqual(calls, [{
       command: process.platform === "win32" ? "npx.cmd" : "npx",

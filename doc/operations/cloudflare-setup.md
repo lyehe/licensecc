@@ -347,3 +347,39 @@ To validate edits to this guide, run `npm run test:docs-accuracy` and
 `npm run check:docs` from the repository root; normal commit validation also
 requires `npm run check:pr`. These checks validate documentation and source
 contracts, not a fresh Cloudflare account or remote production readiness.
+
+
+## Protected-device readiness
+
+A secret-name inventory is not an end-to-end readiness verdict. The backend
+inventory now requires `BOUND_LEASE_SIGNING_PRIVATE_KEY_PKCS8_PEM` and
+`BOUND_APPROVAL_ENCRYPTION_KEYS` in addition to the legacy secrets. It reports
+`secret_names_only`; it cannot read or prove deployed secret values.
+
+Before deploying protected licensing, validate the prepared JSON Worker config
+and the local secret-input JSON (both remain untracked):
+
+```sh
+npm run validate:protected-config --workspace @licensecc/cloudflare-licensing-backend -- \
+  --config=/absolute/private/backend.json --secrets=/absolute/private/backend-secrets.json
+```
+
+The command validates `BOUND_DEVICE_CONFIG`, the dedicated RSA public/private
+signer pairing, and the approval encryption ring. Output contains only safe
+check results and explicitly says live issuance/renewal were not run. This
+command currently accepts JSON configuration, not TOML or JSONC.
+
+Apply migration 0041 before deploying this backend. It preserves older pending
+attempts with no requested feature and makes new feature intent immutable.
+Deploy the backend before releasing the new native clients; older backends
+correctly reject the new field. No audit-event deletion policy changes.
+
+For release qualification, use a temporary protected entitlement and the real
+native example: enroll the configured feature, compare/approve the browser
+code, activate, authorize protected work, close the process, resume and renew,
+then start/authorize a feature session. Record exact deployed Worker versions,
+public signer id, platform/runtime build and results without tokens or private
+keys. Both activation and post-restart renewal must pass. Configuration checks,
+legacy lease smoke tests and simulator tests do not substitute for this live
+qualification. Run it separately on each supported platform before claiming
+that deployment/platform ready.

@@ -404,6 +404,7 @@ const DETERMINISTIC_VECTOR_SUFFIXES = Object.freeze([
 ]);
 const REVIEWED_JSON_VECTOR_FIXTURES = new Set([
   "test/vectors/device_bound/v1/enrollment_comparison.json",
+  "test/vectors/device_bound/v1/enrollment_comparison_feature.json",
   "test/vectors/device_bound/v1/exchange.json",
   "test/vectors/device_bound/v1/exchange_wire.json",
   "test/vectors/device_bound/v1/protocol.json",
