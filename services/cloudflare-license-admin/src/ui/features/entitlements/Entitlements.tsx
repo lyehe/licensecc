@@ -1,4 +1,4 @@
-import React, { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { FormEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import type { EntitlementDeviceRecord, EntitlementRecord, Policy } from "../../../shared/api";
 import { ENTITLEMENT_BATCH_MAX_IDS } from "../../../shared/api";
@@ -146,6 +146,7 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
     rememberFilters("entitlements", { ...filter });
   }, [active, filter, navigationIntent, rememberFilters, scopedGrant]);
 
+  useLayoutEffect(() => setSelectedIds(new Set()), [filterGeneration]);
   useEffect(() => {
     setSelectedIds((previous) => {
       const present = new Set(entitlements.map((item) => item.id));
@@ -153,7 +154,6 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
       return next.size === previous.size ? previous : next;
     });
   }, [entitlements]);
-
   async function submitCreate(event: FormEvent): Promise<void> {
     event.preventDefault();
     if (form.policy_id !== "" && (!activePoliciesFence.canLoadMore() || !activePolicies.some((policy) => policy.id === form.policy_id))) {

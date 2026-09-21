@@ -8,6 +8,7 @@ deployment.
 .. toctree::
    :maxdepth: 2
 
+   cloudflare-setup
    production-readiness
    database-backends
    observability

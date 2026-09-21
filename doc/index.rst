@@ -32,6 +32,9 @@ Choose a starting point
    * - Diagnose a customer machine
      - :ref:`support-with-lccinspector`
      - ``lccinspector`` reports identifiers and checks an explicit license.
+   * - Set up Cloudflare hosting
+     - :doc:`operations/cloudflare-setup`
+     - Workers, shared D1, admin Access, customer sign-in and backups are configured.
    * - Operate the hosted platform
      - :doc:`operations/production-readiness`
      - Required resources, controls, and evidence are known before rollout.
