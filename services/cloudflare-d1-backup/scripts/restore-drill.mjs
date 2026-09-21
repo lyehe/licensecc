@@ -608,8 +608,11 @@ function restoredSchemaIdentity(database, config, mode, label) {
   return validateSchemaObjectRows(d1Json(database, config, mode, schemaObjectSql(), label));
 }
 
-function tableCounts(database, config, mode, tables, label) {
-  return countMapFromRows(d1Json(database, config, mode, countSql(tables), label));
+function tableCounts(database, config, mode, tables, label, query = d1Json) {
+  // Remote D1 rejects large compound SELECTs. Count each table independently;
+  // the scratch snapshot is immutable during fidelity validation.
+  return countMapFromRows(tables.flatMap((table) =>
+    query(database, config, mode, countSql([table]), label)));
 }
 
 function canonicalMigrationNames(migrationsDirectory = DEFAULT_BACKEND_MIGRATIONS_DIR) {
@@ -1370,6 +1373,7 @@ export {
   compareCounts,
   countMapFromRows,
   countSql,
+  tableCounts,
   entitlementSemanticsFromRows,
   entitlementSemanticsSql,
   liveSourceCountObservation,
