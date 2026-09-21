@@ -9,7 +9,7 @@ namespace device_identity {
 // Storage decisions only; no outcome grants protected-operation authority.
 enum class BoundCheckpointDecision {
 	replace,
-	unchanged,
+	unchanged,  // Equivalent signed resume policy; tokens need not be byte-identical.
 	stale,
 	conflict,
 	invalid_candidate,
