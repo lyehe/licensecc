@@ -2,14 +2,14 @@ import type { AdminTab } from "./types";
 
 export const tabs: ReadonlyArray<{ id: AdminTab; label: string }> = [
   { id: "overview", label: "Overview" },
-  { id: "entitlements", label: "Entitlements" },
+  { id: "entitlements", label: "License access" },
   { id: "policies", label: "Policies" },
-  { id: "plans", label: "Plans" },
+  { id: "plans", label: "Plans & features" },
   { id: "webhooks", label: "Webhooks" },
   { id: "events", label: "Events" },
   { id: "customers", label: "Customers" },
-  { id: "licenses", label: "Licenses" },
-  { id: "fulfillment", label: "Fulfillment" },
+  { id: "licenses", label: "Issued licenses" },
+  { id: "fulfillment", label: "Order activity" },
   { id: "reports", label: "Reports" },
 ];
 

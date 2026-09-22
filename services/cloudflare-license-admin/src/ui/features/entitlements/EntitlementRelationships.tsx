@@ -38,7 +38,7 @@ function RelationshipLookup({ kind, value, onChange, scope = "", required = fals
     <div className="filterBar"><label>Search {kind}s<input value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); setSearch(query); } }} /></label><button type="button" onClick={() => { setSearch(query); setRevision((previous) => previous + 1); }}>Find {kind}s</button></div>
     <ReadNotice {...currentRead} hasData={visible.length > 0} label={`${kind} options`} onRetry={() => setRevision((previous) => previous + 1)} />
     <label>{label} ({required ? "required" : "optional"})<select required={required} value={value} disabled={!ready} onChange={(event) => onChange(event.target.value)}><option value="">No {kind}</option>{value !== "" && !visible.some((item) => item.id === value) && <option value={value}>Current ID: {value}</option>}{visible.map((item) => <option key={item.id} value={item.id}>{item.name || item.email || item.label || item.project || item.id}{(item.name || item.email || item.label || item.project) ? ` · ${item.id}` : ""}</option>)}</select></label>
-    {value !== "" && <p className="muted">Selected {kind} ID: <code>{value}</code></p>}
+
     {ready && visible.length === 0 && <p className="muted">No {kind}s match. Try another search or enter the full ID below.</p>}
     <details><summary>Enter {kind} ID manually</summary><p className="muted">Use this when lookup cannot resolve the {kind}. Enter the complete identifier.</p><label>{label} ID<input name={`${kind}_id`} maxLength={128} value={value} onChange={(event) => onChange(event.target.value)} /></label></details>
   </section>;

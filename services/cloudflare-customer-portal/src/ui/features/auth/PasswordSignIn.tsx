@@ -3,8 +3,8 @@ import { api } from "../../shared/api";
 
 import { passwordMessage } from "./passwordMessages";
 
-export function PasswordSignIn({ onSignedIn }: { onSignedIn(): Promise<boolean> }): React.ReactElement {
-  const [register, setRegister] = useState(false);
+export function PasswordSignIn({ onSignedIn, mode, onModeChange }: { onSignedIn(): Promise<boolean>; mode: "login" | "register"; onModeChange(mode: "login" | "register"): void }): React.ReactElement {
+  const register = mode === "register";
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
@@ -30,7 +30,7 @@ export function PasswordSignIn({ onSignedIn }: { onSignedIn(): Promise<boolean> 
       {register && <p id="passwordHelp">15–128 characters. New accounts have no licenses; your email is not verified.</p>}
       {message && <p role="alert">{message}</p>}
       <button className="primary" disabled={busy} type="submit">{busy ? "Please wait…" : register ? "Create account" : "Sign in"}</button>
-      <button disabled={busy} type="button" onClick={() => { setRegister(!register); setPassword(""); setMessage(""); }}>{register ? "Already have an account? Sign in" : "Create an account"}</button>
+      <button disabled={busy} type="button" onClick={() => { onModeChange(register ? "login" : "register"); setPassword(""); setMessage(""); }}>{register ? "Already have an account? Sign in" : "Create an account"}</button>
     </form>
     <details><summary>Forgot your password?</summary><p>Sign in with a connected Google or GitHub account, then change your password in Account. Otherwise, contact your administrator for recovery.</p></details>
   </section>;

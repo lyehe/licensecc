@@ -100,17 +100,19 @@ unverified. Password login must be enabled in the portal configuration.
 ## Customer interface
 
 The portal uses the shared charcoal visual style and a locally bundled IBM Plex
-Sans font. Apps groups licenses by project; each app page retains separate
-license capacity, validity, activation downloads and recorded usage. Devices shows
-registered device IDs with app filtering and a separate browser-managed seat
-section. Account shows available sign-in methods and sign-out; password editing and technical account details expand on demand.
+Sans font. Apps groups licenses by project. Each app has one License access
+list with capacity, validity and mode-specific activation actions; Activity
+expands separately. Devices distinguishes protected app connections, legacy
+registrations and browser sessions. Browser sessions stays open while a local
+seat or pending release needs attention; Renew seat sends the existing heartbeat.
+Account contains sign-in methods and expandable password/account details.
+Sign out stays in the shell and does not release app devices or seats.
 
 Google and GitHub support sign-in and registration when their OAuth credentials
 are configured. Existing customers can connect a provider from Account after
 signing in through their existing method. Email-code login remains available
-when email delivery is configured. Native pairing, friendly node names,
-last-contact timestamps and cross-browser seat inventory are not enabled. Configured
-capacity is not presented as available capacity. The portal's browser-managed
+when email delivery is configured. Protected application enrollment uses the
+Connect approval flow. Configured capacity is not presented as available capacity. The portal's browser-managed
 seat controls do not represent native application sessions on other machines.
 
 | Goal | Start here | Side effects |

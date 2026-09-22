@@ -317,13 +317,16 @@ export function useDevicesController(options: DeviceFeatureOptions): DevicesCont
 }
 
 export function DevicesFeature({ controller }: { controller: DevicesController }): React.ReactElement {
+  const hasBrowserSession=Object.keys(controller.seatSessions).length>0 || controller.pendingSeatRelease!==null;
+  const [browserSessionsOpen,setBrowserSessionsOpen]=useState(hasBrowserSession);
+  useEffect(()=>{if(hasBrowserSession)setBrowserSessionsOpen(true);},[hasBrowserSession]);
   const floatingEntitlements = controller.entitlements.filter((item) => item.license_mode === "floating");
   return (
     <div>
       {controller.devices.length>0 && <DeviceRegistrations devices={controller.devices} busy={controller.busy} releaseDevice={controller.releaseDevice} />}
       {floatingEntitlements.length > 0 && (
-        <div className="seatGrid">
-          <div className="seatHeading"><h2>Browser-managed seats</h2><p>These controls manage seats created in this browser. They do not list or control native app sessions on other machines.</p></div>
+        <details className="browserSessions" open={hasBrowserSession || browserSessionsOpen} onToggle={event=>{if(hasBrowserSession && !event.currentTarget.open)event.currentTarget.open=true;else setBrowserSessionsOpen(event.currentTarget.open);}}><summary>Browser sessions</summary><div className="seatGrid">
+          <div className="seatHeading"><p>These controls manage seats created in this browser. They do not list or control native app sessions on other machines.</p></div>
           {floatingEntitlements.map((item, index) => (
             <div
               className="seatCard"
@@ -342,12 +345,12 @@ export function DevicesFeature({ controller }: { controller: DevicesController }
                   disabled={controller.busy || item.status !== "active" || controller.seatSessions[item.id] !== undefined}
                   onClick={() => void controller.seatAction(item, "checkout")}
                 >Start seat</button>
-                <button disabled={controller.busy || item.status !== "active" || controller.seatSessions[item.id] === undefined} onClick={() => void controller.seatAction(item, "heartbeat")}>Refresh</button>
+                <button disabled={controller.busy || item.status !== "active" || controller.seatSessions[item.id] === undefined} onClick={() => void controller.seatAction(item, "heartbeat")}>Renew seat</button>
                 <button disabled={controller.busy || controller.seatSessions[item.id] === undefined} onClick={() => controller.requestSeatRelease(item)}>Release</button>
               </div>
             </div>
           ))}
-        </div>
+        </div></details>
       )}
     </div>
   );

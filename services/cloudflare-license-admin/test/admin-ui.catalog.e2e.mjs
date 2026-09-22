@@ -19,14 +19,15 @@ async function openProjectionTask(page) {
   const backToPlans = page.getByRole("button", { name: "Back to plans", exact: true });
   if (await backToPlans.isVisible()) await backToPlans.click();
   await openCatalogView(page, "Plans");
-  await page.getByRole("button", { name: "Prepare plan application", exact: true }).click();
+  await page.getByRole("button", { name: "Apply plan", exact: true }).click();
 }
 
 test("admin UI makes catalog-import Apply a modal, preview-bound, single-submit consequence", async ({ page }) => {
   const api = makeAdminApiFixture();
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
-  await page.getByRole("link", { name: "Plans", exact: true }).click();
+  if (await page.getByRole("button", { name: "Configuration", exact: true }).getAttribute("aria-expanded") === "false") await page.getByRole("button", { name: "Configuration", exact: true }).click();
+  await page.getByRole("link", { name: "Plans & features", exact: true }).click();
 
   await page.getByRole("navigation", { name: "Catalog views" }).getByRole("link", { name: "Import", exact: true }).click();
   const form = page.getByRole("form", { name: "Catalog import" });
@@ -94,7 +95,8 @@ test("admin UI reconciles an unknown catalog-import Apply with the original prev
   const api = makeAdminApiFixture();
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
-  await page.getByRole("link", { name: "Plans", exact: true }).click();
+  if (await page.getByRole("button", { name: "Configuration", exact: true }).getAttribute("aria-expanded") === "false") await page.getByRole("button", { name: "Configuration", exact: true }).click();
+  await page.getByRole("link", { name: "Plans & features", exact: true }).click();
 
   await page.getByRole("navigation", { name: "Catalog views" }).getByRole("link", { name: "Import", exact: true }).click();
   const form = page.getByRole("form", { name: "Catalog import" });
@@ -134,7 +136,8 @@ test("admin UI replays a retained catalog-import Apply after a tab round-trip wi
   const api = makeAdminApiFixture();
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
-  await page.getByRole("link", { name: "Plans", exact: true }).click();
+  if (await page.getByRole("button", { name: "Configuration", exact: true }).getAttribute("aria-expanded") === "false") await page.getByRole("button", { name: "Configuration", exact: true }).click();
+  await page.getByRole("link", { name: "Plans & features", exact: true }).click();
 
   await page.getByRole("navigation", { name: "Catalog views" }).getByRole("link", { name: "Import", exact: true }).click();
   const form = page.getByRole("form", { name: "Catalog import" });
@@ -163,10 +166,11 @@ test("admin UI replays a retained catalog-import Apply after a tab round-trip wi
   // replay is still required to settle the retained server mutation, but may
   // not reclaim focus when the operator comes back to this pane.
   const reportsTab = page.getByRole("link", { name: "Reports", exact: true });
+  if (await page.getByRole("button", { name: "Activity", exact: true }).getAttribute("aria-expanded") === "false") await page.getByRole("button", { name: "Activity", exact: true }).click();
   await reportsTab.focus();
   await expect(reportsTab).toBeFocused();
   await page.keyboard.press("Enter");
-  const plansTab = page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Plans", exact: true });
+  const plansTab = page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Plans & features", exact: true });
   await plansTab.focus();
   await expect(plansTab).toBeFocused();
   await page.keyboard.press("Enter");
@@ -206,7 +210,8 @@ test("admin UI retains a substituted initial catalog-import Apply response for e
   }));
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
-  await page.getByRole("link", { name: "Plans", exact: true }).click();
+  if (await page.getByRole("button", { name: "Configuration", exact: true }).getAttribute("aria-expanded") === "false") await page.getByRole("button", { name: "Configuration", exact: true }).click();
+  await page.getByRole("link", { name: "Plans & features", exact: true }).click();
 
   await page.getByRole("navigation", { name: "Catalog views" }).getByRole("link", { name: "Import", exact: true }).click();
   const form = page.getByRole("form", { name: "Catalog import" });
@@ -236,7 +241,8 @@ test("admin UI retains a substituted replayed catalog-import response until an e
   const api = makeAdminApiFixture();
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
-  await page.getByRole("link", { name: "Plans", exact: true }).click();
+  if (await page.getByRole("button", { name: "Configuration", exact: true }).getAttribute("aria-expanded") === "false") await page.getByRole("button", { name: "Configuration", exact: true }).click();
+  await page.getByRole("link", { name: "Plans & features", exact: true }).click();
 
   await page.getByRole("navigation", { name: "Catalog views" }).getByRole("link", { name: "Import", exact: true }).click();
   const form = page.getByRole("form", { name: "Catalog import" });
@@ -280,7 +286,8 @@ test("admin UI surfaces catalog-import capability failures exactly and recovers 
   const api = makeAdminApiFixture();
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
-  await page.getByRole("link", { name: "Plans", exact: true }).click();
+  if (await page.getByRole("button", { name: "Configuration", exact: true }).getAttribute("aria-expanded") === "false") await page.getByRole("button", { name: "Configuration", exact: true }).click();
+  await page.getByRole("link", { name: "Plans & features", exact: true }).click();
   await page.getByRole("navigation", { name: "Catalog views" }).getByRole("link", { name: "Import", exact: true }).click();
   const form = page.getByRole("form", { name: "Catalog import" });
   const manifest = JSON.stringify({
@@ -343,7 +350,8 @@ test("admin UI clears its bound preview for stale and fingerprint-conflict Apply
   const api = makeAdminApiFixture();
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
-  await page.getByRole("link", { name: "Plans" }).click();
+  if (await page.getByRole("button", { name: "Configuration", exact: true }).getAttribute("aria-expanded") === "false") await page.getByRole("button", { name: "Configuration", exact: true }).click();
+  await page.getByRole("link", { name: "Plans & features" }).click();
 
   const featureForm = await openCatalogEditor(page, "Features", "New feature", "Catalog feature");
   await featureForm.getByLabel("Feature key").fill("core");

@@ -77,16 +77,16 @@ BoundCallbackParse parse_bound_callback_http(std::string_view request, const std
 const std::string& bound_callback_http_response(bool received) {
 	static const auto build = [](bool success) {
 		const std::string body =
-			success ? "<!doctype html><meta charset=utf-8><title>Return to "
-					  "application</title><script>history.replaceState(null,'','/complete');</script><p>Approval "
-					  "received. Return to the application to finish activation.</p>"
-					: "<!doctype html><meta charset=utf-8><title>Callback not "
-					  "accepted</title><script>history.replaceState(null,'','/complete');</script><p>This callback was "
-					  "not accepted. Return to the application and try again.</p>";
+			std::string("<!doctype html><html lang=en><meta charset=utf-8><meta name=viewport content=\"width=device-width,initial-scale=1\"><title>") +
+			(success ? "Approval sent" : "Connection not completed") +
+			"</title><style>:root{color-scheme:dark;font:16px/1.5 system-ui,sans-serif;background:#0f0f0f;color:#e8e8e8}body{margin:0;padding:48px 20px}main{max-width:440px;margin:auto;padding:28px;background:#161616;border:1px solid #2a2a2a;border-radius:8px}h1{font-size:24px;margin:0 0 12px}p{color:#aaa;margin:0}</style><script>history.replaceState(null,'','/complete');</script><main><h1>" +
+			(success ? "Approval sent" : "Connection not completed") + "</h1><p>" +
+			(success ? "Return to your app to finish activation. You can close this page."
+					 : "Return to your app and start Connect again.") + "</p></main></html>";
 		return std::string(success ? "HTTP/1.1 200 OK\r\n" : "HTTP/1.1 400 Bad Request\r\n") +
 			   "Content-Type: text/html; charset=utf-8\r\nCache-Control: no-store\r\nReferrer-Policy: "
 			   "no-referrer\r\nX-Content-Type-Options: nosniff\r\n"
-			   "Content-Security-Policy: default-src 'none'; script-src "
+			   "Content-Security-Policy: default-src 'none'; style-src 'sha256-lXx7LnkxljlxX22joj9yvPcXqhFrX9ElhSXalMPnDhk='; script-src "
 			   "'sha256-Lf/N59q6KU/9GVHgg2dDcUopzg+zOYjQ/mz5Xv/OwTU='; base-uri 'none'; form-action 'none'; "
 			   "frame-ancestors 'none'\r\n"
 			   "Connection: close\r\nContent-Length: " +

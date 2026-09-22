@@ -1,3 +1,4 @@
+import { useAdminNavigation } from "../../app/navigation";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { api, apiFailureMessage, parseExactApiSuccess } from "../../shared/api";
 import { formatEpoch } from "../../shared/format";
@@ -66,6 +67,7 @@ function PagedRecords({ url, code, customerId, kind, render }: {
 }
 
 export function CustomerAccess({ customerId }: { customerId: string }): React.ReactElement {
+  const { navigate } = useAdminNavigation();
   const [project, setProject] = useState<string | null>(null);
   const [view, setView] = useState<"grants" | "nodes" | "sessions">("grants");
   const [managed, setManaged] = useState<EntitlementFilter | null>(null);
@@ -73,7 +75,7 @@ export function CustomerAccess({ customerId }: { customerId: string }): React.Re
   const url = project === null ? `${root}/apps` : `${root}/${view === "grants" ? "access" : "resources"}?${new URLSearchParams({ project, ...(view === "grants" ? {} : { kind: view }) })}`;
   if (managed) return <Entitlements key={managed.id} active navigationIntent={null} onNavigationHandled={() => undefined} scopedGrant={managed} onExit={() => setManaged(null)} />;
   return <section>
-    <h3>Apps &amp; access</h3>
+    <div className="actions"><h3>Apps &amp; access</h3><button onClick={() => navigate({ tab: "entitlements", filter: { customer_id: customerId, ...(project ? { project } : {}) } })}>Assign existing license</button></div>
     {project !== null && <><div className="actions"><button onClick={() => setProject(null)}>All apps</button><strong>{project}</strong></div>
       <nav className="sectionTabs" aria-label="App records">{(["grants", "nodes", "sessions"] as const).map(kind => <button key={kind} aria-current={view === kind ? "page" : undefined} onClick={() => setView(kind)}>{kind === "grants" ? "Access grants" : kind === "nodes" ? "Registered nodes" : "Floating sessions"}</button>)}</nav></>}
     <PagedRecords key={url} url={url} customerId={customerId} kind={project === null ? "apps" : view} code={project === null ? "customer_apps" : view === "grants" ? "entitlements_listed" : "customer_resources"} render={(rows, now) => <div className="customerAccessRecords">

@@ -75,7 +75,7 @@ export function ProtectedNodes({customer,busy,runOnce,onSessionExpired}:Props):R
     setSaved(null);setPending(null);setOpen(false);setError("");setTerminal(false);setReviewed(undefined);setUnreadableReviewed(false);void load();
   }
   return <section className="protectedNodes" aria-busy={loading}>
-    <div className="sectionHeading"><div><h2 ref={heading} tabIndex={-1}>Connected devices</h2><p>To add a device, open your app and choose Connect.</p></div><button disabled={busy||loading} onClick={()=>void load()}>Refresh devices</button></div>
+    <div className="sectionHeading"><div><h2 ref={heading} tabIndex={-1}>Connected devices</h2></div><button disabled={busy||loading} onClick={()=>void load()}>Refresh devices</button></div>
     {message && <p role="status" className="readNotice">{message}</p>}
     {signInNeeded && <button disabled={busy} onClick={()=>void onSessionExpired()}>Check sign-in</button>}
     {saved==="invalid"?<div role="alert" className="readNotice"><p>A saved disconnect request cannot be read. Review current devices before clearing it.</p>{unreadableReviewed?<button disabled={busy} onClick={discard}>Clear unreadable request</button>:<button disabled={busy||loading} onClick={()=>void review()}>Review current devices</button>}</div>:saved && <div className="readNotice"><p>A disconnect request for {saved.label} needs confirmation.</p><button disabled={busy} onClick={()=>{setPending(saved);setOpen(true);}}>Review disconnect request</button></div>}

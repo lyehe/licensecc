@@ -103,7 +103,7 @@ export function App(): React.ReactElement {
         <nav aria-label="Main navigation">
           {(["apps", "nodes", "account"] as const).map((page) => <a key={page} ref={location.page === page ? activeTabButtonRef : undefined} href={`#/${page}`} aria-current={location.page === page ? "page" : undefined}>{page === "nodes" ? "Devices" : page[0].toUpperCase() + page.slice(1)}</a>)}
         </nav>
-        <button disabled={busy} onClick={() => void logout()}>Sign out</button>
+        <div className="signOutControl"><button disabled={busy} onClick={() => void logout()}>Sign out</button>{location.page==="account" && <p>Your apps and devices stay connected.</p>}</div>
         </div>
       </header>
       <div id="content" className="workspaceContent" tabIndex={-1}>
@@ -115,7 +115,7 @@ export function App(): React.ReactElement {
           )}
         </div>
         {location.page === "nodes" && <><div className="pageHeading"><div><h1>Devices</h1><p>Manage the devices using your licenses.</p></div></div><ProtectedNodes key={auth.customerId} customer={auth.customerId??""} busy={busy} runOnce={runOnce} onSessionExpired={auth.retrySession} /></>}
-        {location.page === "account" ? <AccountFeature customerId={auth.customerId} busy={busy} logout={logout} /> : readState !== "ready" ? <section className="emptyState"><h2>{location.page==="nodes"?"Registered machines unavailable":readState === "loading" ? "Loading your account…" : "Account data unavailable"}</h2><p>{readState === "loading" ? "Fetching your licenses and devices." : "We could not refresh your account. Retry to see current access."}</p>{readState === "error" && <button disabled={busy} onClick={() => void refreshPortalData()}>Retry</button>}</section> : <>
+        {location.page === "account" ? <AccountFeature customerId={auth.customerId} /> : readState !== "ready" ? <section className="emptyState"><h2>{location.page==="nodes"?"Registered machines unavailable":readState === "loading" ? "Loading your account…" : "Account data unavailable"}</h2><p>{readState === "loading" ? "Fetching your licenses and devices." : "We could not refresh your account. Retry to see current access."}</p>{readState === "error" && <button disabled={busy} onClick={() => void refreshPortalData()}>Retry</button>}</section> : <>
           {location.page === "apps" && <AppsFeature entitlements={entitlements} usage={usage} usageAvailable={usageAvailable} retry={refreshPortalData} downloads={downloads} busy={busy || stale} project={location.project} />}
           {location.page === "nodes" && <DevicesFeature controller={deviceController} />}
         </>}

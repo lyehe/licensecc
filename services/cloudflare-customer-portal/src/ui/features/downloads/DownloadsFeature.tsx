@@ -8,8 +8,6 @@ import {
   downloadPath,
   canDownloadLicense,
   licenseDisplayStatus,
-  formatWindow,
-  NO_DOWNLOADS_EMPTY_COPY,
 } from "../../portalWorkflow";
 import { localMessage, resultMessage } from "../../shared/api";
 import { useLicenseClock } from "../../shared/useLicenseClock";
@@ -79,41 +77,12 @@ export function useLicenseDownloads({ runOnce, setMessage }: DownloadOptions): L
   return { deviceKeys, setDeviceKey, download, clear };
 }
 
-export function DownloadsFeature({ busy, downloads, entitlements }: {
-  busy: boolean;
-  downloads: LicenseDownloads;
-  entitlements: EntitlementRow[];
-}): React.ReactElement {
-  const now = useLicenseClock();
-  const downloadable = entitlements.filter(canDownloadLicense);
-  return (
-    <section className="tablePane full">
-      <h2>Download licenses</h2>
-      <p className="muted">{ACTIVATION_DOWNLOAD_DISCLOSURE}</p>
-      <p className="muted">{DEVICE_KEY_HELP_COPY}</p>
-      <table>
-        <thead><tr><th>App</th><th>Feature</th><th>Status</th><th>Valid</th><th>License</th></tr></thead>
-        <tbody>
-          {downloadable.map((item, index) => (
-            <tr key={`dl/${item.id}/${index}`}>
-              <td data-label="App">{item.project}</td>
-              <td data-label="Feature">{item.feature}</td>
-              <td data-label="Status"><span className={`status ${licenseDisplayStatus(item, now)}`}>{licenseDisplayStatus(item, now).replace("_", " ")}</span></td>
-              <td data-label="Valid">{formatWindow(item.valid_from, item.valid_until)}</td>
-              <td data-label="License"><div className="downloadActions">
-                <input
-                  aria-label={`Device key for ${item.project} ${item.feature}`}
-                  placeholder="device key id"
-                  value={downloads.deviceKeys[item.id] ?? ""}
-                  onChange={(event) => downloads.setDeviceKey(item.id, event.target.value)}
-                />
-                <button disabled={busy || licenseDisplayStatus(item, now) !== "enabled" || (downloads.deviceKeys[item.id] ?? "").trim() === ""} onClick={() => void downloads.download(item)}>{ACTIVATION_DOWNLOAD_ACTION_LABEL}</button>
-              </div></td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      {downloadable.length === 0 && <p className="muted">{NO_DOWNLOADS_EMPTY_COPY}</p>}
-    </section>
-  );
+export function LicenseDownloadAction({item,downloads,busy}:{item:EntitlementRow;downloads:LicenseDownloads;busy:boolean}):React.ReactElement {
+  const now=useLicenseClock();
+  return <details className="licenseDownload"><summary>Activate and download</summary>
+    <p>{ACTIVATION_DOWNLOAD_DISCLOSURE}</p>
+    <label>Device key<input aria-label={`Device key for ${item.project} ${item.feature}`} placeholder="Device key ID" value={downloads.deviceKeys[item.id]??""} onChange={event=>downloads.setDeviceKey(item.id,event.target.value)} /></label>
+    <p>{DEVICE_KEY_HELP_COPY}</p>
+    <button disabled={busy || licenseDisplayStatus(item,now)!=="enabled" || (downloads.deviceKeys[item.id]??"").trim()===""} onClick={()=>void downloads.download(item)}>{ACTIVATION_DOWNLOAD_ACTION_LABEL}</button>
+  </details>;
 }

@@ -272,7 +272,7 @@ button.danger:hover:not(:disabled) {
 }
 
 .rangeSelector button {
-  min-height: 28px;
+  min-height: 44px;
   padding: 4px 10px;
 }
 
@@ -519,3 +519,11 @@ button.danger:hover:not(:disabled) {
 .connectionDialog::backdrop { background: rgb(15 23 42 / 40%); }
 .connectionDialog p + p { margin-top: 12px; }
 .connectionDialog .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 20px; }
+
+.navDisclosure { width:100%; text-align:left; border:0; background:none; color:var(--muted); min-height:44px; margin-top:12px; }
+.navDisclosure::after { content:"+"; float:right; }
+.navDisclosure[aria-expanded="true"]::after { content:"−"; }
+.navGroup [hidden] { display:none; }
+.advancedSettings summary { min-height:44px; padding:12px 0; cursor:pointer; }
+
+.deliveriesPane > summary { min-height:44px; padding:12px 0; cursor:pointer; }

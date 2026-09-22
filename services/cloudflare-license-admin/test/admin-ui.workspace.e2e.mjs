@@ -81,7 +81,7 @@ test("customer app pages recover failed refreshes and manage only the selected o
   await expect(page.getByText("No records found.", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Access grants", exact: true }).click();
   await page.getByRole("button", { name: "Manage access", exact: true }).click();
-  await expect(page.getByText(/Showing the selected grant for customer/)).toContainText(customer.id);
+  await expect(page.getByText(/License access for customer/)).toContainText(customer.id);
   await expect(page.locator(".desktopRecords tbody tr")).toHaveCount(1);
   expect(page.url()).toContain(`/customers/${customer.id}`);
   await expect(page.getByRole("button", { name: "Clear filters", exact: true })).toHaveCount(0);
@@ -154,7 +154,8 @@ test("workspace navigation uses the mobile menu and desktop links", async ({ pag
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.goto("/");
   const desktopNavigation = page.getByRole("navigation", { name: "Main navigation" });
-  await expect(desktopNavigation.getByRole("link", { name: "Reports", exact: true })).toBeVisible();
+  await expect(desktopNavigation.getByRole("button", { name: "Activity", exact: true })).toHaveAttribute("aria-expanded", "false");
+  if (await page.getByRole("button", { name: "Activity", exact: true }).getAttribute("aria-expanded") === "false") await page.getByRole("button", { name: "Activity", exact: true }).click();
   await desktopNavigation.getByRole("link", { name: "Reports", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Reports", exact: true })).toBeVisible();
 });
@@ -183,7 +184,7 @@ test("entitlements open list-first without an always-visible editor", async ({ p
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.goto("/#/entitlements");
 
-  await expect(page.getByRole("heading", { name: "Entitlements", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "License access", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "New entitlement", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Create entitlement", exact: true })).toHaveCount(0);
   await expect(page.getByRole("form", { name: "Create entitlement", exact: true })).toHaveCount(0);
@@ -273,4 +274,21 @@ test("customer URLs support direct entry and history while unavailable settings 
   await expect(page.locator("[data-workspace-heading]")).toHaveText("Customers");
   await page.goForward();
   await expect(page.getByRole("heading", { name: enterpriseCustomerName, exact: true })).toBeVisible();
+});
+
+test("customer assignment replaces an untouched editor with customer and app context", async ({ page }) => {
+  await installRealisticFixture(page);
+  await page.goto("/#/entitlements");
+  await page.getByRole("button", { name: "New entitlement", exact: true }).click();
+  await page.evaluate(id => { location.hash = `/customers/${id}?section=access`; }, enterpriseCustomerId);
+  await page.getByRole("button", { name: "Assign existing license", exact: true }).click();
+  await expect(page.locator(".editorLayout form")).toHaveCount(0);
+  await page.getByRole("button", { name: "New entitlement", exact: true }).click();
+  await page.getByText("Enter customer ID manually", { exact: true }).click();
+  await expect(page.getByLabel("Customer ID", { exact: true })).toHaveValue(enterpriseCustomerId);
+  await page.getByText("Enter license ID manually", { exact: true }).click();
+  await page.getByLabel("License ID", { exact: true }).fill("lic_previous_project");
+  await page.getByLabel("Project", { exact: true }).fill("OTHER_APP");
+  await expect(page.getByLabel("License ID", { exact: true })).toHaveValue("");
+  await expect(page.getByLabel("Customer ID", { exact: true })).toHaveValue(enterpriseCustomerId);
 });

@@ -41,7 +41,8 @@ test("admin UI keeps selected catalog-plan controls unavailable after returning 
   api.seed.catalogPlan("plan_old", "OLD", "old");
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
-  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Plans", exact: true }).click();
+  if (await page.getByRole("button", { name: "Configuration", exact: true }).getAttribute("aria-expanded") === "false") await page.getByRole("button", { name: "Configuration", exact: true }).click();
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Plans & features", exact: true }).click();
   const plansPane = page.getByRole("heading", { name: "Catalog plans" }).locator("..");
   await expect(plansPane.locator(".desktopRecords").getByText("Plan old")).toBeVisible();
   await plansPane.getByRole("button", { name: "View plan", exact: true }).click();
@@ -77,7 +78,8 @@ test("admin UI rejects repeated cursors and duplicate rows from shared and custo
   api.behavior.deliveryPagination = true;
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
-  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Plans", exact: true }).click();
+  if (await page.getByRole("button", { name: "Configuration", exact: true }).getAttribute("aria-expanded") === "false") await page.getByRole("button", { name: "Configuration", exact: true }).click();
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Plans & features", exact: true }).click();
   const plansPane = page.getByRole("heading", { name: "Catalog plans" }).locator("..");
   await expect(plansPane.locator("tbody tr")).toHaveCount(1);
   api.behavior.catalogPlanRepeatCursor = true;
@@ -90,14 +92,16 @@ test("admin UI rejects repeated cursors and duplicate rows from shared and custo
   // page-one snapshot instead of expecting a second unsafe append from it.
   api.behavior.catalogPlanRepeatCursor = false;
   api.behavior.catalogPlanDuplicatePage = true;
-  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Entitlements", exact: true }).click();
-  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Plans", exact: true }).click();
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "License access", exact: true }).click();
+  if (await page.getByRole("button", { name: "Configuration", exact: true }).getAttribute("aria-expanded") === "false") await page.getByRole("button", { name: "Configuration", exact: true }).click();
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Plans & features", exact: true }).click();
   await expect(plansPane.locator("tbody tr")).toHaveCount(1);
   await plansPane.getByRole("button", { name: "Load more" }).click();
   await expect(page.getByText("invalid_api_response (duplicate_page_item)")).toBeVisible();
   await expect(plansPane.locator("tbody tr")).toHaveCount(1);
   await expect(plansPane.getByRole("button", { name: "Load more" })).toHaveCount(0);
 
+  if (await page.getByRole("button", { name: "Configuration", exact: true }).getAttribute("aria-expanded") === "false") await page.getByRole("button", { name: "Configuration", exact: true }).click();
   await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Webhooks", exact: true }).click();
   const webhookRow = page.locator(".tablePane table tbody tr").filter({ hasText: "https://hooks.example.test/pager" });
   await webhookRow.getByRole("button", { name: "Deliveries", exact: true }).click();
@@ -112,7 +116,8 @@ test("admin UI rejects repeated cursors and duplicate rows from shared and custo
   // Re-entering the feature establishes a new delivery page-one snapshot.
   api.behavior.deliveryDuplicatePage = false;
   api.behavior.deliveryRepeatCursor = true;
-  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Entitlements", exact: true }).click();
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "License access", exact: true }).click();
+  if (await page.getByRole("button", { name: "Configuration", exact: true }).getAttribute("aria-expanded") === "false") await page.getByRole("button", { name: "Configuration", exact: true }).click();
   await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Webhooks", exact: true }).click();
   await expect(deliveries.locator("tbody tr")).toHaveCount(1);
   await deliveries.getByRole("button", { name: "Load more" }).click();
@@ -131,6 +136,7 @@ test("admin UI clears a definitive pre-mutation attempt so the next ordinary ret
   });
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
+  if (await page.getByRole("button", { name: "Configuration", exact: true }).getAttribute("aria-expanded") === "false") await page.getByRole("button", { name: "Configuration", exact: true }).click();
   await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Webhooks", exact: true }).click();
   const form = await newWebhookForm(page);
   await form.getByLabel("URL").fill("https://hooks.example.test/new-key");
@@ -153,7 +159,7 @@ test("admin UI keeps a same-key replay conflict indeterminate after a post-commi
   );
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
-  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Entitlements", exact: true }).click();
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "License access", exact: true }).click();
   const createForm = await newEntitlementForm(page);
   await createForm.getByLabel("Project").fill("replay-conflict");
   await createForm.getByLabel("Feature").fill("pro");
@@ -198,7 +204,7 @@ test("admin UI reconciles release seats through the exact entitlement GET even w
   const api = makeAdminApiFixture();
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
-  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Entitlements", exact: true }).click();
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "License access", exact: true }).click();
   const createForm = await newEntitlementForm(page);
   await createForm.getByLabel("Project").fill("release-page-two");
   await createForm.getByLabel("Feature").fill("float");
@@ -226,7 +232,7 @@ test("admin UI keeps a release-seat result unknown when same-key replay evidence
   );
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
-  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Entitlements", exact: true }).click();
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "License access", exact: true }).click();
   const createForm = await newEntitlementForm(page);
   await createForm.getByLabel("Project").fill("release-evidence");
   await createForm.getByLabel("Feature").fill("float");
@@ -254,7 +260,7 @@ test("admin UI keeps an undocumented release-seat 4xx indeterminate", async ({ p
   });
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
-  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Entitlements", exact: true }).click();
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "License access", exact: true }).click();
   const createForm = await newEntitlementForm(page);
   await createForm.getByLabel("Project").fill("release-wrong-route");
   await createForm.getByLabel("Feature").fill("float");
@@ -284,6 +290,7 @@ test("admin UI clears known webhook recovery only after an additional current-co
   });
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
+  if (await page.getByRole("button", { name: "Configuration", exact: true }).getAttribute("aria-expanded") === "false") await page.getByRole("button", { name: "Configuration", exact: true }).click();
   await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Webhooks", exact: true }).click();
   const form = await newWebhookForm(page);
   await form.getByLabel("URL").fill("https://hooks.example.test/stale-refresh");
@@ -321,6 +328,7 @@ test("admin UI retains known webhook recovery after its current read becomes sta
   });
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
+  if (await page.getByRole("button", { name: "Configuration", exact: true }).getAttribute("aria-expanded") === "false") await page.getByRole("button", { name: "Configuration", exact: true }).click();
   await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Webhooks", exact: true }).click();
   const form = await newWebhookForm(page);
   await form.getByLabel("URL").fill("https://hooks.example.test/noop-refresh");
@@ -435,7 +443,8 @@ test("admin UI rejects A-to-B-to-A cursor cycles before shared or custom pagers 
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
 
-  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Plans", exact: true }).click();
+  if (await page.getByRole("button", { name: "Configuration", exact: true }).getAttribute("aria-expanded") === "false") await page.getByRole("button", { name: "Configuration", exact: true }).click();
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Plans & features", exact: true }).click();
   const plansPane = page.getByRole("heading", { name: "Catalog plans" }).locator("..");
   await expect(plansPane.locator("tbody tr")).toHaveCount(1);
   await plansPane.getByRole("button", { name: "Load more", exact: true }).click();
@@ -445,6 +454,7 @@ test("admin UI rejects A-to-B-to-A cursor cycles before shared or custom pagers 
   await expect(plansPane.locator("tbody tr")).toHaveCount(2);
   await expect(plansPane.getByRole("button", { name: "Load more", exact: true })).toHaveCount(0);
 
+  if (await page.getByRole("button", { name: "Configuration", exact: true }).getAttribute("aria-expanded") === "false") await page.getByRole("button", { name: "Configuration", exact: true }).click();
   await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Webhooks", exact: true }).click();
   const endpointRow = page.locator(".tablePane table tbody tr").filter({ hasText: "https://hooks.example.test/cycle" });
   await endpointRow.getByRole("button", { name: "Deliveries", exact: true }).click();

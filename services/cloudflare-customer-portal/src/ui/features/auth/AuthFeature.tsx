@@ -163,6 +163,7 @@ export function AuthFeature({ auth, busy, message, connecting = false }: {
 }): React.ReactElement | null {
   const { providers, failed, retry } = useProviders();
   const [emailCode, setEmailCode] = useState(false);
+  const [passwordMode,setPasswordMode]=useState<"login"|"register">("login");
   if (auth.phase === "authed") return null;
   if (auth.phase === "loading" || auth.phase === "error") {
     return (
@@ -179,14 +180,14 @@ export function AuthFeature({ auth, busy, message, connecting = false }: {
     <main className="authPane">
       <div className="authBrand brand"><span aria-hidden="true">L</span>Licensecc</div>
       <section className="authCard">
-        <h1>Sign in</h1>
+        <h1>{!emailCode && providers?.password && auth.phase === "request" && passwordMode === "register" ? "Create account" : "Sign in"}</h1>
         <p>{connecting ? "Sign in to approve this device connection." : "Sign in to manage your licenses and devices."}</p>
         <StatusLine message={message} fallback="" />
         <ProviderResult />
         {auth.phase === "request" && failed && <p>Unable to load sign-in options. <button onClick={retry}>Retry sign-in options</button></p>}
         {auth.phase === "request" && !providers && !failed && <p>Loading sign-in options…</p>}
         {auth.phase === "request" && providers && !providers.google && !providers.github && !providers.email && !providers.password && <p>Sign-in is not configured yet. Contact your administrator.</p>}
-        {auth.phase === "request" && providers?.password && !emailCode && <PasswordSignIn onSignedIn={auth.retrySession} />}
+        {auth.phase === "request" && providers?.password && !emailCode && <PasswordSignIn onSignedIn={auth.retrySession} mode={passwordMode} onModeChange={setPasswordMode} />}
         {auth.phase === "request" && providers?.email && (!providers.password || emailCode) && (
           <form onSubmit={(event) => void auth.submitRequest(event)}>
             <label>

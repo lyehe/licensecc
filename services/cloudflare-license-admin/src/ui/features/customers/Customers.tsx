@@ -373,5 +373,5 @@ export function Customers({ active, navigationIntent, onNavigationHandled }: {
 
 function DetailTable({ caption, empty, limit, headers, children }: { caption: string; empty: string; limit: string; headers: string[]; children: React.ReactNode }): React.ReactElement {
   const rows = React.Children.count(children);
-  return <section className="tableScroll" role="region" aria-label={caption} tabIndex={0}><h3>{caption}</h3><p className="muted">{rows} shown, up to {limit}. More may exist at this limit.</p>{rows === 0 ? <div className="emptyState"><p>{empty}</p></div> : <table><caption className="srOnly">{caption}</caption><thead><tr>{headers.map((header) => <th key={header}>{header}</th>)}</tr></thead><tbody>{children}</tbody></table>}</section>;
+  return <section className="tableScroll" role="region" aria-label={caption} tabIndex={0}><h3>{caption}</h3><p className="muted">{rows} shown{rows >= Number(limit) ? `. Limit ${limit}; more may exist.` : ""}</p>{rows === 0 ? <div className="emptyState"><p>{empty}</p></div> : <table><caption className="srOnly">{caption}</caption><thead><tr>{headers.map((header) => <th key={header}>{header}</th>)}</tr></thead><tbody>{children}</tbody></table>}</section>;
 }

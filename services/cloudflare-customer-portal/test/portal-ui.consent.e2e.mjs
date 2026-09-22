@@ -141,6 +141,7 @@ test("consent: sign-out clears the attempt and another account cannot reuse a sa
   expect(await page.evaluate(key => sessionStorage.getItem(key), storageKey)).toBeNull();
   await page.goto(entry);
   await expect(page.getByRole("combobox", { name: "License", exact: true })).toBeVisible();
+  await page.getByText("Account details", { exact: true }).click();
   await page.getByRole("button", { name: "Sign out", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Sign in", exact: true })).toBeVisible();
   expect(await page.evaluate(key => sessionStorage.getItem(key), storageKey)).toBeNull();
@@ -203,6 +204,7 @@ test("consent: pending sign-out disables consent mutations", async ({page})=>{
   }});
   await page.goto(entry);
   await page.getByRole("combobox",{name:"License",exact:true}).selectOption("license-pro");
+  await page.getByText("Account details", { exact: true }).click();
   await page.getByRole("button",{name:"Sign out",exact:true}).click();
   await started;
   try {
@@ -319,6 +321,7 @@ test("consent: a failed sign-out remains visible and preserves the request",asyn
   await fixture(page,{logout:route=>route.fulfill({status:503,json:{ok:false,code:"temporarily_unavailable"}})});
   await page.goto(entry);
   await expect(page.getByRole("combobox",{name:"License",exact:true})).toBeVisible();
+  await page.getByText("Account details", { exact: true }).click();
   await page.getByRole("button",{name:"Sign out",exact:true}).click();
   await expect(page.locator(".statusline.error")).toBeVisible();
   await expect(page.getByRole("button",{name:"Sign out",exact:true})).toBeEnabled();
@@ -364,6 +367,7 @@ test("consent: a new link refreshes account identity after a no-reload account c
   await expect(page.getByRole("alert")).toContainText("Your account changed");
   await page.goto(`/connect#attempt_handle=${"Q".repeat(42)}A`);
   await expect(page.getByRole("combobox",{name:"License",exact:true})).toBeVisible();
+  await page.getByText("Account details", {exact:true}).click();
   await expect(page.getByText("customer-b",{exact:true})).toBeVisible();
 });
 
@@ -401,7 +405,7 @@ test("consent: real encoded license references stay readable on mobile",async({p
   await expect(page.getByRole("option",{name:"2. PRO — …000000000002",exact:true})).toHaveCount(1);
   await page.getByRole("combobox",{name:"License",exact:true}).selectOption(ids[1]);
   await expect(page.getByText(fingerprints[1],{exact:true})).toBeHidden();
-  await page.locator(".consentSummary summary").click();
+  await page.getByText("License details", {exact:true}).click();
   await expect(page.getByText(fingerprints[1],{exact:true})).toBeVisible();
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
 });

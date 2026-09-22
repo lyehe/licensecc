@@ -22,7 +22,7 @@ test("admin UI renders Workstream F charts, expiring panel, validity indicators,
   await page.goto("/");
 
   // Seed one entitlement so the health badge + force-release verb have a row to act on.
-  await page.getByRole("link", { name: "Entitlements", exact: true }).click();
+  await page.getByRole("link", { name: "License access", exact: true }).click();
   if (!await page.locator(".editorLayout form").isVisible()) await page.getByRole("button", { name: "New entitlement", exact: true }).click();
   const createForm = page.locator(".editorLayout form");
   await createForm.getByLabel("Feature").fill("float");
@@ -47,6 +47,7 @@ test("admin UI renders Workstream F charts, expiring panel, validity indicators,
   await expect(page.getByText(/released 2 seats/)).toBeVisible();
 
   // REPORTS TAB: the inline-SVG charts render (aria-labelled), plus the expiring-soon panel rows.
+  if (await page.getByRole("button", { name: "Activity", exact: true }).getAttribute("aria-expanded") === "false") await page.getByRole("button", { name: "Activity", exact: true }).click();
   await page.getByRole("link", { name: "Reports" }).click();
   await expect.poll(() => api.requests.timeseries.length).toBeGreaterThan(0);
   await expect(page.getByRole("img", { name: /Checkouts .* versus denials/ })).toBeVisible();
@@ -68,10 +69,11 @@ test("admin UI renders Workstream F charts, expiring panel, validity indicators,
 
   // Deep-link from an expiring row into the Entitlements tab filtered to that project/feature.
   await page.locator(".expiringPanel tbody tr").first().getByRole("button", { name: "View" }).click();
-  await expect(page.locator(".sidebar nav a[aria-current=page]")).toHaveText("Entitlements");
+  await expect(page.locator(".sidebar nav a[aria-current=page]")).toHaveText("License access");
 
   // FULFILLMENT TAB: the fulfillment-events bar spark renders (aria-labelled).
-  await page.getByRole("link", { name: "Fulfillment" }).click();
+  if (await page.getByRole("button", { name: "Activity", exact: true }).getAttribute("aria-expanded") === "false") await page.getByRole("button", { name: "Activity", exact: true }).click();
+  await page.getByRole("link", { name: "Order activity" }).click();
   await page.getByText("Activity summary and trends", { exact: true }).click();
   await expect(page.getByRole("img", { name: /Fulfillment .* events/ })).toBeVisible();
   await expect(page.locator(".fulfillmentSpark .rangeSelector button.active")).toHaveText("last 30d");
@@ -107,7 +109,7 @@ test("admin UI keeps destructive operator actions consequence-led, reason-gated,
   }
 
   await page.goto("/");
-  await page.getByRole("link", { name: "Entitlements", exact: true }).click();
+  await page.getByRole("link", { name: "License access", exact: true }).click();
   if (!await page.locator(".editorLayout form").isVisible()) await page.getByRole("button", { name: "New entitlement", exact: true }).click();
   const createForm = page.locator(".editorLayout form");
   await createForm.getByLabel("Feature").fill("float");
@@ -136,19 +138,22 @@ test("admin UI keeps destructive operator actions consequence-led, reason-gated,
   await assertConfirmation(page.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first(), "customer-portal access");
   expect(api.requests.customerTransitions).toHaveLength(0);
 
+  if (await page.getByRole("button", { name: "Configuration", exact: true }).getAttribute("aria-expanded") === "false") await page.getByRole("button", { name: "Configuration", exact: true }).click();
   await page.getByRole("link", { name: "Policies", exact: true }).click();
   const policyRow = page.locator("tr").filter({ hasText: "Confirm policy" });
   await expect(policyRow).toBeVisible();
   await assertConfirmation(policyRow.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first(), "already-stamped entitlements are frozen and unaffected");
   expect(api.requests.policyTransitions).toHaveLength(0);
 
-  await page.getByRole("link", { name: "Plans", exact: true }).click();
+  if (await page.getByRole("button", { name: "Configuration", exact: true }).getAttribute("aria-expanded") === "false") await page.getByRole("button", { name: "Configuration", exact: true }).click();
+  await page.getByRole("link", { name: "Plans & features", exact: true }).click();
   await page.getByRole("navigation", { name: "Catalog views" }).getByRole("link", { name: "Features", exact: true }).click();
   const catalogFeatureRow = page.locator("tr").filter({ hasText: "Confirm feature" });
   await expect(catalogFeatureRow).toBeVisible();
   await assertConfirmation(catalogFeatureRow.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first(), "New plan projections skip disabled feature definitions");
   expect(api.requests.catalogFeatureTransitions).toHaveLength(0);
 
+  if (await page.getByRole("button", { name: "Configuration", exact: true }).getAttribute("aria-expanded") === "false") await page.getByRole("button", { name: "Configuration", exact: true }).click();
   await page.getByRole("link", { name: "Webhooks", exact: true }).click();
   const webhookRow = page.locator("tr").filter({ hasText: "https://hooks.example.test/confirm" });
   await expect(webhookRow).toBeVisible();
@@ -160,7 +165,7 @@ test("admin UI consequence dialogs contain focus, isolate the background, and re
   const api = makeAdminApiFixture();
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
-  await page.getByRole("link", { name: "Entitlements", exact: true }).click();
+  await page.getByRole("link", { name: "License access", exact: true }).click();
 
   const project = `project-${"long-segment-".repeat(8)}`;
   if (!await page.locator(".editorLayout form").isVisible()) await page.getByRole("button", { name: "New entitlement", exact: true }).click();
@@ -259,7 +264,7 @@ test("admin UI fallback consequence dialogs keep the background inert", async ({
   const api = makeAdminApiFixture();
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
-  await page.getByRole("link", { name: "Entitlements", exact: true }).click();
+  await page.getByRole("link", { name: "License access", exact: true }).click();
   if (!await page.locator(".editorLayout form").isVisible()) await page.getByRole("button", { name: "New entitlement", exact: true }).click();
   const createForm = page.locator(".editorLayout form");
   await createForm.getByLabel("Project").fill("fallback");
@@ -287,7 +292,7 @@ test("admin UI typed failures keep consequence dialogs open and restore focus", 
   const api = makeAdminApiFixture();
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
-  await page.getByRole("link", { name: "Entitlements", exact: true }).click();
+  await page.getByRole("link", { name: "License access", exact: true }).click();
   if (!await page.locator(".editorLayout form").isVisible()) await page.getByRole("button", { name: "New entitlement", exact: true }).click();
   const createForm = page.locator(".editorLayout form");
   await createForm.getByLabel("Project").fill("typed-failure");
@@ -375,7 +380,7 @@ test("admin UI direct re-enable replays an unknown mutation with the same key", 
   const api = makeAdminApiFixture();
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
-  await page.getByRole("link", { name: "Entitlements", exact: true }).click();
+  await page.getByRole("link", { name: "License access", exact: true }).click();
   if (!await page.locator(".editorLayout form").isVisible()) await page.getByRole("button", { name: "New entitlement", exact: true }).click();
   const createForm = page.locator(".editorLayout form");
   await createForm.getByLabel("Project").fill("direct-reenable-unknown");
@@ -417,7 +422,7 @@ test("admin UI keeps a wrong-action reason_required rejection indeterminate", as
   const api = makeAdminApiFixture();
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
-  await page.getByRole("link", { name: "Entitlements", exact: true }).click();
+  await page.getByRole("link", { name: "License access", exact: true }).click();
   if (!await page.locator(".editorLayout form").isVisible()) await page.getByRole("button", { name: "New entitlement", exact: true }).click();
   const createForm = page.locator(".editorLayout form");
   await createForm.getByLabel("Project").fill("wrong-action-reason");
@@ -454,7 +459,7 @@ test("admin UI keeps every same-key replay failure indeterminate until exact suc
   const api = makeAdminApiFixture();
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
-  await page.getByRole("link", { name: "Entitlements", exact: true }).click();
+  await page.getByRole("link", { name: "License access", exact: true }).click();
   if (!await page.locator(".editorLayout form").isVisible()) await page.getByRole("button", { name: "New entitlement", exact: true }).click();
   const createForm = page.locator(".editorLayout form");
   await createForm.getByLabel("Project").fill("replay-outcomes");
@@ -510,7 +515,7 @@ test("admin UI rejects a partial successful mutation envelope as unknown", async
   const api = makeAdminApiFixture();
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
-  await page.getByRole("link", { name: "Entitlements", exact: true }).click();
+  await page.getByRole("link", { name: "License access", exact: true }).click();
   if (!await page.locator(".editorLayout form").isVisible()) await page.getByRole("button", { name: "New entitlement", exact: true }).click();
   const createForm = page.locator(".editorLayout form");
   await createForm.getByLabel("Project").fill("partial-mutation");
@@ -548,7 +553,7 @@ test("admin UI rejects a non-2xx response carrying a successful mutation envelop
   const api = makeAdminApiFixture();
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
-  await page.getByRole("link", { name: "Entitlements", exact: true }).click();
+  await page.getByRole("link", { name: "License access", exact: true }).click();
   if (!await page.locator(".editorLayout form").isVisible()) await page.getByRole("button", { name: "New entitlement", exact: true }).click();
   const createForm = page.locator(".editorLayout form");
   await createForm.getByLabel("Project").fill("http-status");
@@ -588,7 +593,7 @@ test("admin UI treats a well-formed 5xx rejection envelope as an unknown mutatio
   const api = makeAdminApiFixture();
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
-  await page.getByRole("link", { name: "Entitlements", exact: true }).click();
+  await page.getByRole("link", { name: "License access", exact: true }).click();
   if (!await page.locator(".editorLayout form").isVisible()) await page.getByRole("button", { name: "New entitlement", exact: true }).click();
   const createForm = page.locator(".editorLayout form");
   await createForm.getByLabel("Project").fill("five-hundred-rejection");
@@ -615,7 +620,7 @@ test("admin UI rejects duplicate batch result identities as unknown", async ({ p
   const api = makeAdminApiFixture();
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
-  await page.getByRole("link", { name: "Entitlements", exact: true }).click();
+  await page.getByRole("link", { name: "License access", exact: true }).click();
 
   async function createEntitlement(feature, fingerprint) {
     if (!await page.locator(".editorLayout form").isVisible()) await page.getByRole("button", { name: "New entitlement", exact: true }).click();
@@ -656,7 +661,7 @@ test("admin UI rejects substituted batch result identities as unknown", async ({
   const api = makeAdminApiFixture();
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
-  await page.getByRole("link", { name: "Entitlements", exact: true }).click();
+  await page.getByRole("link", { name: "License access", exact: true }).click();
 
   async function createEntitlement(feature, fingerprint) {
     if (!await page.locator(".editorLayout form").isVisible()) await page.getByRole("button", { name: "New entitlement", exact: true }).click();
@@ -697,7 +702,7 @@ test("admin UI reports a known partial batch outcome when every row identity and
   const api = makeAdminApiFixture();
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
-  await page.getByRole("link", { name: "Entitlements", exact: true }).click();
+  await page.getByRole("link", { name: "License access", exact: true }).click();
 
   if (!await page.locator(".editorLayout form").isVisible()) await page.getByRole("button", { name: "New entitlement", exact: true }).click();
 
@@ -738,7 +743,7 @@ test("admin UI rejects an unknown per-row batch failure code as ambiguous", asyn
   const api = makeAdminApiFixture();
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
-  await page.getByRole("link", { name: "Entitlements", exact: true }).click();
+  await page.getByRole("link", { name: "License access", exact: true }).click();
   if (!await page.locator(".editorLayout form").isVisible()) await page.getByRole("button", { name: "New entitlement", exact: true }).click();
   const createForm = page.locator(".editorLayout form");
   for (const [feature, fingerprint] of [["batch-code-one", "c"], ["batch-code-two", "d"]]) {
@@ -772,7 +777,7 @@ test("admin UI rejects reordered batch proof rows as an unknown outcome", async 
   const api = makeAdminApiFixture();
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
-  await page.getByRole("link", { name: "Entitlements", exact: true }).click();
+  await page.getByRole("link", { name: "License access", exact: true }).click();
 
   if (!await page.locator(".editorLayout form").isVisible()) await page.getByRole("button", { name: "New entitlement", exact: true }).click();
 
@@ -813,7 +818,7 @@ test("admin UI rejects duplicate release-seat identities as unknown", async ({ p
   const api = makeAdminApiFixture();
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
-  await page.getByRole("link", { name: "Entitlements", exact: true }).click();
+  await page.getByRole("link", { name: "License access", exact: true }).click();
   if (!await page.locator(".editorLayout form").isVisible()) await page.getByRole("button", { name: "New entitlement", exact: true }).click();
   const createForm = page.locator(".editorLayout form");
   await createForm.getByLabel("Feature").fill("float");
@@ -844,7 +849,7 @@ test("admin UI rejects a device transition that proves a different entitlement",
   const api = makeAdminApiFixture();
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
-  await page.getByRole("link", { name: "Entitlements", exact: true }).click();
+  await page.getByRole("link", { name: "License access", exact: true }).click();
   if (!await page.locator(".editorLayout form").isVisible()) await page.getByRole("button", { name: "New entitlement", exact: true }).click();
   const createForm = page.locator(".editorLayout form");
   await createForm.getByLabel("Project").fill("device-evidence");
@@ -877,7 +882,7 @@ test("admin UI gates ordinary mutations while consequence recovery is pending", 
   const api = makeAdminApiFixture();
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
-  await page.getByRole("link", { name: "Entitlements", exact: true }).click();
+  await page.getByRole("link", { name: "License access", exact: true }).click();
   if (!await page.locator(".editorLayout form").isVisible()) await page.getByRole("button", { name: "New entitlement", exact: true }).click();
   const createForm = page.locator(".editorLayout form");
   await createForm.getByLabel("Project").fill("recovery-gate");
@@ -916,7 +921,7 @@ test("admin UI gates ordinary mutations through the post-success refresh", async
   const api = makeAdminApiFixture();
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
-  await page.getByRole("link", { name: "Entitlements", exact: true }).click();
+  await page.getByRole("link", { name: "License access", exact: true }).click();
   if (!await page.locator(".editorLayout form").isVisible()) await page.getByRole("button", { name: "New entitlement", exact: true }).click();
   const createForm = page.locator(".editorLayout form");
   await createForm.getByLabel("Project").fill("post-success-gate");
@@ -948,7 +953,7 @@ test("admin UI direct re-enable treats a malformed mutation response as unknown"
   const api = makeAdminApiFixture();
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
-  await page.getByRole("link", { name: "Entitlements", exact: true }).click();
+  await page.getByRole("link", { name: "License access", exact: true }).click();
   if (!await page.locator(".editorLayout form").isVisible()) await page.getByRole("button", { name: "New entitlement", exact: true }).click();
   const createForm = page.locator(".editorLayout form");
   await createForm.getByLabel("Project").fill("direct-reenable-malformed");
@@ -979,7 +984,7 @@ test("admin UI direct re-enable keeps parsed refresh recovery visible", async ({
   const api = makeAdminApiFixture();
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
-  await page.getByRole("link", { name: "Entitlements", exact: true }).click();
+  await page.getByRole("link", { name: "License access", exact: true }).click();
   if (!await page.locator(".editorLayout form").isVisible()) await page.getByRole("button", { name: "New entitlement", exact: true }).click();
   const createForm = page.locator(".editorLayout form");
   await createForm.getByLabel("Project").fill("direct-reenable-refresh");
@@ -1005,7 +1010,7 @@ test("admin UI direct re-enable keeps parsed refresh recovery visible", async ({
   await expect(page.locator(".operatorNotice")).toContainText("Action succeeded; status refresh failed");
   await refreshButton.click();
   await expect(page.locator(".operatorNotice")).toHaveCount(0);
-  await expect(row.getByRole("button", { name: "Reenable", exact: true, includeHidden: true }).first()).toBeDisabled();
+  await expect(row.getByRole("button", { name: "Reenable", exact: true, includeHidden: true })).toHaveCount(0);
   await expect(row.locator(".status")).toBeFocused();
 });
 
@@ -1013,7 +1018,7 @@ test("admin UI settles a same-key reconciliation across a stale filter context w
   const api = makeAdminApiFixture();
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
-  await page.getByRole("link", { name: "Entitlements", exact: true }).click();
+  await page.getByRole("link", { name: "License access", exact: true }).click();
   if (!await page.locator(".editorLayout form").isVisible()) await page.getByRole("button", { name: "New entitlement", exact: true }).click();
   const createForm = page.locator(".editorLayout form");
   await createForm.getByLabel("Project").fill("stale-unknown");
@@ -1055,7 +1060,7 @@ test("admin UI settles a same-key reconciliation across a stale filter context w
 
   await filter.fill("stale-unknown");
   await expect(page.locator(".tablePane table tbody tr").first()).toBeVisible();
-  await expect(page.locator(".tablePane table tbody tr").first().getByRole("button", { name: "Reenable", exact: true, includeHidden: true }).first()).toBeDisabled();
+  await expect(page.locator(".tablePane table tbody tr").first().getByRole("button", { name: "Reenable", exact: true, includeHidden: true })).toHaveCount(0);
   expect(await page.evaluate(() => document.activeElement === document.body)).toBe(false);
 });
 
@@ -1063,7 +1068,7 @@ test("admin UI settles an ABA filter switch after an exact same-key replay", asy
   const api = makeAdminApiFixture();
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
-  await page.getByRole("link", { name: "Entitlements", exact: true }).click();
+  await page.getByRole("link", { name: "License access", exact: true }).click();
   if (!await page.locator(".editorLayout form").isVisible()) await page.getByRole("button", { name: "New entitlement", exact: true }).click();
   const createForm = page.locator(".editorLayout form");
   await createForm.getByLabel("Project").fill("aba-replay");
@@ -1116,7 +1121,7 @@ test("admin UI keeps unresolved recovery exclusive without stealing focus after 
   const api = makeAdminApiFixture();
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
-  await page.getByRole("link", { name: "Entitlements", exact: true }).click();
+  await page.getByRole("link", { name: "License access", exact: true }).click();
   if (!await page.locator(".editorLayout form").isVisible()) await page.getByRole("button", { name: "New entitlement", exact: true }).click();
   const createForm = page.locator(".editorLayout form");
   await createForm.getByLabel("Project").fill("context-bound");
@@ -1163,7 +1168,7 @@ test("admin UI discards stale device recovery after filter supersession while ac
   const api = makeAdminApiFixture();
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
-  await page.getByRole("link", { name: "Entitlements", exact: true }).click();
+  await page.getByRole("link", { name: "License access", exact: true }).click();
   if (!await page.locator(".editorLayout form").isVisible()) await page.getByRole("button", { name: "New entitlement", exact: true }).click();
   const createForm = page.locator(".editorLayout form");
   for (const [project, fingerprint] of [["device-one", "9"], ["device-two", "a"]]) {

@@ -54,20 +54,22 @@ test("admin UI loads every active-policy selector page and accepts production nu
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
 
-  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Entitlements", exact: true }).click();
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "License access", exact: true }).click();
   const entitlementForm = await newEntitlementForm(page);
   const policySelect = entitlementForm.getByLabel("Policy (optional)");
   await expect(policySelect.locator("option")).toHaveCount(3);
   await expect(policySelect).toContainText("First policy");
   await expect(policySelect).toContainText("Second policy");
 
-  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Plans", exact: true }).click();
+  if (await page.getByRole("button", { name: "Configuration", exact: true }).getAttribute("aria-expanded") === "false") await page.getByRole("button", { name: "Configuration", exact: true }).click();
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Plans & features", exact: true }).click();
   await page.getByRole("button", { name: "View plan", exact: true }).click();
   await page.getByRole("button", { name: "Add feature", exact: true }).click();
-  const policyOptions = page.locator("#active-policy-ids option");
+  const policyOptions = page.getByLabel("Policy", { exact: true }).locator("option[value]:not([value=\"\"])");
   await expect(policyOptions).toHaveCount(2);
   await expect(policyOptions.nth(1)).toHaveAttribute("value", "pol_second");
 
+  if (await page.getByRole("button", { name: "Configuration", exact: true }).getAttribute("aria-expanded") === "false") await page.getByRole("button", { name: "Configuration", exact: true }).click();
   await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Webhooks", exact: true }).click();
   const endpointRow = page.locator(".tablePane table tbody tr").first();
   await endpointRow.getByRole("button", { name: "Deliveries", exact: true }).click();
@@ -77,11 +79,13 @@ test("admin UI loads every active-policy selector page and accepts production nu
   await deliveriesMore.click();
   await expect(deliveries.locator("tbody tr")).toHaveCount(2);
 
-  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Licenses", exact: true }).click();
+  if (await page.getByRole("button", { name: "Related records", exact: true }).getAttribute("aria-expanded") === "false") await page.getByRole("button", { name: "Related records", exact: true }).click();
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Issued licenses", exact: true }).click();
   await expect(page.locator(".desktopRecords tbody tr")).toContainText("lic_null");
   await expect(page.locator(".desktopRecords tbody tr")).toContainText("—");
 
-  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Fulfillment", exact: true }).click();
+  if (await page.getByRole("button", { name: "Activity", exact: true }).getAttribute("aria-expanded") === "false") await page.getByRole("button", { name: "Activity", exact: true }).click();
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Order activity", exact: true }).click();
   await expect(page.locator(".tablePane tbody tr")).toContainText("sub_string");
 });
 
@@ -102,6 +106,7 @@ test("admin UI fences duplicate and stale load-more appends for deliveries, orde
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
 
+  if (await page.getByRole("button", { name: "Configuration", exact: true }).getAttribute("aria-expanded") === "false") await page.getByRole("button", { name: "Configuration", exact: true }).click();
   await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Webhooks", exact: true }).click();
   await page.locator(".tablePane table tbody tr").first().getByRole("button", { name: "Deliveries", exact: true }).click();
   const deliveries = page.getByRole("region", { name: "Recent webhook deliveries" });
@@ -118,7 +123,8 @@ test("admin UI fences duplicate and stale load-more appends for deliveries, orde
   await expect(deliveries.locator("tbody tr")).toHaveCount(1);
   await expect(deliveries).not.toContainText("retry");
 
-  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Fulfillment", exact: true }).click();
+  if (await page.getByRole("button", { name: "Activity", exact: true }).getAttribute("aria-expanded") === "false") await page.getByRole("button", { name: "Activity", exact: true }).click();
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Order activity", exact: true }).click();
   const fulfillment = page.locator("section.tablePane.full");
   const ordersMore = fulfillment.getByRole("button", { name: "Load more", exact: true });
   await expect(fulfillment.locator("tbody tr")).toHaveCount(1);
@@ -133,6 +139,7 @@ test("admin UI fences duplicate and stale load-more appends for deliveries, orde
   await expect(fulfillment.locator("tbody tr")).toHaveCount(1);
   await expect(fulfillment).not.toContainText("evt_reject");
 
+  if (await page.getByRole("button", { name: "Activity", exact: true }).getAttribute("aria-expanded") === "false") await page.getByRole("button", { name: "Activity", exact: true }).click();
   await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Reports", exact: true }).click();
   const expiring = page.locator(".expiringPanel");
   const expiringMore = expiring.getByRole("button", { name: "Load more", exact: true });
@@ -186,7 +193,8 @@ test("admin UI retires contract-invalid null, scalar, and envelope append cursor
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
 
-  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Plans", exact: true }).click();
+  if (await page.getByRole("button", { name: "Configuration", exact: true }).getAttribute("aria-expanded") === "false") await page.getByRole("button", { name: "Configuration", exact: true }).click();
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Plans & features", exact: true }).click();
   const plansPane = page.getByRole("heading", { name: "Catalog plans" }).locator("..");
   const plansMore = plansPane.getByRole("button", { name: "Load more", exact: true });
   await expect(plansPane.locator("tbody tr")).toHaveCount(1);
@@ -194,6 +202,7 @@ test("admin UI retires contract-invalid null, scalar, and envelope append cursor
   await expect(plansPane.locator("tbody tr")).toHaveCount(1);
   await expect(plansMore).toHaveCount(0);
 
+  if (await page.getByRole("button", { name: "Configuration", exact: true }).getAttribute("aria-expanded") === "false") await page.getByRole("button", { name: "Configuration", exact: true }).click();
   await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Webhooks", exact: true }).click();
   await page.locator(".tablePane table tbody tr").filter({ hasText: endpoint.url }).getByRole("button", { name: "Deliveries", exact: true }).click();
   const deliveries = page.getByRole("region", { name: "Recent webhook deliveries" });
@@ -203,7 +212,8 @@ test("admin UI retires contract-invalid null, scalar, and envelope append cursor
   await expect(deliveries.locator("tbody tr")).toHaveCount(1);
   await expect(deliveriesMore).toHaveCount(0);
 
-  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Fulfillment", exact: true }).click();
+  if (await page.getByRole("button", { name: "Activity", exact: true }).getAttribute("aria-expanded") === "false") await page.getByRole("button", { name: "Activity", exact: true }).click();
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Order activity", exact: true }).click();
   const fulfillment = page.locator("section.tablePane.full");
   const ordersMore = fulfillment.getByRole("button", { name: "Load more", exact: true });
   await expect(fulfillment.locator("tbody tr")).toHaveCount(1);
@@ -211,6 +221,7 @@ test("admin UI retires contract-invalid null, scalar, and envelope append cursor
   await expect(fulfillment.locator("tbody tr")).toHaveCount(1);
   await expect(ordersMore).toHaveCount(0);
 
+  if (await page.getByRole("button", { name: "Activity", exact: true }).getAttribute("aria-expanded") === "false") await page.getByRole("button", { name: "Activity", exact: true }).click();
   await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Reports", exact: true }).click();
   const expiring = page.locator(".expiringPanel");
   const expiringMore = expiring.getByRole("button", { name: "Load more", exact: true });
@@ -238,7 +249,8 @@ test("admin UI keeps 5xx null and scalar append cursors retryable", async ({ pag
   api.behavior.deliveryAppendResponses.push({ status: 503, body: "upstream unavailable" });
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
-  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Plans", exact: true }).click();
+  if (await page.getByRole("button", { name: "Configuration", exact: true }).getAttribute("aria-expanded") === "false") await page.getByRole("button", { name: "Configuration", exact: true }).click();
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Plans & features", exact: true }).click();
   const plansPane = page.getByRole("heading", { name: "Catalog plans" }).locator("..");
   const plansMore = plansPane.getByRole("button", { name: "Load more", exact: true });
   await expect(plansPane.locator("tbody tr")).toHaveCount(1);
@@ -250,6 +262,7 @@ test("admin UI keeps 5xx null and scalar append cursors retryable", async ({ pag
   await expect(plansPane.locator("tbody tr")).toHaveCount(2);
   await expect(plansMore).toHaveCount(0);
 
+  if (await page.getByRole("button", { name: "Configuration", exact: true }).getAttribute("aria-expanded") === "false") await page.getByRole("button", { name: "Configuration", exact: true }).click();
   await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Webhooks", exact: true }).click();
   await page.locator(".tablePane table tbody tr").filter({ hasText: endpoint.url }).getByRole("button", { name: "Deliveries", exact: true }).click();
   const deliveries = page.getByRole("region", { name: "Recent webhook deliveries" });
@@ -267,7 +280,7 @@ test("admin UI invalidates a batch selection when its entitlement filter context
   const api = makeAdminApiFixture();
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
-  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Entitlements", exact: true }).click();
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "License access", exact: true }).click();
   const createForm = await newEntitlementForm(page);
   await createForm.getByLabel("Project").fill("selection-context");
   await createForm.getByLabel("Feature").fill("float");
@@ -309,7 +322,7 @@ test("admin UI fences ordinary device and meter reads across an ABA selection", 
   const api = makeAdminApiFixture();
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
-  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Entitlements", exact: true }).click();
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "License access", exact: true }).click();
   const createForm = await newEntitlementForm(page);
   for (const [project, fingerprint] of [["fence-device-one", "a"], ["fence-device-two", "b"]]) {
     await createForm.getByLabel("Project").fill(project);
@@ -352,6 +365,7 @@ test("admin UI fences webhook deliveries and report reads after a superseded con
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
 
+  if (await page.getByRole("button", { name: "Configuration", exact: true }).getAttribute("aria-expanded") === "false") await page.getByRole("button", { name: "Configuration", exact: true }).click();
   await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Webhooks", exact: true }).click();
   const endpointRows = page.locator(".tablePane table tbody tr");
   await expect(endpointRows).toHaveCount(2);
@@ -369,6 +383,7 @@ test("admin UI fences webhook deliveries and report reads after a superseded con
   api.behavior.deferReads.add("report");
   api.behavior.deferReads.add("timeseries");
   api.behavior.deferReads.add("expiring:30");
+  if (await page.getByRole("button", { name: "Activity", exact: true }).getAttribute("aria-expanded") === "false") await page.getByRole("button", { name: "Activity", exact: true }).click();
   await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Reports", exact: true }).click();
   await expect.poll(() => api.behavior.releaseReads.has("report")).toBe(true);
   await expect.poll(() => api.behavior.releaseReads.has("timeseries")).toBe(true);
@@ -382,6 +397,7 @@ test("admin UI fences webhook deliveries and report reads after a superseded con
   await expect(page.locator(".expiringPanel")).toContainText("pro-7");
 
   await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Overview", exact: true }).click();
+  if (await page.getByRole("button", { name: "Activity", exact: true }).getAttribute("aria-expanded") === "false") await page.getByRole("button", { name: "Activity", exact: true }).click();
   await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Reports", exact: true }).click();
   const reportTotal = page.locator(".reportsTab .reportCards > div").first().locator("strong");
   await expect(reportTotal).toHaveText("2");
@@ -398,7 +414,7 @@ test("admin UI treats accepted mutation plus aborted refresh as success with man
   const api = makeAdminApiFixture();
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
-  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Entitlements", exact: true }).click();
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "License access", exact: true }).click();
   const createForm = await newEntitlementForm(page);
   await createForm.getByLabel("Project").fill("refresh-abort");
   await createForm.getByLabel("Feature").fill("float");
@@ -434,7 +450,7 @@ test("admin UI treats malformed post-success refresh as success with manual reco
   const api = makeAdminApiFixture();
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
-  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Entitlements", exact: true }).click();
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "License access", exact: true }).click();
   const createForm = await newEntitlementForm(page);
   await createForm.getByLabel("Project").fill("refresh-malformed");
   await createForm.getByLabel("Feature").fill("float");
@@ -469,7 +485,7 @@ for (const refreshFailure of ["truncated", "wrong-enum"]) {
     const api = makeAdminApiFixture();
     await page.route("**/api/admin/**", api.route);
     await page.goto("/");
-    await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Entitlements", exact: true }).click();
+    await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "License access", exact: true }).click();
     const createForm = await newEntitlementForm(page);
     await createForm.getByLabel("Project").fill(`refresh-${refreshFailure}`);
     await createForm.getByLabel("Feature").fill("float");
@@ -524,7 +540,7 @@ test("admin UI rejects a non-2xx refresh carrying an ok response", async ({ page
   const api = makeAdminApiFixture();
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
-  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Entitlements", exact: true }).click();
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "License access", exact: true }).click();
   const createForm = await newEntitlementForm(page);
   await createForm.getByLabel("Project").fill("refresh-http-status");
   await createForm.getByLabel("Feature").fill("float");
@@ -552,7 +568,7 @@ test("admin UI keeps the success warning after a parsed refresh error and clears
   const api = makeAdminApiFixture();
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
-  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Entitlements", exact: true }).click();
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "License access", exact: true }).click();
   const createForm = await newEntitlementForm(page);
   await createForm.getByLabel("Project").fill("refresh-error");
   await createForm.getByLabel("Feature").fill("float");
@@ -593,7 +609,7 @@ test("admin UI treats missing refresh data as success with manual recovery", asy
   const api = makeAdminApiFixture();
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
-  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Entitlements", exact: true }).click();
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "License access", exact: true }).click();
   const createForm = await newEntitlementForm(page);
   await createForm.getByLabel("Project").fill("refresh-missing-data");
   await createForm.getByLabel("Feature").fill("float");
@@ -628,7 +644,7 @@ test("admin UI falls back to a stable section when a successful row disappears",
   api.behavior.dropTransitionRow = true;
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
-  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Entitlements", exact: true }).click();
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "License access", exact: true }).click();
   const createForm = await newEntitlementForm(page);
   await createForm.getByLabel("Project").fill("missing-focus-row");
   await createForm.getByLabel("Feature").fill("float");
@@ -657,6 +673,7 @@ test("admin UI discards stale create/import follow-ups after filter, selection, 
   // A form edit and a list-filter change while the POST is in flight make the
   // original webhook result stale.  It must neither reset the draft nor
   // republish the old active list after the disabled filter is current.
+  if (await page.getByRole("button", { name: "Configuration", exact: true }).getAttribute("aria-expanded") === "false") await page.getByRole("button", { name: "Configuration", exact: true }).click();
   await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Webhooks", exact: true }).click();
   const webhookForm = await newWebhookForm(page);
   await webhookForm.getByLabel("URL").fill("https://hooks.example.test/stale-create");
@@ -674,6 +691,7 @@ test("admin UI discards stale create/import follow-ups after filter, selection, 
   await expect(page.getByText(/webhook_created/)).toHaveCount(0);
 
   // The policy editor follows the same contract independently of webhooks.
+  if (await page.getByRole("button", { name: "Configuration", exact: true }).getAttribute("aria-expanded") === "false") await page.getByRole("button", { name: "Configuration", exact: true }).click();
   await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Policies", exact: true }).click();
   const policyForm = await newPolicyForm(page);
   await policyForm.getByLabel("Name").fill("stale policy");
@@ -691,7 +709,8 @@ test("admin UI discards stale create/import follow-ups after filter, selection, 
   await expect(page.locator(".tablePane table tbody tr")).toHaveCount(0);
   await expect(page.getByText(/policy_created/)).toHaveCount(0);
 
-  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Plans", exact: true }).click();
+  if (await page.getByRole("button", { name: "Configuration", exact: true }).getAttribute("aria-expanded") === "false") await page.getByRole("button", { name: "Configuration", exact: true }).click();
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Plans & features", exact: true }).click();
   const catalogViews = page.getByRole("navigation", { name: "Catalog views" });
   await catalogViews.getByRole("link", { name: "Features", exact: true }).click();
   await page.getByRole("button", { name: "New feature", exact: true }).click();
@@ -721,6 +740,7 @@ test("admin UI discards stale create/import follow-ups after filter, selection, 
   await expect.poll(() => api.requests.catalogFeatures.length).toBe(2);
   await page.getByRole("button", { name: "Back to features" }).click();
 
+  if (await page.getByRole("button", { name: "Configuration", exact: true }).getAttribute("aria-expanded") === "false") await page.getByRole("button", { name: "Configuration", exact: true }).click();
   await catalogViews.getByRole("link", { name: "Plans", exact: true }).click();
   await page.getByRole("button", { name: "New plan", exact: true }).click();
   const planForm = page.getByRole("form", { name: "Catalog plan" });
@@ -765,6 +785,7 @@ test("admin UI discards stale create/import follow-ups after filter, selection, 
   await expect(featurePane.locator("tbody tr")).toHaveCount(0);
   await featurePane.getByLabel("Feature status").selectOption("");
 
+  if (await page.getByRole("button", { name: "Configuration", exact: true }).getAttribute("aria-expanded") === "false") await page.getByRole("button", { name: "Configuration", exact: true }).click();
   await catalogViews.getByRole("link", { name: "Plans", exact: true }).click();
   const attachedPlanRow = planPane.locator("tbody tr").filter({ hasText: "attachedplan" });
   await attachedPlanRow.getByRole("button", { name: "Edit", exact: true }).click();
@@ -853,12 +874,13 @@ test("admin UI discards a stale webhook redrive follow-up after delivery-filter 
   }];
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
+  if (await page.getByRole("button", { name: "Configuration", exact: true }).getAttribute("aria-expanded") === "false") await page.getByRole("button", { name: "Configuration", exact: true }).click();
   await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Webhooks", exact: true }).click();
   await page.locator(".tablePane table tbody tr").first().getByRole("button", { name: "Deliveries", exact: true }).click();
   const deliveries = page.getByRole("region", { name: "Recent webhook deliveries" });
-  await expect(deliveries.getByRole("button", { name: "Redrive", exact: true })).toBeEnabled();
+  await expect(deliveries.getByRole("button", { name: "Retry delivery", exact: true })).toBeEnabled();
   api.behavior.deferMutations.add("webhook-redrive");
-  await deliveries.getByRole("button", { name: "Redrive", exact: true }).click();
+  await deliveries.getByRole("button", { name: "Retry delivery", exact: true }).click();
   await expect.poll(() => api.requests.webhookRedrives).toEqual([88]);
   await expect.poll(() => api.behavior.releaseMutations.has("webhook-redrive")).toBe(true);
   await page.getByLabel("Filter deliveries by status").selectOption("delivered");
@@ -883,6 +905,7 @@ test("admin UI retains an ambiguous keyed ordinary mutation and replays its immu
   );
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
+  if (await page.getByRole("button", { name: "Configuration", exact: true }).getAttribute("aria-expanded") === "false") await page.getByRole("button", { name: "Configuration", exact: true }).click();
   await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Webhooks", exact: true }).click();
   const form = await newWebhookForm(page);
   await form.getByLabel("URL").fill("https://hooks.example.test/recovered");
@@ -918,6 +941,7 @@ test("admin UI keeps an exact ordinary success in GET-only recovery after a 5xx 
   });
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
+  if (await page.getByRole("button", { name: "Configuration", exact: true }).getAttribute("aria-expanded") === "false") await page.getByRole("button", { name: "Configuration", exact: true }).click();
   await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Webhooks", exact: true }).click();
   const form = await newWebhookForm(page);
   await form.getByLabel("URL").fill("https://hooks.example.test/exact-refresh");

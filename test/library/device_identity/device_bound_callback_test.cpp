@@ -71,6 +71,12 @@ BOOST_AUTO_TEST_CASE(response_pages_have_exact_lengths_csp_hashes_and_no_query_r
 		BOOST_REQUIRE(sha256(reinterpret_cast<const std::uint8_t*>(script.data()), script.size(), digest));
 		BOOST_CHECK(response.find("'sha256-" + encode_canonical_base64(digest.data(), digest.size()) + "'") !=
 					std::string::npos);
+		const auto style_start = body.find("<style>") + 7;
+		const auto style = body.substr(style_start, body.find("</style>") - style_start);
+		BOOST_REQUIRE(sha256(reinterpret_cast<const std::uint8_t*>(style.data()), style.size(), digest));
+		BOOST_CHECK(response.find("style-src 'sha256-" + encode_canonical_base64(digest.data(), digest.size()) + "'") != std::string::npos);
+		BOOST_CHECK(body.find("name=viewport") != std::string::npos);
+		BOOST_CHECK(body.find(accepted ? "Return to your app to finish activation" : "start Connect again") != std::string::npos);
 		BOOST_CHECK(response.find("default-src 'none'") != std::string::npos);
 		BOOST_CHECK(response.find("frame-ancestors 'none'") != std::string::npos);
 		BOOST_CHECK(response.find(target) == std::string::npos);
