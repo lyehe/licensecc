@@ -10,9 +10,15 @@ export function AppsFeature({ entitlements, usage, usageAvailable, retry, downlo
   entitlements: EntitlementRow[]; usage: UsageRow[]; downloads: LicenseDownloads;
   busy: boolean; project: string | null;
 }): React.ReactElement {
-  const projects = [...new Set(entitlements.map((item) => item.project))].sort();
+  const accessByProject = new Map<string, EntitlementRow[]>();
+  for (const item of entitlements) {
+    const access = accessByProject.get(item.project) ?? [];
+    access.push(item);
+    accessByProject.set(item.project, access);
+  }
+  const projects = [...accessByProject.entries()].sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0);
   if (project !== null) {
-    const access = entitlements.filter((item) => item.project === project);
+    const access = accessByProject.get(project) ?? [];
     return <div className="appDetail">
       <a className="backLink" href="#/apps">← Back to apps</a>
       <div className="pageHeading"><div><h1>{project}</h1></div><a className="button" href="#/nodes">View devices</a></div>
@@ -25,11 +31,11 @@ export function AppsFeature({ entitlements, usage, usageAvailable, retry, downlo
   return <>
     <div className="pageHeading"><div><h1>Apps</h1></div></div>
     {projects.length === 0 ? <div className="emptyState"><h2>No apps assigned yet</h2><p>Apps appear here when a license is assigned to your account.</p></div> : <div className="appList">
-      {projects.map((name) => {
-        const access = entitlements.filter((item) => item.project === name);
+      {projects.map(([name, access]) => {
+        const featureCount = new Set(access.map((item) => item.feature)).size;
         return <article className="appRow" key={name}>
           <div className="appMark" aria-hidden="true">{name.slice(0, 1).toUpperCase()}</div>
-          <div className="appIdentity"><h2>{name}</h2><p>{access.length} {access.length === 1 ? "license" : "licenses"} · {new Set(access.map((item) => item.feature)).size} {new Set(access.map((item) => item.feature)).size === 1 ? "feature" : "features"}</p></div>
+          <div className="appIdentity"><h2>{name}</h2><p>{access.length} {access.length === 1 ? "license" : "licenses"} · {featureCount} {featureCount === 1 ? "feature" : "features"}</p></div>
 
           <a className="button" href={appLocation(name)} aria-label={`View app ${name}`}>View licenses</a>
         </article>;

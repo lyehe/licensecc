@@ -106,7 +106,7 @@ export function useDevicesController(options: DeviceFeatureOptions): DevicesCont
   function setSeatSessions(update: React.SetStateAction<Record<string, SeatSession>>): void {
     setSeatSessionsRaw((current) => {
       const next = typeof update === "function"
-        ? (update as (previous: Record<string, SeatSession>) => Record<string, SeatSession>)(current)
+        ? update(current)
         : update;
       writeStoredSeats(serializeSeatSessions(next));
       return next;
@@ -201,21 +201,19 @@ export function useDevicesController(options: DeviceFeatureOptions): DevicesCont
     seatReleaseDialogRef.current?.focus();
     let closeDialog = false;
     try {
-      try {
-        const outcome = await seatAction(pending.item, "release");
-        if (outcome.succeeded) {
-          setSeatReleaseFocusId(pending.item.id);
-          if (outcome.refreshFailed) setMessage(localMessage(FLOATING_SEAT_RELEASE_REFRESH_FAILED_CODE, false));
-        } else {
-          seatReleaseDeferredFocusRef.current = returnFocus;
-        }
-        setPendingSeatRelease(null);
-        closeDialog = true;
-      } catch {
-        setSeatReleaseError(FLOATING_SEAT_RELEASE_NETWORK_ERROR_COPY);
-        setSeatReleaseOutcomeUnknown(true);
-        seatReleaseDialogRef.current?.focus();
+      const outcome = await seatAction(pending.item, "release");
+      if (outcome.succeeded) {
+        setSeatReleaseFocusId(pending.item.id);
+        if (outcome.refreshFailed) setMessage(localMessage(FLOATING_SEAT_RELEASE_REFRESH_FAILED_CODE, false));
+      } else {
+        seatReleaseDeferredFocusRef.current = returnFocus;
       }
+      setPendingSeatRelease(null);
+      closeDialog = true;
+    } catch {
+      setSeatReleaseError(FLOATING_SEAT_RELEASE_NETWORK_ERROR_COPY);
+      setSeatReleaseOutcomeUnknown(true);
+      seatReleaseDialogRef.current?.focus();
     } finally {
       seatReleaseConfirmingRef.current = false;
       if (closeDialog) seatReleaseReturnFocusRef.current = null;

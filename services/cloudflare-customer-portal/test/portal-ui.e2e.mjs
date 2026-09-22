@@ -595,8 +595,13 @@ async function signIn(page, api) {
 test("app grouping, browser history and mobile reflow preserve the customer context", async ({ page }) => {
   const api = makePortalApiFixture();
   api.entitlements.push({ ...api.entitlements[0], id: "second_app", project: "SECOND_APP", feature: "second-feature" });
+  api.entitlements.push({ ...api.entitlements[0], id: "duplicate_feature" });
+  api.entitlements.reverse();
   await signIn(page, api);
   await expect(page.locator(".appRow")).toHaveCount(2);
+  await expect(page.locator(".appRow h2")).toHaveText(["DEFAULT", "SECOND_APP"]);
+  await expect(page.locator(".appRow").nth(0)).toContainText("3 licenses · 2 features");
+  await expect(page.locator(".appRow").nth(1)).toContainText("1 license · 1 feature");
   await page.getByRole("link", { name: "View app SECOND_APP" }).click();
   await expect(page.getByRole("heading", { name: "SECOND_APP", exact: true })).toBeVisible();
   await expect(page.getByText("solo", { exact: true })).toHaveCount(0);
