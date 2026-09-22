@@ -55,9 +55,12 @@ public:
 		owner_.reset(raw);
 		if (result != LCC_BOUND_OK) {
 			std::cerr << feature << ": ";
-			if (result == LCC_BOUND_ENROLLMENT_REQUIRED) std::cerr << "Activate this feature from your app first.";
-			else if (result == LCC_BOUND_PROVIDER_ERROR) std::cerr << "Device identity is unavailable. Check the device key and TPM before retrying activation.";
-			else std::cerr << "Unable to open licensing. Retry or contact support.";
+			if (result == LCC_BOUND_ENROLLMENT_REQUIRED)
+				std::cerr << "Activate this feature from your app first.";
+			else if (result == LCC_BOUND_PROVIDER_ERROR)
+				std::cerr << "Device identity is unavailable. Check the device key and TPM before retrying activation.";
+			else
+				std::cerr << "Unable to open licensing. Retry or contact support.";
 			std::cerr << "\nDiagnostic code: " << result << '\n';
 			return false;
 		}
