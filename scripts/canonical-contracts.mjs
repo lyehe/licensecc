@@ -235,7 +235,7 @@ function runNpmBuild(directory, repoRoot) {
       shell: false,
       stdio: "inherit",
     };
-    const npmCli = path.join(path.dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js");
+    const npmCli = process.env.npm_execpath || path.join(path.dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js");
     let retriedWithCli = false;
     let settled = false;
     const settle = (callback) => {
