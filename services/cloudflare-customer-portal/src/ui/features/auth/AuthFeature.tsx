@@ -16,11 +16,10 @@ import {
 import { api, localMessage, resultMessage, StatusLine } from "../../shared/api";
 import type { PortalMe, StatusMessage } from "../../types";
 
-import { PasswordSignIn } from "./PasswordSignIn";
+import { PasswordSignIn, type PasswordMode } from "./PasswordSignIn";
 import { ProviderButtons, ProviderResult, useProviders } from "./ProviderSignIn";
 
 export type AuthPhase = "loading" | "request" | "verify" | "authed" | "error";
-type PasswordMode = "login" | "register" | "reset";
 const PASSWORD_HEADINGS: Record<PasswordMode, string> = {
   login: "Sign in",
   register: "Create account",
@@ -64,7 +63,9 @@ export function usePortalAuth({ setMessage, runOnce }: AuthOptions): PortalAuth 
         return true;
       }
       setPhase(result.code === "unauthorized" ? "request" : "error");
-      } catch { setPhase("error"); }
+    } catch {
+      setPhase("error");
+    }
     return false;
   }, [setMessage]);
 
@@ -72,20 +73,25 @@ export function usePortalAuth({ setMessage, runOnce }: AuthOptions): PortalAuth 
     void loadMe();
   }, [loadMe]);
 
+  async function requestCode(): Promise<string | null> {
+    const normalized = normalizeEmail(email);
+    if (!isLikelyEmail(normalized)) {
+      setMessage(localMessage("invalid_email", false));
+      return null;
+    }
+    const result = await api(authRequestPath(), {
+      method: "POST",
+      body: JSON.stringify({ email: normalized }),
+    });
+    setMessage(resultMessage(result));
+    return result.ok ? normalized : null;
+  }
+
   async function submitRequest(event: React.FormEvent): Promise<void> {
     event.preventDefault();
     await runOnce(async () => {
-      const normalized = normalizeEmail(email);
-      if (!isLikelyEmail(normalized)) {
-        setMessage(localMessage("invalid_email", false));
-        return;
-      }
-      const result = await api(authRequestPath(), {
-        method: "POST",
-        body: JSON.stringify({ email: normalized }),
-      });
-      setMessage(resultMessage(result));
-      if (result.ok) {
+      const normalized = await requestCode();
+      if (normalized !== null) {
         setEmail(normalized);
         setPhase("verify");
       }
@@ -94,16 +100,7 @@ export function usePortalAuth({ setMessage, runOnce }: AuthOptions): PortalAuth 
 
   async function resendCode(): Promise<void> {
     await runOnce(async () => {
-      const normalized = normalizeEmail(email);
-      if (!isLikelyEmail(normalized)) {
-        setMessage(localMessage("invalid_email", false));
-        return;
-      }
-      const result = await api(authRequestPath(), {
-        method: "POST",
-        body: JSON.stringify({ email: normalized }),
-      });
-      setMessage(resultMessage(result));
+      await requestCode();
     });
   }
 

@@ -3,7 +3,7 @@ import { api } from "../../shared/api";
 
 import { passwordMessage } from "./passwordMessages";
 
-type PasswordMode = "login" | "register" | "reset";
+export type PasswordMode = "login" | "register" | "reset";
 const MODE_COPY: Record<Exclude<PasswordMode, "login">, string> = {
   register: "Verify your email, then choose a password. Your administrator can assign licenses after registration.",
   reset: "We’ll send a reset link to your verified email. You can also recover through a connected Google or GitHub account.",

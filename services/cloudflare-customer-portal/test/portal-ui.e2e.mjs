@@ -330,6 +330,13 @@ test("customer portal signs in with an 8-digit code and walks every screen witho
   await expect(page.getByText(/Check your email/)).toBeVisible();
   await expect.poll(() => api.requests.authRequests).toBe(1);
 
+  // Resending shares the request path but must retain the verification form and input.
+  await page.getByLabel("8-digit code").fill("1234");
+  await page.getByRole("button", { name: "Resend code", exact: true }).click();
+  await expect.poll(() => api.requests.authRequests).toBe(2);
+  await expect(page.getByLabel("8-digit code")).toHaveValue("1234");
+  await expect(page.getByRole("button", { name: "Send code", exact: true })).toHaveCount(0);
+
   // --- Login: enter the 8-digit code -> me() -> dashboard ---
   await page.getByLabel("8-digit code").fill(api.VALID_CODE);
   await page.getByRole("button", { name: "Verify" }).click();
