@@ -47,6 +47,7 @@ type WranglerBindings = Pick<Cloudflare.Env,
   | "PORTAL_GITHUB_CLIENT_ID"
   | "PORTAL_PUBLIC_ORIGIN"
   | "BACKEND_ORIGIN"
+  | "BACKEND"
   | "PORTAL_EMAIL_FROM"
   | "PORTAL_EMAIL_API_BASE"
 >;
@@ -59,6 +60,7 @@ interface RuntimeEnv {
   PORTAL_PASSWORD_ENABLED?: string;
   PORTAL_PUBLIC_ORIGIN?: string;
   BACKEND_ORIGIN?: string;
+  BACKEND?: { fetch(request: Request): Promise<Response> };
   PORTAL_OTP_PEPPERS?: string;
   PORTAL_SESSION_PEPPERS?: string;
   ACCOUNT_TOKEN_PEPPERS?: string;

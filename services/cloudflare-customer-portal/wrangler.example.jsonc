@@ -4,7 +4,8 @@
   "main": "src/worker/index.ts",
   "compatibility_date": "2026-06-24",
   "services": [
-    { "binding": "DEVICE_CONSENT", "service": "licensecc-online-verifier", "entrypoint": "DeviceConsent" }
+    { "binding": "DEVICE_CONSENT", "service": "licensecc-online-verifier", "entrypoint": "DeviceConsent" },
+    { "binding": "BACKEND", "service": "licensecc-online-verifier" }
   ],
   "observability": {
     "enabled": true,
