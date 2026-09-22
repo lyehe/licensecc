@@ -14,10 +14,17 @@ import {
   type OwnedEntitlement,
 } from "../support.js";
 
-type AnyFn = (...args: any[]) => any;
-const mintSessionToken = (tokenModule as { mintSessionToken: AnyFn }).mintSessionToken;
-const proxyBackend = (tokenModule as { proxyBackend: AnyFn }).proxyBackend;
-const portalRateLimit = (ratelimitModule as { portalRateLimit: AnyFn }).portalRateLimit;
+type MintResult = { ok: true; raw: string; code: string } | { ok: false; code: string };
+type ProxyResult =
+  | { ok: true; status: number; code?: string; data: Record<string, unknown> }
+  | { ok: false; status: number; code: string };
+type MintSessionToken = (env: Env, session: { customer_id: string }, options: Record<string, unknown>) => Promise<MintResult>;
+type BackendService = { fetch(request: Request): Promise<Response> };
+type ProxyBackend = (origin: string, path: string, token: string, body: unknown, operation: string, backend?: BackendService) => Promise<ProxyResult>;
+type PortalRateLimit = (env: Env, key: string, limit: number, windowSec: number, now: number) => Promise<{ limited: boolean; count: number }>;
+const mintSessionToken = (tokenModule as { mintSessionToken: MintSessionToken }).mintSessionToken;
+const proxyBackend = (tokenModule as { proxyBackend: ProxyBackend }).proxyBackend;
+const portalRateLimit = (ratelimitModule as { portalRateLimit: PortalRateLimit }).portalRateLimit;
 
 async function apiMe(session: { customer_id: string }, reqId: string): Promise<Response> {
   return envelope(reqId, "me", { customer_id: session.customer_id });
