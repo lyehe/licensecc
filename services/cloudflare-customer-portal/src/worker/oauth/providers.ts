@@ -17,13 +17,13 @@ export async function digest(value: string): Promise<string> {
   return btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }
 
-// All destinations are fixed provider endpoints. Never forward credentials across redirects.
+// Workerd requires manual redirects; response.ok rejects them without forwarding credentials.
 async function providerJson(url: string, init: RequestInit = {}): Promise<unknown> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 10000);
   let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
   try {
-    const response = await fetch(url, { ...init, redirect: "error", signal: controller.signal });
+    const response = await fetch(url, { ...init, redirect: "manual", signal: controller.signal });
     reader = response.body?.getReader();
     if (!response.ok || !reader) throw new Error("provider_unavailable");
     const chunks: Uint8Array[] = [];

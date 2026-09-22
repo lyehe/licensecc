@@ -13,6 +13,9 @@ test("portal static assets carry a restrictive browser security policy", () => {
   assert.match(headers, /Content-Security-Policy: default-src 'none'/u);
   assert.match(headers, /script-src 'self'/u);
   assert.match(headers, /frame-ancestors 'none'/u);
+  // Native OAuth form POSTs must retain Origin, and Chromium checks their redirects against form-action.
+  assert.match(headers, /Referrer-Policy: same-origin/u);
+  assert.match(headers, /form-action 'self' https:\/\/github\.com\/login\/oauth\/authorize https:\/\/accounts\.google\.com\/o\/oauth2\/v2\/auth;/u);
   assert.match(headers, /X-Frame-Options: DENY/u);
   assert.match(headers, /X-Content-Type-Options: nosniff/u);
   assert.doesNotMatch(headers, /unsafe-inline|unsafe-eval/iu);

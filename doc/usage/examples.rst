@@ -50,9 +50,13 @@ specific policy or platform boundary you need.
      - ``licensecc_windows_tpm`` or ``licensecc_tpm2_openssl``
    * - `examples/device_bound
        <https://github.com/lyehe/licensecc/tree/main/examples/device_bound>`_
-     - Enroll through browser consent, resume online and authorize native work.
-     - Windows TPM pilot; live deployment and hardware qualification are separate.
-     - ``licensecc_device_bound``
+     - Enroll through browser consent and guard native work; includes a
+       `calculator with free and licensed operations
+       <https://github.com/lyehe/licensecc/blob/main/examples/device_bound/CALCULATOR.md>`_.
+     - Windows/Linux TPM providers; live deployment and hardware qualification
+       are separate from local guard tests.
+     - ``licensecc_device_bound``, ``licensecc_feature_sessions``,
+       ``licensecc_calculator``
 
 Build models
 ------------

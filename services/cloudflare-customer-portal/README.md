@@ -280,11 +280,28 @@ and [GitHub OAuth web flow](https://docs.github.com/en/apps/oauth-apps/building-
 
 ## Email and password
 
-Apply backend migration `0034_portal_passwords.sql` after `0033`, then set
-`PORTAL_PASSWORD_ENABLED="1"` and the exact HTTPS `PORTAL_PUBLIC_ORIGIN` in
-the local Worker configuration. The existing session peppers are required.
-Registration and login do not require an email provider or OAuth credentials.
-Disabling the flag hides the form and rejects password routes.
+Apply all backend migrations through `0042_portal_password_actions.sql` before
+updating the portal. Keep `PORTAL_PASSWORD_ENABLED="0"` until Workers Paid and
+email delivery are configured. Set the exact HTTPS `PORTAL_PUBLIC_ORIGIN` and
+retain the existing session peppers. Disabling the flag hides the form and
+rejects every password route.
+
+To enable verified registration and recovery:
+
+1. Configure a Resend-compatible sender with a verified sending domain. Set
+   `PORTAL_EMAIL_FROM` (for example, `Licensecc <accounts@example.com>`), and
+   store `PORTAL_EMAIL_API_KEY` as a Worker secret. The default
+   `PORTAL_EMAIL_API_BASE` is `https://api.resend.com`; use only a trusted,
+   compatible HTTPS service. Credentials must never be committed.
+2. Enable Workers Paid and configure enough CPU time for the hashing below.
+   This is a separate billing decision; deploying this code does not enable it.
+3. Apply migration 0042, deploy the portal, then set
+   `PORTAL_PASSWORD_ENABLED="1"`. Keep Google/GitHub available during rollout.
+4. On staging, test delivery to a real inbox, registration, expiry/resend,
+   password recovery, old-session revocation and normal password sign-in.
+
+Email/password sign-in continues to work for existing credentials if email
+is unavailable; new registration and emailed recovery require the sender.
 
 Passwords use salted scrypt (N=32768, r=8, p=3), following an
 [OWASP password-storage profile](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html).
@@ -293,21 +310,39 @@ intended for the Free plan's per-request CPU limit. Each derivation uses a
 32 MiB work buffer. Passwords accept 15–128 Unicode characters, up to 512 UTF-8
 bytes, without trimming or truncation. IP and email limits run before hashing.
 
-New registrations create an empty customer account. The login email remains
-unverified and separate from the customer contact email: entering an address
-does not claim existing licenses or enable email-code recovery. Operators can
-grant access using the customer ID. Existing customer email addresses cannot
-be registered again; sign in with the existing method and add a password from
-Account. Email matches never merge accounts.
+Registration asks only for an email address. The emailed link opens a password
+form; submitting it verifies ownership and creates an empty account with that
+verified contact email. No account or password is stored before verification,
+and no licenses are granted. Existing accounts are never claimed or merged by
+registration. Existing OAuth customers can set a password from Account after a
+recent verified sign-in.
+
+Forgot password sends a link only for an active password account whose login
+email matches its verified contact address. Legacy/admin-created credentials
+with an unverified login email retain their existing login but cannot use email
+recovery; connect a provider or use the protected operator recovery procedure.
+This migration deliberately does not mark historical emails as verified.
+
+Links expire after 15 minutes and are single-use. The random token is hashed in
+D1, placed in the link fragment (not query string), and immediately removed
+from browser history by the form. Opening a link does not consume it; submitting
+a new password does. Reloading the form requires reopening the email link.
+Requests return the same 202 response for ineligible addresses and mail delivery
+failures. Resend uses the same request endpoint, limited to one email per minute
+and ten per 15 minutes per action, with additional IP limits. No password or
+raw token appears in API responses or application logs. Expired action rows are
+removed on subsequent eligible email requests; audit events are unaffected.
 
 Account supports changing a password with the current password, or setting or
 resetting one within ten minutes of a Google, GitHub, or email-code sign-in.
-Successful changes revoke existing browser sessions and outstanding email
-codes, advance the account token revocation sequence, and issue a fresh session.
-There is no public email-based forgot-password endpoint. Password-only users
-should connect a provider for recovery; otherwise an authorized operator must
-verify ownership and use the existing protected recovery/bootstrap procedure.
-Do not treat an unverified login email as ownership evidence.
+Successful changes and emailed resets revoke old browser sessions and email
+codes, advance the account-token revocation sequence, invalidate old reset
+links, and issue a fresh session. Concurrent link redemption permits one write.
+
+The registration API now accepts `{ "email": "..." }` and returns 202; clients
+must follow the email link and POST `{ "token": "...", "password": "..." }` to
+`/portal/v1/auth/password/complete`. POST `/portal/v1/auth/password/reset` requests
+a recovery link. Update old registration clients before enabling this flow.
 
 Before deployment, apply the migration, verify the billing/CPU configuration,
 and test registration, sign-out/login, password changes, and provider recovery

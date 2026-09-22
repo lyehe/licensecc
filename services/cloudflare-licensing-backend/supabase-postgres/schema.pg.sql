@@ -1494,3 +1494,19 @@ END;
 $$ LANGUAGE plpgsql;
 CREATE TRIGGER tr_bound_requested_feature_update BEFORE UPDATE OF feature,requested_feature ON device_bound_authorizations
 FOR EACH ROW EXECUTE FUNCTION tr_bound_requested_feature_update_fn();
+-- Pending email ownership proofs. Raw tokens and proposed passwords are never stored.
+-- customer_id is preallocated for registration, so it intentionally has no FK.
+CREATE TABLE portal_password_actions (
+  token_hash TEXT PRIMARY KEY NOT NULL,
+  purpose TEXT NOT NULL CHECK (purpose IN ('register', 'reset')),
+  email_lower TEXT NOT NULL,
+  customer_id TEXT NOT NULL,
+  credential_hash TEXT,
+  created_at BIGINT NOT NULL,
+  expires_at BIGINT NOT NULL,
+  consumed_at BIGINT,
+  claim TEXT,
+  CHECK (expires_at > created_at),
+  CHECK ((purpose = 'register' AND credential_hash IS NULL) OR (purpose = 'reset' AND credential_hash IS NOT NULL))
+);
+CREATE INDEX idx_portal_password_actions_expiry ON portal_password_actions(expires_at);

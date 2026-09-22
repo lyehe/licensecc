@@ -41,8 +41,9 @@
     // It must be a canonical HTTPS origin only: no userinfo, path, query, fragment, or HTTP.
     // This applies in development too; use a local HTTPS endpoint rather than an HTTP exception.
     "BACKEND_ORIGIN": "https://licensecc-online-verifier.example.workers.dev",
-    // Resend (or compatible) transactional email. email_unconfigured does NOT 503 — it falls
-    // back to operator bootstrap (blueprint (e)). Set the API key as a Worker SECRET.
+    // Resend-compatible transactional email. Verified password registration/recovery
+    // require this sender; existing OTP operator bootstrap remains available without it.
+    // Set PORTAL_EMAIL_API_KEY as a Worker SECRET, never in this file.
     "PORTAL_EMAIL_FROM": "",
     // This optional Resend-compatible destination has the same strict HTTPS-origin policy.
     "PORTAL_EMAIL_API_BASE": "https://api.resend.com"

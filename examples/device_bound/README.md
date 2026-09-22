@@ -1,5 +1,8 @@
 # Windows device-bound application example
 
+For a smaller application with free addition/subtraction and licensed
+multiplication/division, start with the [C++ calculator](CALCULATOR.md).
+
 This standalone consumer uses only installed public headers. It enrolls through
 the system browser, persists signed checkpoints through the native core, resumes
 with a fresh online renewal, and authorizes each batch before computing XYZ point

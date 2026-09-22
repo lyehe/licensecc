@@ -13,13 +13,14 @@ function makeEnvelope(code, data) {
 }
 makeEnvelope.nextRequestId = 0;
 
-test("email/password registration opens an empty account and does not request an email code", async ({ page }) => {
+test("registration verifies email before choosing a password and opens an empty account", async ({ page }) => {
   let authed = false;
   const submissions = [];
   await page.route("**/portal/v1/auth/**", (route) => {
     const path = new URL(route.request().url()).pathname;
     if (path.endsWith("/providers")) return route.fulfill({ json: makeEnvelope("auth_providers", { google: false, github: false, email: false, password: true }) });
-    if (path.endsWith("/password/register")) { submissions.push(route.request().postDataJSON()); authed = true; return route.fulfill({ json: makeEnvelope("signed_in", { customer_id: "new-customer" }) }); }
+    if (path.endsWith("/password/register")) { submissions.push(route.request().postDataJSON()); return route.fulfill({ status: 202, json: makeEnvelope("verification_requested") }); }
+    if (path.endsWith("/password/complete")) { submissions.push(route.request().postDataJSON()); authed = true; return route.fulfill({ json: makeEnvelope("signed_in", { customer_id: "new-customer" }) }); }
     throw new Error(`Unexpected auth route ${path}`);
   });
   await page.route("**/api/portal/**", (route) => {
@@ -30,13 +31,26 @@ test("email/password registration opens an empty account and does not request an
   await expect(page.getByRole("button", { name: "Send code" })).toHaveCount(0);
   await page.getByRole("button", { name: "Create an account", exact: true }).click();
   await page.getByLabel("Email", { exact: true }).fill("new@example.com");
-  await page.getByLabel("Password", { exact: true }).fill("A long testing passphrase 1!");
-  await expect(page.getByText(/your email is not verified/)).toBeVisible();
+  await expect(page.locator('input[type="password"]')).toHaveCount(0);
   await page.setViewportSize({ width: 390, height: 844 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  await page.getByRole("button", { name: "Create account", exact: true }).click();
+  await page.getByRole("button", { name: "Send verification link", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText("Check your email");
+  expect(submissions).toEqual([{ email: "new@example.com" }]);
+  const token = "a".repeat(43);
+  await page.goto(`/password-action#token=${token}`);
+  await expect(page.getByRole("heading", { name: "Choose your password" })).toBeVisible();
+  expect(page.url()).not.toContain(token);
+  expect(submissions).toHaveLength(1);
+  await page.getByLabel("New password", { exact: true }).fill("A long testing passphrase 1!");
+  await page.getByLabel("Confirm password", { exact: true }).fill("A different testing passphrase");
+  await page.getByRole("button", { name: "Save password and sign in" }).click();
+  await expect(page.getByRole("alert")).toHaveText("Passwords do not match.");
+  expect(submissions).toHaveLength(1);
+  await page.getByLabel("Confirm password", { exact: true }).fill("A long testing passphrase 1!");
+  await page.getByRole("button", { name: "Save password and sign in" }).click();
   await expect(page.getByRole("heading", { name: "Apps", exact: true })).toBeVisible();
-  expect(submissions).toEqual([{ email: "new@example.com", password: "A long testing passphrase 1!" }]);
+  expect(submissions[1]).toEqual({ token, password: "A long testing passphrase 1!" });
   await expect(page.locator('input[type="password"]')).toHaveCount(0);
 });
 
@@ -46,7 +60,7 @@ test("password login errors clear the secret and explain recovery", async ({ pag
   await page.route("**/portal/v1/auth/password/login", (route) => route.fulfill({ status: 401, json: { ok: false, code: "invalid_credentials" } }));
   await page.goto("/");
   await expect(page.getByRole("button", { name: "Continue with Google" })).toBeHidden();
-  await page.getByText("Other sign-in options", { exact: true }).click();
+  if (!await page.locator(".otherSignIn").evaluate(element => element.open)) await page.getByText("Other sign-in options", { exact: true }).click();
   await expect(page.getByRole("button", { name: "Continue with Google" })).toBeVisible();
   await page.getByLabel("Email", { exact: true }).fill("new@example.com");
   await page.getByLabel("Password", { exact: true }).fill("A wrong testing passphrase");
@@ -54,7 +68,36 @@ test("password login errors clear the secret and explain recovery", async ({ pag
   await expect(page.getByRole("alert")).toHaveText("Email or password is incorrect.");
   await expect(page.getByLabel("Password", { exact: true })).toHaveValue("");
   await page.getByText("Forgot your password?", { exact: true }).click();
-  await expect(page.getByText(/contact your administrator for recovery/)).toBeVisible();
+  await expect(page.getByText(/We’ll send a reset link/)).toBeVisible();
+  await page.route("**/portal/v1/auth/password/reset", route => {
+    expect(route.request().postDataJSON()).toEqual({ email: "new@example.com" });
+    return route.fulfill({ status: 202, json: makeEnvelope("verification_requested") });
+  });
+  await page.getByRole("button", { name: "Send reset link" }).click();
+  await expect(page.getByRole("alert")).toContainText("Check your email");
+});
+
+test("expired password link shows recovery guidance and reloading cannot retain the secret", async ({ page }) => {
+  await page.route("**/api/portal/me", route => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" } }));
+  await page.route("**/portal/v1/auth/providers", route => route.fulfill({ json: makeEnvelope("auth_providers", { password: true }) }));
+  let attempts = 0;
+  await page.route("**/portal/v1/auth/password/complete", route => {
+    attempts += 1;
+    return route.fulfill({ status: 400, json: { ok: false, code: "invalid_link" } });
+  });
+  const token = "b".repeat(43);
+  await page.goto(`/password-action#token=${token}`);
+  await page.getByLabel("New password", { exact: true }).fill("A replacement passphrase 2!");
+  await page.getByLabel("Confirm password", { exact: true }).fill("A replacement passphrase 2!");
+  await page.getByRole("button", { name: "Save password and sign in" }).click();
+  await expect(page.getByRole("alert")).toContainText("expired or was already used");
+  await expect(page.getByLabel("New password", { exact: true })).toHaveValue("");
+  expect(page.url()).not.toContain(token);
+  expect(await page.evaluate(value => [...Object.values(localStorage), ...Object.values(sessionStorage)].some(v => v.includes(value)), token)).toBe(false);
+  await page.reload();
+  await expect(page.getByRole("alert")).toContainText("Open the link from your email again");
+  await expect(page.getByRole("button", { name: "Save password and sign in" })).toHaveCount(0);
+  expect(attempts).toBe(1);
 });
 
 test("Account password change requires the current password and confirms session rotation", async ({ page }) => {
@@ -651,7 +694,7 @@ test("protected access uses app enrollment while legacy downloads respect date b
   await expect(page.getByRole("heading", { name: "Download licenses" })).toHaveCount(0);
 });
 
-test("sign-in headings follow the chosen method after registration", async ({ page }) => {
+test("sign-in headings follow the chosen method after registration and reset", async ({ page }) => {
   await page.route("**/api/portal/me", route => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" } }));
   await page.route("**/portal/v1/auth/providers", route => route.fulfill({ json: makeEnvelope("auth_providers", { google: true, github: true, email: true, password: true }) }));
   await page.goto("/");
@@ -662,5 +705,10 @@ test("sign-in headings follow the chosen method after registration", async ({ pa
   await expect(page.getByRole("heading", { name: "Sign in", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Use a password instead" }).click();
   await expect(page.getByRole("heading", { name: "Create account", exact: true })).toBeVisible();
-
+  await page.getByRole("button", { name: "Back to sign in", exact: true }).click();
+  await page.getByRole("button", { name: "Forgot your password?" }).click();
+  await expect(page.getByRole("heading", { name: "Reset password", exact: true })).toBeVisible();
+  if (!await page.locator(".otherSignIn").evaluate(element => element.open)) await page.getByText("Other sign-in options", { exact: true }).click();
+  await page.getByRole("button", { name: "Use an email code instead" }).click();
+  await expect(page.getByRole("heading", { name: "Sign in", exact: true })).toBeVisible();
 });

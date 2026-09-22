@@ -8,3 +8,6 @@ import "./portal-worker-route-owners.test.mjs";
 import "./portal-worker-oauth.test.mjs";
 
 import "./portal-worker-password.test.mjs";
+import "./portal-worker-password-email.test.mjs";
+
+import "./portal-oauth-runtime.test.mjs";

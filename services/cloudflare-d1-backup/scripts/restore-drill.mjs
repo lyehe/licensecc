@@ -20,7 +20,7 @@ const MAX_BACKUP_MANIFEST_BYTES = 16 * 1024;
 const MAX_FUTURE_CLOCK_SKEW_MS = 5 * 60 * 1000;
 const MAX_MANIFEST_STRING_LENGTH = 2048;
 const SQL_HASH_CHUNK_BYTES = 64 * 1024;
-const EXPECTED_SCHEMA_SIGNATURE_SHA256 = "fbfa4bd728359c1ea068f313cc3a06093dc701cd15a0d707d4505bea34150ffa";
+const EXPECTED_SCHEMA_SIGNATURE_SHA256 = "7d2ca88b10dda302d8fd36b2a2f6a2c861ee2f4ec818a38eca3da5cf93198c1b";
 const SNAPSHOT_INVENTORY_ALGORITHM = "d1-export-sql-insert-count-v1";
 const DEFAULT_BACKEND_MIGRATIONS_DIR = resolve(
   dirname(fileURLToPath(import.meta.url)),
@@ -79,6 +79,7 @@ const PRESENCE_ONLY_TABLES = [
   "portal_otp",
   "portal_sessions",
   "portal_passwords",
+  "portal_password_actions",
   "portal_identities",
   "portal_oauth_states",
   "portal_bootstrap_events",
@@ -108,6 +109,7 @@ const SENSITIVE_TABLES = [
   "portal_otp",
   "portal_sessions",
   "portal_passwords",
+  "portal_password_actions",
   "portal_identities",
   "portal_oauth_states",
 ];
@@ -115,10 +117,11 @@ const SENSITIVE_TABLES = [
 // Every table the restored database must contain (presence-asserted as one set).
 const ALL_RESTORE_TABLES = [...REQUIRED_TABLES, ...PRESENCE_ONLY_TABLES];
 
-// Final named indexes and triggers from migrations 0001-0039. SQLite's
+// Final named indexes and triggers from migrations 0001-0042. SQLite's
 // autoindexes are intentionally excluded; each named object's type, owner, and
 // normalized DDL contributes to the canonical schema signature below.
 const EXPECTED_INDEXES = {
+  idx_portal_password_actions_expiry: "portal_password_actions",
   idx_bound_approval_cleanup: "device_bound_authorizations",
   idx_bound_operation_payload_cleanup: "device_bound_operations",
   idx_bound_consumed_attempt_cleanup: "device_bound_authorizations",

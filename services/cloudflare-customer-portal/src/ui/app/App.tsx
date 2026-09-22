@@ -2,6 +2,7 @@ import React, { useLayoutEffect, useRef, useState } from "react";
 import { localMessage, StatusLine } from "../shared/api";
 import { useSingleFlight } from "../shared/useSingleFlight";
 import { AuthFeature, usePortalAuth } from "../features/auth/AuthFeature";
+import { PasswordAction, capturePasswordAction } from "../features/auth/PasswordAction";
 import { usePortalData } from "../features/data/usePortalData";
 import { DEVICES_REFRESH_ACTION_LABEL, DEVICES_REFRESH_FAILURE_CODE, DevicesFeature, SeatReleaseDialog, useDevicesController } from "../features/devices/DevicesFeature";
 import { useLicenseDownloads } from "../features/downloads/DownloadsFeature";
@@ -15,6 +16,7 @@ import type { StatusMessage } from "../types";
 import "../styles.css";
 
 export function App(): React.ReactElement {
+  const [passwordAction, setPasswordAction] = useState(capturePasswordAction);
   const [enrollment,setEnrollment] = useState(captureEnrollment);
   useLayoutEffect(() => {
     const capture = ():void => {
@@ -33,7 +35,7 @@ export function App(): React.ReactElement {
 
   const location = usePortalLocation();
   const { entitlements, devices, usage, usageAvailable, readState, stale, refreshData, clear: clearPortalData } = usePortalData({
-    active: auth.phase === "authed" && enrollment === null,
+    active: auth.phase === "authed" && enrollment === null && passwordAction === null,
     setMessage,
   });
   const downloads = useLicenseDownloads({ runOnce, setMessage });
@@ -90,6 +92,12 @@ export function App(): React.ReactElement {
   function finishEnrollment():void {
     clearEnrollment();setEnrollment(null);window.history.replaceState(null,"","/#/apps");
   }
+  if (passwordAction !== null) return <PasswordAction token={passwordAction} onDone={async () => {
+    window.history.replaceState(null, "", "/#/apps");
+    clearPortalData();
+    await auth.retrySession();
+    setPasswordAction(null);
+  }} />;
   if (typeof enrollment === "string" || (enrollment && auth.phase === "authed")) return <ConsentFeature key={typeof enrollment==="string"?enrollment:`${enrollment.handle}:${enrollment.createdAt}`} entry={enrollment} customerId={auth.customerId??""} onDone={finishEnrollment} onSignOut={logout} onSessionExpired={auth.retrySession} feedback={<StatusLine message={message} fallback="" />} />;
   if (auth.phase !== "authed") return <AuthFeature auth={auth} busy={busy} message={message} connecting={enrollment!==null} />;
 

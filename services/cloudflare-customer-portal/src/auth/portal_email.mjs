@@ -1,10 +1,8 @@
 // portal_email.mjs — fetch-only transactional email adapter (Resend-compatible).
 //
-// Blueprint (e): the sendEmail seam. When email is NOT configured (no API key / no from address)
-// this returns { ok:false, code:"email_unconfigured" } and the caller does NOT 503 — it falls back
-// to operator bootstrap. A successful login flow on the request path never blocks on email: the
-// caller runs sendEmail inside ctx.waitUntil(). The OTP secret is passed here ONLY to compose the
-// magic-link / code body; it is NEVER logged.
+// Returns a bounded result without logging recipients or message bodies. OTP callers
+// send in ctx.waitUntil(); password verification waits for this result so it can
+// remove undelivered proofs. Each caller owns its unavailable-sender behavior.
 //
 // Worker-safe: no node:/Buffer; only fetch + standard globals.
 

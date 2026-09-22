@@ -17,9 +17,17 @@ const responses = {
   "503": errorResponse("Session/database configuration unavailable.", "config_error"),
 };
 export const passwordPaths: LabeledPathFragment = { label: "password", entries: [
-  ["/portal/v1/auth/password/register", { post: {
-    tags: ["auth"], operationId: "authRegisterPassword", summary: "Register an empty account with email and password.", security: [], requestBody: body(true), responses,
-    description: "Requires exact Origin and enabled password sign-in. Email is an unverified login identifier stored separately from customer contact email. Never claims an existing customer or grants licenses. Per-IP limit 5/900s and per-email 10/900s before scrypt.",
+  ...(["register", "reset"] as const).map(action => [`/portal/v1/auth/password/${action}`, { post: {
+    tags: ["auth"], operationId: action === "register" ? "authRegisterPassword" : "authResetPassword", summary: action === "register" ? "Request email verification before creating an account." : "Request password recovery at a verified email.", security: [],
+    requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["email"], properties: { email: { type: "string", format: "email" } } } } } },
+    responses: { "202": { description: "Generic verification_requested response, including ineligible addresses and delivery failures. No session or account is created." }, "400": errorResponse("Invalid email or JSON.", ["invalid_email", "invalid_json"]), "403": responses["403"], "404": responses["404"], "413": responses["413"], "429": responses["429"], "503": errorResponse("Email or session configuration unavailable.", ["email_unconfigured", "config_error"]) },
+    description: "Requires exact Origin, password enablement and an email sender. Links expire after 15 minutes. Registration never claims existing accounts; reset is restricted to active accounts whose credential email matches their verified contact address. Shared email send limit 1/60s, per-action email 10/900s, IP 5/900s for registration and 30/900s for reset. Resend uses the same endpoint.",
+  } }] as [string, Record<string, unknown>]),
+  ["/portal/v1/auth/password/complete", { post: {
+    tags: ["auth"], operationId: "authCompletePassword", summary: "Redeem an email proof and set a password.", security: [],
+    requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["token", "password"], properties: { token: { type: "string", pattern: "^[A-Za-z0-9_-]{43}$" }, password: { type: "string", minLength: 15, maxLength: 128 } } } } } },
+    responses: { ...responses, "400": errorResponse("Expired, used or invalid link, or invalid password/JSON.", ["invalid_link", "invalid_registration", "invalid_json"]) },
+    description: "POST only; opening the email link does not consume it. Single-use atomic redemption creates an empty verified account or resets an existing credential. Reset revokes sessions, OTPs and ephemeral account tokens. Outstanding reset links become invalid after any password change. Token must be passed in JSON, never a query parameter. IP 10/900s and token 5/900s before hashing.",
   } }],
   ["/portal/v1/auth/password/login", { post: {
     tags: ["auth"], operationId: "authLoginPassword", summary: "Sign in using an email/password credential.", security: [], requestBody: body(true), responses,

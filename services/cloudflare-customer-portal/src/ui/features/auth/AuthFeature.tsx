@@ -163,7 +163,7 @@ export function AuthFeature({ auth, busy, message, connecting = false }: {
 }): React.ReactElement | null {
   const { providers, failed, retry } = useProviders();
   const [emailCode, setEmailCode] = useState(false);
-  const [passwordMode,setPasswordMode]=useState<"login"|"register">("login");
+  const [passwordMode,setPasswordMode]=useState<"login"|"register"|"reset">("login");
   if (auth.phase === "authed") return null;
   if (auth.phase === "loading" || auth.phase === "error") {
     return (
@@ -180,7 +180,7 @@ export function AuthFeature({ auth, busy, message, connecting = false }: {
     <main className="authPane">
       <div className="authBrand brand"><span aria-hidden="true">L</span>Licensecc</div>
       <section className="authCard">
-        <h1>{!emailCode && providers?.password && auth.phase === "request" && passwordMode === "register" ? "Create account" : "Sign in"}</h1>
+        <h1>{!emailCode && providers?.password && auth.phase==="request" ? (passwordMode==="register"?"Create account":passwordMode==="reset"?"Reset password":"Sign in") : "Sign in"}</h1>
         <p>{connecting ? "Sign in to approve this device connection." : "Sign in to manage your licenses and devices."}</p>
         <StatusLine message={message} fallback="" />
         <ProviderResult />

@@ -20,7 +20,7 @@ function githubStub(t, { email = "new@example.com", verified = true, id = 123, f
   const calls = [];
   t.mock.method(globalThis, "fetch", async (url, init) => {
     calls.push({ url, init });
-    assert.equal(init.redirect, "error");
+    assert.equal(init.redirect, "manual");
     if (failure) return new Response("failure", { status: 502 });
     if (url === "https://github.com/login/oauth/access_token") return Response.json({ access_token: "private-provider-token", token_type: "bearer" });
     if (url === "https://api.github.com/user") return Response.json({ id, name: "Customer", email: "untrusted@example.com" });
