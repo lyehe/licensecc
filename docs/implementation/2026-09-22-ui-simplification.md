@@ -2,8 +2,10 @@
 
 ## Scope and source
 
-Implemented the non-optional presentation and workflow changes from
-[the protected plan](../superpowers/plans/2026-09-22-ui-simplification.md).
+Implemented the non-optional presentation and workflow changes from the
+2026-09-22 UI simplification proposal. That superseded, untracked proposal was
+removed during the user-requested plan review; this record retains the delivered
+scope, verification limits and deferred work.
 Verified commit: `efb3bb00dab3fab5ae2198643194a832fba5661a` on
 `fix/portal-oauth-navigation`. The commit is isolated from the concurrent
 password/email, migration, and calculator changes that remain in the worktree.
@@ -85,8 +87,10 @@ was performed during this UI work.
 
 ## Release boundary and deferred work
 
-Optional friendly consent identity and missing provisioning APIs remain separate,
-as specified by packet 5. No contract or schema work was added for them.
+Optional friendly consent identity, missing provisioning APIs and a complete
+admin app-management destination remain separate capability proposals. They
+require their own contracts and review; this work did not implement them.
+No contract or schema work was added for them.
 
 Staging and production were not deployed. The isolated deployment dry-run
 passed, but a live staging deploy still requires the materialized staging
