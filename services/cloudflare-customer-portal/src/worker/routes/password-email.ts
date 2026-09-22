@@ -3,11 +3,10 @@ import { canonicalHttpsOrigin, emailApiOrigin } from "../../auth/portal_destinat
 import { portalRateLimit } from "../../auth/portal_ratelimit.mjs";
 import { clientIp, envelope, readJson } from "../support.js";
 import { hashPassword, loginEmail, validPassword } from "../password/crypto.js";
-import { HEADERS, primary, gate, throttle, signedIn } from "../password/shared.js";
+import { HEADERS, primary, gate, throttle, signedIn, digest } from "../password/shared.js";
 import type { Env, TopRoute } from "../env.js";
 
 type Action = { purpose: "register" | "reset"; email_lower: string; customer_id: string; credential_hash: string | null };
-const digest = async (value: string): Promise<string> => Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value))), v => v.toString(16).padStart(2, "0")).join("");
 
 async function requestLink(request: Request, env: Env, reqId: string, now: number, purpose: Action["purpose"]): Promise<Response> {
   const denied = gate(request, env, reqId);
