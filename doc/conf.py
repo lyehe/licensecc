@@ -58,8 +58,7 @@ html_css_files = ["css/custom.css"]
 html_js_files = ["https://buttons.github.io/buttons.js"]
 html_favicon = "_static/lock_32.ico"
 # Read the Docs supplies the canonical domain plus language/version path for
-# each build.  The local fallback deliberately avoids claiming the retired
-# upstream GitHub Pages site as this fork's canonical documentation.
+# each build. The local fallback makes no external canonical-domain claim.
 html_baseurl = os.environ.get("READTHEDOCS_CANONICAL_URL", "/")
 htmlhelp_basename = "licenseccdoc"
 sitemap_url_scheme = "{link}"

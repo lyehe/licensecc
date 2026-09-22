@@ -2,11 +2,11 @@
 
 Notable changes to this repository. The format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
-**This fork has made no namespaced release yet.** The newest reachable bare tag (`v1.0.0`) is
-inherited upstream lineage, hundreds of commits behind `main`, and remains legacy history. Current
+**No namespaced release has been tagged yet.** The reachable bare tag (`v1.0.0`)
+predates the current release streams and remains legacy history. Current
 release streams are:
 
-- **C++ library** (`CMakeLists.txt`): `2.1.0` — continues the upstream `licensecc` 2.x lineage.
+- **C++ library** (`CMakeLists.txt`): `2.1.0` — versioned independently.
 - **Platform packages** (root/workspace Node packages, the four Cloudflare services, OpenAPI
   documents, and the Python, .NET, and Java SDKs): `0.1.0-rc.2` (Python `0.1.0rc2`) — versioned
   independently of the C++ core and not yet published to any registry.

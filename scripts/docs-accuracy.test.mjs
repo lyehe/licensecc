@@ -273,7 +273,7 @@ test("the docs identity, primary navigation, and example inventory are deliberat
   const examples = source("doc/usage/examples.rst");
 
   assert.match(docsConfig, /READTHEDOCS_CANONICAL_URL/u);
-  assert.doesNotMatch(docsConfig, /open-license-manager\.github\.io/u);
+  assert.match(docsConfig, /html_baseurl = os\.environ\.get\("READTHEDOCS_CANONICAL_URL", "\/"\)/u);
   assert.match(readTheDocs, /fail_on_warning:\s*true/u);
   assert.match(readme, /\]\(doc\/index\.rst\)/u);
 
