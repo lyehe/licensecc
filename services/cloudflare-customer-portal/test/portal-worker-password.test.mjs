@@ -74,6 +74,32 @@ test("password change requires proof, rotates sessions and prevents old-hash ses
   assert.equal(db.prepare("SELECT count(*) AS n FROM portal_passwords WHERE customer_id = 'B'").get().n, 0);
   assert.equal((await mintSession(env, { customerId: credential.customer_id, authMethod: "password", passwordHash: credential.password_hash, now: NOW })).ok, false);
 });
+test("a raced password change preserves the winning credential and existing access", async t => {
+  const { env, db } = fixture();
+  const first = await register(env);
+  const credential = db.prepare("SELECT * FROM portal_passwords").get();
+  const winningHash = await hashPassword(NEXT);
+  db.prepare("INSERT INTO portal_otp (id,customer_id,email_lower,secret_hmac,code_hmac,pepper_key_id,expires_at,created_at) VALUES ('otp-race',?,?,'secret-test','code-test','p1',?,?)")
+    .run(credential.customer_id, credential.email_lower, NOW + 600, NOW);
+  const batch = env.DB.batch.bind(env.DB);
+  t.mock.method(env.DB, "batch", statements => {
+    // Another request commits after this route reads the old credential.
+    db.prepare("UPDATE portal_passwords SET password_hash = ? WHERE customer_id = ?")
+      .run(winningHash, credential.customer_id);
+    return batch(statements);
+  });
+  const result = await call(env, "POST", PATH, {
+    cookie: cookie(first), body: { password: NEXT, current_password: PASSWORD },
+  });
+  assert.equal(result.status, 409);
+  assert.equal(result.body.code, "password_change_conflict");
+  assert.equal(result.res.headers.get("set-cookie"), null);
+  assert.equal(db.prepare("SELECT password_hash FROM portal_passwords").get().password_hash, winningHash);
+  assert.equal(db.prepare("SELECT count(*) n FROM portal_sessions WHERE status = 'active'").get().n, 1);
+  assert.equal(db.prepare("SELECT consumed_at FROM portal_otp WHERE id = 'otp-race'").get().consumed_at, null);
+  assert.equal(db.prepare("SELECT count(*) n FROM account_token_revocations").get().n, 0);
+});
+
 test("first password and recovery require recent verified sign-in", async () => {
   const { env } = fixture();
   const old = await verifiedCookie(env, "A", 700);

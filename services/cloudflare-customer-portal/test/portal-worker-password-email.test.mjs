@@ -41,6 +41,7 @@ test("email proof precedes account creation and creates verified, empty account 
   assert.ok(!JSON.stringify(response.body).includes(f.token()));
   const result = await f.complete();
   assert.equal(result.status, 200);
+  assert.equal(f.db.prepare("SELECT count(*) n FROM account_token_revocations").get().n, 0);
   assert.match(result.res.headers.get("set-cookie"), /HttpOnly; Secure; SameSite=Lax/);
   assert.equal(f.db.prepare("SELECT email FROM customers WHERE id = ?").get(result.body.data.customer_id).email, "new@example.com");
   const settings = await call(f.env, "GET", PATH, { cookie: cookie(result) });

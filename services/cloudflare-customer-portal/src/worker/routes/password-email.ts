@@ -4,6 +4,7 @@ import { portalRateLimit } from "../../auth/portal_ratelimit.mjs";
 import { clientIp, envelope, readJson } from "../support.js";
 import { hashPassword, loginEmail, validPassword } from "../password/crypto.js";
 import { HEADERS, primary, gate, throttle, signedIn, digest } from "../password/shared.js";
+import { passwordInvalidations } from "../password/invalidation.js";
 import type { Env, TopRoute } from "../env.js";
 
 type Action = { purpose: "register" | "reset"; email_lower: string; customer_id: string; credential_hash: string | null };
@@ -55,7 +56,6 @@ async function complete(request: Request, env: Env, reqId: string, now: number):
   const passwordHash = await hashPassword(body.password);
   const claim = crypto.randomUUID();
   const claimed = "EXISTS (SELECT 1 FROM portal_password_actions WHERE token_hash = ? AND claim = ?)";
-  const changed = "EXISTS (SELECT 1 FROM portal_passwords WHERE customer_id = ? AND password_hash = ?)";
   const { customer_id: id, email_lower: email } = action;
   const statements = [env.DB.prepare("UPDATE portal_password_actions SET consumed_at = ?, claim = ? WHERE token_hash = ? AND consumed_at IS NULL AND expires_at > ?").bind(now, claim, tokenHash, now)];
   if (action.purpose === "register") {
@@ -68,12 +68,9 @@ async function complete(request: Request, env: Env, reqId: string, now: number):
       .bind(passwordHash, now, id, email, action.credential_hash, tokenHash, claim, id, email));
   }
   const writeIndex = statements.length - 1;
-  statements.push(
-    env.DB.prepare(`UPDATE portal_sessions SET status = 'revoked' WHERE customer_id = ? AND ${changed}`).bind(id, id, passwordHash),
-    env.DB.prepare(`UPDATE portal_otp SET consumed_at = ? WHERE customer_id = ? AND consumed_at IS NULL AND ${changed}`).bind(now, id, id, passwordHash),
-    env.DB.prepare(`UPDATE portal_password_actions SET consumed_at = ? WHERE email_lower = ? AND consumed_at IS NULL AND ${changed}`).bind(now, email, id, passwordHash),
-  );
-  if (action.purpose === "reset") statements.push(env.DB.prepare(`INSERT INTO account_token_revocations (customer_id, revocation_seq, updated_at) SELECT ?, 1, ? WHERE ${changed} ON CONFLICT(customer_id) DO UPDATE SET revocation_seq = account_token_revocations.revocation_seq + 1, updated_at = excluded.updated_at`).bind(id, now, id, passwordHash));
+  statements.push(...passwordInvalidations(env.DB, id, passwordHash, now, {
+    email, revokeAccountTokens: action.purpose === "reset",
+  }));
   const results = await env.DB.batch(statements);
   if (!results[writeIndex]?.results.length) return invalid();
   return signedIn(request, env, reqId, id, passwordHash, now);
