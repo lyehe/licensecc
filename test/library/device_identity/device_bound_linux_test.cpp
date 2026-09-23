@@ -2,11 +2,13 @@
 #include <boost/test/unit_test.hpp>
 #include "bound_checkpoint_platform.hpp"
 #include "bound_anchor.hpp"
+#include "bound_directory_linux.hpp"
 #include "bound_browser.hpp"
 #include "bound_http.hpp"
 #include "bound_peer_linux.hpp"
 #include <arpa/inet.h>
 #include <fcntl.h>
+#include <pwd.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -151,6 +153,34 @@ BOOST_AUTO_TEST_CASE(checkpoint_publish_survives_a_restrictive_umask) {
 	const auto published = storage->publish(0, "first");
 	storage->unlock();
 	BOOST_CHECK(published == BoundCheckpointIo::ok);
+}
+BOOST_AUTO_TEST_CASE(private_directory_is_created_0700_under_a_restrictive_umask) {
+	// bound_linux_directory is the only creator and roots at the account's home; use a unique
+	// leaf there and remove whatever this case created.
+	std::array<char, 16384> buffer{};
+	passwd entry{}, *account = nullptr;
+	BOOST_REQUIRE(getpwuid_r(geteuid(), &entry, buffer.data(), buffer.size(), &account) == 0 && account);
+	const std::string base = std::string(account->pw_dir) + "/.licensecc";
+	const bool base_existed = ::access(base.c_str(), F_OK) == 0;
+	const std::string leaf = "test-umask-" + std::to_string(getpid());
+	std::string created;
+	bool made = false;
+	{
+		UmaskGuard guard(0277);
+		made = bound_linux_directory(leaf, created);
+	}
+	struct stat info {};
+	const bool leaf_stat = made && stat(created.c_str(), &info) == 0;
+	const mode_t leaf_mode = info.st_mode & 0777;
+	const bool base_stat = stat(base.c_str(), &info) == 0;
+	::rmdir((base + "/" + leaf).c_str());
+	if (!base_existed) ::rmdir(base.c_str());
+	BOOST_REQUIRE(made);
+	BOOST_CHECK_EQUAL(created, base + "/" + leaf);
+	BOOST_REQUIRE(leaf_stat);
+	BOOST_CHECK_EQUAL(leaf_mode, 0700U);
+	BOOST_REQUIRE(base_stat);
+	BOOST_CHECK_EQUAL(info.st_mode & 0777, 0700U);
 }
 BOOST_AUTO_TEST_CASE(pre_existing_unsafe_lock_file_fails_closed_without_being_repaired) {
 	Directory root;
