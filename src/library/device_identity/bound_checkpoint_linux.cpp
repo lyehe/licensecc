@@ -156,7 +156,9 @@ public:
 			} else if (errno != ENOENT)
 				return BoundCheckpointIo::error;
 			File file(openat(directory_.fd, stage, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0600));
-			if (!valid(file.fd, stage, 8192)) return BoundCheckpointIo::error;
+			// The process umask may strip owner bits; the private mode is required, not requested.
+			if (file.fd < 0 || fchmod(file.fd, 0600) != 0 || !valid(file.fd, stage, 8192))
+				return BoundCheckpointIo::error;
 			std::size_t offset = 0;
 			while (offset < bytes.size()) {
 				const auto count = ::write(file.fd, bytes.data() + offset, bytes.size() - offset);
@@ -181,8 +183,22 @@ std::unique_ptr<BoundCheckpointStorage> make_bound_checkpoint_storage_at_root(co
 		if (wait > 1000) return nullptr;
 		File directory(open_bound_private_directory(root));
 		if (directory.fd < 0) return nullptr;
-		File lock(openat(directory.fd, lock_name, O_RDWR | O_CREAT | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK, 0600));
+		int raw_lock =
+			openat(directory.fd, lock_name, O_RDWR | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK, 0600);
+		const bool lock_created = raw_lock >= 0;
+		if (!lock_created) {
+			if (errno != EEXIST) return nullptr;
+			// A pre-existing lock file is left exactly as found: fchmod would repair (and so
+			// silently accept) an unsafe mode, and would mutate a foreign inode if the name is a
+			// hard link. valid() below judges it as-is instead.
+			raw_lock = openat(directory.fd, lock_name, O_RDWR | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK);
+		}
+		File lock(raw_lock);
 		if (lock.fd < 0) return nullptr;
+		if (lock_created) {
+			// The process umask may strip owner bits; the private mode is required, not requested.
+			if (fchmod(lock.fd, 0600) != 0) return nullptr;
+		}
 		auto result = std::make_unique<LinuxStorage>(directory.fd, lock.fd, root, wait);
 		directory.fd = lock.fd = -1;
 		const auto checked = result->lock();

@@ -54,10 +54,28 @@ bool bound_linux_directory(const std::string& leaf, std::string& out) noexcept {
 		if (getpwuid_r(geteuid(), &entry, buffer.data(), buffer.size(), &result) != 0 || !result || !entry.pw_dir)
 			return false;
 		const std::string base = std::string(entry.pw_dir) + "/.licensecc";
-		if (mkdir(base.c_str(), 0700) != 0 && errno != EEXIST) return false;
+		const bool base_created = mkdir(base.c_str(), 0700) == 0;
+		if (!base_created && errno != EEXIST) return false;
+		if (base_created) {
+			// The process umask may strip owner bits; the private mode is required, not requested.
+			const int fixup = open(base.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+			const bool fixed = fixup >= 0 && fchmod(fixup, 0700) == 0;
+			if (fixup >= 0) close(fixup);
+			if (!fixed) return false;
+		}
 		const int parent = open_bound_private_directory(base);
 		if (parent < 0) return false;
 		const bool created = mkdirat(parent, leaf.c_str(), 0700) == 0;
+		if (created) {
+			// The process umask may strip owner bits; the private mode is required, not requested.
+			const int fixup = openat(parent, leaf.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+			const bool fixed = fixup >= 0 && fchmod(fixup, 0700) == 0;
+			if (fixup >= 0) close(fixup);
+			if (!fixed) {
+				close(parent);
+				return false;
+			}
+		}
 		const bool exists = created || errno == EEXIST;
 		const bool durable = !created || fsync(parent) == 0;
 		close(parent);

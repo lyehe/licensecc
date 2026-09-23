@@ -73,3 +73,31 @@ jobs:
           build/ci-linux-sanitizers/fuzz/fuzz_online_assertion
           -max_total_time=20 -timeout=5 -max_len=16384 -rss_limit_mb=2048
           -print_final_stats=1 fuzz/corpus/online_assertion
+
+  sanitizers-device-identity:
+    name: Clang ASan and UBSan over device identity
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      ASAN_OPTIONS: detect_leaks=1:strict_string_checks=1:check_initialization_order=1:abort_on_error=1
+      UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install native dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build libssl-dev zlib1g-dev \
+            libboost-dev libboost-test-dev libboost-filesystem-dev \
+            libboost-iostreams-dev libboost-program-options-dev \
+            libboost-system-dev libboost-thread-dev libboost-date-time-dev \
+            libcurl4-openssl-dev
+      - name: Bootstrap native source preflight
+        run: pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/bootstrap.ps1 -CheckOnly
+      - name: Configure Clang sanitizers with device identity
+        run: cmake --preset ci-linux-sanitizers-device-identity
+      - name: Build complete native test tree
+        run: cmake --build --preset ci-linux-sanitizers-device-identity --parallel 2
+      - name: Run complete native test suite under ASan and UBSan
+        run: ctest --preset ci-linux-sanitizers-device-identity --no-tests=error

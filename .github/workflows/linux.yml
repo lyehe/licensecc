@@ -149,7 +149,7 @@ jobs:
             openssl version -a
       -  name: Bootstrap preflight
          run: pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/bootstrap.ps1 -CheckOnly
-      -  name: Keep Ubuntu 22 provider-only coverage with its older libcurl
+      -  name: Ubuntu 22 libcurl 7.81 cannot build desktop adapters
          if: matrix.os == 'ubuntu-22.04'
          run: cmake --preset ${{ matrix.preset }} -DLCC_ENABLE_LINUX_DESKTOP=OFF
       -  name: Production TPM2 build purity

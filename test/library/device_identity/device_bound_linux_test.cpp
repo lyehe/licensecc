@@ -4,18 +4,30 @@
 #include "bound_anchor.hpp"
 #include "bound_browser.hpp"
 #include "bound_http.hpp"
+#include "bound_peer_linux.hpp"
+#include <arpa/inet.h>
+#include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <csignal>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <thread>
 
 namespace {
 bool fail_browser_exec = false;
+int inherited_fd = -1;
 int test_browser_exec(const char* executable, char* const args[], char* const environment[]) {
-	if (std::string(executable) != "/usr/bin/xdg-open" || !args[1]) _exit(126);
+	const std::string path(executable);
+	if (path.empty() || path.front() != '/' || path.size() < 9 || path.compare(path.size() - 9, 9, "/xdg-open") != 0 ||
+		!args[1])
+		_exit(126);
 	if (fail_browser_exec) return -1;
+	if (inherited_fd >= 0 && (fcntl(inherited_fd, F_GETFD) & FD_CLOEXEC) == 0) return -1;
 	char sleep[] = "/bin/sleep", duration[] = "2";
 	char* command[]{sleep, duration, nullptr};
 	return execve(sleep, command, environment);
@@ -26,6 +38,10 @@ int test_browser_exec(const char* executable, char* const args[], char* const en
 #include "bound_browser_linux.cpp"
 #undef make_bound_browser_launcher
 #undef execve
+
+#define make_bound_http_transport make_test_linux_http_transport
+#include "bound_http_linux.cpp"
+#undef make_bound_http_transport
 
 using namespace license::device_identity;
 namespace {
@@ -41,6 +57,14 @@ struct Directory {
 		std::error_code ignored;
 		std::filesystem::remove_all(path, ignored);
 	}
+};
+// Restores the process umask even if a BOOST_REQUIRE/BOOST_CHECK aborts the test case via
+// exception unwinding; a leaked umask would otherwise corrupt file modes in every later test
+// case sharing this process.
+struct UmaskGuard {
+	mode_t previous;
+	explicit UmaskGuard(mode_t next) : previous(::umask(next)) {}
+	~UmaskGuard() { ::umask(previous); }
 };
 void observe_empty(BoundCheckpointStorage& storage) {
 	std::string value = "unchanged";
@@ -117,6 +141,28 @@ BOOST_AUTO_TEST_CASE(unsafe_files_and_relocated_directory_fail_closed) {
 	BOOST_CHECK(!make_bound_checkpoint_storage_at_root(root.path + "/../" +
 													   std::filesystem::path(root.path).filename().string()));
 }
+BOOST_AUTO_TEST_CASE(checkpoint_publish_survives_a_restrictive_umask) {
+	Directory root;
+	UmaskGuard guard(0277);
+	auto storage = make_bound_checkpoint_storage_at_root(root.path, 0);
+	BOOST_REQUIRE(storage);
+	BOOST_REQUIRE(storage->lock() == BoundCheckpointIo::ok);
+	observe_empty(*storage);
+	const auto published = storage->publish(0, "first");
+	storage->unlock();
+	BOOST_CHECK(published == BoundCheckpointIo::ok);
+}
+BOOST_AUTO_TEST_CASE(pre_existing_unsafe_lock_file_fails_closed_without_being_repaired) {
+	Directory root;
+	const auto lock_path = root.path + "/checkpoint.lock";
+	const int fd = ::open(lock_path.c_str(), O_WRONLY | O_CREAT, 0644);
+	BOOST_REQUIRE(fd >= 0);
+	::close(fd);
+	BOOST_CHECK(!make_bound_checkpoint_storage_at_root(root.path, 0));
+	struct stat info {};
+	BOOST_REQUIRE(stat(lock_path.c_str(), &info) == 0);
+	BOOST_CHECK_EQUAL(info.st_mode & 0777, 0644U);
+}
 BOOST_AUTO_TEST_CASE(clock_uses_boot_time_and_process_identity) {
 	auto platform = make_bound_anchor_platform();
 	BOOST_REQUIRE(platform);
@@ -147,6 +193,43 @@ BOOST_AUTO_TEST_CASE(browser_and_transport_reject_untrusted_configuration_withou
 	BOOST_CHECK_EQUAL(out.body, "unchanged");
 }
 
+namespace {
+std::size_t feed(license::device_identity::Response& response, std::string line) {
+	return license::device_identity::Response::header(line.data(), 1, line.size(), &response);
+}
+}  // namespace
+
+BOOST_AUTO_TEST_CASE(linux_http_headers_fail_closed) {
+	using license::device_identity::Response;
+	{ Response r; feed(r, "HTTP/1.1 200 OK\r\n"); BOOST_CHECK(feed(r, "Content-Type: application/json\r\n")); BOOST_CHECK_EQUAL(feed(r, "content-type: application/json\r\n"), 0U); }
+	{ Response r; BOOST_CHECK(feed(r, "Content-Length: 2\r\n")); BOOST_CHECK_EQUAL(feed(r, "Transfer-Encoding: chunked\r\n"), 0U); }
+	{ Response r; BOOST_CHECK(feed(r, "Transfer-Encoding: chunked\r\n")); BOOST_CHECK_EQUAL(feed(r, "Content-Length: 2\r\n"), 0U); }
+	{ Response r; BOOST_CHECK_EQUAL(feed(r, "Content-Encoding: gzip\r\n"), 0U); }
+	{ Response r; BOOST_CHECK_EQUAL(feed(r, "Content-Type: text/html\r\n"), 0U); }
+	{ Response r; BOOST_CHECK_EQUAL(feed(r, "Content-Length: 16385\r\n"), 0U); }
+	{ Response r; BOOST_CHECK_EQUAL(feed(r, "X-Folded: a\r\n"), strlen("X-Folded: a\r\n")); BOOST_CHECK_EQUAL(feed(r, " continued\r\n"), 0U); }
+	{ Response r; BOOST_CHECK_EQUAL(feed(r, "Content-Type: application/json\n"), 0U); }
+	{ Response r;  // interim 1xx then final response: per-response header state resets
+	  feed(r, "HTTP/1.1 100 Continue\r\n"); BOOST_CHECK(feed(r, "Content-Type: application/json\r\n")); feed(r, "\r\n");
+	  feed(r, "HTTP/1.1 200 OK\r\n"); BOOST_CHECK(feed(r, "Content-Type: application/json\r\n")); BOOST_CHECK(!r.invalid); }
+}
+
+BOOST_AUTO_TEST_CASE(linux_http_completion_rejects_redirects_short_bodies_and_missing_type) {
+	using license::device_identity::Response;
+	using license::device_identity::finish_response;
+	const auto ready = [](bool type, std::string body, bool has_length, std::uint64_t length) {
+		Response r; r.type = type; r.value.body = std::move(body); r.has_length = has_length; r.length = length; return r;
+	};
+	BoundHttpResponse out{0, "unchanged"};
+	auto a = ready(true, "{}", true, 2); BOOST_CHECK(finish_response(a, 200, out) == BoundHttpStatus::complete); BOOST_CHECK_EQUAL(out.status, 200U);
+	auto b = ready(true, "{}", false, 0); BOOST_CHECK(finish_response(b, 302, out) == BoundHttpStatus::invalid_response);
+	auto c = ready(true, "{}", true, 3); BOOST_CHECK(finish_response(c, 200, out) == BoundHttpStatus::invalid_response);
+	auto d = ready(false, "{}", false, 0); BOOST_CHECK(finish_response(d, 200, out) == BoundHttpStatus::invalid_response);
+	auto e = ready(true, "", false, 0); BOOST_CHECK(finish_response(e, 503, out) == BoundHttpStatus::invalid_response);
+	auto f = ready(true, "{}", false, 0); BOOST_CHECK(finish_response(f, 199, out) == BoundHttpStatus::invalid_response);
+	auto g = ready(true, "{\"e\":1}", false, 0); BOOST_CHECK(finish_response(g, 429, out) == BoundHttpStatus::complete);
+}
+
 BOOST_AUTO_TEST_CASE(browser_launcher_does_not_wait_for_browser_lifetime_and_reports_exec_failure) {
 	auto browser = make_test_linux_browser_launcher("https://example.com/authorize");
 	BOOST_REQUIRE(browser);
@@ -157,4 +240,152 @@ BOOST_AUTO_TEST_CASE(browser_launcher_does_not_wait_for_browser_lifetime_and_rep
 	fail_browser_exec = true;
 	BOOST_CHECK(browser->open(url) == BoundBrowserStatus::unavailable);
 	fail_browser_exec = false;
+}
+
+BOOST_AUTO_TEST_CASE(browser_launcher_tolerates_hosts_that_ignore_sigchld) {
+	auto browser = make_test_linux_browser_launcher("https://example.com/authorize");
+	BOOST_REQUIRE(browser);
+	const auto previous = std::signal(SIGCHLD, SIG_IGN);
+	const auto result = browser->open("https://example.com/authorize#attempt_handle=" + std::string(43, 'A'));
+	std::signal(SIGCHLD, previous);
+	BOOST_CHECK(result == BoundBrowserStatus::opened);
+}
+
+BOOST_AUTO_TEST_CASE(reaped_sigchld_does_not_mask_a_real_exec_failure) {
+	// A host that reaps SIGCHLD must not turn a genuine exec failure into "opened":
+	// the pipe-EOF check still has to gate success, not just the waitpid/ECHILD fallback.
+	auto browser = make_test_linux_browser_launcher("https://example.com/authorize");
+	BOOST_REQUIRE(browser);
+	const auto previous = std::signal(SIGCHLD, SIG_IGN);
+	fail_browser_exec = true;
+	const auto result = browser->open("https://example.com/authorize#attempt_handle=" + std::string(43, 'A'));
+	fail_browser_exec = false;
+	std::signal(SIGCHLD, previous);
+	BOOST_CHECK(result == BoundBrowserStatus::unavailable);
+}
+
+BOOST_AUTO_TEST_CASE(browser_launcher_does_not_leak_host_descriptors) {
+	auto browser = make_test_linux_browser_launcher("https://example.com/authorize");
+	BOOST_REQUIRE(browser);
+	inherited_fd = ::open("/dev/null", O_RDONLY);
+	BOOST_REQUIRE(inherited_fd >= 0);
+	const auto result = browser->open("https://example.com/authorize#attempt_handle=" + std::string(43, 'A'));
+	::close(inherited_fd);
+	inherited_fd = -1;
+	BOOST_CHECK(result == BoundBrowserStatus::opened);
+}
+
+namespace {
+// Restores PATH (including an originally-unset PATH) and the working directory even if a
+// BOOST_REQUIRE/BOOST_CHECK aborts the test case via exception unwinding.
+struct PathAndCwdGuard {
+	bool had_path;
+	std::string previous_path;
+	std::filesystem::path previous_cwd;
+	PathAndCwdGuard() : previous_cwd(std::filesystem::current_path()) {
+		const char* current = std::getenv("PATH");
+		had_path = current != nullptr;
+		if (had_path) previous_path = current;
+	}
+	~PathAndCwdGuard() {
+		std::error_code ignored;
+		std::filesystem::current_path(previous_cwd, ignored);
+		if (had_path)
+			setenv("PATH", previous_path.c_str(), 1);
+		else
+			unsetenv("PATH");
+	}
+};
+}  // namespace
+
+BOOST_AUTO_TEST_CASE(browser_launcher_uses_absolute_path_entries_only) {
+	Directory bin;
+	const auto opener = bin.path + "/xdg-open";
+	std::ofstream(opener) << "#!/bin/sh\n";
+	BOOST_REQUIRE(chmod(opener.c_str(), 0700) == 0);
+
+	// A relative PATH entry ("rel") that genuinely resolves from the test's cwd: if resolution
+	// ever honoured relative entries, this would let the launcher exec a non-existent absolute
+	// path, so the case must fail closed regardless of what "rel" contains.
+	Directory relative_root;
+	const auto relative_dir = relative_root.path + "/rel";
+	BOOST_REQUIRE(std::filesystem::create_directory(relative_dir));
+	const auto relative_opener = relative_dir + "/xdg-open";
+	std::ofstream(relative_opener) << "#!/bin/sh\n";
+	BOOST_REQUIRE(chmod(relative_opener.c_str(), 0700) == 0);
+
+	PathAndCwdGuard guard;
+	std::filesystem::current_path(relative_root.path);
+
+	auto browser = make_test_linux_browser_launcher("https://example.com/authorize");
+	BOOST_REQUIRE(browser);
+	const auto url = "https://example.com/authorize#attempt_handle=" + std::string(43, 'A');
+
+	setenv("PATH", "rel", 1);
+	BOOST_CHECK(browser->open(url) == BoundBrowserStatus::unavailable);
+
+	setenv("PATH", ":", 1);
+	BOOST_CHECK(browser->open(url) == BoundBrowserStatus::unavailable);
+
+	setenv("PATH", ("rel:" + bin.path).c_str(), 1);
+	BOOST_CHECK(browser->open(url) == BoundBrowserStatus::opened);
+}
+
+namespace {
+sockaddr_storage ipv4(const char* text, unsigned short port) {
+	sockaddr_storage value{};
+	auto& address = reinterpret_cast<sockaddr_in&>(value);
+	address.sin_family = AF_INET;
+	address.sin_port = htons(port);
+	BOOST_REQUIRE(inet_pton(AF_INET, text, &address.sin_addr) == 1);
+	return value;
+}
+sockaddr_storage ipv6(const char* text, unsigned short port) {
+	sockaddr_storage value{};
+	auto& address = reinterpret_cast<sockaddr_in6&>(value);
+	address.sin6_family = AF_INET6;
+	address.sin6_port = htons(port);
+	BOOST_REQUIRE(inet_pton(AF_INET6, text, &address.sin6_addr) == 1);
+	return value;
+}
+// Format exactly like the kernel: raw 32-bit words printed as native integers.
+std::string endpoint(const sockaddr_storage& value) {
+	char text[64];
+	if (value.ss_family == AF_INET) {
+		const auto& a = reinterpret_cast<const sockaddr_in&>(value);
+		std::snprintf(text, sizeof(text), "%08X:%04X", a.sin_addr.s_addr, ntohs(a.sin_port));
+	} else {
+		const auto& a = reinterpret_cast<const sockaddr_in6&>(value);
+		std::uint32_t w[4];
+		std::memcpy(w, &a.sin6_addr, sizeof(w));
+		std::snprintf(text, sizeof(text), "%08X%08X%08X%08X:%04X", w[0], w[1], w[2], w[3], ntohs(a.sin6_port));
+	}
+	return text;
+}
+std::string table(const Directory& root, const std::string& rows) {
+	const auto path = root.path + "/tcp";
+	std::ofstream(path)
+		<< "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n"
+		<< rows;
+	return path;
+}
+std::string row(const sockaddr_storage& local, const sockaddr_storage& remote, unsigned uid) {
+	return "   0: " + endpoint(local) + " " + endpoint(remote) + " 01 00000000:00000000 00:00000000 00000000 " +
+		   std::to_string(uid) + "        0 12345 1 0000000000000000 20 4 30 10 -1\n";
+}
+}  // namespace
+
+BOOST_AUTO_TEST_CASE(loopback_peer_must_belong_to_the_same_user) {
+	Directory root;
+	const auto peer = ipv4("127.0.0.1", 40000), local = ipv4("127.0.0.1", 45678);
+	const auto me = geteuid();
+	BOOST_CHECK(
+		bound_loopback_peer_owned(table(root, row(local, peer, me) + row(peer, local, me)).c_str(), peer, local, me));
+	BOOST_CHECK(!bound_loopback_peer_owned(table(root, row(local, peer, me) + row(peer, local, me + 1)).c_str(), peer,
+										   local, me));
+	BOOST_CHECK(!bound_loopback_peer_owned(table(root, row(local, peer, me)).c_str(), peer, local, me));
+	BOOST_CHECK(!bound_loopback_peer_owned((root.path + "/missing").c_str(), peer, local, me));
+	const auto peer6 = ipv6("::1", 40001), local6 = ipv6("::1", 45679);
+	BOOST_CHECK(bound_loopback_peer_owned(table(root, row(peer6, local6, me)).c_str(), peer6, local6, me));
+	BOOST_CHECK(!bound_loopback_peer_owned(table(root, row(peer6, local6, me + 1)).c_str(), peer6, local6, me));
 }
