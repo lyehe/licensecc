@@ -6,7 +6,7 @@ import { createPublicKey, verify } from "node:crypto";
 import worker from "../../dist/app.js";
 import { boundRandomId, boundSecretHash } from "../../src/device/bound_enrollment.mjs";
 import { expireBoundRecovery, purgeExpiredBoundLeases } from "../../src/device/bound_cleanup.mjs";
-import { boundSourceIdentity, limitBoundRequest, limitBoundVerified } from "../../src/device/bound_rate.mjs";
+import { boundSourceIdentity, limitBoundRequest, limitBoundVerified, parseGlobalRateLimit } from "../../src/device/bound_rate.mjs";
 import { retireBoundBinding } from "../../src/device/bound_retire.mjs";
 import { encodeBase64url, deviceOperationBody, deviceProofSigningInput, decodeDeviceLeaseEnvelope, deviceLeaseSigningInput } from "@licensecc/licensing-domain/lease/device_protocol";
 import { sha256Hex, normalizeDeviceSignature, importBoundDeviceKey } from "../../src/device/bound_crypto.mjs";
@@ -408,6 +408,14 @@ test("global protected budget is configurable and still denies once exhausted", 
   // Invalid values fall back to the default 1000, so this request is admitted
   // (global count is 150 < 1000), not denied.
   await limitBoundRequest(new Request("https://backend.test/v2/device-challenges", {headers:{"cf-connecting-ip":"203.0.113.10"}}), f.env, f.db);
+});
+
+test("parseGlobalRateLimit is the one shared range check for both the runtime clamp and readiness", () => {
+  for (const value of [100, 500, 1000, 1000000]) assert.equal(parseGlobalRateLimit(String(value)), value);
+  assert.equal(parseGlobalRateLimit(500), 500);
+  for (const invalid of [undefined, "0", "99", "1000001", "12.5", "not-a-number", "", "-5", "NaN", "Infinity"]) {
+    assert.equal(parseGlobalRateLimit(invalid), null, String(invalid));
+  }
 });
 
 test("session routes consult the edge limiter before any D1 write", async t => {

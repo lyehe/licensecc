@@ -23,7 +23,7 @@ test("protected readiness proves local crypto/configuration without claiming liv
   assert.equal(result.scope,"local_configuration_only");
   assert.equal(result.live_issuance,"not_run");
   assert.equal(result.live_renewal,"not_run");
-  assert.deepEqual(result.checks,{registry:true,signing_key_pair:true,approval_key_ring:true});
+  assert.deepEqual(result.checks,{registry:true,signing_key_pair:true,approval_key_ring:true,global_rate_limit:true});
   for (const field of Object.keys(env)) {
     const broken = {...env}; delete broken[field];
     assert.equal((await checkProtectedDeviceConfiguration(broken)).ok,false,field);
@@ -34,6 +34,22 @@ test("protected readiness proves local crypto/configuration without claiming liv
   assert.equal(mismatch.checks.signing_key_pair,false);
   assert.doesNotMatch(JSON.stringify(mismatch),/PRIVATE KEY|PUBLIC KEY|a1|licenses\.example/);
   assert.equal((await checkProtectedDeviceConfiguration({...env,BOUND_APPROVAL_ENCRYPTION_KEYS:'{"active":"missing","keys":{}}'})).ok,false);
+});
+
+test("protected readiness flags an out-of-range or non-integer global rate limit as its own failure", async () => {
+  const env = await configuration();
+  for (const invalid of ["0", "99", "1000001", "12.5", "not-a-number", "", "-5", "NaN", "Infinity"]) {
+    const result = await checkProtectedDeviceConfiguration({...env, BOUND_GLOBAL_RATE_LIMIT: invalid});
+    assert.equal(result.ok, false, invalid);
+    assert.deepEqual(result.checks, {registry:true,signing_key_pair:true,approval_key_ring:true,global_rate_limit:false}, invalid);
+  }
+  for (const valid of ["100", "1000", "1000000", "500", 500]) {
+    const result = await checkProtectedDeviceConfiguration({...env, BOUND_GLOBAL_RATE_LIMIT: valid});
+    assert.equal(result.ok, true, String(valid));
+    assert.equal(result.checks.global_rate_limit, true, String(valid));
+  }
+  // Unset keeps the documented default (1000) and is not a failure.
+  assert.equal((await checkProtectedDeviceConfiguration(env)).checks.global_rate_limit, true);
 });
 
 test("readiness script supports environment-scoped Wrangler vars", async (t) => {

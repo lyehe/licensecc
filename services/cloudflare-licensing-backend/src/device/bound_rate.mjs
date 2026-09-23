@@ -62,9 +62,21 @@ export function boundSourceIdentity(raw) {
   return `${groups.slice(0, 4).map(group => group.toString(16)).join(":")}::/64`;
 }
 
+// The one shared range check for BOUND_GLOBAL_RATE_LIMIT: the runtime clamp
+// below and the deployment readiness check both call this instead of each
+// keeping their own copy of the range. A missing value is not a configuration
+// error (callers apply their own default); a present value that is not an
+// integer in [100, 1000000] parses to null so callers can tell "unset" apart
+// from "set but invalid".
+/** @param {string | number | undefined} raw @returns {number | null} */
+export function parseGlobalRateLimit(raw) {
+  if (raw === undefined) return null;
+  const value = Number(raw);
+  return Number.isSafeInteger(value) && value >= 100 && value <= 1000000 ? value : null;
+}
+
 function globalLimit(env) {
-  const value = Number(env.BOUND_GLOBAL_RATE_LIMIT ?? 1000);
-  return Number.isSafeInteger(value) && value >= 100 && value <= 1000000 ? value : 1000;
+  return parseGlobalRateLimit(env.BOUND_GLOBAL_RATE_LIMIT) ?? 1000;
 }
 
 // Fixed protected-protocol namespaces. Legacy rate/proof/account-token "off"

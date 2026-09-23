@@ -4,12 +4,17 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { boundDeviceConfig, loadBoundSigner } from "../src/device/bound_config.mjs";
 import { sealBoundApproval, openBoundApproval } from "../src/device/bound_approval_crypto.mjs";
+import { parseGlobalRateLimit } from "../src/device/bound_rate.mjs";
 
 // This validates material prepared for deployment. It cannot prove which values
 // are deployed or that an actual entitlement can be issued/renewed remotely.
 export async function checkProtectedDeviceConfiguration(env) {
-  const checks = { registry: false, signing_key_pair: false, approval_key_ring: false };
+  const checks = { registry: false, signing_key_pair: false, approval_key_ring: false, global_rate_limit: false };
   try {
+    // Independent of the registry/signer/key-ring chain below: an operator can
+    // set an invalid BOUND_GLOBAL_RATE_LIMIT even when everything else is fine,
+    // and the runtime clamp would otherwise hide it by silently using 1000.
+    checks.global_rate_limit = env.BOUND_GLOBAL_RATE_LIMIT === undefined || parseGlobalRateLimit(env.BOUND_GLOBAL_RATE_LIMIT) !== null;
     boundDeviceConfig(env);
     checks.registry = true;
     const signer = await loadBoundSigner(env);
