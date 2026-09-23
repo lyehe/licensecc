@@ -314,6 +314,14 @@ function collectBackupSurfaceFromVm(repoRoot) {
   const nodeCryptoShim = new vm.SyntheticModule(["createHash"], function initializeNodeCrypto() {
     this.setExport("createHash", createHash);
   }, { context, identifier: "node:crypto" });
+  const cloudflareWorkflowsShim = new vm.SyntheticModule(["NonRetryableError"], function initializeCloudflareWorkflows() {
+    this.setExport("NonRetryableError", class NonRetryableError extends Error {
+      constructor(message, name) {
+        super(message);
+        this.name = name ?? "NonRetryableError";
+      }
+    });
+  }, { context, identifier: "cloudflare:workflows" });
 
   const loadModule = (absolutePath) => {
     const identifier = pathToFileURL(absolutePath).href;
@@ -328,6 +336,7 @@ function collectBackupSurfaceFromVm(repoRoot) {
   const linker = async (specifier, referencingModule) => {
     if (specifier === "cloudflare:workers") return workflowShim;
     if (specifier === "node:crypto") return nodeCryptoShim;
+    if (specifier === "cloudflare:workflows") return cloudflareWorkflowsShim;
     if (!specifier.startsWith(".") && !specifier.startsWith("/")) {
       throw new Error(`Backup compiled module imports unsupported external specifier ${specifier}.`);
     }
