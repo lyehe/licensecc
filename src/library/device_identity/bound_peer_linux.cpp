@@ -29,16 +29,18 @@ bool bound_loopback_peer_owned(const char* table, const sockaddr_storage& peer, 
 	bool owned = false;
 	if (std::fgets(line, sizeof(line), file)) {
 		while (std::fgets(line, sizeof(line), file)) {
-			unsigned source[4]{}, target[4]{}, source_port = 0, target_port = 0, uid = 0;
+			unsigned source[4]{}, target[4]{}, source_port = 0, target_port = 0, state = 0, uid = 0;
 			const bool parsed =
 				peer.ss_family == AF_INET
-					? std::sscanf(line, " %*u: %8X:%4X %8X:%4X %*X %*X:%*X %*X:%*X %*X %u", &source[0], &source_port,
-								  &target[0], &target_port, &uid) == 5
-					: std::sscanf(line, " %*u: %8X%8X%8X%8X:%4X %8X%8X%8X%8X:%4X %*X %*X:%*X %*X:%*X %*X %u",
+					? std::sscanf(line, " %*u: %8X:%4X %8X:%4X %2X %*X:%*X %*X:%*X %*X %u", &source[0], &source_port,
+								  &target[0], &target_port, &state, &uid) == 6
+					: std::sscanf(line, " %*u: %8X%8X%8X%8X:%4X %8X%8X%8X%8X:%4X %2X %*X:%*X %*X:%*X %*X %u",
 								  &source[0], &source[1], &source[2], &source[3], &source_port, &target[0], &target[1],
-								  &target[2], &target[3], &target_port, &uid) == 11;
+								  &target[2], &target[3], &target_port, &state, &uid) == 12;
 			// The connecting socket's local endpoint is our peer; its remote endpoint is our listener side.
-			if (parsed && same(peer, source, source_port) && same(local, target, target_port)) {
+			// Only live rows count: ESTABLISHED (01) or CLOSE_WAIT (08); TIME_WAIT rows report uid 0.
+			if (parsed && (state == 0x01 || state == 0x08) && same(peer, source, source_port) &&
+				same(local, target, target_port)) {
 				owned = uid == owner;
 				break;
 			}

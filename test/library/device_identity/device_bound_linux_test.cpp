@@ -417,9 +417,10 @@ std::string table(const Directory& root, const std::string& rows) {
 		<< rows;
 	return path;
 }
-std::string row(const sockaddr_storage& local, const sockaddr_storage& remote, unsigned uid) {
-	return "   0: " + endpoint(local) + " " + endpoint(remote) + " 01 00000000:00000000 00:00000000 00000000 " +
-		   std::to_string(uid) + "        0 12345 1 0000000000000000 20 4 30 10 -1\n";
+std::string row(const sockaddr_storage& local, const sockaddr_storage& remote, unsigned uid, const char* state = "01") {
+	return "   0: " + endpoint(local) + " " + endpoint(remote) + " " + state +
+		   " 00000000:00000000 00:00000000 00000000 " + std::to_string(uid) +
+		   "        0 12345 1 0000000000000000 20 4 30 10 -1\n";
 }
 }  // namespace
 
@@ -440,4 +441,16 @@ BOOST_AUTO_TEST_CASE(loopback_peer_must_belong_to_the_same_user) {
 	BOOST_CHECK(!bound_loopback_peer_owned(table(root, row(local6, peer6, me) + row(peer6, local6, me + 1)).c_str(),
 										   peer6, local6, me));
 	BOOST_CHECK(!bound_loopback_peer_owned(table(root, row(local6, peer6, me)).c_str(), peer6, local6, me));
+}
+
+BOOST_AUTO_TEST_CASE(loopback_peer_rows_must_be_established_or_close_wait) {
+	Directory root;
+	const auto peer = ipv4("127.0.0.1", 40002), local = ipv4("127.0.0.1", 45680);
+	const auto me = geteuid();
+	// A TIME_WAIT (06) row reports uid 0 and must never decide ownership, even for root.
+	BOOST_CHECK(!bound_loopback_peer_owned(table(root, row(peer, local, 0, "06")).c_str(), peer, local, 0));
+	BOOST_CHECK(bound_loopback_peer_owned(table(root, row(peer, local, 0, "06") + row(peer, local, me)).c_str(), peer,
+										  local, me));
+	BOOST_CHECK(bound_loopback_peer_owned(table(root, row(peer, local, me, "08")).c_str(), peer, local, me));
+	BOOST_CHECK(!bound_loopback_peer_owned(table(root, row(peer, local, me, "0A")).c_str(), peer, local, me));
 }
