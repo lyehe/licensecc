@@ -5,11 +5,11 @@ import { clientIp, envelope, readJson } from "../support.js";
 import { hashPassword, loginEmail, validPassword } from "../password/crypto.js";
 import { HEADERS, primary, gate, throttle, signedIn, digest } from "../password/shared.js";
 import { passwordInvalidations } from "../password/invalidation.js";
-import type { Env, TopRoute } from "../env.js";
+import type { Env, ExecutionContextLike, TopRoute } from "../env.js";
 
 type Action = { purpose: "register" | "reset"; email_lower: string; customer_id: string; credential_hash: string | null };
 
-async function requestLink(request: Request, env: Env, reqId: string, now: number, purpose: Action["purpose"]): Promise<Response> {
+async function requestLink(request: Request, env: Env, ctx: ExecutionContextLike | undefined, reqId: string, now: number, purpose: Action["purpose"]): Promise<Response> {
   const denied = gate(request, env, reqId);
   if (denied) return denied;
   const body = await readJson(request, reqId);
@@ -20,26 +20,39 @@ async function requestLink(request: Request, env: Env, reqId: string, now: numbe
   if (await throttle(request, env, email, purpose, now) || (await portalRateLimit(env, `password:mail:${await digest(email)}`, 1, 60, now)).limited) {
     return envelope(reqId, "rate_limited", undefined, 429, HEADERS);
   }
-  const db = primary(env);
-  const accepted = () => envelope(reqId, "verification_requested", undefined, 202, HEADERS);
-  // Verified contact addresses recover credentials. Accounts created before email
-  // verification (empty contact) may recover once, if no other customer owns it.
-  const credential = await db.prepare(`SELECT p.customer_id, p.password_hash FROM portal_passwords p JOIN customers c ON c.id = p.customer_id
-    WHERE p.email_lower = ? AND c.status = 'active'
-      AND (lower(c.email) = p.email_lower OR (c.email = '' AND NOT EXISTS (SELECT 1 FROM customers o WHERE lower(o.email) = p.email_lower)))`)
-    .bind(email).first<{ customer_id: string; password_hash: string }>();
-  const existing = await db.prepare("SELECT id FROM customers WHERE lower(email) = ? UNION ALL SELECT customer_id AS id FROM portal_passwords WHERE email_lower = ? LIMIT 1").bind(email, email).first();
-  // The same response covers unknown, disabled, unverified and already registered addresses.
-  if ((purpose === "register" && existing) || (purpose === "reset" && !credential)) return accepted();
-  const token = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32)))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-  const tokenHash = await digest(token);
-  await db.prepare("DELETE FROM portal_password_actions WHERE expires_at <= ?").bind(now).run();
-  await db.prepare("INSERT INTO portal_password_actions (token_hash, purpose, email_lower, customer_id, credential_hash, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
-    .bind(tokenHash, purpose, email, credential?.customer_id ?? `cust_${crypto.randomUUID()}`, purpose === "reset" ? credential!.password_hash : null, now, now + 900).run();
-  const link = `${canonicalHttpsOrigin(env.PORTAL_PUBLIC_ORIGIN)}/password-action#token=${token}`;
-  const sent = await sendEmail(env, email, purpose === "register" ? "Verify your Licensecc email" : "Reset your Licensecc password", `${purpose === "register" ? "Verify your email and choose a password" : "Choose a new password"}:\n\n${link}\n\nThis link expires in 15 minutes and can be used once. If you did not request it, ignore this email.`);
-  if (!sent.ok) await db.prepare("DELETE FROM portal_password_actions WHERE token_hash = ? AND consumed_at IS NULL").bind(tokenHash).run();
-  return accepted();
+  // Eligibility, proof storage and delivery run after the response so every
+  // address gets the same 202 with the same latency.
+  const work = issueLink(env, email, now, purpose);
+  if (ctx?.waitUntil) ctx.waitUntil(work);
+  else await work;
+  return envelope(reqId, "verification_requested", undefined, 202, HEADERS);
+}
+
+async function issueLink(env: Env, email: string, now: number, purpose: Action["purpose"]): Promise<void> {
+  try {
+    const db = primary(env);
+    // Verified contact addresses recover credentials. Accounts created before email
+    // verification (empty contact) may recover once, if no other customer owns it.
+    const credential = await db.prepare(`SELECT p.customer_id, p.password_hash FROM portal_passwords p JOIN customers c ON c.id = p.customer_id
+      WHERE p.email_lower = ? AND c.status = 'active'
+        AND (lower(c.email) = p.email_lower OR (c.email = '' AND NOT EXISTS (SELECT 1 FROM customers o WHERE lower(o.email) = p.email_lower)))`)
+      .bind(email).first<{ customer_id: string; password_hash: string }>();
+    const existing = await db.prepare("SELECT id FROM customers WHERE lower(email) = ? UNION ALL SELECT customer_id AS id FROM portal_passwords WHERE email_lower = ? LIMIT 1").bind(email, email).first();
+    // The same response covers unknown, disabled, unverified and already registered addresses.
+    if ((purpose === "register" && existing) || (purpose === "reset" && !credential)) return;
+    const token = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32)))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    const tokenHash = await digest(token);
+    await db.prepare("DELETE FROM portal_password_actions WHERE expires_at <= ?").bind(now).run();
+    await db.prepare("INSERT INTO portal_password_actions (token_hash, purpose, email_lower, customer_id, credential_hash, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+      .bind(tokenHash, purpose, email, credential?.customer_id ?? `cust_${crypto.randomUUID()}`, purpose === "reset" ? credential!.password_hash : null, now, now + 900).run();
+    const link = `${canonicalHttpsOrigin(env.PORTAL_PUBLIC_ORIGIN)}/password-action#token=${token}`;
+    const sent = await sendEmail(env, email, purpose === "register" ? "Verify your Licensecc email" : "Reset your Licensecc password", `${purpose === "register" ? "Verify your email and choose a password" : "Choose a new password"}:\n\n${link}\n\nThis link expires in 15 minutes and can be used once. If you did not request it, ignore this email.`);
+    if (!sent.ok && sent.code !== "email_send_indeterminate") {
+      await db.prepare("DELETE FROM portal_password_actions WHERE token_hash = ? AND consumed_at IS NULL").bind(tokenHash).run();
+    }
+  } catch {
+    // Background delivery never surfaces account state; the proof simply expires.
+  }
 }
 
 async function complete(request: Request, env: Env, reqId: string, now: number): Promise<Response> {
@@ -85,7 +98,7 @@ async function complete(request: Request, env: Env, reqId: string, now: number):
 }
 
 export const PASSWORD_EMAIL_DISPATCH: Record<string, TopRoute> = {
-  "POST /portal/v1/auth/password/register": (request, env, _ctx, reqId, now) => requestLink(request, env, reqId, now, "register"),
-  "POST /portal/v1/auth/password/reset": (request, env, _ctx, reqId, now) => requestLink(request, env, reqId, now, "reset"),
+  "POST /portal/v1/auth/password/register": (request, env, ctx, reqId, now) => requestLink(request, env, ctx, reqId, now, "register"),
+  "POST /portal/v1/auth/password/reset": (request, env, ctx, reqId, now) => requestLink(request, env, ctx, reqId, now, "reset"),
   "POST /portal/v1/auth/password/complete": (request, env, _ctx, reqId, now) => complete(request, env, reqId, now),
 };

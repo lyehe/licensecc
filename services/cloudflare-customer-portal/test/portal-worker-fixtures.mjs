@@ -74,7 +74,7 @@ export async function ownedEntitlementId(env, cookie) {
   return r.body.data.items[0].id;
 }
 
-export async function call(env, method, path, { cookie, body, headers } = {}) {
+export async function call(env, method, path, { cookie, body, headers, ctx = CTX } = {}) {
   const h = sameSiteHeaders(headers);
   if (cookie) h.cookie = cookie;
   const req = new Request(`https://portal.test${path}`, {
@@ -82,7 +82,7 @@ export async function call(env, method, path, { cookie, body, headers } = {}) {
     headers: h,
     body: body === undefined ? undefined : JSON.stringify(body),
   });
-  const res = await worker.fetch(req, env, CTX);
+  const res = await worker.fetch(req, env, ctx);
   let parsed = null;
   const text = await res.clone().text();
   try { parsed = JSON.parse(text); } catch { parsed = text; }

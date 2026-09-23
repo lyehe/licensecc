@@ -399,7 +399,7 @@ test("email provider header stalls are bounded without retrying or leaking the O
     }, "customer@example.test", "Subject", otpBody, 1),
   ), 500);
   assert.notEqual(result, null, "email send does not wait indefinitely for response headers");
-  assert.deepEqual(result, { ok: false, code: "email_send_failed" });
+  assert.deepEqual(result, { ok: false, code: "email_send_indeterminate" });
   assert.equal(aborted, true, "the single email subrequest is aborted");
   assert.equal(calls.length, 1, "the provider request is never retried");
   assert.equal(calls[0].redirect, "manual", "the API key request remains redirect-safe");

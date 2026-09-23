@@ -16,10 +16,17 @@ function fixture(t) {
     mail.push(JSON.parse(init.body));
     return new Response("{}", { status: 200 });
   });
-  const request = (purpose, email = "new@example.com", env = data.env) => call(env, "POST", `${PATH}/${purpose}`, { body: { email } });
+  const pending = [];
+  const ctx = { waitUntil: p => { pending.push(Promise.resolve(p)); } };
+  const settle = async () => { while (pending.length) await pending.shift(); };
+  const request = async (purpose, email = "new@example.com", env = data.env) => {
+    const result = await call(env, "POST", `${PATH}/${purpose}`, { body: { email }, ctx });
+    await settle();
+    return result;
+  };
   const token = () => new URL(mail.at(-1).text.match(/https:\/\/\S+/)[0]).hash.slice("#token=".length);
   const complete = (value = token(), password = PASSWORD) => call(data.env, "POST", `${PATH}/complete`, { body: { token: value, password } });
-  return { ...data, mail, request, token, complete };
+  return { ...data, mail, request, token, complete, ctx, settle };
 }
 const cookie = result => result.res.headers.get("set-cookie").split(";")[0];
 async function credential(env, email = "a@x.com") {
@@ -150,6 +157,26 @@ test("legacy reset stays generic when another customer owns the address", async 
   assert.equal((await f.request("reset", "a@x.com")).status, 202);
   assert.equal(f.mail.length, 0);
   assert.equal(f.db.prepare("SELECT email FROM customers WHERE id = 'L'").get().email, "");
+});
+
+test("link requests answer before any account lookup or delivery", async t => {
+  const f = fixture(t);
+  await credential(f.env);
+  let release; const gate = new Promise(resolve => { release = resolve; });
+  t.mock.method(globalThis, "fetch", async (_url, init) => { await gate; f.mail.push(JSON.parse(init.body)); return new Response("{}", { status: 200 }); });
+  const response = await call(f.env, "POST", `${PATH}/reset`, { body: { email: "a@x.com" }, ctx: f.ctx });
+  assert.equal(response.status, 202);
+  assert.equal(f.mail.length, 0);
+  release(); await f.settle();
+  assert.equal(f.mail.length, 1);
+});
+
+test("a provider timeout keeps the emailed link redeemable", async t => {
+  const f = fixture(t);
+  t.mock.method(globalThis, "fetch", async (_url, init) => { f.mail.push(JSON.parse(init.body)); throw new DOMException("aborted", "AbortError"); });
+  assert.equal((await f.request("register", "slow@example.com")).status, 202);
+  assert.equal(f.db.prepare("SELECT count(*) n FROM portal_password_actions WHERE email_lower = 'slow@example.com'").get().n, 1);
+  assert.equal((await f.complete()).status, 200);
 });
 
 export const DIRECT_ROUTE_TESTS = ["POST /portal/v1/auth/password/register", "POST /portal/v1/auth/password/reset", "POST /portal/v1/auth/password/complete"];
