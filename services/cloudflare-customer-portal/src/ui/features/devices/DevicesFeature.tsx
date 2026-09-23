@@ -50,8 +50,10 @@ export interface DevicesController {
   seatSessions: Record<string, SeatSession>;
   seatReleaseDialogRef: React.RefObject<HTMLDivElement | null>;
   seatStartButtonRefs: React.RefObject<Record<string, HTMLButtonElement | null>>;
+  seatReleaseButtonRefs: React.RefObject<Record<string, HTMLButtonElement | null>>;
   seatCardRefs: React.RefObject<Record<string, HTMLDivElement | null>>;
   browserSessionsSummaryRef: React.RefObject<HTMLElement | null>;
+  panelHeadingRef: React.RefObject<HTMLElement | null>;
   seatAction(item: EntitlementRow, operation: SeatOperation): Promise<SeatActionResult>;
   requestSeatRelease(item: EntitlementRow): void;
   dismissSeatRelease(): void;
@@ -88,6 +90,20 @@ function writeStoredSeats(json: string): void {
   }
 }
 
+// Verify-then-fallback focus: try the primary target (skipping a disabled button), then the
+// secondary target if the primary did not actually take focus, then the fallback if neither did
+// (activeElement still null/BODY). Shared by the release-focus and start-focus effects below, both
+// of which move focus after a seat action remounts the browser-sessions panel.
+function focusFirstAvailable(
+  primary: HTMLElement | null | undefined,
+  secondary: HTMLElement | null | undefined,
+  fallback: HTMLElement | null | undefined,
+): void {
+  if (primary != null && !(primary instanceof HTMLButtonElement && primary.disabled)) primary.focus();
+  if (document.activeElement !== primary) secondary?.focus();
+  if (document.activeElement === null || document.activeElement === document.body) fallback?.focus();
+}
+
 export function useDevicesController(options: DeviceFeatureOptions): DevicesController {
   const { busy, busyRef, devices, entitlements, refreshData, runOnce, setMessage } = options;
   const [seatSessions, setSeatSessionsRaw] = useState<Record<string, SeatSession>>(
@@ -97,13 +113,16 @@ export function useDevicesController(options: DeviceFeatureOptions): DevicesCont
   const [seatReleaseError, setSeatReleaseError] = useState<string | null>(null);
   const [seatReleaseOutcomeUnknown, setSeatReleaseOutcomeUnknown] = useState(false);
   const [seatReleaseFocusId, setSeatReleaseFocusId] = useState<string | null>(null);
+  const [seatStartFocusId, setSeatStartFocusId] = useState<string | null>(null);
   const seatReleaseDialogRef = useRef<HTMLDivElement>(null);
   const seatReleaseReturnFocusRef = useRef<HTMLElement | null>(null);
   const seatReleaseDeferredFocusRef = useRef<HTMLElement | null>(null);
   const seatReleaseConfirmingRef = useRef(false);
   const seatStartButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const seatReleaseButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const seatCardRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const browserSessionsSummaryRef = useRef<HTMLElement | null>(null);
+  const panelHeadingRef = useRef<HTMLElement | null>(null);
 
   function setSeatSessions(update: React.SetStateAction<Record<string, SeatSession>>): void {
     setSeatSessionsRaw((current) => {
@@ -118,6 +137,7 @@ export function useDevicesController(options: DeviceFeatureOptions): DevicesCont
   async function seatAction(item: EntitlementRow, operation: SeatOperation): Promise<SeatActionResult> {
     let succeeded = false;
     let refreshFailed = false;
+    let checkedOut = false;
     await runOnce(async () => {
       const existing = seatSessions[item.id];
       if ((operation === "heartbeat" || operation === "release") && existing === undefined) {
@@ -145,6 +165,7 @@ export function useDevicesController(options: DeviceFeatureOptions): DevicesCont
           ...current,
           [item.id]: { seat_id: seatId, client_instance_id: clientInstanceId, expires_at: leaseExpiresAt },
         }));
+        checkedOut = true;
       }
       if (operation === "heartbeat" && existing !== undefined) {
         setSeatSessions((current) => {
@@ -169,6 +190,9 @@ export function useDevicesController(options: DeviceFeatureOptions): DevicesCont
       await refreshData();
       succeeded = true;
     });
+    // Set after runOnce resolves (busy has cleared) so the seat's Release button is enabled, and
+    // thus focusable, by the time the start-focus effect below runs.
+    if (checkedOut) setSeatStartFocusId(item.id);
     return { succeeded, refreshFailed };
   }
 
@@ -270,15 +294,30 @@ export function useDevicesController(options: DeviceFeatureOptions): DevicesCont
 
   useEffect(() => {
     if (seatReleaseFocusId === null || pendingSeatRelease !== null || seatSessions[seatReleaseFocusId] !== undefined) return;
-    const startButton = seatStartButtonRefs.current[seatReleaseFocusId];
-    if (startButton !== null && !startButton.disabled) startButton.focus();
-    if (document.activeElement !== startButton) seatCardRefs.current[seatReleaseFocusId]?.focus();
     // Releasing the last live browser session collapses the panel into a closed <details>, which
-    // makes the seat card/button unfocusable. When neither target above took focus, land it on the
-    // panel's own <summary> instead of leaving it on <body>.
-    if (document.activeElement === null || document.activeElement === document.body) browserSessionsSummaryRef.current?.focus();
+    // makes the seat card/button unfocusable. When neither the start button nor the card took
+    // focus, land it on the panel's own <summary> instead of leaving it on <body>.
+    focusFirstAvailable(
+      seatStartButtonRefs.current[seatReleaseFocusId],
+      seatCardRefs.current[seatReleaseFocusId],
+      browserSessionsSummaryRef.current,
+    );
     setSeatReleaseFocusId(null);
   }, [entitlements, pendingSeatRelease, seatReleaseFocusId, seatSessions]);
+
+  useEffect(() => {
+    if (seatStartFocusId === null || seatSessions[seatStartFocusId] === undefined) return;
+    // Starting a floating seat flips hasBrowserSession and remounts the seat grid (<details> ->
+    // <section>), so the just-clicked Start seat button is unmounted and focus would otherwise
+    // drop to <body>. Land it on the seat's own Release button or card, falling back to the
+    // panel's now-visible heading.
+    focusFirstAvailable(
+      seatReleaseButtonRefs.current[seatStartFocusId],
+      seatCardRefs.current[seatStartFocusId],
+      panelHeadingRef.current,
+    );
+    setSeatStartFocusId(null);
+  }, [entitlements, seatSessions, seatStartFocusId]);
 
   async function releaseDevice(item: DeviceRow): Promise<void> {
     if (!window.confirm(DEVICE_RELEASE_CONFIRM_COPY)) return;
@@ -298,6 +337,7 @@ export function useDevicesController(options: DeviceFeatureOptions): DevicesCont
     setSeatReleaseError(null);
     setSeatReleaseOutcomeUnknown(false);
     setSeatReleaseFocusId(null);
+    setSeatStartFocusId(null);
   }
 
   return {
@@ -310,8 +350,10 @@ export function useDevicesController(options: DeviceFeatureOptions): DevicesCont
     seatSessions,
     seatReleaseDialogRef,
     seatStartButtonRefs,
+    seatReleaseButtonRefs,
     seatCardRefs,
     browserSessionsSummaryRef,
+    panelHeadingRef,
     seatAction,
     requestSeatRelease,
     dismissSeatRelease,
@@ -346,7 +388,11 @@ export function DevicesFeature({ controller }: { controller: DevicesController }
               onClick={() => void controller.seatAction(item, "checkout")}
             >Start seat</button>
             <button disabled={controller.busy || item.status !== "active" || controller.seatSessions[item.id] === undefined} onClick={() => void controller.seatAction(item, "heartbeat")}>Renew seat</button>
-            <button disabled={controller.busy || controller.seatSessions[item.id] === undefined} onClick={() => controller.requestSeatRelease(item)}>Release</button>
+            <button
+              ref={(element) => { controller.seatReleaseButtonRefs.current[item.id] = element; }}
+              disabled={controller.busy || controller.seatSessions[item.id] === undefined}
+              onClick={() => controller.requestSeatRelease(item)}
+            >Release</button>
           </div>
         </div>
       ))}
@@ -358,7 +404,11 @@ export function DevicesFeature({ controller }: { controller: DevicesController }
       {floatingEntitlements.length > 0 && (
         hasBrowserSession ? (
           <section className="browserSessions" aria-labelledby="browser-sessions-heading">
-            <h3 id="browser-sessions-heading">Browser sessions</h3>
+            <h3
+              id="browser-sessions-heading"
+              ref={(element) => { controller.panelHeadingRef.current = element; }}
+              tabIndex={-1}
+            >Browser sessions</h3>
             {seatGridContent}
           </section>
         ) : (

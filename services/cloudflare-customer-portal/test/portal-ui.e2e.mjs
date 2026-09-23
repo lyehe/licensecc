@@ -386,6 +386,11 @@ test("customer portal signs in with an 8-digit code and walks every screen witho
   await expect(seatCard.getByRole("button", { name: "Start seat" })).toBeDisabled();
   await expect(seatCard.getByRole("button", { name: "Renew seat" })).toBeEnabled();
   await expect(seatCard.getByRole("button", { name: "Release" })).toBeEnabled();
+  // Starting the seat flips hasBrowserSession and remounts the panel (<details> -> <section>),
+  // unmounting the just-clicked Start seat button; focus must land on the seat's Release button,
+  // never fall through to <body>.
+  await expect(seatCard.getByRole("button", { name: "Release" })).toBeFocused();
+  expect(await page.evaluate(() => document.activeElement?.tagName)).not.toBe("BODY");
 
   await seatCard.getByRole("button", { name: "Renew seat" }).click();
   await expect.poll(() => api.requests.heartbeats).toBe(1);
