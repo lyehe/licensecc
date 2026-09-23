@@ -4522,28 +4522,6 @@
               },
               "description": "Email login identifier, has_password, can_reset, and email_verified flags; no hash."
             },
-            "400": {
-              "content": {
-                "application/json": {
-                  "schema": {
-                    "allOf": [
-                      {
-                        "$ref": "#/components/schemas/ErrorEnvelope"
-                      }
-                    ],
-                    "properties": {
-                      "code": {
-                        "enum": [
-                          "invalid_json",
-                          "invalid_registration"
-                        ]
-                      }
-                    }
-                  }
-                }
-              },
-              "description": "Invalid JSON, email or password length."
-            },
             "401": {
               "content": {
                 "application/json": {
@@ -4555,16 +4533,13 @@
                     ],
                     "properties": {
                       "code": {
-                        "enum": [
-                          "invalid_credentials",
-                          "unauthorized"
-                        ]
+                        "const": "unauthorized"
                       }
                     }
                   }
                 }
               },
-              "description": "Invalid credentials or session."
+              "description": "Missing, invalid or expired session."
             },
             "403": {
               "content": {
@@ -4577,16 +4552,13 @@
                     ],
                     "properties": {
                       "code": {
-                        "enum": [
-                          "cross_site_forbidden",
-                          "verified_sign_in_required"
-                        ]
+                        "const": "cross_site_forbidden"
                       }
                     }
                   }
                 }
               },
-              "description": "Origin mismatch or fresh verified sign-in required."
+              "description": "Origin mismatch."
             },
             "404": {
               "content": {
@@ -4606,63 +4578,6 @@
                 }
               },
               "description": "Password sign-in disabled."
-            },
-            "409": {
-              "content": {
-                "application/json": {
-                  "schema": {
-                    "allOf": [
-                      {
-                        "$ref": "#/components/schemas/ErrorEnvelope"
-                      }
-                    ],
-                    "properties": {
-                      "code": {
-                        "const": "password_change_conflict"
-                      }
-                    }
-                  }
-                }
-              },
-              "description": "Settings changed concurrently."
-            },
-            "413": {
-              "content": {
-                "application/json": {
-                  "schema": {
-                    "allOf": [
-                      {
-                        "$ref": "#/components/schemas/ErrorEnvelope"
-                      }
-                    ],
-                    "properties": {
-                      "code": {
-                        "const": "body_too_large"
-                      }
-                    }
-                  }
-                }
-              },
-              "description": "Request body exceeds 8192 bytes."
-            },
-            "429": {
-              "content": {
-                "application/json": {
-                  "schema": {
-                    "allOf": [
-                      {
-                        "$ref": "#/components/schemas/ErrorEnvelope"
-                      }
-                    ],
-                    "properties": {
-                      "code": {
-                        "const": "rate_limited"
-                      }
-                    }
-                  }
-                }
-              },
-              "description": "Per-IP or login-identifier limit reached."
             },
             "503": {
               "content": {

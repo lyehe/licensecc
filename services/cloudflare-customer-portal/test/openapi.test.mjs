@@ -18,8 +18,8 @@ import { canonicalBackendErrorManifest, canonicalBackendSuccessManifest, expecte
 
 const keyOf = (r) => `${r.method} ${r.path}`;
 
-function documentedErrorCodes(path, status) {
-  const response = openApiDocument.paths[path]?.post?.responses?.[String(status)];
+function documentedErrorCodes(path, status, method = "post") {
+  const response = openApiDocument.paths[path]?.[method]?.responses?.[String(status)];
   const code = response?.content?.["application/json"]?.schema?.properties?.code;
   if (typeof code?.const === "string") return [code.const];
   if (Array.isArray(code?.enum) && code.enum.every((value) => typeof value === "string")) return code.enum;
@@ -131,6 +131,31 @@ test("operation identifiers and route-class auth declarations stay exact", () =>
   }
   assert.deepEqual(openApiDocument.paths["/portal/v1/auth/logout"].post.security, [{ sessionCookie: [] }, {}]);
   assert.deepEqual(openApiDocument.paths["/portal/v1/admin/bootstrap-otp"].post.security, [{ bootstrapBearer: [] }, { bootstrapBearer: [], cfAccess: [] }]);
+});
+
+// GET only ever runs gate() -> authSession() -> the settings row lookup -> the 200 read. POST goes
+// on to readJson/throttle/the credential check/the batch write, which is where 400/409/413/429 and
+// the extra 401/403 alternatives come from. A shared response map for both verbs (the prior shape)
+// let GET claim codes it structurally cannot emit.
+test("password settings GET and POST each document only the codes their own handler path can emit", () => {
+  const path = "/portal/v1/auth/password";
+  const get = openApiDocument.paths[path].get;
+  const post = openApiDocument.paths[path].post;
+  assert.deepEqual(Object.keys(get.responses).sort(), ["200", "401", "403", "404", "503"]);
+  assert.deepEqual(documentedErrorCodes(path, 401, "get"), ["unauthorized"]);
+  assert.deepEqual(documentedErrorCodes(path, 403, "get"), ["cross_site_forbidden"]);
+  assert.deepEqual(documentedErrorCodes(path, 404, "get"), ["not_found"]);
+  assert.deepEqual(documentedErrorCodes(path, 503, "get"), ["config_error"]);
+
+  assert.deepEqual(Object.keys(post.responses).sort(), ["200", "400", "401", "403", "404", "409", "413", "429", "503"]);
+  assert.deepEqual([...documentedErrorCodes(path, 400, "post")].sort(), ["invalid_json", "invalid_registration"]);
+  assert.deepEqual([...documentedErrorCodes(path, 401, "post")].sort(), ["invalid_credentials", "unauthorized"]);
+  assert.deepEqual([...documentedErrorCodes(path, 403, "post")].sort(), ["cross_site_forbidden", "verified_sign_in_required"]);
+  assert.deepEqual(documentedErrorCodes(path, 404, "post"), ["not_found"]);
+  assert.deepEqual(documentedErrorCodes(path, 409, "post"), ["password_change_conflict"]);
+  assert.deepEqual(documentedErrorCodes(path, 413, "post"), ["body_too_large"]);
+  assert.deepEqual(documentedErrorCodes(path, 429, "post"), ["rate_limited"]);
+  assert.deepEqual(documentedErrorCodes(path, 503, "post"), ["config_error"]);
 });
 
 test("spec is OpenAPI 3.1.0 with the shared envelope/server conventions", () => {
