@@ -57,14 +57,20 @@ export function emitEmailDeliveryFailure(errorType) {
   }
 }
 
-/** @param {unknown} result @returns {EmailDeliveryErrorType | null} */
-function deliveryErrorType(result) {
+/**
+ * Map a sendEmail result onto the closed error_type set. A provider timeout or network throw
+ * (`email_send_indeterminate`: the provider may or may not have accepted the message) is still a
+ * delivery failure, not a malformed result, so it reports as `send_failed`.
+ *
+ * @param {unknown} result @returns {EmailDeliveryErrorType | null}
+ */
+export function deliveryErrorType(result) {
   if (result === null || typeof result !== "object") return "invalid_result";
   const deliveryResult = /** @type {{ ok?: unknown, code?: unknown }} */ (result);
   if (deliveryResult.ok === true) return null;
   if (deliveryResult.ok !== false) return "invalid_result";
   if (deliveryResult.code === "email_unconfigured") return "unconfigured";
-  if (deliveryResult.code === "email_send_failed") return "send_failed";
+  if (deliveryResult.code === "email_send_failed" || deliveryResult.code === "email_send_indeterminate") return "send_failed";
   return "invalid_result";
 }
 

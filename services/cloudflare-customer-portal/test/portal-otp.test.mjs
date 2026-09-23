@@ -77,6 +77,7 @@ test("resolved and rejected delivery failures emit one fixed failure class and r
   const cases = [
     ["unconfigured", () => ({ ok: false, code: "email_unconfigured" })],
     ["send_failed", () => ({ ok: false, code: "email_send_failed" })],
+    ["send_failed", () => ({ ok: false, code: "email_send_indeterminate" })],
     ["invalid_result", () => ({ ok: false, code: "provider-secret-detail", body: "provider-secret-body" })],
     ["invalid_result", () => undefined],
     ["rejected", () => Promise.reject(new Error("provider rejection detail"))],
