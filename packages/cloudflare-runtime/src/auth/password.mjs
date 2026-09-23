@@ -6,11 +6,13 @@ const SALT_BYTES = 16;
 const encoder = new TextEncoder();
 function hex(bytes) { return Array.from(bytes, (value) => value.toString(16).padStart(2, "0")).join(""); }
 function unhex(value) { return Uint8Array.from(value.match(/../g) ?? [], (pair) => Number.parseInt(pair, 16)); }
+// addr-spec only: header/list/quoting punctuation and controls never reach the mail API.
+const EMAIL = /^[^\s@<>()[\]\\,;:"\u0000-\u001f\u007f]+@[^\s@<>()[\]\\,;:"\u0000-\u001f\u007f]+\.[^\s@<>()[\]\\,;:"\u0000-\u001f\u007f]+$/;
 export function loginEmail(value) {
     if (typeof value !== "string")
         return null;
     const email = value.trim().toLowerCase();
-    return email.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : null;
+    return email.length <= 254 && EMAIL.test(email) ? email : null;
 }
 export function validPassword(value) {
     return typeof value === "string" && [...value].length >= 15 && [...value].length <= 128 && encoder.encode(value).length <= 512;
