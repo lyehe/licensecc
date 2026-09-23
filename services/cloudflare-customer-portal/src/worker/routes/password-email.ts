@@ -21,9 +21,11 @@ async function requestLink(request: Request, env: Env, ctx: ExecutionContextLike
   if (await throttle(request, env, email, purpose, now) || (await portalRateLimit(env, `password:mail:${await digest(email)}`, 1, 60, now)).limited) {
     return envelope(reqId, "rate_limited", undefined, 429, HEADERS);
   }
-  // Eligibility, proof storage and delivery run after the response so every
-  // address gets the same 202 with the same latency.
-  const work = issueLink(env, email, now, purpose);
+  // Eligibility, proof storage and delivery run after the response so every address gets the same
+  // 202 with the same latency. A macrotask boundary (not just a microtask one) is required here:
+  // issueLink's own first DB read is synchronous work wrapped in a promise, so calling it directly
+  // would still run that read before this function returns, ahead of the response.
+  const work = new Promise<void>((resolve) => setTimeout(resolve, 0)).then(() => issueLink(env, email, now, purpose));
   if (ctx?.waitUntil) ctx.waitUntil(work);
   else await work;
   return envelope(reqId, "verification_requested", undefined, 202, HEADERS);

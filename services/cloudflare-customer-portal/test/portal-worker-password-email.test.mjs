@@ -164,9 +164,20 @@ test("link requests answer before any account lookup or delivery", async t => {
   await credential(f.env);
   let release; const gate = new Promise(resolve => { release = resolve; });
   t.mock.method(globalThis, "fetch", async (_url, init) => { await gate; f.mail.push(JSON.parse(init.body)); return new Response("{}", { status: 200 }); });
+  // Rate-limit counters are ALWAYS-ON and deliberately run before the 202 (blueprint (a)); only the
+  // account/proof-table work (credential lookup, existing-account lookup, the portal_password_actions
+  // write) must wait until after the response, so every address gets the same 202 latency.
+  const prepareSpy = t.mock.method(f.db, "prepare");
   const response = await call(f.env, "POST", `${PATH}/reset`, { body: { email: "a@x.com" }, ctx: f.ctx });
   assert.equal(response.status, 202);
   assert.equal(f.mail.length, 0);
+  const queriesBeforeSettle = prepareSpy.mock.calls.map(call => call.arguments[0]);
+  assert.equal(
+    queriesBeforeSettle.some(sql => /\bcustomers\b|\bportal_passwords\b|\bportal_password_actions\b/.test(sql)),
+    false,
+    `an account/proof query ran before settle(): ${JSON.stringify(queriesBeforeSettle)}`,
+  );
+  assert.equal(f.db.prepare("SELECT count(*) n FROM portal_password_actions").get().n, 0);
   release(); await f.settle();
   assert.equal(f.mail.length, 1);
 });
