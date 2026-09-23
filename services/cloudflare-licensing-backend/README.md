@@ -833,7 +833,8 @@ The configured legacy `VERIFY_RATE_LIMITER` additionally protects registration;
 it does not impose a low shared-IP budget on short feature jobs.
 
 Use `npm run validate:protected-config -- --config=<private-json-config>
---secrets=<private-json-secrets> --env=<name>` for local protected registry/signer/key-ring
-validation. It does not claim live issuance or renewal. Follow the protected
+--secrets=<private-json-secrets> [--env=<name>]` for local protected registry/signer/key-ring
+validation. `--env=<name>` is optional (omit it for the top-level `vars`); when
+given, it must follow `--config` and `--secrets`. It does not claim live issuance or renewal. Follow the protected
 readiness section of [Cloudflare setup](../../doc/operations/cloudflare-setup.md)
 for deployment order and native live qualification.
