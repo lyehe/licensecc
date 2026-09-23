@@ -156,12 +156,11 @@ BOOST_AUTO_TEST_CASE(checkpoint_publish_survives_a_restrictive_umask) {
 }
 BOOST_AUTO_TEST_CASE(private_directory_is_created_0700_under_a_restrictive_umask) {
 	// bound_linux_directory is the only creator and roots at the account's home; use a unique
-	// leaf there and remove whatever this case created.
+	// leaf there and remove it (an empty 0700 ~/.licensecc is harmless and shared with other tests).
 	std::array<char, 16384> buffer{};
 	passwd entry{}, *account = nullptr;
 	BOOST_REQUIRE(getpwuid_r(geteuid(), &entry, buffer.data(), buffer.size(), &account) == 0 && account);
 	const std::string base = std::string(account->pw_dir) + "/.licensecc";
-	const bool base_existed = ::access(base.c_str(), F_OK) == 0;
 	const std::string leaf = "test-umask-" + std::to_string(getpid());
 	std::string created;
 	bool made = false;
@@ -174,7 +173,6 @@ BOOST_AUTO_TEST_CASE(private_directory_is_created_0700_under_a_restrictive_umask
 	const mode_t leaf_mode = info.st_mode & 0777;
 	const bool base_stat = stat(base.c_str(), &info) == 0;
 	::rmdir((base + "/" + leaf).c_str());
-	if (!base_existed) ::rmdir(base.c_str());
 	BOOST_REQUIRE(made);
 	BOOST_CHECK_EQUAL(created, base + "/" + leaf);
 	BOOST_REQUIRE(leaf_stat);
@@ -362,6 +360,8 @@ BOOST_AUTO_TEST_CASE(browser_launcher_uses_absolute_path_entries_only) {
 }
 
 BOOST_AUTO_TEST_CASE(browser_launcher_falls_back_to_system_directories_without_path) {
+	// No browser opens: this file macro-replaces execve with test_browser_exec, which runs
+	// /bin/sleep in place of the resolved xdg-open. The system opener is only probed with access().
 	PathAndCwdGuard guard;
 	auto browser = make_test_linux_browser_launcher("https://example.com/authorize");
 	BOOST_REQUIRE(browser);
