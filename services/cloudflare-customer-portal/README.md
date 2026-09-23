@@ -214,12 +214,11 @@ are rejected before the Worker mints/sends a bearer or constructs an email API
 key request. There is no HTTP local-development exception; use a local HTTPS
 endpoint when overriding either destination.
 
-The portal currently retains the validated-origin configuration rather than a
-Worker service binding. The backend also has independent local-host, preview,
-and deployment targets, and the tracked configuration has no reviewed
-per-environment binding map for all of them. Add a service binding only with an
-explicit target mapping for every deployment environment; until then invalid
-destinations fail closed and readiness returns its existing 503 envelope.
+The portal reaches the backend through the `BACKEND` service binding (readiness
+and self-service proxying) and `DEVICE_CONSENT` (the `DeviceConsent` RPC
+entrypoint). Wrangler environment blocks do not inherit `services`: declare
+both bindings under every `env.<name>` with that environment's backend Worker
+name, or staging will call production.
 
 See the [change guide](../../doc/architecture/change-guide.md) before adding
 a route, migration, policy rule, UI workflow, or OpenAPI operation. Keep real
