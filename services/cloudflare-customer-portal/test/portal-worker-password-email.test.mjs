@@ -1,23 +1,10 @@
 import { test } from "node:test";
-import { assert, baseFixture, call, NOW, mintSession } from "./portal-worker-fixtures.mjs";
+import { assert, baseFixture, call, NOW, mintSession, within } from "./portal-worker-fixtures.mjs";
 import { hashPassword } from "../dist-worker/worker/password/crypto.js";
 
 const PATH = "/portal/v1/auth/password";
 const PASSWORD = "A long testing passphrase 1!";
 const NEXT = "Another testing passphrase 2!";
-// Fails fast (rather than hanging) when a promise never settles -- e.g. if a handler starts
-// awaiting DB work that this test is deliberately holding open with a gate.
-async function within(promise, milliseconds = 250) {
-  let timer;
-  try {
-    return await Promise.race([
-      promise,
-      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`timed out after ${milliseconds}ms`)), milliseconds); }),
-    ]);
-  } finally {
-    clearTimeout(timer);
-  }
-}
 function fixture(t) {
   t.mock.method(Date, "now", () => NOW * 1000);
   const data = baseFixture({ PORTAL_PASSWORD_ENABLED: "1", PORTAL_EMAIL_API_KEY: "test-only", PORTAL_EMAIL_FROM: "sender@example.com" });

@@ -106,6 +106,22 @@ export function baseFixture(extraEnv = {}) {
 // DEVICE RELEASE — self-serve deactivation (ownership-scoped, guarded, audited)
 // =================================================================================================
 
+// Fails fast (rather than hanging) when a promise never settles -- e.g. if a handler starts
+// awaiting DB work that a test is deliberately holding open with a gate.
+export async function within(promise, milliseconds = 250) {
+  let timer;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`timed out after ${milliseconds}ms`)), milliseconds);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export function seedDevice(db, { project = "DEFAULT", feature = "DEFAULT", fingerprint, deviceKeyId, status = "active" }) {
   db.prepare(
     "INSERT INTO entitlement_devices (project, feature, license_fingerprint, device_key_id, public_key_spki_der_base64, status, created_at, updated_at) VALUES (?, ?, ?, ?, 'x', ?, ?, ?)",

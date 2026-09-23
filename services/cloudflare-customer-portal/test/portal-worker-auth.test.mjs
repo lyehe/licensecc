@@ -1,5 +1,5 @@
 import { test } from "node:test";
-import { assert, worker, mintSession, codeFromSecretBytes, requestOtp, redeemOtp, policyCapacityViolation, FP_A, FP_B, installBackendStub, cookieFor, sameSiteHeaders, entitlementId, ownedEntitlementId, call, baseFixture, seedDevice, seedEntitlement, CTX, NOW } from "./portal-worker-fixtures.mjs";
+import { assert, worker, mintSession, codeFromSecretBytes, requestOtp, redeemOtp, policyCapacityViolation, FP_A, FP_B, installBackendStub, cookieFor, sameSiteHeaders, entitlementId, ownedEntitlementId, call, baseFixture, seedDevice, seedEntitlement, CTX, NOW, within } from "./portal-worker-fixtures.mjs";
 
 const textEncoder = new TextEncoder();
 
@@ -94,20 +94,6 @@ function readerMagicRequest({ read, cancel }) {
     },
   };
   return { request, state };
-}
-
-async function within(promise, milliseconds = 250) {
-  let timer;
-  try {
-    return await Promise.race([
-      promise,
-      new Promise((_, reject) => {
-        timer = setTimeout(() => reject(new Error(`timed out after ${milliseconds}ms`)), milliseconds);
-      }),
-    ]);
-  } finally {
-    clearTimeout(timer);
-  }
 }
 
 test("auth/request rejects oversized JSON bodies without relying on Content-Length", async () => {
