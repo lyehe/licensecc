@@ -38,6 +38,18 @@ are recorded in [ADR 0005](doc/architecture/decisions/0005-platform-version-and-
 - Repository-wide secret-scan lint with a unified needle set; `schema.sql` generated from
   migrations (`npm run schema:write`); ordered zero-to-first-online-license operator runbook;
   per-worker OpenAPI documents with artifact-based drift guards.
+- Linux protected device licensing: TPM2 (OpenSSL provider) device keys, loopback
+  enrollment, private checkpoint storage and Linux SDK bridges for Python, .NET
+  and Java (#25).
+- Protected enrollment can request a specific feature; consent offers only
+  matching entitlements (#25).
+- Email-verified password registration and reset links in the customer portal (#27).
+- `examples/device_bound`: protected application, feature-session and calculator
+  examples, built and tested in CI on Windows and Linux (#27, remediation).
+- CI: dedicated ASan/UBSan sanitizer job covering the Linux device-identity
+  native code (remediation).
+- The protected-device readiness script accepts `--env=<name>` to check
+  environment-scoped Wrangler vars (remediation).
 
 ### Changed
 - Advanced the unpublished platform candidate from `0.1.0-rc.1` to `0.1.0-rc.2`.
@@ -52,6 +64,18 @@ are recorded in [ADR 0005](doc/architecture/decisions/0005-platform-version-and-
   enum/capacity invariant, and the idempotency store are shared through the backend package instead
   of per-worker copies; admin mutation handlers use uniform pathname-derived idempotency scopes;
   guarded status transitions share one helper, and webhook disable requires an audited reason.
+- Customer portal and operator console flows simplified; portal proxies the
+  backend through the `BACKEND` service binding (#27).
+- `LCC_ENABLE_LINUX_DESKTOP` defaults ON only with the TPM2 or test provider,
+  with a clear libcurl 7.85+ configure-time error otherwise (remediation).
+- Protected-device global rate fuse counts only per-source-admitted requests;
+  optional `BOUND_SESSION_RATE_LIMITER` and `BOUND_GLOBAL_RATE_LIMIT`; the
+  per-customer verified budget now scales with the entitlement's device limit,
+  and replaying an already-committed lease never consumes rate budget
+  (remediation).
+- Admin action labels describe what they do, and the portal's browser-sessions
+  panel reflects real session state instead of staying artificially open
+  (remediation).
 
 ### Fixed
 - C++ core: unstable disk-derived hardware ids on device-path fstab entries; `confirm_license`
@@ -61,3 +85,20 @@ are recorded in [ADR 0005](doc/architecture/decisions/0005-platform-version-and-
   DER bounds checks, and license-verification paths.
 - Documentation: license misstatements (BSD → AGPL), nonexistent CMake modules and CLI names,
   stale upstream links, SDK install stories, and contributor-gate portability (`pwsh`).
+- Protected enrollment and license-validity wording in the portal (#23).
+- Admin entitlement filter selection race (#24).
+- D1 backup export compatibility and same-second checkpoint recovery (#26); longer
+  export polling (up to 20 minutes), terminal provider failures that stop retrying
+  immediately, and no orphan dumps left in R2 (remediation).
+- Linux loopback callbacks are accepted only from the same local user; browser
+  launcher hardening; checkpoint files and directories keep private permissions
+  under restrictive umasks, and hard-linked TPM2 key references are rejected
+  (remediation).
+- Pre-verification password accounts can recover through reset without revealing
+  account existence by response timing; password links are sent after responding
+  and stay redeemable through provider timeouts; login accepts only addr-spec
+  emails, rejecting display-name/list forms; a committed reset now reports
+  success even when the follow-on sign-in fails (remediation).
+- Java and .NET SDK native-loader error messages are accurate on Linux; .NET
+  reports the real `dlopen`/`dlerror` diagnostic instead of a Windows-flavored
+  message (remediation).
