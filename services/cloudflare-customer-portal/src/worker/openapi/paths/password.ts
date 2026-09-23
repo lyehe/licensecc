@@ -10,10 +10,17 @@ const body = (register: boolean) => ({ required: true, content: { "application/j
 // check/the batch write. Each verb gets its own map below so neither can claim a code its own
 // handler path cannot emit.
 const signedInResponse = { description: "Signed in with a rotated opaque HttpOnly session cookie. No password/hash is returned." };
-const settingsSharedResponses = {
+const common = {
   "403": errorResponse("Origin mismatch.", "cross_site_forbidden"),
   "404": errorResponse("Password sign-in disabled.", "not_found"),
+  "413": errorResponse("Request body exceeds 8192 bytes.", "body_too_large"),
+  "429": errorResponse("Per-IP or login-identifier limit reached.", "rate_limited"),
   "503": errorResponse("Session/database configuration unavailable.", "config_error"),
+};
+const settingsSharedResponses = {
+  "403": common["403"],
+  "404": common["404"],
+  "503": common["503"],
 };
 const settingsGetResponses = {
   ...settingsSharedResponses,
@@ -29,13 +36,6 @@ const settingsPostResponses = {
   "409": errorResponse("Settings changed concurrently.", "password_change_conflict"),
   "413": errorResponse("Request body exceeds 8192 bytes.", "body_too_large"),
   "429": errorResponse("Per-IP or login-identifier limit reached.", "rate_limited"),
-};
-const common = {
-  "403": errorResponse("Origin mismatch.", "cross_site_forbidden"),
-  "404": errorResponse("Password sign-in disabled.", "not_found"),
-  "413": errorResponse("Request body exceeds 8192 bytes.", "body_too_large"),
-  "429": errorResponse("Per-IP or login-identifier limit reached.", "rate_limited"),
-  "503": errorResponse("Session/database configuration unavailable.", "config_error"),
 };
 const accepted = { description: "Generic verification_requested envelope, including ineligible addresses and delivery failures. No session or account is created.",
   content: { "application/json": { schema: { type: "object", required: ["ok", "code"], properties: { ok: { type: "boolean", const: true }, code: { type: "string", const: "verification_requested" } } } } } };
