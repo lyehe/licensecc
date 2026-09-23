@@ -401,8 +401,9 @@ It uses ``~/.licensecc/device-keys`` for TPM-wrapped key references and
 are private (0700), files are private (0600), and symbolic links, hard-linked
 files, changed ownership and unsafe permissions are rejected. The one
 exception: under the storage lock, the library removes a second link left by
-its own interrupted publish or delete. The application cannot override these paths through the public protected API. Do not copy or
-remove these files to bypass enrollment or recover a lost key.
+its own interrupted publish or delete. The application cannot override these
+paths through the public protected API. Do not copy or remove these files to
+bypass enrollment or recover a lost key.
 
 Linux uses ``CLOCK_BOOTTIME`` bracketed by ``CLOCK_MONOTONIC`` readings in the
 same 100-nanosecond units as Windows. Suspend, fork, clock discontinuity or a
