@@ -49,6 +49,18 @@ foreach(_lcc_device_identity_test IN LISTS _lcc_device_identity_tests)
     set_tests_properties(${_lcc_device_identity_test}
         PROPERTIES LABELS "security;public_api;device_identity")
 endforeach()
+if(TARGET device_bound_linux_test)
+    # CURL::libcurl is an IMPORTED target scoped to the directory that called
+    # find_package(CURL) (src/library) and its descendants; this directory is a
+    # sibling branch (added from the root CMakeLists.txt), so the target is not
+    # visible here. LCC_ENABLE_LINUX_DESKTOP already forced src/library's own
+    # find_package(CURL 7.85) to succeed (or FATAL_ERROR) before this directory
+    # is ever reached, so this call only reuses the cached result to create the
+    # imported target in this directory's scope. Same pattern as
+    # examples/online_callback and examples/production_decision_host.
+    find_package(CURL 7.85 REQUIRED)
+    target_link_libraries(device_bound_linux_test PRIVATE CURL::libcurl)
+endif()
 target_sources(device_bound_public_test PRIVATE device_bound_c_header_test.c)
 set_property(TARGET device_bound_public_test PROPERTY C_STANDARD 11)
 target_sources(feature_session_public_test PRIVATE feature_session_c_header_test.c)

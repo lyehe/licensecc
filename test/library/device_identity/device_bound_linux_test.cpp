@@ -39,6 +39,10 @@ int test_browser_exec(const char* executable, char* const args[], char* const en
 #undef make_bound_browser_launcher
 #undef execve
 
+#define make_bound_http_transport make_test_linux_http_transport
+#include "bound_http_linux.cpp"
+#undef make_bound_http_transport
+
 using namespace license::device_identity;
 namespace {
 struct Directory {
@@ -187,6 +191,43 @@ BOOST_AUTO_TEST_CASE(browser_and_transport_reject_untrusted_configuration_withou
 	BoundHttpResponse out{299, "unchanged"};
 	BOOST_CHECK(transport->post(BoundWireOperation::renew, "", out) == BoundHttpStatus::internal_error);
 	BOOST_CHECK_EQUAL(out.body, "unchanged");
+}
+
+namespace {
+std::size_t feed(license::device_identity::Response& response, std::string line) {
+	return license::device_identity::Response::header(line.data(), 1, line.size(), &response);
+}
+}  // namespace
+
+BOOST_AUTO_TEST_CASE(linux_http_headers_fail_closed) {
+	using license::device_identity::Response;
+	{ Response r; feed(r, "HTTP/1.1 200 OK\r\n"); BOOST_CHECK(feed(r, "Content-Type: application/json\r\n")); BOOST_CHECK_EQUAL(feed(r, "content-type: application/json\r\n"), 0U); }
+	{ Response r; BOOST_CHECK(feed(r, "Content-Length: 2\r\n")); BOOST_CHECK_EQUAL(feed(r, "Transfer-Encoding: chunked\r\n"), 0U); }
+	{ Response r; BOOST_CHECK(feed(r, "Transfer-Encoding: chunked\r\n")); BOOST_CHECK_EQUAL(feed(r, "Content-Length: 2\r\n"), 0U); }
+	{ Response r; BOOST_CHECK_EQUAL(feed(r, "Content-Encoding: gzip\r\n"), 0U); }
+	{ Response r; BOOST_CHECK_EQUAL(feed(r, "Content-Type: text/html\r\n"), 0U); }
+	{ Response r; BOOST_CHECK_EQUAL(feed(r, "Content-Length: 16385\r\n"), 0U); }
+	{ Response r; BOOST_CHECK_EQUAL(feed(r, "X-Folded: a\r\n"), strlen("X-Folded: a\r\n")); BOOST_CHECK_EQUAL(feed(r, " continued\r\n"), 0U); }
+	{ Response r; BOOST_CHECK_EQUAL(feed(r, "Content-Type: application/json\n"), 0U); }
+	{ Response r;  // interim 1xx then final response: per-response header state resets
+	  feed(r, "HTTP/1.1 100 Continue\r\n"); BOOST_CHECK(feed(r, "Content-Type: application/json\r\n")); feed(r, "\r\n");
+	  feed(r, "HTTP/1.1 200 OK\r\n"); BOOST_CHECK(feed(r, "Content-Type: application/json\r\n")); BOOST_CHECK(!r.invalid); }
+}
+
+BOOST_AUTO_TEST_CASE(linux_http_completion_rejects_redirects_short_bodies_and_missing_type) {
+	using license::device_identity::Response;
+	using license::device_identity::finish_response;
+	const auto ready = [](bool type, std::string body, bool has_length, std::uint64_t length) {
+		Response r; r.type = type; r.value.body = std::move(body); r.has_length = has_length; r.length = length; return r;
+	};
+	BoundHttpResponse out{0, "unchanged"};
+	auto a = ready(true, "{}", true, 2); BOOST_CHECK(finish_response(a, 200, out) == BoundHttpStatus::complete); BOOST_CHECK_EQUAL(out.status, 200U);
+	auto b = ready(true, "{}", false, 0); BOOST_CHECK(finish_response(b, 302, out) == BoundHttpStatus::invalid_response);
+	auto c = ready(true, "{}", true, 3); BOOST_CHECK(finish_response(c, 200, out) == BoundHttpStatus::invalid_response);
+	auto d = ready(false, "{}", false, 0); BOOST_CHECK(finish_response(d, 200, out) == BoundHttpStatus::invalid_response);
+	auto e = ready(true, "", false, 0); BOOST_CHECK(finish_response(e, 503, out) == BoundHttpStatus::invalid_response);
+	auto f = ready(true, "{}", false, 0); BOOST_CHECK(finish_response(f, 199, out) == BoundHttpStatus::invalid_response);
+	auto g = ready(true, "{\"e\":1}", false, 0); BOOST_CHECK(finish_response(g, 429, out) == BoundHttpStatus::complete);
 }
 
 BOOST_AUTO_TEST_CASE(browser_launcher_does_not_wait_for_browser_lifetime_and_reports_exec_failure) {

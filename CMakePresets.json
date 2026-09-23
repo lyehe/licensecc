@@ -91,6 +91,19 @@
       }
     },
     {
+      "name": "ci-linux-sanitizers-device-identity",
+      "inherits": "ci-linux-sanitizers",
+      "displayName": "CI Linux Clang Sanitizers with Device Identity",
+      "description": "ASan/UBSan over the identity core, Linux desktop adapters and the software test provider.",
+      "binaryDir": "${sourceDir}/build/ci-linux-sanitizers-device-identity",
+      "cacheVariables": {
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/build/ci-linux-sanitizers-device-identity/install",
+        "LCC_ENABLE_DEVICE_IDENTITY": "TRUE",
+        "LCC_BUILD_DEVICE_IDENTITY_TEST_PROVIDER": "TRUE",
+        "LCC_BUILD_FUZZERS": "FALSE"
+      }
+    },
+    {
       "name": "ci-linux-release",
       "displayName": "CI Linux Release",
       "description": "Linux CI release configure shape.",
@@ -405,6 +418,11 @@
       "configuration": "Debug"
     },
     {
+      "name": "ci-linux-sanitizers-device-identity",
+      "configurePreset": "ci-linux-sanitizers-device-identity",
+      "configuration": "Debug"
+    },
+    {
       "name": "ci-linux-release",
       "configurePreset": "ci-linux-release",
       "configuration": "Release",
@@ -570,6 +588,19 @@
     {
       "name": "ci-linux-sanitizers",
       "configurePreset": "ci-linux-sanitizers",
+      "configuration": "Debug",
+      "output": {
+        "outputOnFailure": true
+      },
+      "environment": {
+        "VIRTUAL_ENV": "VM",
+        "ASAN_OPTIONS": "detect_leaks=1:strict_string_checks=1:check_initialization_order=1:abort_on_error=1",
+        "UBSAN_OPTIONS": "print_stacktrace=1:halt_on_error=1"
+      }
+    },
+    {
+      "name": "ci-linux-sanitizers-device-identity",
+      "configurePreset": "ci-linux-sanitizers-device-identity",
       "configuration": "Debug",
       "output": {
         "outputOnFailure": true

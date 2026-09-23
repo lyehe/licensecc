@@ -112,6 +112,14 @@ struct Response {
 		}
 	}
 };
+BoundHttpStatus finish_response(Response& response, long code, BoundHttpResponse& out) {
+	if (code < 200 || code >= 600 || (code >= 300 && code < 400) || !response.type || response.value.body.empty() ||
+		(response.has_length && response.length != response.value.body.size()))
+		return BoundHttpStatus::invalid_response;
+	response.value.status = static_cast<unsigned>(code);
+	out = std::move(response.value);
+	return BoundHttpStatus::complete;
+}
 class LinuxTransport final : public BoundHttpTransport {
 	std::string origin_;
 
@@ -175,13 +183,9 @@ public:
 			if (response.invalid) return BoundHttpStatus::invalid_response;
 			if (status != CURLE_OK) return BoundHttpStatus::unavailable;
 			long code = 0;
-			if (curl_easy_getinfo(handle.get(), CURLINFO_RESPONSE_CODE, &code) != CURLE_OK || code < 200 ||
-				code >= 600 || (code >= 300 && code < 400) || !response.type || response.value.body.empty() ||
-				(response.has_length && response.length != response.value.body.size()))
+			if (curl_easy_getinfo(handle.get(), CURLINFO_RESPONSE_CODE, &code) != CURLE_OK)
 				return BoundHttpStatus::invalid_response;
-			response.value.status = static_cast<unsigned>(code);
-			out = std::move(response.value);
-			return BoundHttpStatus::complete;
+			return finish_response(response, code, out);
 		} catch (...) {
 			return BoundHttpStatus::internal_error;
 		}
