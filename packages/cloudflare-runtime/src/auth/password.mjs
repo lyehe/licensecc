@@ -7,6 +7,7 @@ const encoder = new TextEncoder();
 function hex(bytes) { return Array.from(bytes, (value) => value.toString(16).padStart(2, "0")).join(""); }
 function unhex(value) { return Uint8Array.from(value.match(/../g) ?? [], (pair) => Number.parseInt(pair, 16)); }
 // addr-spec only: header/list/quoting punctuation and controls never reach the mail API.
+// eslint-disable-next-line no-control-regex -- control characters are rejected deliberately
 const EMAIL = /^[^\s@<>()[\]\\,;:"\u0000-\u001f\u007f]+@[^\s@<>()[\]\\,;:"\u0000-\u001f\u007f]+\.[^\s@<>()[\]\\,;:"\u0000-\u001f\u007f]+$/;
 export function loginEmail(value) {
     if (typeof value !== "string")
