@@ -80,10 +80,37 @@ internal sealed unsafe partial class NativeApi : INativeApi
         [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
         [DllImport("kernel32.dll",CharSet=CharSet.Unicode,ExactSpelling=true,SetLastError=true)]
         private static extern IntPtr LoadLibraryExW(string path,IntPtr file,uint flags);
+        // NativeLibrary.Load exposes no flags on Linux, so it cannot request eager binding.
+        // P/Invoke dlopen directly instead; "libc" resolves to libc.so.6 via the runtime's
+        // built-in Unix library-name probing.
+        private const int RTLD_NOW=2, RTLD_LOCAL=0;
+        [DllImport("libc",EntryPoint="dlopen")] private static extern IntPtr dlopen(string file,int mode);
+        [DllImport("libc",EntryPoint="dlerror")] private static extern IntPtr dlerror();
         internal Module(string path) : base(IntPtr.Zero,true)
         {
-            SetHandle(OperatingSystem.IsWindows() ? LoadLibraryExW(path,IntPtr.Zero,0x00000100|0x00000800) : NativeLibrary.Load(path));
-            if(IsInvalid) throw new Win32Exception(Marshal.GetLastWin32Error());
+            if(OperatingSystem.IsWindows())
+            {
+                SetHandle(LoadLibraryExW(path,IntPtr.Zero,0x00000100|0x00000800));
+                if(IsInvalid) throw new Win32Exception(Marshal.GetLastWin32Error());
+            }
+            else
+            {
+                // dlopen failures surface as DllNotFoundException with the loader message.
+                // Bind eagerly (RTLD_NOW) like the Python bridge so missing TPM2/OpenSSL symbols fail at load.
+                // dlerror() reports the most recent failure and is cleared by any other dynamic-linker
+                // activity on this thread, so: (1) call it once, unconditionally, before dlopen so the
+                // P/Invoke stub for dlerror is already resolved (first-time symbol resolution via dlsym
+                // would otherwise clear the real error we read afterward), and (2) read it back
+                // immediately on failure, before any other call, including SafeHandle bookkeeping.
+                dlerror();
+                var native=dlopen(path,RTLD_NOW|RTLD_LOCAL);
+                if(native==IntPtr.Zero)
+                {
+                    var message=Marshal.PtrToStringAnsi(dlerror());
+                    throw new DllNotFoundException(string.IsNullOrEmpty(message)?$"Unable to load shared library '{path}'.":message);
+                }
+                SetHandle(native);
+            }
         }
         public override bool IsInvalid => handle==IntPtr.Zero;
         protected override bool ReleaseHandle() { NativeLibrary.Free(handle); return true; }

@@ -281,6 +281,11 @@ export async function pollD1Export(fetcher: Fetcher, config: BackupConfig, token
   return parseReadyExportResponse(await responseJson(response, "d1_export_poll"));
 }
 
+// Provider-declared export failure: retrying the same bookmark cannot succeed.
+export function isTerminalExportError(error: unknown): boolean {
+  return error instanceof Error && error.message === "d1_export_provider_failed";
+}
+
 function backupTimestamp(nowMs: number): string {
   return new Date(nowMs).toISOString().replace(/[:.]/g, "-");
 }
@@ -401,50 +406,59 @@ export async function saveD1ExportToR2(
       bookmark: started.bookmark,
     },
   });
-  const streamed = streamingDigest.result();
-  const contentIntegrity = contentIntegrityFromPut(putResult, objectKey, streamed);
-  if (Object.keys(streamed.snapshotInventory.table_counts).length < 1) {
-    throw new Error("snapshot_inventory_no_counted_tables");
-  }
-  const objectUploadedAt = r2UploadedAt(putResult);
-  if (Date.parse(objectUploadedAt) + MAX_CLOCK_SKEW_MS < Date.parse(snapshotRequestedAt)) {
-    throw new Error("r2_put_uploaded_at_before_snapshot");
-  }
-
-  const manifest: BackupObjectManifest = {
-    database_id: config.databaseId,
-    database_name: config.databaseName,
-    source: "cloudflare-d1-export",
-    bookmark: started.bookmark,
-    export_filename: ready.filename,
-    object_key: objectKey,
-    snapshot_requested_at: snapshotRequestedAt,
-    created_at: objectUploadedAt,
-    content_integrity: contentIntegrity,
-    snapshot_inventory: streamed.snapshotInventory,
-  };
   const manifestKey = `${objectKey}.metadata.json`;
-  await bucket.put(manifestKey, JSON.stringify(manifest, null, 2), {
-    httpMetadata: { contentType: "application/json" },
-    customMetadata: {
+  try {
+    const streamed = streamingDigest.result();
+    const contentIntegrity = contentIntegrityFromPut(putResult, objectKey, streamed);
+    if (Object.keys(streamed.snapshotInventory.table_counts).length < 1) {
+      throw new Error("snapshot_inventory_no_counted_tables");
+    }
+    const objectUploadedAt = r2UploadedAt(putResult);
+    if (Date.parse(objectUploadedAt) + MAX_CLOCK_SKEW_MS < Date.parse(snapshotRequestedAt)) {
+      throw new Error("r2_put_uploaded_at_before_snapshot");
+    }
+
+    const manifest: BackupObjectManifest = {
+      database_id: config.databaseId,
+      database_name: config.databaseName,
+      source: "cloudflare-d1-export",
+      bookmark: started.bookmark,
+      export_filename: ready.filename,
+      object_key: objectKey,
+      snapshot_requested_at: snapshotRequestedAt,
+      created_at: objectUploadedAt,
+      content_integrity: contentIntegrity,
+      snapshot_inventory: streamed.snapshotInventory,
+    };
+    await bucket.put(manifestKey, JSON.stringify(manifest, null, 2), {
+      httpMetadata: { contentType: "application/json" },
+      customMetadata: {
+        database_id: config.databaseId,
+        database_name: config.databaseName,
+        bookmark: started.bookmark,
+      },
+    });
+
+    return {
       database_id: config.databaseId,
       database_name: config.databaseName,
       bookmark: started.bookmark,
-    },
-  });
-
-  return {
-    database_id: config.databaseId,
-    database_name: config.databaseName,
-    bookmark: started.bookmark,
-    export_filename: ready.filename,
-    object_key: objectKey,
-    manifest_key: manifestKey,
-    snapshot_requested_at: snapshotRequestedAt,
-    created_at: objectUploadedAt,
-    content_integrity: contentIntegrity,
-    snapshot_inventory: streamed.snapshotInventory,
-  };
+      export_filename: ready.filename,
+      object_key: objectKey,
+      manifest_key: manifestKey,
+      snapshot_requested_at: snapshotRequestedAt,
+      created_at: objectUploadedAt,
+      content_integrity: contentIntegrity,
+      snapshot_inventory: streamed.snapshotInventory,
+    };
+  } catch (error) {
+    // Never leave an unmanifested dump, but never delete one a manifest already covers (an
+    // earlier run or a manifest put with an unknown outcome). A failed check keeps the dump.
+    const manifested = await Promise.resolve().then(() => bucket.list({ prefix: manifestKey, limit: 1 }))
+      .then((listed) => listed.objects.some((object) => object.key === manifestKey), () => true);
+    if (!manifested) await bucket.delete(objectKey).catch(() => {});
+    throw error;
+  }
 }
 
 function uploadedTime(object: R2ObjectLike): number | null {

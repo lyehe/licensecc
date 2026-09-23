@@ -83,12 +83,24 @@ npm run validate:deploy -- \
 
 Export polling uses the D1 REST API's nested completion result and includes
 `output_format: "polling"` on every request. The Workflow retries an unfinished
-export at 30-second intervals (at most 20 retries), without a busy polling loop.
+export at 30-second intervals for about 20 minutes (at most 40 retries), without
+a busy polling loop; large exports can stay `active` longer than a shorter
+budget allows. A provider-declared export failure (`d1_export_provider_failed`)
+is terminal: retrying the same bookmark cannot succeed, so the Workflow throws
+`NonRetryableError` and stops immediately instead of exhausting the poll budget.
 Downloads must provide a positive, safe-integer `Content-Length` and no content
 encoding other than `identity`. The Worker streams SQL through inventory/hash
 validation and a `FixedLengthStream` into R2; missing or mismatched lengths fail
-without publishing a manifest. Upload failures cancel the upstream stream before
-retrying. Dumps are never buffered in full in Worker memory.
+without publishing a manifest. If a dump uploads successfully but then fails a
+post-upload check (content integrity, snapshot inventory, or upload-timestamp
+validation) or the manifest put fails, the Worker deletes the uploaded SQL
+object before the error propagates, so a failed save never leaves an orphan,
+unmanifested dump in R2. The delete is guarded by the manifest: if
+`<object>.metadata.json` already exists (an earlier successful run, or a
+manifest put whose outcome was indeterminate) or its existence cannot be
+checked, the dump is kept and the original error still propagates.
+Upload failures cancel the upstream stream before retrying. Dumps are never
+buffered in full in Worker memory.
 
 Cloudflare D1 Time Travel remains the first emergency recovery tool for recent
 mistakes. The R2 export path gives you longer retention and an offline SQL dump.

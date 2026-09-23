@@ -126,3 +126,41 @@ test("backup VM capture links a shared dependency graph and the exact node:crypt
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("backup VM capture links the cloudflare:workflows NonRetryableError shim", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "licensecc-contract-vm-"));
+  const dist = path.join(root, "services", "cloudflare-d1-backup", "dist");
+  try {
+    mkdirSync(dist, { recursive: true });
+    writeFileSync(path.join(dist, "index.js"), `
+      import { NonRetryableError } from "cloudflare:workflows";
+      export class D1BackupWorkflow {
+        run() {
+          const error = new NonRetryableError("d1_export_provider_failed");
+          return error instanceof Error && error.message === "d1_export_provider_failed";
+        }
+      }
+      export default { async fetch() {}, async scheduled() {} };
+    `, "utf8");
+
+    const capture = spawnSync(process.execPath, [
+      "--experimental-vm-modules",
+      path.join(REPOSITORY_ROOT, "scripts", "canonical-contracts.mjs"),
+      "--capture-backup",
+      root,
+    ], { cwd: REPOSITORY_ROOT, encoding: "utf8", shell: false, windowsHide: true });
+    assert.equal(capture.status, 0, capture.stderr || capture.stdout);
+    assert.deepEqual(JSON.parse(capture.stdout), {
+      compiledEntry: "services/cloudflare-d1-backup/dist/index.js",
+      defaultHandlerMethods: ["fetch", "scheduled"],
+      namedExports: ["D1BackupWorkflow", "default"],
+      service: "cloudflare-d1-backup",
+      workflow: {
+        export: "D1BackupWorkflow",
+        prototypeMethods: ["run"],
+      },
+    });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

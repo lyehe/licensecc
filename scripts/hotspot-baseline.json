@@ -5,6 +5,7 @@
     "packages/cloudflare-runtime/src/d1/entitlement_mutation.mjs": 624,
     "packages/cloudflare-runtime/src/d1/plan_projection.mjs": 1031,
     "packages/cloudflare-runtime/src/webhooks/webhook.mjs": 638,
+    "services/cloudflare-d1-backup/src/core.ts": 506,
     "services/cloudflare-license-admin/src/ui/features/catalog/Catalog.tsx": 740,
     "services/cloudflare-license-admin/src/ui/features/catalog/workflow.ts": 507,
     "services/cloudflare-license-admin/src/ui/features/entitlements/Entitlements.tsx": 704,

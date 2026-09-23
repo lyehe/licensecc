@@ -1,9 +1,11 @@
 import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from "cloudflare:workers";
+import { NonRetryableError } from "cloudflare:workflows";
 import {
   type BackupEnvLike,
   type BackupResult,
   type R2BucketLike,
   backupConfigFromEnv,
+  isTerminalExportError,
   pollD1Export,
   pruneExpiredBackups,
   requireD1RestApiToken,
@@ -72,10 +74,16 @@ export class D1BackupWorkflow extends WorkflowEntrypoint<Env, BackupTriggerParam
     );
     const saved = await step.do(
       "poll export and store SQL dump in R2",
-      { retries: { limit: 20, delay: "30 seconds", backoff: "constant" }, timeout: "15 minutes" },
+      // ~20 minutes of polling; large exports stay "active" longer than the old ~10-minute budget.
+      { retries: { limit: 40, delay: "30 seconds", backoff: "constant" }, timeout: "15 minutes" },
       async () => {
-        const ready = await pollD1Export(fetch, config, token, started.bookmark);
-        return saveD1ExportToR2(this.env.BACKUP_BUCKET, fetch, config, started, ready);
+        try {
+          const ready = await pollD1Export(fetch, config, token, started.bookmark);
+          return await saveD1ExportToR2(this.env.BACKUP_BUCKET, fetch, config, started, ready);
+        } catch (error) {
+          if (isTerminalExportError(error)) throw new NonRetryableError((error as Error).message);
+          throw error;
+        }
       },
     );
     const pruned = await step.do("prune expired R2 backups", async () => pruneExpiredBackups(this.env.BACKUP_BUCKET, config, Date.now()));
