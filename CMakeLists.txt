@@ -168,6 +168,7 @@ else()
 	set(_lcc_linux_desktop_default OFF)
 endif()
 option(LCC_ENABLE_LINUX_DESKTOP "Build Linux protected enrollment and feature-session platform adapters." ${_lcc_linux_desktop_default})
+unset(_lcc_linux_desktop_default)
 option(LCC_BUILD_TPM2_OPENSSL_CAPABILITY_TEST
 	"Build the standalone OpenSSL tpm2-provider exact-digest capability test." OFF)
 
