@@ -1555,6 +1555,17 @@ void test_crash_left_hard_link_is_swept_only_for_library_names() {
 		require(open_with_sibling(sibling) == LCC_DEVICE_KEY_CORRUPT, "unrelated hard link was accepted");
 		require(storage->has_entry(sibling), "unrelated hard link was removed");
 	}
+	// A stale library-named temporary of another inode does not excuse an unrelated hard link.
+	const std::string stale = stem + ".tmp." + suffix;
+	storage = std::make_shared<LockReachPosixStorageApi>(true);
+	storage->add_entry(final_name, 104);
+	storage->add_entry("unrelated.pem", 104);
+	storage->add_entry(stale, 300);
+	auto stale_provider = license::device_identity::make_tpm2_openssl_provider(
+		std::make_shared<FakeOpenSsl3Api>(true, false, true), storage);
+	require(stale_provider->open(request) == LCC_DEVICE_KEY_CORRUPT,
+			"different-inode library sibling excused a hard link");
+	require(storage->has_entry(stale) && storage->has_entry("unrelated.pem"), "sweep removed a non-matching sibling");
 
 	storage = std::make_shared<LockReachPosixStorageApi>();
 	storage->reference_present = true;

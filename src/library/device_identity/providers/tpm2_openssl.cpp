@@ -657,10 +657,8 @@ bool valid_reference_status(const struct stat& status) noexcept {
 	return S_ISREG(status.st_mode) && status.st_uid == ::geteuid() && (status.st_mode & 07777U) == 0600U;
 }
 
-/* Names the library itself links to a reference: the publish temporary and the delete quarantine. */
-bool library_sibling_name(const std::string& name, const std::string& filename) {
-	const std::string stems[] = {filename.substr(0U, filename.size() - std::strlen(".tss2.pem")) + ".tmp.",
-								 filename + ".delete."};
+/* True for `<stem><32 lowercase hex>`: the library's publish temporary or delete quarantine name. */
+bool library_sibling_name(const std::string& name, const std::array<std::string, 2>& stems) {
 	for (const std::string& stem : stems) {
 		if (name.size() == stem.size() + 32U && name.compare(0U, stem.size(), stem) == 0 &&
 			name.find_first_not_of("0123456789abcdef", stem.size()) == std::string::npos) {
@@ -1456,8 +1454,10 @@ private:
 		if (posix_->list_directory(directory, names) != 0) {
 			return storage_errno_result(errno);
 		}
+		const std::array<std::string, 2> stems = {
+			filename.substr(0U, filename.size() - std::strlen(".tss2.pem")) + ".tmp.", filename + ".delete."};
 		for (const std::string& name : names) {
-			if (!library_sibling_name(name, filename)) {
+			if (!library_sibling_name(name, stems)) {
 				continue;
 			}
 			const int raw_descriptor = posix_->openat(directory, name.c_str(), kReferenceOpenFlags, 0U);
