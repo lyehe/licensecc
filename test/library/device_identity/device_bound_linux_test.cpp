@@ -331,6 +331,24 @@ BOOST_AUTO_TEST_CASE(browser_launcher_uses_absolute_path_entries_only) {
 	BOOST_CHECK(browser->open(url) == BoundBrowserStatus::opened);
 }
 
+BOOST_AUTO_TEST_CASE(browser_launcher_falls_back_to_system_directories_without_path) {
+	PathAndCwdGuard guard;
+	auto browser = make_test_linux_browser_launcher("https://example.com/authorize");
+	BOOST_REQUIRE(browser);
+	const auto url = "https://example.com/authorize#attempt_handle=" + std::string(43, 'A');
+	bool installed = false;
+	for (const char* candidate : {"/usr/local/bin/xdg-open", "/usr/bin/xdg-open", "/bin/xdg-open"})
+		installed = installed || ::access(candidate, X_OK) == 0;
+	BOOST_TEST_MESSAGE("system xdg-open installed: " << installed);
+	for (const bool empty : {false, true}) {
+		if (empty)
+			setenv("PATH", "", 1);
+		else
+			unsetenv("PATH");
+		BOOST_CHECK(browser->open(url) == (installed ? BoundBrowserStatus::opened : BoundBrowserStatus::unavailable));
+	}
+}
+
 namespace {
 sockaddr_storage ipv4(const char* text, unsigned short port) {
 	sockaddr_storage value{};
@@ -386,6 +404,10 @@ BOOST_AUTO_TEST_CASE(loopback_peer_must_belong_to_the_same_user) {
 	BOOST_CHECK(!bound_loopback_peer_owned(table(root, row(local, peer, me)).c_str(), peer, local, me));
 	BOOST_CHECK(!bound_loopback_peer_owned((root.path + "/missing").c_str(), peer, local, me));
 	const auto peer6 = ipv6("::1", 40001), local6 = ipv6("::1", 45679);
-	BOOST_CHECK(bound_loopback_peer_owned(table(root, row(peer6, local6, me)).c_str(), peer6, local6, me));
-	BOOST_CHECK(!bound_loopback_peer_owned(table(root, row(peer6, local6, me + 1)).c_str(), peer6, local6, me));
+	// The server-side row (listener endpoint first) is a decoy: only the connecting socket's row counts.
+	BOOST_CHECK(bound_loopback_peer_owned(table(root, row(local6, peer6, me + 1) + row(peer6, local6, me)).c_str(),
+										  peer6, local6, me));
+	BOOST_CHECK(!bound_loopback_peer_owned(table(root, row(local6, peer6, me) + row(peer6, local6, me + 1)).c_str(),
+										   peer6, local6, me));
+	BOOST_CHECK(!bound_loopback_peer_owned(table(root, row(local6, peer6, me)).c_str(), peer6, local6, me));
 }
