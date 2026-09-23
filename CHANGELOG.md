@@ -92,6 +92,8 @@ are recorded in [ADR 0005](doc/architecture/decisions/0005-platform-version-and-
 - Admin action labels describe what they do, and the portal's browser-sessions
   panel reflects real session state instead of staying artificially open
   (remediation).
+- Portal OpenAPI: `GET /portal/v1/auth/password` no longer documents
+  400/409/413/429 responses (follow-up).
 
 ### Upgrade notes
 - Existing Linux build trees that cached `LCC_ENABLE_LINUX_DESKTOP=ON` without
@@ -101,6 +103,9 @@ are recorded in [ADR 0005](doc/architecture/decisions/0005-platform-version-and-
   `LCC_ENABLE_LINUX_DESKTOP=OFF`.
 - Checkpoint directories previously created with mode 0500 under a restrictive
   umask are not repaired automatically; fix their permissions (0700) manually.
+- Protected-device readiness now fails (`checks.global_rate_limit: false`) when
+  `BOUND_GLOBAL_RATE_LIMIT` is set but invalid (non-integer, outside
+  100..1000000, or an empty string); leaving it unset is fine.
 
 ### Fixed
 - C++ core: unstable disk-derived hardware ids on device-path fstab entries; `confirm_license`
@@ -127,3 +132,8 @@ are recorded in [ADR 0005](doc/architecture/decisions/0005-platform-version-and-
 - Java and .NET SDK native-loader error messages are accurate on Linux; .NET
   reports the real `dlopen`/`dlerror` diagnostic instead of a Windows-flavored
   message (remediation).
+- Linux loopback callbacks match only ESTABLISHED/CLOSE_WAIT rows of the
+  connecting socket; login and registration emails reject C1 control
+  characters (U+0080–U+009F); the TPM2 provider removes the library's own
+  leftover hard links from an interrupted publish or delete under the storage
+  lock; keyboard focus lands on the seat after Start seat (follow-up).

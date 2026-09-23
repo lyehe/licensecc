@@ -373,7 +373,9 @@ npm run validate:protected-config --workspace @licensecc/cloudflare-licensing-ba
 given, it must be the third argument, after `--config` and `--secrets`.
 
 The command validates `BOUND_DEVICE_CONFIG`, the dedicated RSA public/private
-signer pairing, and the approval encryption ring. Output contains only safe
+signer pairing, the approval encryption ring, and `BOUND_GLOBAL_RATE_LIMIT`
+(unset is fine; a set but invalid value — non-integer, outside 100..1000000, or
+an empty string — fails `checks.global_rate_limit`). Output contains only safe
 check results and explicitly says live issuance/renewal were not run. This
 command currently accepts JSON configuration, not TOML or JSONC.
 
