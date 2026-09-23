@@ -22,8 +22,11 @@ async function requestLink(request: Request, env: Env, reqId: string, now: numbe
   }
   const db = primary(env);
   const accepted = () => envelope(reqId, "verification_requested", undefined, 202, HEADERS);
-  // Only previously verified contact addresses can recover existing credentials.
-  const credential = await db.prepare("SELECT p.customer_id, p.password_hash FROM portal_passwords p JOIN customers c ON c.id = p.customer_id WHERE p.email_lower = ? AND lower(c.email) = p.email_lower AND c.status = 'active'")
+  // Verified contact addresses recover credentials. Accounts created before email
+  // verification (empty contact) may recover once, if no other customer owns it.
+  const credential = await db.prepare(`SELECT p.customer_id, p.password_hash FROM portal_passwords p JOIN customers c ON c.id = p.customer_id
+    WHERE p.email_lower = ? AND c.status = 'active'
+      AND (lower(c.email) = p.email_lower OR (c.email = '' AND NOT EXISTS (SELECT 1 FROM customers o WHERE lower(o.email) = p.email_lower)))`)
     .bind(email).first<{ customer_id: string; password_hash: string }>();
   const existing = await db.prepare("SELECT id FROM customers WHERE lower(email) = ? UNION ALL SELECT customer_id AS id FROM portal_passwords WHERE email_lower = ? LIMIT 1").bind(email, email).first();
   // The same response covers unknown, disabled, unverified and already registered addresses.
@@ -64,10 +67,15 @@ async function complete(request: Request, env: Env, reqId: string, now: number):
     statements.push(env.DB.prepare(`INSERT INTO portal_passwords (customer_id, email_lower, password_hash, created_at, updated_at) SELECT ?, ?, ?, ?, ? WHERE ${claimed} AND EXISTS (SELECT 1 FROM customers WHERE id = ? AND status = 'active') RETURNING customer_id`)
       .bind(id, email, passwordHash, now, now, tokenHash, claim, id));
   } else {
-    statements.push(env.DB.prepare(`UPDATE portal_passwords SET password_hash = ?, updated_at = ? WHERE customer_id = ? AND email_lower = ? AND password_hash = ? AND ${claimed} AND EXISTS (SELECT 1 FROM customers WHERE id = ? AND status = 'active' AND lower(email) = ?) RETURNING customer_id`)
-      .bind(passwordHash, now, id, email, action.credential_hash, tokenHash, claim, id, email));
+    statements.push(env.DB.prepare(`UPDATE portal_passwords SET password_hash = ?, updated_at = ? WHERE customer_id = ? AND email_lower = ? AND password_hash = ? AND ${claimed} AND EXISTS (SELECT 1 FROM customers WHERE id = ? AND status = 'active' AND (lower(email) = ? OR (email = '' AND NOT EXISTS (SELECT 1 FROM customers o WHERE lower(o.email) = ?)))) RETURNING customer_id`)
+      .bind(passwordHash, now, id, email, action.credential_hash, tokenHash, claim, id, email, email));
   }
   const writeIndex = statements.length - 1;
+  if (action.purpose === "reset") {
+    // Redeeming the emailed link proves the mailbox; record it as the contact address.
+    statements.push(env.DB.prepare(`UPDATE customers SET email = ?, updated_at = ? WHERE id = ? AND email = '' AND EXISTS (SELECT 1 FROM portal_passwords WHERE customer_id = ? AND password_hash = ?) AND NOT EXISTS (SELECT 1 FROM customers o WHERE lower(o.email) = ?)`)
+      .bind(email, now, id, id, passwordHash, email));
+  }
   statements.push(...passwordInvalidations(env.DB, id, passwordHash, now, {
     email, revokeAccountTokens: action.purpose === "reset",
   }));

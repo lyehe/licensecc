@@ -120,7 +120,7 @@ Composition roots remain intentionally small. Current counts are:
 | Portal Worker `src/worker/index.ts` / `src/worker/app.ts` | 2 | 84 |
 | Portal UI `src/ui/main.tsx` / `src/ui/app/App.tsx` | 6 | 135 |
 
-Current production-source totals are 19,358 lines for license-admin, 8,708 lines for licensing-backend, 6,418 lines for customer-portal, and 1,320 lines for D1-backup. These counts include tracked and non-ignored, untracked
+Current production-source totals are 19,358 lines for license-admin, 8,708 lines for licensing-backend, 6,426 lines for customer-portal, and 1,320 lines for D1-backup. These counts include tracked and non-ignored, untracked
 TypeScript, TSX, JavaScript, and MJS under each service's `src` tree. They are
 evidence for responsibility review, not a reason
 to move code without a behavioral or ownership boundary.

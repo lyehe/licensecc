@@ -27,6 +27,10 @@ async function credential(env, email = "a@x.com") {
   await env.DB.prepare("INSERT INTO portal_passwords (customer_id,email_lower,password_hash,created_at,updated_at) VALUES ('A',?,?,?,?)").bind(email, hash, NOW, NOW).run();
   return hash;
 }
+async function legacy(env, email) {
+  await env.DB.prepare("INSERT INTO customers (id,name,email,created_at,updated_at) VALUES ('L','Personal account','',?,?)").bind(NOW, NOW).run();
+  await env.DB.prepare("INSERT INTO portal_passwords (customer_id,email_lower,password_hash,created_at,updated_at) VALUES ('L',?,?,?,?)").bind(email, await hashPassword(PASSWORD), NOW, NOW).run();
+}
 
 test("email proof precedes account creation and creates verified, empty account once", async t => {
   const f = fixture(t);
@@ -126,6 +130,26 @@ test("mail cooldown, missing sender, delivery failure, CSRF and disabled flag fa
   assert.equal(f.db.prepare("SELECT count(*) n FROM portal_password_actions WHERE email_lower = 'failed@example.com'").get().n,0);
   assert.equal((await call(f.env,"GET",`${PATH}/complete?token=${f.token()}`)).status,404);
   assert.equal(f.db.prepare("SELECT consumed_at FROM portal_password_actions").get().consumed_at,null);
+});
+
+test("pre-verification password accounts recover and adopt the proven email", async t => {
+  const f = fixture(t);
+  await legacy(f.env, "legacy@example.com");
+  assert.equal((await f.request("reset", "legacy@example.com")).status, 202);
+  assert.equal(f.mail.length, 1);
+  const result = await f.complete(undefined, NEXT);
+  assert.equal(result.status, 200);
+  assert.equal(result.body.data.customer_id, "L");
+  assert.equal(f.db.prepare("SELECT email FROM customers WHERE id = 'L'").get().email, "legacy@example.com");
+  assert.equal((await call(f.env, "POST", `${PATH}/login`, { body: { email: "legacy@example.com", password: NEXT } })).status, 200);
+});
+
+test("legacy reset stays generic when another customer owns the address", async t => {
+  const f = fixture(t);
+  await legacy(f.env, "a@x.com");
+  assert.equal((await f.request("reset", "a@x.com")).status, 202);
+  assert.equal(f.mail.length, 0);
+  assert.equal(f.db.prepare("SELECT email FROM customers WHERE id = 'L'").get().email, "");
 });
 
 export const DIRECT_ROUTE_TESTS = ["POST /portal/v1/auth/password/register", "POST /portal/v1/auth/password/reset", "POST /portal/v1/auth/password/complete"];
