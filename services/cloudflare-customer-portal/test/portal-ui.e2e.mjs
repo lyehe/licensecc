@@ -503,8 +503,9 @@ test("customer portal signs in with an 8-digit code and walks every screen witho
 
   // Only the explicit confirmation sends the original request, and a double click remains one
   // release while the existing busy guard is active. Releasing the last live seat leaves no
-  // browser session, so the panel reverts to its plain collapsible <details>; reopen it to keep
-  // inspecting the seat card.
+  // browser session, so the panel reverts to its plain collapsible <details> and the now-hidden
+  // seat card/button can no longer take focus; the app falls back to focusing the panel's own
+  // <summary> instead of leaving focus on <body>.
   await seatCard.getByRole("button", { name: "Release" }).click();
   const confirmReleaseDialog = page.getByRole("dialog");
   await expect(confirmReleaseDialog).toBeVisible();
@@ -520,7 +521,10 @@ test("customer portal signs in with an 8-digit code and walks every screen witho
   });
   expect(release.body.client_instance_id).toBe(checkout.body.client_instance_id);
   await expect(page.getByText(/release_ok/)).toBeVisible();
-  await page.getByText("Browser sessions", { exact: true }).click();
+  const browserSessionsSummary = page.getByText("Browser sessions", { exact: true });
+  await expect(browserSessionsSummary).toBeFocused();
+  expect(await page.evaluate(() => document.activeElement?.tagName)).not.toBe("BODY");
+  await browserSessionsSummary.click();
   await expect(seatCard.getByRole("button", { name: "Start seat" })).toBeEnabled();
   await expect(seatCard.getByRole("button", { name: "Renew seat" })).toBeDisabled();
   await expect(seatCard.getByRole("button", { name: "Release" })).toBeDisabled();
@@ -545,8 +549,12 @@ test("customer portal signs in with an 8-digit code and walks every screen witho
   await expect(page.locator('.feedback p[role="status"]')).toContainText(/released; status refresh failed/i);
   await expect(page.getByRole("button", { name: "Refresh status" })).toBeVisible();
   await expect.poll(() => page.evaluate(() => window.localStorage.getItem("licensecc.portal.seats.v1"))).toBe("{}");
-  // This release also leaves no browser session, collapsing the panel again.
-  await page.getByText("Browser sessions", { exact: true }).click();
+  // This release also leaves no browser session, collapsing the panel again; focus again lands on
+  // the summary rather than <body>, since neither the (disabled) Start seat button nor the hidden
+  // seat card can take it.
+  await expect(browserSessionsSummary).toBeFocused();
+  expect(await page.evaluate(() => document.activeElement?.tagName)).not.toBe("BODY");
+  await browserSessionsSummary.click();
   await expect(seatCard.getByRole("button", { name: "Start seat" })).toBeDisabled();
 
   await page.getByRole("button", { name: "Refresh status" }).click();

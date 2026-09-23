@@ -51,6 +51,7 @@ export interface DevicesController {
   seatReleaseDialogRef: React.RefObject<HTMLDivElement | null>;
   seatStartButtonRefs: React.RefObject<Record<string, HTMLButtonElement | null>>;
   seatCardRefs: React.RefObject<Record<string, HTMLDivElement | null>>;
+  browserSessionsSummaryRef: React.RefObject<HTMLElement | null>;
   seatAction(item: EntitlementRow, operation: SeatOperation): Promise<SeatActionResult>;
   requestSeatRelease(item: EntitlementRow): void;
   dismissSeatRelease(): void;
@@ -102,6 +103,7 @@ export function useDevicesController(options: DeviceFeatureOptions): DevicesCont
   const seatReleaseConfirmingRef = useRef(false);
   const seatStartButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const seatCardRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const browserSessionsSummaryRef = useRef<HTMLElement | null>(null);
 
   function setSeatSessions(update: React.SetStateAction<Record<string, SeatSession>>): void {
     setSeatSessionsRaw((current) => {
@@ -270,7 +272,11 @@ export function useDevicesController(options: DeviceFeatureOptions): DevicesCont
     if (seatReleaseFocusId === null || pendingSeatRelease !== null || seatSessions[seatReleaseFocusId] !== undefined) return;
     const startButton = seatStartButtonRefs.current[seatReleaseFocusId];
     if (startButton !== null && !startButton.disabled) startButton.focus();
-    else seatCardRefs.current[seatReleaseFocusId]?.focus();
+    if (document.activeElement !== startButton) seatCardRefs.current[seatReleaseFocusId]?.focus();
+    // Releasing the last live browser session collapses the panel into a closed <details>, which
+    // makes the seat card/button unfocusable. When neither target above took focus, land it on the
+    // panel's own <summary> instead of leaving it on <body>.
+    if (document.activeElement === null || document.activeElement === document.body) browserSessionsSummaryRef.current?.focus();
     setSeatReleaseFocusId(null);
   }, [entitlements, pendingSeatRelease, seatReleaseFocusId, seatSessions]);
 
@@ -305,6 +311,7 @@ export function useDevicesController(options: DeviceFeatureOptions): DevicesCont
     seatReleaseDialogRef,
     seatStartButtonRefs,
     seatCardRefs,
+    browserSessionsSummaryRef,
     seatAction,
     requestSeatRelease,
     dismissSeatRelease,
@@ -355,7 +362,7 @@ export function DevicesFeature({ controller }: { controller: DevicesController }
             {seatGridContent}
           </section>
         ) : (
-          <details className="browserSessions"><summary>Browser sessions</summary>{seatGridContent}</details>
+          <details className="browserSessions"><summary ref={(element) => { controller.browserSessionsSummaryRef.current = element; }}>Browser sessions</summary>{seatGridContent}</details>
         )
       )}
     </div>
