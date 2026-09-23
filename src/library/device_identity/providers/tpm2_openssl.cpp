@@ -18,6 +18,7 @@
 #include <linux/fs.h>
 #include <sys/file.h>
 #include <sys/syscall.h>
+#include <dirent.h>
 #include <fcntl.h>
 #include <unistd.h>
 
@@ -180,6 +181,31 @@ public:
 	int renameat2_noreplace(int directory, const char* old_path, const char* new_path) noexcept override {
 		return static_cast<int>(::syscall(SYS_renameat2, directory, old_path, directory, new_path,
 										  static_cast<unsigned int>(RENAME_NOREPLACE)));
+	}
+	int list_directory(int directory, std::vector<std::string>& names) noexcept override {
+		const int descriptor = ::openat(directory, ".", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+		DIR* stream = descriptor < 0 ? nullptr : ::fdopendir(descriptor);
+		if (stream == nullptr) {
+			const int saved_errno = errno;
+			if (descriptor >= 0) {
+				(void)::close(descriptor);
+			}
+			errno = saved_errno;
+			return -1;
+		}
+		int saved_errno = 0;
+		try {
+			errno = 0;
+			while (const struct dirent* entry = ::readdir(stream)) {
+				names.emplace_back(entry->d_name);
+			}
+			saved_errno = errno;
+		} catch (...) {
+			saved_errno = ENOMEM;
+		}
+		(void)::closedir(stream);
+		errno = saved_errno;
+		return saved_errno == 0 ? 0 : -1;
 	}
 	int clock_gettime(clockid_t clock, struct timespec* value) noexcept override {
 		return ::clock_gettime(clock, value);
@@ -628,8 +654,20 @@ bool same_file(const FileIdentity& left, const FileIdentity& right) noexcept {
 }
 
 bool valid_reference_status(const struct stat& status) noexcept {
-	return S_ISREG(status.st_mode) && status.st_uid == ::geteuid() && (status.st_mode & 07777U) == 0600U &&
-		   status.st_nlink == 1;
+	return S_ISREG(status.st_mode) && status.st_uid == ::geteuid() && (status.st_mode & 07777U) == 0600U;
+}
+
+/* Names the library itself links to a reference: the publish temporary and the delete quarantine. */
+bool library_sibling_name(const std::string& name, const std::string& filename) {
+	const std::string stems[] = {filename.substr(0U, filename.size() - std::strlen(".tss2.pem")) + ".tmp.",
+								 filename + ".delete."};
+	for (const std::string& stem : stems) {
+		if (name.size() == stem.size() + 32U && name.compare(0U, stem.size(), stem) == 0 &&
+			name.find_first_not_of("0123456789abcdef", stem.size()) == std::string::npos) {
+			return true;
+		}
+	}
+	return false;
 }
 
 bool valid_removal_status(const struct stat& status, bool require_safe_mode) noexcept {
@@ -1413,6 +1451,27 @@ private:
 		return LCC_DEVICE_OK;
 	}
 
+	LCC_DEVICE_RESULT sweep_library_sibling(int directory, const std::string& filename, const struct stat& reference) {
+		std::vector<std::string> names;
+		if (posix_->list_directory(directory, names) != 0) {
+			return storage_errno_result(errno);
+		}
+		for (const std::string& name : names) {
+			if (!library_sibling_name(name, filename)) {
+				continue;
+			}
+			const int raw_descriptor = posix_->openat(directory, name.c_str(), kReferenceOpenFlags, 0U);
+			DescriptorHandle sibling(posix_, raw_descriptor);
+			struct stat status {};
+			if (raw_descriptor >= 0 && posix_->fstat(sibling.get(), &status) == 0 &&
+				same_file(FileIdentity{reference.st_dev, reference.st_ino},
+						  FileIdentity{status.st_dev, status.st_ino})) {
+				return cleanup_quarantine(directory, name);
+			}
+		}
+		return LCC_DEVICE_KEY_CORRUPT;
+	}
+
 	LCC_DEVICE_RESULT load_reference(int directory, const std::string& filename, LoadedReference& out) {
 		const int raw_descriptor = posix_->openat(directory, filename.c_str(), kReferenceOpenFlags, 0U);
 		if (raw_descriptor < 0) {
@@ -1429,14 +1488,22 @@ private:
 			const int saved_errno = errno;
 			return saved_errno == EACCES || saved_errno == EPERM ? LCC_DEVICE_ACCESS_DENIED : LCC_DEVICE_IO_ERROR;
 		}
-		/* A second hard link is evidence the reference file was tampered with (e.g. aliased
-		 * so a delete/replace of one name leaves the key material reachable from another);
-		 * that is corruption of the stored key material, not merely a caller access problem. */
-		if (status.st_nlink != 1) {
-			return LCC_DEVICE_KEY_CORRUPT;
-		}
 		if (!valid_reference_status(status)) {
 			return LCC_DEVICE_ACCESS_DENIED;
+		}
+		/* Every caller holds the namespace lock, so a second link can only be a crash leftover of
+		 * the library's own publish/delete protocols (swept here) or tampering (KEY_CORRUPT). */
+		if (status.st_nlink == 2) {
+			const LCC_DEVICE_RESULT swept = sweep_library_sibling(directory, filename, status);
+			if (swept != LCC_DEVICE_OK) {
+				return swept;
+			}
+			if (posix_->fstat(descriptor.get(), &status) != 0) {
+				return LCC_DEVICE_IO_ERROR;
+			}
+		}
+		if (status.st_nlink != 1) {
+			return LCC_DEVICE_KEY_CORRUPT;
 		}
 		const std::string uri = "file:/proc/self/fd/" + std::to_string(descriptor.get());
 		UI_METHOD* ui_method = rejecting_ui_method();

@@ -475,6 +475,10 @@ public:
 		errno = ENOSYS;
 		return -1;
 	}
+	int list_directory(int, std::vector<std::string>&) noexcept override {
+		errno = ENOSYS;
+		return -1;
+	}
 	int clock_gettime(clockid_t, struct timespec*) noexcept override {
 		errno = ENOSYS;
 		return -1;
@@ -654,7 +658,8 @@ public:
 						  : descriptor_info.kind == Kind::Reference
 							  ? S_IFREG | (reference_bad_mode ? 0640U : 0600U)
 							  : S_IFREG | (temporary_bad_mode ? 0640U : (recorded_mode & 07777U));
-		status->st_nlink = descriptor_info.kind == Kind::Reference && reference_hard_linked ? 2 : 1;
+		status->st_nlink =
+			descriptor_info.kind == Kind::Reference && reference_hard_linked ? 2 : link_count(descriptor_info.inode);
 		return 0;
 	}
 	int flock(int, int) noexcept override {
@@ -808,6 +813,12 @@ public:
 		refresh_presence();
 		return 0;
 	}
+	int list_directory(int, std::vector<std::string>& names) noexcept override {
+		for (const auto& entry : entries_) {
+			names.push_back(entry.first);
+		}
+		return 0;
+	}
 	int clock_gettime(clockid_t, struct timespec* value) noexcept override {
 		calls.push_back("clock_gettime");
 		if (value == nullptr) {
@@ -819,6 +830,11 @@ public:
 		return 0;
 	}
 	int nanosleep(const struct timespec*, struct timespec*) noexcept override { return 0; }
+
+	void add_entry(const std::string& name, ino_t inode) {
+		entries_[name] = FakeFile{inode, S_IFREG | 0600U, ::geteuid()};
+	}
+	bool has_entry(const std::string& name) const { return entries_.find(name) != entries_.end(); }
 
 	std::vector<std::string> calls;
 	bool lock_opened = false;
@@ -899,6 +915,14 @@ private:
 	static bool is_temporary(const std::string& value) { return value.find(".tmp.") != std::string::npos; }
 	static bool is_move(const std::string& value) { return value.find(".move.") != std::string::npos; }
 	static bool is_delete_name(const std::string& value) { return value.find(".delete.") != std::string::npos; }
+
+	nlink_t link_count(ino_t inode) const {
+		nlink_t count = 0;
+		for (const auto& entry : entries_) {
+			count += entry.second.inode == inode ? 1U : 0U;
+		}
+		return count == 0 ? 1 : count;
+	}
 
 	int allocate_descriptor() {
 		while (descriptors_.find(next_descriptor_) != descriptors_.end()) {
@@ -1506,6 +1530,40 @@ void test_storage_ancestor_symlink_lock_timeout_and_publish_capabilities() {
 			"fallback revalidation cleanup fsync failure was reported as busy");
 }
 
+void test_crash_left_hard_link_is_swept_only_for_library_names() {
+	const ProviderOpenRequest request = request_for("/safe");
+	const std::string final_name = request.device_namespace.linux_filename;
+	const std::string stem = final_name.substr(0U, final_name.size() - std::strlen(".tss2.pem"));
+	const std::string suffix(32U, 'a');
+	std::shared_ptr<LockReachPosixStorageApi> storage;
+	const auto open_with_sibling = [&](const std::string& sibling) {
+		storage = std::make_shared<LockReachPosixStorageApi>(true);
+		storage->add_entry(final_name, 104);
+		storage->add_entry(sibling, 104);
+		auto provider = license::device_identity::make_tpm2_openssl_provider(
+			std::make_shared<FakeOpenSsl3Api>(true, false, true), storage);
+		return provider->open(request);
+	};
+	for (const std::string& sibling : {final_name + ".delete." + suffix, stem + ".tmp." + suffix}) {
+		require(open_with_sibling(sibling) == LCC_DEVICE_OK, "crash-left library hard link was not swept");
+		require(!storage->has_entry(sibling) && storage->has_entry(final_name),
+				"sweep removed the wrong name or left the library sibling");
+	}
+	for (const std::string& sibling : {std::string("unrelated.pem"), final_name + ".delete.short",
+									   final_name + ".delete." + std::string(32U, 'G')}) {
+		require(open_with_sibling(sibling) == LCC_DEVICE_KEY_CORRUPT, "unrelated hard link was accepted");
+		require(storage->has_entry(sibling), "unrelated hard link was removed");
+	}
+
+	storage = std::make_shared<LockReachPosixStorageApi>();
+	storage->reference_present = true;
+	storage->reference_hard_linked = true;
+	storage->reference_bad_mode = true;
+	auto provider =
+		license::device_identity::make_tpm2_openssl_provider(std::make_shared<FakeOpenSsl3Api>(true), storage);
+	require(provider->open(request) == LCC_DEVICE_ACCESS_DENIED, "bad mode on a hard-linked reference was not denied");
+}
+
 void test_fstat_and_cleanup_failures_are_not_success() {
 	auto openssl = std::make_shared<FakeOpenSsl3Api>(true, false, true);
 	auto storage = std::make_shared<LockReachPosixStorageApi>(true);
@@ -1708,6 +1766,7 @@ int run_shim() {
 	test_store_terminal_and_provider_failure_matrix();
 	test_postpublication_inode_rollback_preserves_race_winner();
 	test_storage_ancestor_symlink_lock_timeout_and_publish_capabilities();
+	test_crash_left_hard_link_is_swept_only_for_library_names();
 	test_fstat_and_cleanup_failures_are_not_success();
 	test_publish_cleanup_preserves_a_same_name_replacement();
 	test_store_cardinality_and_clean_eof_are_required();

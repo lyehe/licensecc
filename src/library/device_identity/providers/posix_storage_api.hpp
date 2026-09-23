@@ -7,6 +7,8 @@
 #include <cstddef>
 #include <ctime>
 #include <memory>
+#include <string>
+#include <vector>
 
 namespace license {
 namespace device_identity {
@@ -27,6 +29,8 @@ public:
 	virtual int linkat(int old_directory, const char* old_path, int new_directory, const char* new_path,
 					   int flags) noexcept = 0;
 	virtual int renameat2_noreplace(int directory, const char* old_path, const char* new_path) noexcept = 0;
+	/* Appends the entry names of a directory descriptor; returns 0, or -1 with errno set. */
+	virtual int list_directory(int directory, std::vector<std::string>& names) noexcept = 0;
 	virtual int clock_gettime(clockid_t clock, struct timespec* value) noexcept = 0;
 	virtual int nanosleep(const struct timespec* request, struct timespec* remaining) noexcept = 0;
 };
