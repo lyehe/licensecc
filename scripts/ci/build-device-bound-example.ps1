@@ -60,14 +60,10 @@ if ($LASTEXITCODE -ne 0) { throw 'openssl genpkey failed' }
 & openssl pkey -in $privateKey -pubout -outform DER -out $key
 if ($LASTEXITCODE -ne 0) { throw 'openssl pkey failed' }
 
-if ($Generator) {
-    # An explicit generator (via -Generator, or its $env:CMAKE_GENERATOR default) keeps the
-    # prior behavior: pass it through, with -A x64 for Windows' Visual Studio generators.
-    $generatorArguments = if ($IsWindows) { @('-G', $Generator, '-A', 'x64') } else { @('-G', $Generator) }
-} else {
-    # No generator requested: let CMake pick its own default instead of forcing one.
-    $generatorArguments = @()
-}
+# No generator requested: let CMake pick its own default instead of forcing one. An explicit
+# generator (via -Generator, or its $env:CMAKE_GENERATOR default) is passed through, with
+# -A x64 for Windows' Visual Studio generators.
+$generatorArguments = if (-not $Generator) { @() } elseif ($IsWindows) { @('-G', $Generator, '-A', 'x64') } else { @('-G', $Generator) }
 # Every -D value is double-quoted deliberately: PowerShell mis-splits an
 # unquoted "-DNAME=value" native-command argument into two argv entries when
 # "value" contains two or more dots (confirmed with pwsh 7.6 independent of
