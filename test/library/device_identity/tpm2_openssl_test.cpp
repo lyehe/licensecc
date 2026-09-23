@@ -654,6 +654,7 @@ public:
 						  : descriptor_info.kind == Kind::Reference
 							  ? S_IFREG | (reference_bad_mode ? 0640U : 0600U)
 							  : S_IFREG | (temporary_bad_mode ? 0640U : (recorded_mode & 07777U));
+		status->st_nlink = descriptor_info.kind == Kind::Reference && reference_hard_linked ? 2 : 1;
 		return 0;
 	}
 	int flock(int, int) noexcept override {
@@ -826,6 +827,7 @@ public:
 	bool reference_present = false;
 	bool reference_nonregular = false;
 	bool reference_symlink = false;
+	bool reference_hard_linked = false;
 	bool lock_nonregular = false;
 	bool lock_symlink = false;
 	bool directory_symlink = false;
@@ -1395,6 +1397,13 @@ void test_storage_ancestor_symlink_lock_timeout_and_publish_capabilities() {
 	storage->reference_symlink = true;
 	provider = license::device_identity::make_tpm2_openssl_provider(std::make_shared<FakeOpenSsl3Api>(true), storage);
 	require(provider->open(request_for("/safe")) == LCC_DEVICE_KEY_CORRUPT, "final reference symlink was not rejected");
+
+	storage = std::make_shared<LockReachPosixStorageApi>();
+	storage->reference_present = true;
+	storage->reference_hard_linked = true;
+	provider = license::device_identity::make_tpm2_openssl_provider(std::make_shared<FakeOpenSsl3Api>(true), storage);
+	require(provider->open(request_for("/safe")) == LCC_DEVICE_KEY_CORRUPT,
+			"hard-linked key reference was not rejected");
 
 	storage = std::make_shared<LockReachPosixStorageApi>();
 	storage->lock_symlink = true;

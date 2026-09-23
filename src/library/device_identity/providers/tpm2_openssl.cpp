@@ -628,7 +628,8 @@ bool same_file(const FileIdentity& left, const FileIdentity& right) noexcept {
 }
 
 bool valid_reference_status(const struct stat& status) noexcept {
-	return S_ISREG(status.st_mode) && status.st_uid == ::geteuid() && (status.st_mode & 07777U) == 0600U;
+	return S_ISREG(status.st_mode) && status.st_uid == ::geteuid() && (status.st_mode & 07777U) == 0600U &&
+		   status.st_nlink == 1;
 }
 
 bool valid_removal_status(const struct stat& status, bool require_safe_mode) noexcept {
@@ -1427,6 +1428,12 @@ private:
 		if (posix_->fstat(descriptor.get(), &status) != 0) {
 			const int saved_errno = errno;
 			return saved_errno == EACCES || saved_errno == EPERM ? LCC_DEVICE_ACCESS_DENIED : LCC_DEVICE_IO_ERROR;
+		}
+		/* A second hard link is evidence the reference file was tampered with (e.g. aliased
+		 * so a delete/replace of one name leaves the key material reachable from another);
+		 * that is corruption of the stored key material, not merely a caller access problem. */
+		if (status.st_nlink != 1) {
+			return LCC_DEVICE_KEY_CORRUPT;
 		}
 		if (!valid_reference_status(status)) {
 			return LCC_DEVICE_ACCESS_DENIED;

@@ -54,6 +54,14 @@ struct Directory {
 		std::filesystem::remove_all(path, ignored);
 	}
 };
+// Restores the process umask even if a BOOST_REQUIRE/BOOST_CHECK aborts the test case via
+// exception unwinding; a leaked umask would otherwise corrupt file modes in every later test
+// case sharing this process.
+struct UmaskGuard {
+	mode_t previous;
+	explicit UmaskGuard(mode_t next) : previous(::umask(next)) {}
+	~UmaskGuard() { ::umask(previous); }
+};
 void observe_empty(BoundCheckpointStorage& storage) {
 	std::string value = "unchanged";
 	BOOST_CHECK(storage.read(0, value) == BoundCheckpointIo::missing);
@@ -128,6 +136,17 @@ BOOST_AUTO_TEST_CASE(unsafe_files_and_relocated_directory_fail_closed) {
 	BOOST_CHECK(storage->lock() == BoundCheckpointIo::error);
 	BOOST_CHECK(!make_bound_checkpoint_storage_at_root(root.path + "/../" +
 													   std::filesystem::path(root.path).filename().string()));
+}
+BOOST_AUTO_TEST_CASE(checkpoint_publish_survives_a_restrictive_umask) {
+	Directory root;
+	UmaskGuard guard(0277);
+	auto storage = make_bound_checkpoint_storage_at_root(root.path, 0);
+	BOOST_REQUIRE(storage);
+	BOOST_REQUIRE(storage->lock() == BoundCheckpointIo::ok);
+	observe_empty(*storage);
+	const auto published = storage->publish(0, "first");
+	storage->unlock();
+	BOOST_CHECK(published == BoundCheckpointIo::ok);
 }
 BOOST_AUTO_TEST_CASE(clock_uses_boot_time_and_process_identity) {
 	auto platform = make_bound_anchor_platform();
