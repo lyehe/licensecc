@@ -160,8 +160,14 @@ option(LCC_BUILD_FUZZERS
 option(LCC_ENABLE_DEVICE_IDENTITY "Build the portable device-identity ABI and proof core." OFF)
 option(LCC_ENABLE_WINDOWS_TPM "Build the Windows Platform KSP device-key provider." OFF)
 option(LCC_ENABLE_TPM2_OPENSSL "Build the OpenSSL TPM2 device-key provider." OFF)
-option(LCC_ENABLE_LINUX_DESKTOP "Build Linux protected enrollment and feature-session platform adapters." ON)
 option(LCC_BUILD_DEVICE_IDENTITY_TEST_PROVIDER "Build the process-local software device-key test provider." OFF)
+# Desktop adapters open keys through the TPM2 provider (or the test provider); default them on only then.
+if(LCC_ENABLE_TPM2_OPENSSL OR LCC_BUILD_DEVICE_IDENTITY_TEST_PROVIDER)
+	set(_lcc_linux_desktop_default ON)
+else()
+	set(_lcc_linux_desktop_default OFF)
+endif()
+option(LCC_ENABLE_LINUX_DESKTOP "Build Linux protected enrollment and feature-session platform adapters." ${_lcc_linux_desktop_default})
 option(LCC_BUILD_TPM2_OPENSSL_CAPABILITY_TEST
 	"Build the standalone OpenSSL tpm2-provider exact-digest capability test." OFF)
 
@@ -206,6 +212,12 @@ if(LCC_BUILD_TPM2_OPENSSL_CAPABILITY_TEST AND NOT CMAKE_SYSTEM_NAME STREQUAL "Li
 endif()
 if(LCC_ENABLE_TPM2_OPENSSL AND NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
 	message(FATAL_ERROR "LCC_ENABLE_TPM2_OPENSSL is valid only on Linux")
+endif()
+if(LCC_ENABLE_DEVICE_IDENTITY AND CMAKE_SYSTEM_NAME STREQUAL "Linux" AND LCC_ENABLE_LINUX_DESKTOP
+	AND NOT LCC_ENABLE_TPM2_OPENSSL AND NOT LCC_BUILD_DEVICE_IDENTITY_TEST_PROVIDER)
+	message(FATAL_ERROR
+		"LCC_ENABLE_LINUX_DESKTOP=ON needs LCC_ENABLE_TPM2_OPENSSL=ON (or the test-only "
+		"LCC_BUILD_DEVICE_IDENTITY_TEST_PROVIDER=ON). Set LCC_ENABLE_LINUX_DESKTOP=OFF for the portable identity core only.")
 endif()
 if(LCC_BUILD_TPM2_OPENSSL_CAPABILITY_TEST AND NOT BUILD_TESTING)
 	message(FATAL_ERROR

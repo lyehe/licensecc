@@ -2,6 +2,8 @@ cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
 project(licensecc_java_device_bound LANGUAGES CXX)
 set(LCC_PROJECT_NAME "test" CACHE STRING "Installed Licensecc project component")
 find_package(licensecc CONFIG REQUIRED)
+# LCC_ENABLE_LINUX_DESKTOP defaults ON only when the installed package was built
+# with LCC_ENABLE_TPM2_OPENSSL=ON, and needs libcurl >= 7.85.
 if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8 OR NOT LCC_ENABLE_DEVICE_IDENTITY OR
    (WIN32 AND (NOT MSVC OR NOT LCC_ENABLE_WINDOWS_TPM)) OR
    (CMAKE_SYSTEM_NAME STREQUAL "Linux" AND (NOT LCC_ENABLE_TPM2_OPENSSL OR NOT LCC_ENABLE_LINUX_DESKTOP)) OR

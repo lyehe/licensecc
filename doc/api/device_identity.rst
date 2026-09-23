@@ -409,9 +409,14 @@ process restart requires fresh online permission. Checkpoints contain signed
 recovery state, not restored authority. Linux desktop/browser/TLS and physical
 TPM qualification remains distinct from simulator and local integration tests.
 
-The Linux desktop adapters are enabled by default when device identity is built.
-For a provider-only runtime (including Ubuntu 22.04 with its older system curl),
-set ``LCC_ENABLE_LINUX_DESKTOP=OFF``. The low-level TPM proof API remains available;
-public protected enrollment and feature-session opens then return
-``UNSUPPORTED_PLATFORM``. Full desktop builds require libcurl 7.85+ with
-thread-safe global initialization and asynchronous DNS support.
+The Linux desktop adapters default ``ON`` only when a device-key provider is
+enabled (``LCC_ENABLE_TPM2_OPENSSL=ON``, or the test-only
+``LCC_BUILD_DEVICE_IDENTITY_TEST_PROVIDER=ON``); otherwise they default
+``OFF``. Setting ``LCC_ENABLE_LINUX_DESKTOP=ON`` without either provider stops
+the configure with a ``FATAL_ERROR``. For a provider-only runtime (including
+Ubuntu 22.04 with its older system curl), leave ``LCC_ENABLE_LINUX_DESKTOP=OFF``
+(the default). The low-level TPM proof API remains available; public protected
+enrollment and feature-session opens then return ``UNSUPPORTED_PLATFORM``.
+Desktop builds require libcurl >= 7.85 with thread-safe global initialization
+and asynchronous DNS support; configuring with an older libcurl stops with a
+``FATAL_ERROR`` naming the version found.
