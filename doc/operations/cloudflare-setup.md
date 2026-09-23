@@ -361,7 +361,7 @@ and the local secret-input JSON (both remain untracked):
 
 ```sh
 npm run validate:protected-config --workspace @licensecc/cloudflare-licensing-backend -- \
-  --config=/absolute/private/backend.json --secrets=/absolute/private/backend-secrets.json
+  --config=/absolute/private/backend.json --secrets=/absolute/private/backend-secrets.json --env=<name>
 ```
 
 The command validates `BOUND_DEVICE_CONFIG`, the dedicated RSA public/private

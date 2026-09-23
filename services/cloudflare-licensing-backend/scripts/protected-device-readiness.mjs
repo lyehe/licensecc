@@ -37,10 +37,15 @@ async function boundedJson(path) {
 }
 export async function main(argv) {
   try {
-    if (argv.length !== 2 || !argv[0].startsWith("--config=") || !argv[1].startsWith("--secrets=")) throw new Error();
-    const config = await boundedJson(argv[0].slice(9));
-    const secrets = await boundedJson(argv[1].slice(10));
-    const result = await checkProtectedDeviceConfiguration({ ...config.vars, ...secrets });
+    const [configArg, secretsArg, envArg, ...rest] = argv;
+    if (rest.length || !configArg?.startsWith("--config=") || !secretsArg?.startsWith("--secrets=") || (envArg !== undefined && !envArg.startsWith("--env="))) throw new Error();
+    const config = await boundedJson(configArg.slice(9));
+    const secrets = await boundedJson(secretsArg.slice(10));
+    const name = envArg?.slice(6);
+    // Wrangler env blocks do not inherit top-level vars; validate exactly what that environment deploys.
+    const vars = name === undefined ? config.vars : config.env?.[name]?.vars;
+    if (!vars || typeof vars !== "object") throw new Error();
+    const result = await checkProtectedDeviceConfiguration({ ...vars, ...secrets });
     process.stdout.write(JSON.stringify(result) + "\n");
     return result.ok ? 0 : 1;
   } catch {
