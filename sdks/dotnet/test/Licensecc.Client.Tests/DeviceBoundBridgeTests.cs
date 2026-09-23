@@ -143,6 +143,19 @@ public sealed unsafe class DeviceBoundBridgeTests
         if(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture==Architecture.X64)
             Assert.ThrowsExactly<ArgumentException>(()=>new DeviceBoundLibrary("relative.dll"));
     }
+    [TestMethod]
+    public void LoadingNonElfFileOnLinuxThrowsDllNotFoundExceptionUnwrapped()
+    {
+        if(!OperatingSystem.IsLinux()) { Assert.Inconclusive("Linux-only: dlopen rejection of a non-ELF file."); return; }
+        var path=Path.GetTempFileName();
+        try
+        {
+            File.WriteAllText(path,"not an ELF binary, just text");
+            var error=Assert.ThrowsExactly<DllNotFoundException>(()=>new NativeApi(path));
+            Assert.IsTrue(error.Message.Contains(path),$"Expected the real dlerror() text (naming '{path}'), got: \"{error.Message}\"");
+        }
+        finally { File.Delete(path); }
+    }
 
     private sealed class Pin : IDisposable
     {

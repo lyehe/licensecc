@@ -1,5 +1,6 @@
 package io.licensecc.client;
 
+import java.io.IOException;
 import java.lang.ref.WeakReference;
 import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
@@ -57,6 +58,7 @@ final class DeviceBoundAdapterTest {
     }
 
     static void run() throws Exception {
+        loaderMessages();
         configurationBounds();
         operationsAndClose();
         failedOpenCleanup();
@@ -66,6 +68,22 @@ final class DeviceBoundAdapterTest {
         cleaner();
         installed();
         System.out.println("Java device-bound adapter boundary tests passed");
+    }
+    private static void loaderMessages() throws IOException {
+        // Both checks are OS-independent (they run before any OS-specific dlopen/LoadLibrary
+        // call), so they execute the same way on Windows and Linux hosts.
+        try { DeviceBoundNative.load(Path.of("relative-native-library.so")); throw new AssertionError("Expected relative path rejection"); }
+        catch (IllegalArgumentException expected) {
+            check(expected.getMessage().contains("absolute native library path"), "relative path message: " + expected.getMessage());
+        }
+        Path notALibrary = Files.createTempFile("licensecc-loader-test", ".txt");
+        try {
+            Files.writeString(notALibrary, "not a native library");
+            try { DeviceBoundNative.load(notALibrary); throw new AssertionError("Expected wrong-extension rejection"); }
+            catch (IllegalArgumentException expected) {
+                check(expected.getMessage().contains("regular JNI library"), "extension message: " + expected.getMessage());
+            }
+        } finally { Files.deleteIfExists(notALibrary); }
     }
     private static void configurationBounds() {
         String astral = "\uD83D\uDE80";

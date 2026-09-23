@@ -17,10 +17,10 @@ final class DeviceBoundNative implements DeviceBoundApi {
                 || !"64".equals(System.getProperty("sun.arch.data.model"))) {
             throw new UnsupportedOperationException("The device-bound adapter requires 64-bit Windows or Linux Java");
         }
-        if (!path.isAbsolute()) throw new IllegalArgumentException("An application-owned absolute DLL path is required");
+        if (!path.isAbsolute()) throw new IllegalArgumentException("An application-owned absolute native library path is required");
         Path canonical = path.toRealPath();
         if (!Files.isRegularFile(canonical) || !canonical.toString().toLowerCase(Locale.ROOT).endsWith(windows ? ".dll" : ".so")) {
-            throw new IllegalArgumentException("Expected a regular JNI DLL");
+            throw new IllegalArgumentException("Expected a regular JNI library (.dll on Windows, .so on Linux)");
         }
         if (loadedPath != null) {
             if (!ready || !loadedPath.equals(canonical)) throw new IllegalStateException("JNI library is already pinned or failed to initialize");
