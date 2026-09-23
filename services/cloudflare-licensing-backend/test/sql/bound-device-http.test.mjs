@@ -418,6 +418,22 @@ test("parseGlobalRateLimit is the one shared range check for both the runtime cl
   }
 });
 
+test("verified renew for a large-capacity entitlement is admitted past the default 240/minute customer limit", async t => {
+  const f = fixture(t);
+  f.sql.prepare("UPDATE entitlements SET max_active_devices=200 WHERE project='APP'").run();
+  const d = await enrollment(f);
+  const activated = await f.call("/v2/device-authorizations/exchange", await signed(f, d, "exchange"));
+  assert.equal(activated.status, 200, JSON.stringify(activated.body));
+  // Seed the shared per-customer counter near the default 240/minute limit;
+  // the entitlement's own cap is max(240, 2*200)=400, so the next verified
+  // operation must still be admitted.
+  f.sql.exec("UPDATE rate_limit_counters SET request_count=245 WHERE namespace='device-v2-customer'");
+  const body = {binding_id: activated.body.data.binding_id, generation: 1, operation_id: boundRandomId(32)};
+  const renewed = await f.call("/v2/device-leases/renew", await signed(f, d, "renew", body));
+  assert.equal(renewed.status, 200, JSON.stringify(renewed.body));
+  assert.equal(f.sql.prepare("SELECT request_count n FROM rate_limit_counters WHERE namespace='device-v2-customer'").get().n, 246);
+});
+
 test("session routes consult the edge limiter before any D1 write", async t => {
   const f = fixture(t);
   const keys = [];
