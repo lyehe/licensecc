@@ -6,14 +6,14 @@ which closes every verified finding from the 2026-09-23 review of PRs #23–#27
 
 ## Scope and verified state
 
-Worktree: `C:\Users\HEQ\Projects\licensecc-remediation`. Base for every branch: `main` @
+Worktree: a dedicated local git worktree, separate from the primary checkout. Base for every branch: `main` @
 `6480049`. Five independent workstreams, each its own local branch, none merged and none
 pushed (Ruling R1 below). This report's own verified commit is the one that follows it on
 `fix/review-e-docs-ui` (the plan + this report, committed together per Ruling R6); the CHANGELOG
 commit immediately before it is `eaab9a3` (`docs(changelog): record #23-#27 and review
 remediation`).
 
-| Workstream | Branch | Head commit (verified) | Commits ahead of `main` |
+| Workstream | Branch | Head commit (initial wave, verified) | Commits ahead of `main` |
 | --- | --- | --- | --- |
 | A — backend protected-device rate limiting | `fix/review-a-device-rate` | `7527214` | 3 |
 | B — portal password/email flow | `fix/review-b-portal-password` | `9b63e6c` | 6 |
@@ -224,7 +224,8 @@ Every ruling recorded during execution, verbatim from `progress.md`:
   `test:e2e` (license-admin) 100/100; `test:ui` 15/15 both rounds; `test:docs-accuracy` 14/14
   after two `system-map.md` refreshes (`DevicesFeature.tsx` grew 389→397→404 lines).
 - **E4** (this task, `eaab9a3` + this commit): see below.
-- Deferred minor findings: E1 — none noted. E2 — the Windows CI step's
+- Deferred minor findings: E1 — the commit trailer on `da45c3e` names the wrong model
+  ("Claude Haiku 4.5" instead of the required session trailer); history was not rewritten. E2 — the Windows CI step's
   `-Generator "$env:CMAKE_GENERATOR"` is untested against the real `windows-2025-vs2026` runner
   (only local VS2022 was available); the new script has no unit test (matches sibling scripts).
   E3 — the brief's `-g "seat|session"` Playwright filter matches no test title in this suite (the
@@ -240,9 +241,10 @@ All items above, gathered in one place for triage before/at merge:
 2. A1: an observed read under true concurrency can spuriously 429 (fails safe, pre-existing).
 3. A2: no HTTP-level test of the scaled customer cap (only direct `limitBoundVerified`).
 4. B1: no test for the address being claimed by another customer between reset request and
-   complete (write-time guard verified only by reading).
+   complete (write-time guard verified only by reading). **Resolved in the final fix wave (B-3).**
 5. B2 (SHOULD FIX): `portal_otp.mjs`'s `deliveryErrorType` maps only `email_send_failed` to
-   `send_failed`; add an `email_send_indeterminate` → `send_failed` mapping.
+   `send_failed`; add an `email_send_indeterminate` → `send_failed` mapping. **Resolved in the
+   final fix wave (B-1).**
 6. B2: the "answer before any account lookup" test only gates `fetch`; strengthen it to assert no
    `portal_password_actions` row exists before `settle()`.
 7. B3: C1 control characters (`\u0080`–`\u009f`) are not excluded from the email syntax.
@@ -263,9 +265,10 @@ All items above, gathered in one place for triage before/at merge:
 15. C5: the native-security contract test inspects only literal `cacheVariables`, so an inherited
     sanitizer preset is not detected.
 16. D1: older integrity-failure tests do not assert the dump is removed; the README does not
-    mention a manifest-put failure as a cleanup trigger.
+    mention a manifest-put failure as a cleanup trigger. **README part resolved in the final fix
+    wave (D-1).**
 17. D3: no explicit `LPUTF8Str` on the `dlopen` path parameter.
-18. E1: none.
+18. E1: the commit trailer on `da45c3e` names the wrong model (see item 21).
 19. E2: the Windows CI step's generator variable is untested against the real VS2026 runner; no
     unit test for the new script (matches sibling scripts).
 20. E3: the brief's `-g "seat|session"` Playwright filter matches no test title in this suite.
@@ -396,25 +399,87 @@ Playwright). **Exit 0, no failures.**
 
 ## Remaining risks and follow-up
 
-- None of the five branches are merged or pushed. Two merge-conflict-risk (not logic-conflict)
-  pairs were flagged in the plan's pre-flight scan and remain true at integration time: C4 and E2
-  both touch `.github/workflows/linux.yml` (different steps, different branches); D2 and E1 both
-  touch `doc/operations/cloudflare-setup.md` (different sections, different branches). Whoever
-  integrates the five branches should expect textual conflicts there, not behavioral ones.
-- `doc/architecture/system-map.md`'s per-service line totals and hotspot rows were refreshed
-  incrementally, once per task that changed a tracked file's line count (A1/A2, B1/B2/B4/B5,
-  D1, E3 ×2). `check:hotspots`' baseline was also bumped three times across branches
-  (`tpm2_openssl.cpp` in C, `core.ts` in D, `DevicesFeature.tsx` in E). Each was independently
-  verified against `test:docs-accuracy`/`check:hotspots` at the time, but once the five branches
-  are combined onto one integration branch, a single fresh `test:docs-accuracy` +
-  `check:hotspots` pass should be run against the merged tree rather than assuming the
-  incremental refreshes compose correctly.
-- The 21-item deferred minor findings list above (mostly SHOULD-FIX-later test-coverage gaps and
-  one real SHOULD FIX: `portal_otp.mjs`'s OTP-timeout telemetry label) should be triaged before or
-  shortly after merge; none block this remediation, but B2's is the most concrete undone item.
+- None of the five branches are merged or pushed. Integration guidance from the final
+  whole-branch review, re-verified after the final fix wave with read-only pairwise
+  `git merge-tree --write-tree` runs against the branch heads:
+  - The **only textual conflict** is `doc/architecture/system-map.md`. It conflicts in A+B, A+D,
+    A+E, B+D, B+E and D+E, always on the single "Current production-source totals" line; D+E
+    has a second hunk because D (`core.ts`) and E (`DevicesFeature.tsx`) change adjacent
+    hotspot-table rows. C does not touch the file and merges cleanly with every other branch.
+  - `.github/workflows/linux.yml` (C+E) and `doc/operations/cloudflare-setup.md` (D+E) merge
+    cleanly. `scripts/hotspot-baseline.json` is changed by C (`tpm2_openssl.cpp`) and D
+    (`core.ts`, 503→506 after the fix wave) on different lines and merges cleanly; E does not
+    touch it.
+  - Merged system-map values. Method: each branch's system-map values were refreshed by
+    `test:docs-accuracy` against that branch's own tree, and the branches change disjoint
+    production files, so the merged total for a service is `main`'s value plus the sum of every
+    branch's delta from `main`. The deltas were cross-checked independently with
+    `git diff --numstat main <branch> -- services/<service>/src` summed over
+    `.ts/.tsx/.js/.mjs` files; both methods agree. Final per-branch deltas, including the final
+    fix wave: A licensing-backend +63; B customer-portal +62; D D1-backup +28; E
+    customer-portal +11; license-admin 0 on every branch; C none. Resolve the conflict to:
+    **19,358** lines for license-admin, **8,771** for licensing-backend (8,708 + 63),
+    **6,491** for customer-portal (6,418 + 62 + 11), and **1,348** for D1-backup
+    (1,320 + 28); hotspot rows `DevicesFeature.tsx` **404** (from E) and `core.ts` **506**
+    (from D). Then confirm with `npm run test:docs-accuracy` on the merged tree.
+  - Merge order: merge A, B, C and D (any order) before E, because E's CHANGELOG and this report
+    describe A–D.
+  - After integration run, on the merged tree: `npm ci && npm run check:pr`; `npm run test:e2e`;
+    `npm run test:sdks` on Linux; `pwsh -NoProfile -File scripts/check-build-purity.ps1 -Preset
+    dev-debug`; then real GitHub Actions runs for the jobs never executed in this session
+    (`sanitizers-device-identity`, the Windows and Linux `examples/device_bound` steps, and the
+    Ubuntu 22.04 job).
+- The 21-item deferred minor findings list above (mostly SHOULD-FIX-later test-coverage gaps)
+  should be triaged before or shortly after merge; none block this remediation. The one real
+  SHOULD FIX (`portal_otp.mjs`'s OTP-timeout telemetry label) was closed in the final fix wave.
 - This report and the CHANGELOG describe workstreams A–D as already complete on their own
   branches; if any of A–D is dropped or substantially changed before merge, this CHANGELOG entry
   and this report would need a follow-up correction (the risk Ruling R5 explicitly accepted).
+
+## Final review fix wave
+
+A final whole-branch review found the items below. Each was fixed with a new commit on the named
+branch (no rebase, amend, merge or push). All commands ran from the worktree root or the named
+service directory on Windows (Node v24.20.0).
+
+| Finding | Branch | Commit | Change |
+| --- | --- | --- | --- |
+| B-1 | `fix/review-b-portal-password` | `723794d` | `deliveryErrorType` maps `email_send_indeterminate` (provider timeout/network error) to `send_failed`; the documented four-value `error_type` set is unchanged. |
+| B-2, B-3 | `fix/review-b-portal-password` | `8859b58` | Background `issueLink` reuses the OTP path's `emitEmailDeliveryFailure`/`deliveryErrorType`: a failed send emits its class, a caught exception (including D1) emits `rejected`, at most one event per request, no recipient/token/exception text; 202 response and timing unchanged. Adds the legacy-reset address-claimed-after-send test (B-3). System-map portal total 6,418→6,480. |
+| A-1 | `fix/review-a-device-rate` | `9c073be` | `boundSourceIdentity` normalizes `cf-connecting-ip` before hashing for both the D1 per-source counter and the edge limiter key: IPv6 → `/64` prefix (compressed forms, brackets, zone ids), IPv4-mapped → IPv4, IPv4 and `unknown-client` unchanged, unparseable → raw value. README documents the per-source identity and that two sources at 600/min exceed the default 1,000/min fuse (raise `BOUND_GLOBAL_RATE_LIMIT`, add a WAF rule). Default fuse stays 1000. System-map backend total 8,708→8,771. |
+| D-1 | `fix/review-d-backup-ops-sdk` | `75cc000` | `saveD1ExportToR2` cleanup lists `<object>.metadata.json` first and deletes the dump only when the manifest is definitely absent; an existing manifest or a failed check keeps the dump; the original error always propagates. README names the manifest-put trigger and the guard. `core.ts` 503→506: `scripts/hotspot-baseline.json` ratcheted and system-map row/total refreshed. |
+| D-2 | `fix/review-d-backup-ops-sdk` | `de53e06` | `cloudflare-setup.md` and the backend README show `[--env=<name>]` as optional and third, after `--config` and `--secrets` (matches the positional parser in `protected-device-readiness.mjs`). |
+| E-1 | `fix/review-e-docs-ui` | `6e57c87` | CHANGELOG `[Unreleased]`: password-complete `sign_in_required`, removed `registration_unavailable`, eager .NET `RTLD_NOW`, IPv6 per-/64 limiting, `send_failed` email telemetry; C4 bullet split into two clauses; new "Upgrade notes". |
+| E-2 | `fix/review-e-docs-ui` | the commit that adds this section | This report: generic worktree wording, E1 trailer minor, final merge guidance, this section, deferred final-review minors. |
+
+| Branch | Command | Outcome |
+| --- | --- | --- |
+| B | `npm test` (customer-portal) | 153/153 and 22/22 pass (new: indeterminate mapping case, background telemetry test, legacy-claim test) |
+| B | `npm run lint` / `npm run typecheck` (customer-portal) | clean / exit 0 |
+| B | `npm run test:docs-accuracy` | 14/14 after the portal total refresh |
+| A | `npm run test:sql` (licensing-backend) | 312/312 pass (3 new: identity mapping, shared /64 budget vs other /64 and IPv4, edge keys) |
+| A | `npm run lint` / `npm run typecheck` (licensing-backend) | exit 0 / exit 0 |
+| A | `npm run test:docs-accuracy`; `npm run check:hotspots` | 14/14 after the backend total refresh; passed (18 files) |
+| D | `npm test` (d1-backup) | 95/95 pass (4 new: existing manifest keeps dump, failed check keeps dump and rethrows, indeterminate manifest put keeps dump, failed manifest put removes dump) |
+| D | `npm run lint` / `npm run typecheck` (d1-backup) | exit 0 / exit 0 |
+| D | `npm run test:contracts` | 8/8; "Canonical contracts passed: backend (23 routes), admin (73 routes), portal (35 routes), backup" |
+| D | `npm run test:docs-accuracy`; `npm run check:hotspots` | 14/14; passed (19 files) after ratcheting `core.ts` 503→506 |
+| E | `npm run test:docs-accuracy`; `npm run check:versions` | 14/14; exit 0 |
+| E | `npm run check:docs` | exit 0, Sphinx "build succeeded" (run on the E branch with this section in place) |
+
+Not run in this wave: `check:pr`, `test:e2e`, `test:sdks`, build purity and Actions runs. They
+belong to the post-integration gate above; no fix-wave change touched C++, SDK or UI code.
+
+### Final-review minor findings deferred
+
+- E3: keyboard focus on the Start-seat control can drop when the device panel remounts.
+- C3: window between the `nlink` check and the `.delete` quarantine / `linkat` fallback.
+- C4: the real old-libcurl `FATAL_ERROR` path is still unexercised (only simulated locally).
+- A: an out-of-range `BOUND_GLOBAL_RATE_LIMIT` silently clamps to the default 1000 with no
+  warning.
+- A: the per-entitlement cap `max(240, 2 × max_active_devices)` is applied to a customer-wide
+  counter.
+- E2: the example build script keeps a stale default CMake generator.
 
 ## Self-review
 
