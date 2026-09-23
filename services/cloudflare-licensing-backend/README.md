@@ -843,6 +843,14 @@ shared-IP budget on short feature jobs. Operators should also add a WAF rate
 rule in front of these routes to blunt floods distributed across many source
 IPs, which per-source edge and D1 limits cannot address alone.
 
+A per-source identity is the IPv4 address, or the IPv6 /64 prefix (an
+IPv4-mapped IPv6 address counts as its IPv4 address), for both the edge and D1
+limiters. With the defaults, two sources each at the 600/minute session limit
+(1,200/minute) already exceed the 1,000/minute global fuse, so a few sources
+can deny protected traffic to everyone. Production operators should raise
+`BOUND_GLOBAL_RATE_LIMIT` to their expected peak protected request rate and
+enforce a WAF rate rule on the protected routes.
+
 Use `npm run validate:protected-config -- --config=<private-json-config>
 --secrets=<private-json-secrets>` for local protected registry/signer/key-ring
 validation. It does not claim live issuance or renewal. Follow the protected

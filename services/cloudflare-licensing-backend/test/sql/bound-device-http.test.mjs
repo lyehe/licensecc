@@ -6,7 +6,7 @@ import { createPublicKey, verify } from "node:crypto";
 import worker from "../../dist/app.js";
 import { boundRandomId, boundSecretHash } from "../../src/device/bound_enrollment.mjs";
 import { expireBoundRecovery, purgeExpiredBoundLeases } from "../../src/device/bound_cleanup.mjs";
-import { limitBoundRequest, limitBoundVerified } from "../../src/device/bound_rate.mjs";
+import { boundSourceIdentity, limitBoundRequest, limitBoundVerified } from "../../src/device/bound_rate.mjs";
 import { retireBoundBinding } from "../../src/device/bound_retire.mjs";
 import { encodeBase64url, deviceOperationBody, deviceProofSigningInput, decodeDeviceLeaseEnvelope, deviceLeaseSigningInput } from "@licensecc/licensing-domain/lease/device_protocol";
 import { sha256Hex, normalizeDeviceSignature, importBoundDeviceKey } from "../../src/device/bound_crypto.mjs";
@@ -418,6 +418,51 @@ test("session routes consult the edge limiter before any D1 write", async t => {
   assert.equal(keys.length, 1);
   assert.match(keys[0], /^device-v2-session:/);
   assert.equal(f.sql.prepare("SELECT count(*) n FROM rate_limit_counters").get().n, 0);
+});
+
+test("source identity collapses IPv6 to its /64 and leaves IPv4 and malformed input raw", () => {
+  for (const [raw, expected] of [
+    ["2001:db8:1:2::1", "2001:db8:1:2::/64"],
+    ["2001:0DB8:0001:0002:ffff:0:0:9", "2001:db8:1:2::/64"],
+    ["[2001:db8:1:2::5]", "2001:db8:1:2::/64"],
+    ["fe80::1%eth0", "fe80:0:0:0::/64"],
+    ["::1", "0:0:0:0::/64"],
+    ["1:2:3:4:5:6:1.2.3.4", "1:2:3:4::/64"],
+    ["::ffff:192.0.2.1", "192.0.2.1"],
+    ["::ffff:c000:201", "192.0.2.1"],
+    ["192.0.2.1", "192.0.2.1"],
+    ["unknown-client", "unknown-client"],
+    ["garbage", "garbage"],
+    ["1::2::3", "1::2::3"],
+    ["1:2:3:4:5:6:7:8:9", "1:2:3:4:5:6:7:8:9"],
+    ["12345::", "12345::"],
+    ["192.0.2.256", "192.0.2.256"],
+  ]) assert.equal(boundSourceIdentity(raw), expected, raw);
+});
+
+test("addresses in one IPv6 /64 share a source budget; another /64 does not", async t => {
+  const f = fixture(t);
+  const register = ip => limitBoundRequest(new Request("https://backend.test/v2/device-authorizations", {headers:{"cf-connecting-ip":ip}}), f.env, f.db);
+  for (let i = 0; i < 10; i++) await register(`2001:db8:1:2::${i + 1}`);
+  for (let i = 0; i < 10; i++) await register(`2001:db8:1:2:${(i + 1).toString(16)}::9`);
+  await assert.rejects(register("2001:db8:1:2:ffff:ffff:ffff:ffff"), /rate_limited/);
+  await register("2001:db8:1:3::1");
+  await register("192.0.2.70");
+  assert.equal(f.sql.prepare("SELECT count(*) n FROM rate_limit_counters WHERE namespace='device-v2-registration'").get().n, 3);
+});
+
+test("edge limiter keys use the same normalized source identity", async t => {
+  const f = fixture(t);
+  const keys = [];
+  f.env.BOUND_SESSION_RATE_LIMITER = { async limit({ key }) { keys.push(key); return { success: false }; } };
+  for (const ip of ["2001:db8:1:2::1", "2001:db8:1:2:abcd::7", "2001:db8:1:3::1", "192.0.2.61", "not-an-address"]) {
+    await assert.rejects(limitBoundRequest(new Request("https://backend.test/v2/device-leases/renew", {headers:{"cf-connecting-ip":ip}}), f.env, f.db), /rate_limited/);
+  }
+  const key = async identity => `device-v2-session:${await boundSecretHash(identity)}`;
+  assert.deepEqual(keys, [
+    await key("2001:db8:1:2::/64"), await key("2001:db8:1:2::/64"), await key("2001:db8:1:3::/64"),
+    await key("192.0.2.61"), await key("not-an-address"),
+  ]);
 });
 
 test("HTTP mismatched signer and stale authority cannot commit a lease",async t=>{
