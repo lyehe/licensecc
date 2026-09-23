@@ -825,12 +825,20 @@ comparison transcript uses `lcc-device-enrollment-comparison-v2`. Older clients
 without the field retain v1 comparison and project-wide consent selection.
 Deploy the migration and backend before distributing new native clients.
 
-Protected traffic has a 1,000/minute global ceiling, a 20/minute registration IP
-limit, and a separate 600/minute session-traffic IP limit. After proof and current
-authority checks, issuance/recovery has 60/minute device-key and 240/minute
-customer limits. These gates are independent of legacy optional-proof switches.
-The configured legacy `VERIFY_RATE_LIMITER` additionally protects registration;
-it does not impose a low shared-IP budget on short feature jobs.
+Protected traffic has a 1,000/minute global fuse (`BOUND_GLOBAL_RATE_LIMIT`,
+range 100..1000000), a 20/minute registration IP limit, and a separate
+600/minute session-traffic IP limit. The global fuse counts only requests
+already admitted by their own per-source budget, so one flooding source
+cannot exhaust the shared budget for every other source. After proof and
+current authority checks, issuance/recovery has 60/minute device-key and
+240/minute customer limits. These gates are independent of legacy
+optional-proof switches. The configured legacy `VERIFY_RATE_LIMITER`
+additionally protects registration; the optional `BOUND_SESSION_RATE_LIMITER`
+Cloudflare rate limiter rejects session-route (challenge/exchange/renew)
+floods at the edge, before any D1 write. Neither edge limiter imposes a low
+shared-IP budget on short feature jobs. Operators should also add a WAF rate
+rule in front of these routes to blunt floods distributed across many source
+IPs, which per-source edge and D1 limits cannot address alone.
 
 Use `npm run validate:protected-config -- --config=<private-json-config>
 --secrets=<private-json-secrets>` for local protected registry/signer/key-ring

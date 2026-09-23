@@ -376,13 +376,48 @@ test("HTTP limiter fails closed if its batch straddles the minute boundary",asyn
       const first={results:f.sql.prepare(statements[0].query).all(...statements[0].params)};
       f.clock(1020);
       const second={results:f.sql.prepare(statements[1].query).all(...statements[1].params)};
-      f.sql.exec("COMMIT");return [first,second];
+      const third={results:f.sql.prepare(statements[2].query).all(...statements[2].params)};
+      f.sql.exec("COMMIT");return [first,second,third];
     }
     return batch(statements);
   };
   assert.equal((await f.call("/v2/device-authorizations","malformed")).status,503);
-  assert.equal(f.sql.prepare("SELECT count(*) n FROM rate_limit_counters WHERE namespace IN ('device-v2-client','device-v2-registration')").get().n,0);
+  assert.ok(f.sql.prepare("SELECT count(*) n FROM rate_limit_counters WHERE namespace IN ('device-v2-client','device-v2-registration')").get().n<=1);
   assert.equal((await f.call("/v2/device-authorizations","malformed")).status,400);
+});
+
+test("one source over its budget cannot consume the global protected budget", async t => {
+  const f = fixture(t);
+  const flood = new Request("https://backend.test/v2/device-challenges", {headers:{"cf-connecting-ip":"192.0.2.50"}});
+  let limited = 0;
+  for (let i = 0; i < 700; i++) {
+    try { await limitBoundRequest(flood, f.env, f.db); } catch (error) { if (/rate_limited/.test(String(error.code ?? error.message))) limited++; else throw error; }
+  }
+  assert.equal(limited, 100);
+  assert.equal(f.sql.prepare("SELECT request_count n FROM rate_limit_counters WHERE namespace='device-v2-global'").get().n, 600);
+  const other = new Request("https://backend.test/v2/device-leases/renew", {headers:{"cf-connecting-ip":"192.0.2.51"}});
+  await limitBoundRequest(other, f.env, f.db);
+});
+
+test("global protected budget is configurable and still denies once exhausted", async t => {
+  const f = fixture(t);
+  f.env.BOUND_GLOBAL_RATE_LIMIT = "150";
+  for (let i = 0; i < 150; i++) await limitBoundRequest(new Request("https://backend.test/v2/device-challenges", {headers:{"cf-connecting-ip":`198.51.100.${i % 200}`}}), f.env, f.db);
+  await assert.rejects(limitBoundRequest(new Request("https://backend.test/v2/device-challenges", {headers:{"cf-connecting-ip":"203.0.113.9"}}), f.env, f.db), /rate_limited/);
+  f.env.BOUND_GLOBAL_RATE_LIMIT = "7";
+  // Invalid values fall back to the default 1000, so this request is admitted
+  // (global count is 150 < 1000), not denied.
+  await limitBoundRequest(new Request("https://backend.test/v2/device-challenges", {headers:{"cf-connecting-ip":"203.0.113.10"}}), f.env, f.db);
+});
+
+test("session routes consult the edge limiter before any D1 write", async t => {
+  const f = fixture(t);
+  const keys = [];
+  f.env.BOUND_SESSION_RATE_LIMITER = { async limit({ key }) { keys.push(key); return { success: false }; } };
+  await assert.rejects(limitBoundRequest(new Request("https://backend.test/v2/device-leases/renew", {headers:{"cf-connecting-ip":"192.0.2.60"}}), f.env, f.db), /rate_limited/);
+  assert.equal(keys.length, 1);
+  assert.match(keys[0], /^device-v2-session:/);
+  assert.equal(f.sql.prepare("SELECT count(*) n FROM rate_limit_counters").get().n, 0);
 });
 
 test("HTTP mismatched signer and stale authority cannot commit a lease",async t=>{

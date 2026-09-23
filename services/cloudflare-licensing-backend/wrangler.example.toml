@@ -66,6 +66,9 @@ ACCOUNT_TOKEN_LAST_USED_THROTTLE_SEC = "300"
 # D1_GLOBAL_RATE_LIMIT_ENABLED = "0"
 # D1_GLOBAL_RATE_LIMIT_LIMIT = "200"
 # D1_GLOBAL_RATE_LIMIT_PERIOD_SECONDS = "60"
+# Protected-device global fuse (requests/minute across all sources); counts only
+# traffic already admitted by its own per-source budget. Default 1000, range 100..1000000.
+# BOUND_GLOBAL_RATE_LIMIT = "1000"
 
 [observability]
 enabled = true
@@ -87,6 +90,13 @@ migrations_dir = "migrations"
 name = "VERIFY_RATE_LIMITER"
 namespace_id = "1001"
 simple = { limit = 20, period = 60 }
+
+# Per-source edge limit for /v2 challenge, exchange and renew traffic. Rejects
+# floods before any D1 write. Keep >= the D1 per-client budget (600/min).
+[[ratelimits]]
+name = "BOUND_SESSION_RATE_LIMITER"
+namespace_id = "1002"
+simple = { limit = 600, period = 60 }
 
 # Set these as Worker secrets, not plaintext vars:
 # wrangler secret put ONLINE_SIGNING_PRIVATE_KEY_PKCS8_PEM
