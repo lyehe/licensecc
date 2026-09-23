@@ -337,6 +337,49 @@ test("a dump that fails post-upload checks is removed from R2", async () => {
   assert.equal(bucket.objects.size, 0);
 });
 
+test("a failed save keeps a dump that an existing manifest already covers", async () => {
+  const { bucket, fetchImpl, config, started, ready } = fixtureWithDump("-- empty\n");
+  const objectKey = backupObjectKey(config, ready, started);
+  await bucket.put(`${objectKey}.metadata.json`, "{\"object_key\":\"prior successful run\"}");
+  await assert.rejects(saveD1ExportToR2(bucket, fetchImpl, config, started, ready), /snapshot_inventory_no_counted_tables/);
+  assert.equal(bucket.objects.has(objectKey), true);
+  assert.deepEqual(bucket.deleted, []);
+});
+
+test("a failed manifest existence check keeps the dump and rethrows the original error", async () => {
+  const { bucket, fetchImpl, config, started, ready } = fixtureWithDump("-- empty\n");
+  const objectKey = backupObjectKey(config, ready, started);
+  bucket.list = async () => { throw new Error("r2_list_unavailable"); };
+  await assert.rejects(saveD1ExportToR2(bucket, fetchImpl, config, started, ready), /snapshot_inventory_no_counted_tables/);
+  assert.equal(bucket.objects.has(objectKey), true);
+  assert.deepEqual(bucket.deleted, []);
+});
+
+test("an indeterminate manifest put keeps the dump when the manifest landed", async () => {
+  const { bucket, fetchImpl, config, started, ready } = fixtureWithDump(D1_EXPORT_SQL);
+  const objectKey = backupObjectKey(config, ready, started);
+  const put = bucket.put.bind(bucket);
+  bucket.put = async (key, value, options) => {
+    const result = await put(key, value, options);
+    if (key.endsWith(".metadata.json")) throw new Error("r2_manifest_put_timeout");
+    return result;
+  };
+  await assert.rejects(saveD1ExportToR2(bucket, fetchImpl, config, started, ready), /r2_manifest_put_timeout/);
+  assert.equal(bucket.objects.has(objectKey), true);
+  assert.deepEqual(bucket.deleted, []);
+});
+
+test("a manifest put failure that stored nothing removes the unmanifested dump", async () => {
+  const { bucket, fetchImpl, config, started, ready } = fixtureWithDump(D1_EXPORT_SQL);
+  const put = bucket.put.bind(bucket);
+  bucket.put = async (key, value, options) => {
+    if (key.endsWith(".metadata.json")) throw new Error("r2_manifest_put_failed");
+    return put(key, value, options);
+  };
+  await assert.rejects(saveD1ExportToR2(bucket, fetchImpl, config, started, ready), /r2_manifest_put_failed/);
+  assert.equal(bucket.objects.size, 0);
+});
+
 test("invalid export lengths cancel the download without publishing objects", async () => {
   for (const header of [null, "", "-1", "1.5", "9007199254740992", "abc"]) {
     let cancelled = false;

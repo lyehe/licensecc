@@ -93,8 +93,12 @@ encoding other than `identity`. The Worker streams SQL through inventory/hash
 validation and a `FixedLengthStream` into R2; missing or mismatched lengths fail
 without publishing a manifest. If a dump uploads successfully but then fails a
 post-upload check (content integrity, snapshot inventory, or upload-timestamp
-validation), the Worker deletes the uploaded SQL object before the error
-propagates, so a failed save never leaves an orphan, unmanifested dump in R2.
+validation) or the manifest put fails, the Worker deletes the uploaded SQL
+object before the error propagates, so a failed save never leaves an orphan,
+unmanifested dump in R2. The delete is guarded by the manifest: if
+`<object>.metadata.json` already exists (an earlier successful run, or a
+manifest put whose outcome was indeterminate) or its existence cannot be
+checked, the dump is kept and the original error still propagates.
 Upload failures cancel the upstream stream before retrying. Dumps are never
 buffered in full in Worker memory.
 

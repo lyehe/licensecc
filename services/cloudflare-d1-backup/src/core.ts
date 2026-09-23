@@ -406,6 +406,7 @@ export async function saveD1ExportToR2(
       bookmark: started.bookmark,
     },
   });
+  const manifestKey = `${objectKey}.metadata.json`;
   try {
     const streamed = streamingDigest.result();
     const contentIntegrity = contentIntegrityFromPut(putResult, objectKey, streamed);
@@ -429,7 +430,6 @@ export async function saveD1ExportToR2(
       content_integrity: contentIntegrity,
       snapshot_inventory: streamed.snapshotInventory,
     };
-    const manifestKey = `${objectKey}.metadata.json`;
     await bucket.put(manifestKey, JSON.stringify(manifest, null, 2), {
       httpMetadata: { contentType: "application/json" },
       customMetadata: {
@@ -452,8 +452,11 @@ export async function saveD1ExportToR2(
       snapshot_inventory: streamed.snapshotInventory,
     };
   } catch (error) {
-    // Never leave an unmanifested dump: restore drills require the manifest.
-    await bucket.delete(objectKey).catch(() => {});
+    // Never leave an unmanifested dump, but never delete one a manifest already covers (an
+    // earlier run or a manifest put with an unknown outcome). A failed check keeps the dump.
+    const manifested = await Promise.resolve().then(() => bucket.list({ prefix: manifestKey, limit: 1 }))
+      .then((listed) => listed.objects.some((object) => object.key === manifestKey), () => true);
+    if (!manifested) await bucket.delete(objectKey).catch(() => {});
     throw error;
   }
 }
