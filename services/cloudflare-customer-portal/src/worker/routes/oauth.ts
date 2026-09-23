@@ -1,6 +1,6 @@
 import { mintSession, setSessionCookie, loadSessionPeppers } from "../../auth/portal_session.mjs";
 import { portalRateLimit } from "../../auth/portal_ratelimit.mjs";
-import { canonicalHttpsOrigin } from "../../auth/portal_destination.mjs";
+import { canonicalHttpsOrigin, emailApiOrigin } from "../../auth/portal_destination.mjs";
 import { authSession } from "./auth.js";
 import { clientIp, envelope } from "../support.js";
 import { digest, exchangeIdentity, providerConfig, randomToken, type Provider } from "../oauth/providers.js";
@@ -92,7 +92,7 @@ export const OAUTH_DISPATCH: Record<string, TopRoute> = {
   "GET /portal/v1/auth/providers": (_request, env, _ctx, reqId) => envelope(reqId, "auth_providers", {
     google: providerConfig(env, "google") !== null, github: providerConfig(env, "github") !== null,
     password: env.PORTAL_PASSWORD_ENABLED === "1",
-    email: Boolean(env.PORTAL_EMAIL_API_KEY && env.PORTAL_EMAIL_FROM),
+    email: Boolean(env.PORTAL_EMAIL_API_KEY && env.PORTAL_EMAIL_FROM && emailApiOrigin(env)),
   }, 200, { "cache-control": "no-store" }),
   "POST /portal/v1/auth/google/start": (request, env, _ctx, reqId, now) => start(request, env, reqId, now, "google"),
   "POST /portal/v1/auth/github/start": (request, env, _ctx, reqId, now) => start(request, env, reqId, now, "github"),

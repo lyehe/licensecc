@@ -14,7 +14,7 @@ const SUBMIT_LABEL: Record<PasswordMode, string> = {
   reset: "Send reset link",
 };
 
-export function PasswordSignIn({ onSignedIn, mode, onModeChange }: { onSignedIn(): Promise<boolean>; mode: PasswordMode; onModeChange(mode: PasswordMode): void }): React.ReactElement {
+export function PasswordSignIn({ onSignedIn, mode, onModeChange, emailLinks }: { onSignedIn(): Promise<boolean>; mode: PasswordMode; onModeChange(mode: PasswordMode): void; emailLinks: boolean }): React.ReactElement {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
@@ -47,11 +47,11 @@ export function PasswordSignIn({ onSignedIn, mode, onModeChange }: { onSignedIn(
   return <section className="passwordSignIn" aria-label="Email and password">
     <form onSubmit={(event) => void submit(event)}>
       <label>Email<input type="email" autoComplete="username" required value={email} onChange={(event) => setEmail(event.target.value)} /></label>
-      {mode === "login" ? <label>Password<input type="password" autoComplete="current-password" required maxLength={256} value={password} onChange={(event) => setPassword(event.target.value)} /></label> : <p>{MODE_COPY[mode]}</p>}
+      {mode === "login" ? <label>Password<input type="password" autoComplete="current-password" required maxLength={128} value={password} onChange={(event) => setPassword(event.target.value)} /></label> : <p>{MODE_COPY[mode]}</p>}
       {message && <p role="alert">{message}</p>}
       <button className="primary" disabled={busy} type="submit">{busy ? "Please wait…" : SUBMIT_LABEL[mode]}</button>
-      <button disabled={busy} type="button" onClick={() => switchMode(mode === "login" ? "register" : "login")}>{mode === "login" ? "Create an account" : "Back to sign in"}</button>
+      {(emailLinks || mode !== "login") && <button disabled={busy} type="button" onClick={() => switchMode(mode === "login" ? "register" : "login")}>{mode === "login" ? "Create an account" : "Back to sign in"}</button>}
     </form>
-    {mode === "login" && <button disabled={busy} type="button" onClick={() => switchMode("reset")}>Forgot your password?</button>}
+    {mode === "login" && emailLinks && <button disabled={busy} type="button" onClick={() => switchMode("reset")}>Forgot your password?</button>}
   </section>;
 }

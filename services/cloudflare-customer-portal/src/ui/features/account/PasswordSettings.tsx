@@ -37,8 +37,8 @@ export function PasswordSettings(): React.ReactElement {
       <p>{settings.email || "No verified email available"}</p>
       {settings.has_password && !settings.email_verified && <p>Email not verified. Password recovery by email is unavailable.</p>}
       {!settings.has_password && !settings.can_reset ? <p>Sign in again with Google, GitHub, or an email code to set a password.</p> : <details className="passwordEditor"><summary>{settings.has_password ? "Change password" : "Set password"}</summary><form className="passwordSettings" onSubmit={(event) => void submit(event)}>
-        {settings.has_password && !settings.can_reset && <label>Current password<input type="password" autoComplete="current-password" required value={current} onChange={(event) => setCurrent(event.target.value)} /></label>}
-        <label>New password<input type="password" autoComplete="new-password" required maxLength={256} value={password} onChange={(event) => setPassword(event.target.value)} /></label>
+        {settings.has_password && !settings.can_reset && <label>Current password<input type="password" autoComplete="current-password" required maxLength={128} value={current} onChange={(event) => setCurrent(event.target.value)} /></label>}
+        <label>New password<input type="password" autoComplete="new-password" required minLength={15} maxLength={128} value={password} onChange={(event) => setPassword(event.target.value)} /></label>
         <p>Use 15–128 characters. Saving signs out your other browser sessions.</p>
         <button type="submit" disabled={busy}>{busy ? "Saving…" : settings.has_password ? "Change password" : "Set password"}</button>
       </form></details>}

@@ -10,3 +10,9 @@ export function passwordMessage(code: string): string {
     password_change_conflict: "Your sign-in settings changed. Reload and try again.",
   } as Record<string, string>)[code] ?? "Unable to complete the request. Please try again.";
 }
+
+// The password-action page (choosing a password from an emailed link) never collects an email, so
+// its invalid_registration guidance should describe only the password requirement.
+export function passwordActionMessage(code: string): string {
+  return code === "invalid_registration" ? "Choose a password of 15–128 characters." : passwordMessage(code);
+}
