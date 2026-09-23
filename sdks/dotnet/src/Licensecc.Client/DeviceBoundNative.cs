@@ -84,7 +84,7 @@ internal sealed unsafe partial class NativeApi : INativeApi
         // P/Invoke dlopen directly instead; "libc" resolves to libc.so.6 via the runtime's
         // built-in Unix library-name probing.
         private const int RTLD_NOW=2, RTLD_LOCAL=0;
-        [DllImport("libc",EntryPoint="dlopen")] private static extern IntPtr dlopen(string file,int mode);
+        [DllImport("libc",EntryPoint="dlopen")] private static extern IntPtr dlopen([MarshalAs(UnmanagedType.LPUTF8Str)] string file,int mode);
         [DllImport("libc",EntryPoint="dlerror")] private static extern IntPtr dlerror();
         internal Module(string path) : base(IntPtr.Zero,true)
         {
