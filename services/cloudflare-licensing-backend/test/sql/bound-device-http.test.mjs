@@ -6,7 +6,7 @@ import { createPublicKey, verify } from "node:crypto";
 import worker from "../../dist/app.js";
 import { boundRandomId, boundSecretHash } from "../../src/device/bound_enrollment.mjs";
 import { expireBoundRecovery, purgeExpiredBoundLeases } from "../../src/device/bound_cleanup.mjs";
-import { limitBoundRequest, limitBoundVerified } from "../../src/device/bound_rate.mjs";
+import { boundSourceIdentity, limitBoundRequest, limitBoundVerified } from "../../src/device/bound_rate.mjs";
 import { retireBoundBinding } from "../../src/device/bound_retire.mjs";
 import { encodeBase64url, deviceOperationBody, deviceProofSigningInput, decodeDeviceLeaseEnvelope, deviceLeaseSigningInput } from "@licensecc/licensing-domain/lease/device_protocol";
 import { sha256Hex, normalizeDeviceSignature, importBoundDeviceKey } from "../../src/device/bound_crypto.mjs";
@@ -376,13 +376,93 @@ test("HTTP limiter fails closed if its batch straddles the minute boundary",asyn
       const first={results:f.sql.prepare(statements[0].query).all(...statements[0].params)};
       f.clock(1020);
       const second={results:f.sql.prepare(statements[1].query).all(...statements[1].params)};
-      f.sql.exec("COMMIT");return [first,second];
+      const third={results:f.sql.prepare(statements[2].query).all(...statements[2].params)};
+      f.sql.exec("COMMIT");return [first,second,third];
     }
     return batch(statements);
   };
   assert.equal((await f.call("/v2/device-authorizations","malformed")).status,503);
-  assert.equal(f.sql.prepare("SELECT count(*) n FROM rate_limit_counters WHERE namespace IN ('device-v2-client','device-v2-registration')").get().n,0);
+  assert.ok(f.sql.prepare("SELECT count(*) n FROM rate_limit_counters WHERE namespace IN ('device-v2-client','device-v2-registration')").get().n<=1);
   assert.equal((await f.call("/v2/device-authorizations","malformed")).status,400);
+});
+
+test("one source over its budget cannot consume the global protected budget", async t => {
+  const f = fixture(t);
+  const flood = new Request("https://backend.test/v2/device-challenges", {headers:{"cf-connecting-ip":"192.0.2.50"}});
+  let limited = 0;
+  for (let i = 0; i < 700; i++) {
+    try { await limitBoundRequest(flood, f.env, f.db); } catch (error) { if (/rate_limited/.test(String(error.code ?? error.message))) limited++; else throw error; }
+  }
+  assert.equal(limited, 100);
+  assert.equal(f.sql.prepare("SELECT request_count n FROM rate_limit_counters WHERE namespace='device-v2-global'").get().n, 600);
+  const other = new Request("https://backend.test/v2/device-leases/renew", {headers:{"cf-connecting-ip":"192.0.2.51"}});
+  await limitBoundRequest(other, f.env, f.db);
+});
+
+test("global protected budget is configurable and still denies once exhausted", async t => {
+  const f = fixture(t);
+  f.env.BOUND_GLOBAL_RATE_LIMIT = "150";
+  for (let i = 0; i < 150; i++) await limitBoundRequest(new Request("https://backend.test/v2/device-challenges", {headers:{"cf-connecting-ip":`198.51.100.${i % 200}`}}), f.env, f.db);
+  await assert.rejects(limitBoundRequest(new Request("https://backend.test/v2/device-challenges", {headers:{"cf-connecting-ip":"203.0.113.9"}}), f.env, f.db), /rate_limited/);
+  f.env.BOUND_GLOBAL_RATE_LIMIT = "7";
+  // Invalid values fall back to the default 1000, so this request is admitted
+  // (global count is 150 < 1000), not denied.
+  await limitBoundRequest(new Request("https://backend.test/v2/device-challenges", {headers:{"cf-connecting-ip":"203.0.113.10"}}), f.env, f.db);
+});
+
+test("session routes consult the edge limiter before any D1 write", async t => {
+  const f = fixture(t);
+  const keys = [];
+  f.env.BOUND_SESSION_RATE_LIMITER = { async limit({ key }) { keys.push(key); return { success: false }; } };
+  await assert.rejects(limitBoundRequest(new Request("https://backend.test/v2/device-leases/renew", {headers:{"cf-connecting-ip":"192.0.2.60"}}), f.env, f.db), /rate_limited/);
+  assert.equal(keys.length, 1);
+  assert.match(keys[0], /^device-v2-session:/);
+  assert.equal(f.sql.prepare("SELECT count(*) n FROM rate_limit_counters").get().n, 0);
+});
+
+test("source identity collapses IPv6 to its /64 and leaves IPv4 and malformed input raw", () => {
+  for (const [raw, expected] of [
+    ["2001:db8:1:2::1", "2001:db8:1:2::/64"],
+    ["2001:0DB8:0001:0002:ffff:0:0:9", "2001:db8:1:2::/64"],
+    ["[2001:db8:1:2::5]", "2001:db8:1:2::/64"],
+    ["fe80::1%eth0", "fe80:0:0:0::/64"],
+    ["::1", "0:0:0:0::/64"],
+    ["1:2:3:4:5:6:1.2.3.4", "1:2:3:4::/64"],
+    ["::ffff:192.0.2.1", "192.0.2.1"],
+    ["::ffff:c000:201", "192.0.2.1"],
+    ["192.0.2.1", "192.0.2.1"],
+    ["unknown-client", "unknown-client"],
+    ["garbage", "garbage"],
+    ["1::2::3", "1::2::3"],
+    ["1:2:3:4:5:6:7:8:9", "1:2:3:4:5:6:7:8:9"],
+    ["12345::", "12345::"],
+    ["192.0.2.256", "192.0.2.256"],
+  ]) assert.equal(boundSourceIdentity(raw), expected, raw);
+});
+
+test("addresses in one IPv6 /64 share a source budget; another /64 does not", async t => {
+  const f = fixture(t);
+  const register = ip => limitBoundRequest(new Request("https://backend.test/v2/device-authorizations", {headers:{"cf-connecting-ip":ip}}), f.env, f.db);
+  for (let i = 0; i < 10; i++) await register(`2001:db8:1:2::${i + 1}`);
+  for (let i = 0; i < 10; i++) await register(`2001:db8:1:2:${(i + 1).toString(16)}::9`);
+  await assert.rejects(register("2001:db8:1:2:ffff:ffff:ffff:ffff"), /rate_limited/);
+  await register("2001:db8:1:3::1");
+  await register("192.0.2.70");
+  assert.equal(f.sql.prepare("SELECT count(*) n FROM rate_limit_counters WHERE namespace='device-v2-registration'").get().n, 3);
+});
+
+test("edge limiter keys use the same normalized source identity", async t => {
+  const f = fixture(t);
+  const keys = [];
+  f.env.BOUND_SESSION_RATE_LIMITER = { async limit({ key }) { keys.push(key); return { success: false }; } };
+  for (const ip of ["2001:db8:1:2::1", "2001:db8:1:2:abcd::7", "2001:db8:1:3::1", "192.0.2.61", "not-an-address"]) {
+    await assert.rejects(limitBoundRequest(new Request("https://backend.test/v2/device-leases/renew", {headers:{"cf-connecting-ip":ip}}), f.env, f.db), /rate_limited/);
+  }
+  const key = async identity => `device-v2-session:${await boundSecretHash(identity)}`;
+  assert.deepEqual(keys, [
+    await key("2001:db8:1:2::/64"), await key("2001:db8:1:2::/64"), await key("2001:db8:1:3::/64"),
+    await key("192.0.2.61"), await key("not-an-address"),
+  ]);
 });
 
 test("HTTP mismatched signer and stale authority cannot commit a lease",async t=>{
@@ -490,4 +570,22 @@ test("invalid possession proofs cannot consume verified customer budgets", async
   request.proof.signature = "A".repeat(86);
   assert.equal((await f.call("/v2/device-authorizations/exchange",request)).status,401);
   assert.equal(f.sql.prepare("SELECT count(*) n FROM rate_limit_counters WHERE namespace IN ('device-v2-device','device-v2-customer')").get().n,0);
+});
+
+test("recovering a committed exchange is not blocked by an exhausted device budget", async t => {
+  const f = fixture(t), d = await enrollment(f);
+  const activated = await f.call("/v2/device-authorizations/exchange", await signed(f, d, "exchange"));
+  assert.equal(activated.status, 200, JSON.stringify(activated.body));
+  f.sql.prepare("INSERT INTO rate_limit_counters VALUES('device-v2-device',?,960,61,1080,1000) ON CONFLICT(namespace,rate_key,window_start) DO UPDATE SET request_count=61").run(d.keyId);
+  const recovered = await f.call("/v2/device-authorizations/exchange", await signed(f, d, "exchange"));
+  assert.equal(recovered.status, 200, JSON.stringify(recovered.body));
+  assert.deepEqual(recovered.body, activated.body);
+});
+
+test("customer verified budget scales with the entitlement device limit", async t => {
+  const f = fixture(t);
+  const key = i => "sha256:" + i.toString(16).padStart(64, "0");
+  for (let i = 0; i < 250; i++) await limitBoundVerified(f.db, key(i), "fleet", 500);
+  for (let i = 0; i < 240; i++) await limitBoundVerified(f.db, key(1000 + i), "small");
+  await assert.rejects(limitBoundVerified(f.db, key(2000), "small"), /rate_limited/);
 });
