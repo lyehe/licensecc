@@ -31,6 +31,7 @@
         "scripts/check-build-purity.test.ps1",
         "scripts/check-docs.ps1",
         "scripts/check-typecheck-coverage.mjs",
+        "scripts/ci/build-device-bound-example.ps1",
         "scripts/ci/device-bound-exports.ps1",
         "scripts/ci/device-bound-exports.test.ps1",
         "scripts/ci/run-installed-device-identity-consumer.ps1",

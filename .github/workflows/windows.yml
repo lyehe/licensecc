@@ -188,6 +188,11 @@ jobs:
          shell: pwsh
          timeout-minutes: 10
          run: pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/ci/run-installed-java-device-bound.ps1 -Generator "$env:CMAKE_GENERATOR" -InstallPrefix build/ci-windows-msvc-debug-dynamic-tpm/install
+      -  name: Protected application example
+         if: matrix.preset == 'ci-windows-msvc-debug-dynamic-tpm'
+         shell: pwsh
+         timeout-minutes: 10
+         run: pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/ci/build-device-bound-example.ps1 -InstallPrefix build/ci-windows-msvc-debug-dynamic-tpm/install -BuildDirectory build/ci-windows-msvc-debug-dynamic-tpm-example -Configuration Debug -Generator "$env:CMAKE_GENERATOR"
       -  name: On failure print logs
          if: ${{ failure() }}
          shell: pwsh
