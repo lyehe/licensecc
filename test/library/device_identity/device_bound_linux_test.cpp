@@ -148,6 +148,17 @@ BOOST_AUTO_TEST_CASE(checkpoint_publish_survives_a_restrictive_umask) {
 	storage->unlock();
 	BOOST_CHECK(published == BoundCheckpointIo::ok);
 }
+BOOST_AUTO_TEST_CASE(pre_existing_unsafe_lock_file_fails_closed_without_being_repaired) {
+	Directory root;
+	const auto lock_path = root.path + "/checkpoint.lock";
+	const int fd = ::open(lock_path.c_str(), O_WRONLY | O_CREAT, 0644);
+	BOOST_REQUIRE(fd >= 0);
+	::close(fd);
+	BOOST_CHECK(!make_bound_checkpoint_storage_at_root(root.path, 0));
+	struct stat info {};
+	BOOST_REQUIRE(stat(lock_path.c_str(), &info) == 0);
+	BOOST_CHECK_EQUAL(info.st_mode & 0777, 0644U);
+}
 BOOST_AUTO_TEST_CASE(clock_uses_boot_time_and_process_identity) {
 	auto platform = make_bound_anchor_platform();
 	BOOST_REQUIRE(platform);
