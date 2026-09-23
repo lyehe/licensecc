@@ -38,7 +38,8 @@ bool bound_loopback_peer_owned(const char* table, const sockaddr_storage& peer, 
 								  &source[0], &source[1], &source[2], &source[3], &source_port, &target[0], &target[1],
 								  &target[2], &target[3], &target_port, &state, &uid) == 12;
 			// The connecting socket's local endpoint is our peer; its remote endpoint is our listener side.
-			// Only live rows count: ESTABLISHED (01) or CLOSE_WAIT (08); TIME_WAIT rows report uid 0.
+			// Only the connecting socket's live rows count: ESTABLISHED (01) or CLOSE_WAIT (08). TIME_WAIT rows report
+			// uid 0, and a half-closed client (FIN_WAIT1/2) is rejected fail-closed.
 			if (parsed && (state == 0x01 || state == 0x08) && same(peer, source, source_port) &&
 				same(local, target, target_port)) {
 				owned = uid == owner;
