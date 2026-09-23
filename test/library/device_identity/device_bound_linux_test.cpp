@@ -180,6 +180,19 @@ BOOST_AUTO_TEST_CASE(browser_launcher_tolerates_hosts_that_ignore_sigchld) {
 	BOOST_CHECK(result == BoundBrowserStatus::opened);
 }
 
+BOOST_AUTO_TEST_CASE(reaped_sigchld_does_not_mask_a_real_exec_failure) {
+	// A host that reaps SIGCHLD must not turn a genuine exec failure into "opened":
+	// the pipe-EOF check still has to gate success, not just the waitpid/ECHILD fallback.
+	auto browser = make_test_linux_browser_launcher("https://example.com/authorize");
+	BOOST_REQUIRE(browser);
+	const auto previous = std::signal(SIGCHLD, SIG_IGN);
+	fail_browser_exec = true;
+	const auto result = browser->open("https://example.com/authorize#attempt_handle=" + std::string(43, 'A'));
+	fail_browser_exec = false;
+	std::signal(SIGCHLD, previous);
+	BOOST_CHECK(result == BoundBrowserStatus::unavailable);
+}
+
 BOOST_AUTO_TEST_CASE(browser_launcher_does_not_leak_host_descriptors) {
 	auto browser = make_test_linux_browser_launcher("https://example.com/authorize");
 	BOOST_REQUIRE(browser);
@@ -191,20 +204,60 @@ BOOST_AUTO_TEST_CASE(browser_launcher_does_not_leak_host_descriptors) {
 	BOOST_CHECK(result == BoundBrowserStatus::opened);
 }
 
+namespace {
+// Restores PATH (including an originally-unset PATH) and the working directory even if a
+// BOOST_REQUIRE/BOOST_CHECK aborts the test case via exception unwinding.
+struct PathAndCwdGuard {
+	bool had_path;
+	std::string previous_path;
+	std::filesystem::path previous_cwd;
+	PathAndCwdGuard() : previous_cwd(std::filesystem::current_path()) {
+		const char* current = std::getenv("PATH");
+		had_path = current != nullptr;
+		if (had_path) previous_path = current;
+	}
+	~PathAndCwdGuard() {
+		std::error_code ignored;
+		std::filesystem::current_path(previous_cwd, ignored);
+		if (had_path)
+			setenv("PATH", previous_path.c_str(), 1);
+		else
+			unsetenv("PATH");
+	}
+};
+}  // namespace
+
 BOOST_AUTO_TEST_CASE(browser_launcher_uses_absolute_path_entries_only) {
 	Directory bin;
 	const auto opener = bin.path + "/xdg-open";
 	std::ofstream(opener) << "#!/bin/sh\n";
 	BOOST_REQUIRE(chmod(opener.c_str(), 0700) == 0);
-	const std::string saved = std::getenv("PATH") ? std::getenv("PATH") : "";
+
+	// A relative PATH entry ("rel") that genuinely resolves from the test's cwd: if resolution
+	// ever honoured relative entries, this would let the launcher exec a non-existent absolute
+	// path, so the case must fail closed regardless of what "rel" contains.
+	Directory relative_root;
+	const auto relative_dir = relative_root.path + "/rel";
+	BOOST_REQUIRE(std::filesystem::create_directory(relative_dir));
+	const auto relative_opener = relative_dir + "/xdg-open";
+	std::ofstream(relative_opener) << "#!/bin/sh\n";
+	BOOST_REQUIRE(chmod(relative_opener.c_str(), 0700) == 0);
+
+	PathAndCwdGuard guard;
+	std::filesystem::current_path(relative_root.path);
+
 	auto browser = make_test_linux_browser_launcher("https://example.com/authorize");
 	BOOST_REQUIRE(browser);
 	const auto url = "https://example.com/authorize#attempt_handle=" + std::string(43, 'A');
-	setenv("PATH", ("relative/bin:" + bin.path).c_str(), 1);
-	BOOST_CHECK(browser->open(url) == BoundBrowserStatus::opened);
-	setenv("PATH", "relative/bin", 1);
+
+	setenv("PATH", "rel", 1);
 	BOOST_CHECK(browser->open(url) == BoundBrowserStatus::unavailable);
-	setenv("PATH", saved.c_str(), 1);
+
+	setenv("PATH", ":", 1);
+	BOOST_CHECK(browser->open(url) == BoundBrowserStatus::unavailable);
+
+	setenv("PATH", ("rel:" + bin.path).c_str(), 1);
+	BOOST_CHECK(browser->open(url) == BoundBrowserStatus::opened);
 }
 
 namespace {
