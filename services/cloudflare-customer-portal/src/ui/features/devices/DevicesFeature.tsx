@@ -195,10 +195,12 @@ export function useDevicesController(options: DeviceFeatureOptions): DevicesCont
       }
       await refreshData();
       succeeded = true;
+    }).finally(() => {
+      // Set after runOnce settles (busy has cleared) so the seat's Release button is enabled, and
+      // thus focusable, by the time the start-focus effect below runs; a checkout whose follow-up
+      // refresh throws still moves focus onto the seat.
+      if (checkedOut) setPendingSeatFocus({ seatId: item.id, after: "start" });
     });
-    // Set after runOnce resolves (busy has cleared) so the seat's Release button is enabled, and
-    // thus focusable, by the time the start-focus effect below runs.
-    if (checkedOut) setPendingSeatFocus({ seatId: item.id, after: "start" });
     return { succeeded, refreshFailed };
   }
 
