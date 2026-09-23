@@ -9,6 +9,7 @@
 #include <openssl/err.h>
 #include <openssl/ui.h>
 
+#include <algorithm>
 #include <cerrno>
 #include <array>
 #include <cstdint>
@@ -1564,6 +1565,25 @@ void test_crash_left_hard_link_is_swept_only_for_library_names() {
 	require(provider->open(request) == LCC_DEVICE_ACCESS_DENIED, "bad mode on a hard-linked reference was not denied");
 }
 
+void test_native_list_directory_names_every_entry() {
+	char root[] = "/tmp/licensecc-list-XXXXXX";
+	require(::mkdtemp(root) != nullptr, "mkdtemp");
+	const std::string name = "key.tss2.pem.delete." + std::string(32U, 'a');
+	const std::string file = std::string(root) + "/" + name;
+	const int created = ::open(file.c_str(), O_CREAT | O_EXCL | O_WRONLY | O_CLOEXEC, 0600);
+	const int directory = ::open(root, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+	const auto api = license::device_identity::make_native_posix_storage_api();
+	std::vector<std::string> names;
+	const int listed = api->list_directory(directory, names);
+	const int listed_again = api->list_directory(directory, names);
+	(void)::close(created);
+	(void)::close(directory);
+	(void)::unlink(file.c_str());
+	(void)::rmdir(root);
+	require(created >= 0 && directory >= 0 && listed == 0 && listed_again == 0, "native list_directory failed");
+	require(std::count(names.begin(), names.end(), name) == 2, "native list_directory missed an entry on relisting");
+}
+
 void test_fstat_and_cleanup_failures_are_not_success() {
 	auto openssl = std::make_shared<FakeOpenSsl3Api>(true, false, true);
 	auto storage = std::make_shared<LockReachPosixStorageApi>(true);
@@ -1767,6 +1787,7 @@ int run_shim() {
 	test_postpublication_inode_rollback_preserves_race_winner();
 	test_storage_ancestor_symlink_lock_timeout_and_publish_capabilities();
 	test_crash_left_hard_link_is_swept_only_for_library_names();
+	test_native_list_directory_names_every_entry();
 	test_fstat_and_cleanup_failures_are_not_success();
 	test_publish_cleanup_preserves_a_same_name_replacement();
 	test_store_cardinality_and_clean_eof_are_required();
