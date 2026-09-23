@@ -34,8 +34,8 @@ const settingsPostResponses = {
   "401": errorResponse("Invalid credentials or session.", ["invalid_credentials", "unauthorized"]),
   "403": errorResponse("Origin mismatch or fresh verified sign-in required.", ["cross_site_forbidden", "verified_sign_in_required"]),
   "409": errorResponse("Settings changed concurrently.", "password_change_conflict"),
-  "413": errorResponse("Request body exceeds 8192 bytes.", "body_too_large"),
-  "429": errorResponse("Per-IP or login-identifier limit reached.", "rate_limited"),
+  "413": common["413"],
+  "429": common["429"],
 };
 const accepted = { description: "Generic verification_requested envelope, including ineligible addresses and delivery failures. No session or account is created.",
   content: { "application/json": { schema: { type: "object", required: ["ok", "code"], properties: { ok: { type: "boolean", const: true }, code: { type: "string", const: "verification_requested" } } } } } };
