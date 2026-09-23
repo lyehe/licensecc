@@ -5,6 +5,19 @@ import { hashPassword } from "../dist-worker/worker/password/crypto.js";
 const PATH = "/portal/v1/auth/password";
 const PASSWORD = "A long testing passphrase 1!";
 const NEXT = "Another testing passphrase 2!";
+// Fails fast (rather than hanging) when a promise never settles -- e.g. if a handler starts
+// awaiting DB work that this test is deliberately holding open with a gate.
+async function within(promise, milliseconds = 250) {
+  let timer;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`timed out after ${milliseconds}ms`)), milliseconds); }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 function fixture(t) {
   t.mock.method(Date, "now", () => NOW * 1000);
   const data = baseFixture({ PORTAL_PASSWORD_ENABLED: "1", PORTAL_EMAIL_API_KEY: "test-only", PORTAL_EMAIL_FROM: "sender@example.com" });
@@ -166,19 +179,39 @@ test("link requests answer before any account lookup or delivery", async t => {
   t.mock.method(globalThis, "fetch", async (_url, init) => { await gate; f.mail.push(JSON.parse(init.body)); return new Response("{}", { status: 200 }); });
   // Rate-limit counters are ALWAYS-ON and deliberately run before the 202 (blueprint (a)); only the
   // account/proof-table work (credential lookup, existing-account lookup, the portal_password_actions
-  // write) must wait until after the response, so every address gets the same 202 latency.
-  const prepareSpy = t.mock.method(f.db, "prepare");
-  const response = await call(f.env, "POST", `${PATH}/reset`, { body: { email: "a@x.com" }, ctx: f.ctx });
+  // write) may still be in flight when the response is observed. With real D1 (unlike the synchronous
+  // node:sqlite fake), .first()/.run() only DISPATCH the query -- it is awaiting the result that would
+  // block the response -- so gate exactly those statements' resolution and prove the query has been
+  // dispatched but is still unresolved by the time the caller sees the 202. That is the real
+  // latency-parity invariant; it does not depend on which statement runs in which order.
+  const GATED = /\bcustomers\b|\bportal_passwords\b|\bportal_password_actions\b/;
+  let releaseLookups; const lookupGate = new Promise(resolve => { releaseLookups = resolve; });
+  const dispatched = []; const resolved = [];
+  const realPrepare = f.env.DB.prepare.bind(f.env.DB);
+  t.mock.method(f.env.DB, "prepare", sql => {
+    const stmt = realPrepare(sql);
+    if (!GATED.test(sql)) return stmt;
+    return {
+      bind: (...args) => {
+        const bound = stmt.bind(...args);
+        const wrap = method => async (...a) => {
+          dispatched.push(sql);
+          await lookupGate;
+          const result = await bound[method](...a);
+          resolved.push(sql);
+          return result;
+        };
+        return { first: wrap("first"), run: wrap("run"), all: wrap("all") };
+      },
+    };
+  });
+  const response = await within(call(f.env, "POST", `${PATH}/reset`, { body: { email: "a@x.com" }, ctx: f.ctx }));
   assert.equal(response.status, 202);
   assert.equal(f.mail.length, 0);
-  const queriesBeforeSettle = prepareSpy.mock.calls.map(call => call.arguments[0]);
-  assert.equal(
-    queriesBeforeSettle.some(sql => /\bcustomers\b|\bportal_passwords\b|\bportal_password_actions\b/.test(sql)),
-    false,
-    `an account/proof query ran before settle(): ${JSON.stringify(queriesBeforeSettle)}`,
-  );
+  assert.ok(dispatched.length > 0, "expected the credential lookup to be dispatched before the response");
+  assert.equal(resolved.length, 0, `an account/proof lookup resolved before the 202 was observed: ${JSON.stringify(resolved)}`);
   assert.equal(f.db.prepare("SELECT count(*) n FROM portal_password_actions").get().n, 0);
-  release(); await f.settle();
+  releaseLookups(); release(); await f.settle();
   assert.equal(f.mail.length, 1);
 });
 
