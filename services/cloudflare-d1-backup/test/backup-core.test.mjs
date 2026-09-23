@@ -278,6 +278,7 @@ test("R2 save rejects an empty export without publishing a manifest", async () =
     /d1_export_empty/,
   );
   assert.equal([...bucket.objects.keys()].some((key) => key.endsWith(".metadata.json")), false);
+  assert.equal(bucket.objects.size, 0, "the unmanifested dump must be removed, not just the manifest withheld");
 });
 
 test("R2 save rejects object metadata that predates the requested snapshot", async () => {
