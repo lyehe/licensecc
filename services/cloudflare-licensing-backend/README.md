@@ -831,12 +831,14 @@ range 100..1000000), a 20/minute registration IP limit, and a separate
 already admitted by their own per-source budget, so one flooding source
 cannot exhaust the shared budget for every other source. After proof and
 current authority checks, fresh issuance has a 60/minute device-key limit
-and a max(240, 2 × the entitlement's `max_active_devices`)/minute customer
-limit; replaying an already-committed operation returns the stored lease
-without spending either budget, so idempotent reconciliation is never
-rate-limited. These gates are independent of legacy
-optional-proof switches. The configured legacy `VERIFY_RATE_LIMITER`
-additionally protects registration; the optional `BOUND_SESSION_RATE_LIMITER`
+and a max(240, 2 × `max_active_devices`)/minute customer limit, computed
+from the entitlement being renewed or exchanged and charged against one
+counter shared by every entitlement of that customer; replaying an
+already-committed operation returns the stored lease without spending
+either budget, so idempotent reconciliation is never rate-limited. These
+gates are independent of legacy optional-proof switches. The configured
+legacy `VERIFY_RATE_LIMITER` additionally protects registration; the
+optional `BOUND_SESSION_RATE_LIMITER`
 Cloudflare rate limiter rejects session-route (challenge/exchange/renew)
 floods at the edge, before any D1 write. Neither edge limiter imposes a low
 shared-IP budget on short feature jobs. Operators should also add a WAF rate
