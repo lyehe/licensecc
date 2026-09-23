@@ -918,10 +918,8 @@ private:
 	static bool is_delete_name(const std::string& value) { return value.find(".delete.") != std::string::npos; }
 
 	nlink_t link_count(ino_t inode) const {
-		nlink_t count = 0;
-		for (const auto& entry : entries_) {
-			count += entry.second.inode == inode ? 1U : 0U;
-		}
+		const auto count = static_cast<nlink_t>(std::count_if(
+			entries_.begin(), entries_.end(), [inode](const auto& entry) { return entry.second.inode == inode; }));
 		return count == 0 ? 1 : count;
 	}
 
