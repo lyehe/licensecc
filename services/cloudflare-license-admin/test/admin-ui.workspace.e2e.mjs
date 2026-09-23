@@ -281,7 +281,7 @@ test("customer assignment replaces an untouched editor with customer and app con
   await page.goto("/#/entitlements");
   await page.getByRole("button", { name: "New entitlement", exact: true }).click();
   await page.evaluate(id => { location.hash = `/customers/${id}?section=access`; }, enterpriseCustomerId);
-  await page.getByRole("button", { name: "Assign existing license", exact: true }).click();
+  await page.getByRole("button", { name: "View assigned licenses", exact: true }).click();
   await expect(page.locator(".editorLayout form")).toHaveCount(0);
   await page.getByRole("button", { name: "New entitlement", exact: true }).click();
   await page.getByText("Enter customer ID manually", { exact: true }).click();

@@ -107,7 +107,7 @@ repository-owned third-party `src/library/ini/` sources are excluded.
 | `services/cloudflare-licensing-backend/src/fulfillment/order_ingest.mjs` | 1,147 | Backend order-ingest bounded context; persistence and exactly-once tests stay backend-owned. |
 | `services/cloudflare-licensing-backend/src/routes/verify.ts` | 933 | Backend verification route and abuse controls; it is not a shared package concern. |
 | `services/cloudflare-license-admin/src/ui/features/catalog/Catalog.tsx` | 724 | Catalog list/mutation coordinator; consequence-heavy import/projection workflows and presentation stay in sibling catalog modules. |
-| `services/cloudflare-customer-portal/src/ui/features/devices/DevicesFeature.tsx` | 389 | Portal device/floating-seat workflow; portal-local state and consequences remain feature-owned. |
+| `services/cloudflare-customer-portal/src/ui/features/devices/DevicesFeature.tsx` | 397 | Portal device/floating-seat workflow; portal-local state and consequences remain feature-owned. |
 | `services/cloudflare-d1-backup/src/core.ts` | 492 | D1 export/R2 backup orchestration; backup remains independently deployable. |
 
 Composition roots remain intentionally small. Current counts are:
@@ -120,7 +120,7 @@ Composition roots remain intentionally small. Current counts are:
 | Portal Worker `src/worker/index.ts` / `src/worker/app.ts` | 2 | 84 |
 | Portal UI `src/ui/main.tsx` / `src/ui/app/App.tsx` | 6 | 135 |
 
-Current production-source totals are 19,358 lines for license-admin, 8,708 lines for licensing-backend, 6,418 lines for customer-portal, and 1,320 lines for D1-backup. These counts include tracked and non-ignored, untracked
+Current production-source totals are 19,358 lines for license-admin, 8,708 lines for licensing-backend, 6,422 lines for customer-portal, and 1,320 lines for D1-backup. These counts include tracked and non-ignored, untracked
 TypeScript, TSX, JavaScript, and MJS under each service's `src` tree. They are
 evidence for responsibility review, not a reason
 to move code without a behavioral or ownership boundary.

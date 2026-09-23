@@ -316,39 +316,47 @@ export function useDevicesController(options: DeviceFeatureOptions): DevicesCont
 
 export function DevicesFeature({ controller }: { controller: DevicesController }): React.ReactElement {
   const hasBrowserSession=Object.keys(controller.seatSessions).length>0 || controller.pendingSeatRelease!==null;
-  const [browserSessionsOpen,setBrowserSessionsOpen]=useState(hasBrowserSession);
-  useEffect(()=>{if(hasBrowserSession)setBrowserSessionsOpen(true);},[hasBrowserSession]);
   const floatingEntitlements = controller.entitlements.filter((item) => item.license_mode === "floating");
+  const seatGridContent = (
+    <div className="seatGrid">
+      <div className="seatHeading"><p>These controls manage seats created in this browser. They do not list or control native app sessions on other machines.</p></div>
+      {floatingEntitlements.map((item, index) => (
+        <div
+          className="seatCard"
+          key={`seat/${item.id}/${index}`}
+          ref={(element) => { controller.seatCardRefs.current[item.id] = element; }}
+          tabIndex={-1}
+        >
+          <div>
+            <strong>{item.project}</strong>
+            <span className="muted"> / {item.feature}</span>
+            <span className="muted"> pool {item.pool_size}</span>
+          </div>
+          <div className="actions">
+            <button
+              ref={(element) => { controller.seatStartButtonRefs.current[item.id] = element; }}
+              disabled={controller.busy || item.status !== "active" || controller.seatSessions[item.id] !== undefined}
+              onClick={() => void controller.seatAction(item, "checkout")}
+            >Start seat</button>
+            <button disabled={controller.busy || item.status !== "active" || controller.seatSessions[item.id] === undefined} onClick={() => void controller.seatAction(item, "heartbeat")}>Renew seat</button>
+            <button disabled={controller.busy || controller.seatSessions[item.id] === undefined} onClick={() => controller.requestSeatRelease(item)}>Release</button>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
   return (
     <div>
       {controller.devices.length>0 && <DeviceRegistrations devices={controller.devices} busy={controller.busy} releaseDevice={controller.releaseDevice} />}
       {floatingEntitlements.length > 0 && (
-        <details className="browserSessions" open={hasBrowserSession || browserSessionsOpen} onToggle={event=>{if(hasBrowserSession && !event.currentTarget.open)event.currentTarget.open=true;else setBrowserSessionsOpen(event.currentTarget.open);}}><summary>Browser sessions</summary><div className="seatGrid">
-          <div className="seatHeading"><p>These controls manage seats created in this browser. They do not list or control native app sessions on other machines.</p></div>
-          {floatingEntitlements.map((item, index) => (
-            <div
-              className="seatCard"
-              key={`seat/${item.id}/${index}`}
-              ref={(element) => { controller.seatCardRefs.current[item.id] = element; }}
-              tabIndex={-1}
-            >
-              <div>
-                <strong>{item.project}</strong>
-                <span className="muted"> / {item.feature}</span>
-                <span className="muted"> pool {item.pool_size}</span>
-              </div>
-              <div className="actions">
-                <button
-                  ref={(element) => { controller.seatStartButtonRefs.current[item.id] = element; }}
-                  disabled={controller.busy || item.status !== "active" || controller.seatSessions[item.id] !== undefined}
-                  onClick={() => void controller.seatAction(item, "checkout")}
-                >Start seat</button>
-                <button disabled={controller.busy || item.status !== "active" || controller.seatSessions[item.id] === undefined} onClick={() => void controller.seatAction(item, "heartbeat")}>Renew seat</button>
-                <button disabled={controller.busy || controller.seatSessions[item.id] === undefined} onClick={() => controller.requestSeatRelease(item)}>Release</button>
-              </div>
-            </div>
-          ))}
-        </div></details>
+        hasBrowserSession ? (
+          <section className="browserSessions" aria-labelledby="browser-sessions-heading">
+            <h3 id="browser-sessions-heading">Browser sessions</h3>
+            {seatGridContent}
+          </section>
+        ) : (
+          <details className="browserSessions"><summary>Browser sessions</summary>{seatGridContent}</details>
+        )
       )}
     </div>
   );

@@ -113,10 +113,6 @@ export const NO_ENTITLEMENTS_EMPTY_COPY = "No entitlements yet — licenses appe
 
 export const NO_DEVICES_EMPTY_COPY = "No devices registered yet — activate a license to register one.";
 
-export const NO_USAGE_EMPTY_COPY = "No usage recorded yet — activity appears here once your licenses are in use.";
-
-export const NO_DOWNLOADS_EMPTY_COPY = "No downloadable licenses yet — they appear here after purchase.";
-
 // Map a raw server/result code to customer-facing copy. Returns null for any code we do not humanize,
 // so the caller can fall back to showing the raw code (kept visible as small print for support). Codes
 // mirror the backend envelope `code` field; this is the single source of humane portal feedback strings.

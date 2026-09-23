@@ -20,7 +20,7 @@ export function DeviceRegistrations({ devices, busy, releaseDevice }: {
           <td data-label="Registered">{formatTimestamp(item.created_at)}</td>
           <td data-label="Action"><button disabled={busy} onClick={() => void releaseDevice(item)}>{DEVICE_RELEASE_ACTION_LABEL}</button></td>
         </tr>)}
-      </tbody></table> : <div className="emptyState"><h3>{devices.length === 0 ? "No devices registered yet" : "No matching devices"}</h3><p>{devices.length === 0 ? "Activate a license from your application to register a machine." : "Try another device ID or app."}</p></div>}
+      </tbody></table> : <div className="emptyState"><h3>No matching devices</h3><p>Try another device ID or app.</p></div>}
       {devices.length >= 500 && <p className="readNotice">Only the first 500 registrations are shown. More may exist.</p>}
     </section>
   </section>;

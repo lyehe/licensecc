@@ -6,7 +6,7 @@ export function UsageFeature({ usage, available, busy, retry }: {
   available: boolean; busy: boolean; retry(): Promise<void>;
   usage: UsageRow[];
 }): React.ReactElement {
-  if (!available) return <section className="tablePane full"><h2>Recorded usage</h2><p>Usage is unavailable. Your license access and nodes are still available.</p><button disabled={busy} onClick={() => void retry()}>Retry usage</button></section>;
+  if (!available) return <section className="tablePane full"><h2>Activity</h2><p>Activity is unavailable. Your license access and devices are still available.</p><button disabled={busy} onClick={() => void retry()}>Retry activity</button></section>;
   if(usage.length===0)return <details className="appActivity"><summary>Activity</summary><p>No activity yet.</p></details>;
   return (
     <details className="appActivity"><summary>Activity</summary>
