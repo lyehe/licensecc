@@ -6,11 +6,11 @@
 
 ## Context
 
-The repository has two release streams. The C++ library continues the upstream
-2.x lineage, while the Cloudflare services, shared Node packages, OpenAPI
-documents, and Python, .NET, and Java SDKs form one platform contract. Before this
-decision, platform version strings were repeated without an executable source
-of truth. The reachable bare `v1.0.0` tag belongs to inherited upstream history
+The repository has two release streams. The C++ library has its own 2.x version,
+while the Cloudflare services, shared Node packages, OpenAPI documents, and
+Python, .NET, and Java SDKs form one platform contract. Before this decision,
+platform version strings were repeated without an executable source
+of truth. The reachable bare `v1.0.0` tag predates the current release streams
 and is not an identifier for the current platform.
 
 A platform release must be unambiguous about which API and SDK projections it

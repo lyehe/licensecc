@@ -2,7 +2,7 @@
 
 ## Getting Help
 
-Use [GitHub issues on this repository](https://github.com/lyehe/licensecc/issues) for questions, integration help, documentation gaps, reproducible bugs, and actionable feature requests. (The upstream `open-license-manager` discussions cover the original project, not this fork.)
+Use [GitHub issues on this repository](https://github.com/lyehe/licensecc/issues) for questions, integration help, documentation gaps, reproducible bugs, and actionable feature requests.
 
 ## Reporting Bugs
 
@@ -31,7 +31,7 @@ Open an enhancement issue for feature requests that affect public APIs, license 
 
 ## Code Contributions
 
-For normal work on this public fork, target `main` unless an issue or maintainer says otherwise.
+For normal work in this repository, target `main` unless an issue or maintainer says otherwise.
 
 Before opening a pull request:
 

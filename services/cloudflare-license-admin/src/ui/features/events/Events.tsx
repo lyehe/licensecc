@@ -76,7 +76,7 @@ export function Events({ active }: { active: boolean }): React.ReactElement | nu
         <button type="button" disabled={busy || operationLocked} onClick={() => void downloadCsv("/api/admin/events", "events.csv", runMutation, setMessage)}>Export CSV</button>
       </div>
       <div className="tableScroll" role="region" aria-label="Audit event records" tabIndex={0}><table>
-        <thead><tr><th>Time</th><th>Event</th><th>Project</th><th>Feature</th><th>Fingerprint</th><th>Source</th><th>Actor</th><th>Detail</th><th>Seq</th></tr></thead>
+        <thead><tr><th>Time</th><th>Event</th><th>Project</th><th>Feature</th><th>Details</th></tr></thead>
         <tbody>
           {events.map((item) => (
             <tr key={item.id}>
@@ -84,11 +84,7 @@ export function Events({ active }: { active: boolean }): React.ReactElement | nu
               <td>{item.event_type}</td>
               <td>{item.project}</td>
               <td>{item.feature}</td>
-              <td><code>{shortHash(item.license_fingerprint)}</code></td>
-              <td>{item.source}</td>
-              <td>{item.actor} <span className="muted">({item.actor_type})</span></td>
-              <td>{item.detail}</td>
-              <td>{item.revocation_seq}</td>
+              <td><details><summary>Event details</summary><dl className="recordMeta"><div><dt>License</dt><dd><code>{shortHash(item.license_fingerprint)}</code></dd></div><div><dt>Source</dt><dd>{item.source}</dd></div><div><dt>Actor</dt><dd>{item.actor} ({item.actor_type})</dd></div><div><dt>Detail</dt><dd>{item.detail}</dd></div><div><dt>Revision</dt><dd>{item.revocation_seq}</dd></div></dl></details></td>
             </tr>
           ))}
         </tbody>

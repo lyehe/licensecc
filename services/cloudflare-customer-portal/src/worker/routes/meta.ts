@@ -107,7 +107,11 @@ async function backendRequiresAccountTokenMode(env: Env): Promise<boolean> {
   try {
     // Redirects are terminal, even though readiness carries no credential: never let an untrusted
     // Location turn this explicit backend trust check into a second request.
-    const response = await fetch(new URL("/health", origin).toString(), { signal: controller.signal, redirect: "manual" });
+    const target = new URL("/health", origin).toString();
+    const init = { signal: controller.signal, redirect: "manual" as RequestRedirect };
+    const response = env.BACKEND === undefined
+      ? await fetch(target, init)
+      : await env.BACKEND.fetch(new Request(target, init));
     if (response.status !== 200) {
       // The status is enough to fail readiness, but its body may be an endless upstream stream. Drain
       // no bytes and cancel it before returning the established 503 envelope.

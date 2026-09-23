@@ -19,6 +19,8 @@ export const META_ROUTES = [
 export const PUBLIC_ROUTES = [
   { method: "GET", path: "/health", inSpec: true },
   { method: "POST", path: "/portal/v1/auth/password/register", inSpec: true },
+  { method: "POST", path: "/portal/v1/auth/password/reset", inSpec: true },
+  { method: "POST", path: "/portal/v1/auth/password/complete", inSpec: true },
   { method: "POST", path: "/portal/v1/auth/password/login", inSpec: true },
   { method: "GET", path: "/portal/v1/auth/password", inSpec: true },
   { method: "POST", path: "/portal/v1/auth/password", inSpec: true },

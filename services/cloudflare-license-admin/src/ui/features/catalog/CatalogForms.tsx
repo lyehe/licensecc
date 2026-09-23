@@ -128,8 +128,8 @@ export function CatalogPlanFeatureEditor({
       <datalist id="catalog-feature-keys">{features.map((feature) => <option key={feature.id} value={feature.feature_key} />)}</datalist>
       <label>Inclusion<select value={form.feature_inclusion} onChange={(event) => onChange({ ...form, feature_inclusion: event.target.value as CatalogPlanFeature["feature_inclusion"] })}><option value="included">included</option><option value="addon">addon</option></select></label>
       {form.feature_inclusion === "addon" && <label>Add-on key<input value={form.addon_key} onChange={(event) => onChange({ ...form, addon_key: event.target.value })} /></label>}
-      <label>Policy ID<input disabled={!activePoliciesSettled} list="active-policy-ids" value={form.policy_id} onChange={(event) => onChange({ ...form, policy_id: event.target.value })} /></label>
-      <datalist id="active-policy-ids">{policies.map((policy) => <option key={policy.id} value={policy.id}>{policy.name}</option>)}</datalist>
+      <label>Policy<select aria-label="Policy" disabled={!activePoliciesSettled} value={form.policy_id} onChange={event=>onChange({...form,policy_id:event.target.value})}><option value="">No policy</option>{form.policy_id && !policies.some(policy=>policy.id===form.policy_id) && <option value={form.policy_id}>Unavailable policy — choose another</option>}{policies.map(policy=><option key={policy.id} value={policy.id}>{policy.name} · {policy.project}</option>)}</select></label>
+      {form.policy_id && <details><summary>Policy details</summary><code>{form.policy_id}</code></details>}
       <label>Display order<input type="number" value={form.display_order} onChange={(event) => onChange({ ...form, display_order: Number(event.target.value) })} /></label>
       <label>Status<select value={form.status} onChange={(event) => onChange({ ...form, status: event.target.value as CatalogPlanFeature["status"] })}><option value="active">active</option><option value="disabled">disabled</option></select></label>
       <label>Pool size<input type="number" value={form.pool_size} onChange={(event) => onChange({ ...form, pool_size: event.target.value })} /></label>

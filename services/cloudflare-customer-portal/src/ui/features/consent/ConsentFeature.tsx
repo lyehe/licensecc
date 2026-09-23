@@ -107,31 +107,30 @@ export function ConsentFeature({entry,customerId,onDone,onSignOut,onSessionExpir
   const mutation=record.current?.mutation;
   const waiting=clock<retryAt;
   const terminal=["expired","blocked","cancelled","connected"].includes(phase);
-  const title=phase==="expired"?"Connection request expired":phase==="cancelled"?"Connection cancelled":phase==="connected"?"Device connected":phase==="approved"?"Returning to your app…":"Connect this device";
+  const title=phase==="expired"?"Connection request expired":phase==="cancelled"?"Connection cancelled":phase==="connected"?"Device connected":phase==="approved"?"Returning to your app…":phase==="blocked"?"Unable to connect":"Connect this device";
   return <main className="authPane consentPane"><div className="authBrand brand"><span aria-hidden="true">L</span>Licensecc</div>
     <section className="authCard consentCard" aria-busy={busy}>
       <h1 ref={heading} tabIndex={-1}>{title}</h1>
       {feedback}
       {phase==="loading"?<p role="status">Checking this connection request…</p>:<>
-        {details && !terminal && <><p>Allow <strong>{details.app.name}</strong> to use a license on this device.</p>
-          <dl className="consentSummary"><div><dt>Device</dt><dd>{details.device.label||"Unnamed device"}</dd></div><div><dt>Account</dt><dd>{customerId}</dd></div></dl></>}
+        {details && !terminal && <div className="consentIdentity"><strong>{details.app.name}</strong><span>{details.device.label||"Unnamed device"}</span></div>}
         {phase==="ready" && details && !mutation && <>
-          <div className="consentComparison"><p>Comparison code</p><p className="consentCode">{details.comparison_code}</p><p>Check that your app shows the same code.</p>
-            <label className="consentConfirm"><input type="checkbox" checked={comparisonConfirmed} onChange={event=>setComparisonConfirmed(event.target.checked)} disabled={busy} />This code matches my app</label></div>
+          {details.entitlements.length>0 && <div className="consentComparison"><p>Check the code in your app</p><p className="consentCode">{details.comparison_code}</p>
+            <label className="consentConfirm"><input type="checkbox" checked={comparisonConfirmed} onChange={event=>setComparisonConfirmed(event.target.checked)} disabled={busy} />This code matches my app</label></div>}
           {details.entitlements.length===0?<p>{previousCursors.length?"No licenses remain on this page. Go back to choose another license.":"No eligible license is available for this app. Contact your administrator."}</p>:
             <LicenseChoice items={details.entitlements} selected={selected} onSelect={setSelected} busy={busy} soleOverall={pageCursor===undefined && !details.has_more && details.entitlements.length===1} />}
           {(previousCursors.length>0 || details.has_more) && <nav className="consentPages" aria-label="License pages">
             <button disabled={busy||waiting||previousCursors.length===0} onClick={()=>void runOnce(()=>inspect(previousCursors.at(-1),previousCursors.slice(0,-1)))}>Previous</button>
             <span role="status">Page {previousCursors.length+1}</span><button disabled={busy||waiting||!details.next_page_cursor} onClick={()=>void runOnce(()=>inspect(details.next_page_cursor??undefined,[...previousCursors,pageCursor]))}>Next</button>
           </nav>}
-          <p className="muted">A device slot is used when the app completes activation.</p>
+          <p className="consentNote">Uses one device slot when your app finishes connecting.</p>
         </>}
         {message && <p role="alert" className="consentMessage">{message}</p>}
         {mutation && phase==="ready" && <p className="muted">Your original selection is saved for this retry.</p>}
         {phase==="expired" && <p>Return to your app and start connecting again.</p>}
         {phase==="cancelled" && <p>This request cannot activate a device.</p>}
         {phase==="connected" && <p>You can close this page and continue in your app.</p>}
-        {phase==="approved" && callback && <><p>If your app did not open, use your browser’s Back button to return here and try again.</p><a className="button" href={callback}>Open app</a></>}
+        {phase==="approved" && callback && <><p>Return to your app to finish. If nothing happens, try again below.</p><a className="button" href={callback}>Open app</a></>}
         {terminal?<button onClick={onDone}>Go to portal</button>:phase==="ready"?<div className="actions consentActions">
           {!details?<button disabled={busy||waiting} onClick={()=>void runOnce(inspect)}>Retry</button>:mutation?<button className="primary" disabled={busy||waiting} onClick={()=>void act(mutation.operation)}>{busy?"Checking…":mutation.operation==="approve"?"Retry approval":"Retry cancellation"}</button>:<>
             <button disabled={busy||waiting} onClick={()=>void act("deny")}>Cancel</button><button className="primary" disabled={busy||waiting||!selected||!comparisonConfirmed} onClick={()=>void act("approve")}>{busy?"Connecting…":"Approve"}</button>
@@ -139,6 +138,6 @@ export function ConsentFeature({entry,customerId,onDone,onSignOut,onSessionExpir
         </div>:null}
       </>}
     </section>
-    {customerId && <button className="consentSignOut" disabled={busy} onClick={()=>void runOnce(onSignOut)}>Sign out</button>}
+    {customerId && <div className="consentAccount"><details><summary>Account details</summary><p>{customerId}</p></details><button className="consentSignOut" disabled={busy} onClick={()=>void runOnce(onSignOut)}>Sign out</button><p>To use another account, sign out and restart Connect in your app.</p></div>}
   </main>;
 }

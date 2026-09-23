@@ -46,7 +46,7 @@ export function EntitlementEditor({ form, item, extendValidity = false, busy, lo
 
   function change(field: keyof EntitlementFormState, value: string | number): void {
     setErrors((previous) => { const next = { ...previous }; delete next[field]; return next; });
-    onChange({ [field]: value });
+    onChange(isCreate && field === "project" ? { project: String(value), license_id: "", policy_id: "" } : { [field]: value });
   }
 
   const errorFor = (field: string): React.ReactElement | null => errors[field] ? <span id={`entitlement-${field}-error`} role="alert">{errors[field]}</span> : null;
@@ -66,9 +66,9 @@ export function EntitlementEditor({ form, item, extendValidity = false, busy, lo
       {!isCreate && <p className="wide muted">Project, feature, and fingerprint identify this entitlement and cannot be edited. {extendValidity ? "Update Valid until to extend access." : "Save changes updates the existing entitlement."}</p>}
       <label>Valid from<input aria-label="Valid from" name="valid_from" type="date" min="1970-01-01" value={form.valid_from} aria-invalid={!!errors.valid_from} aria-describedby={`entitlement-date-rules${errors.valid_from ? " entitlement-valid_from-error" : ""}`} onChange={(event) => change("valid_from", event.target.value)} /><span className="muted">{inheritsDates ? "Blank: use policy start." : "Blank: Starts immediately."}</span>{errorFor("valid_from")}</label>
       <label>Valid until<input aria-label="Valid until" name="valid_until" type="date" min="1970-01-01" value={form.valid_until} aria-invalid={!!errors.valid_until} aria-describedby={`entitlement-date-rules${errors.valid_until ? " entitlement-valid_until-error" : ""}`} onChange={(event) => change("valid_until", event.target.value)} /><span className="muted">{inheritsDates ? "Blank: use policy expiry." : "Blank: No expiry."}</span>{errorFor("valid_until")}</label>
-      <p id="entitlement-date-rules" className="wide muted">Dates use UTC. A new or changed date stores 00:00 UTC. Access expires at the start of the selected Valid until date; select the following date to include a whole day. Unchanged dates keep their existing timestamp.</p>
+      <p id="entitlement-date-rules" className="wide muted">Dates are UTC. Expiry is at the start of the selected day; choose the following date to include a whole day. Untouched timestamps stay unchanged.</p>
       {item && <p className="wide muted">Stored start: {item.valid_from === null ? "Starts immediately" : new Date(item.valid_from * 1000).toISOString()}. Stored expiry: {item.valid_until === null ? "No expiry" : new Date(item.valid_until * 1000).toISOString()}.</p>}
-      <EntitlementRelationships required={isCreate && form.enforcement_mode === "device_bound_v1"} customerId={form.customer_id} licenseId={form.license_id} onCustomerChange={(value) => change("customer_id", value)} onLicenseChange={(value) => change("license_id", value)} />
+      <EntitlementRelationships required={isCreate && form.enforcement_mode === "device_bound_v1"} customerId={form.customer_id} licenseId={form.license_id} onCustomerChange={(value) => { change("customer_id", value); if (isCreate) change("license_id", ""); }} onLicenseChange={(value) => change("license_id", value)} />
       {!isCreate && <p className="wide muted">Protection: {item?.enforcement_mode === "device_bound_v1" ? "Protected devices" : item?.enforcement_mode === "legacy" ? "Legacy application" : "Unknown — refresh the entitlement to confirm."}</p>}
       {(errors.customer_id || errors.license_id) && <p className="wide" role="alert">{errors.customer_id || errors.license_id}</p>}
       <label className="wide">Notes<textarea aria-label="Notes" name="notes" maxLength={1000} value={form.notes} aria-invalid={!!errors.notes} aria-describedby={describedBy("notes")} onChange={(event) => change("notes", event.target.value)} />{errorFor("notes")}</label>

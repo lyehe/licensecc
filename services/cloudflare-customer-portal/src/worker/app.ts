@@ -57,7 +57,7 @@ async function handleApiPortal(request: Request, env: Env, reqId: string, now: n
   for (const key of session) {
     if (!(key in SESSION_DISPATCH)) throw new Error(`route without session dispatch entry: ${key}`);
   }
-  if (ALL_ROUTES.length !== 33) throw new Error(`portal route inventory changed: expected 33, got ${ALL_ROUTES.length}`);
+  if (ALL_ROUTES.length !== 35) throw new Error(`portal route inventory changed: expected 35, got ${ALL_ROUTES.length}`);
 }
 
 export const PORTAL_ROUTE_KEYS: readonly string[] = [...Object.keys(TOP_DISPATCH), ...Object.keys(SESSION_DISPATCH)];

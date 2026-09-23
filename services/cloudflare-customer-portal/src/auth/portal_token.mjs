@@ -147,7 +147,7 @@ export async function mintSessionToken(
 }
 
 /**
- * proxyBackend(origin, path, token, body, operation) -> { ok:true, status:200, data, code? } | { ok:false, status, code }
+ * proxyBackend(origin, path, token, body, operation, backendService?) -> { ok:true, status:200, data, code? } | { ok:false, status, code }
  *
  * Forwards an /api/portal action to ${BACKEND_ORIGIN}/v1/* with Authorization: Bearer <ephemeral
  * account token>. The backend (ACCOUNT_TOKEN_MODE=required) is the authoritative isolation boundary.
@@ -160,14 +160,14 @@ export async function mintSessionToken(
  * approved, freshly copied fields; a hostile backend echo never reaches the browser.
  */
 /** @param {string} origin @param {string} path @param {string} token @param {unknown} body @param {string} operation */
-export function proxyBackend(origin, path, token, body, operation) {
-  return proxyBackendWithTimeout(origin, path, token, body, operation, BACKEND_RESPONSE_TIMEOUT_MS);
+export function proxyBackend(origin, path, token, body, operation, backendService) {
+  return proxyBackendWithTimeout(origin, path, token, body, operation, BACKEND_RESPONSE_TIMEOUT_MS, backendService);
 }
 
 // The production export above always uses the fixed short timeout. Keep the timeout-taking form
 // private to this module's test internals so stream-abort behavior can be tested without turning
 // every deterministic test run into a multi-second wall-clock delay.
-async function proxyBackendWithTimeout(origin, path, token, body, operation, timeoutMs) {
+async function proxyBackendWithTimeout(origin, path, token, body, operation, timeoutMs, backendService) {
   // Defence in depth: callers normally resolve this once before minting a token, but the proxy
   // itself also refuses any non-canonical destination before it can construct a Bearer header.
   const destination = canonicalHttpsOrigin(origin);
@@ -177,16 +177,20 @@ async function proxyBackendWithTimeout(origin, path, token, body, operation, tim
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const upstream = await fetch(new URL(path, destination).toString(), {
+    const target = new URL(path, destination).toString();
+    const requestInit = {
       method: "POST",
       headers: {
         authorization: `Bearer ${token}`,
         "content-type": "application/json",
       },
       body: JSON.stringify(body ?? {}),
-      redirect: "manual",
+      redirect: /** @type {RequestRedirect} */ ("manual"),
       signal: controller.signal,
-    });
+    };
+    const upstream = backendService === undefined
+      ? await fetch(target, requestInit)
+      : await backendService.fetch(new Request(target, requestInit));
     if (upstream.status >= 300 && upstream.status < 400) {
       cancelResponseBody(upstream);
       return { ok: false, status: 502, code: "backend_invalid_response" };

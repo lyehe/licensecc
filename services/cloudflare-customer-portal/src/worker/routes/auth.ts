@@ -14,16 +14,26 @@ import {
   readJson,
 } from "../support.js";
 
-type AnyFn = (...args: any[]) => any;
-const requestOtp = (otpModule as { requestOtp: AnyFn }).requestOtp;
-const redeemOtp = (otpModule as { redeemOtp: AnyFn }).redeemOtp;
-const mintSession = (sessionModule as { mintSession: AnyFn }).mintSession;
-const resolveSession = (sessionModule as { resolveSession: AnyFn }).resolveSession;
-const revokeSession = (sessionModule as { revokeSession: AnyFn }).revokeSession;
+type RequestOtpResult = { ok: true; code: string; secret?: string } | { ok: false; code: string; secret?: string };
+type RedeemOtpResult = { ok: true; code: string; customerId: string } | { ok: false; code: string };
+type RequestOtp = (env: Env, options: Record<string, unknown>) => Promise<RequestOtpResult>;
+type RedeemOtp = (env: Env, options: Record<string, unknown>) => Promise<RedeemOtpResult>;
+type MintSession = (env: Env, options: Record<string, unknown>) => Promise<{ ok: true; raw: string } | { ok: false }>;
+type ResolveSession = (env: Env, raw: string, now: number) => Promise<
+  | { ok: true; session: { id: string; customer_id: string } }
+  | { ok: false; code: string }
+>;
+type RevokeSession = (env: Env, sessionId: string, customerId: string) => Promise<void>;
+type SendEmail = (env: Env, to: string, subject: string, body: string) => Promise<unknown>;
+const requestOtp = (otpModule as { requestOtp: RequestOtp }).requestOtp;
+const redeemOtp = (otpModule as { redeemOtp: RedeemOtp }).redeemOtp;
+const mintSession = (sessionModule as { mintSession: MintSession }).mintSession;
+const resolveSession = (sessionModule as { resolveSession: ResolveSession }).resolveSession;
+const revokeSession = (sessionModule as { revokeSession: RevokeSession }).revokeSession;
 const cookieFromRequest = (sessionModule as { cookieFromRequest: (r: Request) => string | null }).cookieFromRequest;
 const setSessionCookie = (sessionModule as { setSessionCookie: (raw: string) => string }).setSessionCookie;
 const clearSessionCookie = (sessionModule as { clearSessionCookie: () => string }).clearSessionCookie;
-const sendEmail = (emailModule as { sendEmail: AnyFn }).sendEmail;
+const sendEmail = (emailModule as { sendEmail: SendEmail }).sendEmail;
 
 const MAGIC_REDEEM_MAX_BODY_BYTES = 8192;
 const HEX = /^[0-9A-Fa-f]{2}$/;

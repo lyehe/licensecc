@@ -22,13 +22,13 @@ h3 { font-size: var(--text-section); }
 p { color: var(--muted); }
 a { color: var(--accent); text-underline-offset: 3px; }
 button, input, select, textarea { font: inherit; }
-button, .button { min-height: 40px; padding: 8px 12px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface); color: var(--ink); cursor: pointer; }
+button, .button { min-height: 44px; padding: 8px 12px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface); color: var(--ink); cursor: pointer; }
 button:hover:not(:disabled), .button:hover { border-color: #3a3a3a; background: #262626; color: #e8e8e8; }
 button:disabled { background: #1e1e1e; color: #858585; cursor: not-allowed; }
 button.primary, .editorLayout button[type="submit"] { background: var(--accent); color: #161616; border-color: var(--accent); font-weight: var(--weight-strong); }
 button.primary:hover, .editorLayout button[type="submit"]:hover { background: #d0d0d0; color: #161616; }
 :is(button, input, select, textarea, summary, a, [tabindex]):focus-visible { outline: 2px solid #b8b8b8; outline-offset: 3px; }
-input, select, textarea { width: 100%; min-width: 0; min-height: 40px; border: 1px solid #3a3a3a; border-radius: 4px; background: #1a1a1a; color: var(--ink); padding: 8px 10px; }
+input, select, textarea { width: 100%; min-width: 0; min-height: 44px; border: 1px solid #3a3a3a; border-radius: 4px; background: #1a1a1a; color: var(--ink); padding: 8px 10px; }
 input::placeholder { color: var(--muted); }
 input[type="checkbox"] { width: 18px; min-height: 18px; }
 textarea { min-height: 88px; resize: vertical; }
@@ -72,7 +72,7 @@ fieldset:disabled { opacity: .75; }
 .searchResultMeta { font-size: var(--text-small); }
 .customerIdentity { display: grid; gap: 6px; }
 .customerIdentity h2 { margin: 0; }
-.backLink { justify-self: start; min-height: 40px; padding: 8px 0; border-color: transparent; background: transparent; color: var(--muted); }
+.backLink { justify-self: start; min-height: 44px; padding: 8px 0; border-color: transparent; background: transparent; color: var(--muted); }
 .backLink > span { margin-right: 8px; }
 .customerHeader { align-items: center; }
 .customerHeader .customerIdentity { flex: 1 1 280px; min-width: 0; overflow-wrap: anywhere; }
@@ -149,7 +149,7 @@ pre, pre code { font-family: ui-monospace, Consolas, monospace; font-size: var(-
 .statusActions { display: inline-flex; vertical-align: middle; }
 .statusActions[data-status="active"] [data-focus-action="reenable"], .statusActions[data-status="disabled"] .danger { display: none; }
 .contextActions { width: fit-content; max-width: 100%; }
-.contextActions summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; cursor: pointer; min-height: 40px; padding: 8px 12px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface); white-space: nowrap; list-style: none; }
+.contextActions summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; cursor: pointer; min-height: 44px; padding: 8px 12px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface); white-space: nowrap; list-style: none; }
 .contextActions summary::-webkit-details-marker { display: none; }
 .actionChevron { color: var(--muted); }
 .contextActions[open] .actionChevron { transform: rotate(180deg); }

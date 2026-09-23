@@ -39,8 +39,9 @@ use **Reconcile status** to recover the original creation safely.
 ## Create protected application access
 
 Create the customer and its license for the application's project, then open
-**Entitlements → New entitlement**. Choose **Protected devices**, the customer
-and license, and the application's project, feature and license fingerprint.
+**License access → New entitlement**. Choose **Protected devices**, set the
+application's project and feature, then choose its customer and existing license
+and enter the license fingerprint. Changing the project clears dependent selections.
 Use the exact lowercase 64-character fingerprint. Protected project and feature
 IDs use ASCII letters, numbers, `_`, `.`, `:`, or `-` (127 and 15 characters).
 Leave the legacy device hash empty. A selected policy must have zero floating

@@ -18,12 +18,12 @@ export function LicenseChoice({items,selected,onSelect,busy,soleOverall}:{items:
       <option value="" disabled>Choose a license</option>
       {items.map((item,index)=><option key={item.id} value={item.id}>{index+1}. {item.feature} — {shortReference(item.id)}</option>)}
     </select></label>}
-    {chosen && <dl className="consentSummary">
-      <div><dt>License</dt><dd>{chosen.feature}</dd></div>
-      <div><dt>License reference</dt><dd><details className="referenceDetails"><summary>{shortReference(chosen.id)}</summary><span className="identifier">{reference(chosen.id)}</span></details></dd></div>
+    {chosen && <dl className="consentSummary consentLicense">
+      {soleOverall && <div><dt>License</dt><dd>{chosen.feature}</dd></div>}
       <div><dt>Device limit</dt><dd>{chosen.device_limit} {chosen.device_limit===1?"device":"devices"}</dd></div>
       {chosen.activation_trial_seconds!==undefined && <div><dt>Trial</dt><dd>{duration(chosen.activation_trial_seconds)} from app activation. Approving here does not start the trial.</dd></div>}
       {(chosen.activation_trial_seconds===undefined || chosen.valid_until!==null) && <div><dt>{chosen.activation_trial_seconds===undefined?"Expires":"Expires by"}</dt><dd>{chosen.valid_until===null?"No expiry":new Date(chosen.valid_until*1000).toLocaleString()}</dd></div>}
     </dl>}
+    {chosen && <details className="referenceDetails consentReference"><summary>License details</summary><span className="identifier">{reference(chosen.id)}</span></details>}
   </>;
 }

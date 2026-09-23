@@ -393,15 +393,6 @@ code {
   gap:8px
 }
 
-.downloadActions {
-  display:grid;
-  gap:8px
-}
-
-.downloadActions button {
-  white-space:normal
-}
-
 .seatGrid {
   display:grid;
   grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr));
@@ -462,22 +453,35 @@ code {
   margin-top:20px
 }
 
-.consentCard { width:min(100%,520px); }
+.consentPane { max-width:584px; padding-top:40px; }
+.consentPane .authBrand { margin-bottom:20px; }
+.consentCard h1:focus { outline:none; }
+.consentCard { width:100%; }
 .consentSummary { margin:24px 0; display:grid; gap:16px; }
-.consentSummary div { display:grid; gap:4px; }
+.consentSummary div { display:grid; grid-template-columns:100px minmax(0,1fr); gap:12px; }
 .consentSummary dt { color:var(--muted); }
 .consentSummary dd { margin:0; overflow-wrap:anywhere; }
 .consentChoice { display:grid; gap:8px; margin-bottom:16px; }
 .consentChoice select { width:100%; min-width:0; }
-.consentComparison { margin:24px 0; padding:16px; border:1px solid var(--border); border-radius:6px; }
+.consentComparison { margin:20px 0; padding:16px; background:#0f0f0f; border-radius:8px; text-align:center; }
 .consentComparison p { margin:0 0 10px; }
-.consentComparison .consentCode { font-size:20px; font-weight:600; letter-spacing:.06em; }
-.consentConfirm { display:flex; gap:10px; align-items:flex-start; }
+.consentComparison .consentCode { margin:8px 0 12px; color:inherit; font-size:clamp(20px,5vw,28px); font-weight:600; letter-spacing:.06em; font-variant-numeric:tabular-nums; }
+.consentConfirm { display:flex; gap:10px; align-items:center; justify-content:center; min-height:44px; cursor:pointer; }
 .consentConfirm input { width:auto; flex:none; margin:4px 0 0; }
 .consentPages { display:flex; align-items:center; justify-content:space-between; gap:12px; margin:16px 0; }
-.consentActions { margin-top:24px; justify-content:flex-end; }
+.consentActions { margin-top:24px; display:grid; grid-template-columns:1fr 2fr; gap:12px; }
+.consentActions button:only-child { grid-column:1 / -1; }
 .consentMessage { margin-top:16px; }
-.consentSignOut { margin-top:20px; }
+.consentSignOut { margin-top:12px; }
+.consentIdentity { display:grid; gap:4px; margin-top:20px; overflow-wrap:anywhere; }
+.consentIdentity span { color:var(--muted); }
+.consentLicense { gap:10px; margin:20px 0 8px; }
+.consentNote { margin-top:20px; }
+.consentAccount { width:min(100%,520px); margin-top:20px; color:var(--muted); overflow-wrap:anywhere; }
+.consentAccount summary,.consentReference summary { cursor:pointer; padding:10px 0; min-height:44px; }
+.consentAccount p { font-size:inherit; }
+.consentCard .consentReference { margin-top:0; }
+.consentCard .consentReference summary { padding:4px 0; min-height:44px; }
 .consentCard>.button { display:inline-block; margin-top:20px; }
 
 .modalOverlay {
@@ -696,3 +700,17 @@ code {
 @media(max-width:767px) {
   .protectedNodes .tablePane { padding:0 16px; }
 }
+
+.licenseDownload { min-width:0; max-width:340px; }
+.licenseDownload summary,.appActivity summary,.browserSessions>summary { cursor:pointer; padding:12px 0; min-height:44px; }
+.licenseDownload label { display:grid; gap:8px; margin-top:12px; }
+.licenseDownload button { margin-top:12px; }
+.licenseDownload input { width:100%; min-width:0; }
+.licenseReference { display:block; color:var(--muted); overflow-wrap:anywhere; }
+.appActivity,.browserSessions { margin-top:24px; }
+
+.signOutControl { text-align:right; max-width:240px; }
+
+@media(max-width:1023px) { .licenseAction:has(.licenseDownload) { display:block; } .licenseAction:has(.licenseDownload)::before { display:none; } .licenseDownload { max-width:none; } }
+
+@media(min-width:1024px) { .licenseTable th:first-child { width:18%; } .licenseTable th:last-child { width:28%; } .licenseTable td { vertical-align:top; } }

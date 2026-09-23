@@ -23,6 +23,16 @@
     {
       "inSpec": true,
       "method": "POST",
+      "path": "/portal/v1/auth/password/reset"
+    },
+    {
+      "inSpec": true,
+      "method": "POST",
+      "path": "/portal/v1/auth/password/complete"
+    },
+    {
+      "inSpec": true,
+      "method": "POST",
       "path": "/portal/v1/auth/password/login"
     },
     {
@@ -4898,6 +4908,212 @@
           ]
         }
       },
+      "/portal/v1/auth/password/complete": {
+        "post": {
+          "description": "POST only; opening the email link does not consume it. Single-use atomic redemption creates an empty verified account or resets an existing credential. Reset revokes sessions, OTPs and ephemeral account tokens. Outstanding reset links become invalid after any password change. Token must be passed in JSON, never a query parameter. IP 10/900s and token 5/900s before hashing.",
+          "operationId": "authCompletePassword",
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "password": {
+                      "maxLength": 128,
+                      "minLength": 15,
+                      "type": "string"
+                    },
+                    "token": {
+                      "pattern": "^[A-Za-z0-9_-]{43}$",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "token",
+                    "password"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "required": true
+          },
+          "responses": {
+            "200": {
+              "description": "Signed in with a rotated opaque HttpOnly session cookie. No password/hash is returned."
+            },
+            "400": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "invalid_link",
+                          "invalid_registration",
+                          "invalid_json"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Expired, used or invalid link, or invalid password/JSON."
+            },
+            "401": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "invalid_credentials",
+                          "unauthorized"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Invalid credentials or session."
+            },
+            "403": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "cross_site_forbidden",
+                          "verified_sign_in_required"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Origin mismatch or fresh verified sign-in required."
+            },
+            "404": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "not_found"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Password sign-in disabled."
+            },
+            "409": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "registration_unavailable",
+                          "password_change_conflict"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Registration unavailable or settings changed concurrently."
+            },
+            "413": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "body_too_large"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Request body exceeds 8192 bytes."
+            },
+            "429": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "rate_limited"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Per-IP or login-identifier limit reached."
+            },
+            "503": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "config_error"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Session/database configuration unavailable."
+            }
+          },
+          "security": [],
+          "summary": "Redeem an email proof and set a password.",
+          "tags": [
+            "auth"
+          ]
+        }
+      },
       "/portal/v1/auth/password/login": {
         "post": {
           "description": "Requires exact Origin. Wrong password, unknown login and disabled customer return the same denial. Per-IP 30/900s and per-email 10/900s. Session creation atomically checks the verified password hash is still current.",
@@ -5109,30 +5325,20 @@
       },
       "/portal/v1/auth/password/register": {
         "post": {
-          "description": "Requires exact Origin and enabled password sign-in. Email is an unverified login identifier stored separately from customer contact email. Never claims an existing customer or grants licenses. Per-IP limit 5/900s and per-email 10/900s before scrypt.",
+          "description": "Requires exact Origin, password enablement and an email sender. Links expire after 15 minutes. Registration never claims existing accounts; reset is restricted to active accounts whose credential email matches their verified contact address. Shared email send limit 1/60s, per-action email 10/900s, IP 5/900s for registration and 30/900s for reset. Resend uses the same endpoint.",
           "operationId": "authRegisterPassword",
           "requestBody": {
             "content": {
               "application/json": {
                 "schema": {
                   "properties": {
-                    "current_password": {
-                      "description": "Required for an existing password unless this is a recent OTP/OAuth session.",
-                      "type": "string"
-                    },
                     "email": {
                       "format": "email",
-                      "type": "string"
-                    },
-                    "password": {
-                      "maxLength": 128,
-                      "minLength": 15,
                       "type": "string"
                     }
                   },
                   "required": [
-                    "email",
-                    "password"
+                    "email"
                   ],
                   "type": "object"
                 }
@@ -5141,8 +5347,8 @@
             "required": true
           },
           "responses": {
-            "200": {
-              "description": "Signed in with a rotated opaque HttpOnly session cookie. No password/hash is returned."
+            "202": {
+              "description": "Generic verification_requested response, including ineligible addresses and delivery failures. No session or account is created."
             },
             "400": {
               "content": {
@@ -5156,37 +5362,15 @@
                     "properties": {
                       "code": {
                         "enum": [
-                          "invalid_json",
-                          "invalid_registration"
+                          "invalid_email",
+                          "invalid_json"
                         ]
                       }
                     }
                   }
                 }
               },
-              "description": "Invalid JSON, email or password length."
-            },
-            "401": {
-              "content": {
-                "application/json": {
-                  "schema": {
-                    "allOf": [
-                      {
-                        "$ref": "#/components/schemas/ErrorEnvelope"
-                      }
-                    ],
-                    "properties": {
-                      "code": {
-                        "enum": [
-                          "invalid_credentials",
-                          "unauthorized"
-                        ]
-                      }
-                    }
-                  }
-                }
-              },
-              "description": "Invalid credentials or session."
+              "description": "Invalid email or JSON."
             },
             "403": {
               "content": {
@@ -5228,28 +5412,6 @@
                 }
               },
               "description": "Password sign-in disabled."
-            },
-            "409": {
-              "content": {
-                "application/json": {
-                  "schema": {
-                    "allOf": [
-                      {
-                        "$ref": "#/components/schemas/ErrorEnvelope"
-                      }
-                    ],
-                    "properties": {
-                      "code": {
-                        "enum": [
-                          "registration_unavailable",
-                          "password_change_conflict"
-                        ]
-                      }
-                    }
-                  }
-                }
-              },
-              "description": "Registration unavailable or settings changed concurrently."
             },
             "413": {
               "content": {
@@ -5300,17 +5462,178 @@
                     ],
                     "properties": {
                       "code": {
-                        "const": "config_error"
+                        "enum": [
+                          "email_unconfigured",
+                          "config_error"
+                        ]
                       }
                     }
                   }
                 }
               },
-              "description": "Session/database configuration unavailable."
+              "description": "Email or session configuration unavailable."
             }
           },
           "security": [],
-          "summary": "Register an empty account with email and password.",
+          "summary": "Request email verification before creating an account.",
+          "tags": [
+            "auth"
+          ]
+        }
+      },
+      "/portal/v1/auth/password/reset": {
+        "post": {
+          "description": "Requires exact Origin, password enablement and an email sender. Links expire after 15 minutes. Registration never claims existing accounts; reset is restricted to active accounts whose credential email matches their verified contact address. Shared email send limit 1/60s, per-action email 10/900s, IP 5/900s for registration and 30/900s for reset. Resend uses the same endpoint.",
+          "operationId": "authResetPassword",
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "email": {
+                      "format": "email",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "email"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "required": true
+          },
+          "responses": {
+            "202": {
+              "description": "Generic verification_requested response, including ineligible addresses and delivery failures. No session or account is created."
+            },
+            "400": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "invalid_email",
+                          "invalid_json"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Invalid email or JSON."
+            },
+            "403": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "cross_site_forbidden",
+                          "verified_sign_in_required"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Origin mismatch or fresh verified sign-in required."
+            },
+            "404": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "not_found"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Password sign-in disabled."
+            },
+            "413": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "body_too_large"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Request body exceeds 8192 bytes."
+            },
+            "429": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "rate_limited"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Per-IP or login-identifier limit reached."
+            },
+            "503": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "email_unconfigured",
+                          "config_error"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Email or session configuration unavailable."
+            }
+          },
+          "security": [],
+          "summary": "Request password recovery at a verified email.",
           "tags": [
             "auth"
           ]
@@ -5725,7 +6048,7 @@
       }
     ]
   },
-  "openApiOperationCount": 31,
+  "openApiOperationCount": 33,
   "PORTAL_ROUTE_KEYS": [
     "GET /openapi.json",
     "GET /docs",
@@ -5743,6 +6066,8 @@
     "GET /portal/v1/auth/github/callback",
     "GET /portal/v1/auth/identities",
     "POST /portal/v1/auth/password/register",
+    "POST /portal/v1/auth/password/reset",
+    "POST /portal/v1/auth/password/complete",
     "POST /portal/v1/auth/password/login",
     "GET /portal/v1/auth/password",
     "POST /portal/v1/auth/password",
@@ -5761,7 +6086,7 @@
     "POST /api/portal/device-authorizations/deny",
     "GET /api/portal/device-bindings"
   ],
-  "routeCount": 33,
-  "routeKeyCount": 33,
+  "routeCount": 35,
+  "routeKeyCount": 35,
   "service": "cloudflare-customer-portal"
 }

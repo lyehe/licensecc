@@ -13,13 +13,14 @@ function makeEnvelope(code, data) {
 }
 makeEnvelope.nextRequestId = 0;
 
-test("email/password registration opens an empty account and does not request an email code", async ({ page }) => {
+test("registration verifies email before choosing a password and opens an empty account", async ({ page }) => {
   let authed = false;
   const submissions = [];
   await page.route("**/portal/v1/auth/**", (route) => {
     const path = new URL(route.request().url()).pathname;
     if (path.endsWith("/providers")) return route.fulfill({ json: makeEnvelope("auth_providers", { google: false, github: false, email: false, password: true }) });
-    if (path.endsWith("/password/register")) { submissions.push(route.request().postDataJSON()); authed = true; return route.fulfill({ json: makeEnvelope("signed_in", { customer_id: "new-customer" }) }); }
+    if (path.endsWith("/password/register")) { submissions.push(route.request().postDataJSON()); return route.fulfill({ status: 202, json: makeEnvelope("verification_requested") }); }
+    if (path.endsWith("/password/complete")) { submissions.push(route.request().postDataJSON()); authed = true; return route.fulfill({ json: makeEnvelope("signed_in", { customer_id: "new-customer" }) }); }
     throw new Error(`Unexpected auth route ${path}`);
   });
   await page.route("**/api/portal/**", (route) => {
@@ -30,13 +31,26 @@ test("email/password registration opens an empty account and does not request an
   await expect(page.getByRole("button", { name: "Send code" })).toHaveCount(0);
   await page.getByRole("button", { name: "Create an account", exact: true }).click();
   await page.getByLabel("Email", { exact: true }).fill("new@example.com");
-  await page.getByLabel("Password", { exact: true }).fill("A long testing passphrase 1!");
-  await expect(page.getByText(/your email is not verified/)).toBeVisible();
+  await expect(page.locator('input[type="password"]')).toHaveCount(0);
   await page.setViewportSize({ width: 390, height: 844 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  await page.getByRole("button", { name: "Create account", exact: true }).click();
+  await page.getByRole("button", { name: "Send verification link", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText("Check your email");
+  expect(submissions).toEqual([{ email: "new@example.com" }]);
+  const token = "a".repeat(43);
+  await page.goto(`/password-action#token=${token}`);
+  await expect(page.getByRole("heading", { name: "Choose your password" })).toBeVisible();
+  expect(page.url()).not.toContain(token);
+  expect(submissions).toHaveLength(1);
+  await page.getByLabel("New password", { exact: true }).fill("A long testing passphrase 1!");
+  await page.getByLabel("Confirm password", { exact: true }).fill("A different testing passphrase");
+  await page.getByRole("button", { name: "Save password and sign in" }).click();
+  await expect(page.getByRole("alert")).toHaveText("Passwords do not match.");
+  expect(submissions).toHaveLength(1);
+  await page.getByLabel("Confirm password", { exact: true }).fill("A long testing passphrase 1!");
+  await page.getByRole("button", { name: "Save password and sign in" }).click();
   await expect(page.getByRole("heading", { name: "Apps", exact: true })).toBeVisible();
-  expect(submissions).toEqual([{ email: "new@example.com", password: "A long testing passphrase 1!" }]);
+  expect(submissions[1]).toEqual({ token, password: "A long testing passphrase 1!" });
   await expect(page.locator('input[type="password"]')).toHaveCount(0);
 });
 
@@ -46,7 +60,7 @@ test("password login errors clear the secret and explain recovery", async ({ pag
   await page.route("**/portal/v1/auth/password/login", (route) => route.fulfill({ status: 401, json: { ok: false, code: "invalid_credentials" } }));
   await page.goto("/");
   await expect(page.getByRole("button", { name: "Continue with Google" })).toBeHidden();
-  await page.getByText("Other sign-in options", { exact: true }).click();
+  if (!await page.locator(".otherSignIn").evaluate(element => element.open)) await page.getByText("Other sign-in options", { exact: true }).click();
   await expect(page.getByRole("button", { name: "Continue with Google" })).toBeVisible();
   await page.getByLabel("Email", { exact: true }).fill("new@example.com");
   await page.getByLabel("Password", { exact: true }).fill("A wrong testing passphrase");
@@ -54,7 +68,36 @@ test("password login errors clear the secret and explain recovery", async ({ pag
   await expect(page.getByRole("alert")).toHaveText("Email or password is incorrect.");
   await expect(page.getByLabel("Password", { exact: true })).toHaveValue("");
   await page.getByText("Forgot your password?", { exact: true }).click();
-  await expect(page.getByText(/contact your administrator for recovery/)).toBeVisible();
+  await expect(page.getByText(/We’ll send a reset link/)).toBeVisible();
+  await page.route("**/portal/v1/auth/password/reset", route => {
+    expect(route.request().postDataJSON()).toEqual({ email: "new@example.com" });
+    return route.fulfill({ status: 202, json: makeEnvelope("verification_requested") });
+  });
+  await page.getByRole("button", { name: "Send reset link" }).click();
+  await expect(page.getByRole("alert")).toContainText("Check your email");
+});
+
+test("expired password link shows recovery guidance and reloading cannot retain the secret", async ({ page }) => {
+  await page.route("**/api/portal/me", route => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" } }));
+  await page.route("**/portal/v1/auth/providers", route => route.fulfill({ json: makeEnvelope("auth_providers", { password: true }) }));
+  let attempts = 0;
+  await page.route("**/portal/v1/auth/password/complete", route => {
+    attempts += 1;
+    return route.fulfill({ status: 400, json: { ok: false, code: "invalid_link" } });
+  });
+  const token = "b".repeat(43);
+  await page.goto(`/password-action#token=${token}`);
+  await page.getByLabel("New password", { exact: true }).fill("A replacement passphrase 2!");
+  await page.getByLabel("Confirm password", { exact: true }).fill("A replacement passphrase 2!");
+  await page.getByRole("button", { name: "Save password and sign in" }).click();
+  await expect(page.getByRole("alert")).toContainText("expired or was already used");
+  await expect(page.getByLabel("New password", { exact: true })).toHaveValue("");
+  expect(page.url()).not.toContain(token);
+  expect(await page.evaluate(value => [...Object.values(localStorage), ...Object.values(sessionStorage)].some(v => v.includes(value)), token)).toBe(false);
+  await page.reload();
+  await expect(page.getByRole("alert")).toContainText("Open the link from your email again");
+  await expect(page.getByRole("button", { name: "Save password and sign in" })).toHaveCount(0);
+  expect(attempts).toBe(1);
 });
 
 test("Account password change requires the current password and confirms session rotation", async ({ page }) => {
@@ -287,6 +330,13 @@ test("customer portal signs in with an 8-digit code and walks every screen witho
   await expect(page.getByText(/Check your email/)).toBeVisible();
   await expect.poll(() => api.requests.authRequests).toBe(1);
 
+  // Resending shares the request path but must retain the verification form and input.
+  await page.getByLabel("8-digit code").fill("1234");
+  await page.getByRole("button", { name: "Resend code", exact: true }).click();
+  await expect.poll(() => api.requests.authRequests).toBe(2);
+  await expect(page.getByLabel("8-digit code")).toHaveValue("1234");
+  await expect(page.getByRole("button", { name: "Send code", exact: true })).toHaveCount(0);
+
   // --- Login: enter the 8-digit code -> me() -> dashboard ---
   await page.getByLabel("8-digit code").fill(api.VALID_CODE);
   await page.getByRole("button", { name: "Verify" }).click();
@@ -295,15 +345,16 @@ test("customer portal signs in with an 8-digit code and walks every screen witho
 
   // --- Per-app access (read-only) ---
   await page.getByRole("link", { name: "View app DEFAULT" }).click();
-  await expect(page.getByText("pro", { exact: true }).first()).toBeVisible();
+  await expect(page.locator(".tablePane tbody tr").filter({hasText:"pro"}).first()).toBeVisible();
   await expect(page.locator(".status.enabled").first()).toHaveText("enabled");
   await expect(page.getByText("aaaaaaaa...aaaaaaaa").first()).toBeVisible();
 
   // --- My devices/seats: floating seat checkout/heartbeat/release ---
   await page.getByRole("link", { name: "Devices", exact: true }).click();
+  await page.getByText("Browser sessions", {exact:true}).click();
   const seatCard = page.locator(".seatCard").filter({ hasText: "pro" }).first();
   await expect(seatCard.getByRole("button", { name: "Start seat" })).toBeEnabled();
-  await expect(seatCard.getByRole("button", { name: "Refresh" })).toBeDisabled();
+  await expect(seatCard.getByRole("button", { name: "Renew seat" })).toBeDisabled();
   await expect(seatCard.getByRole("button", { name: "Release" })).toBeDisabled();
 
   await seatCard.getByRole("button", { name: "Start seat" }).click();
@@ -313,10 +364,10 @@ test("customer portal signs in with an 8-digit code and walks every screen witho
   expect(checkout.body).not.toHaveProperty("seat_id");
   expect(checkout.body.client_instance_id).toMatch(/^[0-9a-f-]{36}$/);
   await expect(seatCard.getByRole("button", { name: "Start seat" })).toBeDisabled();
-  await expect(seatCard.getByRole("button", { name: "Refresh" })).toBeEnabled();
+  await expect(seatCard.getByRole("button", { name: "Renew seat" })).toBeEnabled();
   await expect(seatCard.getByRole("button", { name: "Release" })).toBeEnabled();
 
-  await seatCard.getByRole("button", { name: "Refresh" }).click();
+  await seatCard.getByRole("button", { name: "Renew seat" }).click();
   await expect.poll(() => api.requests.heartbeats).toBe(1);
   const heartbeat = api.requests.seatActions.at(-1);
   expect(heartbeat).toMatchObject({ op: "heartbeat", body: { entitlement_id: "ent_floating", seat_id: "seat-e2e" } });
@@ -370,7 +421,7 @@ test("customer portal signs in with an 8-digit code and walks every screen witho
   await expect(cancelRelease).toBeFocused();
   await expect(page.locator("main")).toHaveAttribute("aria-hidden", "true");
   await expect(page.locator("main")).toHaveAttribute("inert", "");
-  await expect(page.locator("main").getByRole("button", { name: "Refresh" })).toHaveCount(0);
+  await expect(page.locator("main").getByRole("button", { name: "Renew seat" })).toHaveCount(0);
   await page.keyboard.press("Tab");
   await expect(confirmRelease).toBeFocused();
   await page.keyboard.press("Tab");
@@ -391,7 +442,7 @@ test("customer portal signs in with an 8-digit code and walks every screen witho
   await expect(releaseDialog).toHaveCount(0);
   await expect.poll(() => api.requests.releases).toBe(0);
   await expect.poll(() => page.evaluate(() => window.localStorage.getItem("licensecc.portal.seats.v1"))).toBe(storedSeatSessionBeforeReleaseConfirm);
-  await expect(seatCard.getByRole("button", { name: "Refresh" })).toBeEnabled();
+  await expect(seatCard.getByRole("button", { name: "Renew seat" })).toBeEnabled();
   await expect(seatCard.getByRole("button", { name: "Release" })).toBeEnabled();
   await expect(seatCard.getByRole("button", { name: "Release" })).toBeFocused();
   await page.setViewportSize({ width: 1280, height: 720 });
@@ -470,7 +521,7 @@ test("customer portal signs in with an 8-digit code and walks every screen witho
   await expect(seatCard.getByRole("button", { name: "Start seat" })).toBeEnabled();
   await expect(seatCard.getByRole("button", { name: "Start seat" })).toBeFocused();
   expect(await page.evaluate(() => document.activeElement?.tagName)).not.toBe("BODY");
-  await expect(seatCard.getByRole("button", { name: "Refresh" })).toBeDisabled();
+  await expect(seatCard.getByRole("button", { name: "Renew seat" })).toBeDisabled();
   await expect(seatCard.getByRole("button", { name: "Release" })).toBeDisabled();
 
   // A valid release is authoritative even when the follow-up status refresh rejects. The local
@@ -479,7 +530,7 @@ test("customer portal signs in with an 8-digit code and walks every screen witho
   await seatCard.getByRole("button", { name: "Start seat" }).click();
   await expect.poll(() => api.requests.checkouts).toBe(2);
   await expect(seatCard.getByRole("button", { name: "Start seat" })).toBeDisabled();
-  await expect(seatCard.getByRole("button", { name: "Refresh" })).toBeEnabled();
+  await expect(seatCard.getByRole("button", { name: "Renew seat" })).toBeEnabled();
   const refreshFailureReleaseCount = api.requests.releases;
   const refreshFailureStoredSession = await page.evaluate(() => window.localStorage.getItem("licensecc.portal.seats.v1"));
   expect(refreshFailureStoredSession).not.toBeNull();
@@ -506,11 +557,12 @@ test("customer portal signs in with an 8-digit code and walks every screen witho
   // --- Usage ---
   await page.getByRole("link", { name: "Apps", exact: true }).click();
   await page.getByRole("link", { name: "View app DEFAULT" }).click();
-  await expect(page.getByText("Recorded usage")).toBeVisible();
+  await page.getByText("Activity",{exact:true}).click();
   await expect(page.getByText("87", { exact: true })).toBeVisible();
 
   // --- Download: triggers a browser download of the streamed attachment ---
   // License download is part of the app details.
+  await page.locator("tr").filter({has:page.getByLabel("Device key for DEFAULT solo")}).getByText("Activate and download",{exact:true}).click();
   await page.getByLabel("Device key for DEFAULT solo").fill("device-e2e");
   const downloadPromise = page.waitForEvent("download");
   await page.getByRole("button", { name: "Activate and download .lic" }).first().click();
@@ -543,8 +595,13 @@ async function signIn(page, api) {
 test("app grouping, browser history and mobile reflow preserve the customer context", async ({ page }) => {
   const api = makePortalApiFixture();
   api.entitlements.push({ ...api.entitlements[0], id: "second_app", project: "SECOND_APP", feature: "second-feature" });
+  api.entitlements.push({ ...api.entitlements[0], id: "duplicate_feature" });
+  api.entitlements.reverse();
   await signIn(page, api);
   await expect(page.locator(".appRow")).toHaveCount(2);
+  await expect(page.locator(".appRow h2")).toHaveText(["DEFAULT", "SECOND_APP"]);
+  await expect(page.locator(".appRow").nth(0)).toContainText("3 licenses · 2 features");
+  await expect(page.locator(".appRow").nth(1)).toContainText("1 license · 1 feature");
   await page.getByRole("link", { name: "View app SECOND_APP" }).click();
   await expect(page.getByRole("heading", { name: "SECOND_APP", exact: true })).toBeVisible();
   await expect(page.getByText("solo", { exact: true })).toHaveCount(0);
@@ -561,9 +618,9 @@ test("app grouping, browser history and mobile reflow preserve the customer cont
   await page.getByRole("link", { name: "Devices", exact: true }).click();
   await page.setViewportSize({ width: 320, height: 900 });
   await page.screenshot({ path: "../../build/worker-staging/portal-redesign-nodes-mobile.png", fullPage: true });
-  await page.getByRole("searchbox", { name: "Find a node" }).fill("missing");
-  await expect(page.getByRole("heading", { name: "No matching nodes" })).toBeVisible();
-  await page.getByRole("searchbox", { name: "Find a node" }).fill("");
+  await page.getByRole("searchbox", { name: "Find a device" }).fill("missing");
+  await expect(page.getByRole("heading", { name: "No matching devices" })).toBeVisible();
+  await page.getByRole("searchbox", { name: "Find a device" }).fill("");
   await expect(page.getByText("d".repeat(40), { exact: true })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await page.getByRole("link", { name: "Account", exact: true }).click();
@@ -602,16 +659,18 @@ test("usage failure stays local and removing a filtered registration keeps the s
   await signIn(page, api);
   await page.getByRole("link", { name: "View app DEFAULT" }).click();
   await expect(page.getByText(/Usage is unavailable/)).toBeVisible();
+  await page.locator("tr").filter({has:page.getByLabel("Device key for DEFAULT solo")}).getByText("Activate and download",{exact:true}).click();
   await page.getByLabel("Device key for DEFAULT solo").fill("device-e2e");
   await expect(page.getByRole("button", { name: "Activate and download .lic" })).toBeEnabled();
   api.controls.rejectUsage = false;
   await page.getByRole("button", { name: "Retry usage" }).click();
+  await page.getByText("Activity",{exact:true}).click();
   await expect(page.getByText("87", { exact: true })).toBeVisible();
   await page.getByRole("link", { name: "Devices", exact: true }).click();
   await page.getByRole("combobox", { name: "App", exact: true }).selectOption("DEFAULT");
   page.once("dialog", (dialog) => dialog.accept());
   await page.locator(".registrations").getByRole("button", { name: "Release", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "No matching nodes" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "No matching devices" })).toBeVisible();
   await expect(page.getByRole("combobox", { name: "App", exact: true })).toHaveValue("DEFAULT");
   await expect(page.getByRole("option", { name: "DEFAULT", exact: true })).toHaveCount(1);
   await page.getByRole("combobox", { name: "App", exact: true }).selectOption("");
@@ -619,7 +678,7 @@ test("usage failure stays local and removing a filtered registration keeps the s
 });
 
 
-test("protected access uses app enrollment while legacy downloads respect date boundaries", async ({ page }) => {
+test("protected access uses app enrollment while legacy downloads respect date boundaries", async ({ page }, testInfo) => {
   const api = makePortalApiFixture();
   api.entitlements.push({ ...api.entitlements[1], id: "protected", feature: "protected", enforcement_mode: "device_bound_v1" });
   api.entitlements[1].valid_until = Math.floor(Date.now() / 1000) - 1;
@@ -627,15 +686,41 @@ test("protected access uses app enrollment while legacy downloads respect date b
   await page.route("**/api/portal/**", api.route);
   await signIn(page, api);
   await page.getByRole("link", { name: "View app DEFAULT" }).click();
-  await expect(page.getByRole("heading", { name: "Connect your app" })).toBeVisible();
+  await expect(page.getByText("Connect from your app",{exact:true})).toBeVisible();
   await expect(page.getByRole("cell", { name: "Protected device", exact: true })).toBeVisible();
   await expect(page.getByLabel("Device key for DEFAULT protected")).toHaveCount(0);
-  await expect(page.locator(".status.expired")).toHaveCount(2);
+  await expect(page.locator(".status.expired")).toHaveCount(1);
+  await page.locator("tr").filter({has:page.getByLabel("Device key for DEFAULT solo")}).getByText("Activate and download",{exact:true}).click();
   await page.getByLabel("Device key for DEFAULT solo").fill("test-device");
   await expect(page.getByRole("button", { name: "Activate and download .lic" })).toBeDisabled();
   expect(api.requests.downloads).toBe(0);
+  for (const width of [320, 390, 768, 1280, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    await expect(page.getByText("Status reflects license dates. Your app also checks device and trial access.", { exact: true })).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await page.screenshot({ path: testInfo.outputPath(`license-access-${width}.png`), fullPage: true });
+  }
   api.entitlements.splice(0, 2);
   await page.reload();
-  await expect(page.getByRole("heading", { name: "Connect your app" })).toBeVisible();
+  await expect(page.getByText("Connect from your app",{exact:true})).toBeVisible();
   await expect(page.getByRole("heading", { name: "Download licenses" })).toHaveCount(0);
+});
+
+test("sign-in headings follow the chosen method after registration and reset", async ({ page }) => {
+  await page.route("**/api/portal/me", route => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" } }));
+  await page.route("**/portal/v1/auth/providers", route => route.fulfill({ json: makeEnvelope("auth_providers", { google: true, github: true, email: true, password: true }) }));
+  await page.goto("/");
+  await page.getByRole("button", { name: "Create an account", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Create account", exact: true })).toBeVisible();
+  if (!await page.locator(".otherSignIn").evaluate(element => element.open)) await page.getByText("Other sign-in options", { exact: true }).click();
+  await page.getByRole("button", { name: "Use an email code instead" }).click();
+  await expect(page.getByRole("heading", { name: "Sign in", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Use a password instead" }).click();
+  await expect(page.getByRole("heading", { name: "Create account", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Back to sign in", exact: true }).click();
+  await page.getByRole("button", { name: "Forgot your password?" }).click();
+  await expect(page.getByRole("heading", { name: "Reset password", exact: true })).toBeVisible();
+  if (!await page.locator(".otherSignIn").evaluate(element => element.open)) await page.getByText("Other sign-in options", { exact: true }).click();
+  await page.getByRole("button", { name: "Use an email code instead" }).click();
+  await expect(page.getByRole("heading", { name: "Sign in", exact: true })).toBeVisible();
 });

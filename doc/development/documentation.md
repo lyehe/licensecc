@@ -89,8 +89,8 @@ raw source paths so strict builds validate navigation.
 
 `.readthedocs.yaml` is the source-controlled Read the Docs build contract.
 `doc/conf.py` obtains the canonical URL from the
-`READTHEDOCS_CANONICAL_URL` build variable; never hard-code the retired
-upstream GitHub Pages domain or an unconfirmed Read the Docs project slug.
+`READTHEDOCS_CANONICAL_URL` build variable; do not hard-code an unrelated
+documentation domain or an unconfirmed Read the Docs project slug.
 
 The project is currently prerelease across the combined platform surface. In
 the Read the Docs dashboard:

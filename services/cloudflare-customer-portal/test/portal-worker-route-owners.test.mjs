@@ -14,7 +14,10 @@ import { DIRECT_ROUTE_TESTS as consentRoutes } from "./portal-worker-device-cons
 import { DIRECT_ROUTE_TESTS as retireRoutes } from "./portal-worker-device-retire.test.mjs";
 import { DIRECT_ROUTE_TESTS as bindingRoutes } from "./portal-worker-bindings.test.mjs";
 
+import { DIRECT_ROUTE_TESTS as passwordEmailRoutes } from "./portal-worker-password-email.test.mjs";
+
 const GROUPS = Object.freeze({
+  passwordEmail: passwordEmailRoutes,
   bindings: bindingRoutes,
   retire: retireRoutes,
   consent: consentRoutes,
@@ -31,7 +34,9 @@ const ROUTE_OWNER_TABLE = Object.freeze({
   "POST /api/portal/device-authorizations/inspect": "consent",
   "POST /api/portal/device-authorizations/approve": "consent",
   "POST /api/portal/device-authorizations/deny": "consent",
-  "POST /portal/v1/auth/password/register": "password",
+  "POST /portal/v1/auth/password/register": "passwordEmail",
+  "POST /portal/v1/auth/password/reset": "passwordEmail",
+  "POST /portal/v1/auth/password/complete": "passwordEmail",
   "POST /portal/v1/auth/password/login": "password",
   "GET /portal/v1/auth/password": "password",
   "POST /portal/v1/auth/password": "password",

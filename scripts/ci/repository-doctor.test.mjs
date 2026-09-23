@@ -11,7 +11,6 @@ function cleanSnapshot(overrides = {}) {
     branches: ["main"],
     remotes: {
       origin: "https://github.com/lyehe/licensecc.git",
-      upstream: "https://github.com/open-license-manager/licensecc.git",
     },
     mainDivergence: { ahead: 0, behind: 0 },
     localOutputs: [],
@@ -46,8 +45,7 @@ test("local hygiene and toolchain drift are advisory by default", () => {
     worktrees: ["C:/repo", "C:/repo-task"],
     branches: Array.from({ length: 11 }, (_, index) => `task-${index}`),
     remotes: {
-      origin: "https://github.com/open-license-manager/licensecc.git",
-      upstream: "https://github.com/lyehe/licensecc.git",
+      origin: "https://github.com/example/other-repository.git",
     },
     mainDivergence: { ahead: 2, behind: 3 },
     localOutputs: ["build"],
@@ -58,7 +56,7 @@ test("local hygiene and toolchain drift are advisory by default", () => {
   }));
   assert.equal(result.exitCode, 0);
   assert.equal(result.summary.errors, 0);
-  assert.ok(result.summary.warnings >= 9);
+  assert.equal(result.summary.warnings, 8);
   assert.ok(result.findings.some(({ code }) => code === "DOCTOR_MULTIPLE_WORKTREES"));
   assert.ok(result.findings.some(({ code }) => code === "DOCTOR_TOOL_MISSING"));
   assert.ok(result.findings.some(({ code }) => code === "DOCTOR_TOOL_VERSION"));

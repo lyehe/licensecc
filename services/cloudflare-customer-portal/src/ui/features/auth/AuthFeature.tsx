@@ -16,10 +16,15 @@ import {
 import { api, localMessage, resultMessage, StatusLine } from "../../shared/api";
 import type { PortalMe, StatusMessage } from "../../types";
 
-import { PasswordSignIn } from "./PasswordSignIn";
+import { PasswordSignIn, type PasswordMode } from "./PasswordSignIn";
 import { ProviderButtons, ProviderResult, useProviders } from "./ProviderSignIn";
 
 export type AuthPhase = "loading" | "request" | "verify" | "authed" | "error";
+const PASSWORD_HEADINGS: Record<PasswordMode, string> = {
+  login: "Sign in",
+  register: "Create account",
+  reset: "Reset password",
+};
 
 interface AuthOptions {
   setMessage: React.Dispatch<React.SetStateAction<StatusMessage | null>>;
@@ -58,7 +63,9 @@ export function usePortalAuth({ setMessage, runOnce }: AuthOptions): PortalAuth 
         return true;
       }
       setPhase(result.code === "unauthorized" ? "request" : "error");
-      } catch { setPhase("error"); }
+    } catch {
+      setPhase("error");
+    }
     return false;
   }, [setMessage]);
 
@@ -66,20 +73,25 @@ export function usePortalAuth({ setMessage, runOnce }: AuthOptions): PortalAuth 
     void loadMe();
   }, [loadMe]);
 
+  async function requestCode(): Promise<string | null> {
+    const normalized = normalizeEmail(email);
+    if (!isLikelyEmail(normalized)) {
+      setMessage(localMessage("invalid_email", false));
+      return null;
+    }
+    const result = await api(authRequestPath(), {
+      method: "POST",
+      body: JSON.stringify({ email: normalized }),
+    });
+    setMessage(resultMessage(result));
+    return result.ok ? normalized : null;
+  }
+
   async function submitRequest(event: React.FormEvent): Promise<void> {
     event.preventDefault();
     await runOnce(async () => {
-      const normalized = normalizeEmail(email);
-      if (!isLikelyEmail(normalized)) {
-        setMessage(localMessage("invalid_email", false));
-        return;
-      }
-      const result = await api(authRequestPath(), {
-        method: "POST",
-        body: JSON.stringify({ email: normalized }),
-      });
-      setMessage(resultMessage(result));
-      if (result.ok) {
+      const normalized = await requestCode();
+      if (normalized !== null) {
         setEmail(normalized);
         setPhase("verify");
       }
@@ -88,16 +100,7 @@ export function usePortalAuth({ setMessage, runOnce }: AuthOptions): PortalAuth 
 
   async function resendCode(): Promise<void> {
     await runOnce(async () => {
-      const normalized = normalizeEmail(email);
-      if (!isLikelyEmail(normalized)) {
-        setMessage(localMessage("invalid_email", false));
-        return;
-      }
-      const result = await api(authRequestPath(), {
-        method: "POST",
-        body: JSON.stringify({ email: normalized }),
-      });
-      setMessage(resultMessage(result));
+      await requestCode();
     });
   }
 
@@ -163,6 +166,10 @@ export function AuthFeature({ auth, busy, message, connecting = false }: {
 }): React.ReactElement | null {
   const { providers, failed, retry } = useProviders();
   const [emailCode, setEmailCode] = useState(false);
+  const [passwordMode, setPasswordMode] = useState<PasswordMode>("login");
+  const passwordHeading = !emailCode && providers?.password && auth.phase === "request"
+    ? PASSWORD_HEADINGS[passwordMode]
+    : "Sign in";
   if (auth.phase === "authed") return null;
   if (auth.phase === "loading" || auth.phase === "error") {
     return (
@@ -179,14 +186,14 @@ export function AuthFeature({ auth, busy, message, connecting = false }: {
     <main className="authPane">
       <div className="authBrand brand"><span aria-hidden="true">L</span>Licensecc</div>
       <section className="authCard">
-        <h1>Sign in</h1>
+        <h1>{passwordHeading}</h1>
         <p>{connecting ? "Sign in to approve this device connection." : "Sign in to manage your licenses and devices."}</p>
         <StatusLine message={message} fallback="" />
         <ProviderResult />
         {auth.phase === "request" && failed && <p>Unable to load sign-in options. <button onClick={retry}>Retry sign-in options</button></p>}
         {auth.phase === "request" && !providers && !failed && <p>Loading sign-in options…</p>}
         {auth.phase === "request" && providers && !providers.google && !providers.github && !providers.email && !providers.password && <p>Sign-in is not configured yet. Contact your administrator.</p>}
-        {auth.phase === "request" && providers?.password && !emailCode && <PasswordSignIn onSignedIn={auth.retrySession} />}
+        {auth.phase === "request" && providers?.password && !emailCode && <PasswordSignIn onSignedIn={auth.retrySession} mode={passwordMode} onModeChange={setPasswordMode} />}
         {auth.phase === "request" && providers?.email && (!providers.password || emailCode) && (
           <form onSubmit={(event) => void auth.submitRequest(event)}>
             <label>

@@ -550,6 +550,20 @@ CREATE TABLE IF NOT EXISTS portal_otp (
   FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS portal_password_actions (
+  token_hash TEXT PRIMARY KEY NOT NULL,
+  purpose TEXT NOT NULL CHECK (purpose IN ('register', 'reset')),
+  email_lower TEXT NOT NULL,
+  customer_id TEXT NOT NULL,
+  credential_hash TEXT,
+  created_at INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL,
+  consumed_at INTEGER,
+  claim TEXT,
+  CHECK (expires_at > created_at),
+  CHECK ((purpose = 'register' AND credential_hash IS NULL) OR (purpose = 'reset' AND credential_hash IS NOT NULL))
+);
+
 CREATE TABLE IF NOT EXISTS portal_passwords (
   customer_id TEXT PRIMARY KEY NOT NULL REFERENCES customers(id),
   email_lower TEXT NOT NULL UNIQUE,
@@ -846,6 +860,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_portal_otp_code ON portal_otp(code_hmac);
 CREATE INDEX IF NOT EXISTS idx_portal_otp_expires ON portal_otp(expires_at);
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_portal_otp_secret ON portal_otp(secret_hmac);
+
+CREATE INDEX IF NOT EXISTS idx_portal_password_actions_expiry ON portal_password_actions(expires_at);
 
 CREATE INDEX IF NOT EXISTS idx_portal_sessions_customer ON portal_sessions(customer_id);
 

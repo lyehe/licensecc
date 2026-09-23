@@ -214,6 +214,27 @@ test("/health verifies the backend's required mode instead of a duplicated porta
   }
 });
 
+test("/health uses the same-zone backend service binding when it is configured", async () => {
+  const { db, env } = baseFixture();
+  const calls = [];
+  env.BACKEND = {
+    fetch: async (request) => {
+      calls.push({ url: request.url, redirect: request.redirect });
+      return backendHealth({ accountTokenMode: "required" });
+    },
+  };
+  try {
+    const response = await withFetchStub(async () => {
+      throw new Error("same-zone health must use the service binding");
+    }, () => call(env, "GET", "/health", {}));
+    assert.equal(response.status, 200);
+    assert.equal(response.body.code, "healthy");
+    assert.deepEqual(calls, [{ url: "https://backend.test/health", redirect: "manual" }]);
+  } finally {
+    db.close();
+  }
+});
+
 test("/health fails closed when the backend reports account-token enforcement off", async () => {
   const { db, env } = baseFixture();
   try {

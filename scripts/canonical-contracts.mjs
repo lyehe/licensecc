@@ -14,7 +14,7 @@ const HTTP_METHODS = new Set(["get", "put", "post", "delete", "options", "head",
 const DEPLOYABLES = Object.freeze([
   { id: "backend", directory: "services/cloudflare-licensing-backend", expectedRoutes: 23 },
   { id: "admin", directory: "services/cloudflare-license-admin", expectedRoutes: 73 },
-  { id: "portal", directory: "services/cloudflare-customer-portal", expectedRoutes: 33 },
+  { id: "portal", directory: "services/cloudflare-customer-portal", expectedRoutes: 35 },
   { id: "backup", directory: "services/cloudflare-d1-backup" },
 ]);
 
@@ -235,7 +235,7 @@ function runNpmBuild(directory, repoRoot) {
       shell: false,
       stdio: "inherit",
     };
-    const npmCli = path.join(path.dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js");
+    const npmCli = process.env.npm_execpath || path.join(path.dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js");
     let retriedWithCli = false;
     let settled = false;
     const settle = (callback) => {
@@ -427,7 +427,7 @@ async function captureContracts(repoRoot) {
       routeKeysField: "PORTAL_ROUTE_KEYS",
       openApi: portalOpenApi.openApiDocument,
       openApiField: "openApiDocument",
-      expectedRoutes: 33,
+      expectedRoutes: 35,
     }),
     backup: captureBackupSurface(repoRoot),
   };

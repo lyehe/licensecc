@@ -57,12 +57,12 @@ function ConsoleShell(): React.ReactElement {
       <div className="consoleBody">
         <header className="topbar">
           <button ref={menuRef} type="button" className="mobileMenuTrigger" data-workspace-menu aria-controls="workspace-navigation" aria-expanded={menuOpen && !modalActive} onClick={() => setMenuOpen((current) => !current)}>Menu</button>
-          <span className="workspaceLabel"><span className="workspacePrefix">Workspace <span aria-hidden="true">/</span> </span>{label}</span>
+          <span className="workspaceLabel">{label}</span>
           <EnvironmentBadge />
           <Search onNavigate={navigate} onOpen={() => setMenuOpen(false)} closeSignal={navigationVersion} hiddenByMenu={menuOpen} />
         </header>
         <div id="workspace-content" className="workspaceContent" tabIndex={-1}>
-          <div className="pageHeading"><div><p className="eyebrow">License operations</p><h2 data-workspace-heading tabIndex={-1}>{label}</h2><p>{descriptions[activeTab]}</p></div></div>
+          <div className="pageHeading"><div><h2 data-workspace-heading tabIndex={-1}>{label}</h2><p>{descriptions[activeTab]}</p></div></div>
           {navigationNotice !== null && <p className="activityMessage" data-tone="info" role="status">{navigationNotice}</p>}
           {feedback.message && <div className="activityMessage" data-tone={feedback.tone} role={feedback.tone === "error" ? "alert" : "status"}>{feedback.message}</div>}
           {activeTab === "overview" && <div className="quickActions"><button className="primary" onClick={() => navigateTab("entitlements")}>Manage access <span aria-hidden="true">→</span></button><button onClick={() => navigateTab("reports")}>View usage</button></div>}

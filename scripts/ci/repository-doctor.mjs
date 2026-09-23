@@ -42,11 +42,7 @@ export function evaluateRepositorySnapshot(snapshot, { strictLocal = false } = {
   if (remotes.origin && !/github\.com[/:]lyehe\/licensecc(?:\.git)?$/iu.test(remotes.origin)) {
     findings.push(finding("warning", "DOCTOR_ORIGIN_REMOTE", "origin should name the maintained lyehe/licensecc repository.", remotes.origin));
   }
-  if (remotes.upstream && !/github\.com[/:]open-license-manager\/licensecc(?:\.git)?$/iu.test(remotes.upstream)) {
-    findings.push(finding("warning", "DOCTOR_UPSTREAM_REMOTE", "upstream should name the historical open-license-manager repository.", remotes.upstream));
-  }
   if (!remotes.origin) findings.push(finding("warning", "DOCTOR_ORIGIN_MISSING", "The canonical origin remote is missing."));
-  if (!remotes.upstream) findings.push(finding("warning", "DOCTOR_UPSTREAM_MISSING", "The historical upstream remote is missing."));
 
   const divergence = snapshot.mainDivergence;
   if (divergence && (divergence.ahead > 0 || divergence.behind > 0)) {

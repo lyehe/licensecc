@@ -3,8 +3,8 @@ import { ProviderButtons, ProviderResult, useProviders } from "../auth/ProviderS
 import { PasswordSettings } from "./PasswordSettings";
 import { api } from "../../shared/api";
 
-export function AccountFeature({ customerId, busy, logout }: {
-  customerId: string | null; busy: boolean; logout(): Promise<void>;
+export function AccountFeature({ customerId }: {
+  customerId: string | null;
 }): React.ReactElement {
   const { providers, failed, retry } = useProviders();
   const [identities, setIdentities] = useState<Array<{ provider: string; email: string }> | null>(null);
@@ -24,7 +24,6 @@ export function AccountFeature({ customerId, busy, logout }: {
     <div className="pageHeading"><div><h1>Account</h1><p>Manage how you sign in.</p></div></div>
     <ProviderResult />
     {(failed || identityError || !providers || !identities || providers.google || providers.github || identities.length > 0) && <section className="tablePane full"><h2>Connected accounts</h2>
-      <p>Use a connected account to sign in.</p>
       {(failed || identityError) ? <p>Unable to load sign-in methods. <button onClick={() => { retry(); setAttempt((value) => value + 1); }}>Retry</button></p> : !providers || !identities ? <p>Loading sign-in methods…</p> : <>
         {identities.map((identity) => <p key={identity.provider}>{identity.provider === "google" ? "Google" : "GitHub"} · {identity.email}</p>)}
         <ProviderButtons providers={providers} linked={identities.map((identity) => identity.provider)} link />
@@ -32,7 +31,6 @@ export function AccountFeature({ customerId, busy, logout }: {
       </>}
     </section>}
     {providers?.password && <PasswordSettings />}
-    <section className="tablePane full"><h2>Sign out</h2><p>Your apps and devices stay connected.</p><button disabled={busy} onClick={() => void logout()}>Sign out</button></section>
     <details className="referenceDetails"><summary>Account details</summary><p>Account ID</p><p className="identifier">{customerId ?? "Account details unavailable"}</p></details>
   </div>;
 }

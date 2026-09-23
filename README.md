@@ -120,9 +120,9 @@ failure signals, and next integration steps.
 | `services/` | Online verification, administration, customer self-service, and backup | [Operations](doc/operations/index.rst) |
 | `sdks/` | Signed-token verification and selected backend HTTP calls | [SDK reference](doc/api/sdks.rst) |
 
-**Versioning:** no namespaced release has been tagged yet. The C++ library
-carries the upstream 2.x lineage (`2.1.0` in CMake); platform services, SDKs,
-and Node packages are `0.1.0-rc.2` and versioned independently.
+**Versioning:** no namespaced release has been tagged yet. The C++ library is
+`2.1.0` in CMake. Platform services, SDKs, and Node packages are `0.1.0-rc.2`
+and versioned independently.
 [`version.json`](version.json) is the platform version authority. Platform tags
 use `platform-v*`, future independent C++ tags use `cpp-v*`, and new bare `v*`
 tags are forbidden. See [CHANGELOG.md](CHANGELOG.md) and

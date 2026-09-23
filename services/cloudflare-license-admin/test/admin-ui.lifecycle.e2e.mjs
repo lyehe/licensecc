@@ -92,7 +92,7 @@ test("admin UI completes entitlement lifecycle and blocks duplicate create submi
 
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "licensecc admin" })).toBeVisible();
-  await page.getByRole("link", { name: "Entitlements" }).click();
+  await page.getByRole("link", { name: "License access" }).click();
 
   if (!await page.locator("section.editorLayout form").isVisible()) await page.getByRole("button", { name: "New entitlement", exact: true }).click();
 
@@ -168,15 +168,15 @@ test("admin UI completes entitlement lifecycle and blocks duplicate create submi
   await expect(entitlementActions.locator(".status.revoked")).toHaveText("revoked");
   await expect(entitlementActions.getByRole("button", { name: "Edit" })).toBeDisabled();
   const revokedReenable = entitlementActions.getByRole("button", { name: "Reenable", includeHidden: true });
-  await openActionMenu(revokedReenable);
-  await expect(revokedReenable).toBeDisabled();
+  await expect(revokedReenable).toHaveCount(0);
 
+  if (await page.getByRole("button", { name: "Activity", exact: true }).getAttribute("aria-expanded") === "false") await page.getByRole("button", { name: "Activity", exact: true }).click();
   await page.getByRole("link", { name: "Events" }).click();
   for (const eventType of ["create", "update", "disable", "reenable", "revoke"]) {
     await expect(page.getByText(eventType, { exact: true })).toBeVisible();
   }
-  await expect(page.getByText("admin@example.com").first()).toBeVisible();
-  await expect(page.getByText("(access)").first()).toBeVisible();
+  await page.getByText("Event details", { exact: true }).first().click();
+  await expect(page.getByText("admin@example.com (access)", { exact: true }).first()).toBeVisible();
 
   const pageText = await page.locator("body").innerText();
   expect(pageText).not.toContain("PRIVATE KEY");
@@ -190,7 +190,7 @@ test("admin UI runs bulk transitions, global search deep-link, and CSV export", 
   await page.route("**/api/admin/**", api.route);
 
   await page.goto("/");
-  await page.getByRole("link", { name: "Entitlements", exact: true }).click();
+  await page.getByRole("link", { name: "License access", exact: true }).click();
 
   // Seed two entitlements via the create form (the fixture stores them so bulk/search can act).
   async function createEntitlement(feature, fingerprint) {
@@ -247,7 +247,7 @@ test("admin UI retains the server-owned four-entitlement batch limit", async ({ 
   const api = makeAdminApiFixture();
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
-  await page.getByRole("link", { name: "Entitlements", exact: true }).click();
+  await page.getByRole("link", { name: "License access", exact: true }).click();
   if (!await page.locator("section.editorLayout form").isVisible()) await page.getByRole("button", { name: "New entitlement", exact: true }).click();
   const createForm = page.locator("section.editorLayout form");
   for (const [index, fingerprint] of ["a", "b", "c", "d", "e"].entries()) {
@@ -286,8 +286,9 @@ test("admin UI previews and applies a license plan projection", async ({ page })
   await page.route("**/api/admin/**", api.route);
 
   await page.goto("/");
-  await page.getByRole("link", { name: "Plans" }).click();
-  await expect(page.locator(".sidebar nav a[aria-current=page]")).toHaveText("Plans");
+  if (await page.getByRole("button", { name: "Configuration", exact: true }).getAttribute("aria-expanded") === "false") await page.getByRole("button", { name: "Configuration", exact: true }).click();
+  await page.getByRole("link", { name: "Plans & features" }).click();
+  await expect(page.locator(".sidebar nav a[aria-current=page]")).toHaveText("Plans & features");
 
   let featureForm = await openCatalogEditor(page, "Features", "New feature", "Catalog feature");
   await featureForm.getByLabel("Feature key").fill("core");
@@ -313,7 +314,7 @@ test("admin UI previews and applies a license plan projection", async ({ page })
   await page.getByRole("button", { name: "Add feature", exact: true }).click();
   const planFeatureForm = page.getByRole("form", { name: "Plan feature" });
   await planFeatureForm.getByLabel("Feature key").fill("core");
-  await planFeatureForm.getByLabel("Policy ID").fill("pol_node");
+  await planFeatureForm.getByLabel("Policy", { exact: true }).selectOption("pol_node");
   await planFeatureForm.getByRole("button", { name: "Save plan feature" }).click();
   await expect.poll(() => api.requests.catalogPlanFeatures.length).toBe(1);
   await expect(page.getByText(/catalog_plan_feature_saved/)).toBeVisible();
@@ -321,7 +322,7 @@ test("admin UI previews and applies a license plan projection", async ({ page })
   await planFeatureForm.getByLabel("Feature key").fill("team");
   await planFeatureForm.getByLabel("Inclusion").selectOption("addon");
   await planFeatureForm.getByLabel("Add-on key").fill("team_seats");
-  await planFeatureForm.getByLabel("Policy ID").fill("pol_float");
+  await planFeatureForm.getByLabel("Policy", { exact: true }).selectOption("pol_float");
   await planFeatureForm.getByLabel("Pool size").fill("6");
   await planFeatureForm.getByLabel("Max devices").fill("6");
   await planFeatureForm.getByLabel("Max borrow").fill("172800");
@@ -458,7 +459,7 @@ test("admin UI previews and applies a license plan projection", async ({ page })
   await expect(page.getByRole("row", { name: /Analytics analytics included - pol_node/ })).toBeVisible();
 
   await openCatalogView(page, "Plans");
-  await page.getByRole("button", { name: "Prepare plan application", exact: true }).click();
+  await page.getByRole("button", { name: "Apply plan", exact: true }).click();
   const form = page.getByRole("form", { name: "Plan projection" });
   let projectionNotes = "";
   async function fillProjectionForm() {
@@ -475,7 +476,7 @@ test("admin UI previews and applies a license plan projection", async ({ page })
       const backToPlans = page.getByRole("button", { name: "Back to plans", exact: true });
       if (await backToPlans.isVisible()) await backToPlans.click();
       await openCatalogView(page, "Plans");
-      await page.getByRole("button", { name: "Prepare plan application", exact: true }).click();
+      await page.getByRole("button", { name: "Apply plan", exact: true }).click();
     }
     await fillProjectionForm();
   }
@@ -499,6 +500,7 @@ test("admin UI previews and applies a license plan projection", async ({ page })
   const applyButton = form.getByRole("button", { name: "Apply" });
   await expect(applyButton).toBeEnabled();
   await expect(page.getByText(/Server preview ppv_ui_/)).toBeVisible();
+  await page.getByText("Technical details", { exact: true }).click();
   await expect(page.getByText(/Local form digest [0-9a-f]{64}/)).toBeVisible();
 
   // Any projection-form edit invalidates the bound preview until the operator previews again.
@@ -574,7 +576,7 @@ test("admin UI previews and applies a license plan projection", async ({ page })
   await page.getByRole("row", { name: /Pro Annual pro/ }).getByRole("button", { name: "View plan", exact: true }).click();
   await page.getByRole("button", { name: "Add feature", exact: true }).click();
   await planFeatureForm.getByLabel("Feature key").fill("analytics");
-  await planFeatureForm.getByLabel("Policy ID").fill("pol_node");
+  await planFeatureForm.getByLabel("Policy", { exact: true }).selectOption("pol_node");
   await planFeatureForm.getByRole("button", { name: "Save plan feature" }).click();
   await expect.poll(() => api.requests.catalogPlanFeatures.length).toBe(3);
   await openProjectionEditor();
@@ -610,15 +612,16 @@ test("admin UI previews and applies a license plan projection", async ({ page })
   await expect(applyButton).toBeDisabled();
   await openCatalogView(page, "Plans");
   await page.getByRole("row", { name: /Growth growth/ }).getByRole("button", { name: "View plan", exact: true }).click();
-  await page.getByRole("button", { name: "Prepare plan application", exact: true }).click();
+  await page.getByRole("button", { name: "Apply plan", exact: true }).click();
   await form.getByLabel("Plan ID").fill("");
   await form.getByLabel("Plan key").fill("pro");
   await freshPreview();
 
   // Returning to the pane and refreshing its catalog data both require a new preview.
-  await page.getByRole("link", { name: "Entitlements", exact: true }).click();
-  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Plans", exact: true }).click();
-  await page.getByRole("button", { name: "Prepare plan application", exact: true }).click();
+  await page.getByRole("link", { name: "License access", exact: true }).click();
+  if (await page.getByRole("button", { name: "Configuration", exact: true }).getAttribute("aria-expanded") === "false") await page.getByRole("button", { name: "Configuration", exact: true }).click();
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Plans & features", exact: true }).click();
+  await page.getByRole("button", { name: "Apply plan", exact: true }).click();
   await expect(applyButton).toBeDisabled();
   await freshPreview();
   await page.getByRole("button", { name: "Back to plans", exact: true }).click();
@@ -634,7 +637,7 @@ test("admin UI previews and applies a license plan projection", async ({ page })
   await expect(page.getByText(/Execution result; re-preview required before another Apply/)).toBeVisible();
   await expect(page.getByText(/license_plan_projection_applied/)).toBeVisible();
 
-  await page.getByRole("link", { name: "Entitlements", exact: true }).click();
+  await page.getByRole("link", { name: "License access", exact: true }).click();
   await expect(page.getByRole("cell", { name: /DEFAULT\s+core/ })).toBeVisible();
   await expect(page.getByRole("cell", { name: /DEFAULT\s+team/ })).toBeVisible();
   await expect(page.locator(".desktopRecords").getByText("floating", { exact: true })).toBeVisible();
