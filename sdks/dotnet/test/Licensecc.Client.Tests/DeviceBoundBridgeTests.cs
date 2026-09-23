@@ -157,7 +157,7 @@ public sealed unsafe class DeviceBoundBridgeTests
         finally { File.Delete(path); }
     }
     [TestMethod]
-    public void LoadingViaDlopenPreservesNonAsciiPathBytesExactly()
+    public void LoadingViaDlopenPinsCurrentUtf8PathMarshalling()
     {
         if(!OperatingSystem.IsLinux()) { Assert.Inconclusive("Linux-only: dlopen path marshaling for non-ASCII paths."); return; }
         var directory=Path.Combine(Path.GetTempPath(),"licensecc-é東京-"+Guid.NewGuid().ToString("N"));
@@ -166,9 +166,10 @@ public sealed unsafe class DeviceBoundBridgeTests
         try
         {
             File.WriteAllText(path,"not an ELF binary, just text");
-            // dlopen must receive the exact UTF-8 bytes of the path, not a lossy ANSI/codepage
-            // transliteration; a mismatch would report ENOENT (file not found) rather than the
-            // real "not an ELF" failure, and the reported path text would be mangled.
+            // Pins the current behavior: dlopen receives the exact UTF-8 bytes of the path, so it
+            // reports the real "not an ELF" failure naming the unmangled path. This is a regression
+            // pin, not a proof of the LPUTF8Str attribute: .NET's default string marshalling is
+            // already UTF-8 on Unix, so the test would still pass without the attribute there.
             var error=Assert.ThrowsExactly<DllNotFoundException>(()=>new NativeApi(path));
             Assert.IsTrue(error.Message.Contains(path),$"Expected the real dlerror() text (naming the exact Unicode path '{path}'), got: \"{error.Message}\"");
         }
