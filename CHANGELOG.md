@@ -66,16 +66,41 @@ are recorded in [ADR 0005](doc/architecture/decisions/0005-platform-version-and-
   guarded status transitions share one helper, and webhook disable requires an audited reason.
 - Customer portal and operator console flows simplified; portal proxies the
   backend through the `BACKEND` service binding (#27).
-- `LCC_ENABLE_LINUX_DESKTOP` defaults ON only with the TPM2 or test provider,
-  with a clear libcurl 7.85+ configure-time error otherwise (remediation).
+- `LCC_ENABLE_LINUX_DESKTOP` defaults ON only when the TPM2 or test provider is
+  enabled (forcing it ON without one is a configure error); separately, the
+  Linux desktop build now reports a clear configure-time error when libcurl is
+  older than 7.85 (remediation).
 - Protected-device global rate fuse counts only per-source-admitted requests;
   optional `BOUND_SESSION_RATE_LIMITER` and `BOUND_GLOBAL_RATE_LIMIT`; the
   per-customer verified budget now scales with the entitlement's device limit,
   and replaying an already-committed lease never consumes rate budget
   (remediation).
+- IPv6 sources of protected-device traffic are rate-limited per /64 prefix
+  (IPv4-mapped addresses count as their IPv4 address), at the edge and in D1
+  (remediation).
+- Portal API: `POST /portal/v1/auth/password/complete` may now return 200
+  `password_updated` with `data.sign_in_required: true` (and no session cookie)
+  when the password was saved but the follow-on sign-in could not be
+  completed; clients must send the user to sign in. `registration_unavailable`
+  is no longer part of the password OpenAPI contract (remediation).
+- .NET SDK: the Linux protected-device native loader binds eagerly
+  (`RTLD_NOW`), so a native library with missing symbols fails at load instead
+  of at first call (remediation).
+- Portal OTP and password-link email delivery failures, including provider
+  timeouts, are reported as `portal.email_delivery_failed` with `error_type`
+  `send_failed` (remediation).
 - Admin action labels describe what they do, and the portal's browser-sessions
   panel reflects real session state instead of staying artificially open
   (remediation).
+
+### Upgrade notes
+- Existing Linux build trees that cached `LCC_ENABLE_LINUX_DESKTOP=ON` without
+  a device-key provider now stop with a configure error: enable
+  `LCC_ENABLE_TPM2_OPENSSL` (or, for tests,
+  `LCC_BUILD_DEVICE_IDENTITY_TEST_PROVIDER`) or set
+  `LCC_ENABLE_LINUX_DESKTOP=OFF`.
+- Checkpoint directories previously created with mode 0500 under a restrictive
+  umask are not repaired automatically; fix their permissions (0700) manually.
 
 ### Fixed
 - C++ core: unstable disk-derived hardware ids on device-path fstab entries; `confirm_license`
