@@ -192,9 +192,10 @@ Every ruling recorded during execution, verbatim from `progress.md`:
   `cloudflare:workflows` contract gap that became D1's fix round 1.
 - Workstream gate: `check:pr` green except Ruling R7 (confirmed independently by D3 after the D1
   fix round 1 landed).
-- Deferred minor findings: D1 — older integrity-failure tests do not assert the dump is removed;
-  the README does not mention a manifest-put failure as a cleanup trigger. D3 — no explicit
-  `LPUTF8Str` on the `dlopen` path parameter; the Windows host lacks the pinned .NET SDK 8.0.423
+- Deferred minor findings: D1 — older integrity-failure tests do not assert the dump is removed
+  (**Resolved in the follow-up (`fix/followup-small-gaps`, `d0a018e`, `1d431ee`).**); the README does not mention a
+  manifest-put failure as a cleanup trigger. D3 — no explicit `LPUTF8Str` on the `dlopen` path
+  parameter (**Resolved in the follow-up (`fix/followup-small-gaps`, `6af0eb5`).**); the Windows host lacks the pinned .NET SDK 8.0.423
   and Java (tests ran in WSL instead).
 
 ### Workstream E — docs, example CI, UI cleanup, CHANGELOG (`fix/review-e-docs-ui`)
@@ -240,24 +241,29 @@ All items above, gathered in one place for triage before/at merge:
    (plan-mandated).
 2. A1: an observed read under true concurrency can spuriously 429 (fails safe, pre-existing).
 3. A2: no HTTP-level test of the scaled customer cap (only direct `limitBoundVerified`).
+   **Resolved in the follow-up (`fix/followup-small-gaps`, `e730976`).**
 4. B1: no test for the address being claimed by another customer between reset request and
    complete (write-time guard verified only by reading). **Resolved in the final fix wave (B-3).**
 5. B2 (SHOULD FIX): `portal_otp.mjs`'s `deliveryErrorType` maps only `email_send_failed` to
    `send_failed`; add an `email_send_indeterminate` → `send_failed` mapping. **Resolved in the
    final fix wave (B-1).**
 6. B2: the "answer before any account lookup" test only gates `fetch`; strengthen it to assert no
-   `portal_password_actions` row exists before `settle()`.
+   `portal_password_actions` row exists before `settle()`. **Resolved in the follow-up (`fix/followup-small-gaps`, `0376576`).**
 7. B3: C1 control characters (`\u0080`–`\u009f`) are not excluded from the email syntax.
+   **Resolved in the follow-up (`fix/followup-small-gaps`, `4dcf05c`).**
 8. B4: the settings `GET` shared response map still documents codes `GET` cannot emit
-   (pre-existing).
+   (pre-existing). **Resolved in the follow-up (`fix/followup-small-gaps`, `e380e7b`).**
 9. C1: no socket-state filter in the `/proc` tcp match (`TIME_WAIT` uid-0 edge); the `tcp6` unit
-   case has no decoy server row.
+   case has no decoy server row. **Resolved in the follow-up (`fix/followup-small-gaps`, `e896344`, `91df9cf`).**
 10. C2: 65536 fd ceiling in the `fcntl` fallback; the PATH-unset fallback is untested; the 3s poll
-    is an observable behavior change from the prior 1s.
+    is an observable behavior change from the prior 1s. **PATH-unset part resolved in the
+    follow-up (`fix/followup-small-gaps`, `91df9cf`); the rest stays deferred (see below).**
 11. C3: a `renameat2`-unsupported `linkat` fallback can leave `nlink==2` after a crash, causing
-    permanent `KEY_CORRUPT` (document or sweep).
+    permanent `KEY_CORRUPT` (document or sweep). **Resolved in the follow-up (`fix/followup-small-gaps`, `1cf43c6`,
+    `8ad5740`).**
 12. C3: a hard-linked reference with a bad owner/mode now returns `KEY_CORRUPT` instead of
     `ACCESS_DENIED` (would need the nlink check moved after the `S_ISREG`/uid check to change).
+    **Resolved in the follow-up (`fix/followup-small-gaps`, `1cf43c6`).**
 13. C3: redundant `nlink` condition in `load_reference` needs a comment; the directory fix has no
     dedicated unit test; directories already created 0500 are never repaired (release note).
 14. C4: `_lcc_linux_desktop_default` is not explicitly `unset()`; the consumer-side curl message
@@ -266,8 +272,8 @@ All items above, gathered in one place for triage before/at merge:
     sanitizer preset is not detected.
 16. D1: older integrity-failure tests do not assert the dump is removed; the README does not
     mention a manifest-put failure as a cleanup trigger. **README part resolved in the final fix
-    wave (D-1).**
-17. D3: no explicit `LPUTF8Str` on the `dlopen` path parameter.
+    wave (D-1); test part resolved in the follow-up (`fix/followup-small-gaps`, `d0a018e`, `1d431ee`).**
+17. D3: no explicit `LPUTF8Str` on the `dlopen` path parameter. **Resolved in the follow-up (`fix/followup-small-gaps`, `6af0eb5`).**
 18. E1: the commit trailer on `da45c3e` names the wrong model (see item 21).
 19. E2: the Windows CI step's generator variable is untested against the real VS2026 runner; no
     unit test for the new script (matches sibling scripts).
@@ -472,14 +478,43 @@ belong to the post-integration gate above; no fix-wave change touched C++, SDK o
 
 ### Final-review minor findings deferred
 
+All six are **resolved in the follow-up (`fix/followup-small-gaps`)**:
+
 - E3: keyboard focus on the Start-seat control can drop when the device panel remounts.
+  Resolved (`f135461`, `80e47c2`, `acaeb40`).
 - C3: window between the `nlink` check and the `.delete` quarantine / `linkat` fallback.
+  Resolved: crash-left library links are swept under the storage lock (`1cf43c6`, `8ad5740`).
 - C4: the real old-libcurl `FATAL_ERROR` path is still unexercised (only simulated locally).
+  Resolved: a consumer CTest exercises the FATAL path (`6a48fb7`).
 - A: an out-of-range `BOUND_GLOBAL_RATE_LIMIT` silently clamps to the default 1000 with no
-  warning.
+  warning. Resolved: readiness reports it (`03c4e4f`, `adc93c2`).
 - A: the per-entitlement cap `max(240, 2 × max_active_devices)` is applied to a customer-wide
-  counter.
-- E2: the example build script keeps a stale default CMake generator.
+  counter. Resolved: the computation is documented (`6cba822`) and tested over HTTP (`e730976`).
+- E2: the example build script keeps a stale default CMake generator. Resolved (`891b3e3`,
+  `66a4a93`, `deb197b`).
+
+## Follow-up: small gaps closed
+
+Branch `fix/followup-small-gaps` closes most deferred minor findings above. Key commits:
+`4dcf05c` (C1 control characters in login email), `e380e7b`/`235c9b0`/`916c385` (password
+settings OpenAPI maps), `0376576` (password-link dispatch-vs-response test), `03c4e4f`/`adc93c2`
+(global rate limit validated at readiness), `e730976`/`6cba822` (HTTP-level customer-cap test and
+docs), `f135461`/`80e47c2`/`acaeb40` (Start-seat focus), `1cf43c6`/`8ad5740` (TPM2 crash-left
+hard-link sweep, including temporary quarantines and `nlink==3`), `e896344`/`91df9cf` (loopback
+socket-state filter, `tcp6` decoy row, PATH-less browser fallback), `6af0eb5`/`b1b677d`
+(`LPUTF8Str` and its test pin), `d0a018e`/`1d431ee` (backup dump-removal assertions),
+`6a48fb7` (old-curl FATAL path), `891b3e3`/`66a4a93`/`deb197b` (example build generator).
+
+Still deferred, deliberately:
+
+- Item 1 (A1 straddle test's 1-row client-counter leak): the failed straddled batch fails closed by
+  design; the leak only tightens the budget.
+- Item 2 (A1 spurious 429 under true concurrency): fails safe and is pre-existing.
+- Item 10 remainder: the 65536 fd ceiling only matters without `close_range` on kernels older than
+  5.11; the 3 s poll is intentional.
+- B3 staging query: not run; there is no staging access.
+- The private-directory test writes an empty 0700 `~/.licensecc` on the test runner
+  (acknowledged; harmless).
 
 ## Self-review
 
