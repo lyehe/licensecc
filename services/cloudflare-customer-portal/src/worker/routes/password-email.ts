@@ -1,6 +1,7 @@
 import { sendEmail } from "../../auth/portal_email.mjs";
 import { canonicalHttpsOrigin, emailApiOrigin } from "../../auth/portal_destination.mjs";
 import { portalRateLimit } from "../../auth/portal_ratelimit.mjs";
+import { deliveryErrorType, emitEmailDeliveryFailure } from "../../auth/portal_otp.mjs";
 import { clientIp, envelope, readJson } from "../support.js";
 import { hashPassword, loginEmail, validPassword } from "../password/crypto.js";
 import { HEADERS, primary, gate, throttle, signedIn, digest } from "../password/shared.js";
@@ -29,6 +30,14 @@ async function requestLink(request: Request, env: Env, ctx: ExecutionContextLike
 }
 
 async function issueLink(env: Env, email: string, now: number, purpose: Action["purpose"]): Promise<void> {
+  // At most one closed-shape delivery-failure event per request: never the recipient, token,
+  // exception text or whether the address is eligible (only failures after eligibility emit).
+  let reported = false;
+  const report = (errorType: Parameters<typeof emitEmailDeliveryFailure>[0]) => {
+    if (reported) return;
+    reported = true;
+    emitEmailDeliveryFailure(errorType);
+  };
   try {
     const db = primary(env);
     // Verified contact addresses recover credentials. Accounts created before email
@@ -47,11 +56,15 @@ async function issueLink(env: Env, email: string, now: number, purpose: Action["
       .bind(tokenHash, purpose, email, credential?.customer_id ?? `cust_${crypto.randomUUID()}`, purpose === "reset" ? credential!.password_hash : null, now, now + 900).run();
     const link = `${canonicalHttpsOrigin(env.PORTAL_PUBLIC_ORIGIN)}/password-action#token=${token}`;
     const sent = await sendEmail(env, email, purpose === "register" ? "Verify your Licensecc email" : "Reset your Licensecc password", `${purpose === "register" ? "Verify your email and choose a password" : "Choose a new password"}:\n\n${link}\n\nThis link expires in 15 minutes and can be used once. If you did not request it, ignore this email.`);
+    const failure = deliveryErrorType(sent);
+    if (failure !== null) report(failure);
     if (!sent.ok && sent.code !== "email_send_indeterminate") {
       await db.prepare("DELETE FROM portal_password_actions WHERE token_hash = ? AND consumed_at IS NULL").bind(tokenHash).run();
     }
   } catch {
-    // Background delivery never surfaces account state; the proof simply expires.
+    // Background delivery never surfaces account state to the caller; the proof simply expires.
+    // The exception object is discarded: its message may carry provider text, SQL or the address.
+    report("rejected");
   }
 }
 
