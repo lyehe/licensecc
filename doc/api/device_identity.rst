@@ -380,8 +380,9 @@ Linux protected desktop requirements
 
 Build with ``LCC_ENABLE_TPM2_OPENSSL=ON``. Linux requires OpenSSL 3 with the
 TPM2 provider, TPM device permissions, libcurl 7.85 or newer with HTTPS support,
-a system CA trust store, and ``/usr/bin/xdg-open`` for browser consent. Use a
-local filesystem supporting ``flock``, atomic rename and directory ``fsync``.
+a system CA trust store, and the first ``xdg-open`` on an absolute ``PATH``
+entry for browser consent. Use a local filesystem supporting ``flock``,
+atomic rename and directory ``fsync``.
 The user must have a desktop browser on the same machine as the callback
 listener. Failure to start the opener returns ``BROWSER_UNAVAILABLE``. A successful
 launch only starts consent; if the desktop cannot open a browser, the attempt

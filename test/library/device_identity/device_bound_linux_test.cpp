@@ -6,10 +6,13 @@
 #include "bound_http.hpp"
 #include "bound_peer_linux.hpp"
 #include <arpa/inet.h>
+#include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <csignal>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -17,9 +20,14 @@
 
 namespace {
 bool fail_browser_exec = false;
+int inherited_fd = -1;
 int test_browser_exec(const char* executable, char* const args[], char* const environment[]) {
-	if (std::string(executable) != "/usr/bin/xdg-open" || !args[1]) _exit(126);
+	const std::string path(executable);
+	if (path.empty() || path.front() != '/' || path.size() < 9 || path.compare(path.size() - 9, 9, "/xdg-open") != 0 ||
+		!args[1])
+		_exit(126);
 	if (fail_browser_exec) return -1;
+	if (inherited_fd >= 0 && (fcntl(inherited_fd, F_GETFD) & FD_CLOEXEC) == 0) return -1;
 	char sleep[] = "/bin/sleep", duration[] = "2";
 	char* command[]{sleep, duration, nullptr};
 	return execve(sleep, command, environment);
@@ -161,6 +169,42 @@ BOOST_AUTO_TEST_CASE(browser_launcher_does_not_wait_for_browser_lifetime_and_rep
 	fail_browser_exec = true;
 	BOOST_CHECK(browser->open(url) == BoundBrowserStatus::unavailable);
 	fail_browser_exec = false;
+}
+
+BOOST_AUTO_TEST_CASE(browser_launcher_tolerates_hosts_that_ignore_sigchld) {
+	auto browser = make_test_linux_browser_launcher("https://example.com/authorize");
+	BOOST_REQUIRE(browser);
+	const auto previous = std::signal(SIGCHLD, SIG_IGN);
+	const auto result = browser->open("https://example.com/authorize#attempt_handle=" + std::string(43, 'A'));
+	std::signal(SIGCHLD, previous);
+	BOOST_CHECK(result == BoundBrowserStatus::opened);
+}
+
+BOOST_AUTO_TEST_CASE(browser_launcher_does_not_leak_host_descriptors) {
+	auto browser = make_test_linux_browser_launcher("https://example.com/authorize");
+	BOOST_REQUIRE(browser);
+	inherited_fd = ::open("/dev/null", O_RDONLY);
+	BOOST_REQUIRE(inherited_fd >= 0);
+	const auto result = browser->open("https://example.com/authorize#attempt_handle=" + std::string(43, 'A'));
+	::close(inherited_fd);
+	inherited_fd = -1;
+	BOOST_CHECK(result == BoundBrowserStatus::opened);
+}
+
+BOOST_AUTO_TEST_CASE(browser_launcher_uses_absolute_path_entries_only) {
+	Directory bin;
+	const auto opener = bin.path + "/xdg-open";
+	std::ofstream(opener) << "#!/bin/sh\n";
+	BOOST_REQUIRE(chmod(opener.c_str(), 0700) == 0);
+	const std::string saved = std::getenv("PATH") ? std::getenv("PATH") : "";
+	auto browser = make_test_linux_browser_launcher("https://example.com/authorize");
+	BOOST_REQUIRE(browser);
+	const auto url = "https://example.com/authorize#attempt_handle=" + std::string(43, 'A');
+	setenv("PATH", ("relative/bin:" + bin.path).c_str(), 1);
+	BOOST_CHECK(browser->open(url) == BoundBrowserStatus::opened);
+	setenv("PATH", "relative/bin", 1);
+	BOOST_CHECK(browser->open(url) == BoundBrowserStatus::unavailable);
+	setenv("PATH", saved.c_str(), 1);
 }
 
 namespace {
