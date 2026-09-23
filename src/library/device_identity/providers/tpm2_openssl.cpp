@@ -657,15 +657,24 @@ bool valid_reference_status(const struct stat& status) noexcept {
 	return S_ISREG(status.st_mode) && status.st_uid == ::geteuid() && (status.st_mode & 07777U) == 0600U;
 }
 
-/* True for `<stem><32 lowercase hex>`: the library's publish temporary or delete quarantine name. */
+bool lowercase_hex32_at(const std::string& name, std::size_t offset) noexcept {
+	return name.size() >= offset + 32U && name.find_first_not_of("0123456789abcdef", offset) >= offset + 32U;
+}
+
+/* True for the library's publish temporary `<stems[0]><hex>`, delete quarantine `<stems[1]><hex>`, or the
+ * temporary's own quarantine `<stems[0]><hex>.delete.<hex>` (each hex exactly 32 lowercase digits). */
 bool library_sibling_name(const std::string& name, const std::array<std::string, 2>& stems) {
 	for (const std::string& stem : stems) {
 		if (name.size() == stem.size() + 32U && name.compare(0U, stem.size(), stem) == 0 &&
-			name.find_first_not_of("0123456789abcdef", stem.size()) == std::string::npos) {
+			lowercase_hex32_at(name, stem.size())) {
 			return true;
 		}
 	}
-	return false;
+	const std::string& temporary = stems[0];
+	const std::size_t quarantine = temporary.size() + 32U + std::strlen(".delete.");
+	return name.size() == quarantine + 32U && name.compare(0U, temporary.size(), temporary) == 0 &&
+		   lowercase_hex32_at(name, temporary.size()) && name.compare(temporary.size() + 32U, 8U, ".delete.") == 0 &&
+		   lowercase_hex32_at(name, quarantine);
 }
 
 bool valid_removal_status(const struct stat& status, bool require_safe_mode) noexcept {
@@ -1449,27 +1458,44 @@ private:
 		return LCC_DEVICE_OK;
 	}
 
-	LCC_DEVICE_RESULT sweep_library_sibling(int directory, const std::string& filename, const struct stat& reference) {
-		std::vector<std::string> names;
-		if (posix_->list_directory(directory, names) != 0) {
-			return storage_errno_result(errno);
-		}
+	/* Removes one same-inode library sibling per pass until the reference is the only link; a pass that
+	 * removes none means a foreign link remains, so the key is KEY_CORRUPT. */
+	LCC_DEVICE_RESULT sweep_library_siblings(int directory, const std::string& filename, int reference_descriptor,
+											 struct stat& reference) {
 		const std::array<std::string, 2> stems = {
 			filename.substr(0U, filename.size() - std::strlen(".tss2.pem")) + ".tmp.", filename + ".delete."};
-		for (const std::string& name : names) {
-			if (!library_sibling_name(name, stems)) {
-				continue;
+		while (reference.st_nlink > 1) {
+			std::vector<std::string> names;
+			if (posix_->list_directory(directory, names) != 0) {
+				return storage_errno_result(errno);
 			}
-			const int raw_descriptor = posix_->openat(directory, name.c_str(), kReferenceOpenFlags, 0U);
-			DescriptorHandle sibling(posix_, raw_descriptor);
-			struct stat status {};
-			if (raw_descriptor >= 0 && posix_->fstat(sibling.get(), &status) == 0 &&
-				same_file(FileIdentity{reference.st_dev, reference.st_ino},
-						  FileIdentity{status.st_dev, status.st_ino})) {
-				return cleanup_quarantine(directory, name);
+			bool removed = false;
+			for (const std::string& name : names) {
+				if (!library_sibling_name(name, stems)) {
+					continue;
+				}
+				const int raw_descriptor = posix_->openat(directory, name.c_str(), kReferenceOpenFlags, 0U);
+				DescriptorHandle sibling(posix_, raw_descriptor);
+				struct stat status {};
+				if (raw_descriptor >= 0 && posix_->fstat(sibling.get(), &status) == 0 &&
+					same_file(FileIdentity{reference.st_dev, reference.st_ino},
+							  FileIdentity{status.st_dev, status.st_ino})) {
+					const LCC_DEVICE_RESULT cleaned = cleanup_quarantine(directory, name);
+					if (cleaned != LCC_DEVICE_OK) {
+						return cleaned;
+					}
+					removed = true;
+					break;
+				}
+			}
+			if (!removed) {
+				return LCC_DEVICE_KEY_CORRUPT;
+			}
+			if (posix_->fstat(reference_descriptor, &reference) != 0) {
+				return LCC_DEVICE_IO_ERROR;
 			}
 		}
-		return LCC_DEVICE_KEY_CORRUPT;
+		return LCC_DEVICE_OK;
 	}
 
 	LCC_DEVICE_RESULT load_reference(int directory, const std::string& filename, LoadedReference& out) {
@@ -1491,16 +1517,11 @@ private:
 		if (!valid_reference_status(status)) {
 			return LCC_DEVICE_ACCESS_DENIED;
 		}
-		/* Every caller holds the namespace lock, so a second link can only be a crash leftover of
+		/* Every caller holds the namespace lock, so an extra link can only be a crash leftover of
 		 * the library's own publish/delete protocols (swept here) or tampering (KEY_CORRUPT). */
-		if (status.st_nlink == 2) {
-			const LCC_DEVICE_RESULT swept = sweep_library_sibling(directory, filename, status);
-			if (swept != LCC_DEVICE_OK) {
-				return swept;
-			}
-			if (posix_->fstat(descriptor.get(), &status) != 0) {
-				return LCC_DEVICE_IO_ERROR;
-			}
+		const LCC_DEVICE_RESULT swept = sweep_library_siblings(directory, filename, descriptor.get(), status);
+		if (swept != LCC_DEVICE_OK) {
+			return swept;
 		}
 		if (status.st_nlink != 1) {
 			return LCC_DEVICE_KEY_CORRUPT;

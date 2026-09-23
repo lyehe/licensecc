@@ -1543,16 +1543,39 @@ void test_crash_left_hard_link_is_swept_only_for_library_names() {
 			std::make_shared<FakeOpenSsl3Api>(true, false, true), storage);
 		return provider->open(request);
 	};
-	for (const std::string& sibling : {final_name + ".delete." + suffix, stem + ".tmp." + suffix}) {
+	const std::string temporary_quarantine = stem + ".tmp." + suffix + ".delete." + suffix;
+	for (const std::string& sibling :
+		 {final_name + ".delete." + suffix, stem + ".tmp." + suffix, temporary_quarantine}) {
 		require(open_with_sibling(sibling) == LCC_DEVICE_OK, "crash-left library hard link was not swept");
 		require(!storage->has_entry(sibling) && storage->has_entry(final_name),
 				"sweep removed the wrong name or left the library sibling");
 	}
-	for (const std::string& sibling : {std::string("unrelated.pem"), final_name + ".delete.short",
-									   final_name + ".delete." + std::string(32U, 'G')}) {
+	for (const std::string& sibling :
+		 {std::string("unrelated.pem"), final_name + ".delete.short", final_name + ".delete." + std::string(32U, 'G'),
+		  stem + ".tmp." + suffix + ".delete.short", stem + ".tmp." + std::string(31U, 'a') + ".delete." + suffix}) {
 		require(open_with_sibling(sibling) == LCC_DEVICE_KEY_CORRUPT, "unrelated hard link was accepted");
 		require(storage->has_entry(sibling), "unrelated hard link was removed");
 	}
+	// An interrupted linkat publish can leave two library siblings (nlink 3); each pass removes one.
+	storage = std::make_shared<LockReachPosixStorageApi>(true);
+	storage->add_entry(final_name, 104);
+	storage->add_entry(stem + ".tmp." + suffix, 104);
+	storage->add_entry(temporary_quarantine, 104);
+	auto triple_provider = license::device_identity::make_tpm2_openssl_provider(
+		std::make_shared<FakeOpenSsl3Api>(true, false, true), storage);
+	require(triple_provider->open(request) == LCC_DEVICE_OK, "two crash-left library hard links were not swept");
+	require(storage->has_entry(final_name) && !storage->has_entry(stem + ".tmp." + suffix) &&
+				!storage->has_entry(temporary_quarantine),
+			"nlink-3 sweep left a library sibling or removed the reference");
+	// A library sibling next to an unrelated third link stays KEY_CORRUPT and keeps the unrelated name.
+	storage = std::make_shared<LockReachPosixStorageApi>(true);
+	storage->add_entry(final_name, 104);
+	storage->add_entry(stem + ".tmp." + suffix, 104);
+	storage->add_entry("unrelated.pem", 104);
+	auto mixed_provider = license::device_identity::make_tpm2_openssl_provider(
+		std::make_shared<FakeOpenSsl3Api>(true, false, true), storage);
+	require(mixed_provider->open(request) == LCC_DEVICE_KEY_CORRUPT, "unrelated third hard link was accepted");
+	require(storage->has_entry("unrelated.pem"), "unrelated third hard link was removed");
 	// A stale library-named temporary of another inode does not excuse an unrelated hard link.
 	const std::string stale = stem + ".tmp." + suffix;
 	storage = std::make_shared<LockReachPosixStorageApi>(true);

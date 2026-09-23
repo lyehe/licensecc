@@ -400,7 +400,7 @@ It uses ``~/.licensecc/device-keys`` for TPM-wrapped key references and
 ``~/.licensecc/checkpoint-<namespace-hash>`` for signed checkpoints. Directories
 are private (0700), files are private (0600), and symbolic links, hard-linked
 files, changed ownership and unsafe permissions are rejected. The one
-exception: under the storage lock, the library removes a second link left by
+exception: under the storage lock, the library removes extra links left by
 its own interrupted publish or delete. The application cannot override these
 paths through the public protected API. Do not copy or remove these files to
 bypass enrollment or recover a lost key.
