@@ -40,6 +40,13 @@ interface PendingSeatRelease {
   session: SeatSession;
 }
 
+// Focus to move once a seat action's re-render lands: after "start" the seat's session is present,
+// after "release" it is gone (and the release dialog has closed).
+interface PendingSeatFocus {
+  seatId: string;
+  after: "start" | "release";
+}
+
 export interface DevicesController {
   busy: boolean;
   devices: DeviceRow[];
@@ -92,8 +99,8 @@ function writeStoredSeats(json: string): void {
 
 // Verify-then-fallback focus: try the primary target (skipping a disabled button), then the
 // secondary target if the primary did not actually take focus, then the fallback if neither did
-// (activeElement still null/BODY). Shared by the release-focus and start-focus effects below, both
-// of which move focus after a seat action remounts the browser-sessions panel.
+// (activeElement still null/BODY). Used by the pending-seat-focus effect below, which moves focus
+// after a seat start or release remounts the browser-sessions panel.
 function focusFirstAvailable(
   primary: HTMLElement | null | undefined,
   secondary: HTMLElement | null | undefined,
@@ -112,8 +119,7 @@ export function useDevicesController(options: DeviceFeatureOptions): DevicesCont
   const [pendingSeatRelease, setPendingSeatRelease] = useState<PendingSeatRelease | null>(null);
   const [seatReleaseError, setSeatReleaseError] = useState<string | null>(null);
   const [seatReleaseOutcomeUnknown, setSeatReleaseOutcomeUnknown] = useState(false);
-  const [seatReleaseFocusId, setSeatReleaseFocusId] = useState<string | null>(null);
-  const [seatStartFocusId, setSeatStartFocusId] = useState<string | null>(null);
+  const [pendingSeatFocus, setPendingSeatFocus] = useState<PendingSeatFocus | null>(null);
   const seatReleaseDialogRef = useRef<HTMLDivElement>(null);
   const seatReleaseReturnFocusRef = useRef<HTMLElement | null>(null);
   const seatReleaseDeferredFocusRef = useRef<HTMLElement | null>(null);
@@ -192,7 +198,7 @@ export function useDevicesController(options: DeviceFeatureOptions): DevicesCont
     });
     // Set after runOnce resolves (busy has cleared) so the seat's Release button is enabled, and
     // thus focusable, by the time the start-focus effect below runs.
-    if (checkedOut) setSeatStartFocusId(item.id);
+    if (checkedOut) setPendingSeatFocus({ seatId: item.id, after: "start" });
     return { succeeded, refreshFailed };
   }
 
@@ -229,7 +235,7 @@ export function useDevicesController(options: DeviceFeatureOptions): DevicesCont
     try {
       const outcome = await seatAction(pending.item, "release");
       if (outcome.succeeded) {
-        setSeatReleaseFocusId(pending.item.id);
+        setPendingSeatFocus({ seatId: pending.item.id, after: "release" });
         if (outcome.refreshFailed) setMessage(localMessage(FLOATING_SEAT_RELEASE_REFRESH_FAILED_CODE, false));
       } else {
         seatReleaseDeferredFocusRef.current = returnFocus;
@@ -293,31 +299,25 @@ export function useDevicesController(options: DeviceFeatureOptions): DevicesCont
   }, [pendingSeatRelease]);
 
   useEffect(() => {
-    if (seatReleaseFocusId === null || pendingSeatRelease !== null || seatSessions[seatReleaseFocusId] !== undefined) return;
-    // Releasing the last live browser session collapses the panel into a closed <details>, which
-    // makes the seat card/button unfocusable. When neither the start button nor the card took
-    // focus, land it on the panel's own <summary> instead of leaving it on <body>.
-    focusFirstAvailable(
-      seatStartButtonRefs.current[seatReleaseFocusId],
-      seatCardRefs.current[seatReleaseFocusId],
-      browserSessionsSummaryRef.current,
-    );
-    setSeatReleaseFocusId(null);
-  }, [entitlements, pendingSeatRelease, seatReleaseFocusId, seatSessions]);
-
-  useEffect(() => {
-    if (seatStartFocusId === null || seatSessions[seatStartFocusId] === undefined) return;
-    // Starting a floating seat flips hasBrowserSession and remounts the seat grid (<details> ->
-    // <section>), so the just-clicked Start seat button is unmounted and focus would otherwise
-    // drop to <body>. Land it on the seat's own Release button or card, falling back to the
-    // panel's now-visible heading.
-    focusFirstAvailable(
-      seatReleaseButtonRefs.current[seatStartFocusId],
-      seatCardRefs.current[seatStartFocusId],
-      panelHeadingRef.current,
-    );
-    setSeatStartFocusId(null);
-  }, [entitlements, seatSessions, seatStartFocusId]);
+    if (pendingSeatFocus === null) return;
+    const { seatId, after } = pendingSeatFocus;
+    const hasSession = seatSessions[seatId] !== undefined;
+    if (after === "start") {
+      if (!hasSession) return;
+      // Starting a floating seat flips hasBrowserSession and remounts the seat grid (<details> ->
+      // <section>), so the just-clicked Start seat button is unmounted and focus would otherwise
+      // drop to <body>. Land it on the seat's own Release button or card, falling back to the
+      // panel's now-visible heading.
+      focusFirstAvailable(seatReleaseButtonRefs.current[seatId], seatCardRefs.current[seatId], panelHeadingRef.current);
+    } else {
+      if (hasSession || pendingSeatRelease !== null) return;
+      // Releasing the last live browser session collapses the panel into a closed <details>, which
+      // makes the seat card/button unfocusable. When neither the start button nor the card took
+      // focus, land it on the panel's own <summary> instead of leaving it on <body>.
+      focusFirstAvailable(seatStartButtonRefs.current[seatId], seatCardRefs.current[seatId], browserSessionsSummaryRef.current);
+    }
+    setPendingSeatFocus(null);
+  }, [entitlements, pendingSeatFocus, pendingSeatRelease, seatSessions]);
 
   async function releaseDevice(item: DeviceRow): Promise<void> {
     if (!window.confirm(DEVICE_RELEASE_CONFIRM_COPY)) return;
@@ -336,8 +336,7 @@ export function useDevicesController(options: DeviceFeatureOptions): DevicesCont
     setPendingSeatRelease(null);
     setSeatReleaseError(null);
     setSeatReleaseOutcomeUnknown(false);
-    setSeatReleaseFocusId(null);
-    setSeatStartFocusId(null);
+    setPendingSeatFocus(null);
   }
 
   return {
