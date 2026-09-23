@@ -121,7 +121,7 @@ not production-ready configuration.
 | --- | --- | --- |
 | Backend | Account/name, `DB`, canonical client destinations, mode selectors, public verification keys, cron and rate limits | [Backend](https://github.com/lyehe/licensecc/blob/main/services/cloudflare-licensing-backend/README.md) |
 | Admin | Same `DB`, `ENVIRONMENT`, Access issuer/audience and operator allowlist; `ADMIN_DEV_BEARER_ENABLED="0"`; `DEVICE_OPERATOR` targets the backend's `DeviceOperator` entrypoint | [Hosted admin setup](https://github.com/lyehe/licensecc/blob/main/services/cloudflare-license-admin/README.md#hosted-setup) |
-| Portal | Same `DB`, `ENVIRONMENT`, exact `PORTAL_PUBLIC_ORIGIN`, matching `BACKEND_ORIGIN`, chosen sign-in method; `DEVICE_CONSENT` targets the backend's `DeviceConsent` entrypoint | [Customer portal](https://github.com/lyehe/licensecc/blob/main/services/cloudflare-customer-portal/README.md) |
+| Portal | Same `DB`, `ENVIRONMENT`, exact `PORTAL_PUBLIC_ORIGIN`, matching `BACKEND_ORIGIN`, chosen sign-in method; `DEVICE_CONSENT` targets the backend's `DeviceConsent` entrypoint; `BACKEND` targets the backend Worker for readiness and self-service proxying (map it per environment) | [Customer portal](https://github.com/lyehe/licensecc/blob/main/services/cloudflare-customer-portal/README.md) |
 | Backup | Same account and D1 identifiers, private R2 bucket, prefix, retention, cron and `D1_BACKUP_WORKFLOW` binding | [Backup setup](https://github.com/lyehe/licensecc/blob/main/services/cloudflare-d1-backup/README.md#cloudflare-setup) |
 
 Keep the backend entrypoint as `src/index.ts` and the admin/portal entrypoints
@@ -192,11 +192,15 @@ The default single-D1 topology does not need the optional replica-sync token.
 
 ## 6. Choose customer sign-in
 
-For the simplest password-based installation, set `PORTAL_PASSWORD_ENABLED="1"`
-and provision session peppers. No email provider or OAuth credentials are
-needed. Registration creates an empty customer; it neither verifies the email
-address nor grants a license. Password-only accounts have no public
-forgot-password email endpoint, so document an operator recovery process.
+For password sign-in, set `PORTAL_PASSWORD_ENABLED="1"`, provision session
+peppers, and configure email delivery (`PORTAL_EMAIL_API_KEY`,
+`PORTAL_EMAIL_FROM`, optional `PORTAL_EMAIL_API_BASE`). Registration and
+password reset send a single-use link valid for 15 minutes; without a working
+sender both return `email_unconfigured` and the portal hides those actions.
+Registration creates an empty customer after the address is verified; it never
+grants a license. Accounts registered before email verification existed can
+recover through reset once, which records the proven address as their contact
+email.
 
 Alternatively, follow the portal's
 [Google/GitHub setup](https://github.com/lyehe/licensecc/blob/main/services/cloudflare-customer-portal/README.md#google-and-github-sign-in):
@@ -246,8 +250,9 @@ still need review. It does not validate that retained settings match the code.
 1. Sign into the admin through Access. This is an operator identity, separate
    from a customer portal account.
 2. In **Customers → Add user**, create a synthetic portal user with an initial
-   password, or let the user register in the portal. No welcome email is sent
-   by Add user. Share an initial password through an appropriate private channel.
+   password, or let the user register in the portal (requires email delivery,
+   step 6). No welcome email is sent by Add user. Share an initial password
+   through an appropriate private channel.
 3. Create the application's customer license and entitlement. Follow
    [protected application access](https://github.com/lyehe/licensecc/blob/main/services/cloudflare-license-admin/README.md#create-protected-application-access)
    for a new protected grant, its exact project/feature/fingerprint and device

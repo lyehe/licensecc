@@ -1,4 +1,4 @@
-# Windows device-bound application example
+# Protected device-bound application example (Windows and Linux)
 
 For a smaller application with free addition/subtraction and licensed
 multiplication/division, start with the [C++ calculator](CALCULATOR.md).
@@ -168,11 +168,36 @@ application binary. See the [native API documentation](../../doc/api/device_iden
 
 ### Linux
 
-Build/install the native runtime with `LCC_ENABLE_TPM2_OPENSSL=ON` and libcurl
-7.85+. Configure this example with the same `LCC_BOUND_*` public values and
-`CMAKE_PREFIX_PATH=/absolute/runtime-install`; use a Linux build directory and
-omit the Visual Studio generator/architecture. `licensecc_device_bound` and
-`licensecc_feature_sessions` have the same commands as their Windows executables.
-The native owner selects the TPM2 provider and private user directories; there
+Build/install the native runtime with `LCC_ENABLE_DEVICE_IDENTITY=ON` and
+`LCC_ENABLE_TPM2_OPENSSL=ON` (this enables the Linux desktop adapters, which
+need libcurl 7.85+). Configure this example with the same `LCC_BOUND_*`
+public values and `CMAKE_PREFIX_PATH=/absolute/runtime-install`; use a Linux
+build directory and omit the Visual Studio generator/architecture. The
+installed package's CMake config lives under `lib/cmake/licensecc` on Linux
+(compare `cmake/licensecc` on Windows above):
+
+```bash
+cmake -S examples/device_bound -B build/device-bound-public-example \
+  "-DCMAKE_PREFIX_PATH=$PWD/build/device-bound-public-install" \
+  "-Dlicensecc_DIR=$PWD/build/device-bound-public-install/lib/cmake/licensecc" \
+  -DLCC_PROJECT_NAME=test \
+  -DLCC_BOUND_APPLICATION_ID=com.example.cad \
+  -DLCC_BOUND_ENDPOINT_ORIGIN=https://backend.test \
+  -DLCC_BOUND_PORTAL_URL=https://portal.test/authorize \
+  -DLCC_BOUND_ISSUER=https://issuer.test/ \
+  -DLCC_BOUND_LEASE_AUDIENCE=CAD-client \
+  -DLCC_BOUND_PROOF_AUDIENCE=proof-audience \
+  -DLCC_BOUND_PROJECT=CAD -DLCC_BOUND_FEATURE=DEFAULT \
+  -DLCC_BOUND_CLIENT_ID=CAD-client \
+  "-DLCC_BOUND_SIGNING_SPKI=$PWD/build/pilot-public-signing-key.der"
+cmake --build build/device-bound-public-example --config Debug
+./build/device-bound-public-example/licensecc_device_bound --check-api
+```
+
+`licensecc_device_bound` and `licensecc_feature_sessions` have the same
+commands as their Windows executables, without the `.exe` suffix or a
+per-configuration output subdirectory (single-config generators such as
+Ninja/Unix Makefiles place binaries directly under the build directory). The
+native owner selects the TPM2 provider and private user directories; there
 is no application-supplied key-storage override. See
 [Linux requirements](../../doc/api/device_identity.rst).

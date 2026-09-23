@@ -63,6 +63,61 @@ calculator guards and free arithmetic. The guard fixtures simulate native
 outcomes; they do not qualify a TPM or a deployed server. Production calculator
 targets have no fixture/bypass mode and always link the native runtime.
 
+## Build on Linux
+
+Start in the repository root, with CMake, Ninja (or Make), a C++17 compiler
+and OpenSSL 3 available. Follow the repository's native prerequisites. The
+following commands use new build/install directories:
+
+```bash
+cmake -S . -B build/calculator-native \
+  -DLCC_ENABLE_DEVICE_IDENTITY=ON -DLCC_ENABLE_TPM2_OPENSSL=ON \
+  -DLCC_PROJECT_NAME=test -DBUILD_TESTING=OFF \
+  -DCMAKE_INSTALL_PREFIX="$PWD/build/calculator-install"
+cmake --build build/calculator-native --target install
+```
+
+Place the licensing Worker's **public RSA-3072 DER signing key** at an
+ignored local path, such as `build/calculator-signing-public.der`, exactly
+as on Windows above. Replace the `.test` URLs, project/client and audience
+values below with the registered environment values before attempting live
+activation. The installed package's CMake config lives under
+`lib/cmake/licensecc` on Linux (compare `cmake/licensecc` on Windows above):
+
+```bash
+cmake -S examples/device_bound -B build/calculator-example \
+  "-DCMAKE_PREFIX_PATH=$PWD/build/calculator-install" \
+  "-Dlicensecc_DIR=$PWD/build/calculator-install/lib/cmake/licensecc" \
+  "-DLCC_PROJECT_NAME=test" \
+  "-DLCC_BOUND_APPLICATION_ID=com.example.calculator" \
+  "-DLCC_BOUND_ENDPOINT_ORIGIN=https://backend.test" \
+  "-DLCC_BOUND_PORTAL_URL=https://portal.test/connect" \
+  "-DLCC_BOUND_ISSUER=https://backend.test/" \
+  "-DLCC_BOUND_LEASE_AUDIENCE=calculator-desktop" \
+  "-DLCC_BOUND_PROOF_AUDIENCE=calculator-proof" \
+  "-DLCC_BOUND_PROJECT=CALCULATOR" "-DLCC_BOUND_FEATURE=DEFAULT" \
+  "-DLCC_BOUND_CLIENT_ID=calculator-desktop" \
+  "-DLCC_BOUND_SIGNING_SPKI=$PWD/build/calculator-signing-public.der" \
+  "-DLCC_BOUND_EXAMPLE_TESTS=ON"
+cmake --build build/calculator-example
+ctest --test-dir build/calculator-example --output-on-failure
+```
+
+This also builds the existing XYZ and multi-feature examples, the same five
+CTest tests as on Windows. Run the free operations the same way, without the
+`.exe` suffix or a per-configuration output subdirectory (single-config
+generators such as Ninja/Unix Makefiles place binaries directly under the
+build directory):
+
+```bash
+./build/calculator-example/licensecc_calculator add 2 3
+# 5, exit 0; no account or TPM is needed for free operations.
+```
+
+See [Linux requirements](README.md#linux) for the native runtime
+prerequisites (TPM2/OpenSSL provider, libcurl 7.85+, and the Linux desktop
+adapters).
+
 ## Run
 
 ```powershell

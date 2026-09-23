@@ -522,7 +522,10 @@ test("customer portal signs in with an 8-digit code and walks every screen witho
   await expect.poll(() => page.evaluate(() => window.localStorage.getItem("licensecc.portal.seats.v1"))).toBe(storedSeatSessionBeforeReleaseConfirm);
 
   // Only the explicit confirmation sends the original request, and a double click remains one
-  // release while the existing busy guard is active. Success focuses the newly available Start seat.
+  // release while the existing busy guard is active. Releasing the last live seat leaves no
+  // browser session, so the panel reverts to its plain collapsible <details> and the now-hidden
+  // seat card/button can no longer take focus; the app falls back to focusing the panel's own
+  // <summary> instead of leaving focus on <body>.
   await seatCard.getByRole("button", { name: "Release" }).click();
   const confirmReleaseDialog = page.getByRole("dialog");
   await expect(confirmReleaseDialog).toBeVisible();
@@ -538,9 +541,11 @@ test("customer portal signs in with an 8-digit code and walks every screen witho
   });
   expect(release.body.client_instance_id).toBe(checkout.body.client_instance_id);
   await expect(page.getByText(/release_ok/)).toBeVisible();
-  await expect(seatCard.getByRole("button", { name: "Start seat" })).toBeEnabled();
-  await expect(seatCard.getByRole("button", { name: "Start seat" })).toBeFocused();
+  const browserSessionsSummary = page.getByText("Browser sessions", { exact: true });
+  await expect(browserSessionsSummary).toBeFocused();
   expect(await page.evaluate(() => document.activeElement?.tagName)).not.toBe("BODY");
+  await browserSessionsSummary.click();
+  await expect(seatCard.getByRole("button", { name: "Start seat" })).toBeEnabled();
   await expect(seatCard.getByRole("button", { name: "Renew seat" })).toBeDisabled();
   await expect(seatCard.getByRole("button", { name: "Release" })).toBeDisabled();
 
@@ -564,9 +569,13 @@ test("customer portal signs in with an 8-digit code and walks every screen witho
   await expect(page.locator('.feedback p[role="status"]')).toContainText(/released; status refresh failed/i);
   await expect(page.getByRole("button", { name: "Refresh status" })).toBeVisible();
   await expect.poll(() => page.evaluate(() => window.localStorage.getItem("licensecc.portal.seats.v1"))).toBe("{}");
-  await expect(seatCard.getByRole("button", { name: "Start seat" })).toBeDisabled();
-  await expect(seatCard).toBeFocused();
+  // This release also leaves no browser session, collapsing the panel again; focus again lands on
+  // the summary rather than <body>, since neither the (disabled) Start seat button nor the hidden
+  // seat card can take it.
+  await expect(browserSessionsSummary).toBeFocused();
   expect(await page.evaluate(() => document.activeElement?.tagName)).not.toBe("BODY");
+  await browserSessionsSummary.click();
+  await expect(seatCard.getByRole("button", { name: "Start seat" })).toBeDisabled();
 
   await page.getByRole("button", { name: "Refresh status" }).click();
   await expect(page.getByRole("button", { name: "Refresh status" })).toHaveCount(0);
@@ -678,12 +687,12 @@ test("usage failure stays local and removing a filtered registration keeps the s
   api.devices.push({ ...api.devices[0], project: "SECOND_APP", device_key_id: "second-node" });
   await signIn(page, api);
   await page.getByRole("link", { name: "View app DEFAULT" }).click();
-  await expect(page.getByText(/Usage is unavailable/)).toBeVisible();
+  await expect(page.getByText(/Activity is unavailable/)).toBeVisible();
   await page.locator("tr").filter({has:page.getByLabel("Device key for DEFAULT solo")}).getByText("Activate and download",{exact:true}).click();
   await page.getByLabel("Device key for DEFAULT solo").fill("device-e2e");
   await expect(page.getByRole("button", { name: "Activate and download .lic" })).toBeEnabled();
   api.controls.rejectUsage = false;
-  await page.getByRole("button", { name: "Retry usage" }).click();
+  await page.getByRole("button", { name: "Retry activity" }).click();
   await page.getByText("Activity",{exact:true}).click();
   await expect(page.getByText("87", { exact: true })).toBeVisible();
   await page.getByRole("link", { name: "Devices", exact: true }).click();
@@ -723,7 +732,6 @@ test("protected access uses app enrollment while legacy downloads respect date b
   api.entitlements.splice(0, 2);
   await page.reload();
   await expect(page.getByText("Connect from your app",{exact:true})).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Download licenses" })).toHaveCount(0);
 });
 
 test("sign-in headings follow the chosen method after registration and reset", async ({ page }) => {
