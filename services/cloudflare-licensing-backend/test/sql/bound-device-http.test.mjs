@@ -526,3 +526,21 @@ test("invalid possession proofs cannot consume verified customer budgets", async
   assert.equal((await f.call("/v2/device-authorizations/exchange",request)).status,401);
   assert.equal(f.sql.prepare("SELECT count(*) n FROM rate_limit_counters WHERE namespace IN ('device-v2-device','device-v2-customer')").get().n,0);
 });
+
+test("recovering a committed exchange is not blocked by an exhausted device budget", async t => {
+  const f = fixture(t), d = await enrollment(f);
+  const activated = await f.call("/v2/device-authorizations/exchange", await signed(f, d, "exchange"));
+  assert.equal(activated.status, 200, JSON.stringify(activated.body));
+  f.sql.prepare("INSERT INTO rate_limit_counters VALUES('device-v2-device',?,960,61,1080,1000) ON CONFLICT(namespace,rate_key,window_start) DO UPDATE SET request_count=61").run(d.keyId);
+  const recovered = await f.call("/v2/device-authorizations/exchange", await signed(f, d, "exchange"));
+  assert.equal(recovered.status, 200, JSON.stringify(recovered.body));
+  assert.deepEqual(recovered.body, activated.body);
+});
+
+test("customer verified budget scales with the entitlement device limit", async t => {
+  const f = fixture(t);
+  const key = i => "sha256:" + i.toString(16).padStart(64, "0");
+  for (let i = 0; i < 250; i++) await limitBoundVerified(f.db, key(i), "fleet", 500);
+  for (let i = 0; i < 240; i++) await limitBoundVerified(f.db, key(1000 + i), "small");
+  await assert.rejects(limitBoundVerified(f.db, key(2000), "small"), /rate_limited/);
+});

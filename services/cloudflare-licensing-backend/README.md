@@ -830,8 +830,11 @@ range 100..1000000), a 20/minute registration IP limit, and a separate
 600/minute session-traffic IP limit. The global fuse counts only requests
 already admitted by their own per-source budget, so one flooding source
 cannot exhaust the shared budget for every other source. After proof and
-current authority checks, issuance/recovery has 60/minute device-key and
-240/minute customer limits. These gates are independent of legacy
+current authority checks, fresh issuance has a 60/minute device-key limit
+and a max(240, 2 × the entitlement's `max_active_devices`)/minute customer
+limit; replaying an already-committed operation returns the stored lease
+without spending either budget, so idempotent reconciliation is never
+rate-limited. These gates are independent of legacy
 optional-proof switches. The configured legacy `VERIFY_RATE_LIMITER`
 additionally protects registration; the optional `BOUND_SESSION_RATE_LIMITER`
 Cloudflare rate limiter rejects session-route (challenge/exchange/renew)

@@ -122,7 +122,6 @@ export async function issueBoundLease(db, purpose, input, config, loadSigner, re
   }
   const { entitlement: e, device, binding, trial } = snapshot;
   const a = verified.subject;
-  await limitBoundVerified(db, a.key_id, e.customer_id);
   const candidate = { purpose, keyId: a.key_id, operationId: request.operation_id, requestDigest: verified.requestDigest,
     customerId: e.customer_id, customerRevision: e.customer_revision, project: e.project, feature: e.feature,
     fingerprint: e.license_fingerprint, entitlementRevision: e.authority_revision, trialStamp: trial.stamp,
@@ -136,6 +135,8 @@ export async function issueBoundLease(db, purpose, input, config, loadSigner, re
     pkceChallenge: purpose === "exchange" ? a.pkce_challenge : null,
     redirectUri: purpose === "exchange" ? a.redirect_uri : null };
   if (operation) return (await recoverBoundDeviceLease(db, candidate)).response;
+  // Replaying a committed operation returns the stored lease; never rate-limit reconciliation.
+  await limitBoundVerified(db, a.key_id, e.customer_id, Math.max(240, 2 * (e.max_active_devices ?? 0)));
   let window;
   try { window = deviceLeaseWindow(e.now, Math.min(e.valid_until ?? Number.MAX_SAFE_INTEGER,
     trial.expiresAt ?? Number.MAX_SAFE_INTEGER,

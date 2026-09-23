@@ -59,7 +59,7 @@ export async function limitBoundRequest(request, env, db) {
 
 // Call only after signature/PKCE and current authority checks. Client-supplied
 // identities cannot create, select or exhaust another customer's counters.
-export async function limitBoundVerified(db, keyId, customerId) {
+export async function limitBoundVerified(db, keyId, customerId, customerLimit = 240) {
   const customer = await boundSecretHash(customerId);
   const result = await db.batch([
     db.prepare(insert + values + " WHERE 1" + conflict).bind("device-v2-device", keyId),
@@ -68,5 +68,5 @@ export async function limitBoundVerified(db, keyId, customerId) {
   const device = result[0]?.results?.[0], account = result[1]?.results?.[0];
   if (!Number.isSafeInteger(device?.request_count) || !Number.isSafeInteger(account?.request_count)
       || device.window_start !== account.window_start) throw new BoundRequestError("temporarily_unavailable", 503);
-  if (device.request_count > 60 || account.request_count > 240) throw new BoundRequestError("rate_limited", 429);
+  if (device.request_count > 60 || account.request_count > customerLimit) throw new BoundRequestError("rate_limited", 429);
 }
