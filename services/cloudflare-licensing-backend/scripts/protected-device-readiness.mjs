@@ -13,8 +13,9 @@ export async function checkProtectedDeviceConfiguration(env) {
   try {
     // Independent of the registry/signer/key-ring chain below: an operator can
     // set an invalid BOUND_GLOBAL_RATE_LIMIT even when everything else is fine,
-    // and the runtime clamp would otherwise hide it by silently using 1000.
-    checks.global_rate_limit = env.BOUND_GLOBAL_RATE_LIMIT === undefined || parseGlobalRateLimit(env.BOUND_GLOBAL_RATE_LIMIT) !== null;
+    // and the runtime clamp would otherwise hide it by silently using the
+    // default. Unset parses to the default, so only "set but invalid" fails.
+    checks.global_rate_limit = parseGlobalRateLimit(env.BOUND_GLOBAL_RATE_LIMIT) !== null;
     boundDeviceConfig(env);
     checks.registry = true;
     const signer = await loadBoundSigner(env);

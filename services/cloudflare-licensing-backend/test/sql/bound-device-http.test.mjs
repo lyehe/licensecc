@@ -6,7 +6,7 @@ import { createPublicKey, verify } from "node:crypto";
 import worker from "../../dist/app.js";
 import { boundRandomId, boundSecretHash } from "../../src/device/bound_enrollment.mjs";
 import { expireBoundRecovery, purgeExpiredBoundLeases } from "../../src/device/bound_cleanup.mjs";
-import { boundSourceIdentity, limitBoundRequest, limitBoundVerified, parseGlobalRateLimit } from "../../src/device/bound_rate.mjs";
+import { boundSourceIdentity, DEFAULT_GLOBAL_RATE_LIMIT, limitBoundRequest, limitBoundVerified, parseGlobalRateLimit } from "../../src/device/bound_rate.mjs";
 import { retireBoundBinding } from "../../src/device/bound_retire.mjs";
 import { encodeBase64url, deviceOperationBody, deviceProofSigningInput, decodeDeviceLeaseEnvelope, deviceLeaseSigningInput } from "@licensecc/licensing-domain/lease/device_protocol";
 import { sha256Hex, normalizeDeviceSignature, importBoundDeviceKey } from "../../src/device/bound_crypto.mjs";
@@ -413,7 +413,8 @@ test("global protected budget is configurable and still denies once exhausted", 
 test("parseGlobalRateLimit is the one shared range check for both the runtime clamp and readiness", () => {
   for (const value of [100, 500, 1000, 1000000]) assert.equal(parseGlobalRateLimit(String(value)), value);
   assert.equal(parseGlobalRateLimit(500), 500);
-  for (const invalid of [undefined, "0", "99", "1000001", "12.5", "not-a-number", "", "-5", "NaN", "Infinity"]) {
+  assert.equal(parseGlobalRateLimit(undefined), DEFAULT_GLOBAL_RATE_LIMIT);
+  for (const invalid of ["0", "99", "1000001", "12.5", "not-a-number", "", "-5", "NaN", "Infinity"]) {
     assert.equal(parseGlobalRateLimit(invalid), null, String(invalid));
   }
 });
