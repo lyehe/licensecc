@@ -1,6 +1,7 @@
 #include "bound_loopback.hpp"
 #include "bound_callback.hpp"
 #include "bound_encoding.hpp"
+#include "bound_peer_linux.hpp"
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <poll.h>
@@ -197,7 +198,13 @@ BoundLoopbackStatus BoundLoopbackListener::poll(BoundEnrollmentFlow& flow, unsig
 				accept4(state.listener, reinterpret_cast<sockaddr*>(&address), &length, SOCK_NONBLOCK | SOCK_CLOEXEC);
 			if (peer >= 0) {
 				auto* connection = state.vacant();
-				if (!connection || !loopback_address(address, state.family)) {
+				sockaddr_storage local{};
+				socklen_t local_length = sizeof(local);
+				// Loopback ports are shared by every local user: accept only this user's sockets.
+				if (!connection || !loopback_address(address, state.family) ||
+					getsockname(peer, reinterpret_cast<sockaddr*>(&local), &local_length) != 0 ||
+					!bound_loopback_peer_owned(state.family == AF_INET ? "/proc/self/net/tcp" : "/proc/self/net/tcp6",
+											   address, local, geteuid())) {
 					::close(peer);
 					rejected = true;
 				} else {

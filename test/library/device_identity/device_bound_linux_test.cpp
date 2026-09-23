@@ -4,9 +4,13 @@
 #include "bound_anchor.hpp"
 #include "bound_browser.hpp"
 #include "bound_http.hpp"
+#include "bound_peer_linux.hpp"
+#include <arpa/inet.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <thread>
@@ -157,4 +161,63 @@ BOOST_AUTO_TEST_CASE(browser_launcher_does_not_wait_for_browser_lifetime_and_rep
 	fail_browser_exec = true;
 	BOOST_CHECK(browser->open(url) == BoundBrowserStatus::unavailable);
 	fail_browser_exec = false;
+}
+
+namespace {
+sockaddr_storage ipv4(const char* text, unsigned short port) {
+	sockaddr_storage value{};
+	auto& address = reinterpret_cast<sockaddr_in&>(value);
+	address.sin_family = AF_INET;
+	address.sin_port = htons(port);
+	BOOST_REQUIRE(inet_pton(AF_INET, text, &address.sin_addr) == 1);
+	return value;
+}
+sockaddr_storage ipv6(const char* text, unsigned short port) {
+	sockaddr_storage value{};
+	auto& address = reinterpret_cast<sockaddr_in6&>(value);
+	address.sin6_family = AF_INET6;
+	address.sin6_port = htons(port);
+	BOOST_REQUIRE(inet_pton(AF_INET6, text, &address.sin6_addr) == 1);
+	return value;
+}
+// Format exactly like the kernel: raw 32-bit words printed as native integers.
+std::string endpoint(const sockaddr_storage& value) {
+	char text[64];
+	if (value.ss_family == AF_INET) {
+		const auto& a = reinterpret_cast<const sockaddr_in&>(value);
+		std::snprintf(text, sizeof(text), "%08X:%04X", a.sin_addr.s_addr, ntohs(a.sin_port));
+	} else {
+		const auto& a = reinterpret_cast<const sockaddr_in6&>(value);
+		std::uint32_t w[4];
+		std::memcpy(w, &a.sin6_addr, sizeof(w));
+		std::snprintf(text, sizeof(text), "%08X%08X%08X%08X:%04X", w[0], w[1], w[2], w[3], ntohs(a.sin6_port));
+	}
+	return text;
+}
+std::string table(const Directory& root, const std::string& rows) {
+	const auto path = root.path + "/tcp";
+	std::ofstream(path)
+		<< "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n"
+		<< rows;
+	return path;
+}
+std::string row(const sockaddr_storage& local, const sockaddr_storage& remote, unsigned uid) {
+	return "   0: " + endpoint(local) + " " + endpoint(remote) + " 01 00000000:00000000 00:00000000 00000000 " +
+		   std::to_string(uid) + "        0 12345 1 0000000000000000 20 4 30 10 -1\n";
+}
+}  // namespace
+
+BOOST_AUTO_TEST_CASE(loopback_peer_must_belong_to_the_same_user) {
+	Directory root;
+	const auto peer = ipv4("127.0.0.1", 40000), local = ipv4("127.0.0.1", 45678);
+	const auto me = geteuid();
+	BOOST_CHECK(
+		bound_loopback_peer_owned(table(root, row(local, peer, me) + row(peer, local, me)).c_str(), peer, local, me));
+	BOOST_CHECK(!bound_loopback_peer_owned(table(root, row(local, peer, me) + row(peer, local, me + 1)).c_str(), peer,
+										   local, me));
+	BOOST_CHECK(!bound_loopback_peer_owned(table(root, row(local, peer, me)).c_str(), peer, local, me));
+	BOOST_CHECK(!bound_loopback_peer_owned((root.path + "/missing").c_str(), peer, local, me));
+	const auto peer6 = ipv6("::1", 40001), local6 = ipv6("::1", 45679);
+	BOOST_CHECK(bound_loopback_peer_owned(table(root, row(peer6, local6, me)).c_str(), peer6, local6, me));
+	BOOST_CHECK(!bound_loopback_peer_owned(table(root, row(peer6, local6, me + 1)).c_str(), peer6, local6, me));
 }

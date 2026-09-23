@@ -387,6 +387,13 @@ listener. Failure to start the opener returns ``BROWSER_UNAVAILABLE``. A success
 launch only starts consent; if the desktop cannot open a browser, the attempt
 remains pending and can be retried. Launching a browser grants no access.
 
+On Linux the callback listener accepts connections only from sockets owned by
+the same user, proven through ``/proc/self/net/tcp`` and ``tcp6``; without a
+readable ``/proc`` the callback is refused. The consent URL is passed to
+``xdg-open`` as an argument, so other local users can see it. They cannot
+complete enrollment for you, but they can use up the attempt, which then shows
+as a refused approval. Start a new attempt if that happens.
+
 The native owner obtains the home directory from the OS account database.
 It uses ``~/.licensecc/device-keys`` for TPM-wrapped key references and
 ``~/.licensecc/checkpoint-<namespace-hash>`` for signed checkpoints. Directories

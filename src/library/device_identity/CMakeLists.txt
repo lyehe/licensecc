@@ -29,7 +29,7 @@ if(WIN32)
         bound_checkpoint_directory.cpp bound_checkpoint_windows.cpp)
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND LCC_ENABLE_LINUX_DESKTOP)
     list(APPEND _lcc_device_identity_sources p256_crypto_openssl.cpp bound_http_linux.cpp
-        bound_loopback_linux.cpp bound_browser_linux.cpp bound_desktop.cpp bound_checkpoint_linux.cpp bound_directory_linux.cpp)
+        bound_loopback_linux.cpp bound_peer_linux.cpp bound_browser_linux.cpp bound_desktop.cpp bound_checkpoint_linux.cpp bound_directory_linux.cpp)
 else()
     list(APPEND _lcc_device_identity_sources p256_crypto_openssl.cpp)
 endif()
