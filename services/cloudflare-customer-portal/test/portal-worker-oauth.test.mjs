@@ -36,6 +36,14 @@ test("OAuth availability, exact-origin enforcement, disabled provider, authentic
   assert.equal((await call(env, "POST", "/portal/v1/auth/github/start", { headers: { origin: "https://evil.test" } })).status, 403);
   assert.match((await call(env, "POST", "/portal/v1/auth/github/start")).res.headers.get("location"), /provider_unavailable/);
 });
+test("the providers envelope hides email actions when the configured email destination is not a canonical HTTPS origin", async () => {
+  const { env } = baseFixture({
+    PORTAL_EMAIL_API_KEY: "test-only",
+    PORTAL_EMAIL_FROM: "sender@example.com",
+    PORTAL_EMAIL_API_BASE: "http://insecure.test",
+  });
+  assert.equal((await call(env, "GET", "/portal/v1/auth/providers")).body.data.email, false);
+});
 test("GitHub registers an empty customer and mints a usable opaque session; callback replay fails", async (t) => {
   const { env, db } = baseFixture(configuration);
   const calls = githubStub(t);

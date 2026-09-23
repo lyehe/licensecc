@@ -16,16 +16,27 @@ function fixture(t) {
     mail.push(JSON.parse(init.body));
     return new Response("{}", { status: 200 });
   });
-  const request = (purpose, email = "new@example.com", env = data.env) => call(env, "POST", `${PATH}/${purpose}`, { body: { email } });
+  const pending = [];
+  const ctx = { waitUntil: p => { pending.push(Promise.resolve(p)); } };
+  const settle = async () => { while (pending.length) await pending.shift(); };
+  const request = async (purpose, email = "new@example.com", env = data.env) => {
+    const result = await call(env, "POST", `${PATH}/${purpose}`, { body: { email }, ctx });
+    await settle();
+    return result;
+  };
   const token = () => new URL(mail.at(-1).text.match(/https:\/\/\S+/)[0]).hash.slice("#token=".length);
   const complete = (value = token(), password = PASSWORD) => call(data.env, "POST", `${PATH}/complete`, { body: { token: value, password } });
-  return { ...data, mail, request, token, complete };
+  return { ...data, mail, request, token, complete, ctx, settle };
 }
 const cookie = result => result.res.headers.get("set-cookie").split(";")[0];
 async function credential(env, email = "a@x.com") {
   const hash = await hashPassword(PASSWORD);
   await env.DB.prepare("INSERT INTO portal_passwords (customer_id,email_lower,password_hash,created_at,updated_at) VALUES ('A',?,?,?,?)").bind(email, hash, NOW, NOW).run();
   return hash;
+}
+async function legacy(env, email) {
+  await env.DB.prepare("INSERT INTO customers (id,name,email,created_at,updated_at) VALUES ('L','Personal account','',?,?)").bind(NOW, NOW).run();
+  await env.DB.prepare("INSERT INTO portal_passwords (customer_id,email_lower,password_hash,created_at,updated_at) VALUES ('L',?,?,?,?)").bind(email, await hashPassword(PASSWORD), NOW, NOW).run();
 }
 
 test("email proof precedes account creation and creates verified, empty account once", async t => {
@@ -126,6 +137,103 @@ test("mail cooldown, missing sender, delivery failure, CSRF and disabled flag fa
   assert.equal(f.db.prepare("SELECT count(*) n FROM portal_password_actions WHERE email_lower = 'failed@example.com'").get().n,0);
   assert.equal((await call(f.env,"GET",`${PATH}/complete?token=${f.token()}`)).status,404);
   assert.equal(f.db.prepare("SELECT consumed_at FROM portal_password_actions").get().consumed_at,null);
+});
+
+test("pre-verification password accounts recover and adopt the proven email", async t => {
+  const f = fixture(t);
+  await legacy(f.env, "legacy@example.com");
+  assert.equal((await f.request("reset", "legacy@example.com")).status, 202);
+  assert.equal(f.mail.length, 1);
+  const result = await f.complete(undefined, NEXT);
+  assert.equal(result.status, 200);
+  assert.equal(result.body.data.customer_id, "L");
+  assert.equal(f.db.prepare("SELECT email FROM customers WHERE id = 'L'").get().email, "legacy@example.com");
+  assert.equal((await call(f.env, "POST", `${PATH}/login`, { body: { email: "legacy@example.com", password: NEXT } })).status, 200);
+});
+
+test("legacy reset stays generic when another customer owns the address", async t => {
+  const f = fixture(t);
+  await legacy(f.env, "a@x.com");
+  assert.equal((await f.request("reset", "a@x.com")).status, 202);
+  assert.equal(f.mail.length, 0);
+  assert.equal(f.db.prepare("SELECT email FROM customers WHERE id = 'L'").get().email, "");
+});
+
+test("link requests answer before any account lookup or delivery", async t => {
+  const f = fixture(t);
+  await credential(f.env);
+  let release; const gate = new Promise(resolve => { release = resolve; });
+  t.mock.method(globalThis, "fetch", async (_url, init) => { await gate; f.mail.push(JSON.parse(init.body)); return new Response("{}", { status: 200 }); });
+  const response = await call(f.env, "POST", `${PATH}/reset`, { body: { email: "a@x.com" }, ctx: f.ctx });
+  assert.equal(response.status, 202);
+  assert.equal(f.mail.length, 0);
+  release(); await f.settle();
+  assert.equal(f.mail.length, 1);
+});
+
+test("a provider timeout keeps the emailed link redeemable", async t => {
+  const f = fixture(t);
+  t.mock.method(globalThis, "fetch", async (_url, init) => { f.mail.push(JSON.parse(init.body)); throw new DOMException("aborted", "AbortError"); });
+  assert.equal((await f.request("register", "slow@example.com")).status, 202);
+  assert.equal(f.db.prepare("SELECT count(*) n FROM portal_password_actions WHERE email_lower = 'slow@example.com'").get().n, 1);
+  assert.equal((await f.complete()).status, 200);
+});
+
+test("a committed reset reports success even when the new session cannot be minted", async t => {
+  const f = fixture(t);
+  await credential(f.env);
+  await f.request("reset", "a@x.com");
+  f.db.exec("CREATE TRIGGER no_sessions BEFORE INSERT ON portal_sessions BEGIN SELECT RAISE(ABORT, 'test'); END");
+  const result = await f.complete(undefined, NEXT);
+  assert.equal(result.status, 200);
+  assert.equal(result.body.code, "password_updated");
+  assert.equal(result.body.data.sign_in_required, true);
+  f.db.exec("DROP TRIGGER no_sessions");
+  assert.equal((await call(f.env, "POST", `${PATH}/login`, { body: { email: "a@x.com", password: NEXT } })).status, 200);
+});
+
+test("a legacy reset link cannot adopt an address another customer claimed after it was sent", async t => {
+  const f = fixture(t);
+  await legacy(f.env, "legacy@example.com");
+  const before = f.db.prepare("SELECT password_hash FROM portal_passwords WHERE customer_id = 'L'").get().password_hash;
+  assert.equal((await f.request("reset", "legacy@example.com")).status, 202);
+  assert.equal(f.mail.length, 1);
+  f.db.prepare("UPDATE customers SET email = 'legacy@example.com' WHERE id = 'B'").run();
+  assert.equal((await f.complete(undefined, NEXT)).body.code, "invalid_link");
+  assert.equal(f.db.prepare("SELECT email FROM customers WHERE id = 'L'").get().email, "");
+  assert.equal(f.db.prepare("SELECT password_hash FROM portal_passwords WHERE customer_id = 'L'").get().password_hash, before);
+});
+
+function captureEvents(t) {
+  const lines = [];
+  t.mock.method(console, "error", (...args) => { lines.push(args.map(String).join(" ")); });
+  return { raw: () => lines.join("\n"), parsed: () => lines.map(line => JSON.parse(line)) };
+}
+
+test("background link delivery failures emit exactly one closed-shape event", async t => {
+  const f = fixture(t);
+  const events = captureEvents(t);
+  const failure = error_type => ({ event: "portal.email_delivery_failed", severity: "error", error_type });
+
+  assert.equal((await f.request("register", "ok@example.com")).status, 202);
+  assert.deepEqual(events.parsed(), [], "a delivered link emits nothing");
+
+  t.mock.method(globalThis, "fetch", async () => new Response("provider-secret-text", { status: 503 }));
+  assert.equal((await f.request("register", "failed@example.com")).status, 202);
+  assert.deepEqual(events.parsed(), [failure("send_failed")]);
+
+  t.mock.method(globalThis, "fetch", async () => { throw new DOMException("aborted", "AbortError"); });
+  assert.equal((await f.request("register", "slow@example.com")).status, 202);
+  assert.deepEqual(events.parsed(), [failure("send_failed"), failure("send_failed")], "an indeterminate send reports send_failed");
+
+  f.db.exec("CREATE TRIGGER no_actions BEFORE INSERT ON portal_password_actions BEGIN SELECT RAISE(ABORT, 'secret-sql-detail'); END");
+  const response = await f.request("register", "boom@example.com");
+  assert.equal(response.status, 202);
+  assert.equal(response.body.code, "verification_requested");
+  assert.deepEqual(events.parsed(), [failure("send_failed"), failure("send_failed"), failure("rejected")], "a background exception emits once");
+  for (const sensitive of ["@example.com", "secret-sql-detail", "provider-secret-text", "token", "aborted"]) {
+    assert.equal(events.raw().includes(sensitive), false, `telemetry excludes ${sensitive}`);
+  }
 });
 
 export const DIRECT_ROUTE_TESTS = ["POST /portal/v1/auth/password/register", "POST /portal/v1/auth/password/reset", "POST /portal/v1/auth/password/complete"];

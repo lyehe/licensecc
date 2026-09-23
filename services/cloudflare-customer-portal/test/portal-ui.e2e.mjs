@@ -18,7 +18,7 @@ test("registration verifies email before choosing a password and opens an empty 
   const submissions = [];
   await page.route("**/portal/v1/auth/**", (route) => {
     const path = new URL(route.request().url()).pathname;
-    if (path.endsWith("/providers")) return route.fulfill({ json: makeEnvelope("auth_providers", { google: false, github: false, email: false, password: true }) });
+    if (path.endsWith("/providers")) return route.fulfill({ json: makeEnvelope("auth_providers", { google: false, github: false, email: true, password: true }) });
     if (path.endsWith("/password/register")) { submissions.push(route.request().postDataJSON()); return route.fulfill({ status: 202, json: makeEnvelope("verification_requested") }); }
     if (path.endsWith("/password/complete")) { submissions.push(route.request().postDataJSON()); authed = true; return route.fulfill({ json: makeEnvelope("signed_in", { customer_id: "new-customer" }) }); }
     throw new Error(`Unexpected auth route ${path}`);
@@ -56,7 +56,7 @@ test("registration verifies email before choosing a password and opens an empty 
 
 test("password login errors clear the secret and explain recovery", async ({ page }) => {
   await page.route("**/api/portal/me", (route) => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" } }));
-  await page.route("**/portal/v1/auth/providers", (route) => route.fulfill({ json: makeEnvelope("auth_providers", { google: true, github: true, email: false, password: true }) }));
+  await page.route("**/portal/v1/auth/providers", (route) => route.fulfill({ json: makeEnvelope("auth_providers", { google: true, github: true, email: true, password: true }) }));
   await page.route("**/portal/v1/auth/password/login", (route) => route.fulfill({ status: 401, json: { ok: false, code: "invalid_credentials" } }));
   await page.goto("/");
   await expect(page.getByRole("button", { name: "Continue with Google" })).toBeHidden();
@@ -98,6 +98,26 @@ test("expired password link shows recovery guidance and reloading cannot retain 
   await expect(page.getByRole("alert")).toContainText("Open the link from your email again");
   await expect(page.getByRole("button", { name: "Save password and sign in" })).toHaveCount(0);
   expect(attempts).toBe(1);
+});
+
+test("password sign-in hides email-only actions when email delivery is off", async ({ page }) => {
+  await page.route("**/api/portal/me", route => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" } }));
+  await page.route("**/portal/v1/auth/providers", route => route.fulfill({ json: makeEnvelope("auth_providers", { google: false, github: false, password: true, email: false }) }));
+  await page.goto("/");
+  await expect(page.getByRole("button", { name: "Sign in" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Create an account", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Forgot your password?" })).toHaveCount(0);
+});
+
+test("password completion enforces the server length and explains a sign-in-required success", async ({ page }) => {
+  await page.route("**/api/portal/me", route => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" } }));
+  await page.route("**/portal/v1/auth/password/complete", route => route.fulfill({ json: makeEnvelope("password_updated", { sign_in_required: true }) }));
+  await page.goto("/password-action#token=" + "A".repeat(43));
+  await expect(page.getByLabel("New password")).toHaveAttribute("maxlength", "128");
+  await page.getByLabel("New password").fill("A long testing passphrase 1!");
+  await page.getByLabel("Confirm password").fill("A long testing passphrase 1!");
+  await page.getByRole("button", { name: "Save password and sign in" }).click();
+  await expect(page.getByRole("alert")).toHaveText("Password saved. Sign in with your new password.");
 });
 
 test("Account password change requires the current password and confirms session rotation", async ({ page }) => {

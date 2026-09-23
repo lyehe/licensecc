@@ -1,8 +1,9 @@
 // portal_email.mjs — fetch-only transactional email adapter (Resend-compatible).
 //
-// Returns a bounded result without logging recipients or message bodies. OTP callers
-// send in ctx.waitUntil(); password verification waits for this result so it can
-// remove undelivered proofs. Each caller owns its unavailable-sender behavior.
+// Returns a bounded result without logging recipients or message bodies. OTP and password links
+// both send in ctx.waitUntil(); the proof is removed only on a definite rejection, never on a
+// timeout or network throw where the provider may have already accepted it. Each caller owns its
+// unavailable-sender behavior.
 //
 // Worker-safe: no node:/Buffer; only fetch + standard globals.
 
@@ -24,7 +25,9 @@ function discardResponseBody(response) {
  *
  *   { ok:true,  code:"sent" }                        on a 2xx from the provider.
  *   { ok:false, code:"email_unconfigured" }          when PORTAL_EMAIL_API_KEY / FROM is unset.
- *   { ok:false, code:"email_send_failed" }           on a provider error / network throw.
+ *   { ok:false, code:"email_send_failed" }           on a definite provider error (non-2xx response).
+ *   { ok:false, code:"email_send_indeterminate" }    on timeout or network throw (the provider may
+ *                                                     have accepted it).
  *
  * NEVER throws (so a flaky email provider can never 500 the auth path) and NEVER logs the body.
  */
@@ -72,7 +75,7 @@ async function sendEmailWithTimeout(env, to, subject, body, timeoutMs) {
     }
     return { ok: false, code: "email_send_failed" };
   } catch {
-    return { ok: false, code: "email_send_failed" };
+    return { ok: false, code: "email_send_indeterminate" };
   } finally {
     clearTimeout(timeout);
   }

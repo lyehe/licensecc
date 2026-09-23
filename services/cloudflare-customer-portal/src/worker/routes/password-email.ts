@@ -1,15 +1,16 @@
 import { sendEmail } from "../../auth/portal_email.mjs";
 import { canonicalHttpsOrigin, emailApiOrigin } from "../../auth/portal_destination.mjs";
 import { portalRateLimit } from "../../auth/portal_ratelimit.mjs";
+import { deliveryErrorType, emitEmailDeliveryFailure } from "../../auth/portal_otp.mjs";
 import { clientIp, envelope, readJson } from "../support.js";
 import { hashPassword, loginEmail, validPassword } from "../password/crypto.js";
 import { HEADERS, primary, gate, throttle, signedIn, digest } from "../password/shared.js";
 import { passwordInvalidations } from "../password/invalidation.js";
-import type { Env, TopRoute } from "../env.js";
+import type { Env, ExecutionContextLike, TopRoute } from "../env.js";
 
 type Action = { purpose: "register" | "reset"; email_lower: string; customer_id: string; credential_hash: string | null };
 
-async function requestLink(request: Request, env: Env, reqId: string, now: number, purpose: Action["purpose"]): Promise<Response> {
+async function requestLink(request: Request, env: Env, ctx: ExecutionContextLike | undefined, reqId: string, now: number, purpose: Action["purpose"]): Promise<Response> {
   const denied = gate(request, env, reqId);
   if (denied) return denied;
   const body = await readJson(request, reqId);
@@ -20,23 +21,51 @@ async function requestLink(request: Request, env: Env, reqId: string, now: numbe
   if (await throttle(request, env, email, purpose, now) || (await portalRateLimit(env, `password:mail:${await digest(email)}`, 1, 60, now)).limited) {
     return envelope(reqId, "rate_limited", undefined, 429, HEADERS);
   }
-  const db = primary(env);
-  const accepted = () => envelope(reqId, "verification_requested", undefined, 202, HEADERS);
-  // Only previously verified contact addresses can recover existing credentials.
-  const credential = await db.prepare("SELECT p.customer_id, p.password_hash FROM portal_passwords p JOIN customers c ON c.id = p.customer_id WHERE p.email_lower = ? AND lower(c.email) = p.email_lower AND c.status = 'active'")
-    .bind(email).first<{ customer_id: string; password_hash: string }>();
-  const existing = await db.prepare("SELECT id FROM customers WHERE lower(email) = ? UNION ALL SELECT customer_id AS id FROM portal_passwords WHERE email_lower = ? LIMIT 1").bind(email, email).first();
-  // The same response covers unknown, disabled, unverified and already registered addresses.
-  if ((purpose === "register" && existing) || (purpose === "reset" && !credential)) return accepted();
-  const token = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32)))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-  const tokenHash = await digest(token);
-  await db.prepare("DELETE FROM portal_password_actions WHERE expires_at <= ?").bind(now).run();
-  await db.prepare("INSERT INTO portal_password_actions (token_hash, purpose, email_lower, customer_id, credential_hash, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
-    .bind(tokenHash, purpose, email, credential?.customer_id ?? `cust_${crypto.randomUUID()}`, purpose === "reset" ? credential!.password_hash : null, now, now + 900).run();
-  const link = `${canonicalHttpsOrigin(env.PORTAL_PUBLIC_ORIGIN)}/password-action#token=${token}`;
-  const sent = await sendEmail(env, email, purpose === "register" ? "Verify your Licensecc email" : "Reset your Licensecc password", `${purpose === "register" ? "Verify your email and choose a password" : "Choose a new password"}:\n\n${link}\n\nThis link expires in 15 minutes and can be used once. If you did not request it, ignore this email.`);
-  if (!sent.ok) await db.prepare("DELETE FROM portal_password_actions WHERE token_hash = ? AND consumed_at IS NULL").bind(tokenHash).run();
-  return accepted();
+  // Eligibility, proof storage and delivery run after the response so every
+  // address gets the same 202 with the same latency.
+  const work = issueLink(env, email, now, purpose);
+  if (ctx?.waitUntil) ctx.waitUntil(work);
+  else await work;
+  return envelope(reqId, "verification_requested", undefined, 202, HEADERS);
+}
+
+async function issueLink(env: Env, email: string, now: number, purpose: Action["purpose"]): Promise<void> {
+  // At most one closed-shape delivery-failure event per request: never the recipient, token,
+  // exception text or whether the address is eligible (only failures after eligibility emit).
+  let reported = false;
+  const report = (errorType: Parameters<typeof emitEmailDeliveryFailure>[0]) => {
+    if (reported) return;
+    reported = true;
+    emitEmailDeliveryFailure(errorType);
+  };
+  try {
+    const db = primary(env);
+    // Verified contact addresses recover credentials. Accounts created before email
+    // verification (empty contact) may recover once, if no other customer owns it.
+    const credential = await db.prepare(`SELECT p.customer_id, p.password_hash FROM portal_passwords p JOIN customers c ON c.id = p.customer_id
+      WHERE p.email_lower = ? AND c.status = 'active'
+        AND (lower(c.email) = p.email_lower OR (c.email = '' AND NOT EXISTS (SELECT 1 FROM customers o WHERE lower(o.email) = p.email_lower)))`)
+      .bind(email).first<{ customer_id: string; password_hash: string }>();
+    const existing = await db.prepare("SELECT id FROM customers WHERE lower(email) = ? UNION ALL SELECT customer_id AS id FROM portal_passwords WHERE email_lower = ? LIMIT 1").bind(email, email).first();
+    // The same response covers unknown, disabled, unverified and already registered addresses.
+    if ((purpose === "register" && existing) || (purpose === "reset" && !credential)) return;
+    const token = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32)))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    const tokenHash = await digest(token);
+    await db.prepare("DELETE FROM portal_password_actions WHERE expires_at <= ?").bind(now).run();
+    await db.prepare("INSERT INTO portal_password_actions (token_hash, purpose, email_lower, customer_id, credential_hash, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+      .bind(tokenHash, purpose, email, credential?.customer_id ?? `cust_${crypto.randomUUID()}`, purpose === "reset" ? credential!.password_hash : null, now, now + 900).run();
+    const link = `${canonicalHttpsOrigin(env.PORTAL_PUBLIC_ORIGIN)}/password-action#token=${token}`;
+    const sent = await sendEmail(env, email, purpose === "register" ? "Verify your Licensecc email" : "Reset your Licensecc password", `${purpose === "register" ? "Verify your email and choose a password" : "Choose a new password"}:\n\n${link}\n\nThis link expires in 15 minutes and can be used once. If you did not request it, ignore this email.`);
+    const failure = deliveryErrorType(sent);
+    if (failure !== null) report(failure);
+    if (!sent.ok && sent.code !== "email_send_indeterminate") {
+      await db.prepare("DELETE FROM portal_password_actions WHERE token_hash = ? AND consumed_at IS NULL").bind(tokenHash).run();
+    }
+  } catch {
+    // Background delivery never surfaces account state to the caller; the proof simply expires.
+    // The exception object is discarded: its message may carry provider text, SQL or the address.
+    report("rejected");
+  }
 }
 
 async function complete(request: Request, env: Env, reqId: string, now: number): Promise<Response> {
@@ -64,20 +93,28 @@ async function complete(request: Request, env: Env, reqId: string, now: number):
     statements.push(env.DB.prepare(`INSERT INTO portal_passwords (customer_id, email_lower, password_hash, created_at, updated_at) SELECT ?, ?, ?, ?, ? WHERE ${claimed} AND EXISTS (SELECT 1 FROM customers WHERE id = ? AND status = 'active') RETURNING customer_id`)
       .bind(id, email, passwordHash, now, now, tokenHash, claim, id));
   } else {
-    statements.push(env.DB.prepare(`UPDATE portal_passwords SET password_hash = ?, updated_at = ? WHERE customer_id = ? AND email_lower = ? AND password_hash = ? AND ${claimed} AND EXISTS (SELECT 1 FROM customers WHERE id = ? AND status = 'active' AND lower(email) = ?) RETURNING customer_id`)
-      .bind(passwordHash, now, id, email, action.credential_hash, tokenHash, claim, id, email));
+    statements.push(env.DB.prepare(`UPDATE portal_passwords SET password_hash = ?, updated_at = ? WHERE customer_id = ? AND email_lower = ? AND password_hash = ? AND ${claimed} AND EXISTS (SELECT 1 FROM customers WHERE id = ? AND status = 'active' AND (lower(email) = ? OR (email = '' AND NOT EXISTS (SELECT 1 FROM customers o WHERE lower(o.email) = ?)))) RETURNING customer_id`)
+      .bind(passwordHash, now, id, email, action.credential_hash, tokenHash, claim, id, email, email));
   }
   const writeIndex = statements.length - 1;
+  if (action.purpose === "reset") {
+    // Redeeming the emailed link proves the mailbox; record it as the contact address.
+    statements.push(env.DB.prepare(`UPDATE customers SET email = ?, updated_at = ? WHERE id = ? AND email = '' AND EXISTS (SELECT 1 FROM portal_passwords WHERE customer_id = ? AND password_hash = ?) AND NOT EXISTS (SELECT 1 FROM customers o WHERE lower(o.email) = ?)`)
+      .bind(email, now, id, id, passwordHash, email));
+  }
   statements.push(...passwordInvalidations(env.DB, id, passwordHash, now, {
     email, revokeAccountTokens: action.purpose === "reset",
   }));
   const results = await env.DB.batch(statements);
   if (!results[writeIndex]?.results.length) return invalid();
-  return signedIn(request, env, reqId, id, passwordHash, now);
+  let session: Response | null = null;
+  try { session = await signedIn(request, env, reqId, id, passwordHash, now); } catch { session = null; }
+  // The credential write is committed; never report it as a failed sign-in.
+  return session?.status === 200 ? session : envelope(reqId, "password_updated", { sign_in_required: true }, 200, HEADERS);
 }
 
 export const PASSWORD_EMAIL_DISPATCH: Record<string, TopRoute> = {
-  "POST /portal/v1/auth/password/register": (request, env, _ctx, reqId, now) => requestLink(request, env, reqId, now, "register"),
-  "POST /portal/v1/auth/password/reset": (request, env, _ctx, reqId, now) => requestLink(request, env, reqId, now, "reset"),
+  "POST /portal/v1/auth/password/register": (request, env, ctx, reqId, now) => requestLink(request, env, ctx, reqId, now, "register"),
+  "POST /portal/v1/auth/password/reset": (request, env, ctx, reqId, now) => requestLink(request, env, ctx, reqId, now, "reset"),
   "POST /portal/v1/auth/password/complete": (request, env, _ctx, reqId, now) => complete(request, env, reqId, now),
 };
