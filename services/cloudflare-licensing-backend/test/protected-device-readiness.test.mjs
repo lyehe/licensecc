@@ -36,7 +36,7 @@ test("protected readiness proves local crypto/configuration without claiming liv
   assert.equal((await checkProtectedDeviceConfiguration({...env,BOUND_APPROVAL_ENCRYPTION_KEYS:'{"active":"missing","keys":{}}'})).ok,false);
 });
 
-test("readiness script supports environment-scoped Wrangler vars", async () => {
+test("readiness script supports environment-scoped Wrangler vars", async (t) => {
   const tempDir = `${import.meta.dirname}/.temp-readiness-${crypto.randomUUID()}`;
   try {
     await mkdir(tempDir, { recursive: true });
@@ -63,13 +63,22 @@ test("readiness script supports environment-scoped Wrangler vars", async () => {
     const result1 = await main([`--config=${configPath}`, `--secrets=${secretsPath}`, "--env=production"]);
     assert.equal(result1, 0, "should succeed with --env=production");
 
-    // Test 2: without --env should return 1 (fail because top-level vars is empty)
+    // Test 2: without --env should return 1 (fail because checkProtectedDeviceConfiguration rejects empty vars)
     const result2 = await main([`--config=${configPath}`, `--secrets=${secretsPath}`]);
     assert.equal(result2, 1, "should fail without --env");
 
-    // Test 3: --env=staging (missing) should return 1 with error message
+    // Test 3: --env=staging (missing) should return 1 with error protected_configuration_unavailable
+    const chunks = [];
+    t.mock.method(process.stdout, "write", (chunk) => {
+      chunks.push(chunk);
+      return true;
+    });
     const result3 = await main([`--config=${configPath}`, `--secrets=${secretsPath}`, "--env=staging"]);
     assert.equal(result3, 1, "should fail with non-existent --env=staging");
+    const output = chunks.join("");
+    const parsed = JSON.parse(output);
+    assert.equal(parsed.ok, false, "response should have ok=false");
+    assert.equal(parsed.error, "protected_configuration_unavailable", "response should have error protected_configuration_unavailable");
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }
