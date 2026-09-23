@@ -90,10 +90,22 @@ class MockR2 {
 
   async list(options = {}) {
     const prefix = options.prefix ?? "";
-    const objects = [...this.objects.entries()]
-      .filter(([key]) => key.startsWith(prefix))
-      .map(([key, object]) => ({ key, uploaded: object.uploaded }));
-    return { objects, truncated: false };
+    const limit = options.limit ?? 1000;
+    const startAfter = options.cursor ?? "";
+    // Real R2 always returns keys in ascending lexicographic order and honours
+    // `limit`; the manifest guard in saveD1ExportToR2 depends on that (see
+    // README) so the mock must match it instead of returning insertion order.
+    const matches = [...this.objects.entries()]
+      .filter(([key]) => key.startsWith(prefix) && key > startAfter)
+      .map(([key, object]) => ({ key, uploaded: object.uploaded }))
+      .sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+    const page = matches.slice(0, limit);
+    const truncated = matches.length > limit;
+    return {
+      objects: page,
+      truncated,
+      cursor: truncated ? page[page.length - 1].key : undefined,
+    };
   }
 
   async delete(keys) {
@@ -240,6 +252,7 @@ test("R2 save fails closed before manifest creation on returned size or SHA-256 
     /r2_put_size_mismatch/,
   );
   assert.equal([...wrongSize.objects.keys()].some((key) => key.endsWith(".metadata.json")), false);
+  assert.equal(wrongSize.objects.size, 0, "the unmanifested dump must be removed, not just the manifest withheld");
 
   const wrongDigest = new MockR2();
   wrongDigest.includeSha256 = true;
@@ -249,6 +262,7 @@ test("R2 save fails closed before manifest creation on returned size or SHA-256 
     /r2_put_sha256_mismatch/,
   );
   assert.equal([...wrongDigest.objects.keys()].some((key) => key.endsWith(".metadata.json")), false);
+  assert.equal(wrongDigest.objects.size, 0, "the unmanifested dump must be removed, not just the manifest withheld");
 });
 
 test("R2 save rejects an empty export without publishing a manifest", async () => {
@@ -279,6 +293,7 @@ test("R2 save rejects object metadata that predates the requested snapshot", asy
     /r2_put_uploaded_at_before_snapshot/,
   );
   assert.equal([...bucket.objects.keys()].some((key) => key.endsWith(".metadata.json")), false);
+  assert.equal(bucket.objects.size, 0, "the unmanifested dump must be removed, not just the manifest withheld");
 });
 
 test("backup object key sanitizes path-like filenames", () => {
@@ -305,6 +320,21 @@ test("retention pruning removes expired R2 objects", async () => {
   assert.deepEqual(bucket.deleted, ["d1/licensecc/old.sql"]);
   assert.equal(bucket.objects.has("d1/licensecc/new.sql"), true);
   assert.equal(bucket.objects.has("other/old.sql"), true);
+});
+
+test("MockR2 list honours limit and returns keys in ascending order like real R2", async () => {
+  const bucket = new MockR2();
+  await bucket.put("d1/licensecc/b.sql", "b");
+  await bucket.put("d1/licensecc/a.sql", "a");
+  await bucket.put("d1/licensecc/c.sql", "c");
+
+  const firstPage = await bucket.list({ prefix: "d1/licensecc/", limit: 2 });
+  assert.deepEqual(firstPage.objects.map((object) => object.key), ["d1/licensecc/a.sql", "d1/licensecc/b.sql"]);
+  assert.equal(firstPage.truncated, true);
+
+  const secondPage = await bucket.list({ prefix: "d1/licensecc/", limit: 2, cursor: firstPage.cursor });
+  assert.deepEqual(secondPage.objects.map((object) => object.key), ["d1/licensecc/c.sql"]);
+  assert.equal(secondPage.truncated, false);
 });
 
 test("timing-safe token comparison preserves equality semantics", async () => {

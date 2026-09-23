@@ -98,7 +98,10 @@ object before the error propagates, so a failed save never leaves an orphan,
 unmanifested dump in R2. The delete is guarded by the manifest: if
 `<object>.metadata.json` already exists (an earlier successful run, or a
 manifest put whose outcome was indeterminate) or its existence cannot be
-checked, the dump is kept and the original error still propagates.
+checked, the dump is kept and the original error still propagates. That guard
+lists by the exact manifest key with `limit: 1` and relies on R2 always
+returning keys in ascending lexicographic order, so an existing manifest is
+never missed even if same-prefixed keys exist.
 Upload failures cancel the upstream stream before retrying. Dumps are never
 buffered in full in Worker memory.
 
