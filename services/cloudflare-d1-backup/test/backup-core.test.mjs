@@ -4,6 +4,7 @@ import { test } from "node:test";
 import {
   backupConfigFromEnv,
   backupObjectKey,
+  isTerminalExportError,
   parseReadyExportResponse,
   parseStartExportResponse,
   pollD1Export,
@@ -105,6 +106,18 @@ class MockR2 {
   }
 }
 
+// Shared successful-save fixture: a fresh bucket/fetch/config/started/ready
+// set that saveD1ExportToR2 accepts end to end, parameterized only by the
+// dump body so tests can steer which post-upload check fires.
+function fixtureWithDump(dumpBody) {
+  const bucket = new MockR2(new Date("2026-06-05T01:03:04.005Z"));
+  bucket.includeSha256 = true;
+  const fetchImpl = async () => sqlResponse(dumpBody);
+  const started = { bookmark: "bookmark-1", snapshotRequestedAt: "2026-06-05T01:02:03.004Z" };
+  const ready = { signedUrl: "https://dump.example/sql", filename: "../dump.sql" };
+  return { bucket, fetchImpl, config, started, ready };
+}
+
 test("backup config validates required values and normalizes prefix", () => {
   assert.deepEqual(config, {
     accountId: "account-123",
@@ -150,12 +163,8 @@ test("D1 export start and poll use the REST API payloads", async () => {
 });
 
 test("R2 save writes SQL stream and metadata manifest", async () => {
-  const bucket = new MockR2(new Date("2026-06-05T01:03:04.005Z"));
-  bucket.includeSha256 = true;
-  const fetcher = async () => sqlResponse(D1_EXPORT_SQL);
-  const started = { bookmark: "bookmark-1", snapshotRequestedAt: "2026-06-05T01:02:03.004Z" };
-  const ready = { signedUrl: "https://dump.example/sql", filename: "../dump.sql" };
-  const result = await saveD1ExportToR2(bucket, fetcher, config, started, ready);
+  const { bucket, fetchImpl, config, started, ready } = fixtureWithDump(D1_EXPORT_SQL);
+  const result = await saveD1ExportToR2(bucket, fetchImpl, config, started, ready);
 
   assert.equal(result.object_key, "d1/licensecc/2026-06-05T01-02-03-004Z/bookmark-1/dump.sql");
   assert.equal(result.manifest_key, `${result.object_key}.metadata.json`);
@@ -314,6 +323,18 @@ test("D1 polling rejects incomplete and failed exports even with a nested URL", 
   assert.throws(() => parseReadyExportResponse({ success: true, result: {
     status: "complete", success: false, result: { signed_url: "https://dump.example/sql" },
   } }), /provider_failed/);
+});
+
+test("provider export failures are terminal; not-ready is retryable", () => {
+  assert.equal(isTerminalExportError(new Error("d1_export_provider_failed")), true);
+  assert.equal(isTerminalExportError(new Error("d1_export_not_ready")), false);
+  assert.equal(isTerminalExportError("d1_export_provider_failed"), false);
+});
+
+test("a dump that fails post-upload checks is removed from R2", async () => {
+  const { bucket, fetchImpl, config, started, ready } = fixtureWithDump("-- empty\n");
+  await assert.rejects(saveD1ExportToR2(bucket, fetchImpl, config, started, ready), /snapshot_inventory_no_counted_tables/);
+  assert.equal(bucket.objects.size, 0);
 });
 
 test("invalid export lengths cancel the download without publishing objects", async () => {

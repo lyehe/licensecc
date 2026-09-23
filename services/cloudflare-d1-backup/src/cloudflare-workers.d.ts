@@ -33,3 +33,9 @@ declare module "cloudflare:workers" {
     run(event: WorkflowEvent<Params>, step: WorkflowStep): Promise<unknown>;
   }
 }
+
+declare module "cloudflare:workflows" {
+  export class NonRetryableError extends Error {
+    constructor(message: string, name?: string);
+  }
+}
