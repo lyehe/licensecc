@@ -4618,16 +4618,13 @@
                     ],
                     "properties": {
                       "code": {
-                        "enum": [
-                          "registration_unavailable",
-                          "password_change_conflict"
-                        ]
+                        "const": "password_change_conflict"
                       }
                     }
                   }
                 }
               },
-              "description": "Registration unavailable or settings changed concurrently."
+              "description": "Settings changed concurrently."
             },
             "413": {
               "content": {
@@ -4828,16 +4825,13 @@
                     ],
                     "properties": {
                       "code": {
-                        "enum": [
-                          "registration_unavailable",
-                          "password_change_conflict"
-                        ]
+                        "const": "password_change_conflict"
                       }
                     }
                   }
                 }
               },
-              "description": "Registration unavailable or settings changed concurrently."
+              "description": "Settings changed concurrently."
             },
             "413": {
               "content": {
@@ -4910,7 +4904,7 @@
       },
       "/portal/v1/auth/password/complete": {
         "post": {
-          "description": "POST only; opening the email link does not consume it. Single-use atomic redemption creates an empty verified account or resets an existing credential. Reset revokes sessions, OTPs and ephemeral account tokens. Outstanding reset links become invalid after any password change. Token must be passed in JSON, never a query parameter. IP 10/900s and token 5/900s before hashing.",
+          "description": "POST only; opening the email link does not consume it. Single-use atomic redemption creates an empty verified account or resets an existing credential. Reset revokes sessions, OTPs and ephemeral account tokens. Outstanding reset links become invalid after any password change. Token must be passed in JSON, never a query parameter. IP 10/900s and token 5/900s before hashing. A committed credential change always reports success, even when the follow-up session mint fails.",
           "operationId": "authCompletePassword",
           "requestBody": {
             "content": {
@@ -4939,7 +4933,7 @@
           },
           "responses": {
             "200": {
-              "description": "Signed in with a rotated opaque HttpOnly session cookie. No password/hash is returned."
+              "description": "Signed in with a rotated session cookie (code signed_in), or password_updated with sign_in_required when the credential changed but no session could be issued."
             },
             "400": {
               "content": {
@@ -4964,28 +4958,6 @@
               },
               "description": "Expired, used or invalid link, or invalid password/JSON."
             },
-            "401": {
-              "content": {
-                "application/json": {
-                  "schema": {
-                    "allOf": [
-                      {
-                        "$ref": "#/components/schemas/ErrorEnvelope"
-                      }
-                    ],
-                    "properties": {
-                      "code": {
-                        "enum": [
-                          "invalid_credentials",
-                          "unauthorized"
-                        ]
-                      }
-                    }
-                  }
-                }
-              },
-              "description": "Invalid credentials or session."
-            },
             "403": {
               "content": {
                 "application/json": {
@@ -4997,16 +4969,13 @@
                     ],
                     "properties": {
                       "code": {
-                        "enum": [
-                          "cross_site_forbidden",
-                          "verified_sign_in_required"
-                        ]
+                        "const": "cross_site_forbidden"
                       }
                     }
                   }
                 }
               },
-              "description": "Origin mismatch or fresh verified sign-in required."
+              "description": "Origin mismatch."
             },
             "404": {
               "content": {
@@ -5026,28 +4995,6 @@
                 }
               },
               "description": "Password sign-in disabled."
-            },
-            "409": {
-              "content": {
-                "application/json": {
-                  "schema": {
-                    "allOf": [
-                      {
-                        "$ref": "#/components/schemas/ErrorEnvelope"
-                      }
-                    ],
-                    "properties": {
-                      "code": {
-                        "enum": [
-                          "registration_unavailable",
-                          "password_change_conflict"
-                        ]
-                      }
-                    }
-                  }
-                }
-              },
-              "description": "Registration unavailable or settings changed concurrently."
             },
             "413": {
               "content": {
@@ -5162,16 +5109,13 @@
                     ],
                     "properties": {
                       "code": {
-                        "enum": [
-                          "invalid_json",
-                          "invalid_registration"
-                        ]
+                        "const": "invalid_json"
                       }
                     }
                   }
                 }
               },
-              "description": "Invalid JSON, email or password length."
+              "description": "Invalid JSON."
             },
             "401": {
               "content": {
@@ -5184,16 +5128,13 @@
                     ],
                     "properties": {
                       "code": {
-                        "enum": [
-                          "invalid_credentials",
-                          "unauthorized"
-                        ]
+                        "const": "invalid_credentials"
                       }
                     }
                   }
                 }
               },
-              "description": "Invalid credentials or session."
+              "description": "Invalid credentials."
             },
             "403": {
               "content": {
@@ -5206,16 +5147,13 @@
                     ],
                     "properties": {
                       "code": {
-                        "enum": [
-                          "cross_site_forbidden",
-                          "verified_sign_in_required"
-                        ]
+                        "const": "cross_site_forbidden"
                       }
                     }
                   }
                 }
               },
-              "description": "Origin mismatch or fresh verified sign-in required."
+              "description": "Origin mismatch."
             },
             "404": {
               "content": {
@@ -5235,28 +5173,6 @@
                 }
               },
               "description": "Password sign-in disabled."
-            },
-            "409": {
-              "content": {
-                "application/json": {
-                  "schema": {
-                    "allOf": [
-                      {
-                        "$ref": "#/components/schemas/ErrorEnvelope"
-                      }
-                    ],
-                    "properties": {
-                      "code": {
-                        "enum": [
-                          "registration_unavailable",
-                          "password_change_conflict"
-                        ]
-                      }
-                    }
-                  }
-                }
-              },
-              "description": "Registration unavailable or settings changed concurrently."
             },
             "413": {
               "content": {
@@ -5348,7 +5264,28 @@
           },
           "responses": {
             "202": {
-              "description": "Generic verification_requested response, including ineligible addresses and delivery failures. No session or account is created."
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "properties": {
+                      "code": {
+                        "const": "verification_requested",
+                        "type": "string"
+                      },
+                      "ok": {
+                        "const": true,
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "ok",
+                      "code"
+                    ],
+                    "type": "object"
+                  }
+                }
+              },
+              "description": "Generic verification_requested envelope, including ineligible addresses and delivery failures. No session or account is created."
             },
             "400": {
               "content": {
@@ -5383,16 +5320,13 @@
                     ],
                     "properties": {
                       "code": {
-                        "enum": [
-                          "cross_site_forbidden",
-                          "verified_sign_in_required"
-                        ]
+                        "const": "cross_site_forbidden"
                       }
                     }
                   }
                 }
               },
-              "description": "Origin mismatch or fresh verified sign-in required."
+              "description": "Origin mismatch."
             },
             "404": {
               "content": {
@@ -5506,7 +5440,28 @@
           },
           "responses": {
             "202": {
-              "description": "Generic verification_requested response, including ineligible addresses and delivery failures. No session or account is created."
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "properties": {
+                      "code": {
+                        "const": "verification_requested",
+                        "type": "string"
+                      },
+                      "ok": {
+                        "const": true,
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "ok",
+                      "code"
+                    ],
+                    "type": "object"
+                  }
+                }
+              },
+              "description": "Generic verification_requested envelope, including ineligible addresses and delivery failures. No session or account is created."
             },
             "400": {
               "content": {
@@ -5541,16 +5496,13 @@
                     ],
                     "properties": {
                       "code": {
-                        "enum": [
-                          "cross_site_forbidden",
-                          "verified_sign_in_required"
-                        ]
+                        "const": "cross_site_forbidden"
                       }
                     }
                   }
                 }
               },
-              "description": "Origin mismatch or fresh verified sign-in required."
+              "description": "Origin mismatch."
             },
             "404": {
               "content": {

@@ -11,26 +11,36 @@ const responses = {
   "401": errorResponse("Invalid credentials or session.", ["invalid_credentials", "unauthorized"]),
   "403": errorResponse("Origin mismatch or fresh verified sign-in required.", ["cross_site_forbidden", "verified_sign_in_required"]),
   "404": errorResponse("Password sign-in disabled.", "not_found"),
-  "409": errorResponse("Registration unavailable or settings changed concurrently.", ["registration_unavailable", "password_change_conflict"]),
+  "409": errorResponse("Settings changed concurrently.", "password_change_conflict"),
   "413": errorResponse("Request body exceeds 8192 bytes.", "body_too_large"),
   "429": errorResponse("Per-IP or login-identifier limit reached.", "rate_limited"),
   "503": errorResponse("Session/database configuration unavailable.", "config_error"),
 };
+const common = {
+  "403": errorResponse("Origin mismatch.", "cross_site_forbidden"),
+  "404": errorResponse("Password sign-in disabled.", "not_found"),
+  "413": errorResponse("Request body exceeds 8192 bytes.", "body_too_large"),
+  "429": errorResponse("Per-IP or login-identifier limit reached.", "rate_limited"),
+  "503": errorResponse("Session/database configuration unavailable.", "config_error"),
+};
+const accepted = { description: "Generic verification_requested envelope, including ineligible addresses and delivery failures. No session or account is created.",
+  content: { "application/json": { schema: { type: "object", required: ["ok", "code"], properties: { ok: { type: "boolean", const: true }, code: { type: "string", const: "verification_requested" } } } } } };
 export const passwordPaths: LabeledPathFragment = { label: "password", entries: [
   ...(["register", "reset"] as const).map(action => [`/portal/v1/auth/password/${action}`, { post: {
     tags: ["auth"], operationId: action === "register" ? "authRegisterPassword" : "authResetPassword", summary: action === "register" ? "Request email verification before creating an account." : "Request password recovery at a verified email.", security: [],
     requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["email"], properties: { email: { type: "string", format: "email" } } } } } },
-    responses: { "202": { description: "Generic verification_requested response, including ineligible addresses and delivery failures. No session or account is created." }, "400": errorResponse("Invalid email or JSON.", ["invalid_email", "invalid_json"]), "403": responses["403"], "404": responses["404"], "413": responses["413"], "429": responses["429"], "503": errorResponse("Email or session configuration unavailable.", ["email_unconfigured", "config_error"]) },
+    responses: { "202": accepted, "400": errorResponse("Invalid email or JSON.", ["invalid_email", "invalid_json"]), "403": common["403"], "404": common["404"], "413": common["413"], "429": common["429"], "503": errorResponse("Email or session configuration unavailable.", ["email_unconfigured", "config_error"]) },
     description: "Requires exact Origin, password enablement and an email sender. Links expire after 15 minutes. Registration never claims existing accounts; reset is restricted to active accounts whose credential email matches their verified contact address. Shared email send limit 1/60s, per-action email 10/900s, IP 5/900s for registration and 30/900s for reset. Resend uses the same endpoint.",
   } }] as [string, Record<string, unknown>]),
   ["/portal/v1/auth/password/complete", { post: {
     tags: ["auth"], operationId: "authCompletePassword", summary: "Redeem an email proof and set a password.", security: [],
     requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["token", "password"], properties: { token: { type: "string", pattern: "^[A-Za-z0-9_-]{43}$" }, password: { type: "string", minLength: 15, maxLength: 128 } } } } } },
-    responses: { ...responses, "400": errorResponse("Expired, used or invalid link, or invalid password/JSON.", ["invalid_link", "invalid_registration", "invalid_json"]) },
-    description: "POST only; opening the email link does not consume it. Single-use atomic redemption creates an empty verified account or resets an existing credential. Reset revokes sessions, OTPs and ephemeral account tokens. Outstanding reset links become invalid after any password change. Token must be passed in JSON, never a query parameter. IP 10/900s and token 5/900s before hashing.",
+    responses: { "200": { description: "Signed in with a rotated session cookie (code signed_in), or password_updated with sign_in_required when the credential changed but no session could be issued." }, "400": errorResponse("Expired, used or invalid link, or invalid password/JSON.", ["invalid_link", "invalid_registration", "invalid_json"]), ...common },
+    description: "POST only; opening the email link does not consume it. Single-use atomic redemption creates an empty verified account or resets an existing credential. Reset revokes sessions, OTPs and ephemeral account tokens. Outstanding reset links become invalid after any password change. Token must be passed in JSON, never a query parameter. IP 10/900s and token 5/900s before hashing. A committed credential change always reports success, even when the follow-up session mint fails.",
   } }],
   ["/portal/v1/auth/password/login", { post: {
-    tags: ["auth"], operationId: "authLoginPassword", summary: "Sign in using an email/password credential.", security: [], requestBody: body(true), responses,
+    tags: ["auth"], operationId: "authLoginPassword", summary: "Sign in using an email/password credential.", security: [], requestBody: body(true),
+    responses: { "200": responses["200"], "400": errorResponse("Invalid JSON.", "invalid_json"), "401": errorResponse("Invalid credentials.", "invalid_credentials"), ...common },
     description: "Requires exact Origin. Wrong password, unknown login and disabled customer return the same denial. Per-IP 30/900s and per-email 10/900s. Session creation atomically checks the verified password hash is still current.",
   } }],
   ["/portal/v1/auth/password", {

@@ -179,4 +179,17 @@ test("a provider timeout keeps the emailed link redeemable", async t => {
   assert.equal((await f.complete()).status, 200);
 });
 
+test("a committed reset reports success even when the new session cannot be minted", async t => {
+  const f = fixture(t);
+  await credential(f.env);
+  await f.request("reset", "a@x.com");
+  f.db.exec("CREATE TRIGGER no_sessions BEFORE INSERT ON portal_sessions BEGIN SELECT RAISE(ABORT, 'test'); END");
+  const result = await f.complete(undefined, NEXT);
+  assert.equal(result.status, 200);
+  assert.equal(result.body.code, "password_updated");
+  assert.equal(result.body.data.sign_in_required, true);
+  f.db.exec("DROP TRIGGER no_sessions");
+  assert.equal((await call(f.env, "POST", `${PATH}/login`, { body: { email: "a@x.com", password: NEXT } })).status, 200);
+});
+
 export const DIRECT_ROUTE_TESTS = ["POST /portal/v1/auth/password/register", "POST /portal/v1/auth/password/reset", "POST /portal/v1/auth/password/complete"];

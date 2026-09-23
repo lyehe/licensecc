@@ -94,7 +94,10 @@ async function complete(request: Request, env: Env, reqId: string, now: number):
   }));
   const results = await env.DB.batch(statements);
   if (!results[writeIndex]?.results.length) return invalid();
-  return signedIn(request, env, reqId, id, passwordHash, now);
+  let session: Response | null = null;
+  try { session = await signedIn(request, env, reqId, id, passwordHash, now); } catch { session = null; }
+  // The credential write is committed; never report it as a failed sign-in.
+  return session?.status === 200 ? session : envelope(reqId, "password_updated", { sign_in_required: true }, 200, HEADERS);
 }
 
 export const PASSWORD_EMAIL_DISPATCH: Record<string, TopRoute> = {
