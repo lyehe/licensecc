@@ -41,7 +41,7 @@ test("sanitizers and fuzzers are opt-in, Clang-only, and fail closed", () => {
   assert.match(cmake, /if\(LCC_BUILD_FUZZERS\)\s+add_subdirectory\(fuzz\)\s+endif\(\)/);
 });
 
-test("only the dedicated Linux Clang preset enables native-security instrumentation", () => {
+test("only the dedicated Linux Clang presets enable native-security instrumentation", () => {
   const configurePresets = presets.configurePresets;
   const sanitizerPreset = configurePresets.find(({ name }) => name === "ci-linux-sanitizers");
   assert.ok(sanitizerPreset, "missing ci-linux-sanitizers configure preset");
@@ -52,18 +52,23 @@ test("only the dedicated Linux Clang preset enables native-security instrumentat
   assert.equal(sanitizerPreset.cacheVariables.LCC_ENABLE_SANITIZERS, "TRUE");
   assert.equal(sanitizerPreset.cacheVariables.LCC_BUILD_FUZZERS, "TRUE");
 
-  for (const preset of configurePresets.filter(({ name }) => name !== "ci-linux-sanitizers")) {
-    assert.notEqual(
-      preset.cacheVariables?.LCC_ENABLE_SANITIZERS,
-      "TRUE",
-      `${preset.name} must not enable sanitizers`,
+  // Resolve `inherits` like CMake: earlier parents win over later ones, and the preset's own values win.
+  const byName = new Map(configurePresets.map((preset) => [preset.name, preset]));
+  const resolvedCache = (preset) =>
+    Object.assign(
+      {},
+      ...[preset.inherits ?? []].flat().reverse().map((name) => resolvedCache(byName.get(name))),
+      preset.cacheVariables,
     );
-    assert.notEqual(
-      preset.cacheVariables?.LCC_BUILD_FUZZERS,
-      "TRUE",
-      `${preset.name} must not enable fuzzers`,
-    );
-  }
+  const enabling = (variable) =>
+    configurePresets
+      .filter((preset) => /^(?:1|ON|YES|TRUE|Y)$/i.test(resolvedCache(preset)[variable] ?? ""))
+      .map(({ name }) => name);
+  assert.deepEqual(enabling("LCC_ENABLE_SANITIZERS"), [
+    "ci-linux-sanitizers",
+    "ci-linux-sanitizers-device-identity",
+  ]);
+  assert.deepEqual(enabling("LCC_BUILD_FUZZERS"), ["ci-linux-sanitizers"]);
 
   assert.ok(
     presets.buildPresets.some(
