@@ -11,7 +11,8 @@ function license(feature, fields = {}) {
   return {
     id: `ent_${feature}`, project: "ALPHA", feature, status: "active", license_fingerprint: "c".repeat(64),
     valid_from: null, valid_until: 4_102_444_800, enforcement_mode: "legacy", license_mode: "node_locked",
-    pool_size: 0, max_active_devices: 1, max_borrow_sec: 0, heartbeat_grace_sec: 900, policy_id: null, trial_ends_at: null,
+    pool_size: 0, max_active_devices: 1, max_borrow_sec: 0, heartbeat_grace_sec: 900, policy_id: null,
+    trial_ends_at: null, trial_starts_on_activation: false,
     ...fields,
   };
 }
@@ -23,8 +24,11 @@ const LICENSES = [
   license("cancelled", { status: "revoked", enforcement_mode: "device_bound_v1" }),
   license("upcoming", { valid_from: 4_102_444_800, valid_until: null }),
   license("runtrial", { enforcement_mode: "device_bound_v1", license_mode: "trial", valid_until: null, trial_ends_at: 4_133_980_800 }),
-  license("newtrial", { enforcement_mode: "device_bound_v1", license_mode: "trial", valid_until: null, trial_ends_at: null }),
+  license("newtrial", { enforcement_mode: "device_bound_v1", license_mode: "trial", valid_until: null, trial_ends_at: null, trial_starts_on_activation: true }),
   license("endtrial", { license_mode: "trial", valid_until: null, trial_ends_at: 1_760_000_000 }),
+  // A trial with no end of its own: a zero-duration legacy trial, or the admin's default from_issue
+  // trial with no end date. Nothing ends it, so it must not read as starting later or as expired.
+  license("opentrial", { license_mode: "trial", valid_until: null, trial_ends_at: null, trial_starts_on_activation: false }),
   license("steady", { project: "BETA" }),
 ];
 
@@ -82,6 +86,11 @@ test("license lifecycle: each state reads as words with its UTC date and next st
   await expect(cell(page, "newtrial", "Mode")).toHaveText("Protected device · Trial starts when you activate");
   await expect(cell(page, "endtrial", "Mode")).toHaveText("Trial · ended 2025-10-09");
   await expect(cell(page, "endtrial", "Status")).toHaveText("Expired on 2025-10-09. Contact support to renew.");
+  // A trial with no end of its own reads just "Trial", stays active and keeps its download.
+  await expect(cell(page, "opentrial", "Mode")).toHaveText("Trial");
+  await expect(cell(page, "opentrial", "Status")).toHaveText("Active");
+  await expect(cell(page, "opentrial", "Valid")).toHaveText("No start date to No end date");
+  await expect(row(page, "opentrial").getByText("Activate and download", { exact: true })).toBeVisible();
 
   // --- Validity window: a missing start or end says so ---
   await expect(cell(page, "solo", "Valid")).toHaveText("No start date to 2100-01-01");

@@ -584,14 +584,17 @@ test("portal entitlement projection distinguishes protected enrollment without e
 });
 
 // =================================================================================================
-// TRIAL END (task C5) — each row says when its trial ends, by the deadline rule the protected-device
-// lease path enforces, with no prospective start: a trial that starts at its first activation and
-// has not started yet has no end (null), and the portal then says it starts when you activate.
+// TRIAL END (task C5) — each row says when its trial ends by the rule that enforces that row: the
+// protected-device rule for a protected row, the legacy lease rule otherwise (a legacy trial has a
+// clock only for an activation basis with a positive duration). A trial never outlives its license
+// (valid_until wins), a clock not yet started has no end (null), and trial_starts_on_activation says
+// whether the first activation starts one.
 // =================================================================================================
 
 const TRIAL_KEY = `sha256:${"e".repeat(64)}`;
 const DAY = 86400;
 
+// A legacy row: seeded as usual, then given its trial columns.
 function seedTrial(db, feature, fingerprint, { basis = null, duration = 0, started = null, validUntil = null, isTrial = 1 }) {
   seedEntitlement(db, { feature, fingerprint, customerId: "A", poolSize: 0, validUntil });
   db.prepare(
@@ -600,7 +603,17 @@ function seedTrial(db, feature, fingerprint, { basis = null, duration = 0, start
   ).run(isTrial, basis, duration, started, started === null ? null : TRIAL_KEY, fingerprint);
 }
 
-test("each entitlement row says when its trial ends; an activation trial not yet started has no end (C5)", async () => {
+// A protected row is inserted as one: an existing row cannot be moved into protected mode.
+function seedProtectedTrial(db, feature, fingerprint, { basis, duration, started = null, validUntil = null }) {
+  db.prepare(
+    "INSERT INTO entitlements (project, feature, license_fingerprint, customer_id, enforcement_mode, status, pool_size, max_active_devices, " +
+      "valid_until, is_trial, trial_expiration_basis, trial_duration_sec, trial_one_per_device, trial_require_device_proof, " +
+      "trial_started_at, trial_device_hash, created_at, updated_at) " +
+      "VALUES ('DEFAULT', ?, ?, 'A', 'device_bound_v1', 'active', 0, 1, ?, 1, ?, ?, 1, 1, ?, ?, ?, ?)",
+  ).run(feature, fingerprint, validUntil, basis, duration, started, started === null ? null : TRIAL_KEY, NOW, NOW);
+}
+
+test("each row's trial end follows the rule that enforces it and never outlives the license (C5)", async () => {
   const { db, env } = baseFixture();
   try {
     seedTrial(db, "RUNNING", "1".repeat(64), { basis: "from_first_activation", duration: 14 * DAY, started: NOW - DAY });
@@ -608,16 +621,32 @@ test("each entitlement row says when its trial ends; an activation trial not yet
     seedTrial(db, "UNSTARTED", "3".repeat(64), { basis: "from_first_use", duration: 7 * DAY });
     seedTrial(db, "ISSUED", "4".repeat(64), { basis: "from_issue", duration: 7 * DAY, validUntil: NOW + 7 * DAY });
     seedTrial(db, "PAID", "5".repeat(64), { isTrial: 0, validUntil: NOW + 30 * DAY });
+    seedTrial(db, "ZERO", "6".repeat(64), { basis: "from_first_activation", duration: 0, started: NOW - 30 * DAY });
+    seedTrial(db, "OPEN", "7".repeat(64), { basis: "from_issue" });
+    seedTrial(db, "CLAMPED", "8".repeat(64), { basis: "from_first_activation", duration: 30 * DAY, started: NOW - DAY, validUntil: NOW + 7 * DAY });
+    seedProtectedTrial(db, "PSTARTED", "9".repeat(64), { basis: "from_first_activation", duration: 7 * DAY, started: NOW - DAY });
+    seedProtectedTrial(db, "PPENDING", "0".repeat(64), { basis: "from_first_activation", duration: 7 * DAY });
+    seedProtectedTrial(db, "PCLAMPED", "d".repeat(64), { basis: "from_first_use", duration: 30 * DAY, started: NOW - DAY, validUntil: NOW + 7 * DAY });
     const r = await call(env, "GET", "/api/portal/entitlements", { cookie: await cookieFor(env, "A") });
     assert.equal(r.status, 200);
-    const endOf = (feature) => r.body.data.items.find((row) => row.feature === feature).trial_ends_at;
-    assert.equal(endOf("RUNNING"), NOW + 13 * DAY, "a started activation trial ends its duration after it started");
-    assert.equal(endOf("ENDED"), NOW - 23 * DAY, "an ended activation trial still reports when it ended");
-    assert.equal(endOf("UNSTARTED"), null, "an activation trial that has not started has no end yet");
-    assert.equal(endOf("ISSUED"), NOW + 7 * DAY, "a from_issue trial ends when the license does");
-    assert.equal(endOf("PAID"), null, "a license that is not a trial has no trial end");
-    assert.equal(endOf("DEFAULT"), null, "the floating license is not a trial either");
-    // Only the derived end reaches the browser, never the columns it is computed from.
+    const trialOf = (feature, endsAt, startsOnActivation, why) => {
+      const row = r.body.data.items.find((item) => item.feature === feature);
+      assert.equal(row.trial_ends_at, endsAt, `${feature}: ${why}`);
+      assert.equal(row.trial_starts_on_activation, startsOnActivation, `${feature}: ${why}`);
+    };
+    trialOf("RUNNING", NOW + 13 * DAY, false, "a started legacy clock ends its duration after it started");
+    trialOf("ENDED", NOW - 23 * DAY, false, "an ended legacy clock still reports when it ended");
+    trialOf("UNSTARTED", null, true, "a legacy clock the first activation starts has no end yet");
+    trialOf("ISSUED", NOW + 7 * DAY, false, "a from_issue trial ends with the license");
+    trialOf("ZERO", null, false, "a zero-duration legacy trial has no clock: no end of its own and no false expiry");
+    trialOf("OPEN", null, false, "the admin's default trial (from_issue, no duration, no end date) has no end and no activation clock");
+    trialOf("CLAMPED", NOW + 7 * DAY, false, "a trial never outlives its license: valid_until wins, so the Mode label and the Valid column agree");
+    trialOf("PSTARTED", NOW + 6 * DAY, false, "a started protected trial ends its duration after it started");
+    trialOf("PPENDING", null, true, "a protected trial the first activation starts has no end yet");
+    trialOf("PCLAMPED", NOW + 7 * DAY, false, "a protected trial never outlives its license either");
+    trialOf("PAID", null, false, "a license that is not a trial has no trial end");
+    trialOf("DEFAULT", null, false, "the floating license is not a trial either");
+    // Only the derived values reach the browser, never the columns they are computed from.
     for (const row of r.body.data.items) {
       for (const column of ["trial_started_at", "trial_duration_sec", "trial_expiration_basis", "trial_device_hash"]) {
         assert.ok(!Object.hasOwn(row, column), `${row.feature} must not expose ${column}`);

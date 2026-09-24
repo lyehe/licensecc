@@ -434,14 +434,17 @@ test("license display preserves explicit status and handles exact date boundarie
   assert.equal(downloadable({ license_mode: "floating" }), false);
 });
 
-// C5: a trial whose clock ran out is expired like any other ended license (the server refuses it
-// too), and a status code the portal does not know is never passed through to the page.
+// C5: a trial the rule that enforces it has ended is expired like any other ended license, and a
+// status code the portal does not know is never passed through to the page.
 test("license display treats an ended trial as expired and never passes an unknown status through (C5)", async () => {
   const { licenseDisplayStatus: status } = await loadWorkflowModule();
   const trial = { status: "active", valid_from: null, valid_until: null, trial_ends_at: 150 };
   assert.equal(status(trial, 149), "active");
   assert.equal(status(trial, 150), "expired");
-  assert.equal(status({ ...trial, trial_ends_at: null }, 10_000), "active", "an unstarted trial has not ended");
+  assert.equal(status({ ...trial, trial_ends_at: null, trial_starts_on_activation: true }, 10_000), "active", "an unstarted trial has not ended");
+  // A trial with no end of its own (a zero-duration legacy trial, the admin's default from_issue
+  // trial with no end date) never reads as expired: nothing enforces an end on it.
+  assert.equal(status({ ...trial, trial_ends_at: null, trial_starts_on_activation: false }, 10_000), "active");
   assert.equal(status({ ...trial, trial_ends_at: undefined }, 10_000), "active", "a row without the field claims nothing");
   assert.equal(status({ ...trial, valid_until: 120 }, 130), "expired", "whichever end comes first ends the license");
   assert.equal(status({ ...trial, status: "paused" }, 100), "unknown");
@@ -470,18 +473,25 @@ test("license status copy names each lifecycle state with its UTC date (C5)", as
   }
 });
 
-test("license mode names a trial's end, or says it starts when you activate (C5)", async () => {
+test("license mode names a trial's end, says the first activation starts it, or just says Trial (C5)", async () => {
   const { licenseModeLabel: mode } = await loadWorkflowModule();
   const now = 1_700_000_000;
-  const protectedTrial = { enforcement_mode: "device_bound_v1", license_mode: "trial" };
+  const protectedTrial = { enforcement_mode: "device_bound_v1", license_mode: "trial", trial_starts_on_activation: false };
+  const legacyTrial = { enforcement_mode: "legacy", license_mode: "trial", trial_starts_on_activation: false };
+  // 1) An end: "ends" ahead of it, "ended" once it has passed.
   assert.equal(mode({ ...protectedTrial, trial_ends_at: 1_800_000_000 }, now), "Protected device · Trial · ends 2027-01-15");
-  assert.equal(mode({ ...protectedTrial, trial_ends_at: null }, now), "Protected device · Trial starts when you activate");
   assert.equal(mode({ ...protectedTrial, trial_ends_at: 1_600_000_000 }, now), "Protected device · Trial · ended 2020-09-13");
   assert.equal(mode({ ...protectedTrial, trial_ends_at: now }, now), "Protected device · Trial · ended 2023-11-14");
-  assert.equal(mode({ enforcement_mode: "legacy", license_mode: "trial", trial_ends_at: 1_800_000_000 }, now), "Trial · ends 2027-01-15");
-  assert.equal(mode({ license_mode: "trial", trial_ends_at: null }, now), "Trial starts when you activate");
-  // A row from a Worker that predates trial_ends_at makes no claim about the trial clock.
-  assert.equal(mode({ ...protectedTrial }, now), "Protected device · Trial");
+  assert.equal(mode({ ...legacyTrial, trial_ends_at: 1_800_000_000 }, now), "Trial · ends 2027-01-15");
+  // 2) No end yet, and the first activation starts the clock.
+  assert.equal(mode({ ...protectedTrial, trial_ends_at: null, trial_starts_on_activation: true }, now), "Protected device · Trial starts when you activate");
+  assert.equal(mode({ ...legacyTrial, trial_ends_at: null, trial_starts_on_activation: true }, now), "Trial starts when you activate");
+  // 3) No end and no activation clock -- a zero-duration legacy trial, or the admin's default
+  //    from_issue trial with no end date: just "Trial" (the Valid column already says "No end date").
+  assert.equal(mode({ ...legacyTrial, trial_ends_at: null }, now), "Trial");
+  assert.equal(mode({ ...protectedTrial, trial_ends_at: null }, now), "Protected device · Trial");
+  // A row from a Worker that predates these fields makes no claim about the trial clock.
+  assert.equal(mode({ enforcement_mode: "device_bound_v1", license_mode: "trial" }, now), "Protected device · Trial");
   assert.equal(mode({ license_mode: "trial" }, now), "Trial");
   assert.equal(mode({ enforcement_mode: "device_bound_v1", license_mode: "node_locked", trial_ends_at: null }, now), "Protected device");
   assert.equal(mode({ license_mode: "node_locked", trial_ends_at: null }, now), "Node-locked");
