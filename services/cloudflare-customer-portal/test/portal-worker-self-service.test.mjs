@@ -97,6 +97,43 @@ test("/api/portal/me returns email: null when customers.email, portal_passwords,
   db.close();
 });
 
+// The four tests above each seed exactly ONE source per customer, so they cannot distinguish the
+// correct precedence from a COALESCE with scrambled argument order (any single-source fallback still
+// "wins" trivially). These two seed ALL applicable sources on ONE customer, each with a DISTINCT
+// address, so picking the wrong source is directly visible in the asserted email.
+
+test("/api/portal/me: when customers.email, a password, and an identity all exist on one customer, customers.email wins over BOTH", async () => {
+  const { db, env } = baseFixture();
+  seedCustomer(db, "COEXIST1", "primary@x.com");
+  db.prepare(
+    "INSERT INTO portal_passwords (customer_id, email_lower, password_hash, created_at, updated_at) VALUES (?, ?, 'hash', ?, ?)",
+  ).run("COEXIST1", "password-loses-1@x.com", NOW, NOW);
+  db.prepare(
+    "INSERT INTO portal_identities (provider, subject, customer_id, email, created_at) VALUES ('google', 'sub-coexist1', ?, ?, ?)",
+  ).run("COEXIST1", "identity-loses-1@x.com", NOW);
+  const cookie = await cookieFor(env, "COEXIST1");
+  const r = await call(env, "GET", "/api/portal/me", { cookie });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.data.email, "primary@x.com", "customers.email wins even when a password and an identity also exist on the same customer");
+  db.close();
+});
+
+test("/api/portal/me: when customers.email is empty but a password AND an identity both exist, the password wins over the identity", async () => {
+  const { db, env } = baseFixture();
+  seedCustomer(db, "COEXIST2", "");
+  db.prepare(
+    "INSERT INTO portal_passwords (customer_id, email_lower, password_hash, created_at, updated_at) VALUES (?, ?, 'hash', ?, ?)",
+  ).run("COEXIST2", "password-wins-2@x.com", NOW, NOW);
+  db.prepare(
+    "INSERT INTO portal_identities (provider, subject, customer_id, email, created_at) VALUES ('google', 'sub-coexist2', ?, ?, ?)",
+  ).run("COEXIST2", "identity-loses-2@x.com", NOW);
+  const cookie = await cookieFor(env, "COEXIST2");
+  const r = await call(env, "GET", "/api/portal/me", { cookie });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.data.email, "password-wins-2@x.com", "portal_passwords wins over portal_identities when customers.email is empty and both exist");
+  db.close();
+});
+
 test("devices + usage are gated by the ownership EXISTS (A sees no B rows)", async () => {
   const { db, env } = baseFixture();
   // Seed a device + usage event on B's entitlement.
