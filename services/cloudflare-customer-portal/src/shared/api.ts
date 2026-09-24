@@ -33,4 +33,5 @@ export interface PortalEntitlementSummary {
   heartbeat_grace_sec: number;
   policy_id: string | null;
   trial_ends_at: number | null;
+  trial_starts_on_activation: boolean;
 }

@@ -91,7 +91,11 @@ export const selfServicePaths: LabeledPathFragment = {
                               valid_until: { type: ["integer", "null"] },
                               trial_ends_at: {
                                 type: ["integer", "null"],
-                                description: "When the trial ends (epoch seconds), by the deadline rule protected-device leases enforce: valid_until for a trial that starts at issue, else the first activation plus the trial duration. null for a license that is not a trial, and for a trial that starts at its first activation and has not started yet.",
+                                description: "When the trial ends (epoch seconds), by the rule that enforces the row: the protected-device trial rule for a protected row, the legacy lease trial rule otherwise; never after valid_until. null for a license that is not a trial, for a trial whose clock starts at its first activation and has not started yet (trial_starts_on_activation), and for a trial with no end of its own.",
+                              },
+                              trial_starts_on_activation: {
+                                type: "boolean",
+                                description: "True for a trial whose clock starts at its first activation and has not started yet.",
                               },
                             },
                           },

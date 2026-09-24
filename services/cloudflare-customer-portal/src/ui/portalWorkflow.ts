@@ -396,7 +396,8 @@ interface LicenseDates {
   status: string;
   valid_from: number | null;
   valid_until: number | null;
-  // null while an activation trial has not started; absent from an older Worker's row.
+  // When the rule that enforces the row ends its trial, never after valid_until; null when nothing
+  // ends the trial yet (or at all); absent from an older Worker's row.
   trial_ends_at?: number | null;
 }
 
@@ -406,7 +407,9 @@ function licenseEndsAt(item: LicenseDates): number | null {
   return ends.length === 0 ? null : Math.min(...ends);
 }
 
-// A trial whose clock ran out is expired like any other ended license: the server refuses it too.
+// An ended trial is expired like any other ended license. trial_ends_at comes from the rule that
+// enforces the row: a protected trial past it is refused, and a legacy one would only get a license
+// that has already expired, so hiding its download is correct.
 export function licenseDisplayStatus(item: LicenseDates, now: number): LicenseDisplayStatus {
   if (item.status === "disabled" || item.status === "revoked") return item.status;
   if (item.status !== "active") return "unknown";
@@ -429,15 +432,18 @@ export function licenseStatusLead(item: LicenseDates, now: number): string {
   }
 }
 
-// The Mode column: how the license is enforced and, for a trial, when its clock runs out, or that it
-// starts at the first activation while trial_ends_at is null. A row without the field (an older
-// Worker's) makes no claim about the trial clock.
-export function licenseModeLabel(item: { enforcement_mode?: string; license_mode: string; trial_ends_at?: number | null }, now: number): string {
+// The Mode column: how the license is enforced and, for a trial, when the rule that enforces it ends
+// it; otherwise that the first activation starts its clock; otherwise plain "Trial" -- a trial with
+// no end of its own (the Valid column already says "No end date"), or a row from an older Worker.
+export function licenseModeLabel(
+  item: { enforcement_mode?: string; license_mode: string; trial_ends_at?: number | null; trial_starts_on_activation?: boolean },
+  now: number,
+): string {
   const enforcement = item.enforcement_mode === "device_bound_v1" ? "Protected device" : null;
   if (item.license_mode !== "trial") return enforcement ?? (item.license_mode === "floating" ? "Floating" : "Node-locked");
-  const trial = item.trial_ends_at === undefined ? "Trial"
-    : item.trial_ends_at === null ? "Trial starts when you activate"
-    : `Trial · ${item.trial_ends_at <= now ? "ended" : "ends"} ${formatEndDate(item.trial_ends_at)}`;
+  const trial = typeof item.trial_ends_at === "number" ? `Trial · ${item.trial_ends_at <= now ? "ended" : "ends"} ${formatEndDate(item.trial_ends_at)}`
+    : item.trial_starts_on_activation === true ? "Trial starts when you activate"
+    : "Trial";
   return enforcement === null ? trial : `${enforcement} · ${trial}`;
 }
 
