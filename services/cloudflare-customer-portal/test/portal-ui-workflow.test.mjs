@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -174,37 +174,61 @@ test("portal UI workflow gives every StatusLine-reachable result code human copy
   }
   assert.ok(manifestCodes.size >= 15, `expected at least 15 distinct manifest codes, found ${manifestCodes.size}`);
 
-  // ---- 3) local UI-only codes: string literals passed to localMessage("...") under src/ui ---------
+  // ---- 3) local UI-only codes: string literals + identifier constants passed to localMessage() ----
+  // Walk EVERY .ts/.tsx file under src/ui recursively rather than scanning a fixed file list -- a
+  // fixed list silently misses a later task's new file that calls localMessage(...) (carried into
+  // C2's dispatch: C1's original list of 5 files would not have noticed a 6th).
   const uiRoot = new URL("../src/ui/", import.meta.url);
-  const uiFilesWithLocalMessages = [
-    "app/App.tsx",
-    "features/auth/AuthFeature.tsx",
-    "features/data/usePortalData.ts",
-    "features/devices/DevicesFeature.tsx",
-    "features/downloads/DownloadsFeature.tsx",
-  ];
-  const localMessageLiteralRe = /localMessage\(\s*"([^"]+)"/g;
-  const localCodes = new Set();
-  for (const relative of uiFilesWithLocalMessages) {
-    const text = readFileSync(new URL(relative, uiRoot), "utf8");
-    for (const match of text.matchAll(localMessageLiteralRe)) localCodes.add(match[1]);
+  function listUiSourceFiles(dirUrl) {
+    const files = [];
+    for (const entry of readdirSync(dirUrl, { withFileTypes: true })) {
+      if (entry.isDirectory()) {
+        files.push(...listUiSourceFiles(new URL(`${entry.name}/`, dirUrl)));
+      } else if (/\.tsx?$/.test(entry.name)) {
+        files.push(new URL(entry.name, dirUrl));
+      }
+    }
+    return files;
   }
-  // The two exported constants passed to localMessage(CONST, ...) are not string literals, so the
-  // regex above cannot see them -- list them explicitly. FLOATING_SEAT_RELEASE_REFRESH_FAILED_CODE is
-  // portalWorkflow.ts's own export (loaded above via workflow). DEVICES_REFRESH_FAILURE_CODE
-  // (DevicesFeature.tsx) is a re-exported alias of that exact same value; assert the alias textually
-  // (rather than transpiling a React/JSX file just for one string) so a future rename cannot silently
-  // drift the two apart.
+  const uiFiles = listUiSourceFiles(uiRoot);
+  // Sanity check on the walk itself, mirroring the >=20/>=15 guards above: a silently-broken walk
+  // (e.g. a wrong root) would otherwise make this whole test vacuously pass with zero collected files.
+  assert.ok(uiFiles.length >= 15, `expected at least 15 .ts/.tsx files under src/ui, found ${uiFiles.length}`);
+
+  const localMessageLiteralRe = /localMessage\(\s*"([^"]+)"/g;
+  const localMessageIdentifierRe = /localMessage\(\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*,/g;
+  const localCodes = new Set();
+  const identifierUsages = new Set();
+  for (const fileUrl of uiFiles) {
+    const text = readFileSync(fileUrl, "utf8");
+    for (const match of text.matchAll(localMessageLiteralRe)) localCodes.add(match[1]);
+    for (const match of text.matchAll(localMessageIdentifierRe)) identifierUsages.add(match[1]);
+  }
+  // Identifier calls (localMessage(CONST, ...)) resolve through the explicit imports below: most UI
+  // constants are portalWorkflow.ts's own exports, reachable here as workflow.<NAME> since it is the
+  // exact module already loaded above. DEVICES_REFRESH_FAILURE_CODE (DevicesFeature.tsx) is the one
+  // exception -- a re-exported alias of FLOATING_SEAT_RELEASE_REFRESH_FAILED_CODE defined locally
+  // rather than in portalWorkflow.ts -- so it is asserted textually below (rather than transpiling a
+  // React/JSX file just for one string) so a future rename cannot silently drift the two apart.
   const devicesFeatureSource = readFileSync(new URL("features/devices/DevicesFeature.tsx", uiRoot), "utf8");
   assert.match(
     devicesFeatureSource,
     /export const DEVICES_REFRESH_FAILURE_CODE = FLOATING_SEAT_RELEASE_REFRESH_FAILED_CODE;/,
     "DEVICES_REFRESH_FAILURE_CODE must stay a plain alias of FLOATING_SEAT_RELEASE_REFRESH_FAILED_CODE",
   );
-  const FLOATING_SEAT_RELEASE_REFRESH_FAILED_CODE = workflow.FLOATING_SEAT_RELEASE_REFRESH_FAILED_CODE;
-  const DEVICES_REFRESH_FAILURE_CODE = workflow.FLOATING_SEAT_RELEASE_REFRESH_FAILED_CODE;
-  localCodes.add(FLOATING_SEAT_RELEASE_REFRESH_FAILED_CODE);
-  localCodes.add(DEVICES_REFRESH_FAILURE_CODE);
+  const KNOWN_LOCAL_ALIASES = { DEVICES_REFRESH_FAILURE_CODE: "FLOATING_SEAT_RELEASE_REFRESH_FAILED_CODE" };
+  for (const identifier of identifierUsages) {
+    const aliasTarget = KNOWN_LOCAL_ALIASES[identifier];
+    const resolved = typeof workflow[identifier] === "string"
+      ? workflow[identifier]
+      : typeof workflow[aliasTarget] === "string" ? workflow[aliasTarget] : undefined;
+    assert.ok(
+      resolved !== undefined,
+      `localMessage(${identifier}, ...) uses a constant this coverage test cannot resolve -- ` +
+      "export it from portalWorkflow.ts (preferred) or extend KNOWN_LOCAL_ALIASES",
+    );
+    localCodes.add(resolved);
+  }
 
   // ---- 4) the dynamic `${operation}_ok` success family (self-service.ts apiAction) -----------------
   // Not a string literal (a template literal keyed by the server-controlled `operation`); its only
