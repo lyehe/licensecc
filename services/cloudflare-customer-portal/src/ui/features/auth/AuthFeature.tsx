@@ -62,7 +62,10 @@ export function usePortalAuth({ setMessage, runOnce }: AuthOptions): PortalAuth 
   const loadMe = useCallback(async (): Promise<boolean> => {
     setPhase("loading");
     try {
-      const result = await api<PortalMe>(mePath());
+      // This IS the session check the global onUnauthorized hook (api.tsx, wired in App.tsx) calls to
+      // find out whether a session is really gone. Its own 401 must never re-trigger that hook -- that
+      // would be circular -- so it is the one api() call in this file that opts out (task C3).
+      const result = await api<PortalMe>(mePath(), undefined, { skipUnauthorizedHook: true });
       if (result.ok && result.data) {
         setCustomerId(result.data.customer_id);
         setEmail(result.data.email ?? null);

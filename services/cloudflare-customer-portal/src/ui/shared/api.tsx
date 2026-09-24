@@ -4,9 +4,30 @@ import type { ApiEnvelope } from "../../shared/api";
 import { describeResultCode, describeUnknownResult } from "../portalWorkflow";
 import type { StatusMessage } from "../types";
 
+// A mid-session 401 (task C3): the server's `unauthorized` code means the session cookie is gone or
+// invalid -- distinct from a credential failure that also answers 401 (`invalid_otp`,
+// `invalid_credentials`, ...), which means "you typed the wrong thing", never "you were signed out".
+// App registers exactly one handler here, once (setOnUnauthorized), so every api() call below routes a
+// real session death through the same recovery path, and reportUnauthorized() lets the download's raw
+// fetch -- it bypasses api() entirely to get the real Response for a blob -- reach that same handler.
+type UnauthorizedHandler = () => void;
+let onUnauthorizedHandler: UnauthorizedHandler | null = null;
+
+export function setOnUnauthorized(handler: UnauthorizedHandler | null): void {
+  onUnauthorizedHandler = handler;
+}
+
+export function reportUnauthorized(status: number, code: string): void {
+  if (status === 401 && code === "unauthorized") onUnauthorizedHandler?.();
+}
+
 // The HttpOnly session cookie is the only browser credential. Keeping every JSON request here makes
 // accidental bearer headers or cross-origin credential modes visible in one small boundary.
-export async function api<T>(path: string, init?: RequestInit): Promise<ApiEnvelope<T>> {
+export async function api<T>(
+  path: string,
+  init?: RequestInit,
+  options?: { skipUnauthorizedHook?: boolean },
+): Promise<ApiEnvelope<T>> {
   let response: Response;
   try {
     response = await fetch(path, {
@@ -25,11 +46,16 @@ export async function api<T>(path: string, init?: RequestInit): Promise<ApiEnvel
     // as an unhandled rejection / pageerror (task C2).
     return { ok: false, code: "network_unavailable", request_id: "" };
   }
+  let envelope: ApiEnvelope<T>;
   try {
-    return (await response.json()) as ApiEnvelope<T>;
+    envelope = (await response.json()) as ApiEnvelope<T>;
   } catch {
     return { ok: false, code: "invalid_response", request_id: "" };
   }
+  // retrySession()'s own /me check (AuthFeature.tsx's loadMe) must never re-trigger the hook it is
+  // itself answering -- that would be circular -- so it alone passes skipUnauthorizedHook (task C3).
+  if (!options?.skipUnauthorizedHook) reportUnauthorized(response.status, envelope.code);
+  return envelope;
 }
 
 export function resultMessage(result: ApiEnvelope<unknown>): StatusMessage {

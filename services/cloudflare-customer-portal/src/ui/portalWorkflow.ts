@@ -199,6 +199,12 @@ const RESULT_CODE_COPY: Record<string, string> = {
   // came back, since a code like "unauthorized" would misleadingly suggest the session already ended
   // (task C2).
   logout_failed: "Sign-out didn't complete. You're still signed in — try again.",
+  // Shown by App's global onUnauthorized hook (api.tsx) once retrySession() confirms a mid-session
+  // 401 is real. The server's own `unauthorized` code already maps to this identical sentence above,
+  // but this local code is what fires the return-to-sign-in transition itself, and it can be raised
+  // by ANY api() caller -- a background data read, a seat action, or the download's raw fetch -- not
+  // just the one request whose response happened to carry the code (task C3).
+  session_ended: "Your session ended. Sign in again.",
   [FLOATING_SEAT_RELEASE_REFRESH_FAILED_CODE]: FLOATING_SEAT_RELEASE_REFRESH_ERROR_COPY,
 
   // ---- Seat-action success (self-service.ts apiAction's default `${operation}_ok`) ----------------

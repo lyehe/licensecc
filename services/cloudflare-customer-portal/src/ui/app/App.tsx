@@ -1,5 +1,5 @@
-import React, { useLayoutEffect, useRef, useState } from "react";
-import { localMessage, StatusLine } from "../shared/api";
+import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { localMessage, setOnUnauthorized, StatusLine } from "../shared/api";
 import { useSingleFlight } from "../shared/useSingleFlight";
 import { AuthFeature, usePortalAuth } from "../features/auth/AuthFeature";
 import { PasswordAction, capturePasswordAction } from "../features/auth/PasswordAction";
@@ -39,6 +39,29 @@ function PortalShell(): React.ReactElement {
   const [message, setMessage] = useState<StatusMessage | null>(null);
   const { busy, busyRef, runOnce } = useSingleFlight();
   const auth = usePortalAuth({ setMessage, runOnce });
+
+  // Task C3: a mid-session 401 (the server's `unauthorized` code, never a credential failure) must
+  // return the customer to sign-in no matter which api() call -- or the download's raw fetch, via
+  // reportUnauthorized() -- surfaced it. Registered exactly once here; `retrying` is a re-entrancy
+  // guard so several api() calls failing at once (e.g. usePortalData's concurrent reads) collapse into
+  // one retrySession() call rather than one each. retrySession() itself (AuthFeature's loadMe) makes
+  // its own /me check with skipUnauthorizedHook, so that check can never re-enter this handler.
+  useEffect(() => {
+    let retrying = false;
+    const handleUnauthorized = (): void => {
+      if (retrying) return;
+      retrying = true;
+      void auth.retrySession()
+        .then((stillAuthed) => {
+          if (!stillAuthed) setMessage(localMessage("session_ended", false));
+        })
+        .finally(() => {
+          retrying = false;
+        });
+    };
+    setOnUnauthorized(handleUnauthorized);
+    return () => setOnUnauthorized(null);
+  }, [auth.retrySession, setMessage]);
 
   const location = usePortalLocation();
   const { entitlements, devices, usage, usageAvailable, readState, stale, refreshData, clear: clearPortalData } = usePortalData({

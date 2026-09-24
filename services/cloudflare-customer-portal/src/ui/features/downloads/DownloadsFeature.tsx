@@ -9,7 +9,7 @@ import {
   canDownloadLicense,
   licenseDisplayStatus,
 } from "../../portalWorkflow";
-import { localMessage, resultMessage } from "../../shared/api";
+import { localMessage, reportUnauthorized, resultMessage } from "../../shared/api";
 import { useLicenseClock } from "../../shared/useLicenseClock";
 import type { EntitlementRow, StatusMessage } from "../../types";
 
@@ -62,6 +62,10 @@ export function useLicenseDownloads({ runOnce, setMessage }: DownloadOptions): L
       if (!response.ok || contentType.includes("application/json")) {
         try {
           const result = (await response.json()) as ApiEnvelope<unknown>;
+          // This download bypasses api() (see the fetch above), so a mid-session 401 needs its own
+          // route to the same global onUnauthorized hook every other api() path already gets -- "every
+          // api() path" (task C3) has to include the download too.
+          reportUnauthorized(response.status, result.code);
           setMessage(resultMessage(result));
         } catch {
           setMessage(localMessage(`download_failed_${response.status}`, false));
