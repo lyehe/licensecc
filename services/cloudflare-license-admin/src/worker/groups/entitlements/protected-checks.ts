@@ -90,14 +90,13 @@ export function protectedCreateAssertion(env: Env, input: EntitlementInput, poli
 }
 
 /**
- * Names the first rule a refused create broke, after its batch rolled back. The checks run against
- * the row the create would have written: its input columns, its policy stamp, and otherwise what an
- * existing protected grant with this key keeps (or the schema default). Values travel as one JSON
- * document so json_extract types numbers the way an INTEGER column stores them. A key that already
- * has a row, with every rule holding, means the claim lost to a concurrent write.
+ * The row a create would have written, as a CTE named `e`: its input columns, its policy stamp, and
+ * otherwise what an existing protected grant with this key keeps (or the schema default). Values
+ * travel as one JSON document so json_extract types numbers the way an INTEGER column stores them.
+ * A create that writes another column before the assertion must model it here too; the SQL suite
+ * compares this row with the committed one after real creates.
  */
-export async function protectedCreateReason(env: Env, input: EntitlementInput, policy?: Policy): Promise<ProtectedCreateReason> {
-  const checks = protectedCreateChecks(input, policy);
+export function protectedWouldBeRowQuery(input: EntitlementInput, policy?: Policy): { sql: string; binds: unknown[] } {
   const stamp = stampColumns(input, policy);
   const written = {
     project: input.project, feature: input.feature, license_fingerprint: input.license_fingerprint, device_hash: input.device_hash ?? "",
@@ -106,16 +105,28 @@ export async function protectedCreateReason(env: Env, input: EntitlementInput, p
   };
   const kept = Object.entries(STAMP_COLUMN_DEFAULTS).filter(([column]) => !(column in stamp))
     .map(([column, fallback]) => `${fallback === null ? `x.${column}` : `coalesce(x.${column}, ${fallback})`} AS ${column}`);
-  const sql = `WITH w(doc) AS (SELECT ?),
+  return {
+    sql: `WITH w(doc) AS (SELECT ?),
     x AS (SELECT ${Object.keys(STAMP_COLUMN_DEFAULTS).join(", ")} FROM entitlements WHERE project=? AND feature=? AND license_fingerprint=? AND enforcement_mode='device_bound_v1'),
-    e AS (SELECT ${[...Object.keys(written).map((column) => `json_extract(w.doc,'$.${column}') AS ${column}`), ...kept].join(", ")} FROM w LEFT JOIN x ON 1)
+    e AS (SELECT ${[...Object.keys(written).map((column) => `json_extract(w.doc,'$.${column}') AS ${column}`), ...kept].join(", ")} FROM w LEFT JOIN x ON 1)`,
+    binds: [JSON.stringify(written), input.project, input.feature, input.license_fingerprint],
+  };
+}
+
+/**
+ * Names the first rule a refused create broke, after its batch rolled back, by walking the checks
+ * against the would-be row. A key that already has a row, with every rule holding, means the claim
+ * lost to a concurrent write.
+ */
+export async function protectedCreateReason(env: Env, input: EntitlementInput, policy?: Policy): Promise<ProtectedCreateReason> {
+  const checks = protectedCreateChecks(input, policy);
+  const wouldBe = protectedWouldBeRowQuery(input, policy);
+  const sql = `${wouldBe.sql}
     SELECT CASE ${checks.map((check) => `WHEN NOT coalesce((${check.sql}), 0) THEN '${check.reason}'`).join("\n      ")}
       WHEN EXISTS (SELECT 1 FROM entitlements s WHERE ${sameKey("s")}) THEN 'fingerprint_in_use'
       ELSE 'unknown' END AS reason FROM e`;
   try {
-    const row = await env.DB.prepare(sql)
-      .bind(JSON.stringify(written), input.project, input.feature, input.license_fingerprint, ...checks.flatMap((check) => check.binds))
-      .first<{ reason: unknown }>();
+    const row = await env.DB.prepare(sql).bind(...wouldBe.binds, ...checks.flatMap((check) => check.binds)).first<{ reason: unknown }>();
     return PROTECTED_CREATE_REASONS.find((reason) => reason === row?.reason) ?? "unknown";
   } catch {
     return "unknown";

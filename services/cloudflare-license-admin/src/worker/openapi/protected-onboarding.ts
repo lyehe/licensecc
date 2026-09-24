@@ -11,7 +11,7 @@ export const protectedOnboardingComponents: LabeledComponentFragment = {
       required: ["project"],
       properties: {
         project: { type: "string", pattern: "^[A-Za-z0-9_.:-]{1,127}$", description: "Protected project ID, under the same rule a protected entitlement uses." },
-        label: { type: "string", maxLength: 128, default: "", description: "Optional operator label. Trimmed; control characters are rejected." },
+        label: { type: "string", maxLength: 128, default: "", description: "Optional operator label. Trimmed; C0 control characters and DEL are rejected." },
       },
     }],
     ["LicenseCreatedData", {

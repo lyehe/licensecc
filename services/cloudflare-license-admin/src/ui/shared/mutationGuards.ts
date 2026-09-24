@@ -33,7 +33,7 @@ const mutationAuthFailures: readonly MutationFailureRule[] = [
 const malformedBodyFailure: readonly MutationFailureRule[] = [{ status: 413, codes: ["body_too_large"] }];
 const noDefinitiveFailure: MutationFailurePolicy = { initial: [], replay: [] };
 
-function documentedMutationPolicy(...initial: readonly MutationFailureRule[]): MutationFailurePolicy {
+export function documentedMutationPolicy(...initial: readonly MutationFailureRule[]): MutationFailurePolicy {
   return {
     // These failures are only conclusive for the original request. A replay
     // happens after an unknown write may already have committed, so even a

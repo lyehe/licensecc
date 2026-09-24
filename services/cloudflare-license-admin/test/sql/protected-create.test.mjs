@@ -284,10 +284,12 @@ test("a create without a policy is judged with the trial state it keeps from the
   assert.deepEqual(f.snapshot(), before);
 });
 
-// Differential net for the diagnostic: after a create commits, the would-be row it rebuilds from the
-// same inputs must equal the row the batch actually wrote. A new side-write that the would-be row
-// does not model (for example a create-time device limit) makes this fail instead of making every
-// refusal of that create read as unknown. Policies here keep stamped validity independent of time.
+// Differential net for the diagnostic: the would-be row it rebuilds from a create's inputs must equal
+// the row that create then commits. The would-be row is read BEFORE the final create, from the state
+// a refused batch rolls back to; read afterwards, its LEFT JOIN would see the committed row and hide
+// the gap. A new side-write the would-be row does not model (for example a create-time device limit)
+// therefore fails here instead of making every refusal of that create read as unknown. Policies here
+// keep stamped validity independent of time.
 const WOULD_BE_ROW_CASES = [
   { name: "a fresh grant without a policy", creates: [{}] },
   { name: "a fresh grant stamped from a policy", policy: "type='trial',trial_expiration_basis='from_first_activation',trial_duration_sec=600,max_active_devices=3,max_borrow_sec=60", creates: [{ policy_id: "policy" }] },
@@ -301,13 +303,14 @@ for (const { name, policy, creates } of WOULD_BE_ROW_CASES) {
     const { stampFromPolicy } = await import("@licensecc/licensing-domain/entitlements/policy");
     const f = fixture(t);
     if (policy) f.sql.exec(`UPDATE entitlement_policies SET ${policy}`);
-    for (const [index, change] of creates.entries()) assert.equal((await f.send({ ...input, ...change }, `create-${index}`)).status, 200);
+    for (const [index, change] of creates.slice(0, -1).entries()) assert.equal((await f.send({ ...input, ...change }, `create-${index}`)).status, 200);
     const last = { ...input, ...creates.at(-1) };
     const policyRow = last.policy_id === undefined ? undefined : f.sql.prepare("SELECT * FROM entitlement_policies WHERE id=?").get(last.policy_id);
     // The Worker hands the diagnostic what createFromPolicy stamped, or the validated body otherwise.
     const used = policyRow === undefined ? last : { ...stampFromPolicy(policyRow, last, 0).input, enforcement_mode: last.enforcement_mode };
     const { sql, binds } = protectedWouldBeRowQuery(used, policyRow);
     const wouldBe = f.sql.prepare(`${sql} SELECT * FROM e`).get(...binds);
+    assert.equal((await f.send(last, "final")).status, 200);
     const committed = f.sql.prepare(`SELECT ${Object.keys(wouldBe).join(", ")} FROM entitlements WHERE project=? AND feature=? AND license_fingerprint=?`)
       .get(input.project, input.feature, input.license_fingerprint);
     assert.ok(Object.keys(wouldBe).length >= 19);
