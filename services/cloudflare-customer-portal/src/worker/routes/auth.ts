@@ -42,7 +42,7 @@ const formTextEncoder = new TextEncoder();
 
 type BoundedBody =
   | { ok: true; bytes: Uint8Array }
-  | { ok: false; code: "body_too_large" | "read_error" };
+  | { ok: false };
 
 function cancelBody(request: Request): void {
   if (request.body === null) return;
@@ -69,7 +69,7 @@ async function readBoundedBody(request: Request): Promise<BoundedBody> {
   const declaredLength = Number(request.headers.get("content-length") ?? "");
   if (Number.isFinite(declaredLength) && declaredLength > MAGIC_REDEEM_MAX_BODY_BYTES) {
     cancelBody(request);
-    return { ok: false, code: "body_too_large" };
+    return { ok: false };
   }
   if (request.body === null) return { ok: true, bytes: new Uint8Array(0) };
 
@@ -78,7 +78,7 @@ async function readBoundedBody(request: Request): Promise<BoundedBody> {
     reader = request.body.getReader();
   } catch {
     cancelBody(request);
-    return { ok: false, code: "read_error" };
+    return { ok: false };
   }
   const chunks: Uint8Array[] = [];
   let size = 0;
@@ -89,14 +89,14 @@ async function readBoundedBody(request: Request): Promise<BoundedBody> {
         result = await reader.read();
       } catch {
         cancelReader(reader);
-        return { ok: false, code: "read_error" };
+        return { ok: false };
       }
       if (result.done) break;
       const value = result.value;
       if (value === undefined) continue;
       if (size + value.byteLength > MAGIC_REDEEM_MAX_BODY_BYTES) {
         cancelReader(reader);
-        return { ok: false, code: "body_too_large" };
+        return { ok: false };
       }
       chunks.push(value);
       size += value.byteLength;
@@ -206,11 +206,12 @@ type RedeemOutcome =
   | { code: "rate_limited" }
   | { code: "config_error" };
 
-// The OTP-redeem + session-mint core, shared by the JSON envelope wrapper (redeemAndMintSession,
-// used by POST /auth/verify and the JSON branch of magic-redeem) and magic-redeem's form-encoded
-// redirect branch (ruling R10). Neither caller duplicates this logic; they only render the same
-// outcome differently — a boolean flag threaded through here would blur that split instead.
-async function redeemSession(
+// Redeems an OTP (an 8-digit code or a magic-link secret) and, on success, mints a session. Shared
+// by the JSON envelope renderer (redeemAsEnvelope, used by POST /auth/verify and the JSON branch of
+// magic-redeem) and magic-redeem's form-encoded redirect renderer. Neither caller duplicates this
+// logic; they only render the same outcome differently — a boolean flag threaded through here would
+// blur that split instead.
+async function redeemOtpSession(
   env: Env,
   request: Request,
   now: number,
@@ -225,25 +226,34 @@ async function redeemSession(
   return { code: "signed_in", customerId: redeemed.customerId, cookie: setSessionCookie(minted.raw) };
 }
 
-async function redeemAndMintSession(
+async function redeemAsEnvelope(
   env: Env,
   request: Request,
   reqId: string,
   now: number,
   args: { email?: string; code?: string; secret?: string },
 ): Promise<Response> {
-  const outcome = await redeemSession(env, request, now, args);
+  const outcome = await redeemOtpSession(env, request, now, args);
   if (outcome.code === "config_error") return envelope(reqId, "config_error", undefined, 503);
   if (outcome.code === "rate_limited") return envelope(reqId, "rate_limited", undefined, 429);
   if (outcome.code === "invalid_otp") return envelope(reqId, "invalid_otp", undefined, 401);
   return envelope(reqId, "signed_in", { customer_id: outcome.customerId }, 200, { "set-cookie": outcome.cookie });
 }
 
+// Renders the same outcome as a browser redirect instead of a JSON envelope, for magic-redeem's
+// form-encoded branch (see handleMagicRedeem below).
+function redeemAsRedirect(origin: string, outcome: RedeemOutcome): Response {
+  if (outcome.code === "signed_in") return redirect(`${origin}/#/apps`, [outcome.cookie]);
+  if (outcome.code === "invalid_otp") return redirect(`${origin}/?auth_error=link_expired`);
+  if (outcome.code === "rate_limited") return redirect(`${origin}/?auth_error=rate_limited`);
+  return redirect(`${origin}/?auth_error=sign_in_failed`);
+}
+
 async function handleAuthVerify(request: Request, env: Env, reqId: string, now: number): Promise<Response> {
   if (isCrossSite(request, env)) return envelope(reqId, "cross_site_forbidden", undefined, 403);
   const body = await readJson(request, reqId);
   if (body instanceof Response) return body;
-  return redeemAndMintSession(env, request, reqId, now, {
+  return redeemAsEnvelope(env, request, reqId, now, {
     email: typeof body.email === "string" ? body.email : "",
     code: typeof body.code === "string" ? body.code : "",
   });
@@ -278,7 +288,7 @@ async function handleMagicRedeem(request: Request, env: Env, reqId: string, now:
   if (mediaType === "application/json") {
     const body = await readJson(request, reqId);
     if (body instanceof Response) return body;
-    return redeemAndMintSession(env, request, reqId, now, {
+    return redeemAsEnvelope(env, request, reqId, now, {
       secret: typeof body.token === "string" ? body.token : "",
     });
   }
@@ -286,20 +296,24 @@ async function handleMagicRedeem(request: Request, env: Env, reqId: string, now:
     return envelope(reqId, "unsupported_media_type", undefined, 415);
   }
 
-  // Ruling R10: the form-encoded branch is always a top-level browser navigation (the interstitial's
-  // auto-submit), so EVERY outcome below is a 303 redirect, never a JSON body — including failures
-  // that happen before an OTP is even looked up (an oversized/undecodable form).
+  // The interstitial's auto-submit means this caller is always a top-level browser navigation, so
+  // every outcome below is a redirect, never a JSON body — including the failures that happen
+  // before an OTP is even looked up (an oversized or undecodable form) and an unexpected thrown
+  // error (e.g. a D1 outage in the rate limiter, redeemOtp, or mintSession): a browser navigation
+  // has no script running to read a JSON error body, so it must redirect too, never fall through
+  // to the app's generic JSON error handler.
   const origin = publicOrigin(env);
   const fail = (code: string): Response => redirect(`${origin}/?auth_error=${code}`);
-  const body = await readBoundedBody(request);
-  if (!body.ok) return fail("sign_in_failed");
-  const parsed = parseFormToken(body.bytes);
-  if (!parsed.ok) return fail("sign_in_failed");
-  const outcome = await redeemSession(env, request, now, { secret: parsed.token });
-  if (outcome.code === "signed_in") return redirect(`${origin}/#/apps`, [outcome.cookie]);
-  if (outcome.code === "invalid_otp") return fail("link_expired");
-  if (outcome.code === "rate_limited") return fail("rate_limited");
-  return fail("sign_in_failed");
+  try {
+    const body = await readBoundedBody(request);
+    if (!body.ok) return fail("sign_in_failed");
+    const parsed = parseFormToken(body.bytes);
+    if (!parsed.ok) return fail("sign_in_failed");
+    const outcome = await redeemOtpSession(env, request, now, { secret: parsed.token });
+    return redeemAsRedirect(origin, outcome);
+  } catch {
+    return fail("sign_in_failed");
+  }
 }
 
 async function handleLogout(request: Request, env: Env, reqId: string, now: number): Promise<Response> {

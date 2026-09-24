@@ -55,6 +55,19 @@ export function App(): React.ReactElement {
     document.getElementById("content")?.focus();
   }, [location.page, location.project]);
 
+  // A signed-in auth_error/auth_result (e.g. an already-used magic link, or an OAuth start/callback
+  // failure that targets #/account) only has somewhere to render on Account, via AccountFeature's
+  // own <ProviderResult/>, which reads and then strips it itself. Every other page has nowhere to
+  // show it, so strip it here instead of letting it linger in the address bar until a later visit to
+  // Account resurfaces it out of context.
+  useLayoutEffect(() => {
+    if (auth.phase !== "authed" || location.page === "account") return;
+    const url = new URL(window.location.href);
+    if (!url.searchParams.has("auth_error") && !url.searchParams.has("auth_result")) return;
+    url.searchParams.delete("auth_error"); url.searchParams.delete("auth_result");
+    window.history.replaceState(null, "", url.pathname + url.search + url.hash);
+  }, [auth.phase, location.page]);
+
   async function refreshPortalData(): Promise<void> {
     if (busyRef.current) return;
     refreshFocusRef.current = activeTabButtonRef.current;

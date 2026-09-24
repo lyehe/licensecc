@@ -1,7 +1,7 @@
 import type { LabeledPathFragment } from "../assemble.js";
 import { ERR_BODY_TOO_LARGE, ERR_CROSS_SITE, ERR_INVALID_JSON, errorResponse, LEASE_ACTION_REQUEST } from "../components.js";
 
-// Ruling R10: the form-encoded caller never gets a 400 (a malformed/undecodable form 303s to
+// The form-encoded caller never gets a 400 (a malformed/undecodable form redirects to
 // sign_in_failed instead — see the 303 response below). This 400 is JSON-caller-only.
 const ERR_INVALID_MAGIC_BODY = errorResponse("Body was not valid JSON (application/json caller only).", "invalid_json");
 const ERR_UNSUPPORTED_MEDIA_TYPE = errorResponse("Content-Type must be application/json or application/x-www-form-urlencoded.", "unsupported_media_type");
@@ -142,9 +142,10 @@ export const authPaths: LabeledPathFragment = {
           "bytes before parsing; multipart and other media types are rejected. Email-independent; " +
           "single-use via an atomic UPDATE. On success sets the lccp_session cookie. The " +
           "form-encoded caller never receives JSON: every outcome of that branch (success or " +
-          "failure) is instead a 303 redirect — see the 303 response. The 400/401/413/429/503 " +
-          "envelopes below apply to JSON callers only; 403 (cross-site) and 415 (unsupported media " +
-          "type) apply to both JSON and form-encoded callers.",
+          "failure) is instead a 303 redirect — see the 303 response. The 200/400/401/413/429/503 " +
+          "envelopes below apply to JSON callers only; 403 (cross-site) is decided before either " +
+          "media type is known, and 415 is returned for any Content-Type that is neither JSON nor " +
+          "form-encoded.",
         security: [],
         requestBody: {
 
@@ -194,8 +195,9 @@ export const authPaths: LabeledPathFragment = {
               "no-store redirect instead of JSON. Success redirects to /#/apps with the lccp_session " +
               "cookie. Failure redirects to /?auth_error=<code>: link_expired (invalid, consumed, " +
               "expired, or over-cap secret — the same no-oracle 401 the JSON branch would otherwise " +
-              "return as invalid_otp), rate_limited, or sign_in_failed (config_error and any body/" +
-              "media parsing failure, including an oversized or undecodable form).",
+              "return as invalid_otp), rate_limited, or sign_in_failed (config_error, a body/token " +
+              "parsing failure such as an oversized or undecodable form, or any unexpected server " +
+              "error).",
             headers: {
               Location: { schema: { type: "string", format: "uri" } },
               "Set-Cookie": {
