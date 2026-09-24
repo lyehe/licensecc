@@ -77,7 +77,7 @@ as a sentence with the request reference:
 | `fingerprint_in_use` | Another license (entitlement) already pairs this fingerprint or license differently, or a concurrent create took this exact grant. |
 | `plan_assignment_conflict` | The license's plan assignment uses another fingerprint. |
 | `lease_history_exists` | The fingerprint has legacy device, lease, seat, usage, or non-protected audit history for this feature. |
-| `policy_mismatch` | The policy changed or was disabled after it was read. |
+| `policy_mismatch` | The policy is not an active policy of this project, or it changed or was disabled after it was read. |
 | `invalid_trial` | The trial settings cannot start a protected trial. |
 | `invalid_capacity` | The device limit is outside 1–1,000,000, or below the devices already connected. |
 | `unknown` | Any other integrity rule, such as a device hash or a floating pool. |
@@ -301,7 +301,8 @@ Customers:
 
 License creation requires the administrator role and an `idempotency-key`.
 Send `{"project": "<protected project ID>", "label": "<optional>"}`; the label
-is trimmed, at most 128 characters, and has no control characters. It inserts
+is trimmed and at most 128 characters; C0 control characters and DEL are
+rejected. It inserts
 one `lic_<uuid>` record for the customer and returns `license_created` with its
 `id`, `customer_id`, `project`, `label` and `created_at` (`no-store`). The same
 key replays that response without a second record. An unknown customer is
