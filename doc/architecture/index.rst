@@ -14,6 +14,8 @@ Start here:
   including repository tooling and layout changes.
 * :doc:`ownership` — role-based ownership plus the repository-wide
   ``.github/CODEOWNERS`` fallback, without inventing unconfirmed teams.
+* :doc:`glossary` — the canonical customer/operator vocabulary shared by the
+  customer portal and admin console UIs.
 * :doc:`decisions/0001-module-boundaries` — package and deployable boundaries.
 * :doc:`decisions/0002-node-workspace` — the final root-workspace outcome.
 * :doc:`decisions/0003-route-openapi-ownership` — route and OpenAPI ownership.
