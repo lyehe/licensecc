@@ -23,6 +23,7 @@ LCC_BOUND_RESULT call(LccDeviceBoundClient* handle, int operation, LccDeviceBoun
 		lcc_init_device_bound_outcome(details);
 		details->renewal_due = 1;
 		details->checkpoint_result = LCC_BOUND_CHECKPOINT_COMMIT_UNKNOWN;
+		details->denial_detail = UINT32_MAX;  // A detail newer than the adapter crosses JNI unchanged.
 		details->effective_time = UINT64_MAX;
 	}
 	return LCC_BOUND_OK;
@@ -73,7 +74,8 @@ LCC_BOUND_RESULT lcc_device_bound_open_enrollment(const LccDeviceBoundOptions* o
 	client.alive = true;
 	*out = &client;
 	lcc_init_device_bound_outcome(details);
-	if (mode == 3) details->reserved = 1;
+	details->denial_detail = LCC_BOUND_DETAIL_DEVICE_LIMIT;
+	if (mode == 3) details->version = 2;
 	return LCC_BOUND_OK;
 }
 LCC_BOUND_RESULT lcc_device_bound_open_resume(const LccDeviceBoundOptions* options, LccDeviceBoundClient** out,

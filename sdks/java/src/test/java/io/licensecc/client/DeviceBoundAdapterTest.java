@@ -32,8 +32,8 @@ final class DeviceBoundAdapterTest {
     }
     private static final class Fake implements DeviceBoundApi {
         final AtomicInteger closes = new AtomicInteger();
-        long[] opened = {73, 0, 0, 0, 0, 0};
-        long[] invoked = {0, 0, 0, 1, -1};
+        long[] opened = {73, 0, 0, 0, 0, 0, 0};
+        long[] invoked = {0, 0, 0, 1, -1, 0};
         int operation = -1;
         int wait = -1;
         boolean resumed;
@@ -63,6 +63,7 @@ final class DeviceBoundAdapterTest {
         operationsAndClose();
         failedOpenCleanup();
         malformedOutcomes();
+        denialDetail();
         reentry();
         concurrentClose();
         cleaner();
@@ -125,12 +126,12 @@ final class DeviceBoundAdapterTest {
         rejects(IllegalStateException.class, client::launch);
     }
     private static void failedOpenCleanup() {
-        for (long[] raw : new long[][]{{73, 8, 0, 0, 0, 0}, {73, 21, 0, 0, 0, 0}, {73, 0, 16, 0, 0, 0}, {73, 0, 0, 12, 0, 0}, {73, 0, 0, 0, 2, 0}}) {
+        for (long[] raw : new long[][]{{73, 8, 0, 0, 0, 0, 0}, {73, 21, 0, 0, 0, 0, 0}, {73, 0, 16, 0, 0, 0, 0}, {73, 0, 0, 12, 0, 0, 0}, {73, 0, 0, 0, 2, 0, 0}}) {
             var fake = new Fake(); fake.opened = raw;
             rejects(IllegalStateException.class, () -> new DeviceBoundLibrary(fake).openEnrollment(configuration("desktop")));
             check(fake.closes.get() == 1, "malformed native open cleaned");
         }
-        var failed = new Fake(); failed.opened = new long[]{0, 8, 0, 0, 0, 0};
+        var failed = new Fake(); failed.opened = new long[]{0, 8, 0, 0, 0, 0, 0};
         check(new DeviceBoundLibrary(failed).openEnrollment(configuration("desktop")).client() == null && failed.closes.get() == 0, "denied open has no client");
         var missing = new Fake(); missing.opened[0] = 0;
         rejects(IllegalStateException.class, () -> new DeviceBoundLibrary(missing).openEnrollment(configuration("desktop")));
@@ -141,14 +142,35 @@ final class DeviceBoundAdapterTest {
     private static void malformedOutcomes() {
         var fake = new Fake();
         try (var client = new DeviceBoundLibrary(fake).openEnrollment(configuration("desktop")).client()) {
-            for (long[] raw : new long[][]{{}, {0}, {22, 0, 0, 0, 0}, {0, 15, 0, 0, 0}, {0, 0, -1, 0, 0}, {0, 0, 0, 2, 0}}) {
+            for (long[] raw : new long[][]{{}, {0}, {0, 0, 0, 0, 0}, {22, 0, 0, 0, 0, 0}, {0, 15, 0, 0, 0, 0}, {0, 0, -1, 0, 0, 0}, {0, 0, 0, 2, 0, 0}}) {
                 fake.invoked = raw; rejects(IllegalStateException.class, client::renew);
                 check(fake.closes.get() == 0, "failed result preserves recovery owner");
             }
-            fake.invoked = new long[]{6, 255, 10, 0, 0};
+            fake.invoked = new long[]{6, 255, 10, 0, 0, 0};
             var retry = client.renew();
             check(retry.code() == DeviceBoundClient.Result.RETRY && retry.checkpointResult() == DeviceBoundClient.CheckpointResult.COMMIT_UNKNOWN, "independent outcomes");
         }
+    }
+    private static void denialDetail() {
+        var fake = new Fake();
+        var opened = new DeviceBoundLibrary(fake).openEnrollment(configuration("desktop"));
+        check(opened.outcome().detail() == DeviceBoundClient.DenialDetail.NONE, "open reports no detail");
+        try (var client = opened.client()) {
+            fake.invoked = new long[]{7, 0, 0, 0, 0, 1};
+            var refused = client.activate();
+            check(refused.code() == DeviceBoundClient.Result.CONFLICT && refused.detail() == DeviceBoundClient.DenialDetail.DEVICE_LIMIT,
+                "a full license is a conflict with the device-limit detail");
+            fake.invoked = new long[]{7, 0, 0, 0, 0, 7};
+            check(client.activate().detail() == DeviceBoundClient.DenialDetail.UNKNOWN, "a newer detail value never throws");
+            fake.invoked = new long[]{0, 0, 0, 0, 0, 0};
+            check(client.authorize().detail() == DeviceBoundClient.DenialDetail.NONE, "no detail on success");
+        }
+        check(DeviceBoundClient.DenialDetail.fromCode(0) == DeviceBoundClient.DenialDetail.NONE
+            && DeviceBoundClient.DenialDetail.fromCode(1) == DeviceBoundClient.DenialDetail.DEVICE_LIMIT
+            && DeviceBoundClient.DenialDetail.fromCode(4294967295L) == DeviceBoundClient.DenialDetail.UNKNOWN, "detail codes");
+        var legacy = new DeviceBoundClient.Outcome(DeviceBoundClient.Result.BUSY, DeviceBoundClient.ProviderResult.OK,
+            DeviceBoundClient.CheckpointResult.NOT_ATTEMPTED, false, BigInteger.ZERO);
+        check(legacy.detail() == DeviceBoundClient.DenialDetail.NONE, "five-value outcomes keep no detail");
     }
     private static void reentry() {
         var fake = new Fake();
@@ -221,7 +243,7 @@ final class DeviceBoundAdapterTest {
         open.setAccessible(true);
         for (int mutation = 0; mutation < 12; mutation++) {
             var config = configuration("desktop").encode();
-            byte[][] fields = config.fields(); byte[][] keys = config.keys(); boolean[] retired = config.retired(); long[] result = new long[6];
+            byte[][] fields = config.fields(); byte[][] keys = config.keys(); boolean[] retired = config.retired(); long[] result = new long[7];
             Arrays.fill(result, 99);
             if (mutation == 0) fields = new byte[0][];
             if (mutation == 1) fields[0] = null;
@@ -234,7 +256,7 @@ final class DeviceBoundAdapterTest {
             if (mutation == 8) retired = null;
             if (mutation == 9) keys = new byte[0][];
             if (mutation == 10) keys[0] = null;
-            if (mutation == 11) result = new long[7];
+            if (mutation == 11) result = new long[6]; // The previous protocol's open shape.
             try { open.invoke(null, fields, keys, retired, false, result); throw new AssertionError("Expected JNI rejection"); }
             catch (java.lang.reflect.InvocationTargetException error) { check(error.getCause() instanceof IllegalStateException, "JNI shape rejection"); }
             long sentinel = mutation == 11 ? 0 : 99;

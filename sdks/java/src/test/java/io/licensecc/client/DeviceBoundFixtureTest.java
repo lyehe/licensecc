@@ -24,7 +24,9 @@ final class DeviceBoundFixtureTest {
             check(control(-1) == 1, "native handle closed exactly once on failed publication or validation");
         }
         control(0);
-        try (var client = library.openResume(configuration).client()) {
+        var opened = library.openResume(configuration);
+        check(opened.outcome().detail() == DeviceBoundClient.DenialDetail.DEVICE_LIMIT, "JNI open marshals the refusal detail");
+        try (var client = opened.client()) {
             check(control(-2) == 10, "native resume routing");
             var calls = java.util.List.<java.util.function.Supplier<DeviceBoundClient.Outcome>>of(client::activate,
                 client::renew, client::authorize, client::saveCheckpoint, client::abandonPending);
@@ -32,7 +34,8 @@ final class DeviceBoundFixtureTest {
                 var result = calls.get(i).get();
                 check(control(-2) == i && result.code() == DeviceBoundClient.Result.OK && result.renewalDue()
                     && result.checkpointResult() == DeviceBoundClient.CheckpointResult.COMMIT_UNKNOWN
-                    && result.effectiveTime().equals(new BigInteger("18446744073709551615")), "JNI dispatch and independent unsigned outcome");
+                    && result.effectiveTime().equals(new BigInteger("18446744073709551615"))
+                    && result.detail() == DeviceBoundClient.DenialDetail.UNKNOWN, "JNI dispatch and independent unsigned outcome");
             }
             check(client.prepare().view().comparisonCode().equals("ABCD-1234-FFFF") && control(-2) == 5, "JNI comparison");
             client.launch(); check(control(-2) == 6, "JNI launch");

@@ -209,21 +209,33 @@ BOOST_AUTO_TEST_CASE(exchange_wire_matches_backend_vector_and_preserves_sensitiv
 BOOST_AUTO_TEST_CASE(exchange_response_codes_distinguish_retry_from_new_enrollment_and_capacity) {
 	BoundWireResponse out;
 	BOOST_REQUIRE(decode_bound_device_response(BoundWireOperation::enrollment_challenge, 200, challenge(), out));
+	BOOST_CHECK(out.detail == BoundWireDetail::none);
 	BOOST_REQUIRE(decode_bound_device_response(BoundWireOperation::exchange, 200,
 											   replace(renewal(), "device_renewed", "device_activated"), out));
-	for (const auto& item : std::vector<std::tuple<BoundWireOperation, unsigned, std::string, BoundWireKind>>{
+	BOOST_CHECK(out.detail == BoundWireDetail::none);
+	// A full license stays a conflict; only its detail says that every device slot is in use.
+	// Each decode starts without a detail, so one refusal never leaks into the next response.
+	using Case = std::tuple<BoundWireOperation, unsigned, std::string, BoundWireKind, BoundWireDetail>;
+	for (const auto& item : std::vector<Case>{
 			 {BoundWireOperation::enrollment_challenge, 404, "authorization_unavailable",
-			  BoundWireKind::authorization_unavailable},
-			 {BoundWireOperation::exchange, 410, "authorization_expired", BoundWireKind::authorization_unavailable},
-			 {BoundWireOperation::exchange, 410, "challenge_expired", BoundWireKind::retry},
-			 {BoundWireOperation::exchange, 401, "invalid_proof", BoundWireKind::retry},
-			 {BoundWireOperation::exchange, 409, "device_limit_reached", BoundWireKind::conflict},
-			 {BoundWireOperation::exchange, 404, "binding_unavailable", BoundWireKind::authority_denied},
-			 {BoundWireOperation::exchange, 409, "idempotency_conflict", BoundWireKind::conflict}}) {
+			  BoundWireKind::authorization_unavailable, BoundWireDetail::none},
+			 {BoundWireOperation::exchange, 410, "authorization_expired", BoundWireKind::authorization_unavailable,
+			  BoundWireDetail::none},
+			 {BoundWireOperation::exchange, 410, "challenge_expired", BoundWireKind::retry, BoundWireDetail::none},
+			 {BoundWireOperation::exchange, 401, "invalid_proof", BoundWireKind::retry, BoundWireDetail::none},
+			 {BoundWireOperation::exchange, 409, "device_limit_reached", BoundWireKind::conflict,
+			  BoundWireDetail::device_limit},
+			 {BoundWireOperation::exchange, 404, "binding_unavailable", BoundWireKind::authority_denied,
+			  BoundWireDetail::none},
+			 {BoundWireOperation::exchange, 409, "idempotency_conflict", BoundWireKind::conflict,
+			  BoundWireDetail::none}}) {
 		BOOST_REQUIRE(
 			decode_bound_device_response(std::get<0>(item), std::get<1>(item), error(std::get<2>(item)), out));
 		BOOST_CHECK(out.kind == std::get<3>(item));
+		BOOST_CHECK_MESSAGE(out.detail == std::get<4>(item), "detail for " << std::get<2>(item));
 	}
+	// Renewal never reports a device limit: the server refuses capacity only at exchange.
+	BOOST_CHECK(!decode_bound_device_response(BoundWireOperation::renew, 409, error("device_limit_reached"), out));
 	BOOST_CHECK(!decode_bound_device_response(BoundWireOperation::exchange, 409, error("revision_conflict"), out));
 	BOOST_CHECK(!decode_bound_device_response(BoundWireOperation::enrollment_challenge, 404,
 											  error("binding_unavailable"), out));

@@ -354,6 +354,34 @@ BOOST_AUTO_TEST_CASE(verified_final_clock_failure_and_later_denial_preserve_chec
 		BOOST_CHECK_EQUAL(lcc_device_bound_authorize(f.owner, &f.detail), LCC_BOUND_DENIED);
 	}
 }
+BOOST_AUTO_TEST_CASE(full_license_refusal_is_a_conflict_with_the_device_limit_detail) {
+	for (const std::string code : {"device_limit_reached", "idempotency_conflict"}) {
+		Public f;
+		const auto normal = f.call;
+		bool refuse = true;
+		f.call = [&, normal](BoundWireOperation op, std::string_view body, BoundHttpResponse& out) {
+			if (op != BoundWireOperation::exchange || !refuse) return normal(op, body, out);
+			out = {409, "{\"ok\":false,\"code\":\"" + code + "\",\"request_id\":\"trace\"}"};
+			return BoundHttpStatus::complete;
+		};
+		f.open();
+		f.prepare();
+		f.receive();
+		f.complete_exchange = true;
+		// The primary result stays CONFLICT; only a full license adds the device-limit detail.
+		const auto expected = code == "device_limit_reached" ? LCC_BOUND_DETAIL_DEVICE_LIMIT : LCC_BOUND_DETAIL_NONE;
+		BOOST_CHECK_EQUAL(lcc_device_bound_activate(f.owner, &f.detail), LCC_BOUND_CONFLICT);
+		BOOST_CHECK_EQUAL(f.detail.denial_detail, expected);
+		BOOST_CHECK_EQUAL(f.detail.checkpoint_result, LCC_BOUND_CHECKPOINT_NOT_ATTEMPTED);
+		BOOST_CHECK_EQUAL(lcc_device_bound_authorize(f.owner, &f.detail), LCC_BOUND_ENROLLMENT_REQUIRED);
+		BOOST_CHECK_EQUAL(f.detail.denial_detail, LCC_BOUND_DETAIL_NONE);
+		// The attempt is kept: after a device is disconnected, the same activation finishes with no detail.
+		refuse = false;
+		BOOST_CHECK_EQUAL(lcc_device_bound_activate(f.owner, &f.detail), LCC_BOUND_OK);
+		BOOST_CHECK_EQUAL(f.detail.denial_detail, LCC_BOUND_DETAIL_NONE);
+		BOOST_CHECK_EQUAL(lcc_device_bound_authorize(f.owner, &f.detail), LCC_BOUND_OK);
+	}
+}
 BOOST_AUTO_TEST_CASE(enrollment_rechecks_storage_before_the_first_network_request) {
 	Public f;
 	f.open();
