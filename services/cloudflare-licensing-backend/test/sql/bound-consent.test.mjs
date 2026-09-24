@@ -319,9 +319,9 @@ test("requested feature constrains consent, approval, recovery and immutable int
   await assert.rejects(approveBoundAuthorization(f.db,"owner",{...f.input,entitlement_id:otherId},f.config,f.ring), /access_denied/);
 });
 
-// B3 (ruling R17, decisions items 2, 5, 8): the consent page must show device occupancy so the
-// portal can block approving a full license, but never block a device that already holds an
-// active binding for that exact license (the server lets it reconnect regardless of capacity).
+// The consent page must show device occupancy so the portal can block approving a full license,
+// but never block a device that already holds an active binding for that exact license - the
+// server itself lets that device reconnect regardless of capacity.
 test("consent page counts occupied device slots, expires a retiring hold's count, and reports the earliest future hold",async t=>{
   const f=await fixture(t),fp="a".repeat(64);
   const read=()=>inspectBoundAuthorization(f.db,"owner",f.input.attempt_handle,f.config);
@@ -344,6 +344,11 @@ test("consent page counts occupied device slots, expires a retiring hold's count
   page=await read();
   // Both retiring holds are still in the future: both occupy a slot until their own hold_until.
   assert.equal(page.entitlements[0].devices_in_use,2);assert.equal(page.entitlements[0].slot_free_at,1100,"the earlier of two retiring holds");
+  f.clock(1150);
+  page=await read();
+  // binding-2's hold has lapsed (1100<=1150); binding-1's has not (1200>1150): slot_free_at advances
+  // to the next future hold instead of just disappearing.
+  assert.equal(page.entitlements[0].devices_in_use,1);assert.equal(page.entitlements[0].slot_free_at,1200,"advances to the next future hold");
   f.clock(1200);
   page=await read();
   assert.equal(page.entitlements[0].devices_in_use,0,"both holds have lapsed");assert.equal(page.entitlements[0].slot_free_at,null);

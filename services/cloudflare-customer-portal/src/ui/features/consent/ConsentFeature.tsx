@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { consentApi, type ConsentApproval, type ConsentInspection } from "../../shared/consentApi";
 import { SupportContact } from "../../shared/SupportContact";
 import { useSingleFlight } from "../../shared/useSingleFlight";
-import { formatEpoch } from "../../portalWorkflow";
+import { formatTimestamp } from "../../portalWorkflow";
 import { clearEnrollment, saveEnrollment, type EnrollmentEntry, type PendingEnrollment, type PendingMutation } from "./pending";
 import { LicenseChoice } from "./LicenseChoice";
 
@@ -23,6 +23,8 @@ export function ConsentFeature({entry,customerId,email,onDone,onSignOut,onSessio
   const {busy,runOnce}=useSingleFlight();
   const mounted=useRef(true);
   const heading=useRef<HTMLHeadingElement>(null);
+  const approveButton=useRef<HTMLButtonElement>(null);
+  const [recheckArmed,setRecheckArmed]=useState(false);
 
   function expire():void {
     clearEnrollment();record.current=null;setCallback(null);setDeadline(null);setPhase("expired");setMessage("");
@@ -64,6 +66,11 @@ export function ConsentFeature({entry,customerId,email,onDone,onSignOut,onSessio
     if(!current.mutation)setSelected(selected && result.data.entitlements.some(item=>item.id===selected)?selected
       :cursor===undefined && history.length===0 && result.data.next_page_cursor===null && result.data.entitlements.length===1?result.data.entitlements[0]!.id:"");
     setPhase("ready");
+  }
+
+  async function checkAgain():Promise<void> {
+    setRecheckArmed(true);
+    await runOnce(()=>inspect(pageCursor,previousCursors));
   }
 
   useEffect(()=>{
@@ -111,9 +118,19 @@ export function ConsentFeature({entry,customerId,email,onDone,onSignOut,onSessio
   const waiting=clock<retryAt;
   const terminal=["expired","blocked","cancelled","connected"].includes(phase);
   const chosenEntitlement=details?.entitlements.find(item=>item.id===selected);
-  // Convenience/explanatory only (change guide: Policy rule) - the server is the capacity source of
-  // truth and re-checks on approve; a device already connected to this license is never blocked (R17).
+  // Convenience/explanatory only (change guide: Policy rule): approving reserves no device slot and
+  // sends no capacity claim. The device's own exchange re-checks capacity, and a device that already
+  // holds an active binding for this exact license is admitted there without using another slot, so
+  // a full license must not block its approval here either.
   const full=!mutation && !!chosenEntitlement && chosenEntitlement.devices_in_use>=chosenEntitlement.device_limit && !chosenEntitlement.device_connected;
+  const checkingAgain=recheckArmed && busy;
+
+  useEffect(()=>{
+    if(!recheckArmed || busy)return;
+    if(!full)approveButton.current?.focus();
+    setRecheckArmed(false);
+  },[recheckArmed,full,busy]);
+
   const title=phase==="expired"?"Connection request expired":phase==="cancelled"?"Connection cancelled":phase==="connected"?"Device connected":phase==="approved"?"Returning to your app…":phase==="blocked"?"Unable to connect":"Connect this device";
   return <main className="authPane consentPane"><div className="authBrand brand"><span aria-hidden="true">L</span>Licensecc</div>
     <section className="authCard consentCard" aria-busy={busy}>
@@ -126,16 +143,19 @@ export function ConsentFeature({entry,customerId,email,onDone,onSignOut,onSessio
             <label className="consentConfirm"><input type="checkbox" checked={comparisonConfirmed} onChange={event=>setComparisonConfirmed(event.target.checked)} disabled={busy} />This code matches my app</label></div>}
           {details.entitlements.length===0?<p>{previousCursors.length?"No licenses remain on this page. Go back to choose another license.":<>No eligible license is available for this app. <SupportContact />.</>}</p>:
             <LicenseChoice items={details.entitlements} selected={selected} onSelect={setSelected} busy={busy} soleOverall={pageCursor===undefined && !details.has_more && details.entitlements.length===1} />}
-          {full && chosenEntitlement && <div className="consentCapacity">
-            <p>All {chosenEntitlement.device_limit} device slots are in use. Disconnect a device under Devices, then check again.</p>
-            {chosenEntitlement.slot_free_at!==null && <p>A recently disconnected slot frees at {formatEpoch(chosenEntitlement.slot_free_at)}.</p>}
-            <button disabled={busy||waiting} onClick={()=>void runOnce(()=>inspect(pageCursor,previousCursors))}>Check again</button>
+          {full && chosenEntitlement && <div className="consentCapacity" role="status">
+            <p>{chosenEntitlement.device_limit===1
+              ?"This license's only device slot is in use. Disconnect a device under Devices, then check again."
+              :`All ${chosenEntitlement.device_limit} device slots are in use. Disconnect a device under Devices, then check again.`}</p>
+            {chosenEntitlement.slot_free_at!==null && <p>A recently disconnected slot frees at {formatTimestamp(chosenEntitlement.slot_free_at)}.</p>}
+            {chosenEntitlement.slot_free_at!==null && chosenEntitlement.slot_free_at>=details.expires_at && <p>This request expires before then. Start connecting again from your app after that time.</p>}
+            <button disabled={busy||waiting} onClick={()=>void checkAgain()}>{checkingAgain?"Checking…":"Check again"}</button>
           </div>}
           {(previousCursors.length>0 || details.has_more) && <nav className="consentPages" aria-label="License pages">
             <button disabled={busy||waiting||previousCursors.length===0} onClick={()=>void runOnce(()=>inspect(previousCursors.at(-1),previousCursors.slice(0,-1)))}>Previous</button>
             <span role="status">Page {previousCursors.length+1}</span><button disabled={busy||waiting||!details.next_page_cursor} onClick={()=>void runOnce(()=>inspect(details.next_page_cursor??undefined,[...previousCursors,pageCursor]))}>Next</button>
           </nav>}
-          <p className="consentNote">Uses one device slot when your app finishes connecting.</p>
+          {!chosenEntitlement?.device_connected && <p className="consentNote">Uses one device slot when your app finishes connecting.</p>}
         </>}
         {message && <p role="alert" className="consentMessage">{message}</p>}
         {mutation && phase==="ready" && <p className="muted">Your original selection is saved for this retry.</p>}
@@ -145,7 +165,7 @@ export function ConsentFeature({entry,customerId,email,onDone,onSignOut,onSessio
         {phase==="approved" && callback && <><p>Return to your app to finish. If nothing happens, try again below.</p><a className="button" href={callback}>Open app</a></>}
         {terminal?<button onClick={onDone}>Go to portal</button>:phase==="ready"?<div className="actions consentActions">
           {!details?<button disabled={busy||waiting} onClick={()=>void runOnce(inspect)}>Retry</button>:mutation?<button className="primary" disabled={busy||waiting} onClick={()=>void act(mutation.operation)}>{busy?"Checking…":mutation.operation==="approve"?"Retry approval":"Retry cancellation"}</button>:<>
-            <button disabled={busy||waiting} onClick={()=>void act("deny")}>Cancel</button><button className="primary" disabled={busy||waiting||!selected||!comparisonConfirmed||full} onClick={()=>void act("approve")}>{busy?"Connecting…":"Approve"}</button>
+            <button disabled={busy||waiting} onClick={()=>void act("deny")}>Cancel</button><button ref={approveButton} className="primary" disabled={busy||waiting||!selected||!comparisonConfirmed||full} onClick={()=>void act("approve")}>{busy && !checkingAgain?"Connecting…":"Approve"}</button>
           </>}
         </div>:null}
       </>}

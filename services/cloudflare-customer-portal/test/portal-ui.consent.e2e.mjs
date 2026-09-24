@@ -537,13 +537,16 @@ test("consent: cursor cycles and account changes cannot append a new page",async
 });
 
 // B3 (RF2): a full license blocks Approve until Check again finds a free slot. The selection
-// survives the re-inspect, and the approve body never carries a capacity claim.
-test("consent: a full license disables Approve; Check again keeps the selection, finds a free slot, and approves with an unchanged body",async({page})=>{
+// survives the re-inspect, focus lands on Approve once it re-enables, and the approve body never
+// carries a capacity claim.
+test("consent: a full license disables Approve; Check again labels itself, keeps the selection, finds a free slot, moves focus to Approve, and approves with an unchanged body",async({page})=>{
   const freeAt=Math.floor(Date.now()/1000)+120;
-  let checks=0,approveBody=null;
+  let checks=0,approveBody=null,releaseSecondInspect,signalSecondInspectStarted;
+  const secondInspectStarted=new Promise(resolve=>{signalSecondInspectStarted=resolve;});
   await fixture(page,{
-    inspect:route=>{
+    inspect:async route=>{
       checks++;
+      if(checks===2){signalSecondInspectStarted();await new Promise(resolve=>{releaseSecondInspect=resolve;});}
       return route.fulfill({json:envelope("authorization_inspected",inspection({entitlements:[
         {id:"license-basic",feature:"BASIC",valid_until:null,device_limit:1,devices_in_use:0,slot_free_at:null,device_connected:false},
         {id:"license-pro",feature:"PRO",valid_until:null,device_limit:2,devices_in_use:checks===1?2:1,slot_free_at:checks===1?freeAt:null,device_connected:false},
@@ -556,21 +559,28 @@ test("consent: a full license disables Approve; Check again keeps the selection,
   await page.getByRole("combobox",{name:"License",exact:true}).selectOption("license-pro");
   await page.getByRole("checkbox",{name:"This code matches my app",exact:true}).check();
   await expect(page.getByText("2 of 2 devices in use",{exact:true})).toBeVisible();
-  await expect(page.getByText("All 2 device slots are in use. Disconnect a device under Devices, then check again.",{exact:true})).toBeVisible();
-  await expect(page.getByText(`A recently disconnected slot frees at ${new Date(freeAt*1000).toISOString().slice(0,10)}.`,{exact:true})).toBeVisible();
+  await expect(page.getByRole("status")).toContainText("All 2 device slots are in use. Disconnect a device under Devices, then check again.");
+  const expectedFreeAt=await page.evaluate(t=>new Date(t*1000).toLocaleString(),freeAt);
+  await expect(page.getByText(`A recently disconnected slot frees at ${expectedFreeAt}.`,{exact:true})).toBeVisible();
+  await expect(page.getByText("This request expires before then",{exact:false})).toHaveCount(0);
   await expect(page.getByRole("button",{name:"Approve",exact:true})).toBeDisabled();
   await page.getByRole("button",{name:"Check again",exact:true}).click();
+  await secondInspectStarted;
+  await expect(page.getByRole("button",{name:"Checking…",exact:true})).toBeVisible();
+  await expect(page.getByRole("button",{name:"Approve",exact:true})).toBeVisible();
+  releaseSecondInspect();
   await expect(page.getByRole("combobox",{name:"License",exact:true})).toHaveValue("license-pro");
   await expect(page.getByText("1 of 2 devices in use",{exact:true})).toBeVisible();
-  await expect(page.getByText("All 2 device slots are in use",{exact:false})).toHaveCount(0);
+  await expect(page.getByRole("status")).toHaveCount(0);
   await expect(page.getByRole("button",{name:"Approve",exact:true})).toBeEnabled();
+  await expect(page.getByRole("button",{name:"Approve",exact:true})).toBeFocused();
   await page.getByRole("button",{name:"Approve",exact:true}).click();
   await expect(page.getByRole("link",{name:"Open app"})).toBeVisible();
   expect(approveBody).toEqual({attempt_handle:handle,expected_attempt_revision:0,entitlement_id:"license-pro"});
   expect(checks).toBe(2);
 });
 
-test("consent: a device already connected to a full license leaves Approve enabled and names the connection",async({page})=>{
+test("consent: a device already connected to a full license leaves Approve enabled, names the connection, and drops the device-slot note",async({page})=>{
   await fixture(page,{inspect:route=>route.fulfill({json:envelope("authorization_inspected",inspection({entitlements:[
     {id:"license-pro",feature:"PRO",valid_until:null,device_limit:2,devices_in_use:2,slot_free_at:null,device_connected:true},
   ]}))})});
@@ -580,4 +590,28 @@ test("consent: a device already connected to a full license leaves Approve enabl
   await expect(page.getByText("All 2 device slots are in use",{exact:false})).toHaveCount(0);
   await expect(page.getByRole("button",{name:"Check again",exact:true})).toHaveCount(0);
   await expect(page.getByRole("button",{name:"Approve",exact:true})).toBeEnabled();
+  await expect(page.getByText("Uses one device slot when your app finishes connecting.",{exact:true})).toHaveCount(0);
+});
+
+test("consent: a device limit of 1 uses singular copy when full",async({page})=>{
+  await fixture(page,{inspect:route=>route.fulfill({json:envelope("authorization_inspected",inspection({entitlements:[
+    {id:"license-solo",feature:"SOLO",valid_until:null,device_limit:1,devices_in_use:1,slot_free_at:null,device_connected:false},
+  ]}))})});
+  await page.goto(entry);
+  await expect(page.getByText("1 of 1 device in use",{exact:true})).toBeVisible();
+  await page.getByRole("checkbox",{name:"This code matches my app",exact:true}).check();
+  await expect(page.getByText("This license's only device slot is in use. Disconnect a device under Devices, then check again.",{exact:true})).toBeVisible();
+  await expect(page.getByRole("button",{name:"Approve",exact:true})).toBeDisabled();
+});
+
+test("consent: a slot that frees after this request expires warns before the free time",async({page})=>{
+  const freeAt=Math.floor(Date.now()/1000)+400;
+  await fixture(page,{inspect:route=>route.fulfill({json:envelope("authorization_inspected",inspection({entitlements:[
+    {id:"license-pro",feature:"PRO",valid_until:null,device_limit:2,devices_in_use:2,slot_free_at:freeAt,device_connected:false},
+  ]}))})});
+  await page.goto(entry);
+  await page.getByRole("checkbox",{name:"This code matches my app",exact:true}).check();
+  const expectedFreeAt=await page.evaluate(t=>new Date(t*1000).toLocaleString(),freeAt);
+  await expect(page.getByText(`A recently disconnected slot frees at ${expectedFreeAt}.`,{exact:true})).toBeVisible();
+  await expect(page.getByText("This request expires before then. Start connecting again from your app after that time.",{exact:true})).toBeVisible();
 });

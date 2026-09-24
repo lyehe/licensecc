@@ -1233,7 +1233,7 @@
                                   "type": "integer"
                                 },
                                 "device_connected": {
-                                  "description": "True when this attempt's own device already holds an active binding for this license; the server admits it regardless of capacity (ruling R17), so approval never blocks on it.",
+                                  "description": "True when this attempt's own device already holds an active binding for this license. That device reconnects without using another slot, so a full license does not block it.",
                                   "type": "boolean"
                                 },
                                 "device_limit": {

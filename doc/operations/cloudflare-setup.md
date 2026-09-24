@@ -343,6 +343,13 @@ For every later release:
    A Worker rollback does not roll back D1. Confirm old code is compatible with
    the current schema and signing configuration before routing traffic to it.
 
+Some contracts are exact on both sides of the portal/backend boundary, not
+merely compatible: the customer portal and the licensing backend both validate
+the device-authorizations inspect payload against the identical closed
+entitlement field set. Deploy and roll back the backend and portal together
+for that path; redeploying or rolling back only one of the two makes consent
+inspection return `temporarily_unavailable` (503).
+
 Keep device audit events until an explicit retention policy is adopted. Do not
 remove persistent identities, checkpoints or capacity holds as a shortcut for
 recovering a failed deployment.
@@ -355,7 +362,7 @@ recovering a failed deployment.
 | Admin redirect loop or 403 | Access application audience/issuer, every enabled hostname, operator role allowlist |
 | Portal login returns configuration error | Session peppers, enabled provider/password configuration, exact portal origin |
 | Password request exceeds resources | Workers plan and CPU budget; preserve password hashing parameters |
-| Consent fails or cannot call backend | Backend deployed first; named `DeviceConsent` binding and client registry match |
+| Consent fails or cannot call backend | Backend and portal deployed together (the consent-inspect payload is exact on both sides); named `DeviceConsent` binding and client registry match |
 | Protected token rejected by app | Dedicated signer/public SPKI pairing, issuer/audience, app trust set and clock policy |
 | New UI not visible | Production `dist` rebuilt in the deployed checkout; actual assets path and served version |
 | R2 `NotEntitled` or backup fails | R2 activation/billing state, private bucket binding, export-token authority, Workflow result |

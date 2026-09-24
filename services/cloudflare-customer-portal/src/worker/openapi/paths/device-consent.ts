@@ -11,7 +11,7 @@ const data = {
       properties:{id:text,feature:text,valid_until:{...nullableTime,description:"Effective expiry for a started trial; optional absolute cap for an unstarted trial."},device_limit:integer,
         devices_in_use:{...integer,description:"Bindings currently occupying a device slot for this license: active, or retiring within its hold (ADR 0006's shared occupancy predicate)."},
         slot_free_at:{...nullableTime,description:"Earliest time a retiring hold releases a slot; null when no hold is retiring."},
-        device_connected:{type:"boolean",description:"True when this attempt's own device already holds an active binding for this license; the server admits it regardless of capacity (ruling R17), so approval never blocks on it."},
+        device_connected:{type:"boolean",description:"True when this attempt's own device already holds an active binding for this license. That device reconnects without using another slot, so a full license does not block it."},
         activation_trial_seconds:{...integer,minimum:2,description:"Present only for an unstarted activation-based trial. Starts on successful native exchange, not browser approval; valid_until may cap its duration."}}}},has_more:{type:"boolean"},
     next_page_cursor:{anyOf:[{type:"string",pattern:"^[A-Za-z0-9_-]{1,512}$"},{type:"null"}]},comparison_code:{type:"string",pattern:"^[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}$"}}),
   approve: object({callback_url:{type:"string",format:"uri"},expires_at:integer,revision:integer}),

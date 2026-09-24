@@ -106,6 +106,11 @@ are recorded in [ADR 0005](doc/architecture/decisions/0005-platform-version-and-
 - Protected-device readiness now fails (`checks.global_rate_limit: false`) when
   `BOUND_GLOBAL_RATE_LIMIT` is set but invalid (non-integer, outside
   100..1000000, or an empty string); leaving it unset is fine.
+- The customer portal and licensing backend now validate the device-authorizations
+  inspect payload against one exact, closed entitlement field set
+  (`additionalProperties: false` on both sides): deploy and roll back the
+  backend and portal together for this path, or consent inspection returns
+  `temporarily_unavailable` (503).
 
 ### Fixed
 - C++ core: unstable disk-derived hardware ids on device-path fstab entries; `confirm_license`
