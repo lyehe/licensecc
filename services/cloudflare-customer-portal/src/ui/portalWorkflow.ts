@@ -130,6 +130,15 @@ const RESULT_CODE_COPY: Record<string, string> = {
   unsupported_media_type: "That request wasn't formatted correctly. Reload the page and try again.",
   logged_out: "You're signed out.",
   not_found: "We couldn't find that. It may have been removed or already changed.",
+  // access_required and bootstrap_otp are the only two codes the operator-only break-glass route
+  // (handleBootstrap in routes/auth.ts, POST /portal/v1/admin/bootstrap-otp) produces. They are
+  // classified differently on purpose:
+  //  - access_required IS mapped here: it is an ordinary 403 failure code, and every non-data
+  //    failure code gets real copy here regardless of which route emits it.
+  //  - bootstrap_otp is deliberately NOT mapped: its 200 payload is the minted OTP secret itself, a
+  //    pure data shape like `me`/`entitlements` (read off `.data`, never handed to setMessage), and
+  //    the customer-portal SPA has no caller for this operator-only route at all. It is excluded via
+  //    DATA_ONLY_CODES in test/portal-ui-workflow.test.mjs rather than mapped to copy here.
   access_required: "Additional verification is required for this action.",
   invalid_request: "That request wasn't valid. Check the details and try again.",
   rate_limited: "Too many attempts — wait a moment and try again.",
