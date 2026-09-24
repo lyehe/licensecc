@@ -78,6 +78,11 @@
     {
       "inSpec": true,
       "method": "POST",
+      "path": "/portal/v1/auth/identities/unlink"
+    },
+    {
+      "inSpec": true,
+      "method": "POST",
       "path": "/portal/v1/auth/request"
     },
     {
@@ -4122,6 +4127,223 @@
           ]
         }
       },
+      "/portal/v1/auth/identities/unlink": {
+        "post": {
+          "description": "Requires a session and a same-site request. Allowed only while another sign-in method is usable now: a password while password sign-in is enabled, the other provider's identity while that provider is configured, or a non-empty contact email while email codes are configured (the same predicates as GET /portal/v1/auth/providers). The rule and the delete are one conditional statement, so concurrent requests cannot remove the last method. The same transaction revokes the customer's other OAuth sessions; the current session and sessions from other sign-in methods are kept.",
+          "operationId": "authUnlinkIdentity",
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "provider": {
+                      "enum": [
+                        "google",
+                        "github"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "provider"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "required": true
+          },
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/Envelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "identity_unlinked"
+                      },
+                      "data": {
+                        "properties": {
+                          "provider": {
+                            "enum": [
+                              "google",
+                              "github"
+                            ],
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "provider"
+                        ],
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "The provider was disconnected and no longer appears in GET /portal/v1/auth/identities.",
+              "headers": {
+                "Cache-Control": {
+                  "description": "no-store",
+                  "schema": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "400": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "invalid_json",
+                          "invalid_request"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Body was not a JSON object, or provider is not google or github."
+            },
+            "401": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "unauthorized"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Missing, invalid or expired session."
+            },
+            "403": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "cross_site_forbidden"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Cross-site request rejected (Sec-Fetch-Site not same-origin, or Origin does not match PORTAL_PUBLIC_ORIGIN)."
+            },
+            "404": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "not_found"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "This customer has no identity for that provider (absent and foreign identities look the same)."
+            },
+            "409": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "last_sign_in_method"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "No other sign-in method is usable now; nothing was changed."
+            },
+            "413": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "body_too_large"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Request body exceeded 8192 bytes."
+            },
+            "503": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ErrorEnvelope"
+                      }
+                    ],
+                    "properties": {
+                      "code": {
+                        "const": "config_error"
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "Session or database configuration unavailable."
+            }
+          },
+          "security": [
+            {
+              "sessionCookie": []
+            }
+          ],
+          "summary": "Disconnect one of this customer's linked providers.",
+          "tags": [
+            "auth"
+          ]
+        }
+      },
       "/portal/v1/auth/logout": {
         "post": {
           "description": "No auth required (the session is optional — logout is idempotent). Marks the session row revoked and bumps account_token_revocations.revocation_seq to kill any in-flight 120s account token (invariant 9). Always clears the cookie (Max-Age=0).",
@@ -5951,7 +6173,7 @@
       }
     ]
   },
-  "openApiOperationCount": 33,
+  "openApiOperationCount": 34,
   "PORTAL_ROUTE_KEYS": [
     "GET /openapi.json",
     "GET /docs",
@@ -5968,6 +6190,7 @@
     "GET /portal/v1/auth/google/callback",
     "GET /portal/v1/auth/github/callback",
     "GET /portal/v1/auth/identities",
+    "POST /portal/v1/auth/identities/unlink",
     "POST /portal/v1/auth/password/register",
     "POST /portal/v1/auth/password/reset",
     "POST /portal/v1/auth/password/complete",
@@ -5989,7 +6212,7 @@
     "POST /api/portal/device-authorizations/deny",
     "GET /api/portal/device-bindings"
   ],
-  "routeCount": 35,
-  "routeKeyCount": 35,
+  "routeCount": 36,
+  "routeKeyCount": 36,
   "service": "cloudflare-customer-portal"
 }

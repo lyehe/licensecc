@@ -66,7 +66,7 @@ workspace install.
 | --- | --- | ---: |
 | Licensing backend | `routes.allCanonicalRoutes`, `BACKEND_ROUTE_KEYS`, `openApiSpec` | 23 |
 | License admin | `ALL_ROUTES`, `API_BINDING_KEYS`, `openApiDocument` | 73 |
-| Customer portal | `ALL_ROUTES`, `PORTAL_ROUTE_KEYS`, `openApiDocument` | 35 |
+| Customer portal | `ALL_ROUTES`, `PORTAL_ROUTE_KEYS`, `openApiDocument` | 36 |
 | D1 backup | default `fetch`/`scheduled` handlers and `D1BackupWorkflow` prototype surface | No route/OpenAPI contract |
 
 The contract runner recursively sorts object keys but keeps array order. It
@@ -120,7 +120,7 @@ Composition roots remain intentionally small. Current counts are:
 | Portal Worker `src/worker/index.ts` / `src/worker/app.ts` | 2 | 84 |
 | Portal UI `src/ui/main.tsx` / `src/ui/app/App.tsx` | 6 | 156 |
 
-Current production-source totals are 19,392 lines for license-admin, 8,783 lines for licensing-backend, 6,778 lines for customer-portal, and 1,348 lines for D1-backup. These counts include tracked and non-ignored, untracked
+Current production-source totals are 19,392 lines for license-admin, 8,783 lines for licensing-backend, 6,913 lines for customer-portal, and 1,348 lines for D1-backup. These counts include tracked and non-ignored, untracked
 TypeScript, TSX, JavaScript, and MJS under each service's `src` tree. They are
 evidence for responsibility review, not a reason
 to move code without a behavioral or ownership boundary.
