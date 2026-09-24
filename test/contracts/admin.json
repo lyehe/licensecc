@@ -10208,7 +10208,7 @@
       },
       "/api/admin/customers/{id}/licenses": {
         "post": {
-          "description": "Admin-only. Inserts one license record (id `lic_<uuid>`) for the customer and project, so a protected entitlement can reference it; the record alone grants no access. The customer must be active, checked in the same statement as the insert. A required idempotency key replays the original response without creating another record. Creator attribution is stored in license metadata. Responses are no-store.",
+          "description": "Admin-only. Inserts one license record (id `lic_<uuid>`) for the customer and project, so a protected entitlement can reference it; the record alone grants no access. The customer must be active, checked in the same statement as the insert. A required idempotency key replays the original response without creating another record. Creator attribution is stored in license metadata. The created record and its replays are sent no-store.",
           "operationId": "createCustomerLicense",
           "parameters": [
             {

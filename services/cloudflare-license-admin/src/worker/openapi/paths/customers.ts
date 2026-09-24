@@ -71,7 +71,7 @@ export const customerPaths: LabeledPathFragment = {
     ["/api/admin/customers/{id}/licenses", {
     post: {
       tags: ["admin:licenses"], operationId: "createCustomerLicense", summary: "Create a license record for an active customer", security: ADMIN_SECURITY,
-      description: "Admin-only. Inserts one license record (id `lic_<uuid>`) for the customer and project, so a protected entitlement can reference it; the record alone grants no access. The customer must be active, checked in the same statement as the insert. A required idempotency key replays the original response without creating another record. Creator attribution is stored in license metadata. Responses are no-store.",
+      description: "Admin-only. Inserts one license record (id `lic_<uuid>`) for the customer and project, so a protected entitlement can reference it; the record alone grants no access. The customer must be active, checked in the same statement as the insert. A required idempotency key replays the original response without creating another record. Creator attribution is stored in license metadata. The created record and its replays are sent no-store.",
       parameters: [idParam, { ...idempotencyKeyHeader, required: true }],
       requestBody: { required: true, content: { "application/json": { schema: { $ref: "#/components/schemas/LicenseCreateInput" } } } },
       responses: { "200": okResponse("Created license record.", "#/components/schemas/LicenseCreatedData", "license_created"),

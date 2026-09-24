@@ -62,6 +62,18 @@ for (const selected of [undefined, policy]) {
   });
 }
 
+test("the diagnostic's would-be row provides every column a check reads from e", async () => {
+  const { protectedCreateChecks, protectedCreateReason } = await checksModule();
+  for (const selected of [undefined, policy]) {
+    const diagnostic = capturingEnv();
+    await protectedCreateReason(diagnostic.env, input, selected);
+    const provided = new Set([...diagnostic.prepared[0].sql.matchAll(/ AS ([a-z_]+)/g)].map((match) => match[1]));
+    const read = new Set(protectedCreateChecks(input, selected).flatMap((check) => [...check.sql.matchAll(/\be\.([a-z_]+)/g)].map((match) => match[1])));
+    assert.ok(read.size > 10);
+    for (const column of read) assert.ok(provided.has(column), `the would-be row lacks e.${column}, so every refusal would read as unknown`);
+  }
+});
+
 test("the diagnostic falls back to unknown for an unrecognized answer or a failed read", async () => {
   const { protectedCreateReason } = await checksModule();
   for (const row of [null, { reason: "not_a_reason" }, { reason: 7 }, () => { throw new Error("D1 unavailable"); }]) {
