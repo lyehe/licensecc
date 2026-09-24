@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 import "./portal-ui.consent.e2e.mjs";
 import "./portal-ui.nodes.e2e.mjs";
+import "./portal-ui.network-failures.e2e.mjs";
 
 function makeEnvelope(code, data) {
   makeEnvelope.nextRequestId += 1;

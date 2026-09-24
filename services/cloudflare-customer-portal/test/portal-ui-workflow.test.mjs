@@ -273,6 +273,20 @@ test("portal UI workflow gives every StatusLine-reachable result code human copy
   }
 });
 
+// C2: a dropped connection (api()'s own fetch rejection, or the download's raw fetch) and a failed
+// sign-out both need copy the customer actually sees, verbatim per the dispatch.
+test("portal UI workflow maps network-failure and failed-logout copy verbatim (C2)", async () => {
+  const workflow = await loadWorkflowModule();
+  assert.equal(
+    workflow.describeResultCode("network_unavailable"),
+    "Couldn't reach the portal. Check your connection and try again.",
+  );
+  assert.equal(
+    workflow.describeResultCode("logout_failed"),
+    "Sign-out didn't complete. You're still signed in — try again.",
+  );
+});
+
 test("portal UI workflow builds filtered usage paths", async () => {
   const workflow = await loadWorkflowModule();
   assert.equal(workflow.usagePath(), "/api/portal/usage");
