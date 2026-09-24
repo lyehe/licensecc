@@ -25,6 +25,10 @@
       "path": "/api/admin/customers"
     },
     {
+      "method": "POST",
+      "path": "/api/admin/customers/{id}/licenses"
+    },
+    {
       "method": "GET",
       "path": "/api/admin/customers/{id}/apps"
     },
@@ -308,6 +312,7 @@
     "GET /api/admin/catalog/projects",
     "GET /api/admin/customers",
     "POST /api/admin/customers",
+    "POST /api/admin/customers/{id}/licenses",
     "GET /api/admin/customers/{id}",
     "POST /api/admin/customers/{id}/disable",
     "POST /api/admin/customers/{id}/reenable",
@@ -2161,6 +2166,53 @@
           },
           "type": "object"
         },
+        "LicenseCreatedData": {
+          "properties": {
+            "created_at": {
+              "type": "integer"
+            },
+            "customer_id": {
+              "type": "string"
+            },
+            "id": {
+              "pattern": "^lic_[0-9a-f-]{36}$",
+              "type": "string"
+            },
+            "label": {
+              "type": "string"
+            },
+            "project": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "customer_id",
+            "project",
+            "label",
+            "created_at"
+          ],
+          "type": "object"
+        },
+        "LicenseCreateInput": {
+          "properties": {
+            "label": {
+              "default": "",
+              "description": "Optional operator label. Trimmed; control characters are rejected.",
+              "maxLength": 128,
+              "type": "string"
+            },
+            "project": {
+              "description": "Protected project ID, under the same rule a protected entitlement uses.",
+              "pattern": "^[A-Za-z0-9_.:-]{1,127}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "project"
+          ],
+          "type": "object"
+        },
         "LicensesListData": {
           "properties": {
             "items": {
@@ -3009,6 +3061,51 @@
             }
           },
           "type": "object"
+        },
+        "ProtectedCreationConflictData": {
+          "additionalProperties": false,
+          "properties": {
+            "reason": {
+              "enum": [
+                "customer_inactive",
+                "license_missing",
+                "license_customer_mismatch",
+                "fingerprint_in_use",
+                "plan_assignment_conflict",
+                "lease_history_exists",
+                "policy_mismatch",
+                "invalid_trial",
+                "invalid_capacity",
+                "unknown"
+              ]
+            }
+          },
+          "required": [
+            "reason"
+          ],
+          "type": "object"
+        },
+        "ProtectedCreationConflictError": {
+          "allOf": [
+            {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            },
+            {
+              "properties": {
+                "code": {
+                  "const": "protected_creation_conflict"
+                },
+                "data": {
+                  "$ref": "#/components/schemas/ProtectedCreationConflictData"
+                }
+              },
+              "required": [
+                "code",
+                "data"
+              ],
+              "type": "object"
+            }
+          ]
         },
         "ReasonRequiredBody": {
           "properties": {
@@ -10109,6 +10206,260 @@
           ]
         }
       },
+      "/api/admin/customers/{id}/licenses": {
+        "post": {
+          "description": "Admin-only. Inserts one license record (id `lic_<uuid>`) for the customer and project, so a protected entitlement can reference it; the record alone grants no access. The customer must be active, checked in the same statement as the insert. A required idempotency key replays the original response without creating another record. Creator attribution is stored in license metadata. Responses are no-store.",
+          "operationId": "createCustomerLicense",
+          "parameters": [
+            {
+              "description": "Resource identifier from the URL path. For entitlements this is the encoded entitlement id; for customers it is the URI-decoded customer id.",
+              "in": "path",
+              "name": "id",
+              "required": true,
+              "schema": {
+                "type": "string"
+              }
+            },
+            {
+              "description": "Optional idempotency key (max 128 chars). Mutations with the same scope+key+actor are cached and replayed from D1. An invalid (over-long/empty) value returns 400 invalid_idempotency_key.",
+              "in": "header",
+              "name": "idempotency-key",
+              "required": true,
+              "schema": {
+                "maxLength": 128,
+                "type": "string"
+              }
+            }
+          ],
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LicenseCreateInput"
+                }
+              }
+            },
+            "required": true
+          },
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/SuccessEnvelope"
+                      },
+                      {
+                        "properties": {
+                          "code": {
+                            "const": "license_created"
+                          },
+                          "data": {
+                            "$ref": "#/components/schemas/LicenseCreatedData"
+                          }
+                        },
+                        "required": [
+                          "data"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  }
+                }
+              },
+              "description": "Created license record."
+            },
+            "400": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "invalid_idempotency_key": {
+                      "value": {
+                        "code": "invalid_idempotency_key",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    },
+                    "invalid_json": {
+                      "value": {
+                        "code": "invalid_json",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    },
+                    "invalid_request": {
+                      "value": {
+                        "code": "invalid_request",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "Invalid body, project, or label, or a missing/invalid idempotency key."
+            },
+            "401": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "admin_auth_not_configured": {
+                      "value": {
+                        "code": "admin_auth_not_configured",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    },
+                    "missing_access_jwt": {
+                      "value": {
+                        "code": "missing_access_jwt",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "Authentication failed."
+            },
+            "403": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "admin_role_denied": {
+                      "value": {
+                        "code": "admin_role_denied",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    },
+                    "admin_role_required": {
+                      "value": {
+                        "code": "admin_role_required",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    },
+                    "invalid_access_jwt": {
+                      "value": {
+                        "code": "invalid_access_jwt",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "Authorization failed (RBAC / invalid JWT / admin role required)."
+            },
+            "404": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "not_found": {
+                      "value": {
+                        "code": "not_found",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "No customer with that id."
+            },
+            "409": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "customer_inactive": {
+                      "value": {
+                        "code": "customer_inactive",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "The customer is suspended."
+            },
+            "413": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "body_too_large": {
+                      "value": {
+                        "code": "body_too_large",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "Body exceeds 8192 bytes."
+            },
+            "500": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "dev_bearer_forbidden_in_environment": {
+                      "value": {
+                        "code": "dev_bearer_forbidden_in_environment",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    },
+                    "mutation_failed": {
+                      "value": {
+                        "code": "mutation_failed",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "Creation failed or development authentication is forbidden here."
+            }
+          },
+          "security": [
+            {
+              "cloudflareAccess": []
+            },
+            {
+              "devBearer": []
+            }
+          ],
+          "summary": "Create a license record for an active customer",
+          "tags": [
+            "admin:licenses"
+          ]
+        }
+      },
       "/api/admin/customers/{id}/reenable": {
         "post": {
           "operationId": "reenableCustomer",
@@ -11098,6 +11449,9 @@
                     "protected_creation_conflict": {
                       "value": {
                         "code": "protected_creation_conflict",
+                        "data": {
+                          "reason": "customer_inactive"
+                        },
                         "ok": false,
                         "request_id": "1a2b3c-1"
                       }
@@ -11118,11 +11472,38 @@
                     }
                   },
                   "schema": {
-                    "$ref": "#/components/schemas/ErrorEnvelope"
+                    "oneOf": [
+                      {
+                        "allOf": [
+                          {
+                            "$ref": "#/components/schemas/ErrorEnvelope"
+                          },
+                          {
+                            "properties": {
+                              "code": {
+                                "enum": [
+                                  "revoked_entitlement_is_terminal",
+                                  "stale_transition",
+                                  "enforcement_mode_conflict",
+                                  "idempotency_request_conflict"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "code"
+                            ],
+                            "type": "object"
+                          }
+                        ]
+                      },
+                      {
+                        "$ref": "#/components/schemas/ProtectedCreationConflictError"
+                      }
+                    ]
                   }
                 }
               },
-              "description": "Terminal or concurrent state, enforcement mismatch, protected eligibility failure, or an idempotency key already used for another tuple/mode."
+              "description": "Terminal or concurrent state, enforcement mismatch, protected eligibility failure (data.reason names the failed rule), or an idempotency key already used for another tuple/mode."
             },
             "413": {
               "content": {
@@ -19347,8 +19728,8 @@
       }
     ]
   },
-  "openApiOperationCount": 73,
-  "routeCount": 73,
-  "routeKeyCount": 71,
+  "openApiOperationCount": 74,
+  "routeCount": 74,
+  "routeKeyCount": 72,
   "service": "cloudflare-license-admin"
 }
