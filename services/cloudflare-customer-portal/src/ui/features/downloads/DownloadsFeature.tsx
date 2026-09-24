@@ -43,12 +43,21 @@ export function useLicenseDownloads({ runOnce, setMessage }: DownloadOptions): L
         setMessage(localMessage("device_key_required", false));
         return;
       }
-      const response = await fetch(downloadPath(), {
-        method: "POST",
-        credentials: "same-origin",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ entitlement_id: item.id, device_key_id: deviceKeyId }),
-      });
+      let response: Response;
+      try {
+        response = await fetch(downloadPath(), {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ entitlement_id: item.id, device_key_id: deviceKeyId }),
+        });
+      } catch {
+        // This download bypasses api() (it needs the raw Response to read a blob), so a dropped
+        // connection needs the same guard here -- same code and copy as api()'s own fetch rejection
+        // (task C2), so the customer sees an identical message either way.
+        setMessage(localMessage("network_unavailable", false));
+        return;
+      }
       const contentType = response.headers.get("content-type") ?? "";
       if (!response.ok || contentType.includes("application/json")) {
         try {

@@ -41,6 +41,10 @@ export type SeatOperation = "checkout" | "heartbeat" | "release";
 export interface SeatActionResult {
   succeeded: boolean;
   refreshFailed: boolean;
+  // True when the seat request itself never reached the server (api()'s own network_unavailable,
+  // task C2) -- distinct from an ordinary failure code, since the server-side outcome is unknown
+  // rather than a definite refusal. Only a floating-seat release currently treats this specially.
+  networkFailure: boolean;
 }
 
 export interface StatusMessage {

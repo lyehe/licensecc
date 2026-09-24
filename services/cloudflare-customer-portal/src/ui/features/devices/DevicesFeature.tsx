@@ -144,6 +144,7 @@ export function useDevicesController(options: DeviceFeatureOptions): DevicesCont
     let succeeded = false;
     let refreshFailed = false;
     let checkedOut = false;
+    let networkFailure = false;
     await runOnce(async () => {
       const existing = seatSessions[item.id];
       if ((operation === "heartbeat" || operation === "release") && existing === undefined) {
@@ -165,7 +166,10 @@ export function useDevicesController(options: DeviceFeatureOptions): DevicesCont
       const resultData = result.data;
       const leaseExpiresAt = typeof resultData?.expires_at === "number" ? resultData.expires_at : 0;
       const seatId = typeof resultData?.seat_id === "string" ? resultData.seat_id : null;
-      if (!result.ok) return;
+      if (!result.ok) {
+        networkFailure = result.code === "network_unavailable";
+        return;
+      }
       if (operation === "checkout" && seatId !== null) {
         setSeatSessions((current) => ({
           ...current,
@@ -201,7 +205,7 @@ export function useDevicesController(options: DeviceFeatureOptions): DevicesCont
       // refresh throws still moves focus onto the seat.
       if (checkedOut) setPendingSeatFocus({ seatId: item.id, after: "start" });
     });
-    return { succeeded, refreshFailed };
+    return { succeeded, refreshFailed, networkFailure };
   }
 
   function requestSeatRelease(item: EntitlementRow): void {
@@ -239,12 +243,26 @@ export function useDevicesController(options: DeviceFeatureOptions): DevicesCont
       if (outcome.succeeded) {
         setPendingSeatFocus({ seatId: pending.item.id, after: "release" });
         if (outcome.refreshFailed) setMessage(localMessage(FLOATING_SEAT_RELEASE_REFRESH_FAILED_CODE, false));
+        setPendingSeatRelease(null);
+        closeDialog = true;
+      } else if (outcome.networkFailure) {
+        // api() no longer throws for a dropped connection (task C2) -- it reports network_unavailable
+        // like any other failure code. A release specifically cannot treat that as an ordinary
+        // failure: whether the server released the seat before the connection dropped is unknown, so
+        // this stays open with the same "outcome is unknown" guidance a thrown exception used to
+        // produce here, rather than silently closing as if the release had simply been refused.
+        setSeatReleaseError(FLOATING_SEAT_RELEASE_NETWORK_ERROR_COPY);
+        setSeatReleaseOutcomeUnknown(true);
+        seatReleaseDialogRef.current?.focus();
       } else {
         seatReleaseDeferredFocusRef.current = returnFocus;
+        setPendingSeatRelease(null);
+        closeDialog = true;
       }
-      setPendingSeatRelease(null);
-      closeDialog = true;
     } catch {
+      // Defensive: nothing on this path is expected to throw anymore (api() itself no longer does),
+      // but if something truly unexpected does, treat it exactly like the network-failure branch
+      // above -- the outcome is equally unknown either way.
       setSeatReleaseError(FLOATING_SEAT_RELEASE_NETWORK_ERROR_COPY);
       setSeatReleaseOutcomeUnknown(true);
       seatReleaseDialogRef.current?.focus();

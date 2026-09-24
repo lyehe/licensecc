@@ -140,8 +140,14 @@ export function usePortalAuth({ setMessage, runOnce }: AuthOptions): PortalAuth 
   async function logout(afterLogout: () => void): Promise<void> {
     await runOnce(async () => {
       const result = await api(logoutPath(), { method: "POST", body: "{}" });
+      if (!result.ok) {
+        // Whatever the server said -- or api()'s own network_unavailable when it couldn't even ask --
+        // the customer is still signed in. Say so specifically rather than forwarding a code like
+        // "unauthorized" that would misleadingly suggest the session is already gone (task C2).
+        setMessage(localMessage("logout_failed", false));
+        return;
+      }
       setMessage(resultMessage(result));
-      if (!result.ok) return;
       afterLogout();
       setCustomerId(null);
       setEmail(null);

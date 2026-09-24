@@ -184,10 +184,19 @@ const RESULT_CODE_COPY: Record<string, string> = {
   invalid_email: "Enter a valid email address.",
   invalid_code: "Enter the 8-digit code exactly as sent.",
   invalid_response: "The service returned an unexpected response. Try again.",
+  // A fetch that never reached the network at all (offline, DNS failure, an aborted request) --
+  // produced by api()'s own fetch rejection and by the download's raw fetch, both of which bypass the
+  // server entirely, so no server-authored code is available (task C2).
+  network_unavailable: "Couldn't reach the portal. Check your connection and try again.",
   account_refresh_failed: "Account refresh failed. Displayed data may be out of date; retry to refresh it.",
   seat_not_checked_out: "Start a seat before doing that.",
   license_unavailable: "This license can't be downloaded right now.",
   download_started: "Download started.",
+  // Shown whenever the logout request itself failed (a server-returned failure code, or the network
+  // rejection above) -- always specific about staying signed in rather than forwarding whatever code
+  // came back, since a code like "unauthorized" would misleadingly suggest the session already ended
+  // (task C2).
+  logout_failed: "Sign-out didn't complete. You're still signed in — try again.",
   [FLOATING_SEAT_RELEASE_REFRESH_FAILED_CODE]: FLOATING_SEAT_RELEASE_REFRESH_ERROR_COPY,
 
   // ---- Seat-action success (self-service.ts apiAction's default `${operation}_ok`) ----------------
