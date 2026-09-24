@@ -34,10 +34,22 @@ function streamingMagicRequest(chunks, { contentType = "application/x-www-form-u
 
 async function magicResponse(env, request) {
   const res = await worker.fetch(request, env, CTX);
-  // The form-encoded branch (R10) answers with a 303 + null body; only parse JSON for JSON responses.
+  // The form-encoded branch answers with a 303 + null body; only parse JSON for JSON responses.
   const isJson = (res.headers.get("content-type") ?? "").includes("application/json");
   const body = isJson ? await res.json() : null;
   return { status: res.status, body, res };
+}
+
+// A D1 double that throws only on the atomic single-use claim UPDATE, so a form redeem can be
+// driven through a genuine mid-flight D1 failure without disturbing any other query on the path
+// (the rate-limit counter INSERT, mintSession's INSERT, etc. all pass through to the real DB).
+function throwingOtpClaimDb(real) {
+  return {
+    prepare(sql) {
+      if (/UPDATE portal_otp/.test(sql)) throw new Error("D1_ERROR: simulated");
+      return real.prepare(sql);
+    },
+  };
 }
 
 function unreadMagicRequest({ contentType, contentLength, cancelBehavior = "resolve" }) {
@@ -356,7 +368,13 @@ test("auth magic redeem preserves token redemption semantics for a valid bounded
   const result = await magicResponse(env, request);
   assert.equal(result.status, 303);
   assert.equal(result.res.headers.get("location"), "https://portal.test/#/apps");
-  assert.match(result.res.headers.get("set-cookie") ?? "", /lccp_session=lccp_/);
+  assert.equal(result.res.headers.get("cache-control"), "no-store");
+  assert.equal(result.res.headers.get("referrer-policy"), "no-referrer");
+  const cookie = result.res.headers.get("set-cookie");
+  assert.match(cookie ?? "", /lccp_session=lccp_/);
+  // The minted cookie must actually resolve, through the ordinary session path, to this customer.
+  const me = await call(env, "GET", "/api/portal/me", { cookie: cookie.split(";")[0] });
+  assert.equal(me.body.data.customer_id, "A");
   assert.notEqual(otpRow(db)?.consumed_at, null);
   db.close();
 });
@@ -370,12 +388,60 @@ test("auth magic redeem: a reused token redirects to link_expired, not the earli
   assert.equal(first.status, 303);
   assert.equal(first.res.headers.get("location"), "https://portal.test/#/apps");
   assert.match(first.res.headers.get("set-cookie") ?? "", /lccp_session=lccp_/);
+  const afterFirst = otpRow(db);
 
   const secondRequest = streamingMagicRequest([`token=${encodeURIComponent(issued.secret)}`]).request;
   const second = await magicResponse(env, secondRequest);
   assert.equal(second.status, 303);
   assert.equal(second.res.headers.get("location"), "https://portal.test/?auth_error=link_expired");
   assert.equal(second.res.headers.get("set-cookie"), null, "a reused token must never mint a second session");
+  assert.deepEqual(otpRow(db), afterFirst, "a rejected reuse must not touch the already-consumed OTP row");
+  assert.equal(db.prepare("SELECT COUNT(*) AS c FROM portal_sessions").get().c, 1, "a reused token must mint exactly one session, never two");
+  db.close();
+});
+
+test("auth magic redeem: exceeding the per-IP verify rate limit redirects to rate_limited", async () => {
+  const { db, env } = baseFixture();
+  for (let i = 0; i < 30; i += 1) {
+    await magicResponse(env, streamingMagicRequest(["token=bad"]).request);
+  }
+  const result = await magicResponse(env, streamingMagicRequest(["token=bad"]).request);
+  assert.equal(result.status, 303);
+  assert.equal(result.res.headers.get("location"), "https://portal.test/?auth_error=rate_limited");
+  db.close();
+});
+
+test("auth magic redeem: unset OTP peppers redirect to sign_in_failed", async () => {
+  const { db, env } = baseFixture({ PORTAL_OTP_PEPPERS: undefined });
+  const result = await magicResponse(env, streamingMagicRequest(["token=bad"]).request);
+  assert.equal(result.status, 303);
+  assert.equal(result.res.headers.get("location"), "https://portal.test/?auth_error=sign_in_failed");
+  db.close();
+});
+
+test("auth magic redeem: a valid secret with unset session peppers redirects to sign_in_failed and mints no cookie", async () => {
+  const { db, env } = baseFixture();
+  const issued = await requestOtp(env, { email: "a@x.com", clientIp: "seed", returnSecret: true, now: NOW });
+  assert.equal(issued.ok, true);
+  const noSessionPeppers = { ...env, PORTAL_SESSION_PEPPERS: undefined };
+  const { request } = streamingMagicRequest([`token=${encodeURIComponent(issued.secret)}`]);
+  const result = await magicResponse(noSessionPeppers, request);
+  assert.equal(result.status, 303);
+  assert.equal(result.res.headers.get("location"), "https://portal.test/?auth_error=sign_in_failed");
+  assert.equal(result.res.headers.get("set-cookie"), null);
+  db.close();
+});
+
+test("auth magic redeem: a thrown D1 error during redeem still redirects to sign_in_failed", async () => {
+  const { db, env } = baseFixture();
+  const issued = await requestOtp(env, { email: "a@x.com", clientIp: "seed", returnSecret: true, now: NOW });
+  assert.equal(issued.ok, true);
+  const withThrowingDb = { ...env, DB: throwingOtpClaimDb(env.DB) };
+  const { request } = streamingMagicRequest([`token=${encodeURIComponent(issued.secret)}`]);
+  const result = await magicResponse(withThrowingDb, request);
+  assert.equal(result.status, 303);
+  assert.equal(result.res.headers.get("location"), "https://portal.test/?auth_error=sign_in_failed");
+  assert.equal(result.res.headers.get("set-cookie"), null);
   db.close();
 });
 

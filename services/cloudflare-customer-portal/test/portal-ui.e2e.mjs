@@ -160,6 +160,30 @@ test("social sign-in buttons submit to their own start routes and hide unavailab
   await expect(page.getByRole("heading", { name: "Provider redirect boundary" })).toBeVisible();
 });
 
+test("link_expired shows the exact expired-link sentence, never the raw code", async ({ page }) => {
+  await page.route("**/api/portal/me", (route) => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" } }));
+  await page.route("**/portal/v1/auth/providers", (route) => route.fulfill({ json: makeEnvelope("auth_providers", { google: false, github: false, email: true, password: false }) }));
+  await page.goto("/?auth_error=link_expired");
+  await expect(page.getByText("This sign-in link has expired or was already used. Request a new code.")).toBeVisible();
+  await expect(page.getByText("link_expired", { exact: false })).toHaveCount(0);
+  expect(page.url()).not.toContain("auth_error");
+});
+
+test("a signed-in user who opens an already-used magic link lands on Apps without a stale message", async ({ page }) => {
+  const api = makePortalApiFixture();
+  await signIn(page, api);
+  await expect(page.getByRole("heading", { name: "Apps", exact: true })).toBeVisible();
+  // Simulate following the emailed magic link a second time while already signed in: the
+  // interstitial's form POST redirects the top-level navigation to /?auth_error=link_expired.
+  await page.goto("/?auth_error=link_expired");
+  await expect(page.getByRole("heading", { name: "Apps", exact: true })).toBeVisible();
+  await expect(page.getByText("This sign-in link has expired or was already used. Request a new code.")).toHaveCount(0);
+  expect(page.url()).not.toContain("auth_error");
+  // The stale code must not resurface later, out of context, when Account happens to mount.
+  await page.getByRole("link", { name: "Account", exact: true }).click();
+  await expect(page.getByText("This sign-in link has expired or was already used. Request a new code.")).toHaveCount(0);
+});
+
 test("unconfigured providers show a clear unavailable state", async ({ page }) => {
   await page.route("**/api/portal/me", (route) => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" } }));
   await page.route("**/portal/v1/auth/providers", (route) => route.fulfill({ json: makeEnvelope("auth_providers", { google: false, github: false, email: false }) }));
