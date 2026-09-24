@@ -119,7 +119,7 @@ test("operation identifiers and route-class auth declarations stay exact", () =>
   assertUniqueOperationIds(openApiDocument.paths);
   for (const route of PUBLIC_ROUTES) {
     if (route.path === "/portal/v1/auth/password") continue;
-    if (route.path.endsWith("/start") || route.path === "/portal/v1/auth/identities") continue;
+    if (route.path.endsWith("/start") || route.path.startsWith("/portal/v1/auth/identities")) continue;
     if (route.path === "/portal/v1/auth/logout" || route.path === "/portal/v1/admin/bootstrap-otp") continue;
     const operation = openApiDocument.paths[route.path]?.[route.method.toLowerCase()];
     if (!operation) continue;
@@ -162,6 +162,25 @@ test("password login documents the suspended-account denial separately from inva
   const path = "/portal/v1/auth/password/login";
   assert.deepEqual(documentedErrorCodes(path, 401), ["invalid_credentials"]);
   assert.deepEqual([...documentedErrorCodes(path, 403)].sort(), ["account_suspended", "cross_site_forbidden"]);
+});
+
+// The handler runs isCrossSite -> authSession -> readJson -> the provider check -> the existence
+// read -> one conditional DELETE batch, so these are exactly the statuses it can answer with.
+test("provider unlink requires a session and documents every status its handler can emit", () => {
+  const path = "/portal/v1/auth/identities/unlink";
+  const post = openApiDocument.paths[path]?.post;
+  assert.ok(post, `${path} must be documented`);
+  assert.deepEqual(post.security, [{ sessionCookie: [] }]);
+  assert.deepEqual(post.requestBody.content["application/json"].schema.properties.provider.enum, ["google", "github"]);
+  assert.deepEqual(Object.keys(post.responses).sort(), ["200", "400", "401", "403", "404", "409", "413", "503"]);
+  assert.equal(post.responses["200"].content["application/json"].schema.properties.code.const, "identity_unlinked");
+  assert.deepEqual([...documentedErrorCodes(path, 400)].sort(), ["invalid_json", "invalid_request"]);
+  assert.deepEqual(documentedErrorCodes(path, 401), ["unauthorized"]);
+  assert.deepEqual(documentedErrorCodes(path, 403), ["cross_site_forbidden"]);
+  assert.deepEqual(documentedErrorCodes(path, 404), ["not_found"]);
+  assert.deepEqual(documentedErrorCodes(path, 409), ["last_sign_in_method"]);
+  assert.deepEqual(documentedErrorCodes(path, 413), ["body_too_large"]);
+  assert.deepEqual(documentedErrorCodes(path, 503), ["config_error"]);
 });
 
 test("the providers envelope documents its nullable support contact", () => {

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import { generateKeyPair, exportJWK, SignJWT } from "jose";
-import { assert, worker, baseFixture, call, cookieFor, NOW, CTX } from "./portal-worker-fixtures.mjs";
+import { assert, worker, baseFixture, call, cookieFor, mintSession, sameSiteHeaders, within, NOW, CTX } from "./portal-worker-fixtures.mjs";
 import { identityCustomer } from "../dist-worker/worker/oauth/accounts.js";
 // Namespace import: a missing export fails its own test instead of the whole suite's module load.
 import * as support from "../dist-worker/worker/support.js";
@@ -243,4 +243,211 @@ test("Concurrent registration cannot leave an orphan customer or duplicate provi
   assert.equal(same, db.prepare("SELECT customer_id FROM portal_identities").get().customer_id);
 });
 
-export const DIRECT_ROUTE_TESTS = ["GET /portal/v1/auth/providers", "POST /portal/v1/auth/google/start", "POST /portal/v1/auth/github/start", "GET /portal/v1/auth/google/callback", "GET /portal/v1/auth/github/callback", "GET /portal/v1/auth/identities"];
+// ---- POST /portal/v1/auth/identities/unlink ------------------------------------------------------
+// A provider may be disconnected only while another sign-in method is usable NOW: a password while
+// password sign-in is enabled, another identity whose provider is configured, or a contact email
+// while email codes can be delivered. Anything else is the customer's last way in.
+
+const UNLINK = "/portal/v1/auth/identities/unlink";
+const EMAIL_DELIVERY = { PORTAL_EMAIL_API_KEY: "test-only", PORTAL_EMAIL_FROM: "sender@example.com" };
+const GOOGLE_ONLY = { PORTAL_GOOGLE_CLIENT_ID: "google-client", PORTAL_GOOGLE_CLIENT_SECRET: "google-secret" };
+
+function linkIdentity(db, customerId, provider) {
+  db.prepare("INSERT INTO portal_identities (provider, subject, customer_id, email, created_at) VALUES (?, ?, ?, ?, ?)")
+    .run(provider, `${provider}-${customerId}`, customerId, `${provider}-${customerId.toLowerCase()}@example.com`, NOW);
+}
+function linkedProviders(db, customerId) {
+  return db.prepare("SELECT provider FROM portal_identities WHERE customer_id = ? ORDER BY provider").all(customerId).map((row) => row.provider);
+}
+function setPassword(db, customerId) {
+  db.prepare("INSERT INTO portal_passwords (customer_id, email_lower, password_hash, created_at, updated_at) VALUES (?, ?, 'x', ?, ?)")
+    .run(customerId, `login-${customerId.toLowerCase()}@example.com`, NOW, NOW);
+}
+function clearContactEmail(db, customerId) {
+  db.prepare("UPDATE customers SET email = '' WHERE id = ?").run(customerId);
+}
+async function sessionFor(env, customerId, authMethod) {
+  const minted = await mintSession(env, { customerId, authMethod, now: NOW });
+  assert.equal(minted.ok, true);
+  return `lccp_session=${minted.raw}`;
+}
+const unlink = (env, cookie, provider = "google", headers) => call(env, "POST", UNLINK, { cookie, body: { provider }, headers });
+const signedIn = async (env, cookie) => (await call(env, "GET", "/api/portal/me", { cookie })).status === 200;
+// Holds each D1 batch until `count` requests have reached one, so every request passes its pre-checks
+// before any conditional DELETE runs; the batches then run one at a time, as D1 serializes them.
+function holdBatches(env, count) {
+  const batch = env.DB.batch.bind(env.DB);
+  let arrived = 0;
+  let release;
+  const everyone = new Promise((resolve) => { release = resolve; });
+  env.DB.batch = async (statements) => {
+    arrived += 1;
+    if (arrived === count) release();
+    await within(everyone, 2000);
+    return batch(statements);
+  };
+}
+
+test("Unlink succeeds via a password while password sign-in is enabled, even for a provider no longer configured", async () => {
+  // No provider is configured and email delivery is off, so only the password remains usable.
+  const { env, db } = baseFixture({ PORTAL_PASSWORD_ENABLED: "1" });
+  linkIdentity(db, "A", "google");
+  setPassword(db, "A");
+  const result = await unlink(env, await sessionFor(env, "A", "oauth"));
+  assert.equal(result.status, 200);
+  assert.equal(result.body.ok, true);
+  assert.equal(result.body.code, "identity_unlinked");
+  assert.deepEqual(result.body.data, { provider: "google" });
+  assert.equal(result.res.headers.get("cache-control"), "no-store");
+  assert.deepEqual(linkedProviders(db, "A"), []);
+});
+
+test("Unlink succeeds via another identity whose provider is configured", async () => {
+  const { env, db } = baseFixture(configuration);
+  linkIdentity(db, "A", "google");
+  linkIdentity(db, "A", "github");
+  const cookie = await sessionFor(env, "A", "oauth");
+  const result = await unlink(env, cookie, "github");
+  assert.equal(result.status, 200);
+  assert.deepEqual(result.body.data, { provider: "github" });
+  assert.deepEqual(linkedProviders(db, "A"), ["google"]);
+  const listed = await call(env, "GET", "/portal/v1/auth/identities", { cookie });
+  assert.deepEqual(listed.body.data.items.map((item) => item.provider), ["google"]);
+});
+
+test("Unlink succeeds via a contact email while email codes are configured", async () => {
+  const { env, db } = baseFixture(EMAIL_DELIVERY);
+  linkIdentity(db, "A", "github");
+  const result = await unlink(env, await sessionFor(env, "A", "oauth"), "github");
+  assert.equal(result.status, 200);
+  assert.deepEqual(result.body.data, { provider: "github" });
+  assert.deepEqual(linkedProviders(db, "A"), []);
+});
+
+test("Unlink is refused as the last sign-in method when no other method is usable now, and changes nothing", async () => {
+  const cases = [
+    ["a password while password sign-in is disabled", { ...configuration, PORTAL_PASSWORD_ENABLED: "0" }, (db) => { clearContactEmail(db, "A"); setPassword(db, "A"); }],
+    ["another identity whose provider is not configured", GOOGLE_ONLY, (db) => { clearContactEmail(db, "A"); linkIdentity(db, "A", "github"); }],
+    ["a contact email while email delivery is not configured", configuration, () => {}],
+    ["email delivery without a contact email", { ...configuration, ...EMAIL_DELIVERY }, (db) => clearContactEmail(db, "A")],
+    ["no other method at all", { ...configuration, ...EMAIL_DELIVERY, PORTAL_PASSWORD_ENABLED: "1" }, (db) => clearContactEmail(db, "A")],
+  ];
+  for (const [name, extraEnv, seed] of cases) {
+    const { env, db } = baseFixture(extraEnv);
+    linkIdentity(db, "A", "google");
+    seed(db);
+    const before = linkedProviders(db, "A");
+    const current = await sessionFor(env, "A", "oauth");
+    const other = await sessionFor(env, "A", "oauth");
+    const refused = await unlink(env, current);
+    assert.equal(refused.status, 409, name);
+    assert.equal(refused.body.code, "last_sign_in_method", name);
+    assert.equal(refused.body.data, undefined, name);
+    assert.equal(refused.res.headers.get("cache-control"), "no-store", name);
+    assert.deepEqual(linkedProviders(db, "A"), before, `${name}: nothing is unlinked`);
+    assert.ok(await signedIn(env, current), `${name}: the current session is kept`);
+    assert.ok(await signedIn(env, other), `${name}: a refused unlink revokes no session`);
+  }
+});
+
+test("A successful unlink revokes the customer's other OAuth sessions and keeps the current one; other sessions are untouched", async () => {
+  const { env, db } = baseFixture(configuration);
+  linkIdentity(db, "A", "google");
+  linkIdentity(db, "A", "github");
+  const current = await sessionFor(env, "A", "oauth");
+  const otherOauth = [await sessionFor(env, "A", "oauth"), await sessionFor(env, "A", "oauth")];
+  const untouched = {
+    password: await sessionFor(env, "A", "password"),
+    otp: await sessionFor(env, "A", "otp"),
+    legacy: await sessionFor(env, "A", "legacy"),
+    "another customer's OAuth": await sessionFor(env, "B", "oauth"),
+  };
+  assert.equal((await unlink(env, current, "github")).status, 200);
+  assert.ok(await signedIn(env, current), "the current session is kept");
+  for (const cookie of otherOauth) assert.equal(await signedIn(env, cookie), false, "another OAuth session is revoked");
+  for (const [name, cookie] of Object.entries(untouched)) assert.ok(await signedIn(env, cookie), `the ${name} session is untouched`);
+  assert.equal(db.prepare("SELECT count(*) AS n FROM portal_sessions WHERE status = 'revoked'").get().n, otherOauth.length);
+
+  // From a password session, every OAuth session is another session.
+  const second = baseFixture({ PORTAL_PASSWORD_ENABLED: "1" });
+  linkIdentity(second.db, "A", "google");
+  setPassword(second.db, "A");
+  const viaPassword = await sessionFor(second.env, "A", "password");
+  const oauth = await sessionFor(second.env, "A", "oauth");
+  assert.equal((await unlink(second.env, viaPassword)).status, 200);
+  assert.ok(await signedIn(second.env, viaPassword));
+  assert.equal(await signedIn(second.env, oauth), false);
+});
+
+test("Unlinking Google and then GitHub refuses the second as the last sign-in method", async () => {
+  const { env, db } = baseFixture(configuration);
+  clearContactEmail(db, "A");
+  linkIdentity(db, "A", "google");
+  linkIdentity(db, "A", "github");
+  const cookie = await sessionFor(env, "A", "oauth");
+  assert.equal((await unlink(env, cookie, "google")).status, 200);
+  const second = await unlink(env, cookie, "github");
+  assert.equal(second.status, 409);
+  assert.equal(second.body.code, "last_sign_in_method");
+  assert.deepEqual(linkedProviders(db, "A"), ["github"]);
+  assert.ok(await signedIn(env, cookie));
+});
+
+test("Concurrent unlinks of Google and GitHub cannot both succeed", async () => {
+  const { env, db } = baseFixture(configuration);
+  clearContactEmail(db, "A");
+  linkIdentity(db, "A", "google");
+  linkIdentity(db, "A", "github");
+  const tabs = [await sessionFor(env, "A", "oauth"), await sessionFor(env, "A", "oauth")];
+  holdBatches(env, 2);
+  const results = await Promise.all([unlink(env, tabs[0], "google"), unlink(env, tabs[1], "github")]);
+  assert.deepEqual(results.map((result) => result.status).sort(), [200, 409]);
+  assert.equal(linkedProviders(db, "A").length, 1, "one sign-in method always remains");
+});
+
+test("Concurrent unlinks of the same provider keep the winner's session; the loser revokes nothing", async () => {
+  const { env, db } = baseFixture(configuration);
+  linkIdentity(db, "A", "google");
+  linkIdentity(db, "A", "github");
+  const tabs = [await sessionFor(env, "A", "oauth"), await sessionFor(env, "A", "oauth")];
+  holdBatches(env, 2);
+  const results = await Promise.all(tabs.map((cookie) => unlink(env, cookie, "google")));
+  assert.deepEqual(results.map((result) => result.status).sort(), [200, 409]);
+  const winner = results.findIndex((result) => result.status === 200);
+  assert.deepEqual(linkedProviders(db, "A"), ["github"]);
+  assert.ok(await signedIn(env, tabs[winner]), "the successful unlink keeps its own session");
+  assert.equal(await signedIn(env, tabs[1 - winner]), false, "the successful unlink revokes the other OAuth session");
+});
+
+test("Unlink requires a same-site request, a session, a known provider and this customer's own identity", async () => {
+  const { env, db } = baseFixture(configuration);
+  linkIdentity(db, "A", "google");
+  linkIdentity(db, "A", "github");
+  linkIdentity(db, "B", "github");
+  const cookieA = await sessionFor(env, "A", "oauth");
+  const expectCode = (result, status, code) => {
+    assert.equal(result.status, status, code);
+    assert.equal(result.body.code, code);
+  };
+  // Cross-site is refused before the session is looked at.
+  expectCode(await unlink(env, undefined, "google", { "sec-fetch-site": "cross-site" }), 403, "cross_site_forbidden");
+  expectCode(await unlink(env, cookieA, "google", { "sec-fetch-site": "same-site" }), 403, "cross_site_forbidden");
+  expectCode(await unlink(env, undefined, "google"), 401, "unauthorized");
+  const signedOut = await sessionFor(env, "A", "oauth");
+  await call(env, "POST", "/portal/v1/auth/logout", { cookie: signedOut });
+  expectCode(await unlink(env, signedOut, "google"), 401, "unauthorized");
+  for (const body of [{}, { provider: "" }, { provider: "GitHub" }, { provider: "gitlab" }, { provider: ["google"] }]) {
+    expectCode(await call(env, "POST", UNLINK, { cookie: cookieA, body }), 400, "invalid_request");
+  }
+  const malformed = await worker.fetch(new Request(`https://portal.test${UNLINK}`, { method: "POST", headers: { ...sameSiteHeaders(), cookie: cookieA }, body: "{" }), env, CTX);
+  assert.equal(malformed.status, 400);
+  assert.equal((await malformed.json()).code, "invalid_json");
+  // Another customer's identity is the same 404 as one that does not exist.
+  db.prepare("DELETE FROM portal_identities WHERE customer_id = 'A' AND provider = 'github'").run();
+  expectCode(await unlink(env, cookieA, "github"), 404, "not_found");
+  assert.deepEqual(linkedProviders(db, "B"), ["github"]);
+  assert.deepEqual(linkedProviders(db, "A"), ["google"]);
+  assert.ok(await signedIn(env, cookieA));
+});
+
+export const DIRECT_ROUTE_TESTS = ["GET /portal/v1/auth/providers", "POST /portal/v1/auth/google/start", "POST /portal/v1/auth/github/start", "GET /portal/v1/auth/google/callback", "GET /portal/v1/auth/github/callback", "GET /portal/v1/auth/identities", "POST /portal/v1/auth/identities/unlink"];

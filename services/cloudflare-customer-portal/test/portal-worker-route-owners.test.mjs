@@ -46,6 +46,7 @@ const ROUTE_OWNER_TABLE = Object.freeze({
   "GET /portal/v1/auth/google/callback": "oauth",
   "GET /portal/v1/auth/github/callback": "oauth",
   "GET /portal/v1/auth/identities": "oauth",
+  "POST /portal/v1/auth/identities/unlink": "oauth",
   "GET /openapi.json": "public",
   "GET /docs": "public",
   "GET /health": "public",

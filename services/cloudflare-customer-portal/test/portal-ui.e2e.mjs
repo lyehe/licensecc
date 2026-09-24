@@ -277,6 +277,72 @@ test("Account shows connected methods and keeps linking failures visible", async
   await expect(page.locator('form[action="/portal/v1/auth/github/start?mode=link"]')).toHaveAttribute("method", "post");
 });
 
+async function routeAccountIdentities(page, identities, unlink) {
+  await page.route("**/api/portal/**", (route) => route.fulfill({ json: makeEnvelope("ok", route.request().url().endsWith("/me") ? { customer_id: "cus_self" } : { items: [] }) }));
+  await page.route("**/portal/v1/auth/providers", (route) => route.fulfill({ json: makeEnvelope("auth_providers", { google: true, github: true, email: false }) }));
+  await page.route("**/portal/v1/auth/identities", (route) => route.fulfill({ json: makeEnvelope("identities", { items: identities() }) }));
+  await page.route("**/portal/v1/auth/identities/unlink", (route) => {
+    expect(route.request().method()).toBe("POST");
+    return unlink(route, route.request().postDataJSON());
+  });
+}
+
+test("Account disconnects a provider only after an inline confirm, then offers to connect it again", async ({ page }) => {
+  let identities = [{ provider: "google", email: "customer@example.com" }, { provider: "github", email: "octo@example.com" }];
+  const unlinks = [];
+  await routeAccountIdentities(page, () => identities, (route, body) => {
+    unlinks.push(body);
+    identities = identities.filter((identity) => identity.provider !== body.provider);
+    return route.fulfill({ json: makeEnvelope("identity_unlinked", { provider: body.provider }) });
+  });
+  await page.goto("/#/account");
+  await expect(page.getByText("GitHub · octo@example.com")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Connect GitHub" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Disconnect GitHub" }).click();
+  const confirm = page.getByRole("group", { name: "Disconnect GitHub? You won't be able to sign in with GitHub until you connect it again." });
+  await expect(confirm).toBeVisible();
+  await expect(confirm).toBeFocused();
+  // The first click only asks; nothing is sent until the customer confirms.
+  expect(unlinks).toEqual([]);
+  await confirm.getByRole("button", { name: "Cancel", exact: true }).click();
+  await expect(confirm).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Disconnect GitHub" })).toBeFocused();
+  expect(unlinks).toEqual([]);
+  await page.getByRole("button", { name: "Disconnect GitHub" }).click();
+  await confirm.getByRole("button", { name: "Disconnect GitHub", exact: true }).click();
+  await expect(page.getByText("GitHub disconnected.", { exact: true })).toBeVisible();
+  expect(unlinks).toEqual([{ provider: "github" }]);
+  await expect(page.getByText("GitHub · octo@example.com")).toHaveCount(0);
+  await expect(page.getByText("Google · customer@example.com")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Connected accounts" })).toBeFocused();
+  await expect(page.getByRole("button", { name: "Connect GitHub" })).toBeVisible();
+  await expect(page.locator('form[action="/portal/v1/auth/github/start?mode=link"]')).toHaveAttribute("method", "post");
+  await expect(page.getByRole("button", { name: "Connect Google" })).toHaveCount(0);
+});
+
+test("Account explains that the last sign-in method cannot be disconnected, without a raw code", async ({ page }) => {
+  const identities = [{ provider: "google", email: "customer@example.com" }];
+  const responses = [
+    { status: 503, json: { ok: false, code: "config_error", request_id: "portal-e2e-unlink-503" } },
+    { status: 409, json: { ok: false, code: "last_sign_in_method", request_id: "portal-e2e-unlink-409" } },
+  ];
+  await routeAccountIdentities(page, () => identities, (route) => route.fulfill(responses.shift()));
+  await page.goto("/#/account");
+  const disconnect = async () => {
+    await page.getByRole("button", { name: "Disconnect Google" }).click();
+    await page.getByRole("group", { name: /^Disconnect Google\?/ }).getByRole("button", { name: "Disconnect Google", exact: true }).click();
+  };
+  await disconnect();
+  await expect(page.getByText("Unable to disconnect Google. Please try again.", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Disconnect Google" })).toBeFocused();
+  await disconnect();
+  await expect(page.getByText("You can't disconnect your only sign-in method. Set up another way to sign in first.", { exact: true })).toBeVisible();
+  await expect(page.getByText("Unable to disconnect Google. Please try again.", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("Google · customer@example.com")).toBeVisible();
+  for (const raw of ["last_sign_in_method", "config_error", "portal-e2e-unlink"]) await expect(page.getByText(raw)).toHaveCount(0);
+  expect(responses).toEqual([]);
+});
+
 // In-memory portal backend. The fixture mints NO real session: a successful verify simply flips an
 // `authed` flag (the SPA gates on me() succeeding, exactly as it would behind the HttpOnly cookie).
 // Crucially the fixtures NEVER return a bearer/token/private-key/another-customer's id — the leak
