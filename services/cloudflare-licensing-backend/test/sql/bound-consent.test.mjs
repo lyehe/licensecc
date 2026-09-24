@@ -336,14 +336,15 @@ test("consent page counts occupied device slots, expires a retiring hold's count
   // The fixture entitlement keeps schema's default max_active_devices=1: one active binding fills it.
   assert.equal(page.entitlements[0].device_limit,1);assert.equal(page.entitlements[0].devices_in_use,1);
   assert.equal(page.entitlements[0].slot_free_at,null);
-  f.sql.prepare(`UPDATE device_bound_bindings SET state='retiring',hold_until=1800 WHERE id='binding-1'`).run();
+  f.sql.prepare(`UPDATE device_bound_bindings SET state='retiring',hold_until=1200 WHERE id='binding-1'`).run();
   page=await read();
-  assert.equal(page.entitlements[0].devices_in_use,1);assert.equal(page.entitlements[0].slot_free_at,1800);
+  assert.equal(page.entitlements[0].devices_in_use,1);assert.equal(page.entitlements[0].slot_free_at,1200);
   f.sql.prepare(`INSERT INTO device_bound_bindings(id,project,feature,license_fingerprint,device_id,state,hold_until,created_at,updated_at)
-    VALUES('binding-2','APP','DEFAULT',?,'device-2','retiring',1500,1000,1000)`).run(fp);
+    VALUES('binding-2','APP','DEFAULT',?,'device-2','retiring',1100,1000,1000)`).run(fp);
   page=await read();
-  assert.equal(page.entitlements[0].devices_in_use,1);assert.equal(page.entitlements[0].slot_free_at,1500,"the earlier of two retiring holds");
-  f.clock(1800);
+  // Both retiring holds are still in the future: both occupy a slot until their own hold_until.
+  assert.equal(page.entitlements[0].devices_in_use,2);assert.equal(page.entitlements[0].slot_free_at,1100,"the earlier of two retiring holds");
+  f.clock(1200);
   page=await read();
   assert.equal(page.entitlements[0].devices_in_use,0,"both holds have lapsed");assert.equal(page.entitlements[0].slot_free_at,null);
 });

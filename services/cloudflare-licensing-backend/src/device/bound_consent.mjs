@@ -58,6 +58,7 @@ export async function inspectBoundAuthorization(db, customerId, handle, config, 
     status: a.status, revision: a.revision, expires_at: a.expires_at, comparison_code,
     entitlements: rows.slice(0,100).map(row=>({id:entitlementId({project:a.project,feature:row.page_feature,license_fingerprint:row.page_fingerprint}),
       feature:row.page_feature,valid_until:row.page_valid_until,device_limit:row.page_device_limit,
+      devices_in_use:row.page_devices_in_use,slot_free_at:row.page_slot_free_at,device_connected:Boolean(row.page_device_connected),
       ...(row.page_activation_trial_seconds===null?{}:{activation_trial_seconds:row.page_activation_trial_seconds})})),has_more,
     next_page_cursor:has_more?consentPageCursor(hash,customerHash,rows[99]):null };
 }

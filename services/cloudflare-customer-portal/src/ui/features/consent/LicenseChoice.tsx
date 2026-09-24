@@ -20,10 +20,11 @@ export function LicenseChoice({items,selected,onSelect,busy,soleOverall}:{items:
     </select></label>}
     {chosen && <dl className="consentSummary consentLicense">
       {soleOverall && <div><dt>License</dt><dd>{chosen.feature}</dd></div>}
-      <div><dt>Device limit</dt><dd>{chosen.device_limit} {chosen.device_limit===1?"device":"devices"}</dd></div>
+      <div><dt>Device limit</dt><dd>{chosen.devices_in_use} of {chosen.device_limit} devices in use</dd></div>
       {chosen.activation_trial_seconds!==undefined && <div><dt>Trial</dt><dd>{duration(chosen.activation_trial_seconds)} from app activation. Approving here does not start the trial.</dd></div>}
       {(chosen.activation_trial_seconds===undefined || chosen.valid_until!==null) && <div><dt>{chosen.activation_trial_seconds===undefined?"Expires":"Expires by"}</dt><dd>{chosen.valid_until===null?"No expiry":new Date(chosen.valid_until*1000).toLocaleString()}</dd></div>}
     </dl>}
+    {chosen?.device_connected && <p className="consentConnected">This device is already connected to this license.</p>}
     {chosen && <details className="referenceDetails consentReference"><summary>License details</summary><span className="identifier">{reference(chosen.id)}</span></details>}
   </>;
 }

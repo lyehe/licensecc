@@ -1232,7 +1232,17 @@
                                   "minimum": 2,
                                   "type": "integer"
                                 },
+                                "device_connected": {
+                                  "description": "True when this attempt's own device already holds an active binding for this license; the server admits it regardless of capacity (ruling R17), so approval never blocks on it.",
+                                  "type": "boolean"
+                                },
                                 "device_limit": {
+                                  "maximum": 9007199254740991,
+                                  "minimum": 0,
+                                  "type": "integer"
+                                },
+                                "devices_in_use": {
+                                  "description": "Bindings currently occupying a device slot for this license: active, or retiring within its hold (ADR 0006's shared occupancy predicate).",
                                   "maximum": 9007199254740991,
                                   "minimum": 0,
                                   "type": "integer"
@@ -1242,6 +1252,19 @@
                                 },
                                 "id": {
                                   "type": "string"
+                                },
+                                "slot_free_at": {
+                                  "anyOf": [
+                                    {
+                                      "maximum": 9007199254740991,
+                                      "minimum": 0,
+                                      "type": "integer"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ],
+                                  "description": "Earliest time a retiring hold releases a slot; null when no hold is retiring."
                                 },
                                 "valid_until": {
                                   "anyOf": [
@@ -1261,7 +1284,10 @@
                                 "id",
                                 "feature",
                                 "valid_until",
-                                "device_limit"
+                                "device_limit",
+                                "devices_in_use",
+                                "slot_free_at",
+                                "device_connected"
                               ],
                               "type": "object"
                             },
