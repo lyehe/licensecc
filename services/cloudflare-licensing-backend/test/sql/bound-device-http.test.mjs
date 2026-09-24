@@ -255,7 +255,7 @@ test("HTTP concurrent activation cannot oversubscribe the last device slot",asyn
 test("HTTP capacity refusal records a best-effort denial with a 15-minute dedupe",async t=>{
   const f=fixture(t),first=await enrollment(f),second=await enrollment(f);
   assert.equal((await f.call("/v2/device-authorizations/exchange",await signed(f,first,"exchange"))).status,200);
-  const denialRows=()=>f.sql.prepare("SELECT project,feature,license_fingerprint,event_type,device_key_id,reason,ts FROM usage_events").all();
+  const denialRows=()=>f.sql.prepare("SELECT project,feature,license_fingerprint,event_type,device_key_id,reason,ts FROM usage_events").all().map(row=>({...row}));
 
   const denied=await f.call("/v2/device-authorizations/exchange",await signed(f,second,"exchange"));
   assert.equal(denied.status,409); assert.equal(denied.body.code,"device_limit_reached");
@@ -266,7 +266,9 @@ test("HTTP capacity refusal records a best-effort denial with a 15-minute dedupe
   assert.equal(denialRows().length,1,"a repeat refusal within 15 minutes writes no additional row");
 
   f.clock(1901);
-  const later=await f.call("/v2/device-authorizations/exchange",await signed(f,second,"exchange"));
+  const secondRetry=await enrollment(f,"DEFAULT",second.keys); // same device key, fresh (unexpired) authorization
+  assert.equal(secondRetry.keyId,second.keyId);
+  const later=await f.call("/v2/device-authorizations/exchange",await signed(f,secondRetry,"exchange"));
   assert.equal(later.status,409); assert.equal(later.body.code,"device_limit_reached");
   const rows=denialRows();
   assert.equal(rows.length,2,"a refusal past the 15-minute window writes a new row");
