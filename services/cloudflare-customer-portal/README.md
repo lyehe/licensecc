@@ -390,7 +390,9 @@ The portal then shows "This account is suspended." followed by a support
 contact. Set the optional `PORTAL_SUPPORT_CONTACT` variable to an `https:` URL
 or one `mailto:` address, for example `mailto:support@example.com`. The
 providers endpoint publishes it as `support`, and the portal links it as
-"Contact support" wherever it tells a customer to get help. A URL containing a
+"Contact support" wherever its sign-in and app-connection messages tell a
+customer to contact someone. The seat message "All seats are in use — release
+one or ask your administrator." stays unlinked on purpose. A URL containing a
 user name or password, a `mailto:` with several addresses or a `?` query, any
 other scheme (`http:`, `javascript:` and so on), a relative path, or an empty
 value counts as unset, and the portal says "Contact your administrator"
