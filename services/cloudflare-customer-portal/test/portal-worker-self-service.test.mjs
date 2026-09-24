@@ -1,5 +1,5 @@
 import { test } from "node:test";
-import { assert, worker, mintSession, codeFromSecretBytes, requestOtp, redeemOtp, policyCapacityViolation, FP_A, FP_B, installBackendStub, cookieFor, sameSiteHeaders, entitlementId, ownedEntitlementId, call, baseFixture, seedDevice, seedEntitlement, CTX, NOW } from "./portal-worker-fixtures.mjs";
+import { assert, worker, mintSession, codeFromSecretBytes, requestOtp, redeemOtp, policyCapacityViolation, FP_A, FP_B, installBackendStub, cookieFor, sameSiteHeaders, entitlementId, ownedEntitlementId, call, baseFixture, seedCustomer, seedDevice, seedEntitlement, CTX, NOW } from "./portal-worker-fixtures.mjs";
 
 test("A's /api/portal/entitlements returns ONLY A's entitlements", async () => {
   const { db, env } = baseFixture();
@@ -22,6 +22,78 @@ test("/api/portal/me reports the SESSION customer, never a client value", async 
   const cookie = await cookieFor(env, "A");
   const r = await call(env, "GET", "/api/portal/me", { cookie });
   assert.equal(r.body.data.customer_id, "A");
+  db.close();
+});
+
+// =================================================================================================
+// /api/portal/me EMAIL RESOLUTION (task A4) — one read, precedence: customers.email, then
+// portal_passwords.email_lower, then the EARLIEST portal_identities.email, else null. Additive: the
+// route still reports customer_id exactly as before; email is a new sibling field.
+// =================================================================================================
+
+test("/api/portal/me resolves email from customers.email when it is non-empty", async () => {
+  const { db, env } = baseFixture();
+  const cookie = await cookieFor(env, "A");
+  const r = await call(env, "GET", "/api/portal/me", { cookie });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.data.customer_id, "A", "customer_id is unchanged (additive response)");
+  assert.equal(r.body.data.email, "a@x.com", "customers.email wins when it is non-empty");
+  db.close();
+});
+
+test("/api/portal/me falls back to portal_passwords.email_lower when customers.email is empty (admin-created user)", async () => {
+  const { db, env } = baseFixture();
+  seedCustomer(db, "PW", "");
+  db.prepare(
+    "INSERT INTO portal_passwords (customer_id, email_lower, password_hash, created_at, updated_at) VALUES (?, ?, 'hash', ?, ?)",
+  ).run("PW", "admin-created@x.com", NOW, NOW);
+  const cookie = await cookieFor(env, "PW");
+  const r = await call(env, "GET", "/api/portal/me", { cookie });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.data.email, "admin-created@x.com", "portal_passwords.email_lower is used when customers.email is empty");
+  db.close();
+});
+
+test("/api/portal/me falls back to the sole portal_identities.email when there is no customers.email or password", async () => {
+  const { db, env } = baseFixture();
+  seedCustomer(db, "ID", "");
+  db.prepare(
+    "INSERT INTO portal_identities (provider, subject, customer_id, email, created_at) VALUES ('google', 'sub-1', ?, ?, ?)",
+  ).run("ID", "identity-only@x.com", NOW);
+  const cookie = await cookieFor(env, "ID");
+  const r = await call(env, "GET", "/api/portal/me", { cookie });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.data.email, "identity-only@x.com", "the sole portal_identities.email is used as a last resort");
+  db.close();
+});
+
+test("/api/portal/me picks the EARLIEST portal_identities row by created_at when a customer has two identities", async () => {
+  const { db, env } = baseFixture();
+  seedCustomer(db, "ID2", "");
+  // Insert the LATER identity first so a correct implementation must be driven by created_at, never
+  // by insertion/rowid order.
+  db.prepare(
+    "INSERT INTO portal_identities (provider, subject, customer_id, email, created_at) VALUES ('github', 'sub-later', ?, ?, ?)",
+  ).run("ID2", "later@x.com", NOW + 100);
+  db.prepare(
+    "INSERT INTO portal_identities (provider, subject, customer_id, email, created_at) VALUES ('google', 'sub-earlier', ?, ?, ?)",
+  ).run("ID2", "earlier@x.com", NOW);
+  const cookie = await cookieFor(env, "ID2");
+  const r = await call(env, "GET", "/api/portal/me", { cookie });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.data.email, "earlier@x.com", "the earliest created_at identity wins, not insertion order");
+  db.close();
+});
+
+test("/api/portal/me returns email: null when customers.email, portal_passwords, and portal_identities all give nothing", async () => {
+  const { db, env } = baseFixture();
+  seedCustomer(db, "NONE", "");
+  const cookie = await cookieFor(env, "NONE");
+  const r = await call(env, "GET", "/api/portal/me", { cookie });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.data.customer_id, "NONE");
+  assert.equal(r.body.data.email, null, "no source resolves an email");
+  assert.ok(Object.hasOwn(r.body.data, "email"), "the email key is present (additive), even when its value is null");
   db.close();
 });
 

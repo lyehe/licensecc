@@ -20,8 +20,8 @@ async function approve(page){
   await page.getByRole("button",{name:"Approve",exact:true}).click();
 }
 
-async function fixture(page, { signedIn = true, inspect, approve, deny, logout, support } = {}) {
-  const state = { signedIn, customer: "customer-a", requests: [], logins: [] };
+async function fixture(page, { signedIn = true, inspect, approve, deny, logout, support, email = null } = {}) {
+  const state = { signedIn, customer: "customer-a", email, requests: [], logins: [] };
   await page.route("**/portal/v1/auth/**", async route => {
     const request = route.request(), path = new URL(request.url()).pathname;
     if (path.endsWith("/providers")) return route.fulfill({ json: envelope("auth_providers", { password: true, github: true, google: false, email: false, ...(support === undefined ? {} : { support }) }) });
@@ -40,7 +40,7 @@ async function fixture(page, { signedIn = true, inspect, approve, deny, logout, 
     const request = route.request(), path = new URL(request.url()).pathname;
     state.requests.push({ path, url: request.url(), referer: request.headers().referer });
     if (!state.signedIn) return route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" } });
-    if (path.endsWith("/me")) return route.fulfill({ json: envelope("ok", { customer_id: state.customer }) });
+    if (path.endsWith("/me")) return route.fulfill({ json: envelope("ok", { customer_id: state.customer, email: state.email }) });
     if(path.includes("/device-authorizations/") && request.headers()["x-expected-customer-id"]!==encodeURIComponent(state.customer)) return route.fulfill({status:409,json:{ok:false,code:"account_changed"}});
     if (path.endsWith("/inspect")) return inspect ? inspect(route, state) : route.fulfill({ json: envelope("authorization_inspected", inspection()) });
     if (path.endsWith("/approve")) return approve ? approve(route, state) : route.fulfill({ json: envelope("authorization_approved", { callback_url: callback, expires_at: Math.floor(Date.now()/1000)+60, revision: 1 }) });
@@ -161,6 +161,23 @@ test("consent: sign-out clears the attempt and another account cannot reuse a sa
   await page.getByRole("button", { name: "Sign out", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Sign in", exact: true })).toBeVisible();
   expect(await page.evaluate(key => sessionStorage.getItem(key), storageKey)).toBeNull();
+});
+
+test("consent: shows the resolved account email visibly while keeping the customer id inside Account details", async ({ page }) => {
+  await fixture(page, { email: "alice@example.com" });
+  await page.goto(entry);
+  await expect(page.getByRole("combobox", { name: "License", exact: true })).toBeVisible();
+  await expect(page.getByText("Connecting to alice@example.com", { exact: true })).toBeVisible();
+  await expect(page.getByText("customer-a", { exact: true })).toBeHidden();
+  await page.getByText("Account details", { exact: true }).click();
+  await expect(page.getByText("customer-a", { exact: true })).toBeVisible();
+});
+
+test("consent: a null account email never renders a dangling \"Connecting to\"", async ({ page }) => {
+  await fixture(page);
+  await page.goto(entry);
+  await expect(page.getByRole("combobox", { name: "License", exact: true })).toBeVisible();
+  await expect(page.getByText("Connecting to", { exact: false })).toHaveCount(0);
 });
 
 test("consent: malformed handles are scrubbed and never inspected", async ({ page }) => {

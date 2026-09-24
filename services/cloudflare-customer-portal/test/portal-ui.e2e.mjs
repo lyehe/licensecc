@@ -252,7 +252,7 @@ test("Account shows connected methods and keeps linking failures visible", async
 function makePortalApiFixture() {
   const VALID_CODE = "80315426";
   let authed = false;
-  const controls = { rejectUsage: false, failMe: false, failNextRelease: false, deferNextRelease: false, rejectNextRelease: false, rejectRefreshes: 0, resolveRelease: null };
+  const controls = { rejectUsage: false, failMe: false, failNextRelease: false, deferNextRelease: false, rejectNextRelease: false, rejectRefreshes: 0, resolveRelease: null, email: null };
   const requests = { authRequests: 0, verifies: 0, checkouts: 0, heartbeats: 0, releases: 0, refreshRejects: 0, downloads: 0, logouts: 0, seatActions: [] };
 
   const entitlements = [
@@ -313,7 +313,7 @@ function makePortalApiFixture() {
     if (method === "GET" && path === "/api/portal/me") {
       if (controls.failMe) return fulfill(503, { ok: false, code: "unavailable", request_id: "session-check" });
       if (!authed) return fulfill(401, { ok: false, code: "unauthorized", request_id: "portal-e2e-401" });
-      return fulfill(200, makeEnvelope("me", { customer_id: "cus_self" }));
+      return fulfill(200, makeEnvelope("me", { customer_id: "cus_self", email: controls.email }));
     }
     if (method === "GET" && path === "/api/portal/entitlements") {
       if (controls.rejectRefreshes > 0) {
@@ -690,6 +690,39 @@ async function signIn(page, api) {
   await page.getByLabel("8-digit code").fill(api.VALID_CODE);
   await page.getByRole("button", { name: "Verify", exact: true }).click();
 }
+
+test("the signed-in header and the empty Apps state show the resolved account email", async ({ page }) => {
+  const api = makePortalApiFixture();
+  api.entitlements.length = 0;
+  api.controls.email = "alice@example.com";
+  await signIn(page, api);
+  await expect(page.getByRole("heading", { name: "Apps", exact: true })).toBeVisible();
+  await expect(page.locator("header").getByText("Signed in as alice@example.com", { exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "No apps assigned yet" })).toBeVisible();
+  await expect(page.getByText("Signed in as alice@example.com. No apps are assigned to this account yet.", { exact: true })).toBeVisible();
+});
+
+test("a null account email never renders a dangling \"Signed in as\" or the literal word null", async ({ page }) => {
+  const api = makePortalApiFixture();
+  api.entitlements.length = 0;
+  await signIn(page, api);
+  await expect(page.getByRole("heading", { name: "No apps assigned yet" })).toBeVisible();
+  await expect(page.getByText("Signed in as", { exact: false })).toHaveCount(0);
+  await expect(page.getByText("No apps are assigned to this account yet.", { exact: true })).toBeVisible();
+  const bodyText = await page.locator("body").innerText();
+  expect(bodyText).not.toContain("null");
+});
+
+test("a long account email wraps in the header instead of causing horizontal scroll at phone width", async ({ page }) => {
+  const longEmail = "a-very-long-customer-email-address-for-overflow-testing-1234567890@example-subdomain.long-domain-name-example.com";
+  const api = makePortalApiFixture();
+  api.controls.email = longEmail;
+  await signIn(page, api);
+  await expect(page.getByRole("heading", { name: "Apps", exact: true })).toBeVisible();
+  await page.setViewportSize({ width: 375, height: 800 });
+  await expect(page.locator("header").getByText(`Signed in as ${longEmail}`)).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+});
 
 test("app grouping, browser history and mobile reflow preserve the customer context", async ({ page }) => {
   const api = makePortalApiFixture();
