@@ -13,6 +13,7 @@ const REASON_SENTENCES: Readonly<Record<ProtectedCreateReason, string>> = {
   lease_history_exists: "This fingerprint already has activation or audit history for this feature; generate a new fingerprint.",
   policy_mismatch: "The policy isn't an active policy for this project, or it changed while you were saving; choose an active policy for this project and try again.",
   invalid_trial: "This license's trial settings can't be used: a trial from issue needs an end date in the future, and other trials need a length.",
+  devices_connected: "This license (entitlement) still has connected devices; disconnect them before moving it to another customer.",
   invalid_capacity: "The device limit must be 1 to 1,000,000 and can't drop below the devices already connected; raise the limit, choose another policy, or disconnect devices first.",
   unknown: "This protected license (entitlement) can't be created with these settings.",
 };

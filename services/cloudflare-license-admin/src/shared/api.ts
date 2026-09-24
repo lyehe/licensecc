@@ -275,6 +275,7 @@ export const PROTECTED_CREATE_REASONS = [
   "lease_history_exists",
   "policy_mismatch",
   "invalid_trial",
+  "devices_connected",
   "invalid_capacity",
   "unknown",
 ] as const;

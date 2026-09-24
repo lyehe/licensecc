@@ -5,7 +5,7 @@ import { ReadNotice } from "../../shared/ReadNotice";
 import { DeviceLimitForm } from "./DeviceLimitForm";
 import { EntitlementRelationships } from "./EntitlementRelationships";
 import { generateLicenseFingerprint, isProtectedProject } from "./protectedCreate";
-import { entitlementFormErrors, policiesForProject, policyOptionLabel, type EntitlementEditState, type EntitlementFormState } from "./workflow";
+import { entitlementFormErrors, policiesForProject, policyGrant, policyOptionLabel, type EntitlementEditState, type EntitlementFormState } from "./workflow";
 
 interface EditorProps {
   form: EntitlementFormState | EntitlementEditState;
@@ -60,7 +60,9 @@ export function EntitlementEditor({ form, item, extendValidity = false, busy, lo
 
   const errorFor = (field: string): React.ReactElement | null => errors[field] ? <span id={`entitlement-${field}-error`} role="alert">{errors[field]}</span> : null;
   const describedBy = (field: string): string | undefined => errors[field] ? `entitlement-${field}-error` : undefined;
-  const policyLimitLabel = `Device limit (from policy ${chosenPolicy?.name ?? (isCreate ? form.policy_id : "")})`;
+  // A chosen policy owns capacity: its device limit, or for a floating policy its seat pool.
+  const grant = chosenPolicy === undefined ? undefined : policyGrant(chosenPolicy);
+  const policyLimitLabel = `${grant?.label ?? "Device limit"} (from policy ${chosenPolicy?.name ?? (isCreate ? form.policy_id : "")})`;
   return <section ref={editorRef} className="editorLayout" aria-label={title}>
     <div className="editorHeader"><div><h3 tabIndex={-1}>{title}</h3><p>{isCreate ? "Grant access to a project and feature." : `${item?.project} / ${item?.feature}`}</p></div><button type="button" disabled={busy} onClick={onCancel}>Back to entitlements</button></div>
     {locked && <p className="readState">{lockMessage ?? "Resolve the pending operation before changing this draft."}</p>}
@@ -74,8 +76,8 @@ export function EntitlementEditor({ form, item, extendValidity = false, busy, lo
         {protectedCreate && <div className="wide"><button type="button" onClick={() => change("license_fingerprint", generateLicenseFingerprint())}>Generate fingerprint</button></div>}
         <div className="wide"><ReadNotice loading={!policiesReady && policiesError === null} error={policiesError} hasData={policies.length > 0} label="active policies" onRetry={onRetryPolicies} /><label>Policy (optional)<select aria-label="Policy (optional)" disabled={!policiesReady} value={form.policy_id} onChange={(event) => change("policy_id", event.target.value)}><option value="">No policy · use fields below</option>{projectPolicies.map((policy) => <option key={policy.id} value={policy.id}>{policyOptionLabel(policy)}</option>)}</select></label>{onCreatePolicy && !locked && !busy && <p><a href="#/policies" onClick={(event) => { event.preventDefault(); onCreatePolicy(); }}>Create policy…</a> <span className="muted">Opens the policy form for {form.project || "this project"}; this draft is kept and gets the new policy.</span></p>}{inheritsDates && <p className="muted">Blank validity dates inherit this policy’s defaults. The default assertion TTL value also inherits the policy lifetime.</p>}</div>
         {inheritsDates
-          ? <label>{policyLimitLabel}<input aria-label={policyLimitLabel} name="max_active_devices" readOnly value={chosenPolicy?.max_active_devices ?? ""} /><span className="muted">The policy sets the device limit.</span></label>
-          : <label>Device limit<input aria-label="Device limit" name="max_active_devices" type="number" min={1} max={MAX_DEVICE_LIMIT} step={1} value={form.max_active_devices} aria-invalid={!!errors.max_active_devices} aria-describedby={describedBy("max_active_devices")} onChange={(event) => change("max_active_devices", Number(event.target.value))} />{errorFor("max_active_devices")}<span className="muted">The most devices that can be connected at once.</span></label>}
+          ? <label>{policyLimitLabel}<input aria-label={policyLimitLabel} name="max_active_devices" readOnly value={grant?.count ?? ""} /><span className="muted">{grant?.label === "Seats" ? "The policy sets a floating pool of seats." : "The policy sets the device limit."}</span></label>
+          : <label>Device limit<input aria-label="Device limit" name="max_active_devices" type="number" min={1} max={MAX_DEVICE_LIMIT} step={1} placeholder="1" value={form.max_active_devices} aria-invalid={!!errors.max_active_devices} aria-describedby={describedBy("max_active_devices")} onChange={(event) => change("max_active_devices", event.target.value === "" ? "" : Number(event.target.value))} />{errorFor("max_active_devices")}<span className="muted">Blank: a new license (entitlement) gets 1; an existing one keeps its limit.</span></label>}
       </>}
       {!isCreate && <p className="wide muted">Project, feature, and fingerprint identify this entitlement and cannot be edited. {extendValidity ? "Update Valid until to extend access." : "Save changes updates the existing entitlement."}</p>}
       <label>Valid from<input aria-label="Valid from" name="valid_from" type="date" min="1970-01-01" value={form.valid_from} aria-invalid={!!errors.valid_from} aria-describedby={`entitlement-date-rules${errors.valid_from ? " entitlement-valid_from-error" : ""}`} onChange={(event) => change("valid_from", event.target.value)} /><span className="muted">{inheritsDates ? "Blank: use policy start." : "Blank: Starts immediately."}</span>{errorFor("valid_from")}</label>

@@ -2,6 +2,7 @@ import { MAX_DEVICE_LIMIT, PROTECTED_CREATE_REASONS, type EntitlementInput, type
 import type { Env } from "../../env.js";
 import { stampFromPolicy } from "@licensecc/licensing-domain/entitlements/policy";
 import type { D1PreparedStatementLike } from "@licensecc/cloudflare-runtime/d1/entitlement_mutation";
+import { boundOccupiedSql } from "@licensecc/cloudflare-runtime/device/bound_capacity";
 
 /** What a protected create writes: its input, and without a policy possibly its own device limit. */
 type CreateInput = EntitlementInput & { max_active_devices?: number };
@@ -75,6 +76,11 @@ export function protectedCreateChecks(input: CreateInput, policy?: Policy): read
       AND ((e.trial_expiration_basis='from_issue' AND typeof(e.valid_until)='integer' AND e.valid_until>unixepoch())
         OR (e.trial_expiration_basis IN ('from_first_activation','from_first_use') AND typeof(e.trial_duration_sec)='integer'
           AND e.trial_duration_sec BETWEEN 2 AND 3153600000)))`, binds: [] },
+    // A grant keeps its customer while it has connected devices (tr_bound_owner_change, ADR 0006).
+    // In the batch the key's row is e itself, which never differs; after a rollback it is the
+    // stored grant, so the diagnostic sees a move to another customer.
+    { reason: "devices_connected", sql: `NOT EXISTS (SELECT 1 FROM entitlements cur WHERE ${sameKey("cur")} AND cur.customer_id IS NOT e.customer_id
+        AND EXISTS (SELECT 1 FROM device_bound_bindings b WHERE ${sameKey("b")} AND ${boundOccupiedSql("b", "unixepoch()")}))`, binds: [] },
     { reason: "invalid_capacity", sql: `typeof(e.max_active_devices)='integer' AND e.max_active_devices BETWEEN 1 AND ${MAX_DEVICE_LIMIT}`, binds: [] },
     // Integrity rules with no operator-specific fix: the row is exactly what this create wrote.
     { reason: "unknown", sql: `e.device_hash='' AND e.pool_size=0
@@ -140,5 +146,24 @@ export async function protectedCreateReason(env: Env, input: CreateInput, policy
     return PROTECTED_CREATE_REASONS.find((reason) => reason === row?.reason) ?? "unknown";
   } catch {
     return "unknown";
+  }
+}
+
+/**
+ * A create refused with capacity_in_use broke one of two schema triggers: moving a grant with
+ * connected devices to another customer (tr_bound_owner_change, which the upsert fires before any
+ * capacity write), or a device limit below them (tr_bound_capacity_decrease). The list's
+ * owner-change rule, asked alone of the would-be row, tells them apart.
+ */
+export async function protectedCapacityReason(env: Env, input: CreateInput, policy?: Policy): Promise<ProtectedCreateReason> {
+  const owner = protectedCreateChecks(input, policy).find((check) => check.reason === "devices_connected");
+  if (owner === undefined) return "invalid_capacity";
+  const wouldBe = protectedWouldBeRowQuery(input, policy);
+  try {
+    const row = await env.DB.prepare(`${wouldBe.sql}
+    SELECT coalesce((${owner.sql}), 0) AS holds FROM e`).bind(...wouldBe.binds, ...owner.binds).first<{ holds: unknown }>();
+    return row?.holds === 0 ? "devices_connected" : "invalid_capacity";
+  } catch {
+    return "invalid_capacity";
   }
 }

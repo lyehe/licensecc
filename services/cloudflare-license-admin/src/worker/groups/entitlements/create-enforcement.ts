@@ -3,7 +3,7 @@ import type { Env } from "../../env.js";
 import type { ReplayAdmission } from "../../idempotency.js";
 import { envelope } from "../../responses.js";
 import { deviceLimit, validateEntitlementInput } from "./validation.js";
-import { protectedCreateAssertion, protectedCreateReason } from "./protected-checks.js";
+import { protectedCapacityReason, protectedCreateAssertion, protectedCreateReason } from "./protected-checks.js";
 import { createEntitlement, type MutationContext, type MutationResult, type IdempotencyCommit, type D1PreparedStatementLike } from "@licensecc/cloudflare-runtime/d1/entitlement_mutation";
 import { buildDeviceLimitStatement } from "@licensecc/cloudflare-runtime/entitlements/policy_store";
 
@@ -21,9 +21,10 @@ export async function createWithEnforcement(env: Env, input: AdminEntitlementCre
   try {
     return await createEntitlement(env, input, ctx, "", undefined, idempotency, [...writes, protectedCreateAssertion(env, input, policy)]);
   } catch (error) {
-    // The capacity trigger names its own rule. The assertion's json() failure names none, so the
-    // diagnostic runs only here, after D1 has rolled the whole batch back.
-    if (error instanceof Error && /capacity_in_use/i.test(error.message)) return protectedCreationConflict(ctx, "invalid_capacity");
+    // Both capacity triggers abort with capacity_in_use; the list's owner-change rule tells them
+    // apart. The assertion's json() failure names no rule, so the diagnostic runs only here, after
+    // D1 has rolled the whole batch back.
+    if (error instanceof Error && /capacity_in_use/i.test(error.message)) return protectedCreationConflict(ctx, await protectedCapacityReason(env, input, policy));
     if (error instanceof Error && /malformed JSON/i.test(error.message)) return protectedCreationConflict(ctx, await protectedCreateReason(env, input, policy));
     throw error;
   }

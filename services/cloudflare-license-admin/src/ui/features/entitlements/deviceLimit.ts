@@ -14,17 +14,24 @@ export function deviceLimitRequestBody(item: Pick<EntitlementRecord, "customer_i
 }
 
 /**
- * The operator's sentence for a refused device limit (409 capacity_in_use), or null for any other
- * failure. A protected grant keeps room for its connected devices, so the sentence says how many
- * are connected and how many to disconnect before the requested limit fits.
+ * The operator's sentence for a refused device limit, or null for a failure without one. A
+ * protected grant keeps room for its connected devices (409 capacity_in_use), so the sentence says
+ * how many are connected and how many to disconnect before the requested limit fits.
  */
 export function deviceLimitFailureMessage(failure: { code: string; requestId: string; data?: unknown }, requested: number): string | null {
+  const reference = `Reference ${failure.requestId}.`;
+  if (failure.code === "stale_transition") {
+    return `This license (entitlement) changed after you opened it; its current values were reloaded. Check the device limit and save again. ${reference}`;
+  }
+  if (failure.code === "revoked_entitlement_is_terminal") return `Revocation is permanent; this license (entitlement) can no longer change. ${reference}`;
   if (failure.code !== "capacity_in_use") return null;
   const data = failure.data !== null && typeof failure.data === "object" ? failure.data as { devices_in_use?: unknown } : {};
   const connected = data.devices_in_use;
   if (typeof connected !== "number" || !Number.isSafeInteger(connected) || connected < 0) {
-    return `More devices are connected than this limit allows; disconnect one first. Reference ${failure.requestId}.`;
+    return `More devices are connected than this limit allows; disconnect one first. ${reference}`;
   }
+  // The count is read after the refusal. If devices disconnected in between, none has to go now.
   const excess = connected - requested;
-  return `${connected} ${connected === 1 ? "device is" : "devices are"} connected; disconnect ${excess > 1 ? excess : "one"} first. Reference ${failure.requestId}.`;
+  if (excess <= 0) return `The connected devices changed while you were saving; try again. ${reference}`;
+  return `${connected} devices are connected; disconnect ${excess > 1 ? excess : "one"} first. ${reference}`;
 }

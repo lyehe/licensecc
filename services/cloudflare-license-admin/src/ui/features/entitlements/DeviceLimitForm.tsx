@@ -49,7 +49,11 @@ export function DeviceLimitForm({ item, locked }: { item: EntitlementRecord; loc
       }, mutationFailurePolicies.entitlementPatch, phase),
       onApplied: (result) => { if (mounted.current) setMessage(`Device limit set to ${limit}. Reference ${result.requestId}.`); },
       refresh: async () => await refreshCore(true),
-      onUnapplied: (result) => setFeedback({ tone: "error", message: deviceLimitFailureMessage(result, limit) ?? `${result.code} (${result.requestId})` }),
+      onUnapplied: (result) => {
+        // A stale expectation wrote nothing; reload so the next save carries the current state.
+        if (result.code === "stale_transition") void refreshCore();
+        setFeedback({ tone: "error", message: deviceLimitFailureMessage(result, limit) ?? `${result.code} (${result.requestId})` });
+      },
       isCurrent: () => mounted.current,
     });
   }
