@@ -287,6 +287,17 @@ test("portal UI workflow maps network-failure and failed-logout copy verbatim (C
   );
 });
 
+// C3: api()'s global onUnauthorized hook (App.tsx) shows this local code once a mid-session 401 is
+// confirmed (retrySession() finds the session really is gone), regardless of which api() caller's
+// response actually carried the server's own `unauthorized` code.
+test("portal UI workflow maps the session-ended copy verbatim (C3)", async () => {
+  const workflow = await loadWorkflowModule();
+  assert.equal(
+    workflow.describeResultCode("session_ended"),
+    "Your session ended. Sign in again.",
+  );
+});
+
 test("portal UI workflow builds filtered usage paths", async () => {
   const workflow = await loadWorkflowModule();
   assert.equal(workflow.usagePath(), "/api/portal/usage");
