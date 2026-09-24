@@ -118,6 +118,24 @@ export function publicOrigin(env: Env): string {
   return (env.PORTAL_PUBLIC_ORIGIN ?? "").replace(/\/$/, "");
 }
 
+const SUPPORT_MAILTO = /^mailto:[^\s@?,]+@[^\s@?,]+$/i;
+
+// The operator's customer-facing support contact, published by the providers envelope and placed
+// in an href by the UI. Only a credential-free https: URL or a single mailto: address qualifies;
+// anything else (javascript:, http:, data:, a relative path, empty) counts as unset. This is its
+// own check because canonicalHttpsOrigin() deliberately rejects both mailto: and URL paths.
+export function supportContact(env: Pick<Env, "PORTAL_SUPPORT_CONTACT">): string | null {
+  const value = (env.PORTAL_SUPPORT_CONTACT ?? "").trim();
+  if (SUPPORT_MAILTO.test(value)) return value;
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return null;
+  }
+  return url.protocol === "https:" && url.username === "" && url.password === "" ? url.href : null;
+}
+
 // Bodyless 303 redirect: no-store, no-referrer, with zero or more Set-Cookie values appended in
 // order. Shared by every browser-facing auth redirect (oauth start/callback, and the magic-link
 // form-encoded redeem branch) so they all go through one hardened response shape.

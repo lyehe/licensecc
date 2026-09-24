@@ -50,6 +50,7 @@ type WranglerBindings = Pick<Cloudflare.Env,
   | "BACKEND"
   | "PORTAL_EMAIL_FROM"
   | "PORTAL_EMAIL_API_BASE"
+  | "PORTAL_SUPPORT_CONTACT"
 >;
 
 interface RuntimeEnv {
@@ -72,6 +73,7 @@ interface RuntimeEnv {
   PORTAL_EMAIL_API_KEY?: string;
   PORTAL_EMAIL_FROM?: string;
   PORTAL_EMAIL_API_BASE?: string;
+  PORTAL_SUPPORT_CONTACT?: string;
   PORTAL_BOOTSTRAP_BEARER?: string;
   PORTAL_BOOTSTRAP_REQUIRE_ACCESS?: string;
 }

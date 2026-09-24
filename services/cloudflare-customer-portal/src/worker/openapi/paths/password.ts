@@ -54,8 +54,9 @@ export const passwordPaths: LabeledPathFragment = { label: "password", entries: 
   } }],
   ["/portal/v1/auth/password/login", { post: {
     tags: ["auth"], operationId: "authLoginPassword", summary: "Sign in using an email/password credential.", security: [], requestBody: body(true),
-    responses: { "200": signedInResponse, "400": errorResponse("Invalid JSON.", "invalid_json"), "401": errorResponse("Invalid credentials.", "invalid_credentials"), ...common },
-    description: "Requires exact Origin. Wrong password, unknown login and disabled customer return the same denial. Per-IP 30/900s and per-email 10/900s. Session creation atomically checks the verified password hash is still current.",
+    responses: { "200": signedInResponse, "400": errorResponse("Invalid JSON.", "invalid_json"), "401": errorResponse("Invalid credentials.", "invalid_credentials"), ...common,
+      "403": errorResponse("Origin mismatch, or the correct password for a suspended customer.", ["cross_site_forbidden", "account_suspended"]) },
+    description: "Requires exact Origin. Wrong password and unknown login return the same denial. The password is verified before the account status is read, so only the correct password on a suspended (disabled) customer returns account_suspended, without a session. Per-IP 30/900s and per-email 10/900s. Session creation atomically checks the verified password hash is still current.",
   } }],
   ["/portal/v1/auth/password", {
     get: { tags: ["auth"], operationId: "authPasswordSettings", summary: "Read this customer's password settings.", security: [{ sessionCookie: [] }], responses: settingsGetResponses },

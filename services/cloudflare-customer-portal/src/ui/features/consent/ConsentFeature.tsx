@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { consentApi, type ConsentApproval, type ConsentInspection } from "../../shared/consentApi";
+import { SupportContact } from "../../shared/SupportContact";
 import { useSingleFlight } from "../../shared/useSingleFlight";
 import { clearEnrollment, saveEnrollment, type EnrollmentEntry, type PendingEnrollment, type PendingMutation } from "./pending";
 import { LicenseChoice } from "./LicenseChoice";
@@ -14,7 +15,7 @@ export function ConsentFeature({entry,customerId,onDone,onSignOut,onSessionExpir
   const [previousCursors,setPreviousCursors]=useState<Array<string|undefined>>([]);
   const [comparisonConfirmed,setComparisonConfirmed]=useState(false);
   const [phase,setPhase]=useState<"loading"|"ready"|"approved"|"cancelled"|"connected"|"expired"|"blocked">(entry==="invalid"?"expired":entry==="storage_unavailable"?"blocked":"loading");
-  const [message,setMessage]=useState(entry==="storage_unavailable"?"Browser session storage is unavailable. Enable it, then restart from your app.":"");
+  const [message,setMessage]=useState<React.ReactNode>(entry==="storage_unavailable"?"Browser session storage is unavailable. Enable it, then restart from your app.":"");
   const [callback,setCallback]=useState<string|null>(null);
   const [deadline,setDeadline]=useState<number|null>(null);
   const [retryAt,setRetryAt]=useState(0),[clock,setClock]=useState(Date.now);
@@ -30,7 +31,7 @@ export function ConsentFeature({entry,customerId,onDone,onSignOut,onSessionExpir
     if(retryAfter)setRetryAt(Date.now()+retryAfter*1000);
     if (code==="unauthorized") {void onSessionExpired();return;}
     if (code==="account_changed") {clearEnrollment();setPhase("blocked");setMessage("Your account changed. Start a new connection from your app.");return;}
-    if (["invalid_request","cross_site_forbidden"].includes(code)) {clearEnrollment();setPhase("blocked");setMessage("This connection request cannot be submitted. Restart from your app; contact your administrator if it happens again.");return;}
+    if (["invalid_request","cross_site_forbidden"].includes(code)) {clearEnrollment();setPhase("blocked");setMessage(<>This connection request cannot be submitted. Restart from your app. <SupportContact /> if it happens again.</>);return;}
     if (["authorization_expired","authorization_unavailable"].includes(code)) {expire();return;}
     if (["access_denied","revision_conflict","idempotency_conflict"].includes(code)) {
       setPhase("blocked");setMessage(code==="access_denied"?"This account cannot approve this request.":"This request changed. Return to your app to check its connection.");return;
@@ -117,7 +118,7 @@ export function ConsentFeature({entry,customerId,onDone,onSignOut,onSessionExpir
         {phase==="ready" && details && !mutation && <>
           {details.entitlements.length>0 && <div className="consentComparison"><p>Check the code in your app</p><p className="consentCode">{details.comparison_code}</p>
             <label className="consentConfirm"><input type="checkbox" checked={comparisonConfirmed} onChange={event=>setComparisonConfirmed(event.target.checked)} disabled={busy} />This code matches my app</label></div>}
-          {details.entitlements.length===0?<p>{previousCursors.length?"No licenses remain on this page. Go back to choose another license.":"No eligible license is available for this app. Contact your administrator."}</p>:
+          {details.entitlements.length===0?<p>{previousCursors.length?"No licenses remain on this page. Go back to choose another license.":<>No eligible license is available for this app. <SupportContact />.</>}</p>:
             <LicenseChoice items={details.entitlements} selected={selected} onSelect={setSelected} busy={busy} soleOverall={pageCursor===undefined && !details.has_more && details.entitlements.length===1} />}
           {(previousCursors.length>0 || details.has_more) && <nav className="consentPages" aria-label="License pages">
             <button disabled={busy||waiting||previousCursors.length===0} onClick={()=>void runOnce(()=>inspect(previousCursors.at(-1),previousCursors.slice(0,-1)))}>Previous</button>

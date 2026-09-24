@@ -14,6 +14,7 @@ import {
   RESEND_CODE_ACTION_LABEL,
 } from "../../portalWorkflow";
 import { api, localMessage, resultMessage, StatusLine } from "../../shared/api";
+import { SupportContact } from "../../shared/SupportContact";
 import type { PortalMe, StatusMessage } from "../../types";
 
 import { PasswordSignIn, type PasswordMode } from "./PasswordSignIn";
@@ -192,7 +193,7 @@ export function AuthFeature({ auth, busy, message, connecting = false }: {
         <ProviderResult />
         {auth.phase === "request" && failed && <p>Unable to load sign-in options. <button onClick={retry}>Retry sign-in options</button></p>}
         {auth.phase === "request" && !providers && !failed && <p>Loading sign-in options…</p>}
-        {auth.phase === "request" && providers && !providers.google && !providers.github && !providers.email && !providers.password && <p>Sign-in is not configured yet. Contact your administrator.</p>}
+        {auth.phase === "request" && providers && !providers.google && !providers.github && !providers.email && !providers.password && <p>Sign-in is not configured yet. <SupportContact />.</p>}
         {auth.phase === "request" && providers?.password && !emailCode && <PasswordSignIn onSignedIn={auth.retrySession} mode={passwordMode} onModeChange={setPasswordMode} emailLinks={Boolean(providers.email)} />}
         {auth.phase === "request" && providers?.email && (!providers.password || emailCode) && (
           <form onSubmit={(event) => void auth.submitRequest(event)}>

@@ -15,10 +15,13 @@ async function login(request: Request, env: Env, reqId: string, now: number): Pr
   const email = loginEmail(body.email);
   if (!email || !validPassword(body.password)) return envelope(reqId, "invalid_credentials", undefined, 401, HEADERS);
   if (await throttle(request, env, email, "login", now)) return envelope(reqId, "rate_limited", undefined, 429, HEADERS);
-  const credential = await primary(env).prepare("SELECT p.customer_id, p.password_hash, p.email_lower FROM portal_passwords p JOIN customers c ON c.id = p.customer_id AND c.status = 'active' WHERE p.email_lower = ?")
-    .bind(email).first<Credential>();
+  const credential = await primary(env).prepare("SELECT p.customer_id, p.password_hash, p.email_lower, c.status FROM portal_passwords p JOIN customers c ON c.id = p.customer_id WHERE p.email_lower = ?")
+    .bind(email).first<Credential & { status: string }>();
+  // Verify before looking at the account status (a missing login still pays the full KDF): only
+  // the correct password may learn that an account is suspended; every guess gets the same 401.
   const verified = await verifyPassword(body.password, credential?.password_hash ?? null);
   if (!verified || !credential) return envelope(reqId, "invalid_credentials", undefined, 401, HEADERS);
+  if (credential.status !== "active") return envelope(reqId, "account_suspended", undefined, 403, HEADERS);
   return signedIn(request, env, reqId, credential.customer_id, credential.password_hash, now);
 }
 

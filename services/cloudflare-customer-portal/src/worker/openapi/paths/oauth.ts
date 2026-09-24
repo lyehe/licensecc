@@ -14,7 +14,7 @@ const start = (provider: string): Record<string, unknown> => ({ post: {
 } });
 const callback = (provider: string): Record<string, unknown> => ({ get: {
   tags: ["auth"], operationId: `authCallback${provider}`, summary: `Complete ${provider} sign-in.`, security: [],
-  description: "Validates browser binding and atomically consumes state before exchanging the code. Requires verified provider email. Stable provider subject identifies the account. A new identity registers an empty customer; existing email collisions require authenticated linking. Provider tokens are not persisted.",
+  description: "Validates browser binding and atomically consumes state before exchanging the code. Requires verified provider email. Stable provider subject identifies the account. A new identity registers an empty customer; existing email collisions require authenticated linking (auth_error=account_link_required). An identity whose customer is suspended redirects with auth_error=account_suspended and no session. Provider tokens are not persisted.",
   parameters: [
     { name: "state", in: "query", required: true, schema: { type: "string" } },
     { name: "code", in: "query", required: false, schema: { type: "string" } },
@@ -29,9 +29,12 @@ const jsonData = (description: string, data: Record<string, unknown>): Record<st
 export const oauthPaths: LabeledPathFragment = { label: "oauth", entries: [
   ["/portal/v1/auth/providers", { get: {
     tags: ["auth"], operationId: "authProviders", summary: "List configured sign-in methods without exposing credentials.", security: [],
-    responses: { "200": jsonData("Provider availability.", {
-      type: "object", required: ["google", "github", "email", "password"],
-      properties: { password: { type: "boolean" }, google: { type: "boolean" }, github: { type: "boolean" }, email: { type: "boolean" } },
+    responses: { "200": jsonData("Provider availability and the operator's support contact.", {
+      type: "object", required: ["google", "github", "email", "password", "support"],
+      properties: {
+        password: { type: "boolean" }, google: { type: "boolean" }, github: { type: "boolean" }, email: { type: "boolean" },
+        support: { type: ["string", "null"], description: "PORTAL_SUPPORT_CONTACT when it is a credential-free https: URL or a single mailto: address; otherwise null." },
+      },
     }) },
   } }],
   ["/portal/v1/auth/google/start", start("Google")],

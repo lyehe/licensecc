@@ -15,7 +15,7 @@ export function PasswordAction({ token, onDone }: { token: string; onDone(): Pro
   const [password, setPassword] = useState("");
   const [confirmation, setConfirmation] = useState("");
   const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState(token ? "" : "Open the link from your email again, or request a new link.");
+  const [message, setMessage] = useState<React.ReactNode>(token ? "" : "Open the link from your email again, or request a new link.");
   const [finished, setFinished] = useState(false);
   async function submit(event: React.FormEvent): Promise<void> {
     event.preventDefault();

@@ -10,7 +10,7 @@ export function PasswordSettings(): React.ReactElement {
   const [password, setPassword] = useState("");
   const [current, setCurrent] = useState("");
   const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState("");
+  const [message, setMessage] = useState<React.ReactNode>("");
   useEffect(() => {
     let cancelled = false;
     setFailed(false);

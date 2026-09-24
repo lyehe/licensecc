@@ -3,6 +3,7 @@ import { localMessage, StatusLine } from "../shared/api";
 import { useSingleFlight } from "../shared/useSingleFlight";
 import { AuthFeature, usePortalAuth } from "../features/auth/AuthFeature";
 import { PasswordAction, capturePasswordAction } from "../features/auth/PasswordAction";
+import { ProvidersScope } from "../features/auth/ProviderSignIn";
 import { usePortalData } from "../features/data/usePortalData";
 import { DEVICES_REFRESH_ACTION_LABEL, DEVICES_REFRESH_FAILURE_CODE, DevicesFeature, SeatReleaseDialog, useDevicesController } from "../features/devices/DevicesFeature";
 import { useLicenseDownloads } from "../features/downloads/DownloadsFeature";
@@ -15,7 +16,13 @@ import { usePortalLocation } from "../shared/navigation";
 import type { StatusMessage } from "../types";
 import "../styles.css";
 
+// The sign-in options are fetched once for every screen; they carry the support contact that
+// signed-in screens (Connect) show too.
 export function App(): React.ReactElement {
+  return <ProvidersScope><PortalShell /></ProvidersScope>;
+}
+
+function PortalShell(): React.ReactElement {
   const [passwordAction, setPasswordAction] = useState(capturePasswordAction);
   const [enrollment,setEnrollment] = useState(captureEnrollment);
   useLayoutEffect(() => {

@@ -2,7 +2,7 @@ import { mintSession, setSessionCookie, loadSessionPeppers } from "../../auth/po
 import { portalRateLimit } from "../../auth/portal_ratelimit.mjs";
 import { canonicalHttpsOrigin, emailApiOrigin } from "../../auth/portal_destination.mjs";
 import { authSession } from "./auth.js";
-import { clientIp, envelope, redirect } from "../support.js";
+import { clientIp, envelope, redirect, supportContact } from "../support.js";
 import { digest, exchangeIdentity, providerConfig, randomToken, type Provider } from "../oauth/providers.js";
 import { identityCustomer } from "../oauth/accounts.js";
 import type { Env, TopRoute } from "../env.js";
@@ -21,6 +21,9 @@ function originFor(request: Request, env: Env): string | null {
   return origin && new URL(request.url).origin === origin ? origin : null;
 }
 const callbackPath = (provider: Provider): string => `/portal/v1/auth/${provider}/callback`;
+// identityCustomer() failures that reach the browser as their own auth_error. Anything else it
+// throws (such as link_failed for an identity another customer owns) stays sign_in_failed.
+const CALLBACK_ERRORS = new Set(["account_link_required", "account_suspended"]);
 
 async function start(request: Request, env: Env, reqId: string, now: number, provider: Provider): Promise<Response> {
   const origin = originFor(request, env);
@@ -79,7 +82,7 @@ async function callback(request: Request, env: Env, reqId: string, now: number, 
     if (!minted.ok || !minted.raw) return fail("sign_in_failed");
     return redirect(`${origin}/${flow.link_session_id ? "?auth_result=linked#/account" : "#/apps"}`, [cookie("", 0), setSessionCookie(minted.raw)]);
   } catch (error) {
-    return fail(error instanceof Error && error.message === "account_link_required" ? "account_link_required" : "sign_in_failed");
+    return fail(error instanceof Error && CALLBACK_ERRORS.has(error.message) ? error.message : "sign_in_failed");
   }
 }
 
@@ -88,6 +91,7 @@ export const OAUTH_DISPATCH: Record<string, TopRoute> = {
     google: providerConfig(env, "google") !== null, github: providerConfig(env, "github") !== null,
     password: env.PORTAL_PASSWORD_ENABLED === "1",
     email: Boolean(env.PORTAL_EMAIL_API_KEY && env.PORTAL_EMAIL_FROM && emailApiOrigin(env)),
+    support: supportContact(env),
   }, 200, { "cache-control": "no-store" }),
   "POST /portal/v1/auth/google/start": (request, env, _ctx, reqId, now) => start(request, env, reqId, now, "google"),
   "POST /portal/v1/auth/github/start": (request, env, _ctx, reqId, now) => start(request, env, reqId, now, "github"),

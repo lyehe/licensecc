@@ -18,7 +18,7 @@ export function PasswordSignIn({ onSignedIn, mode, onModeChange, emailLinks }: {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState("");
+  const [message, setMessage] = useState<React.ReactNode>("");
   async function submit(event: React.FormEvent): Promise<void> {
     event.preventDefault();
     if (busy) return;
