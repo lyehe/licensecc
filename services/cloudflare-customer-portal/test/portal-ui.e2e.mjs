@@ -156,6 +156,38 @@ test("Account password change requires the current password and confirms session
   await expect(page.getByLabel("New password", { exact: true })).toHaveValue("");
 });
 
+// A5: `recovery_available` (routes/password.ts) shares the reset query's own eligibility predicate,
+// so this copy must never promise a recovery the server would refuse.
+test("password settings point an eligible unverified email at Forgot your password", async ({ page }) => {
+  await page.route("**/api/portal/**", (route) => route.fulfill({ json: makeEnvelope("ok", route.request().url().endsWith("/me") ? { customer_id: "cus_self" } : { items: [] }) }));
+  await page.route("**/portal/v1/auth/providers", (route) => route.fulfill({ json: makeEnvelope("auth_providers", { google: false, github: false, email: true, password: true }) }));
+  await page.route("**/portal/v1/auth/identities", (route) => route.fulfill({ json: makeEnvelope("identities", { items: [] }) }));
+  await page.route("**/portal/v1/auth/password", (route) => route.fulfill({ json: makeEnvelope("password_settings", { has_password: true, can_reset: false, email_verified: false, recovery_available: true, email: "invited@example.com" }) }));
+  await page.goto("/#/account");
+  await expect(page.getByText("Use 'Forgot your password?' once to verify this email.", { exact: true })).toBeVisible();
+  await expect(page.getByText("Email not verified. Password recovery by email is unavailable.", { exact: true })).toHaveCount(0);
+});
+
+test("password settings fall back to the unavailable notice when no address is eligible to recover", async ({ page }) => {
+  await page.route("**/api/portal/**", (route) => route.fulfill({ json: makeEnvelope("ok", route.request().url().endsWith("/me") ? { customer_id: "cus_self" } : { items: [] }) }));
+  await page.route("**/portal/v1/auth/providers", (route) => route.fulfill({ json: makeEnvelope("auth_providers", { google: false, github: false, email: true, password: true }) }));
+  await page.route("**/portal/v1/auth/identities", (route) => route.fulfill({ json: makeEnvelope("identities", { items: [] }) }));
+  await page.route("**/portal/v1/auth/password", (route) => route.fulfill({ json: makeEnvelope("password_settings", { has_password: true, can_reset: false, email_verified: false, recovery_available: false, email: "claimed@example.com" }) }));
+  await page.goto("/#/account");
+  await expect(page.getByText("Email not verified. Password recovery by email is unavailable.", { exact: true })).toBeVisible();
+  await expect(page.getByText("Use 'Forgot your password?' once to verify this email.", { exact: true })).toHaveCount(0);
+});
+
+test("password settings hide the recovery promise when the portal has no email delivery configured", async ({ page }) => {
+  await page.route("**/api/portal/**", (route) => route.fulfill({ json: makeEnvelope("ok", route.request().url().endsWith("/me") ? { customer_id: "cus_self" } : { items: [] }) }));
+  await page.route("**/portal/v1/auth/providers", (route) => route.fulfill({ json: makeEnvelope("auth_providers", { google: false, github: false, email: false, password: true }) }));
+  await page.route("**/portal/v1/auth/identities", (route) => route.fulfill({ json: makeEnvelope("identities", { items: [] }) }));
+  await page.route("**/portal/v1/auth/password", (route) => route.fulfill({ json: makeEnvelope("password_settings", { has_password: true, can_reset: false, email_verified: false, recovery_available: true, email: "invited@example.com" }) }));
+  await page.goto("/#/account");
+  await expect(page.getByText("Email not verified. Password recovery by email is unavailable.", { exact: true })).toBeVisible();
+  await expect(page.getByText("Use 'Forgot your password?' once to verify this email.", { exact: true })).toHaveCount(0);
+});
+
 test("social sign-in buttons submit to their own start routes and hide unavailable email", async ({ page }) => {
   await page.route("**/api/portal/me", (route) => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" } }));
   await page.route("**/portal/v1/auth/providers", (route) => route.fulfill({ json: makeEnvelope("auth_providers", { google: true, github: true, email: false }) }));

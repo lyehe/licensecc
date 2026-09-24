@@ -22,6 +22,7 @@ import { test } from "node:test";
 import { scryptSync } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
+import { verifyPassword } from "@licensecc/cloudflare-runtime/auth/password";
 
 import worker from "../../dist-worker/worker/index.js";
 
@@ -231,6 +232,47 @@ test("console: admin creates an isolated password user atomically with safe same
   db.exec("CREATE TRIGGER fail_password_insert BEFORE INSERT ON portal_passwords BEGIN SELECT RAISE(ABORT,'forced'); END");
   assert.equal((await create("rollback@example.test", "rollback-key")).status, 500);
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM customers").get().n, before, "credential failure rolls back customer creation");
+});
+
+// A5: no plaintext initial password by default. Omitting `password` invites the customer instead of
+// setting one: the server hashes a fresh, random, never-disclosed secret so the account has no
+// usable credential until the customer sets their own via the portal's "Forgot your password?".
+test("console: inviting a customer without a password stores a random, unusable credential and never returns or caches it", async () => {
+  const db = freshDb(); seed(db); db.exec("PRAGMA foreign_keys=ON"); const env = devEnv(db);
+  const invite = (email, key = "invite-1", name = "Invited user") =>
+    worker.fetch(devReq("/api/admin/customers", { method: "POST", headers: { "idempotency-key": key }, body: JSON.stringify({ name, email }) }), env);
+  const response = await invite("invited@example.test");
+  assert.equal(response.status, 200);
+  const created = await response.json();
+  assert.equal(created.code, "customer_created");
+  const credential = db.prepare("SELECT * FROM portal_passwords WHERE customer_id = ?").get(created.data.id);
+  assert.ok(credential, "invite still stores a credential row shaped like a real one");
+  assert.match(credential.password_hash, /^scrypt-32768-8-3\$[a-f0-9]{32}\$[a-f0-9]{64}$/);
+  assert.equal(await verifyPassword("", credential.password_hash), false);
+  assert.equal(await verifyPassword("A long initial passphrase 123!", credential.password_hash), false);
+  assert.equal(db.prepare("SELECT email FROM customers WHERE id = ?").get(created.data.id).email, "");
+  const cache = db.prepare("SELECT response_json FROM mutation_idempotency WHERE idempotency_key = ?").get("invite-1").response_json;
+  assert.ok(!JSON.stringify(created).includes(credential.password_hash) && !cache.includes(credential.password_hash));
+  // A same-key replay never regenerates or re-hashes the secret.
+  const replay = await invite("invited@example.test");
+  assert.deepEqual(await replay.json(), created);
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM portal_passwords WHERE customer_id = ?").get(created.data.id).n, 1);
+  // Each invite's secret is independently random.
+  const other = await (await invite("invited-two@example.test", "invite-2", "Invited two")).json();
+  const otherCredential = db.prepare("SELECT password_hash FROM portal_passwords WHERE customer_id = ?").get(other.data.id);
+  assert.notEqual(otherCredential.password_hash, credential.password_hash);
+});
+
+test("console: a present password must still be valid, and an invalid one is never treated as an invite", async () => {
+  const db = freshDb(); seed(db); db.exec("PRAGMA foreign_keys=ON"); const env = devEnv(db);
+  const attempt = (password, key) => worker.fetch(devReq("/api/admin/customers", { method: "POST", headers: { "idempotency-key": key }, body: JSON.stringify({ name: "Reject", email: "reject@example.test", password }) }), env);
+  for (const [password, key] of [[null, "bad-null"], ["", "bad-empty"], [12345, "bad-number"], ["too short", "bad-short"], ["x".repeat(129), "bad-long"], [true, "bad-bool"]]) {
+    const response = await attempt(password, key);
+    assert.equal(response.status, 400, `password ${JSON.stringify(password)} should be rejected`);
+    assert.equal((await response.json()).code, "invalid_request");
+  }
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM customers").get().n, 2, "no rejected attempt created a customer");
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM portal_passwords").get().n, 0);
 });
 
 test("console: customer access pagination exceeds legacy detail cap and cannot change customer scope", async () => {

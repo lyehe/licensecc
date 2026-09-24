@@ -129,4 +129,42 @@ test("first password and recovery require recent verified sign-in", async () => 
   assert.equal((await login(env, "a@x.com", NEXT)).status, 200);
 });
 
+// A5: `recovery_available` must use the EXACT predicate the emailed reset endpoint uses
+// (password-email.ts), so the settings UI never promises a recovery the server would refuse.
+test("password settings report no recovery path before any credential exists", async () => {
+  const { env } = fixture();
+  const result = await call(env, "GET", PATH, { cookie: await verifiedCookie(env, "A") });
+  assert.equal(result.status, 200);
+  assert.equal(result.body.data.has_password, false);
+  assert.equal(result.body.data.recovery_available, false);
+});
+
+test("password settings mark a credential eligible when it matches the customer's own verified email", async () => {
+  const { env } = fixture();
+  await env.DB.prepare("INSERT INTO portal_passwords (customer_id,email_lower,password_hash,created_at,updated_at) VALUES ('A','a@x.com',?,?,?)").bind(await hashPassword(PASSWORD), NOW, NOW).run();
+  const result = await call(env, "GET", PATH, { cookie: await verifiedCookie(env, "A") });
+  assert.equal(result.body.data.has_password, true);
+  assert.equal(result.body.data.email_verified, true);
+  assert.equal(result.body.data.recovery_available, true);
+});
+
+test("password settings mark an admin-invite-shaped account eligible for one recovery when its address is unclaimed", async () => {
+  const { env } = fixture();
+  const created = await register(env, "invited@example.com");
+  const result = await call(env, "GET", PATH, { cookie: cookie(created) });
+  assert.equal(result.body.data.has_password, true);
+  assert.equal(result.body.data.email_verified, false);
+  assert.equal(result.body.data.recovery_available, true);
+});
+
+test("password settings never offer recovery for an admin-invite-shaped account whose address another customer already verified", async () => {
+  // baseFixture seeds customer A with the verified address a@x.com; a second, empty-contact account
+  // sharing that same login identifier (the admin-invite/legacy shape) must not recover with it.
+  const { env } = fixture();
+  const created = await register(env, "a@x.com");
+  const result = await call(env, "GET", PATH, { cookie: cookie(created) });
+  assert.equal(result.body.data.email_verified, false);
+  assert.equal(result.body.data.recovery_available, false);
+});
+
 export const DIRECT_ROUTE_TESTS = ["POST /portal/v1/auth/password/login", "GET /portal/v1/auth/password", "POST /portal/v1/auth/password"];

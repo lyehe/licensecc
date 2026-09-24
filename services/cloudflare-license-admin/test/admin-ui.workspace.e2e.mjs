@@ -38,6 +38,7 @@ test("admin adds a portal user and reconciles a lost creation response without d
   await page.goto("/#/customers");
   await page.getByRole("button", { name: "Add user", exact: true }).click();
   const form = page.getByRole("form", { name: "Add portal user" });
+  await form.getByRole("radio", { name: "Set an initial password", exact: true }).check();
   await form.getByLabel("Name", { exact: true }).fill("New portal user");
   await form.getByLabel("Login email", { exact: true }).fill("new-portal@example.test");
   await form.getByLabel("Initial password", { exact: true }).fill("A long initial passphrase 123!");
@@ -45,12 +46,45 @@ test("admin adds a portal user and reconciles a lost creation response without d
   await page.getByRole("button", { name: "Reconcile status", exact: true }).click();
   await expect(page.getByRole("heading", { name: "User added", exact: true })).toBeVisible();
   expect(attempts).toHaveLength(2); expect(attempts[1]).toEqual(attempts[0]);
+  expect(attempts[0].input.password).toBe("A long initial passphrase 123!");
+  await expect(page.getByText("Share the initial password securely. The user can change it in their portal account.", { exact: true })).toBeVisible();
   await expect(page.locator('input[type="password"]')).toHaveCount(0);
   await page.getByRole("button", { name: "Open user", exact: true }).click();
   await expect(page.getByRole("heading", { name: "New portal user", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Account", exact: true }).click();
   await expect(page.getByText("Login email: new-portal@example.test", { exact: true })).toBeVisible();
   expect(page.url()).not.toContain("example.test");
+});
+
+test("add user defaults to inviting the customer, hides the password field, and switching modes clears any typed password", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  await page.route("**/api/admin/**", api.route);
+  await page.route("**/api/admin/customers", async route => {
+    if (route.request().method() !== "POST") return route.fallback();
+    const input = route.request().postDataJSON();
+    const row = api.seed.customer({ id: "cust_invited_from_admin", name: input.name, email: "", login_email: input.email, status: "active" });
+    return route.fulfill({ contentType: "application/json", body: JSON.stringify(makeEnvelope("customer_created", row)) });
+  });
+  await page.goto("/#/customers");
+  await page.getByRole("button", { name: "Add user", exact: true }).click();
+  const form = page.getByRole("form", { name: "Add portal user" });
+  await expect(form.getByRole("radio", { name: "Invite", exact: true })).toBeChecked();
+  await expect(form.locator('input[type="password"]')).toHaveCount(0);
+  await form.getByRole("radio", { name: "Set an initial password", exact: true }).check();
+  await expect(form.getByLabel("Initial password", { exact: true })).toBeVisible();
+  await form.getByLabel("Initial password", { exact: true }).fill("A temporary passphrase 123!");
+  await form.getByRole("radio", { name: "Invite", exact: true }).check();
+  await expect(form.locator('input[type="password"]')).toHaveCount(0);
+  await form.getByRole("radio", { name: "Set an initial password", exact: true }).check();
+  await expect(form.getByLabel("Initial password", { exact: true })).toHaveValue("");
+  await form.getByRole("radio", { name: "Invite", exact: true }).check();
+  await form.getByLabel("Name", { exact: true }).fill("Invited user");
+  await form.getByLabel("Login email", { exact: true }).fill("invited@example.test");
+  await form.getByRole("button", { name: "Add user", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "User added", exact: true })).toBeVisible();
+  await expect(page.getByText("Ask invited@example.test to open the customer portal and choose 'Forgot your password?' to set a password.", { exact: true })).toBeVisible();
+  await expect(page.getByText(/Share the initial password securely/)).toHaveCount(0);
+  await expect(page.getByText("No licenses have been assigned.")).toBeVisible();
 });
 
 test("customer app pages recover failed refreshes and manage only the selected owner's grant", async ({ page }) => {
