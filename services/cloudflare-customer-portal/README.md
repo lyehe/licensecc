@@ -278,8 +278,20 @@ existing customer's email matches an unlinked provider, the user must first
 sign in by the existing method and connect the provider from Account. During
 migration, retain working email delivery or use the existing protected
 operator bootstrap runbook for an authorized recovery; do not enable a public
-bootstrap bypass. Provider unlinking is deliberately unavailable in this
-slice, avoiding accidental removal of the last sign-in method.
+bootstrap bypass.
+
+Customers can disconnect a provider from Account
+(`POST /portal/v1/auth/identities/unlink`). It is allowed only while another
+sign-in method is usable now: a password while `PORTAL_PASSWORD_ENABLED="1"`,
+the other provider's identity while that provider is configured, or a contact
+email while email codes are configured. A method switched off in configuration
+does not count. Otherwise the answer is `409 last_sign_in_method`, and the
+portal asks the customer to set up another way to sign in first. The rule and
+the delete are one conditional statement, so two tabs cannot disconnect the
+last two methods at once. Disconnecting signs out the customer's other browser
+sessions that signed in with Google or GitHub (sessions do not record which of
+the two); the current session and password or email-code sessions stay signed
+in.
 
 Provider setup references: [Google OpenID Connect](https://developers.google.com/identity/openid-connect/openid-connect)
 and [GitHub OAuth web flow](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps).
@@ -383,3 +395,8 @@ user name or password, a `mailto:` with several addresses or a `?` query, any
 other scheme (`http:`, `javascript:` and so on), a relative path, or an empty
 value counts as unset, and the portal says "Contact your administrator"
 instead. The value is public configuration, not a secret.
+
+Disabling is also the first step of deleting an account. The portal has no
+delete action; follow the operator runbook
+[Delete a customer account](../../doc/operations/customer-account-deletion.md),
+which clears the customer's personal data and keeps the audit rows.
