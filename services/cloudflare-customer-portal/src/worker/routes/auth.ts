@@ -12,6 +12,7 @@ import {
   isCrossSite,
   publicOrigin,
   readJson,
+  redirect,
 } from "../support.js";
 
 type RequestOtpResult = { ok: true; code: string; secret?: string } | { ok: false; code: string; secret?: string };
@@ -199,6 +200,31 @@ async function handleAuthRequest(request: Request, env: Env, ctx: ExecutionConte
   return envelope(reqId, "otp_requested");
 }
 
+type RedeemOutcome =
+  | { code: "signed_in"; customerId: string; cookie: string }
+  | { code: "invalid_otp" }
+  | { code: "rate_limited" }
+  | { code: "config_error" };
+
+// The OTP-redeem + session-mint core, shared by the JSON envelope wrapper (redeemAndMintSession,
+// used by POST /auth/verify and the JSON branch of magic-redeem) and magic-redeem's form-encoded
+// redirect branch (ruling R10). Neither caller duplicates this logic; they only render the same
+// outcome differently — a boolean flag threaded through here would blur that split instead.
+async function redeemSession(
+  env: Env,
+  request: Request,
+  now: number,
+  args: { email?: string; code?: string; secret?: string },
+): Promise<RedeemOutcome> {
+  const redeemed = await redeemOtp(env, { ...args, clientIp: clientIp(request), now });
+  if (redeemed.code === "config_error") return { code: "config_error" };
+  if (redeemed.code === "rate_limited") return { code: "rate_limited" };
+  if (!redeemed.ok) return { code: "invalid_otp" };
+  const minted = await mintSession(env, { customerId: redeemed.customerId, authMethod: "otp", userAgent: request.headers.get("user-agent") ?? "", now });
+  if (!minted.ok) return { code: "config_error" };
+  return { code: "signed_in", customerId: redeemed.customerId, cookie: setSessionCookie(minted.raw) };
+}
+
 async function redeemAndMintSession(
   env: Env,
   request: Request,
@@ -206,13 +232,11 @@ async function redeemAndMintSession(
   now: number,
   args: { email?: string; code?: string; secret?: string },
 ): Promise<Response> {
-  const redeemed = await redeemOtp(env, { ...args, clientIp: clientIp(request), now });
-  if (redeemed.code === "config_error") return envelope(reqId, "config_error", undefined, 503);
-  if (redeemed.code === "rate_limited") return envelope(reqId, "rate_limited", undefined, 429);
-  if (!redeemed.ok) return envelope(reqId, "invalid_otp", undefined, 401);
-  const minted = await mintSession(env, { customerId: redeemed.customerId, authMethod: "otp", userAgent: request.headers.get("user-agent") ?? "", now });
-  if (!minted.ok) return envelope(reqId, "config_error", undefined, 503);
-  return envelope(reqId, "signed_in", { customer_id: redeemed.customerId }, 200, { "set-cookie": setSessionCookie(minted.raw) });
+  const outcome = await redeemSession(env, request, now, args);
+  if (outcome.code === "config_error") return envelope(reqId, "config_error", undefined, 503);
+  if (outcome.code === "rate_limited") return envelope(reqId, "rate_limited", undefined, 429);
+  if (outcome.code === "invalid_otp") return envelope(reqId, "invalid_otp", undefined, 401);
+  return envelope(reqId, "signed_in", { customer_id: outcome.customerId }, 200, { "set-cookie": outcome.cookie });
 }
 
 async function handleAuthVerify(request: Request, env: Env, reqId: string, now: number): Promise<Response> {
@@ -262,15 +286,20 @@ async function handleMagicRedeem(request: Request, env: Env, reqId: string, now:
     return envelope(reqId, "unsupported_media_type", undefined, 415);
   }
 
+  // Ruling R10: the form-encoded branch is always a top-level browser navigation (the interstitial's
+  // auto-submit), so EVERY outcome below is a 303 redirect, never a JSON body — including failures
+  // that happen before an OTP is even looked up (an oversized/undecodable form).
+  const origin = publicOrigin(env);
+  const fail = (code: string): Response => redirect(`${origin}/?auth_error=${code}`);
   const body = await readBoundedBody(request);
-  if (!body.ok) {
-    return body.code === "body_too_large"
-      ? envelope(reqId, "body_too_large", undefined, 413)
-      : envelope(reqId, "invalid_request", undefined, 400);
-  }
+  if (!body.ok) return fail("sign_in_failed");
   const parsed = parseFormToken(body.bytes);
-  if (!parsed.ok) return envelope(reqId, "invalid_request", undefined, 400);
-  return redeemAndMintSession(env, request, reqId, now, { secret: parsed.token });
+  if (!parsed.ok) return fail("sign_in_failed");
+  const outcome = await redeemSession(env, request, now, { secret: parsed.token });
+  if (outcome.code === "signed_in") return redirect(`${origin}/#/apps`, [outcome.cookie]);
+  if (outcome.code === "invalid_otp") return fail("link_expired");
+  if (outcome.code === "rate_limited") return fail("rate_limited");
+  return fail("sign_in_failed");
 }
 
 async function handleLogout(request: Request, env: Env, reqId: string, now: number): Promise<Response> {

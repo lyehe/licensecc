@@ -30,6 +30,7 @@ export function ProviderButtons({ providers, linked = [], link = false }: { prov
 const ERRORS: Record<string, string> = {
   provider_unavailable: "This sign-in method is not available yet. Please try another method.",
   rate_limited: "Too many sign-in attempts. Please try again later.",
+  link_expired: "This sign-in link has expired or was already used. Request a new code.",
   sign_in_cancelled: "Sign-in was cancelled. You can try again.",
   account_link_required: "An account already uses this email. Sign in with the method you already use for it, then connect Google or GitHub under Account. Contact your administrator if you can't sign in.",
   link_failed: "Unable to connect this provider. Sign in again and retry from Account.",

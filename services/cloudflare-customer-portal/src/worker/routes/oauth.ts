@@ -2,7 +2,7 @@ import { mintSession, setSessionCookie, loadSessionPeppers } from "../../auth/po
 import { portalRateLimit } from "../../auth/portal_ratelimit.mjs";
 import { canonicalHttpsOrigin, emailApiOrigin } from "../../auth/portal_destination.mjs";
 import { authSession } from "./auth.js";
-import { clientIp, envelope } from "../support.js";
+import { clientIp, envelope, redirect } from "../support.js";
 import { digest, exchangeIdentity, providerConfig, randomToken, type Provider } from "../oauth/providers.js";
 import { identityCustomer } from "../oauth/accounts.js";
 import type { Env, TopRoute } from "../env.js";
@@ -15,11 +15,6 @@ function cookie(value: string, age = TTL): string {
 function browserToken(request: Request): string {
   const values = (request.headers.get("cookie") ?? "").split(/;\s*/).filter((part) => part.startsWith(`${COOKIE}=`));
   return values.length === 1 ? values[0]!.slice(COOKIE.length + 1) : "";
-}
-function redirect(location: string, cookies: string[] = []): Response {
-  const headers = new Headers({ location, "cache-control": "no-store", "referrer-policy": "no-referrer" });
-  for (const value of cookies) headers.append("set-cookie", value);
-  return new Response(null, { status: 303, headers });
 }
 function originFor(request: Request, env: Env): string | null {
   const origin = canonicalHttpsOrigin(env.PORTAL_PUBLIC_ORIGIN);

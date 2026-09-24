@@ -117,3 +117,12 @@ export async function readJson(request: Request, reqId: string): Promise<Record<
 export function publicOrigin(env: Env): string {
   return (env.PORTAL_PUBLIC_ORIGIN ?? "").replace(/\/$/, "");
 }
+
+// Cookie-less 303 redirect: no-store, no-referrer, with zero or more Set-Cookie values appended in
+// order. Shared by every browser-facing auth redirect (oauth start/callback, and the magic-link
+// form-encoded redeem branch) so they all go through one hardened response shape.
+export function redirect(location: string, cookies: string[] = []): Response {
+  const headers = new Headers({ location, "cache-control": "no-store", "referrer-policy": "no-referrer" });
+  for (const value of cookies) headers.append("set-cookie", value);
+  return new Response(null, { status: 303, headers });
+}

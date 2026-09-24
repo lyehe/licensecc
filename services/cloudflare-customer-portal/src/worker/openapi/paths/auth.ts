@@ -138,7 +138,11 @@ export const authPaths: LabeledPathFragment = {
           "Accepts the token either as JSON { token } or as application/x-www-form-urlencoded " +
           "token=<secret> (posted by the interstitial form). The request body is capped at 8192 " +
           "bytes before parsing; multipart and other media types are rejected. Email-independent; " +
-          "single-use via an atomic UPDATE. On success sets the lccp_session cookie.",
+          "single-use via an atomic UPDATE. On success sets the lccp_session cookie. The " +
+          "form-encoded caller never receives JSON: every outcome of that branch (success or " +
+          "failure) is instead a 303 redirect — see the 303 response. The 400/401/413/429/503 " +
+          "envelopes below apply to JSON callers only; 403 (cross-site) and 415 (unsupported media " +
+          "type) apply to both JSON and form-encoded callers.",
         security: [],
         requestBody: {
 
@@ -179,6 +183,22 @@ export const authPaths: LabeledPathFragment = {
                     data: { type: "object", required: ["customer_id"], properties: { customer_id: { type: "string" } } },
                   },
                 },
+              },
+            },
+          },
+          "303": {
+            description:
+              "Form-encoded caller only (application/x-www-form-urlencoded): every outcome is a " +
+              "no-store redirect instead of JSON. Success redirects to /#/apps with the lccp_session " +
+              "cookie. Failure redirects to /?auth_error=<code>: link_expired (invalid, consumed, " +
+              "expired, or over-cap secret — the same no-oracle 401 the JSON branch would otherwise " +
+              "return as invalid_otp), rate_limited, or sign_in_failed (config_error and any body/" +
+              "media parsing failure, including an oversized or undecodable form).",
+            headers: {
+              Location: { schema: { type: "string", format: "uri" } },
+              "Set-Cookie": {
+                description: "lccp_session=<opaque>; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=86400 (success only).",
+                schema: { type: "string" },
               },
             },
           },
