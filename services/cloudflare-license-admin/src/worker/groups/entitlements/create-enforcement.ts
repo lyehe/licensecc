@@ -1,20 +1,25 @@
-import type { EntitlementCreateInput, EntitlementRecord, Policy, ProtectedCreateReason } from "../../../shared/api.js";
+import type { AdminEntitlementCreateInput, EntitlementRecord, Policy, ProtectedCreateReason } from "../../../shared/api.js";
 import type { Env } from "../../env.js";
 import type { ReplayAdmission } from "../../idempotency.js";
 import { envelope } from "../../responses.js";
-import { validateEntitlementInput } from "./validation.js";
+import { deviceLimit, validateEntitlementInput } from "./validation.js";
 import { protectedCreateAssertion, protectedCreateReason } from "./protected-checks.js";
 import { createEntitlement, type MutationContext, type MutationResult, type IdempotencyCommit, type D1PreparedStatementLike } from "@licensecc/cloudflare-runtime/d1/entitlement_mutation";
+import { buildDeviceLimitStatement } from "@licensecc/cloudflare-runtime/entitlements/policy_store";
 
 /** Protected project IDs; license creation applies the same rule so its records can back a grant. */
 export const PROTECTED_PROJECT = /^[A-Za-z0-9_.:-]{1,127}(?![\s\S])/;
 
-export async function createWithEnforcement(env: Env, input: EntitlementCreateInput, ctx: MutationContext,
+export async function createWithEnforcement(env: Env, input: AdminEntitlementCreateInput, ctx: MutationContext,
   idempotency: IdempotencyCommit | null, statements: D1PreparedStatementLike[] = [], policy?: Policy): Promise<MutationResult<EntitlementRecord> | Response | null> {
-  if (input.enforcement_mode !== "device_bound_v1") return createEntitlement(env, input, ctx, "", undefined, idempotency, statements);
+  // A create that selects no policy may set its own device limit (a policy stamps its own). Like the
+  // stamp, it rides the create's claim, ahead of the protected assertion and the audit/replay records.
+  const writes = policy === undefined && input.max_active_devices !== undefined
+    ? [...statements, buildDeviceLimitStatement(env as never, input, input.max_active_devices)] : statements;
+  if (input.enforcement_mode !== "device_bound_v1") return createEntitlement(env, input, ctx, "", undefined, idempotency, writes);
   if (validateEntitlementCreate(input) === null) return protectedCreationConflict(ctx, "unknown");
   try {
-    return await createEntitlement(env, input, ctx, "", undefined, idempotency, [...statements, protectedCreateAssertion(env, input, policy)]);
+    return await createEntitlement(env, input, ctx, "", undefined, idempotency, [...writes, protectedCreateAssertion(env, input, policy)]);
   } catch (error) {
     // The capacity trigger names its own rule. The assertion's json() failure names none, so the
     // diagnostic runs only here, after D1 has rolled the whole batch back.
@@ -30,11 +35,14 @@ function protectedCreationConflict(ctx: MutationContext, reason: ProtectedCreate
   return envelope(ctx.requestId, "protected_creation_conflict", { reason }, 409);
 }
 
-export function validateEntitlementCreate(value: unknown): EntitlementCreateInput | null {
+export function validateEntitlementCreate(value: unknown): AdminEntitlementCreateInput | null {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
-  const { enforcement_mode: mode, ...rest } = value as Record<string, unknown>;
-  if (rest.policy_id !== undefined && rest.policy_id !== null && rest.policy_id !== "" && (typeof rest.policy_id !== "string" || rest.policy_id.length > 128)) return null;
-  if (typeof rest.policy_id === "string" && rest.policy_id !== "" && rest.assertion_ttl_seconds === null) return null;
+  const { enforcement_mode: mode, max_active_devices: limit, ...rest } = value as Record<string, unknown>;
+  const selectsPolicy = rest.policy_id !== undefined && rest.policy_id !== null && rest.policy_id !== "";
+  if (selectsPolicy && (typeof rest.policy_id !== "string" || rest.policy_id.length > 128)) return null;
+  if (selectsPolicy && rest.assertion_ttl_seconds === null) return null;
+  // A selected policy owns the device limit; only a create without one may set its own.
+  if (limit !== undefined && (selectsPolicy || deviceLimit(limit) === undefined)) return null;
   if (Object.hasOwn(value, "enforcement_mode") && mode !== "legacy" && mode !== "device_bound_v1") return null;
   const input = validateEntitlementInput(rest);
   if (mode === "device_bound_v1" && input !== null && (
@@ -42,10 +50,11 @@ export function validateEntitlementCreate(value: unknown): EntitlementCreateInpu
     || input.license_fingerprint.length !== 64 || !/^[a-f0-9]{64}$/.test(input.license_fingerprint)
     || [input.valid_from, input.valid_until].some(value => value !== null && value !== undefined && !Number.isSafeInteger(value))
   )) return null;
-  return input === null ? null : mode === undefined ? input : { ...input, enforcement_mode: mode as "legacy" | "device_bound_v1" };
+  if (input === null) return null;
+  return { ...input, ...(mode === undefined ? {} : { enforcement_mode: mode as "legacy" | "device_bound_v1" }), ...(limit === undefined ? {} : { max_active_devices: limit as number }) };
 }
 
-export function createReplayAdmission(input: EntitlementCreateInput): ReplayAdmission | undefined {
+export function createReplayAdmission(input: AdminEntitlementCreateInput): ReplayAdmission | undefined {
   if (input.enforcement_mode === undefined) return undefined;
   return value => {
     if (typeof value !== "object" || value === null || Array.isArray(value)) return false;

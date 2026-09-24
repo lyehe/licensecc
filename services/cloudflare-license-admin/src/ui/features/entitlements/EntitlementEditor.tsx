@@ -1,9 +1,11 @@
 import React, { useEffect, useRef, useState, type FormEvent } from "react";
 import type { EntitlementRecord, Policy } from "../../../shared/api";
+import { MAX_DEVICE_LIMIT } from "../../../shared/api";
 import { ReadNotice } from "../../shared/ReadNotice";
+import { DeviceLimitForm } from "./DeviceLimitForm";
 import { EntitlementRelationships } from "./EntitlementRelationships";
 import { generateLicenseFingerprint, isProtectedProject } from "./protectedCreate";
-import { entitlementFormErrors, type EntitlementEditState, type EntitlementFormState } from "./workflow";
+import { entitlementFormErrors, policiesForProject, policyOptionLabel, type EntitlementEditState, type EntitlementFormState } from "./workflow";
 
 interface EditorProps {
   form: EntitlementFormState | EntitlementEditState;
@@ -16,18 +18,23 @@ interface EditorProps {
   policiesReady: boolean;
   policiesError: string | null;
   onRetryPolicies: () => void;
+  /** Park this draft and open the policy form for its project; the new policy comes back chosen. */
+  onCreatePolicy?: () => void;
   onChange: (patch: Partial<EntitlementFormState>) => void;
   onSubmit: (event: FormEvent) => Promise<void>;
   onCancel: () => void;
 }
 
-export function EntitlementEditor({ form, item, extendValidity = false, busy, locked, lockMessage, policies, policiesReady, policiesError, onRetryPolicies, onChange, onSubmit, onCancel }: EditorProps): React.ReactElement {
+export function EntitlementEditor({ form, item, extendValidity = false, busy, locked, lockMessage, policies, policiesReady, policiesError, onRetryPolicies, onCreatePolicy, onChange, onSubmit, onCancel }: EditorProps): React.ReactElement {
   const editorRef = useRef<HTMLElement>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const isCreate = "license_fingerprint" in form;
   const title = isCreate ? "New entitlement" : "Edit entitlement";
   const inheritsDates = isCreate && form.policy_id !== "";
   const protectedCreate = isCreate && form.enforcement_mode === "device_bound_v1";
+  // Only this project's policies can stamp its grant; the chosen one owns the device limit.
+  const projectPolicies = isCreate ? policiesForProject(policies, form.project) : [];
+  const chosenPolicy = isCreate ? projectPolicies.find((policy) => policy.id === form.policy_id) : undefined;
   useEffect(() => {
     editorRef.current?.querySelector<HTMLElement>(extendValidity ? '[name="valid_until"]' : "h3")?.focus();
   }, [extendValidity, item?.id]);
@@ -53,6 +60,7 @@ export function EntitlementEditor({ form, item, extendValidity = false, busy, lo
 
   const errorFor = (field: string): React.ReactElement | null => errors[field] ? <span id={`entitlement-${field}-error`} role="alert">{errors[field]}</span> : null;
   const describedBy = (field: string): string | undefined => errors[field] ? `entitlement-${field}-error` : undefined;
+  const policyLimitLabel = `Device limit (from policy ${chosenPolicy?.name ?? (isCreate ? form.policy_id : "")})`;
   return <section ref={editorRef} className="editorLayout" aria-label={title}>
     <div className="editorHeader"><div><h3 tabIndex={-1}>{title}</h3><p>{isCreate ? "Grant access to a project and feature." : `${item?.project} / ${item?.feature}`}</p></div><button type="button" disabled={busy} onClick={onCancel}>Back to entitlements</button></div>
     {locked && <p className="readState">{lockMessage ?? "Resolve the pending operation before changing this draft."}</p>}
@@ -64,7 +72,10 @@ export function EntitlementEditor({ form, item, extendValidity = false, busy, lo
         <label>Feature (required)<input aria-label="Feature" name="feature" required aria-invalid={!!errors.feature} aria-describedby={describedBy("feature")} value={form.feature} onChange={(event) => change("feature", event.target.value)} />{errorFor("feature")}</label>
         <label className="wide">License fingerprint (required)<input aria-label="License fingerprint" name="license_fingerprint" required aria-invalid={!!errors.license_fingerprint} aria-describedby={describedBy("license_fingerprint")} value={form.license_fingerprint} onChange={(event) => change("license_fingerprint", event.target.value)} />{errorFor("license_fingerprint")}<span className="muted">{protectedCreate ? "The exact 64-character lowercase hexadecimal fingerprint. A new protected license can use a generated one." : "The full 64-character hexadecimal fingerprint."}</span></label>
         {protectedCreate && <div className="wide"><button type="button" onClick={() => change("license_fingerprint", generateLicenseFingerprint())}>Generate fingerprint</button></div>}
-        <div className="wide"><ReadNotice loading={!policiesReady && policiesError === null} error={policiesError} hasData={policies.length > 0} label="active policies" onRetry={onRetryPolicies} /><label>Policy (optional)<select aria-label="Policy (optional)" disabled={!policiesReady} value={form.policy_id} onChange={(event) => change("policy_id", event.target.value)}><option value="">No policy · use fields below</option>{policies.map((policy) => <option key={policy.id} value={policy.id}>{policy.name} ({policy.type}) · {policy.id}</option>)}</select></label>{inheritsDates && <p className="muted">Blank validity dates inherit this policy’s defaults. The default assertion TTL value also inherits the policy lifetime.</p>}</div>
+        <div className="wide"><ReadNotice loading={!policiesReady && policiesError === null} error={policiesError} hasData={policies.length > 0} label="active policies" onRetry={onRetryPolicies} /><label>Policy (optional)<select aria-label="Policy (optional)" disabled={!policiesReady} value={form.policy_id} onChange={(event) => change("policy_id", event.target.value)}><option value="">No policy · use fields below</option>{projectPolicies.map((policy) => <option key={policy.id} value={policy.id}>{policyOptionLabel(policy)}</option>)}</select></label>{onCreatePolicy && !locked && !busy && <p><a href="#/policies" onClick={(event) => { event.preventDefault(); onCreatePolicy(); }}>Create policy…</a> <span className="muted">Opens the policy form for {form.project || "this project"}; this draft is kept and gets the new policy.</span></p>}{inheritsDates && <p className="muted">Blank validity dates inherit this policy’s defaults. The default assertion TTL value also inherits the policy lifetime.</p>}</div>
+        {inheritsDates
+          ? <label>{policyLimitLabel}<input aria-label={policyLimitLabel} name="max_active_devices" readOnly value={chosenPolicy?.max_active_devices ?? ""} /><span className="muted">The policy sets the device limit.</span></label>
+          : <label>Device limit<input aria-label="Device limit" name="max_active_devices" type="number" min={1} max={MAX_DEVICE_LIMIT} step={1} value={form.max_active_devices} aria-invalid={!!errors.max_active_devices} aria-describedby={describedBy("max_active_devices")} onChange={(event) => change("max_active_devices", Number(event.target.value))} />{errorFor("max_active_devices")}<span className="muted">The most devices that can be connected at once.</span></label>}
       </>}
       {!isCreate && <p className="wide muted">Project, feature, and fingerprint identify this entitlement and cannot be edited. {extendValidity ? "Update Valid until to extend access." : "Save changes updates the existing entitlement."}</p>}
       <label>Valid from<input aria-label="Valid from" name="valid_from" type="date" min="1970-01-01" value={form.valid_from} aria-invalid={!!errors.valid_from} aria-describedby={`entitlement-date-rules${errors.valid_from ? " entitlement-valid_from-error" : ""}`} onChange={(event) => change("valid_from", event.target.value)} /><span className="muted">{inheritsDates ? "Blank: use policy start." : "Blank: Starts immediately."}</span>{errorFor("valid_from")}</label>
@@ -82,5 +93,6 @@ export function EntitlementEditor({ form, item, extendValidity = false, busy, lo
       </div></details>
       <div className="editorActions"><button className="primary" disabled={busy} type="submit">{isCreate ? "Create entitlement" : "Save changes"}</button><button disabled={busy} type="button" onClick={onCancel}>Cancel</button></div>
     </fieldset></form>
+    {!isCreate && item && <DeviceLimitForm item={item} locked={locked} />}
   </section>;
 }

@@ -1,4 +1,4 @@
-import type { ExpiryStrategy, PolicyInput, PolicyType, TrialExpirationBasis } from "../../../shared/api";
+import type { ExpiryStrategy, Policy, PolicyInput, PolicyPatch, PolicyType, TrialExpirationBasis } from "../../../shared/api";
 
 export interface PolicyFilter {
   project: string;
@@ -100,6 +100,39 @@ export function normalizePolicyForm(form: PolicyFormState): PolicyInput {
     trial_require_device_proof: form.trial_require_device_proof ? 1 : 0,
     notes: parseNotes(form.notes),
   };
+}
+
+/** The editor's view of an existing policy; its project, name, and type are shown but never sent. */
+export function policyFormFromPolicy(policy: Policy): PolicyFormState {
+  return {
+    project: policy.project,
+    name: policy.name,
+    type: policy.type,
+    valid_from_offset_sec: policy.valid_from_offset_sec === null ? "" : String(policy.valid_from_offset_sec),
+    duration_sec: policy.duration_sec === null ? "" : String(policy.duration_sec),
+    assertion_ttl_seconds: policy.assertion_ttl_seconds,
+    pool_size: policy.pool_size,
+    max_active_devices: policy.max_active_devices,
+    max_borrow_sec: policy.max_borrow_sec,
+    meter_quota: policy.meter_quota,
+    meter_period_sec: policy.meter_period_sec,
+    expiry_strategy: policy.expiry_strategy,
+    trial_expiration_basis: policy.trial_expiration_basis,
+    trial_duration_sec: policy.trial_duration_sec,
+    trial_one_per_device: policy.trial_one_per_device === 1,
+    trial_require_device_proof: policy.trial_require_device_proof === 1,
+    notes: policy.notes,
+  };
+}
+
+/**
+ * PATCH /api/admin/policies/{id}: every patchable field, validated like a create. Project, name,
+ * type, and status are the policy's identity and lifecycle, so they are never sent. An edit changes
+ * later stamps only; entitlements already stamped from the policy keep their frozen copy.
+ */
+export function normalizePolicyPatch(form: PolicyFormState): PolicyPatch {
+  const { project: _project, name: _name, type: _type, ...patchable } = normalizePolicyForm(form);
+  return patchable;
 }
 
 const MAX_POLICY_DURATION_SECONDS = 3_153_600_000;

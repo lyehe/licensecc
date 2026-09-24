@@ -1,10 +1,12 @@
 import type {
+  AdminEntitlementCreateInput,
   EntitlementCreateInput,
   EntitlementPatch,
   EntitlementRecord,
   EntitlementStatus,
+  Policy,
 } from "../../../shared/api";
-import { ENTITLEMENT_BATCH_MAX_IDS } from "../../../shared/api";
+import { ENTITLEMENT_BATCH_MAX_IDS, MAX_DEVICE_LIMIT } from "../../../shared/api";
 import { dateInputToEpoch, epochToDateInput } from "../../shared/dates";
 import { shortHash } from "../../shared/format";
 
@@ -31,6 +33,8 @@ export interface EntitlementFormState {
   notes: string;
   customer_id: string;
   license_id: string;
+  /** Sent only without a policy; a selected policy stamps its own device limit. */
+  max_active_devices: number;
 }
 
 export interface EntitlementEditState {
@@ -56,6 +60,7 @@ export const emptyEntitlementForm: EntitlementFormState = {
   notes: "",
   customer_id: "",
   license_id: "",
+  max_active_devices: 1,
 };
 
 export const emptyEntitlementEditForm: EntitlementEditState = {
@@ -83,7 +88,7 @@ export function entitlementDetailPath(id: string): string {
   return `/api/admin/entitlements/${encodeURIComponent(id)}`;
 }
 
-export function normalizeEntitlementForm(form: EntitlementFormState): EntitlementCreateInput {
+export function normalizeEntitlementForm(form: EntitlementFormState): AdminEntitlementCreateInput {
   return {
     enforcement_mode: form.enforcement_mode,
     project: form.project,
@@ -96,7 +101,27 @@ export function normalizeEntitlementForm(form: EntitlementFormState): Entitlemen
     notes: parseNotes(form.notes),
     customer_id: parseNullableIdentifier(form.customer_id, "customer_id"),
     license_id: parseNullableIdentifier(form.license_id, "license_id"),
+    // What the operator sees is what the grant gets, including on a re-create of an existing key.
+    max_active_devices: parseBoundedInteger(form.max_active_devices, "max_active_devices", 1, MAX_DEVICE_LIMIT),
   };
+}
+
+/** Whether a device limit is a whole number of devices from 1 to MAX_DEVICE_LIMIT. */
+export function isDeviceLimit(value: number): boolean {
+  return Number.isInteger(value) && value >= 1 && value <= MAX_DEVICE_LIMIT;
+}
+
+export const DEVICE_LIMIT_RULE = "Enter a whole number of devices from 1 to 1,000,000.";
+
+/** "{name} · {n} devices · {project}"; a floating policy grants a seat pool, not a device limit. */
+export function policyOptionLabel(policy: Pick<Policy, "name" | "project" | "pool_size" | "max_active_devices">): string {
+  const count = (n: number, unit: string): string => `${n} ${unit}${n === 1 ? "" : "s"}`;
+  return `${policy.name} · ${policy.pool_size > 0 ? count(policy.pool_size, "seat") : count(policy.max_active_devices, "device")} · ${policy.project}`;
+}
+
+/** A grant can only be stamped from a policy of its own project, so only those are offered. */
+export function policiesForProject<T extends Pick<Policy, "project">>(policies: readonly T[], project: string): T[] {
+  return policies.filter((policy) => policy.project === project);
 }
 
 export function normalizeCreateFromPolicy(form: EntitlementFormState): EntitlementCreateInput & { policy_id: string } {
@@ -268,6 +293,8 @@ export function entitlementFormErrors(form: EntitlementEditState | EntitlementFo
     if (form.project.trim() === "" || form.project.length > 127 || /[=\n\r\0]/.test(form.project)) errors.project = "Enter a project of 1–127 characters, without line breaks or =.";
     if (form.feature.trim() === "" || form.feature.length > 15 || /[=\n\r\0]/.test(form.feature)) errors.feature = "Enter a feature of 1–15 characters, without line breaks or =.";
     if (!/^[0-9a-fA-F]{64}$/.test(form.license_fingerprint)) errors.license_fingerprint = "Enter the full 64-character hexadecimal license fingerprint.";
+    // A selected policy stamps its own device limit; the field is read-only then.
+    if (form.policy_id === "" && !isDeviceLimit(form.max_active_devices)) errors.max_active_devices = DEVICE_LIMIT_RULE;
   }
   if (form.device_hash !== "" && !/^[0-9a-fA-F]{64}$/.test(form.device_hash)) errors.device_hash = "Enter 64 hexadecimal characters or leave this blank.";
   if (!Number.isInteger(form.assertion_ttl_seconds) || form.assertion_ttl_seconds < 1 || form.assertion_ttl_seconds > 3600) errors.assertion_ttl_seconds = "Enter a whole number from 1 to 3600 seconds.";

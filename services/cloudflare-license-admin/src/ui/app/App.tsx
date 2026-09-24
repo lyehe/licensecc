@@ -1,6 +1,7 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 
 import { AdminNavigationProvider, useAdminNavigation } from "./navigation";
+import type { DraftPolicy, PolicyDraftRequest } from "./types";
 import { EnvironmentBadge } from "./EnvironmentBadge";
 import { Sidebar } from "./Sidebar";
 import { descriptions, tabs } from "./shellContent";
@@ -44,6 +45,22 @@ function ConsoleShell(): React.ReactElement {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLButtonElement>(null);
   useEffect(() => { setMenuOpen(false); }, [modalActive, navigationVersion]);
+  // "Create policy…": an entitlement draft asks Policies for a policy of its project, and gets
+  // the new one back. Returning to the draft by any route ends the request.
+  const [policyRequest, setPolicyRequest] = useState<PolicyDraftRequest | null>(null);
+  const [draftPolicy, setDraftPolicy] = useState<DraftPolicy | null>(null);
+  useEffect(() => { if (activeTab === "entitlements") setPolicyRequest(null); }, [activeTab]);
+  const requestPolicy = useCallback((project: string): boolean => {
+    setPolicyRequest({ project });
+    if (navigateTab("policies")) return true;
+    setPolicyRequest(null);
+    return false;
+  }, [navigateTab]);
+  const returnToDraft = useCallback((created: DraftPolicy | null): void => {
+    setDraftPolicy(created);
+    navigateTab("entitlements");
+  }, [navigateTab]);
+  const clearDraftPolicy = useCallback((): void => setDraftPolicy(null), []);
 
   return (
     <main className={`consoleShell${operationLocked ? " hasOperationNotice" : ""}`}>
@@ -67,8 +84,8 @@ function ConsoleShell(): React.ReactElement {
           {feedback.message && <div className="activityMessage" data-tone={feedback.tone} role={feedback.tone === "error" ? "alert" : "status"}>{feedback.message}</div>}
           {activeTab === "overview" && <div className="quickActions"><button className="primary" onClick={() => navigateTab("entitlements")}>Manage access <span aria-hidden="true">→</span></button><button onClick={() => navigateTab("reports")}>View usage</button></div>}
           <Overview active={activeTab === "overview"} />
-          <Entitlements active={activeTab === "entitlements"} navigationIntent={navigationIntent} onNavigationHandled={onNavigationHandled} />
-          <Policies active={activeTab === "policies"} />
+          <Entitlements active={activeTab === "entitlements"} navigationIntent={navigationIntent} onNavigationHandled={onNavigationHandled} onCreatePolicy={requestPolicy} draftPolicy={draftPolicy} onDraftPolicyUsed={clearDraftPolicy} />
+          <Policies active={activeTab === "policies"} draftRequest={policyRequest} onReturnToDraft={returnToDraft} />
           <Catalog active={activeTab === "plans"} />
           <Webhooks active={activeTab === "webhooks"} />
           <Events active={activeTab === "events"} />

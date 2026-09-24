@@ -2,7 +2,7 @@
 // shared mutation core's .d.ts so the admin Worker and the licensing backend
 // share ONE shape. Re-exported here so existing `../shared/api` import sites are
 // unchanged.
-import type { EntitlementStatus, EntitlementInput, EntitlementEventType } from "@licensecc/licensing-domain/entitlements/contracts";
+import type { EntitlementStatus, EntitlementInput, EntitlementEventType, EntitlementCreateInput, EntitlementPatch } from "@licensecc/licensing-domain/entitlements/contracts";
 
 export type {
   EntitlementStatus,
@@ -279,6 +279,23 @@ export const PROTECTED_CREATE_REASONS = [
   "unknown",
 ] as const;
 export type ProtectedCreateReason = typeof PROTECTED_CREATE_REASONS[number];
+
+// ── Device limit ─────────────────────────────────────────────────────────────
+// The most devices one license (entitlement) may have connected at once. An operator sets it from 1
+// to MAX_DEVICE_LIMIT: on a create that selects no policy (a policy stamps its own), or alone in a
+// PATCH. A protected grant refuses a limit below its connected devices (409 capacity_in_use).
+export const MAX_DEVICE_LIMIT = 1_000_000;
+
+/** Admin create body: the shared create input plus its own device limit, accepted only without a policy. */
+export type AdminEntitlementCreateInput = EntitlementCreateInput & { max_active_devices?: number };
+
+/** Admin PATCH body: the shared patch fields, or the device limit alone. */
+export type AdminEntitlementPatch = EntitlementPatch & { max_active_devices?: number };
+
+/** 409 capacity_in_use: how many devices hold a slot on the grant (active, or retiring until the hold ends). */
+export interface CapacityInUseData {
+  devices_in_use: number;
+}
 
 // POST /api/admin/customers/{id}/licenses returns the license record it created.
 export interface CreatedLicense {

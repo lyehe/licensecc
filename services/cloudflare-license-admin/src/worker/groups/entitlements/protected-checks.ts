@@ -1,7 +1,10 @@
-import { PROTECTED_CREATE_REASONS, type EntitlementInput, type Policy, type ProtectedCreateReason } from "../../../shared/api.js";
+import { MAX_DEVICE_LIMIT, PROTECTED_CREATE_REASONS, type EntitlementInput, type Policy, type ProtectedCreateReason } from "../../../shared/api.js";
 import type { Env } from "../../env.js";
 import { stampFromPolicy } from "@licensecc/licensing-domain/entitlements/policy";
 import type { D1PreparedStatementLike } from "@licensecc/cloudflare-runtime/d1/entitlement_mutation";
+
+/** What a protected create writes: its input, and without a policy possibly its own device limit. */
+type CreateInput = EntitlementInput & { max_active_devices?: number };
 
 // Every protected-create rule is written once, here, and tagged with the reason an operator is
 // told. protectedCreateAssertion ANDs the list inside the create batch; protectedCreateReason walks
@@ -34,15 +37,20 @@ type StampColumn = keyof typeof STAMP_COLUMN_DEFAULTS;
 const HISTORY_TABLES = ["lease_issuance", "entitlement_devices", "seat_checkouts", "usage_events"] as const;
 const sameKey = (alias: string): string => `${alias}.project=e.project AND ${alias}.feature=e.feature AND ${alias}.license_fingerprint=e.license_fingerprint`;
 
-/** The stamp columns this create writes after its upsert; none without a policy. */
-function stampColumns(input: EntitlementInput, policy?: Policy): Partial<Record<StampColumn, unknown>> {
-  if (policy === undefined) return {};
+/**
+ * The stamp columns this create writes after its upsert: a policy's whole stamp, or, without a
+ * policy, only the device limit it sets on its own (createWithEnforcement's side-write).
+ */
+function stampColumns(input: CreateInput, policy?: Policy): Partial<Record<StampColumn, unknown>> {
+  if (policy === undefined) return input.max_active_devices === undefined ? {} : { max_active_devices: input.max_active_devices };
   const stamp = stampFromPolicy(policy, input, 0);
   return { policy_id: policy.id, ...stamp.capacity, ...stamp.trial };
 }
 
-export function protectedCreateChecks(input: EntitlementInput, policy?: Policy): readonly ProtectedCheck[] {
+export function protectedCreateChecks(input: CreateInput, policy?: Policy): readonly ProtectedCheck[] {
   const expected = Object.entries(stampColumns(input, policy));
+  // A policy's stamp is compared under policy_mismatch; a create's own writes are integrity.
+  const ownWrites = policy === undefined ? expected : [];
   return [
     { reason: "customer_inactive", sql: "EXISTS (SELECT 1 FROM customers c WHERE c.id=e.customer_id AND c.status='active')", binds: [] },
     { reason: "license_missing", sql: "EXISTS (SELECT 1 FROM licenses l WHERE l.id=e.license_id)", binds: [] },
@@ -67,17 +75,18 @@ export function protectedCreateChecks(input: EntitlementInput, policy?: Policy):
       AND ((e.trial_expiration_basis='from_issue' AND typeof(e.valid_until)='integer' AND e.valid_until>unixepoch())
         OR (e.trial_expiration_basis IN ('from_first_activation','from_first_use') AND typeof(e.trial_duration_sec)='integer'
           AND e.trial_duration_sec BETWEEN 2 AND 3153600000)))`, binds: [] },
-    { reason: "invalid_capacity", sql: "typeof(e.max_active_devices)='integer' AND e.max_active_devices BETWEEN 1 AND 1000000", binds: [] },
+    { reason: "invalid_capacity", sql: `typeof(e.max_active_devices)='integer' AND e.max_active_devices BETWEEN 1 AND ${MAX_DEVICE_LIMIT}`, binds: [] },
     // Integrity rules with no operator-specific fix: the row is exactly what this create wrote.
     { reason: "unknown", sql: `e.device_hash='' AND e.pool_size=0
       AND (e.valid_from IS NULL OR (typeof(e.valid_from)='integer' AND e.valid_from BETWEEN 0 AND 9007199254740991))
       AND (e.valid_until IS NULL OR (typeof(e.valid_until)='integer' AND e.valid_until BETWEEN 0 AND 9007199254740991))
       AND (e.valid_from IS NULL OR e.valid_until IS NULL OR e.valid_from<e.valid_until)
-      AND e.customer_id IS ? AND e.license_id IS ?`, binds: [input.customer_id ?? null, input.license_id ?? null] },
+      AND e.customer_id IS ? AND e.license_id IS ?${ownWrites.map(([column]) => ` AND e.${column} IS ?`).join("")}`,
+    binds: [input.customer_id ?? null, input.license_id ?? null, ...ownWrites.map(([, value]) => value)] },
   ];
 }
 
-export function protectedCreateAssertion(env: Env, input: EntitlementInput, policy?: Policy): D1PreparedStatementLike {
+export function protectedCreateAssertion(env: Env, input: CreateInput, policy?: Policy): D1PreparedStatementLike {
   const checks = protectedCreateChecks(input, policy);
   // SELECT does not alter changes(), so the following audit/cache statements
   // still observe the claim/stamp. Failure raises inside D1's batch and rolls
@@ -90,13 +99,14 @@ export function protectedCreateAssertion(env: Env, input: EntitlementInput, poli
 }
 
 /**
- * The row a create would have written, as a CTE named `e`: its input columns, its policy stamp, and
- * otherwise what an existing protected grant with this key keeps (or the schema default). Values
- * travel as one JSON document so json_extract types numbers the way an INTEGER column stores them.
+ * The row a create would have written, as a CTE named `e`: its input columns, its policy stamp or
+ * its own device limit, and otherwise what an existing protected grant with this key keeps (or the
+ * schema default). Values travel as one JSON document so json_extract types numbers the way an
+ * INTEGER column stores them.
  * A create that writes another column before the assertion must model it here too; the SQL suite
  * compares this row with the committed one after real creates.
  */
-export function protectedWouldBeRowQuery(input: EntitlementInput, policy?: Policy): { sql: string; binds: unknown[] } {
+export function protectedWouldBeRowQuery(input: CreateInput, policy?: Policy): { sql: string; binds: unknown[] } {
   const stamp = stampColumns(input, policy);
   const written = {
     project: input.project, feature: input.feature, license_fingerprint: input.license_fingerprint, device_hash: input.device_hash ?? "",
@@ -118,7 +128,7 @@ export function protectedWouldBeRowQuery(input: EntitlementInput, policy?: Polic
  * against the would-be row. A key that already has a row, with every rule holding, means the claim
  * lost to a concurrent write.
  */
-export async function protectedCreateReason(env: Env, input: EntitlementInput, policy?: Policy): Promise<ProtectedCreateReason> {
+export async function protectedCreateReason(env: Env, input: CreateInput, policy?: Policy): Promise<ProtectedCreateReason> {
   const checks = protectedCreateChecks(input, policy);
   const wouldBe = protectedWouldBeRowQuery(input, policy);
   const sql = `${wouldBe.sql}

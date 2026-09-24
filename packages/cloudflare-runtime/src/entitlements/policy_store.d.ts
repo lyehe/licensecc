@@ -9,3 +9,10 @@ export function buildPolicyStampStatement(
   capacity: PolicyCapacity,
   trial: PolicyTrialState,
 ): D1PreparedStatementLike;
+
+/** A create's own device limit, written only beside the create's claimed row (changes() = 1). */
+export function buildDeviceLimitStatement(
+  env: { DB: D1DatabaseLike },
+  key: EntitlementKey,
+  maxActiveDevices: number,
+): D1PreparedStatementLike;

@@ -1,5 +1,6 @@
 import { INVALID_IDEMPOTENCY_KEY, mutationResponse, readIdempotencyKey } from "../../idempotency.js";
 import { createReplayAdmission, createWithEnforcement, validateEntitlementCreate } from "./create-enforcement.js";
+import { patchDeviceLimit } from "./device-limit.js";
 import { envelope } from "../../responses.js";
 import {
   batchReturnedRow,
@@ -237,8 +238,15 @@ export async function handleMutation(request: Request, env: Env, actor: Actor, r
     if (patch === null) {
       return envelope(requestIdValue, "invalid_request", undefined, 400);
     }
+    const { max_active_devices: limit, ...fields } = patch;
+    if (limit !== undefined) {
+      // The device limit is its own audited capacity write, so it is patched alone.
+      if (Object.keys(fields).length > 0) return envelope(requestIdValue, "invalid_request", undefined, 400);
+      return mutationResponse(request, env, ctx, "entitlement_patched", (idempotency) =>
+        patchDeviceLimit(env, key, limit, ctx, idempotency));
+    }
     return mutationResponse(request, env, ctx, "entitlement_patched", (idempotency) =>
-      patchEntitlement(env, key, patch, ctx, idempotency));
+      patchEntitlement(env, key, fields, ctx, idempotency));
   }
   if (request.method === "POST" && action !== undefined) {
     const reason = safeNotes((body as Record<string, unknown>).reason) ?? "";

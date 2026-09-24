@@ -9,6 +9,7 @@ import {
   ENTITLEMENT_BATCH_MAX_IDS,
   ENTITLEMENT_BATCH_TOO_LARGE_CODE,
   ENTITLEMENT_BATCH_TOO_LARGE_GUIDANCE,
+  MAX_DEVICE_LIMIT,
 } from "../../shared/api.js";
 import { DEFAULT_PAGINATION_OPTIONS } from "../query.js";
 import type { PaginationOptions } from "../query.js";
@@ -361,7 +362,7 @@ export const openApiComponents: LabeledComponentFragment = {
       ["EntitlementPatch", {
         type: "object",
         not: { required: ["enforcement_mode"] },
-        description: "All fields optional; only provided fields are updated. project/feature/license_fingerprint/status are NOT patchable.",
+        description: "All fields optional; only provided fields are updated. project/feature/license_fingerprint/status are NOT patchable. max_active_devices is its own audited capacity write and must be sent alone (with the optional expected_* precondition); combined with another field it returns 400 invalid_request.",
         properties: {
           device_hash: { type: "string", description: "64-char hex, or empty string." },
           assertion_ttl_seconds: { type: "integer", minimum: 1, maximum: 3600 },
@@ -370,7 +371,9 @@ export const openApiComponents: LabeledComponentFragment = {
           notes: { type: "string", maxLength: 1000 },
           customer_id: { type: ["string", "null"], maxLength: 128 },
           license_id: { type: ["string", "null"], maxLength: 128 },
+          max_active_devices: { type: "integer", minimum: 1, maximum: MAX_DEVICE_LIMIT, description: "Device limit. A protected grant refuses a limit below its connected devices with 409 capacity_in_use and data.devices_in_use." },
         },
+        dependentSchemas: { max_active_devices: { propertyNames: { enum: ["max_active_devices", "expected_customer_id", "expected_revocation_seq"] } } },
       }],
       ["EntitlementSyncInput", {
         not: { required: ["enforcement_mode"] },

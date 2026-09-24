@@ -1,4 +1,5 @@
 import { encodeBase64url, deviceOperationBody, deviceOperationDigestInput } from "@licensecc/licensing-domain/lease/device_protocol";
+import { boundOccupiedSql } from "@licensecc/cloudflare-runtime/device/bound_capacity";
 import { deviceLeaseWindow } from "@licensecc/licensing-domain/lease/device_policy";
 import { BoundRequestError, validateBoundRequest } from "./bound_request.mjs";
 import { boundRandomId, boundSecretHash } from "./bound_enrollment.mjs";
@@ -72,8 +73,8 @@ async function authority(db, purpose, request, verified, operation) {
   if ((operation || purpose === "renew") && (!binding || !device)) deny("binding_unavailable", 404);
   if (purpose === "renew" && binding.generation !== request.generation) deny("revision_conflict", 409);
   if (!binding) {
-    const capacity = await db.prepare(`SELECT count(*) AS occupied FROM device_bound_bindings WHERE project=? AND feature=?
-      AND license_fingerprint=? AND (state='active' OR (state='retiring' AND hold_until>unixepoch()))`)
+    const capacity = await db.prepare(`SELECT count(*) AS occupied FROM device_bound_bindings b WHERE b.project=? AND b.feature=?
+      AND b.license_fingerprint=? AND ${boundOccupiedSql("b", "unixepoch()")}`)
       .bind(subject.project, subject.feature, subject.license_fingerprint).first();
     if (capacity.occupied >= entitlement.max_active_devices) {
       const created = await db.prepare(`SELECT b.id FROM device_bound_bindings b JOIN device_bound_devices d ON d.id=b.device_id

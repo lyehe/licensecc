@@ -146,6 +146,42 @@ export async function loadAllExactPages<T>(
   return { kind: "success", items };
 }
 
+export type ExactFirstPageRead<T> =
+  | { kind: "success"; items: T[]; more: boolean }
+  | { kind: "stale" }
+  | { kind: "failure"; message: string };
+
+/**
+ * A typeahead reads one bounded page per search and says whether more matched, rather than
+ * walking every page; the operator narrows the search instead. The same fence and duplicate
+ * rules as a full selector read apply, so an older search can never replace a newer one.
+ */
+export async function loadExactFirstPage<T>(
+  url: string,
+  expectedCode: string,
+  dataGuard: (value: unknown) => boolean,
+  fence: RequestFence,
+  identity: (item: T) => string,
+  isCurrent: () => boolean = () => true,
+): Promise<ExactFirstPageRead<T>> {
+  const ticket = fence.begin();
+  const response = await api<{ items: T[]; next_cursor: string | null }>(url);
+  if (!isCurrent() || !fence.isCurrent(ticket)) {
+    return { kind: "stale" };
+  }
+  const parsed = parseExactApiSuccess<{ items: T[]; next_cursor: string | null }>(response, expectedCode, dataGuard);
+  if (parsed === null) {
+    return { kind: "failure", message: apiFailureMessage(response) };
+  }
+  if (pageAppendError([], parsed.data.items, identity) !== null) {
+    return { kind: "failure", message: "invalid_api_response (duplicate_page_item)" };
+  }
+  if (!fence.settle(ticket)) {
+    return { kind: "stale" };
+  }
+  return { kind: "success", items: parsed.data.items, more: (parsed.data.next_cursor ?? null) !== null };
+}
+
 export async function downloadCsv(
   listUrl: string,
   filename: string,

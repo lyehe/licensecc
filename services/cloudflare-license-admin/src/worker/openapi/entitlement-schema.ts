@@ -1,3 +1,5 @@
+import { MAX_DEVICE_LIMIT } from "../../shared/api.js";
+
 export const entitlementRecordSchema = {
   type: "object",
   properties: {
@@ -25,6 +27,7 @@ export const entitlementRecordSchema = {
     trial_require_device_proof: { type: "integer", enum: [0, 1] },
     trial_started_at: { type: ["integer", "null"] },
     trial_device_hash: { type: ["string", "null"] },
+    max_active_devices: { type: "integer", minimum: 0, description: "Device limit: the most devices this license (entitlement) may have connected at once." },
   },
 };
 
@@ -33,6 +36,7 @@ export const entitlementCreateSchema = {
     type: "object",
     properties: {
       enforcement_mode: { type: "string", enum: ["legacy", "device_bound_v1"], description: "Create-only selection. Omission inserts legacy or preserves existing mode. Explicit mode must match an existing row; no in-place conversion. Protected grants require an active customer, matching license/project, zero pool, no legacy device hash/history, and usable policy. Explicit retries require the same tuple and mode; historical missing-mode replies conflict." },
+      max_active_devices: { type: "integer", minimum: 1, maximum: MAX_DEVICE_LIMIT, description: "Device limit for a create that selects no policy; omitted, the create keeps the stored limit (1 for a new grant). It is written in the create's own batch. A selected policy stamps its own limit, so sending both returns 400 invalid_request. On a protected grant, a limit below the devices already connected is refused as protected_creation_conflict with data.reason invalid_capacity." },
     },
     if: { required: ["enforcement_mode"], properties: { enforcement_mode: { const: "device_bound_v1" } } },
     then: {
@@ -48,5 +52,9 @@ export const entitlementCreateSchema = {
         valid_until: { type: ["integer", "null"], minimum: 0, maximum: Number.MAX_SAFE_INTEGER },
       },
     },
+  }, {
+    // A selected policy owns the device limit.
+    if: { required: ["policy_id"], properties: { policy_id: { type: "string", minLength: 1 } } },
+    then: { not: { required: ["max_active_devices"] } },
   }],
 };

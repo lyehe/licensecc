@@ -28,3 +28,18 @@ export interface NavigationIntent {
 }
 
 export type NavigationTarget = Omit<NavigationIntent, "id">;
+
+/**
+ * "Create policy…" from an entitlement draft: the draft stays parked in its (still mounted)
+ * workspace while Policies opens its form for the draft's project. Session memory only; a draft
+ * never enters the URL or history.
+ */
+export interface PolicyDraftRequest {
+  readonly project: string;
+}
+
+/** The policy created for a parked draft, handed back when the operator returns to it. */
+export interface DraftPolicy {
+  readonly id: string;
+  readonly project: string;
+}

@@ -2,7 +2,7 @@ import React, { FormEvent, useCallback, useEffect, useLayoutEffect, useMemo, use
 
 import type { EntitlementDeviceRecord, EntitlementRecord, Policy } from "../../../shared/api";
 import { ENTITLEMENT_BATCH_MAX_IDS } from "../../../shared/api";
-import type { NavigationIntent } from "../../app/types";
+import type { DraftPolicy, NavigationIntent } from "../../app/types";
 import { api, apiFailureDetails, apiFailureMessage, parseExactApiSuccess } from "../../shared/api";
 import { confirmMutationUnknown, confirmSuccessWithRefreshFailure, ConfirmRefreshFailure, EXACT_READ_PROOF, type ConfirmActionOutcome, type ConfirmActionResolution, type ExactReadProof, useContextGeneration, useOperatorControls } from "../../shared/controls";
 import { useCoreRefresh } from "../../shared/coreRefresh";
@@ -41,12 +41,16 @@ import {
   transitionPath,
 } from "./workflow";
 
-export function Entitlements({ active, navigationIntent, onNavigationHandled, scopedGrant, onExit }: {
+export function Entitlements({ active, navigationIntent, onNavigationHandled, scopedGrant, onExit, onCreatePolicy, draftPolicy = null, onDraftPolicyUsed }: {
   active: boolean;
   scopedGrant?: EntitlementFilter;
   onExit?: () => void;
   navigationIntent: NavigationIntent | null;
   onNavigationHandled: (intent: NavigationIntent) => void;
+  /** Opens the policy form for a project while the create draft stays parked here; false if it could not leave. */
+  onCreatePolicy?: (project: string) => boolean;
+  draftPolicy?: DraftPolicy | null;
+  onDraftPolicyUsed?: () => void;
 }): React.ReactElement | null {
   const [entitlements, setEntitlements] = useState<EntitlementRecord[]>([]);
   const [entitlementsCursor, setEntitlementsCursor] = useState<string | null>(null);
@@ -80,10 +84,23 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
   const hasLoadedEntitlements = useRef(false);
   const inspection = useEntitlementInspection(active, filterContextKey, setMessage);
   const { deviceEntitlementId, deviceContextKey, deviceGeneration, isDeviceGenerationCurrent, currentDeviceGeneration, currentDeviceContext, currentDevicesRefreshRef } = inspection;
+  // "Create policy…" parks the create draft: the guard stands down for that one departure, and the
+  // draft stays in this mounted workspace until the operator comes back, with the new policy.
+  const [policyDetour, setPolicyDetour] = useState<"leaving" | "away" | null>(null);
   const { requestLeave } = useNavigationGuard({
-    when: active && !operationLocked && ((createOpen && formContextKey !== JSON.stringify(emptyEntitlementForm)) || (editingId !== null && JSON.stringify(editForm) !== editBaseline)),
+    when: active && !operationLocked && policyDetour === null && ((createOpen && formContextKey !== JSON.stringify(emptyEntitlementForm)) || (editingId !== null && JSON.stringify(editForm) !== editBaseline)),
     onDiscard: () => { setCreateOpen(false); setForm(emptyEntitlementForm); cancelEdit(); },
   });
+  useEffect(() => {
+    if (policyDetour === "leaving") setPolicyDetour(onCreatePolicy?.(form.project) ? "away" : null);
+  }, [policyDetour, onCreatePolicy, form.project]);
+  useEffect(() => {
+    if (!active) return;
+    setPolicyDetour((current) => current === "away" ? null : current);
+    if (draftPolicy === null) return;
+    if (createOpen) setForm((previous) => previous.project === draftPolicy.project ? { ...previous, policy_id: draftPolicy.id } : previous);
+    onDraftPolicyUsed?.();
+  }, [active, draftPolicy, createOpen, onDraftPolicyUsed]);
   useEffect(() => {
     const editorOpen = createOpen || editingId !== null;
     if (active && previousEditorOpen.current && !editorOpen) focusWorkspaceTarget();
@@ -175,6 +192,7 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
       return;
     }
     const expectedStatus = body.status ?? "active";
+    const expectedLimit = "max_active_devices" in body ? body.max_active_devices : undefined;
     const requestBody = JSON.stringify(body);
     await runKeyedMutation({
       request: { method: "POST", path: "/api/admin/entitlements", body: requestBody },
@@ -182,7 +200,8 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
       parse: (result, phase) => parseMutationResponse(result, "entitlement_saved", (value): value is EntitlementRecord => {
         if (!hasEntitlementRecordData(value)) return false;
         const row = value as EntitlementRecord;
-        return row.project === body.project && row.feature === body.feature && row.license_fingerprint === body.license_fingerprint && row.status === expectedStatus && row.enforcement_mode === body.enforcement_mode;
+        return row.project === body.project && row.feature === body.feature && row.license_fingerprint === body.license_fingerprint && row.status === expectedStatus && row.enforcement_mode === body.enforcement_mode
+          && (expectedLimit === undefined || row.max_active_devices === expectedLimit);
       }, mutationFailurePolicies.entitlementCreate, phase),
       onApplied: async (parsed) => {
         if (!isCurrent()) return;
@@ -623,7 +642,7 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
     {onExit && <button disabled={busy} onClick={() => requestLeave(onExit)}>Back to app</button>}
     {createOpen || editingId !== null ? <>
       {editingId !== null && <ReadNotice loading={!ready && listError === null} error={listError} hasData={visibleEntitlements.length > 0} label="entitlements" onRetry={() => void refresh()} />}
-      {createOpen || editingItem ? <EntitlementEditor key={createOpen ? "create" : editingId} form={createOpen ? form : editForm} item={createOpen ? undefined : editingItem} extendValidity={extendValidity} busy={busy} locked={operationLocked || (!createOpen && (!ready || editingItem?.status === "revoked"))} lockMessage={operationLocked ? undefined : editingItem?.status === "revoked" ? "Revocation is permanent. This entitlement can no longer be edited." : "Refresh entitlements successfully before changing or saving this draft."} policies={activePoliciesFence.isSettled() ? activePolicies : []} policiesReady={activePoliciesFence.canLoadMore()} policiesError={policyError} onRetryPolicies={() => void refreshPolicies()} onChange={(patch) => createOpen ? setForm((previous) => ({ ...previous, ...patch })) : setEditForm((previous) => ({ ...previous, ...patch }))} onSubmit={createOpen ? submitCreate : (event) => submitPatch(event, editingItem!)} onCancel={closeEditor} /> : <div className="emptyState"><p>{ready ? "This entitlement is no longer in the current list. Return to the list to select a current record." : "Waiting for the current entitlement record."}</p><button type="button" disabled={busy} onClick={closeEditor}>Back to entitlements</button></div>}
+      {createOpen || editingItem ? <EntitlementEditor key={createOpen ? "create" : editingId} form={createOpen ? form : editForm} item={createOpen ? undefined : editingItem} extendValidity={extendValidity} busy={busy} locked={operationLocked || (!createOpen && (!ready || editingItem?.status === "revoked"))} lockMessage={operationLocked ? undefined : editingItem?.status === "revoked" ? "Revocation is permanent. This entitlement can no longer be edited." : "Refresh entitlements successfully before changing or saving this draft."} policies={activePoliciesFence.isSettled() ? activePolicies : []} policiesReady={activePoliciesFence.canLoadMore()} policiesError={policyError} onRetryPolicies={() => void refreshPolicies()} onCreatePolicy={createOpen && onCreatePolicy !== undefined ? () => setPolicyDetour("leaving") : undefined} onChange={(patch) => createOpen ? setForm((previous) => ({ ...previous, ...patch })) : setEditForm((previous) => ({ ...previous, ...patch }))} onSubmit={createOpen ? submitCreate : (event) => submitPatch(event, editingItem!)} onCancel={closeEditor} /> : <div className="emptyState"><p>{ready ? "This entitlement is no longer in the current list. Return to the list to select a current record." : "Waiting for the current entitlement record."}</p><button type="button" disabled={busy} onClick={closeEditor}>Back to entitlements</button></div>}
     </> : <>
       <EntitlementList scoped={scopedGrant !== undefined} items={visibleEntitlements} filter={filter} onFilter={setFilter} loading={!ready && listError === null} error={listError} ready={ready} busy={busy} selectedIds={selectedIds} selectedCount={selectedCount} allSelected={allSelected} onSelect={toggleSelected} onSelectAll={toggleSelectAll} onClearSelection={() => setSelectedIds(new Set())} onCreate={() => { requestLeave(() => { cancelEdit(); setForm({ ...emptyEntitlementForm, project:filter.project || emptyEntitlementForm.project, feature:filter.feature || emptyEntitlementForm.feature, customer_id:filter.customer_id || "" }); setCreateOpen(true); }); }} onEdit={beginEdit} onRetry={() => void refresh()} onExport={() => void downloadCsv(entitlementsUrl, "entitlements.csv", runMutation, setMessage)} onLoadMore={visibleEntitlementsCursor === null ? null : () => void loadMore(entitlementsUrl, visibleEntitlementsCursor, visibleEntitlements, setEntitlements, setEntitlementsCursor, setMessage, hasEntitlementListData, "entitlements_listed", entitlementsFence, (entitlement) => entitlement.id)} onTransition={transition} onReleaseSeats={releaseSeats} onBatch={runBatch} bulkConfirmBody={bulkConfirmBody} isCurrent={() => isFilterGenerationCurrent(filterGeneration)} deviceEntitlementId={deviceEntitlementId} meterEntitlementId={inspection.meterEntitlementId} onDevices={inspection.toggleDevices} onMeter={inspection.toggleMeter} />
       <EntitlementInspectors inspection={inspection} busy={busy} onDeviceTransition={deviceTransition} />
