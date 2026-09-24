@@ -87,10 +87,10 @@ final class FeatureSessionAdapterTest {
         System.out.println("Feature-session adapter checks passed");
     }
     public static void main(String[] args) throws Exception {
-        check(args.length == 1, "older JNI fixture path");
+        check(args.length == 1, "path of a protocol-2 JNI fixture without feature-session exports");
         try { new FeatureSessionLibrary(Path.of(args[0])); throw new AssertionError("Expected unsupported optional API"); }
         catch (UnsupportedOperationException expected) { check(expected.getMessage().contains("does not support"), "explicit unsupported"); }
         new DeviceBoundLibrary(Path.of(args[0]));
-        System.out.println("Older JNI remains usable after optional feature-session rejection");
+        System.out.println("A protocol-2 JNI library without feature-session exports remains usable after optional feature-session rejection");
     }
 }

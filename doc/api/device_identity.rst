@@ -87,9 +87,12 @@ and the detail is ``LCC_BOUND_DETAIL_DEVICE_LIMIT``; the server issued nothing.
 Ask the user to disconnect a device in the customer portal (Devices), then call
 ``activate`` again. The approval behind the attempt is short-lived, so a later
 retry often reports ``LCC_BOUND_ENROLLMENT_REQUIRED`` and needs a new enrollment.
-Every other outcome, including other conflicts, reports
-``LCC_BOUND_DETAIL_NONE``. Renewal and feature sessions never report the device
-limit. Treat a value the header does not name as ``LCC_BOUND_DETAIL_NONE``.
+Every other outcome the library writes, including other conflicts, reports
+``LCC_BOUND_DETAIL_NONE``. A call that returns before writing, such as an outer
+``LCC_BOUND_BUSY`` or a rejected argument or outcome structure, leaves the
+caller's outcome as it was, so initialize it before each call. Renewal and
+feature sessions never report the device limit. Treat a value the header does
+not name as ``LCC_BOUND_DETAIL_NONE``.
 
 The detail occupies the outcome's former ``reserved`` member. This C ABI change
 is additive: the outcome's size and offsets, ``LCC_DEVICE_BOUND_VERSION`` and

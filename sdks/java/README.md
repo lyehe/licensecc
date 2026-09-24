@@ -16,8 +16,9 @@ same handle with bounded backoff. Handle checkpoint failures independently with
 Call `stop()` to end local authority and use try-with-resources to close the
 session. Stop does not retire the machine or release a device slot. Another
 feature, such as `EXPORT`, needs its own enrolled configuration and session.
-Older JNI DLLs explicitly reject this optional API while remaining usable by
-`DeviceBoundLibrary`. See the [installed adapter guide](native/README.md) and
+Build the JNI library from the same SDK version as the JAR: a JNI library from
+before this release (JNI protocol 1) is rejected at load, by `DeviceBoundLibrary`
+as well as by this adapter. See the [installed adapter guide](native/README.md) and
 [native session contract](../../doc/api/feature_sessions.rst).
 
 The Java 17 SDK is a dependency-free client for Licensecc's HTTP and

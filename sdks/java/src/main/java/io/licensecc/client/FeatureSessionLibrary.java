@@ -5,7 +5,10 @@ import java.lang.ref.Reference;
 import java.nio.file.Path;
 import java.util.Objects;
 
-/** Optional feature-session adapter. Existing DeviceBoundLibrary supports older JNI DLLs. */
+/**
+ * Optional feature-session adapter. Build the JNI library from the same SDK version as the JAR:
+ * a JNI library from before this release (JNI protocol 1) is rejected at load.
+ */
 public final class FeatureSessionLibrary {
     private final FeatureSessionApi api;
     public FeatureSessionLibrary(Path absoluteDllPath) throws IOException { this(FeatureSessionNative.load(absoluteDllPath)); }

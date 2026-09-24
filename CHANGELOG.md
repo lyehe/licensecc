@@ -126,6 +126,9 @@ are recorded in [ADR 0005](doc/architecture/decisions/0005-platform-version-and-
   upgrade the SDK together with the native bridge library. The Java JNI adapter
   now uses protocol 2 (its outcome arrays carry the detail): build the JNI library
   from the same SDK version as the JAR, because a mismatched pair fails at load.
+  Java's `DeviceBoundClient.Outcome` record gains a sixth component, `detail`; the
+  five-argument constructor remains, but Java 21 record patterns that name five
+  components must add it.
 
 ### Fixed
 - C++ core: unstable disk-derived hardware ids on device-path fstab entries; `confirm_license`
