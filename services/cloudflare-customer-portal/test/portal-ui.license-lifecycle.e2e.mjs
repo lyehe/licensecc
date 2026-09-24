@@ -71,7 +71,7 @@ test("license lifecycle: each state reads as words with its UTC date and next st
   await expect(beta.getByText("Needs attention", { exact: true })).toHaveCount(0);
   await page.screenshot({ path: testInfo.outputPath("license-lifecycle-apps.png"), fullPage: true });
 
-  await page.getByRole("link", { name: "View app ALPHA" }).click();
+  await page.getByRole("link", { name: "View licenses for ALPHA" }).click();
   await expect(page.getByRole("heading", { name: "ALPHA", exact: true })).toBeVisible();
 
   // --- Status: the state, its date, and the next step ---

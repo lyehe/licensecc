@@ -183,6 +183,33 @@ test("provider unlink requires a session and documents every status its handler 
   assert.deepEqual(documentedErrorCodes(path, 503), ["config_error"]);
 });
 
+// C6: the seven auth entry points that now send a real `retry-after` header must document it; the
+// password-change 429 (not one of the auth entry points the UI drives its countdown from) and the
+// operator break-glass bootstrap route were both deliberately left out of the rollout.
+test("the auth 429s that now carry retry-after document it; the untouched 429s do not", () => {
+  const withHeader = [
+    ["/portal/v1/auth/request", "post"],
+    ["/portal/v1/auth/verify", "post"],
+    ["/portal/v1/auth/magic-redeem", "post"],
+    ["/portal/v1/auth/password/login", "post"],
+    ["/portal/v1/auth/password/register", "post"],
+    ["/portal/v1/auth/password/reset", "post"],
+    ["/portal/v1/auth/password/complete", "post"],
+  ];
+  for (const [path, method] of withHeader) {
+    const response = openApiDocument.paths[path]?.[method]?.responses?.["429"];
+    assert.ok(response, `${method.toUpperCase()} ${path} must document 429`);
+    assert.ok(response.headers?.["retry-after"], `${method.toUpperCase()} ${path} 429 must document the retry-after header`);
+    assert.match(response.description, /retry-after/i, `${method.toUpperCase()} ${path} 429 description must mention retry-after`);
+  }
+  const settingsChange = openApiDocument.paths["/portal/v1/auth/password"]?.post?.responses?.["429"];
+  assert.ok(settingsChange, "password settings POST must still document 429");
+  assert.equal(settingsChange.headers, undefined, "the password-change 429 was left out of the retry-after rollout");
+  const bootstrap = openApiDocument.paths["/portal/v1/admin/bootstrap-otp"]?.post?.responses?.["429"];
+  assert.ok(bootstrap, "bootstrap-otp must still document 429");
+  assert.equal(bootstrap.headers, undefined, "the operator break-glass route stays outside the customer-facing retry-after rollout");
+});
+
 test("the providers envelope documents its nullable support contact", () => {
   const data = openApiDocument.paths["/portal/v1/auth/providers"].get.responses["200"].content["application/json"].schema.properties.data;
   assert.deepEqual(data.properties.support.type, ["string", "null"]);

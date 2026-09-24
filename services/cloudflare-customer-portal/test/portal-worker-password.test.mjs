@@ -68,9 +68,37 @@ test("CSRF, body limits, disabled configuration and throttling gate credential w
   assert.equal((await call({ ...env, PORTAL_PASSWORD_ENABLED: "0" }, "POST", `${PATH}/register`, { body: { email: "new@example.com" } })).status, 404);
   const window = Math.floor(NOW / 900) * 900;
   db.prepare("INSERT INTO rate_limit_counters (namespace, rate_key, window_start, request_count, expires_at, updated_at) VALUES ('portal', 'password:register:ip:', ?, 5, ?, ?)").run(window, NOW + 1800, NOW);
-  assert.equal((await call({ ...env, PORTAL_EMAIL_API_KEY: "test", PORTAL_EMAIL_FROM: "sender@example.com" }, "POST", `${PATH}/register`, { body: { email: "new@example.com" } })).status, 429);
+  const limited = await call({ ...env, PORTAL_EMAIL_API_KEY: "test", PORTAL_EMAIL_FROM: "sender@example.com" }, "POST", `${PATH}/register`, { body: { email: "new@example.com" } });
+  assert.equal(limited.status, 429);
+  // C6: the auth 429s carry the exact seconds left in the fixed window, so the UI can say "Try again
+  // in {n} minutes." instead of a vague "later".
+  assert.equal(limited.res.headers.get("retry-after"), String(window + 900 - NOW));
   assert.equal(db.prepare("SELECT count(*) AS n FROM portal_passwords").get().n, 0);
   assert.equal((await call(env, "GET", PATH)).status, 401);
+});
+test("login over the per-IP cap answers 429 with the exact retry-after for the fixed window", async t => {
+  t.mock.method(Date, "now", () => NOW * 1000);
+  const { env, db } = fixture();
+  const window = Math.floor(NOW / 900) * 900;
+  db.prepare("INSERT INTO rate_limit_counters (namespace, rate_key, window_start, request_count, expires_at, updated_at) VALUES ('portal', 'password:login:ip:', ?, 30, ?, ?)").run(window, NOW + 1800, NOW);
+  const limited = await login(env, "nobody@example.com", PASSWORD);
+  assert.equal(limited.status, 429);
+  assert.equal(limited.body.code, "rate_limited");
+  assert.equal(limited.res.headers.get("retry-after"), String(window + 900 - NOW));
+});
+// The password-change ("settings" POST) 429 was deliberately left out of the retry-after rollout
+// (it is not one of the auth entry points the UI drives the countdown sentence from), so its 429
+// must keep answering with no header at all.
+test("a signed-in password change over its own rate limit answers 429 with no retry-after header", async t => {
+  t.mock.method(Date, "now", () => NOW * 1000);
+  const { env, db } = fixture();
+  const result = await register(env);
+  const sessionCookie = cookie(result);
+  const window = Math.floor(NOW / 900) * 900;
+  db.prepare("INSERT INTO rate_limit_counters (namespace, rate_key, window_start, request_count, expires_at, updated_at) VALUES ('portal', 'password:change:ip:', ?, 30, ?, ?)").run(window, NOW + 1800, NOW);
+  const limited = await call(env, "POST", PATH, { cookie: sessionCookie, body: { password: NEXT, current_password: PASSWORD } });
+  assert.equal(limited.status, 429);
+  assert.equal(limited.res.headers.get("retry-after"), null);
 });
 test("password change requires proof, rotates sessions and prevents old-hash session minting", async () => {
   const { env, db } = fixture();

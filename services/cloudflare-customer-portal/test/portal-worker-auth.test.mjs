@@ -215,6 +215,50 @@ test("auth/request returns the SAME ok for a known and unknown email (no enumera
   db.close();
 });
 
+// C6: the UI shows "Try again in {n} minutes." from this header alone, so every JSON-answering auth
+// 429 must carry the exact seconds left in portalRateLimit's own fixed window.
+test("auth/request over the per-email cap answers 429 with the exact retry-after for the fixed window", async (t) => {
+  t.mock.method(Date, "now", () => NOW * 1000);
+  const { db, env } = baseFixture();
+  const window = Math.floor(NOW / 900) * 900;
+  db.prepare(
+    "INSERT INTO rate_limit_counters (namespace, rate_key, window_start, request_count, expires_at, updated_at) VALUES ('portal', 'request:email:a@x.com', ?, 5, ?, ?)",
+  ).run(window, NOW + 1800, NOW);
+  const result = await call(env, "POST", "/portal/v1/auth/request", { body: { email: "a@x.com" } });
+  assert.equal(result.status, 429);
+  assert.equal(result.body.code, "rate_limited");
+  assert.equal(result.res.headers.get("retry-after"), String(window + 900 - NOW));
+  db.close();
+});
+
+test("auth/verify over the per-IP cap answers 429 with the exact retry-after for the fixed window", async (t) => {
+  t.mock.method(Date, "now", () => NOW * 1000);
+  const { db, env } = baseFixture();
+  const window = Math.floor(NOW / 900) * 900;
+  db.prepare(
+    "INSERT INTO rate_limit_counters (namespace, rate_key, window_start, request_count, expires_at, updated_at) VALUES ('portal', 'verify:ip:', ?, 30, ?, ?)",
+  ).run(window, NOW + 1800, NOW);
+  const result = await call(env, "POST", "/portal/v1/auth/verify", { body: { email: "a@x.com", code: "12345678" } });
+  assert.equal(result.status, 429);
+  assert.equal(result.body.code, "rate_limited");
+  assert.equal(result.res.headers.get("retry-after"), String(window + 900 - NOW));
+  db.close();
+});
+
+test("auth magic redeem (JSON caller) over the per-IP cap answers 429 with the exact retry-after", async (t) => {
+  t.mock.method(Date, "now", () => NOW * 1000);
+  const { db, env } = baseFixture();
+  const window = Math.floor(NOW / 900) * 900;
+  db.prepare(
+    "INSERT INTO rate_limit_counters (namespace, rate_key, window_start, request_count, expires_at, updated_at) VALUES ('portal', 'verify:ip:', ?, 30, ?, ?)",
+  ).run(window, NOW + 1800, NOW);
+  const result = await call(env, "POST", "/portal/v1/auth/magic-redeem", { body: { token: "z".repeat(43) } });
+  assert.equal(result.status, 429);
+  assert.equal(result.body.code, "rate_limited");
+  assert.equal(result.res.headers.get("retry-after"), String(window + 900 - NOW));
+  db.close();
+});
+
 test("auth magic GET renders a POST interstitial without consuming the secret", async () => {
   const { db, env } = baseFixture();
   const res = await worker.fetch(new Request("https://portal.test/portal/v1/auth/magic?token=secret_value"), env, CTX);
@@ -408,6 +452,9 @@ test("auth magic redeem: exceeding the per-IP verify rate limit redirects to rat
   const result = await magicResponse(env, streamingMagicRequest(["token=bad"]).request);
   assert.equal(result.status, 303);
   assert.equal(result.res.headers.get("location"), "https://portal.test/?auth_error=rate_limited");
+  // C6: a top-level redirect has no script running to read a header, so this path never gets one
+  // (the UI instead falls back to the "later" wording for auth_error=rate_limited).
+  assert.equal(result.res.headers.get("retry-after"), null);
   db.close();
 });
 

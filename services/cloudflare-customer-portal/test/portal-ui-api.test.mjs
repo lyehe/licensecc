@@ -20,7 +20,7 @@ async function loadApiModule() {
   assert.ok(cut > 0, "api.tsx must still define StatusLine at this exact name for the slice point below to be valid");
   const pureSource = fullSource.slice(0, cut)
     .replace(/^import React from "react";\n/m, "")
-    .replace(/^import \{ describeResultCode, describeUnknownResult \} from "\.\.\/portalWorkflow";\n/m, "");
+    .replace(/^import \{ describeResultCode, describeUnknownResult, rateLimitMessage \} from "\.\.\/portalWorkflow";\n/m, "");
   assert.doesNotMatch(pureSource, /from "react"|from "\.\.\/portalWorkflow"/, "the sliced source must have zero remaining runtime imports to resolve");
   const transpiled = ts.transpileModule(pureSource, {
     compilerOptions: {
@@ -39,8 +39,14 @@ async function loadApiModule() {
   }
 }
 
-function jsonResponse(status, body) {
-  return { status, ok: status >= 200 && status < 300, json: async () => body };
+function jsonResponse(status, body, headers = {}) {
+  const lower = Object.fromEntries(Object.entries(headers).map(([key, value]) => [key.toLowerCase(), value]));
+  return {
+    status,
+    ok: status >= 200 && status < 300,
+    json: async () => body,
+    headers: { get: (name) => (Object.hasOwn(lower, name.toLowerCase()) ? lower[name.toLowerCase()] : null) },
+  };
 }
 
 // Fix round 1 (Minor): a session epoch stops a straggler -- a request sent under an OLD, already-
@@ -112,4 +118,29 @@ test("beginNewSession/currentSessionEpoch track one counter, and credential 401s
   // Same (current) epoch, but a credential failure code -- must never fire, epoch match or not.
   api.reportUnauthorized(401, "invalid_otp", api.currentSessionEpoch());
   assert.equal(fired.length, 0);
+});
+
+// C6: the auth 429s now carry a real retry-after header; api() surfaces it on the envelope so the
+// UI can build "Try again in {n} minutes." without re-parsing headers at every call site.
+test("api() surfaces the retry-after response header as retryAfter on the envelope", async () => {
+  const api = await loadApiModule();
+  globalThis.fetch = async () => jsonResponse(429, { ok: false, code: "rate_limited", request_id: "r5" }, { "retry-after": "42" });
+  const result = await api.api("/portal/v1/auth/request", { method: "POST" });
+  assert.equal(result.code, "rate_limited");
+  assert.equal(result.retryAfter, 42);
+});
+
+test("api() leaves retryAfter unset when no retry-after header is present", async () => {
+  const api = await loadApiModule();
+  globalThis.fetch = async () => jsonResponse(200, { ok: true, code: "otp_requested", request_id: "r6" });
+  const result = await api.api("/portal/v1/auth/request", { method: "POST" });
+  assert.equal(result.code, "otp_requested");
+  assert.equal(result.retryAfter, undefined);
+});
+
+test("api() ignores a non-numeric retry-after header rather than surfacing NaN", async () => {
+  const api = await loadApiModule();
+  globalThis.fetch = async () => jsonResponse(429, { ok: false, code: "rate_limited", request_id: "r7" }, { "retry-after": "not-a-number" });
+  const result = await api.api("/portal/v1/auth/request", { method: "POST" });
+  assert.equal(result.retryAfter, undefined);
 });

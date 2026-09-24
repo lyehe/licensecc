@@ -101,7 +101,7 @@ test("an expired session mid-download returns to sign-in with the session-ended 
   setup(page, "/api/portal/download");
   await page.goto("/");
   await signInThroughCode(page);
-  await page.getByRole("link", { name: "View app DEFAULT" }).click();
+  await page.getByRole("link", { name: "View licenses for DEFAULT" }).click();
   await page.locator("tr").filter({ has: page.getByLabel("Device key for DEFAULT solo") }).getByText("Activate and download", { exact: true }).click();
   await page.getByLabel("Device key for DEFAULT solo").fill("device-e2e");
   await page.getByRole("button", { name: "Activate and download .lic" }).click();

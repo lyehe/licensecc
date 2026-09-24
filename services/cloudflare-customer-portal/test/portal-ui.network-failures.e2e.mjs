@@ -121,6 +121,26 @@ test("an aborted verify call shows the network message and stays on the verify s
   expect(pageErrors).toEqual([]);
 });
 
+// Carried from C2: api()'s own network_unavailable now reaches passwordMessage() too (PasswordSignIn,
+// PasswordAction, PasswordSettings), which previously had no copy for it and fell through to the
+// generic "Unable to complete the request" fallback.
+test("an aborted password login shows the network message and leaves the form usable", async ({ page }) => {
+  const pageErrors = [];
+  page.on("pageerror", (error) => pageErrors.push(error));
+  await page.route("**/api/portal/me", (route) => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" } }));
+  await page.route("**/portal/v1/auth/providers", (route) => route.fulfill({ json: makeEnvelope("auth_providers", { google: false, github: false, email: false, password: true }) }));
+  await page.route("**/portal/v1/auth/password/login", (route) => route.abort("failed"));
+  await page.goto("/");
+  await page.getByLabel("Email", { exact: true }).fill("user@example.com");
+  await page.getByLabel("Password", { exact: true }).fill("A testing passphrase 1!");
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await expect(page.getByText(NETWORK_UNAVAILABLE_COPY, { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Sign in", exact: true })).toBeEnabled();
+  await expect(page.getByLabel("Password", { exact: true })).toHaveValue("");
+  await expect(page.getByText("network_unavailable", { exact: false })).not.toBeVisible();
+  expect(pageErrors).toEqual([]);
+});
+
 test("an aborted logout call keeps the customer signed in and explains the failure", async ({ page }) => {
   const pageErrors = [];
   page.on("pageerror", (error) => pageErrors.push(error));
@@ -145,7 +165,7 @@ test("an aborted download call shows the network message with no page error", as
   setup(page, "/api/portal/download");
   await page.goto("/");
   await signInThroughCode(page);
-  await page.getByRole("link", { name: "View app DEFAULT" }).click();
+  await page.getByRole("link", { name: "View licenses for DEFAULT" }).click();
   await page.locator("tr").filter({ has: page.getByLabel("Device key for DEFAULT solo") }).getByText("Activate and download", { exact: true }).click();
   await page.getByLabel("Device key for DEFAULT solo").fill("device-e2e");
   await page.getByRole("button", { name: "Activate and download .lic" }).click();

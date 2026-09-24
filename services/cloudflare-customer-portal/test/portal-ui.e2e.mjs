@@ -71,7 +71,9 @@ test("password login errors clear the secret and explain recovery", async ({ pag
   await expect(page.getByRole("alert")).toHaveText("Email or password is incorrect.");
   await expect(page.getByLabel("Password", { exact: true })).toHaveValue("");
   await page.getByText("Forgot your password?", { exact: true }).click();
-  await expect(page.getByText(/We’ll send a reset link/)).toBeVisible();
+  // R20 (carried from A5): reworded to drop "verified" -- an admin-invited account with an
+  // unverified login email also recovers, and verifies, through this same reset.
+  await expect(page.getByText(/We’ll email a reset link to your login address/)).toBeVisible();
   await page.route("**/portal/v1/auth/password/reset", route => {
     expect(route.request().postDataJSON()).toEqual({ email: "new@example.com" });
     return route.fulfill({ status: 202, json: makeEnvelope("verification_requested") });
@@ -105,10 +107,13 @@ test("expired password link shows recovery guidance and reloading cannot retain 
   });
   const token = "b".repeat(43);
   await page.goto(`/password-action#token=${token}`);
+  await expect(page).toHaveTitle("Set a password · Licensecc");
+  await expect(page.getByRole("heading", { name: "Choose your password" })).toBeFocused();
   await page.getByLabel("New password", { exact: true }).fill("A replacement passphrase 2!");
   await page.getByLabel("Confirm password", { exact: true }).fill("A replacement passphrase 2!");
   await page.getByRole("button", { name: "Save password and sign in" }).click();
   await expect(page.getByRole("alert")).toContainText("expired or was already used");
+  await expect(page.getByRole("alert").getByRole("link", { name: "Request a new link" })).toBeVisible();
   await expect(page.getByLabel("New password", { exact: true })).toHaveValue("");
   expect(page.url()).not.toContain(token);
   expect(await page.evaluate(value => [...Object.values(localStorage), ...Object.values(sessionStorage)].some(v => v.includes(value)), token)).toBe(false);
@@ -118,6 +123,25 @@ test("expired password link shows recovery guidance and reloading cannot retain 
   expect(attempts).toBe(1);
 });
 
+// C6: "Request a new link" (invalid_link) is an actual affordance, not inert text -- it returns to
+// sign-in with the reset form already open, reusing PasswordSignIn's own `mode`.
+test("Request a new link returns to sign-in with the reset form already open", async ({ page }) => {
+  await page.route("**/api/portal/me", route => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" } }));
+  await page.route("**/portal/v1/auth/providers", route => route.fulfill({ json: makeEnvelope("auth_providers", { google: false, github: false, email: true, password: true }) }));
+  await page.route("**/portal/v1/auth/password/complete", route => route.fulfill({ status: 400, json: { ok: false, code: "invalid_link" } }));
+  const token = "c".repeat(43);
+  await page.goto(`/password-action#token=${token}`);
+  await page.getByLabel("New password", { exact: true }).fill("A replacement passphrase 3!");
+  await page.getByLabel("Confirm password", { exact: true }).fill("A replacement passphrase 3!");
+  await page.getByRole("button", { name: "Save password and sign in" }).click();
+  const requestNewLink = page.getByRole("link", { name: "Request a new link" });
+  await expect(requestNewLink).toBeVisible();
+  await requestNewLink.click();
+  await expect(page.getByRole("heading", { name: "Reset password", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Send reset link" })).toBeVisible();
+  expect(page.url()).not.toContain(token);
+});
+
 test("password sign-in hides email-only actions when email delivery is off", async ({ page }) => {
   await page.route("**/api/portal/me", route => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" } }));
   await page.route("**/portal/v1/auth/providers", route => route.fulfill({ json: makeEnvelope("auth_providers", { google: false, github: false, password: true, email: false }) }));
@@ -125,6 +149,21 @@ test("password sign-in hides email-only actions when email delivery is off", asy
   await expect(page.getByRole("button", { name: "Sign in" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Create an account", exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Forgot your password?" })).toHaveCount(0);
+  // Password-only mode (password configured, no email delivery: no reset email can ever be sent) --
+  // the forgot-password entry becomes a support-contact sentence instead of silently disappearing.
+  // No `support` field in this fixture, so it names the administrator fallback.
+  await expect(page.getByText("Contact your administrator to reset your password.", { exact: true })).toBeVisible();
+});
+
+// C6: the same password-only mode, but with a configured support contact -- the sentence must link
+// it exactly as <SupportContact/> does everywhere else, never a bare mailto/URL string.
+test("password-only mode with a configured support contact links it in the reset-password hint", async ({ page }) => {
+  await page.route("**/api/portal/me", route => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" } }));
+  await page.route("**/portal/v1/auth/providers", route => route.fulfill({ json: makeEnvelope("auth_providers", { google: false, github: false, password: true, email: false, support: "mailto:help@example.com" }) }));
+  await page.goto("/");
+  const hint = page.getByText("Contact support to reset your password.", { exact: true });
+  await expect(hint).toBeVisible();
+  await expect(hint.getByRole("link", { name: "Contact support", exact: true })).toHaveAttribute("href", "mailto:help@example.com");
 });
 
 test("password completion enforces the server length and explains a sign-in-required success", async ({ page }) => {
@@ -284,6 +323,102 @@ test("unconfigured providers show a clear unavailable state", async ({ page }) =
   await page.goto("/");
   await expect(page.getByText("Sign-in is not configured yet. Contact your administrator.")).toBeVisible();
   await expect(page.getByRole("button", { name: /Continue with|Send code/ })).toHaveCount(0);
+});
+
+// Carried from A3 (Minor 2 / R15): providers failing once must recover through Retry sign-in
+// options, landing back on a usable sign-in form -- not a stuck "Unable to load" state.
+test("providers failing once then succeeding recovers through Retry sign-in options (carried from A3)", async ({ page }) => {
+  await page.route("**/api/portal/me", (route) => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" } }));
+  let attempt = 0;
+  await page.route("**/portal/v1/auth/providers", (route) => {
+    attempt += 1;
+    if (attempt === 1) return route.fulfill({ status: 500, json: { ok: false, code: "portal_error", request_id: "providers-e2e" } });
+    return route.fulfill({ json: makeEnvelope("auth_providers", { google: false, github: false, email: true, password: false }) });
+  });
+  await page.goto("/");
+  await expect(page.getByText("Unable to load sign-in options.")).toBeVisible();
+  await page.getByRole("button", { name: "Retry sign-in options" }).click();
+  await expect(page.getByLabel("Email", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Send code" })).toBeVisible();
+  await expect(page.getByText("Unable to load sign-in options.")).toHaveCount(0);
+  expect(attempt).toBeGreaterThanOrEqual(2);
+});
+
+// C6: focus moves to the new h1 on every auth step and password-mode switch, using tabIndex={-1}.
+test("focus moves to the new heading on every sign-in step and mode switch", async ({ page }) => {
+  await page.route("**/api/portal/me", (route) => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" } }));
+  await page.route("**/portal/v1/auth/providers", (route) => route.fulfill({ json: makeEnvelope("auth_providers", { google: false, github: false, email: true, password: true }) }));
+  await page.goto("/");
+  const heading = page.getByRole("heading", { level: 1 });
+  await expect(heading).toHaveText("Sign in");
+  await expect(heading).toBeFocused();
+
+  await page.getByRole("button", { name: "Create an account", exact: true }).click();
+  await expect(heading).toHaveText("Create account");
+  await expect(heading).toBeFocused();
+
+  await page.getByRole("button", { name: "Back to sign in", exact: true }).click();
+  await expect(heading).toHaveText("Sign in");
+  await expect(heading).toBeFocused();
+
+  if (!await page.locator(".otherSignIn").evaluate((element) => element.open)) await page.getByText("Other sign-in options", { exact: true }).click();
+  await page.getByText("Use an email code instead", { exact: true }).click();
+  await page.getByLabel("Email", { exact: true }).fill("user@example.com");
+  await page.getByRole("button", { name: "Send code" }).click();
+  await expect(heading).toHaveText("Check your email");
+  await expect(heading).toBeFocused();
+});
+
+// C6: one sentence, driven by the server's real retry-after header, for the OTP request path.
+test("a mocked 429 with retry-after shows the shared rate-limit sentence with minutes (OTP request)", async ({ page }) => {
+  await page.route("**/api/portal/me", (route) => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" } }));
+  await page.route("**/portal/v1/auth/providers", (route) => route.fulfill({ json: makeEnvelope("auth_providers", { google: false, github: false, email: true, password: false }) }));
+  await page.route("**/portal/v1/auth/request", (route) => route.fulfill({ status: 429, headers: { "retry-after": "120" }, json: { ok: false, code: "rate_limited", request_id: "rl-e2e" } }));
+  await page.goto("/");
+  await page.getByLabel("Email", { exact: true }).fill("user@example.com");
+  await page.getByRole("button", { name: "Send code" }).click();
+  await expect(page.getByText("Too many attempts. Try again in 2 minutes.", { exact: true })).toBeVisible();
+  await expect(page.getByText("rate_limited", { exact: false })).toHaveCount(0);
+});
+
+// Same sentence, same header, on a password screen -- proving the UI copy is genuinely shared
+// rather than duplicated per auth surface.
+test("a mocked password-login 429 with retry-after shows the shared rate-limit sentence", async ({ page }) => {
+  await page.route("**/api/portal/me", (route) => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" } }));
+  await page.route("**/portal/v1/auth/providers", (route) => route.fulfill({ json: makeEnvelope("auth_providers", { google: false, github: false, email: false, password: true }) }));
+  await page.route("**/portal/v1/auth/password/login", (route) => route.fulfill({ status: 429, headers: { "retry-after": "45" }, json: { ok: false, code: "rate_limited", request_id: "rl-e2e-2" } }));
+  await page.goto("/");
+  await page.getByLabel("Email", { exact: true }).fill("user@example.com");
+  await page.getByLabel("Password", { exact: true }).fill("A testing passphrase 1!");
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await expect(page.getByRole("alert")).toHaveText("Too many attempts. Try again in 1 minutes.");
+});
+
+// When no header reaches the client at all (a top-level redirect from an OAuth/magic-link rate
+// limit), the sentence falls back to the same "later" wording, never the old bespoke copy.
+test("auth_error=rate_limited (redirect path, no header) shows the later-form sentence", async ({ page }) => {
+  await page.route("**/api/portal/me", (route) => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" } }));
+  await page.route("**/portal/v1/auth/providers", (route) => route.fulfill({ json: makeEnvelope("auth_providers", { google: true, github: false, email: false }) }));
+  await page.goto("/?auth_error=rate_limited");
+  await expect(page.getByText("Too many attempts. Try again later.", { exact: true })).toBeVisible();
+  await expect(page.getByText("Too many sign-in attempts", { exact: false })).toHaveCount(0);
+  expect(page.url()).not.toContain("auth_error");
+});
+
+// C6: the resend button's client-side-only 60s cooldown counts down and re-enables at zero.
+test("the resend cooldown counts down and re-enables at zero", async ({ page }) => {
+  await page.clock.install();
+  await page.route("**/api/portal/me", (route) => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" } }));
+  await page.route("**/portal/v1/auth/providers", (route) => route.fulfill({ json: makeEnvelope("auth_providers", { google: false, github: false, email: true, password: false }) }));
+  await page.route("**/portal/v1/auth/request", (route) => route.fulfill({ json: { ok: true, code: "otp_requested", request_id: "resend-e2e" } }));
+  await page.goto("/");
+  await page.getByLabel("Email", { exact: true }).fill("user@example.com");
+  await page.getByRole("button", { name: "Send code" }).click();
+  await expect(page.getByRole("button", { name: "Resend code (0:59)", exact: true })).toBeDisabled();
+  await page.clock.runFor("00:30");
+  await expect(page.getByRole("button", { name: "Resend code (0:29)", exact: true })).toBeDisabled();
+  await page.clock.runFor("00:29");
+  await expect(page.getByRole("button", { name: "Resend code", exact: true })).toBeEnabled();
 });
 
 test("Account shows connected methods and keeps linking failures visible", async ({ page }) => {
@@ -533,9 +668,14 @@ test("customer portal signs in with an 8-digit code and walks every screen witho
   const api = makePortalApiFixture();
   await page.route("**/portal/v1/auth/**", api.route);
   await page.route("**/api/portal/**", api.route);
+  // The resend button's 60s client-side cooldown (C6) would otherwise make the click below wait a
+  // real minute; fast-forward past it, then resume so the rest of this long walkthrough runs on real
+  // time exactly as before.
+  await page.clock.install();
 
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Sign in", exact: true })).toBeVisible();
+  await expect(page).toHaveTitle("Sign in · Licensecc");
 
   // --- Login: email -> request code ---
   await page.getByLabel("Email").fill("user@example.com");
@@ -543,11 +683,18 @@ test("customer portal signs in with an 8-digit code and walks every screen witho
   // The verify screen's own heading, not a loose text match: otp_requested's StatusLine copy ("Check
   // your email for a sign-in code.", C1) now also legitimately contains "Check your email", so a bare
   // /Check your email/ regex matches both and is a strict-mode violation.
-  await expect(page.getByRole("heading", { name: "Check your email" })).toBeVisible();
+  const checkYourEmailHeading = page.getByRole("heading", { name: "Check your email" });
+  await expect(checkYourEmailHeading).toBeVisible();
+  await expect(checkYourEmailHeading).toBeFocused();
+  await expect(page).toHaveTitle("Check your email · Licensecc");
   await expect.poll(() => api.requests.authRequests).toBe(1);
 
-  // Resending shares the request path but must retain the verification form and input.
+  // Resending shares the request path but must retain the verification form and input. It is
+  // disabled with a countdown for 60s after a code is sent (client-side only, C6).
   await page.getByLabel("8-digit code").fill("1234");
+  await expect(page.getByRole("button", { name: "Resend code (0:59)", exact: true })).toBeDisabled();
+  await page.clock.fastForward("01:00");
+  await page.clock.resume();
   await page.getByRole("button", { name: "Resend code", exact: true }).click();
   await expect.poll(() => api.requests.authRequests).toBe(2);
   await expect(page.getByLabel("8-digit code")).toHaveValue("1234");
@@ -557,16 +704,18 @@ test("customer portal signs in with an 8-digit code and walks every screen witho
   await page.getByLabel("8-digit code").fill(api.VALID_CODE);
   await page.getByRole("button", { name: "Verify" }).click();
   await expect(page.getByRole("link", { name: "Apps", exact: true })).toBeVisible();
+  await expect(page).toHaveTitle("Apps · Licensecc");
   await expect.poll(() => api.requests.verifies).toBe(1);
 
   // --- Per-app access (read-only) ---
-  await page.getByRole("link", { name: "View app DEFAULT" }).click();
+  await page.getByRole("link", { name: "View licenses for DEFAULT" }).click();
   await expect(page.locator(".tablePane tbody tr").filter({hasText:"pro"}).first()).toBeVisible();
   await expect(page.locator(".status.active").first()).toHaveText("Active");
   await expect(page.getByText("aaaaaaaa...aaaaaaaa").first()).toBeVisible();
 
   // --- My devices/seats: floating seat checkout/heartbeat/release ---
   await page.getByRole("link", { name: "Devices", exact: true }).click();
+  await expect(page).toHaveTitle("Devices · Licensecc");
   await page.getByText("Browser sessions", {exact:true}).click();
   const seatCard = page.locator(".seatCard").filter({ hasText: "pro" }).first();
   await expect(seatCard.getByRole("button", { name: "Start seat" })).toBeEnabled();
@@ -793,7 +942,7 @@ test("customer portal signs in with an 8-digit code and walks every screen witho
 
   // --- Usage ---
   await page.getByRole("link", { name: "Apps", exact: true }).click();
-  await page.getByRole("link", { name: "View app DEFAULT" }).click();
+  await page.getByRole("link", { name: "View licenses for DEFAULT" }).click();
   await page.getByText("Activity",{exact:true}).click();
   await expect(page.getByText("87", { exact: true })).toBeVisible();
 
@@ -872,7 +1021,7 @@ test("app grouping, browser history and mobile reflow preserve the customer cont
   await expect(page.locator(".appRow h2")).toHaveText(["DEFAULT", "SECOND_APP"]);
   await expect(page.locator(".appRow").nth(0)).toContainText("3 licenses · 2 features");
   await expect(page.locator(".appRow").nth(1)).toContainText("1 license · 1 feature");
-  await page.getByRole("link", { name: "View app SECOND_APP" }).click();
+  await page.getByRole("link", { name: "View licenses for SECOND_APP" }).click();
   await expect(page.getByRole("heading", { name: "SECOND_APP", exact: true })).toBeVisible();
   await expect(page.getByText("solo", { exact: true })).toHaveCount(0);
   await page.reload();
@@ -894,6 +1043,7 @@ test("app grouping, browser history and mobile reflow preserve the customer cont
   await expect(page.getByText("d".repeat(40), { exact: true })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await page.getByRole("link", { name: "Account", exact: true }).click();
+  await expect(page).toHaveTitle("Account · Licensecc");
   await expect(page.getByText("cus_self", { exact: true })).toBeHidden();
   await page.getByText("Account details", { exact: true }).click();
   await expect(page.getByText("cus_self", { exact: true })).toBeVisible();
@@ -918,7 +1068,7 @@ test("session and account-read failures do not masquerade as an empty account", 
   await expect(page.getByRole("heading", { name: "Account data unavailable" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "No apps assigned yet" })).toHaveCount(0);
   await page.getByRole("button", { name: "Retry", exact: true }).click();
-  await expect(page.getByRole("link", { name: "View app DEFAULT" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "View licenses for DEFAULT" })).toBeVisible();
 });
 
 test("usage failure stays local and removing a filtered registration keeps the selected app truthful", async ({ page }) => {
@@ -927,7 +1077,7 @@ test("usage failure stays local and removing a filtered registration keeps the s
   api.entitlements.push({ ...api.entitlements[1], id: "second_app", project: "SECOND_APP" });
   api.devices.push({ ...api.devices[0], project: "SECOND_APP", device_key_id: "second-node" });
   await signIn(page, api);
-  await page.getByRole("link", { name: "View app DEFAULT" }).click();
+  await page.getByRole("link", { name: "View licenses for DEFAULT" }).click();
   await expect(page.getByText(/Activity is unavailable/)).toBeVisible();
   await page.locator("tr").filter({has:page.getByLabel("Device key for DEFAULT solo")}).getByText("Activate and download",{exact:true}).click();
   await page.getByLabel("Device key for DEFAULT solo").fill("device-e2e");
@@ -955,7 +1105,7 @@ test("protected access uses app enrollment while legacy downloads respect date b
   await page.route("**/portal/v1/auth/**", api.route);
   await page.route("**/api/portal/**", api.route);
   await signIn(page, api);
-  await page.getByRole("link", { name: "View app DEFAULT" }).click();
+  await page.getByRole("link", { name: "View licenses for DEFAULT" }).click();
   await expect(page.getByText("Connect from your app",{exact:true})).toBeVisible();
   await expect(page.getByRole("cell", { name: "Protected device", exact: true })).toBeVisible();
   await expect(page.getByLabel("Device key for DEFAULT protected")).toHaveCount(0);

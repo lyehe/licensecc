@@ -59,3 +59,29 @@ test("first call in a window returns count 1 (under cap)", async () => {
   assert.equal(r.count, 1);
   assert.equal(r.limited, false);
 });
+
+// C6: the UI's rate-limit sentence needs the exact seconds left in the CURRENT fixed window
+// (windowStart + period - now), not just a limited/not-limited flag. Pin both ends of a window: the
+// very first instant has the full period left, and the very last instant has exactly one second.
+test("retryAfter is the exact seconds left in the fixed window, at both boundaries", async () => {
+  const e = env();
+  const period = 100;
+  const windowStart = 1_000; // an arbitrary epoch that is itself a multiple of `period`
+  const first = await portalRateLimit(e, "boundary:key", 1, period, windowStart);
+  assert.equal(first.retryAfter, period, "the first instant of a window has the full period left");
+  const last = await portalRateLimit(e, "boundary:key", 1, period, windowStart + period - 1);
+  assert.equal(last.retryAfter, 1, "the last instant of a window has exactly one second left");
+  const next = await portalRateLimit(e, "boundary:key", 1, period, windowStart + period);
+  assert.equal(next.retryAfter, period, "the next window starts a fresh full period");
+});
+
+// Fail-closed still owes the caller a usable retry-after: windowStart/retryAfter are pure functions
+// of (now, period), computable even though the counter write itself never happened.
+test("retryAfter is still correct when the counter write fails (fail-closed)", async () => {
+  const brokenDb = { prepare() { throw new Error("boom"); } };
+  const period = 100;
+  const windowStart = 5_000;
+  const r = await portalRateLimit({ DB: brokenDb }, "broken:key", 1, period, windowStart + 42);
+  assert.equal(r.limited, true);
+  assert.equal(r.retryAfter, period - 42);
+});

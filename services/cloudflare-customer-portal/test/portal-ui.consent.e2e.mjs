@@ -80,11 +80,15 @@ test("consent: password login retains the attempt without leaking it into naviga
   const state = await fixture(page, { signedIn: false });
   await page.goto(entry);
   await expect(page.getByText("Sign in to approve this device connection.")).toBeVisible();
+  // Still on the sign-in form itself (no consent content yet): the title says so, not "Connect a device".
+  await expect(page).toHaveTitle("Sign in · Licensecc");
   expect(new URL(page.url()).hash).toBe("");
   await page.getByLabel("Email", { exact: true }).fill("customer@example.com");
   await page.getByLabel("Password", { exact: true }).fill("A test password for browser 1!");
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await expect(page.getByRole("combobox", { name: "License", exact: true })).toBeVisible();
+  // C6: the Connect flow's document.title, once past sign-in and onto the consent screen itself.
+  await expect(page).toHaveTitle("Connect a device · Licensecc");
   expect(state.logins).toEqual([{ email: "customer@example.com", password: "A test password for browser 1!" }]);
   expect(JSON.stringify(state.requests)).not.toContain(handle);
   expect(await page.locator("body").innerHTML()).not.toContain(handle);
