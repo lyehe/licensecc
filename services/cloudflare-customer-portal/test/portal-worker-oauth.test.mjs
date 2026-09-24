@@ -94,6 +94,26 @@ test("Existing email requires explicit linking, which cannot cross customer owne
   assert.equal(db.prepare("SELECT customer_id FROM portal_identities").get().customer_id, "A");
   assert.equal((await call(env, "GET", "/portal/v1/auth/identities", { cookie: cookieB })).body.data.items.length, 0);
 });
+test("A password-login account (empty customers.email, portal_passwords.email_lower set) is never duplicated by OAuth", async (t) => {
+  const { env, db } = baseFixture(configuration);
+  const passwordCustomerId = "cust_pw1";
+  db.prepare("INSERT INTO customers (id, name, email, created_at, updated_at) VALUES (?, 'Personal account', '', ?, ?)").run(passwordCustomerId, NOW, NOW);
+  db.prepare("INSERT INTO portal_passwords (customer_id, email_lower, password_hash, created_at, updated_at) VALUES (?, 'alice@example.com', 'x', ?, ?)").run(passwordCustomerId, NOW, NOW);
+  const before = db.prepare("SELECT count(*) AS n FROM customers").get().n;
+  githubStub(t, { email: "alice@example.com", id: 999 });
+  const blocked = await finish(env, await start(env));
+  assert.match(blocked.headers.get("location"), /account_link_required/);
+  assert.equal(db.prepare("SELECT count(*) AS n FROM customers").get().n, before);
+  assert.equal(db.prepare("SELECT count(*) AS n FROM portal_identities").get().n, 0);
+});
+test("RF1: a brand-new email creates exactly one customer", async (t) => {
+  const { env, db } = baseFixture(configuration);
+  const before = db.prepare("SELECT count(*) AS n FROM customers").get().n;
+  githubStub(t, { email: "brandnew@example.com", id: 4242 });
+  const response = await finish(env, await start(env));
+  assert.equal(response.headers.get("location"), "https://portal.test/#/apps");
+  assert.equal(db.prepare("SELECT count(*) AS n FROM customers").get().n, before + 1);
+});
 test("Linking requires the initiating session at callback and rejects revoked sessions", async (t) => {
   const { env, db } = baseFixture(configuration);
   db.exec("PRAGMA foreign_keys = ON");
