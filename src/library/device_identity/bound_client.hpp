@@ -22,6 +22,7 @@ struct BoundRenewResult {
 	BoundRenewStatus status = BoundRenewStatus::internal_error;
 	BoundSessionDecision decision;
 	std::string code;
+	BoundWireDetail detail = BoundWireDetail::none;	 // Explains a conflict; never authority.
 };
 // Internal owner. Transport factory is a native test seam, not an application
 // callback or response-input API. Origin, trust and session context are pinned

@@ -27,7 +27,7 @@ class View(ct.Structure):
 class Outcome(ct.Structure):
     _fields_ = [("size", ct.c_uint32), ("version", ct.c_uint32), ("provider_result", ct.c_uint32),
                 ("checkpoint_result", ct.c_uint32), ("renewal_due", ct.c_uint32),
-                ("reserved", ct.c_uint32), ("effective_time", ct.c_uint64)]
+                ("denial_detail", ct.c_uint32), ("effective_time", ct.c_uint64)]
 
 
 def expected_layout() -> list[int]:

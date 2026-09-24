@@ -24,9 +24,27 @@ public final class DeviceBoundClient implements AutoCloseable {
         NOT_ATTEMPTED, SAVED, UNCHANGED, MISSING, BUSY, STALE, CONFLICT, INVALID, IO_ERROR,
         MIRROR_PENDING, COMMIT_UNKNOWN, LOADED
     }
+    /** Why the native library refused, when it can tell; never permission. Handle the result code first. */
+    public enum DenialDetail {
+        NONE,
+        /** With {@link Result#CONFLICT} from activation: every device slot of the license is in use. */
+        DEVICE_LIMIT,
+        /** A value newer than this SDK; treat it like {@link #NONE}. */
+        UNKNOWN;
+        static DenialDetail fromCode(long code) {
+            if (code == 0) return NONE;
+            return code == 1 ? DEVICE_LIMIT : UNKNOWN;
+        }
+    }
     /** Persistence and renewal hints are independent of permission to perform protected work. */
     public record Outcome(Result code, ProviderResult providerResult, CheckpointResult checkpointResult,
-            boolean renewalDue, BigInteger effectiveTime) { }
+            boolean renewalDue, BigInteger effectiveTime, DenialDetail detail) {
+        /** An outcome without a refusal detail. */
+        public Outcome(Result code, ProviderResult providerResult, CheckpointResult checkpointResult,
+                boolean renewalDue, BigInteger effectiveTime) {
+            this(code, providerResult, checkpointResult, renewalDue, effectiveTime, DenialDetail.NONE);
+        }
+    }
     /** Comparison display only: expiresAt is never a caller-supplied authorization clock. */
     public record EnrollmentView(String comparisonCode, BigInteger expiresAt) { }
     public record PrepareResult(Result code, EnrollmentView view) { }
@@ -110,15 +128,18 @@ public final class DeviceBoundClient implements AutoCloseable {
         return Result.values()[(int) code];
     }
     static Outcome decode(long[] raw, int offset) {
-        if (raw.length != offset + 5 || (raw[offset + 1] != 255 && (raw[offset + 1] < 0 || raw[offset + 1] > 14))
-                || raw[offset + 2] < 0 || raw[offset + 2] > 11 || raw[offset + 3] < 0 || raw[offset + 3] > 1) {
+        if (raw.length != offset + 6 || (raw[offset + 1] != 255 && (raw[offset + 1] < 0 || raw[offset + 1] > 14))
+                || raw[offset + 2] < 0 || raw[offset + 2] > 11 || raw[offset + 3] < 0 || raw[offset + 3] > 1
+                || raw[offset + 5] < 0 || raw[offset + 5] > 0xFFFFFFFFL) {
             throw new IllegalStateException("Invalid native outcome");
         }
+        // Any uint32 detail is valid: one newer than this SDK maps to UNKNOWN because a detail never grants access.
         return new Outcome(decodeCode(raw[offset]), raw[offset + 1] == 255 ? ProviderResult.INTERNAL_ERROR : ProviderResult.values()[(int) raw[offset + 1]],
-            CheckpointResult.values()[(int) raw[offset + 2]], raw[offset + 3] == 1, unsigned(raw[offset + 4]));
+            CheckpointResult.values()[(int) raw[offset + 2]], raw[offset + 3] == 1, unsigned(raw[offset + 4]),
+            DenialDetail.fromCode(raw[offset + 5]));
     }
     static long[] newOutcome(int offset) {
-        long[] raw = new long[offset + 5];
+        long[] raw = new long[offset + 6];
         Arrays.fill(raw, offset, raw.length, -1);
         return raw;
     }

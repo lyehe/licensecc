@@ -142,7 +142,8 @@ final class DeviceBoundAdapterTest {
     private static void malformedOutcomes() {
         var fake = new Fake();
         try (var client = new DeviceBoundLibrary(fake).openEnrollment(configuration("desktop")).client()) {
-            for (long[] raw : new long[][]{{}, {0}, {0, 0, 0, 0, 0}, {22, 0, 0, 0, 0, 0}, {0, 15, 0, 0, 0, 0}, {0, 0, -1, 0, 0, 0}, {0, 0, 0, 2, 0, 0}}) {
+            // {0, 0, 0, 0, 0} leaves the unwritten detail sentinel; a detail outside uint32 is not a native value.
+            for (long[] raw : new long[][]{{}, {0}, {0, 0, 0, 0, 0}, {0, 0, 0, 0, 0, 4294967296L}, {22, 0, 0, 0, 0, 0}, {0, 15, 0, 0, 0, 0}, {0, 0, -1, 0, 0, 0}, {0, 0, 0, 2, 0, 0}}) {
                 fake.invoked = raw; rejects(IllegalStateException.class, client::renew);
                 check(fake.closes.get() == 0, "failed result preserves recovery owner");
             }

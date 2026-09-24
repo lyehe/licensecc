@@ -13,6 +13,8 @@ namespace {
 static_assert(sizeof(void*) == sizeof(jlong), "The JNI adapter requires x64");
 static_assert(LCC_DEVICE_BOUND_VERSION == 1 && LCC_DEVICE_BOUND_TRUST_MAX == 8 && LCC_DEVICE_BOUND_SPKI_MAX == 512,
 			  "Review JNI marshaling before changing the public C contract");
+static_assert(sizeof(LccDeviceBoundOutcome) == 32 && offsetof(LccDeviceBoundOutcome, denial_detail) == 20,
+			  "Review JNI outcome marshaling after ABI changes");
 
 void invalid(JNIEnv* env, const char* message) {
 	if (env->ExceptionCheck()) return;
@@ -101,8 +103,10 @@ jlong bits(std::uint64_t value) {
 LccDeviceBoundClient* pointer(jlong handle) {
 	return reinterpret_cast<LccDeviceBoundClient*>(static_cast<std::uintptr_t>(handle));
 }
+// Six values: code, provider, checkpoint, renewal hint, effective time, refusal detail.
+// Any detail value crosses unchanged; the adapter maps values it does not know.
 bool outcome(JNIEnv* env, LCC_BOUND_RESULT code, const LccDeviceBoundOutcome& value, jlong* out) {
-	if (value.size != sizeof(value) || value.version != 1 || value.reserved != 0) {
+	if (value.size != sizeof(value) || value.version != 1) {
 		invalid(env, "Invalid native outcome layout");
 		return false;
 	}
@@ -111,6 +115,7 @@ bool outcome(JNIEnv* env, LCC_BOUND_RESULT code, const LccDeviceBoundOutcome& va
 	out[2] = value.checkpoint_result;
 	out[3] = value.renewal_due;
 	out[4] = bits(value.effective_time);
+	out[5] = value.denial_detail;
 	return true;
 }
 struct HandleOwner {
@@ -121,12 +126,13 @@ struct HandleOwner {
 };
 }  // namespace
 
-extern "C" JNIEXPORT jint JNICALL Java_io_licensecc_client_DeviceBoundNative_version(JNIEnv*, jclass) { return 1; }
+// Protocol 2: outcome arrays carry the refusal detail (open 7 values, operations 6).
+extern "C" JNIEXPORT jint JNICALL Java_io_licensecc_client_DeviceBoundNative_version(JNIEnv*, jclass) { return 2; }
 
 extern "C" JNIEXPORT void JNICALL
 Java_io_licensecc_client_DeviceBoundNative_openNative(JNIEnv* env, jclass, jobjectArray fields, jobjectArray keys,
 													  jbooleanArray retired, jboolean resume, jlongArray result) try {
-	if (!length(env, result, 6)) return;
+	if (!length(env, result, 7)) return;
 	LccDeviceBoundOptions configuration{};
 	if (!options(env, fields, keys, retired, configuration)) return;
 	LccDeviceBoundOutcome details{};
@@ -134,7 +140,7 @@ Java_io_licensecc_client_DeviceBoundNative_openNative(JNIEnv* env, jclass, jobje
 	HandleOwner owner;
 	const auto code = resume ? lcc_device_bound_open_resume(&configuration, &owner.handle, &details)
 							 : lcc_device_bound_open_enrollment(&configuration, &owner.handle, &details);
-	jlong output[6]{bits(reinterpret_cast<std::uintptr_t>(owner.handle))};
+	jlong output[7]{bits(reinterpret_cast<std::uintptr_t>(owner.handle))};
 	if (!outcome(env, code, details, output + 1)) return;
 		// Acquire only after native work; no Java array stays pinned across I/O.
 #ifdef LCC_JNI_TEST_FIXTURE
@@ -162,7 +168,7 @@ Java_io_licensecc_client_DeviceBoundNative_openNative(JNIEnv* env, jclass, jobje
 extern "C" JNIEXPORT void JNICALL Java_io_licensecc_client_DeviceBoundNative_invokeNative(JNIEnv* env, jclass,
 																						  jlong handle, jint operation,
 																						  jlongArray result) try {
-	if (!length(env, result, 5)) return;
+	if (!length(env, result, 6)) return;
 	LccDeviceBoundOutcome details{};
 	lcc_init_device_bound_outcome(&details);
 	LCC_BOUND_RESULT code = LCC_BOUND_INVALID_ARGUMENT;
@@ -185,8 +191,8 @@ extern "C" JNIEXPORT void JNICALL Java_io_licensecc_client_DeviceBoundNative_inv
 		default:
 			break;
 	}
-	jlong output[5]{};
-	if (outcome(env, code, details, output)) env->SetLongArrayRegion(result, 0, 5, output);
+	jlong output[6]{};
+	if (outcome(env, code, details, output)) env->SetLongArrayRegion(result, 0, 6, output);
 } catch (...) {
 	invalid(env, "Native operation failed unexpectedly");
 }

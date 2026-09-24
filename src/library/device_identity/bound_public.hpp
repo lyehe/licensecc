@@ -22,6 +22,8 @@ LCC_BOUND_RESULT bound_public_structure(const T* value) noexcept {
 LCC_BOUND_RESULT bound_public_result(BoundEnrollmentStatus) noexcept;
 LCC_BOUND_RESULT bound_public_result(BoundRenewStatus) noexcept;
 LCC_BOUND_RESULT bound_public_result(const BoundSessionDecision&, LccDeviceBoundOutcome&) noexcept;
+// Activation/renewal/abandonment result, including the refusal detail of a conflict.
+LCC_BOUND_RESULT bound_public_result(const BoundRenewResult&, LccDeviceBoundOutcome&) noexcept;
 LCC_BOUND_CHECKPOINT_RESULT bound_public_checkpoint(BoundCheckpointStatus) noexcept;
 // Share the final local authorization decision with the feature-session owner.
 // No token decoding, accepted authority import or public metadata injection.

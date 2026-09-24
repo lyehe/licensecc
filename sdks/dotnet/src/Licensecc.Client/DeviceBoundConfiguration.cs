@@ -16,10 +16,22 @@ public enum CheckpointResult
 { NotAttempted=0, Saved=1, Unchanged=2, Missing=3, Busy=4, Stale=5, Conflict=6, Invalid=7, IoError=8, MirrorPending=9, CommitUnknown=10, Loaded=11 }
 public enum ProviderResult
 { Ok=0, InvalidArgument=1, UnsupportedVersion=2, BufferTooSmall=3, ProviderUnavailable=4, HardwareUnavailable=5, AccessDenied=6, KeyNotFound=7, KeyCorrupt=8, KeyLost=9, UnsupportedAlgorithm=10, SignFailed=11, IoError=12, Busy=13, PolicyViolation=14, InternalError=255 }
+/// <summary>Why the native library refused, when it can tell; never permission. A value this SDK
+/// does not name keeps its number: treat it as None.</summary>
+public enum DeviceBoundDenialDetail : uint
+{
+    None=0,
+    /// <summary>With <see cref="Result.Conflict"/> from activation: every device slot of the license is in use.</summary>
+    DeviceLimit=1
+}
 
 /// <summary>Independent native outcomes. Only Authorize returning Ok permits protected work.</summary>
 public sealed record Outcome(Result Code, ProviderResult ProviderResult=ProviderResult.Ok,
-    CheckpointResult CheckpointResult=CheckpointResult.NotAttempted, bool RenewalDue=false, ulong EffectiveTime=0);
+    CheckpointResult CheckpointResult=CheckpointResult.NotAttempted, bool RenewalDue=false, ulong EffectiveTime=0)
+{
+    /// <summary>Why the operation was refused, when known. Handle <see cref="Code"/> first.</summary>
+    public DeviceBoundDenialDetail Detail { get; init; }
+}
 /// <summary>Comparison display only; ExpiresAt is not a local authorization clock.</summary>
 public sealed record EnrollmentView(string ComparisonCode, ulong ExpiresAt);
 

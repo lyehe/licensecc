@@ -76,6 +76,16 @@ LCC_BOUND_RESULT bound_public_result(const BoundSessionDecision& d, LccDeviceBou
 	}
 	return LCC_BOUND_INTERNAL_ERROR;
 }
+LCC_BOUND_RESULT bound_public_result(const BoundRenewResult& r, LccDeviceBoundOutcome& out) noexcept {
+	bound_public_result(r.decision, out);
+	const auto primary = r.status == BoundRenewStatus::session_error ? bound_public_result(r.decision, out)
+																	 : bound_public_result(r.status);
+	// Only a classified exchange refusal explains a conflict; every other outcome has no detail.
+	out.denial_detail = primary == LCC_BOUND_CONFLICT && r.detail == BoundWireDetail::device_limit
+							? LCC_BOUND_DETAIL_DEVICE_LIMIT
+							: LCC_BOUND_DETAIL_NONE;
+	return primary;
+}
 LCC_BOUND_CHECKPOINT_RESULT bound_public_checkpoint(BoundCheckpointStatus s) noexcept {
 	switch (s) {
 		case BoundCheckpointStatus::saved:

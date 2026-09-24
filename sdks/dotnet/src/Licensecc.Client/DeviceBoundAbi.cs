@@ -22,7 +22,7 @@ internal static unsafe class Abi
     [StructLayout(LayoutKind.Sequential)] internal struct View
     { public uint Size, Version; public ulong ExpiresAt; public fixed byte ComparisonCode[15]; }
     [StructLayout(LayoutKind.Sequential)] internal struct Outcome
-    { public uint Size, Version, ProviderResult, CheckpointResult, RenewalDue, Reserved; public ulong EffectiveTime; }
+    { public uint Size, Version, ProviderResult, CheckpointResult, RenewalDue, DenialDetail; public ulong EffectiveTime; }
     [StructLayout(LayoutKind.Sequential)] private struct TrustAlignment { public byte Prefix; public TrustKey Value; }
     [StructLayout(LayoutKind.Sequential)] private struct OptionsAlignment { public byte Prefix; public Options Value; }
     [StructLayout(LayoutKind.Sequential)] private struct ViewAlignment { public byte Prefix; public View Value; }
