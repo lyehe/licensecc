@@ -198,6 +198,7 @@ test("the entitlements envelope documents each row's nullable trial end and its 
   assert.match(description, /valid_until/, "the end never outlives the license");
   assert.match(description, /not started/, "the description says why an activation trial can have no end yet");
   assert.equal(row.properties.trial_starts_on_activation?.type, "boolean");
+  assert.match(row.properties.trial_starts_on_activation.description, /at least 2 seconds/, "the flag says which durations the enforcing rule accepts");
 });
 
 test("spec is OpenAPI 3.1.0 with the shared envelope/server conventions", () => {

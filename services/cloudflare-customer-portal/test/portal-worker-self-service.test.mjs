@@ -627,6 +627,9 @@ test("each row's trial end follows the rule that enforces it and never outlives 
     seedProtectedTrial(db, "PSTARTED", "9".repeat(64), { basis: "from_first_activation", duration: 7 * DAY, started: NOW - DAY });
     seedProtectedTrial(db, "PPENDING", "0".repeat(64), { basis: "from_first_activation", duration: 7 * DAY });
     seedProtectedTrial(db, "PCLAMPED", "d".repeat(64), { basis: "from_first_use", duration: 30 * DAY, started: NOW - DAY, validUntil: NOW + 7 * DAY });
+    seedProtectedTrial(db, "PSHORT", "c".repeat(64), { basis: "from_first_activation", duration: 1 });
+    seedProtectedTrial(db, "PISSUED", "f".repeat(64), { basis: "from_issue", duration: 7 * DAY, validUntil: NOW + 7 * DAY });
+    seedTrial(db, "ZEROPEND", "e".repeat(64), { basis: "from_first_activation", duration: 0 });
     const r = await call(env, "GET", "/api/portal/entitlements", { cookie: await cookieFor(env, "A") });
     assert.equal(r.status, 200);
     const trialOf = (feature, endsAt, startsOnActivation, why) => {
@@ -644,6 +647,9 @@ test("each row's trial end follows the rule that enforces it and never outlives 
     trialOf("PSTARTED", NOW + 6 * DAY, false, "a started protected trial ends its duration after it started");
     trialOf("PPENDING", null, true, "a protected trial the first activation starts has no end yet");
     trialOf("PCLAMPED", NOW + 7 * DAY, false, "a protected trial never outlives its license either");
+    trialOf("PSHORT", null, false, "the protected rule refuses a duration under 2 seconds, so no activation will start this clock");
+    trialOf("PISSUED", NOW + 7 * DAY, false, "a protected from_issue trial ends with the license");
+    trialOf("ZEROPEND", null, false, "an unstarted zero-duration legacy trial has no clock for an activation to start");
     trialOf("PAID", null, false, "a license that is not a trial has no trial end");
     trialOf("DEFAULT", null, false, "the floating license is not a trial either");
     // Only the derived values reach the browser, never the columns they are computed from.

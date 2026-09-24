@@ -476,8 +476,9 @@ test("license status copy names each lifecycle state with its UTC date (C5)", as
 test("license mode names a trial's end, says the first activation starts it, or just says Trial (C5)", async () => {
   const { licenseModeLabel: mode } = await loadWorkflowModule();
   const now = 1_700_000_000;
-  const protectedTrial = { enforcement_mode: "device_bound_v1", license_mode: "trial", trial_starts_on_activation: false };
-  const legacyTrial = { enforcement_mode: "legacy", license_mode: "trial", trial_starts_on_activation: false };
+  const usable = { status: "active", valid_from: null, valid_until: null };
+  const protectedTrial = { ...usable, enforcement_mode: "device_bound_v1", license_mode: "trial", trial_starts_on_activation: false };
+  const legacyTrial = { ...usable, enforcement_mode: "legacy", license_mode: "trial", trial_starts_on_activation: false };
   // 1) An end: "ends" ahead of it, "ended" once it has passed.
   assert.equal(mode({ ...protectedTrial, trial_ends_at: 1_800_000_000 }, now), "Protected device · Trial · ends 2027-01-15");
   assert.equal(mode({ ...protectedTrial, trial_ends_at: 1_600_000_000 }, now), "Protected device · Trial · ended 2020-09-13");
@@ -491,11 +492,28 @@ test("license mode names a trial's end, says the first activation starts it, or 
   assert.equal(mode({ ...legacyTrial, trial_ends_at: null }, now), "Trial");
   assert.equal(mode({ ...protectedTrial, trial_ends_at: null }, now), "Protected device · Trial");
   // A row from a Worker that predates these fields makes no claim about the trial clock.
-  assert.equal(mode({ enforcement_mode: "device_bound_v1", license_mode: "trial" }, now), "Protected device · Trial");
-  assert.equal(mode({ license_mode: "trial" }, now), "Trial");
-  assert.equal(mode({ enforcement_mode: "device_bound_v1", license_mode: "node_locked", trial_ends_at: null }, now), "Protected device");
-  assert.equal(mode({ license_mode: "node_locked", trial_ends_at: null }, now), "Node-locked");
-  assert.equal(mode({ license_mode: "floating", trial_ends_at: null }, now), "Floating");
+  assert.equal(mode({ ...usable, enforcement_mode: "device_bound_v1", license_mode: "trial" }, now), "Protected device · Trial");
+  assert.equal(mode({ ...usable, license_mode: "trial" }, now), "Trial");
+  assert.equal(mode({ ...usable, enforcement_mode: "device_bound_v1", license_mode: "node_locked", trial_ends_at: null }, now), "Protected device");
+  assert.equal(mode({ ...usable, license_mode: "node_locked", trial_ends_at: null }, now), "Node-locked");
+  assert.equal(mode({ ...usable, license_mode: "floating", trial_ends_at: null }, now), "Floating");
+});
+
+// C5: "starts when you activate" is a promise about a license the customer can still activate. Next
+// to "Revoked.", "Suspended." or "Expired on ..." it would contradict the status, so it reads "Trial".
+test("license mode says the first activation starts a trial only while the license is usable (C5)", async () => {
+  const { licenseModeLabel: mode } = await loadWorkflowModule();
+  const now = 1_700_000_000;
+  const pending = { enforcement_mode: "device_bound_v1", license_mode: "trial", status: "active", valid_from: null, valid_until: null,
+    trial_ends_at: null, trial_starts_on_activation: true };
+  assert.equal(mode(pending, now), "Protected device · Trial starts when you activate");
+  assert.equal(mode({ ...pending, valid_from: now + 86_400 }, now), "Protected device · Trial starts when you activate",
+    "not yet valid: activating once it starts still starts the trial");
+  assert.equal(mode({ ...pending, status: "revoked" }, now), "Protected device · Trial", "revoked");
+  assert.equal(mode({ ...pending, status: "disabled" }, now), "Protected device · Trial", "suspended");
+  assert.equal(mode({ ...pending, valid_until: now - 86_400 }, now), "Protected device · Trial", "expired, with an unstarted trial");
+  assert.equal(mode({ ...pending, enforcement_mode: "legacy", valid_until: now - 86_400 }, now), "Trial", "an expired legacy row too");
+  assert.equal(mode({ ...pending, status: "paused" }, now), "Protected device · Trial", "a status the portal does not know is not usable");
 });
 
 test("a license needs attention when it is expired, suspended or revoked, not when it is yet to start (C5)", async () => {

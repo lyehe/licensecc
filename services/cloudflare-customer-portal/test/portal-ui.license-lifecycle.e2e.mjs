@@ -29,6 +29,9 @@ const LICENSES = [
   // A trial with no end of its own: a zero-duration legacy trial, or the admin's default from_issue
   // trial with no end date. Nothing ends it, so it must not read as starting later or as expired.
   license("opentrial", { license_mode: "trial", valid_until: null, trial_ends_at: null, trial_starts_on_activation: false }),
+  // A revoked license whose trial never started: it will not be activated, so no "starts" promise.
+  license("haltedtrial", { status: "revoked", enforcement_mode: "device_bound_v1", license_mode: "trial", valid_until: null,
+    trial_ends_at: null, trial_starts_on_activation: true }),
   license("steady", { project: "BETA" }),
 ];
 
@@ -91,6 +94,9 @@ test("license lifecycle: each state reads as words with its UTC date and next st
   await expect(cell(page, "opentrial", "Status")).toHaveText("Active");
   await expect(cell(page, "opentrial", "Valid")).toHaveText("No start date to No end date");
   await expect(row(page, "opentrial").getByText("Activate and download", { exact: true })).toBeVisible();
+  // An inactive license makes no promise about activating it.
+  await expect(cell(page, "haltedtrial", "Mode")).toHaveText("Protected device · Trial");
+  await expect(cell(page, "haltedtrial", "Status")).toHaveText("Revoked.");
 
   // --- Validity window: a missing start or end says so ---
   await expect(cell(page, "solo", "Valid")).toHaveText("No start date to 2100-01-01");
@@ -98,7 +104,7 @@ test("license lifecycle: each state reads as words with its UTC date and next st
 
   // --- Only an active license offers an action; an inactive one offers no download at all ---
   await expect(row(page, "solo").getByText("Activate and download", { exact: true })).toBeVisible();
-  for (const feature of ["lapsed", "paused", "cancelled", "upcoming", "endtrial"]) {
+  for (const feature of ["lapsed", "paused", "cancelled", "upcoming", "endtrial", "haltedtrial"]) {
     await expect(row(page, feature).getByText("Activate and download")).toHaveCount(0);
     await expect(row(page, feature).getByRole("textbox")).toHaveCount(0);
     await expect(cell(page, feature, "Action").locator("*")).toHaveCount(0);
