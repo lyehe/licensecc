@@ -2198,7 +2198,7 @@
           "properties": {
             "label": {
               "default": "",
-              "description": "Optional operator label. Trimmed; control characters are rejected.",
+              "description": "Optional operator label. Trimmed; C0 control characters and DEL are rejected.",
               "maxLength": 128,
               "type": "string"
             },
