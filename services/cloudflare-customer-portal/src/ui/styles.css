@@ -709,6 +709,11 @@ code {
 .passwordEditor[open] summary { margin-bottom:12px; }
 .accountPage .tablePane { padding:24px; }
 .accountPage > .referenceDetails { padding:0 4px; }
+.connectedIdentity { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:8px 16px; margin-top:12px; }
+.connectedIdentity > p { margin:0; min-width:0; overflow-wrap:anywhere; }
+.disconnectConfirm { flex-basis:100%; display:grid; gap:12px; }
+.disconnectConfirm p { margin:0; color:inherit; }
+.disconnectActions { display:flex; flex-wrap:wrap; gap:12px; }
 .protectedNodes .tablePane { padding:0; overflow-x:auto; }
 
 @media(max-width:767px) {

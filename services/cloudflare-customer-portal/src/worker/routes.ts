@@ -15,7 +15,8 @@ export const META_ROUTES = [
   { method: "GET", path: "/docs", inSpec: false },
 ] as const satisfies readonly PortalRoute[];
 
-// Cookie-less public routes: health plus the auth handshake (each handler does its own gating).
+// Top-level routes outside the /api/portal/ prefix gate: health, the auth handshake, and the sign-in
+// settings beside it. Each handler does its own gating, including its own session check where needed.
 export const PUBLIC_ROUTES = [
   { method: "GET", path: "/health", inSpec: true },
   { method: "POST", path: "/portal/v1/auth/password/register", inSpec: true },
@@ -30,6 +31,7 @@ export const PUBLIC_ROUTES = [
   { method: "GET", path: "/portal/v1/auth/google/callback", inSpec: true },
   { method: "GET", path: "/portal/v1/auth/github/callback", inSpec: true },
   { method: "GET", path: "/portal/v1/auth/identities", inSpec: true },
+  { method: "POST", path: "/portal/v1/auth/identities/unlink", inSpec: true },
   { method: "POST", path: "/portal/v1/auth/request", inSpec: true },
   { method: "POST", path: "/portal/v1/auth/verify", inSpec: true },
   { method: "GET", path: "/portal/v1/auth/magic", inSpec: true },

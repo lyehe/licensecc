@@ -2,7 +2,7 @@ import { mintSession, setSessionCookie, loadSessionPeppers } from "../../auth/po
 import { portalRateLimit } from "../../auth/portal_ratelimit.mjs";
 import { canonicalHttpsOrigin, emailApiOrigin } from "../../auth/portal_destination.mjs";
 import { authSession } from "./auth.js";
-import { clientIp, envelope, redirect, supportContact } from "../support.js";
+import { clientIp, envelope, isCrossSite, readJson, redirect, supportContact } from "../support.js";
 import { digest, exchangeIdentity, providerConfig, randomToken, type Provider } from "../oauth/providers.js";
 import { identityCustomer } from "../oauth/accounts.js";
 import type { Env, TopRoute } from "../env.js";
@@ -24,6 +24,10 @@ const callbackPath = (provider: Provider): string => `/portal/v1/auth/${provider
 // identityCustomer() failures that reach the browser as their own auth_error. Anything else it
 // throws (such as link_failed for an identity another customer owns) stays sign_in_failed.
 const CALLBACK_ERRORS = new Set(["account_link_required", "account_suspended"]);
+const NO_STORE = { "cache-control": "no-store" };
+// The providers envelope publishes these, and unlink counts only them as another usable way in.
+const passwordEnabled = (env: Env): boolean => env.PORTAL_PASSWORD_ENABLED === "1";
+const emailCodesEnabled = (env: Env): boolean => Boolean(env.PORTAL_EMAIL_API_KEY && env.PORTAL_EMAIL_FROM && emailApiOrigin(env));
 
 async function start(request: Request, env: Env, reqId: string, now: number, provider: Provider): Promise<Response> {
   const origin = originFor(request, env);
@@ -86,13 +90,51 @@ async function callback(request: Request, env: Env, reqId: string, now: number, 
   }
 }
 
+// Disconnect a provider only while another sign-in method is usable now: a password while password
+// sign-in is enabled, the other provider's identity while that provider is configured, or a contact
+// email while email codes can be sent. The rule and the delete are one conditional statement, so two
+// tabs disconnecting both providers cannot both succeed. The same transaction revokes the customer's
+// other OAuth sessions, but only when this DELETE removed the row (changes() = 1), so a request that
+// lost a race revokes nothing. The current session and non-OAuth sessions are always kept.
+async function unlink(request: Request, env: Env, reqId: string, now: number): Promise<Response> {
+  if (isCrossSite(request, env)) return envelope(reqId, "cross_site_forbidden", undefined, 403, NO_STORE);
+  const session = await authSession(request, env, reqId, now);
+  if (session instanceof Response) return session;
+  const body = await readJson(request, reqId);
+  if (body instanceof Response) return body;
+  const provider = (["google", "github"] as const).find((name) => name === body.provider);
+  if (provider === undefined) return envelope(reqId, "invalid_request", undefined, 400, NO_STORE);
+  const db = env.DB.withSession?.("first-primary") ?? env.DB;
+  if (!await db.prepare("SELECT 1 FROM portal_identities WHERE customer_id = ? AND provider = ?").bind(session.customer_id, provider).first()) {
+    return envelope(reqId, "not_found", undefined, 404, NO_STORE);
+  }
+  if (!env.DB.batch) return envelope(reqId, "config_error", undefined, 503, NO_STORE);
+  const other: Provider = provider === "google" ? "github" : "google";
+  const flag = (usable: boolean): number => (usable ? 1 : 0);
+  const [deleted] = await env.DB.batch([
+    env.DB.prepare(
+      "DELETE FROM portal_identities WHERE customer_id = ? AND provider = ? AND (" +
+      "(? = 1 AND EXISTS (SELECT 1 FROM portal_passwords WHERE customer_id = ?)) OR " +
+      "(? = 1 AND EXISTS (SELECT 1 FROM portal_identities WHERE customer_id = ? AND provider = ?)) OR " +
+      "(? = 1 AND EXISTS (SELECT 1 FROM customers WHERE id = ? AND email <> ''))) RETURNING provider",
+    ).bind(session.customer_id, provider, flag(passwordEnabled(env)), session.customer_id,
+      flag(providerConfig(env, other) !== null), session.customer_id, other, flag(emailCodesEnabled(env)), session.customer_id),
+    env.DB.prepare(
+      "UPDATE portal_sessions SET status = 'revoked' WHERE changes() = 1 AND customer_id = ? AND auth_method = 'oauth' AND id <> ? " +
+      "AND status = 'active' AND NOT EXISTS (SELECT 1 FROM portal_identities WHERE customer_id = ? AND provider = ?)",
+    ).bind(session.customer_id, session.id, session.customer_id, provider),
+  ]);
+  if (!deleted?.results.length) return envelope(reqId, "last_sign_in_method", undefined, 409, NO_STORE);
+  return envelope(reqId, "identity_unlinked", { provider }, 200, NO_STORE);
+}
+
 export const OAUTH_DISPATCH: Record<string, TopRoute> = {
   "GET /portal/v1/auth/providers": (_request, env, _ctx, reqId) => envelope(reqId, "auth_providers", {
     google: providerConfig(env, "google") !== null, github: providerConfig(env, "github") !== null,
-    password: env.PORTAL_PASSWORD_ENABLED === "1",
-    email: Boolean(env.PORTAL_EMAIL_API_KEY && env.PORTAL_EMAIL_FROM && emailApiOrigin(env)),
+    password: passwordEnabled(env),
+    email: emailCodesEnabled(env),
     support: supportContact(env),
-  }, 200, { "cache-control": "no-store" }),
+  }, 200, NO_STORE),
   "POST /portal/v1/auth/google/start": (request, env, _ctx, reqId, now) => start(request, env, reqId, now, "google"),
   "POST /portal/v1/auth/github/start": (request, env, _ctx, reqId, now) => start(request, env, reqId, now, "github"),
   "GET /portal/v1/auth/google/callback": (request, env, _ctx, reqId, now) => callback(request, env, reqId, now, "google"),
@@ -102,6 +144,7 @@ export const OAUTH_DISPATCH: Record<string, TopRoute> = {
     if (session instanceof Response) return session;
     const db = env.DB.withSession?.("first-primary") ?? env.DB;
     const rows = await db.prepare("SELECT provider, email, created_at FROM portal_identities WHERE customer_id = ? ORDER BY provider").bind(session.customer_id).all();
-    return envelope(reqId, "identities", { items: rows.results }, 200, { "cache-control": "no-store" });
+    return envelope(reqId, "identities", { items: rows.results }, 200, NO_STORE);
   },
+  "POST /portal/v1/auth/identities/unlink": (request, env, _ctx, reqId, now) => unlink(request, env, reqId, now),
 };
