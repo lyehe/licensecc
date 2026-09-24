@@ -284,14 +284,26 @@ Customers can disconnect a provider from Account
 (`POST /portal/v1/auth/identities/unlink`). It is allowed only while another
 sign-in method is usable now: a password while `PORTAL_PASSWORD_ENABLED="1"`,
 the other provider's identity while that provider is configured, or a contact
-email while email codes are configured. A method switched off in configuration
-does not count. Otherwise the answer is `409 last_sign_in_method`, and the
-portal asks the customer to set up another way to sign in first. The rule and
-the delete are one conditional statement, so two tabs cannot disconnect the
-last two methods at once. Disconnecting signs out the customer's other browser
+email while email codes can be sent. Email codes need both email delivery
+(`PORTAL_EMAIL_API_KEY`, `PORTAL_EMAIL_FROM`, and an HTTPS
+`PORTAL_EMAIL_API_BASE` if you set one) and `PORTAL_OTP_PEPPERS`. The
+providers endpoint's `email` flag reports delivery only, so it can be true
+while email codes are not usable. A method switched off in configuration does
+not count. Otherwise the answer is `409 last_sign_in_method`, and the portal
+asks the customer to set up another way to sign in first. The rule, a
+still-live session and the delete are one conditional statement, so two tabs
+cannot disconnect the last two methods at once. A tab that loses such a race
+gets `404` (the provider was already disconnected) or `401` (the other tab's
+unlink signed it out). Disconnecting signs out the customer's other browser
 sessions that signed in with Google or GitHub (sessions do not record which of
 the two); the current session and password or email-code sessions stay signed
 in.
+
+Unlink judges only the configuration at the moment of each request. Turning a
+method off later can strand customers who kept only that method: for example
+setting `PORTAL_PASSWORD_ENABLED="0"`, removing a provider's client ID or
+secret, or removing email delivery or `PORTAL_OTP_PEPPERS`. Before you turn a
+method off, make sure the customers who rely on it have another way in.
 
 Provider setup references: [Google OpenID Connect](https://developers.google.com/identity/openid-connect/openid-connect)
 and [GitHub OAuth web flow](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps).

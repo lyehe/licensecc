@@ -39,6 +39,11 @@ The steps below change these records.
 | `device_bound_devices.label`, `device_bound_authorizations.device_label` | Emptied: device names reported by the customer's apps, which often contain a person's name. |
 | `account_tokens` | Revoked, with an audit row. |
 
+Registration links and `request:email:` counters are found through the
+customer's contact and login addresses only, not through the email addresses of
+its Google or GitHub identities. Any others expire on their own (links after 15
+minutes, counters within 30 minutes), and later requests sweep them.
+
 These records are kept on purpose. Some of them still contain personal data,
 which stays until your own retention policy removes it.
 
@@ -50,7 +55,7 @@ which stays until your own retention policy removes it.
 | `order_events` | Order ingest journal and order webhook source. | `raw_payload` is the order exactly as your commerce system sent it, which can include the name and email. |
 | `account_token_events`, `policy_events`, `catalog_events`, `license_plan_assignment_events`, `webhook_events` | Admin audit. | Operator text only. |
 | `device_bound_devices`, `device_bound_bindings`, `device_bound_events`, `device_bound_operations` | Protected-device enforcement history. Triggers forbid deleting devices, bindings and operations. | None after the labels are cleared. |
-| `entitlements`, `licenses`, `orders`, `license_plan_assignments`, `entitlement_devices` | License records keyed by the customer ID. | Only what an operator wrote into a note or label (`entitlements.notes`, `licenses.label`, `licenses.metadata_json`, `entitlement_devices.notes`). If one names the person, clear it: entitlement notes in the admin console's entitlement editor, which records the change, and the others with a reviewed SQL `UPDATE`. |
+| `entitlements`, `licenses`, `orders`, `license_plan_assignments`, `entitlement_devices`, `account_tokens` | License records and revoked tokens, keyed by the customer ID. | Only what an operator wrote into a note or label: `entitlements.notes`, `licenses.label`, `licenses.metadata_json`, `entitlement_devices.notes`, and `account_tokens.name`. The token name is the CLI's `--name`; the `issue` row in `account_token_events` also keeps it as its `reason`, and that audit copy stays. If one names the person, clear it. Clear entitlement notes in the admin console's entitlement editor, which records the change, and the others with a reviewed SQL `UPDATE`. The trigger `tr_bound_reject_legacy_device_update` aborts an `UPDATE` of an `entitlement_devices` row whose entitlement is `device_bound_v1`, so limit that one to legacy entitlements. |
 
 ## 1. Disable the customer and revoke their tokens
 
@@ -78,7 +83,13 @@ Save the SQL below as `customer-deletion.sql` and replace every
 quote, write it as two. Every statement acts only on a customer that is already
 disabled, so the file changes nothing while the customer is still active or if
 the ID is wrong. Review the file, then run it from
-`services/cloudflare-licensing-backend`:
+`services/cloudflare-licensing-backend`.
+
+Rehearse first with `--local` in place of `--remote`, using the same Wrangler
+configuration. The local copy needs the migrations
+(`npx wrangler d1 migrations apply <database-name> --local`) and a restored
+export or a few seeded rows. Check the result with the query in step 3, then
+run it for real:
 
 ```console
 npx wrangler d1 execute <database-name> --remote --file customer-deletion.sql
