@@ -216,6 +216,24 @@ test("link_expired shows the exact expired-link sentence, never the raw code", a
   expect(page.url()).not.toContain("auth_error");
 });
 
+// Carried from A3 (Minor 1): ProviderResult's ERRORS lookup already guards with Object.hasOwn, but no
+// test ever exercised a prototype-polluting `auth_error` value. `__proto__`/`constructor` name
+// Object.prototype members, so an unsafe `ERRORS[error]` lookup would resolve to that inherited
+// function/value instead of falling back -- React would then throw or silently render a function.
+for (const maliciousCode of ["__proto__", "constructor"]) {
+  test(`auth_error=${maliciousCode} falls back to the generic sign-in-failed sentence, never the raw code or a page error`, async ({ page }) => {
+    const pageErrors = [];
+    page.on("pageerror", (error) => pageErrors.push(error));
+    await page.route("**/api/portal/me", (route) => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" } }));
+    await page.route("**/portal/v1/auth/providers", (route) => route.fulfill({ json: makeEnvelope("auth_providers", { google: false, github: false, email: true, password: false }) }));
+    await page.goto(`/?auth_error=${maliciousCode}`);
+    await expect(page.getByText("Unable to complete sign-in. Please try again.")).toBeVisible();
+    await expect(page.getByText(maliciousCode, { exact: false })).toHaveCount(0);
+    expect(page.url()).not.toContain("auth_error");
+    expect(pageErrors).toEqual([]);
+  });
+}
+
 test("OAuth sign-in to a suspended account explains it and names the administrator when no contact is set", async ({ page }) => {
   await page.route("**/api/portal/me", (route) => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" } }));
   // No support field at all, as from a Worker without PORTAL_SUPPORT_CONTACT: that means no contact.
@@ -519,7 +537,10 @@ test("customer portal signs in with an 8-digit code and walks every screen witho
   // --- Login: email -> request code ---
   await page.getByLabel("Email").fill("user@example.com");
   await page.getByRole("button", { name: "Send code" }).click();
-  await expect(page.getByText(/Check your email/)).toBeVisible();
+  // The verify screen's own heading, not a loose text match: otp_requested's StatusLine copy ("Check
+  // your email for a sign-in code.", C1) now also legitimately contains "Check your email", so a bare
+  // /Check your email/ regex matches both and is a strict-mode violation.
+  await expect(page.getByRole("heading", { name: "Check your email" })).toBeVisible();
   await expect.poll(() => api.requests.authRequests).toBe(1);
 
   // Resending shares the request path but must retain the verification form and input.
@@ -674,7 +695,10 @@ test("customer portal signs in with an 8-digit code and walks every screen witho
   await expect.poll(() => typeof api.controls.resolveRelease).toBe("function");
   api.controls.resolveRelease();
   await expect(failedReleaseDialog).toHaveCount(0);
-  await expect(page.getByText(/verification_error/)).toBeVisible();
+  // Human text, not the raw code (C1): the code stays available, but only inside the collapsed
+  // "Technical details" disclosure.
+  await expect(page.getByText("We couldn't verify that request. Try again.", { exact: true })).toBeVisible();
+  await expect(page.getByText("verification_error", { exact: false })).not.toBeVisible();
   await expect(seatCard.getByRole("button", { name: "Release seat" })).toBeEnabled();
   await expect(seatCard.getByRole("button", { name: "Release seat" })).toBeFocused();
   await expect.poll(() => page.evaluate(() => window.localStorage.getItem("licensecc.portal.seats.v1"))).toBe(storedSeatSessionBeforeReleaseConfirm);
@@ -717,7 +741,9 @@ test("customer portal signs in with an 8-digit code and walks every screen witho
     seat_id: "seat-e2e",
   });
   expect(release.body.client_instance_id).toBe(checkout.body.client_instance_id);
-  await expect(page.getByText(/release_ok/)).toBeVisible();
+  // Human text, not the raw code (C1): Technical details stay collapsed.
+  await expect(page.getByText("Seat released.", { exact: true })).toBeVisible();
+  await expect(page.getByText("release_ok", { exact: false })).not.toBeVisible();
   const browserSessionsSummary = page.getByText("Browser sessions", { exact: true });
   await expect(browserSessionsSummary).toBeFocused();
   expect(await page.evaluate(() => document.activeElement?.tagName)).not.toBe("BODY");
@@ -743,7 +769,9 @@ test("customer portal signs in with an 8-digit code and walks every screen witho
   await expect.poll(() => api.requests.releases).toBe(refreshFailureReleaseCount + 1);
   await expect(refreshFailedDialog).toHaveCount(0);
   await expect.poll(() => api.requests.refreshRejects).toBe(3);
-  await expect(page.locator('.feedback p[role="status"]')).toContainText(/released; status refresh failed/i);
+  // Not tag-qualified (C1 changed StatusLine's non-empty root from <p> to <div> so it can validly
+  // contain the collapsed Technical-details <details>); role + class alone identify it either way.
+  await expect(page.locator('.feedback [role="status"]')).toContainText(/released; status refresh failed/i);
   await expect(page.getByRole("button", { name: "Refresh status" })).toBeVisible();
   await expect.poll(() => page.evaluate(() => window.localStorage.getItem("licensecc.portal.seats.v1"))).toBe("{}");
   // This release also leaves no browser session, collapsing the panel again; focus again lands on
@@ -756,7 +784,7 @@ test("customer portal signs in with an 8-digit code and walks every screen witho
 
   await page.getByRole("button", { name: "Refresh status" }).click();
   await expect(page.getByRole("button", { name: "Refresh status" })).toHaveCount(0);
-  await expect(page.locator('.feedback p[role="status"]')).toHaveText("");
+  await expect(page.locator('.feedback [role="status"]')).toHaveText("");
   await expect(page.getByRole("link", { name: "Devices", exact: true })).toBeFocused();
   expect(await page.evaluate(() => document.activeElement?.tagName)).not.toBe("BODY");
 

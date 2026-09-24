@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import test from "node:test";
 import ts from "@typescript/typescript6";
+import { BACKEND_PROXY_ERROR_MANIFEST } from "../src/auth/portal_backend_error_manifest.mjs";
 
 // Transpile the PURE portalWorkflow.ts (no React/DOM/node deps) and import it as an ES module — the
 // same seam the admin uses. If portalWorkflow ever pulls in a non-pure import, this fails to import.
@@ -110,9 +111,142 @@ test("portal UI workflow maps raw result codes to human-readable copy", async ()
     workflow.describeResultCode("rate_limited"),
     "Too many attempts — wait a moment and try again.",
   );
-  // An unmapped code returns null so the UI can fall back to showing the raw code.
+  // An unmapped code returns null so the caller (StatusLine) can fall back to the generic reference
+  // message instead of the raw code.
   assert.equal(workflow.describeResultCode("some_unknown_code"), null);
   assert.equal(workflow.describeResultCode(""), null);
+  // Prototype-safe lookup (C1 / RF3): a code equal to an Object.prototype member name must resolve to
+  // null too, via Object.hasOwn -- NOT `RESULT_CODE_COPY[code] ?? null`, which would instead return
+  // that inherited function/value and crash React ("Objects are not valid as a React child") or
+  // silently render a function. Carried forward from A3, which fixed the identical bug in
+  // ProviderSignIn's ERRORS and passwordMessage()'s MESSAGES with the same Object.hasOwn guard.
+  assert.equal(workflow.describeResultCode("constructor"), null);
+  assert.equal(workflow.describeResultCode("__proto__"), null);
+  assert.equal(workflow.describeResultCode("toString"), null);
+});
+
+test("portal UI workflow gives StatusLine a reference fallback for any unmapped code", async () => {
+  const workflow = await loadWorkflowModule();
+  // No request id: never dangle the word "Reference" with nothing after it.
+  assert.equal(workflow.describeUnknownResult(""), "Something went wrong. Try again.");
+  // A request id: always carry it, so support can trace the exact failed request.
+  assert.equal(workflow.describeUnknownResult("req-123"), "Something went wrong. Reference req-123.");
+});
+
+test("portal UI workflow maps the download_failed_<status> family by prefix, status hidden from the sentence", async () => {
+  const workflow = await loadWorkflowModule();
+  assert.equal(workflow.describeResultCode(`${workflow.DOWNLOAD_FAILED_PREFIX}500`), workflow.DOWNLOAD_FAILED_COPY);
+  assert.equal(workflow.describeResultCode(`${workflow.DOWNLOAD_FAILED_PREFIX}404`), workflow.DOWNLOAD_FAILED_COPY);
+  assert.equal(workflow.describeResultCode("download_failed_0"), workflow.DOWNLOAD_FAILED_COPY);
+  // The status code itself never appears in the main sentence (it stays in Technical details only).
+  assert.doesNotMatch(workflow.DOWNLOAD_FAILED_COPY, /[0-9]/);
+});
+
+test("portal UI workflow gives every StatusLine-reachable result code human copy (C1 coverage)", async () => {
+  const workflow = await loadWorkflowModule();
+
+  // ---- 1) envelope(reqId, "...") literals from the four route files C1 scans --------------------
+  const routeFiles = [
+    "../src/worker/routes/auth.ts",
+    "../src/worker/routes/self-service.ts",
+    "../src/worker/support.ts",
+    "../src/worker/app.ts",
+  ];
+  const envelopeLiteralRe = /envelope\(\s*reqId\s*,\s*"([^"]+)"/g;
+  const routeCodes = new Set();
+  for (const relative of routeFiles) {
+    const text = readFileSync(new URL(relative, import.meta.url), "utf8");
+    for (const match of text.matchAll(envelopeLiteralRe)) routeCodes.add(match[1]);
+  }
+  // Sanity check on the scan itself: a silently-broken regex (e.g. after a call-shape change) would
+  // otherwise make this whole test vacuously pass with zero collected codes.
+  assert.ok(
+    routeCodes.size >= 20,
+    `expected at least 20 distinct envelope() codes across the four route files, found ${routeCodes.size}`,
+  );
+
+  // ---- 2) BACKEND_PROXY_ERROR_MANIFEST codes ------------------------------------------------------
+  const manifestCodes = new Set();
+  for (const statuses of Object.values(BACKEND_PROXY_ERROR_MANIFEST)) {
+    for (const codes of Object.values(statuses)) {
+      for (const code of codes) manifestCodes.add(code);
+    }
+  }
+  assert.ok(manifestCodes.size >= 15, `expected at least 15 distinct manifest codes, found ${manifestCodes.size}`);
+
+  // ---- 3) local UI-only codes: string literals passed to localMessage("...") under src/ui ---------
+  const uiRoot = new URL("../src/ui/", import.meta.url);
+  const uiFilesWithLocalMessages = [
+    "app/App.tsx",
+    "features/auth/AuthFeature.tsx",
+    "features/data/usePortalData.ts",
+    "features/devices/DevicesFeature.tsx",
+    "features/downloads/DownloadsFeature.tsx",
+  ];
+  const localMessageLiteralRe = /localMessage\(\s*"([^"]+)"/g;
+  const localCodes = new Set();
+  for (const relative of uiFilesWithLocalMessages) {
+    const text = readFileSync(new URL(relative, uiRoot), "utf8");
+    for (const match of text.matchAll(localMessageLiteralRe)) localCodes.add(match[1]);
+  }
+  // The two exported constants passed to localMessage(CONST, ...) are not string literals, so the
+  // regex above cannot see them -- list them explicitly. FLOATING_SEAT_RELEASE_REFRESH_FAILED_CODE is
+  // portalWorkflow.ts's own export (loaded above via workflow). DEVICES_REFRESH_FAILURE_CODE
+  // (DevicesFeature.tsx) is a re-exported alias of that exact same value; assert the alias textually
+  // (rather than transpiling a React/JSX file just for one string) so a future rename cannot silently
+  // drift the two apart.
+  const devicesFeatureSource = readFileSync(new URL("features/devices/DevicesFeature.tsx", uiRoot), "utf8");
+  assert.match(
+    devicesFeatureSource,
+    /export const DEVICES_REFRESH_FAILURE_CODE = FLOATING_SEAT_RELEASE_REFRESH_FAILED_CODE;/,
+    "DEVICES_REFRESH_FAILURE_CODE must stay a plain alias of FLOATING_SEAT_RELEASE_REFRESH_FAILED_CODE",
+  );
+  const FLOATING_SEAT_RELEASE_REFRESH_FAILED_CODE = workflow.FLOATING_SEAT_RELEASE_REFRESH_FAILED_CODE;
+  const DEVICES_REFRESH_FAILURE_CODE = workflow.FLOATING_SEAT_RELEASE_REFRESH_FAILED_CODE;
+  localCodes.add(FLOATING_SEAT_RELEASE_REFRESH_FAILED_CODE);
+  localCodes.add(DEVICES_REFRESH_FAILURE_CODE);
+
+  // ---- 4) the dynamic `${operation}_ok` success family (self-service.ts apiAction) -----------------
+  // Not a string literal (a template literal keyed by the server-controlled `operation`); its only
+  // three possible values are fixed by SESSION_DISPATCH's three seat operations (checkout/heartbeat/
+  // release), and DevicesFeature.tsx's seatAction() passes every one of them to setMessage/resultMessage.
+  const seatAckCodes = ["checkout_ok", "heartbeat_ok", "release_ok"];
+
+  // ---- 5) pure data-payload codes StatusLine never renders -----------------------------------------
+  // Each is a GET envelope's 200 `data` payload consumed as fields/rows elsewhere, never handed to
+  // setMessage -- confirmed by grepping resultMessage( call sites (usePortalData.ts, AuthFeature.tsx):
+  // none of them pass a "me"/"entitlements"/"devices"/"usage" result to it.
+  const DATA_ONLY_CODES = new Set([
+    "me", // GET /api/portal/me: PortalMe read off result.data in AuthFeature's loadMe(), never given to setMessage
+    "entitlements", // GET /api/portal/entitlements: { items } consumed as table rows in usePortalData.ts, never given to setMessage
+    "devices", // GET /api/portal/devices: { items } consumed as table rows in usePortalData.ts, never given to setMessage
+    "usage", // GET /api/portal/usage: { items } consumed as table rows in usePortalData.ts, never given to setMessage
+    "bootstrap_otp", // POST /portal/v1/admin/bootstrap-otp: operator break-glass payload; the customer SPA has no caller for this route at all, so it never reaches setMessage
+  ]);
+
+  const allCodes = new Set([...routeCodes, ...manifestCodes, ...localCodes, ...seatAckCodes]);
+  const uncovered = [...allCodes].filter((code) => !DATA_ONLY_CODES.has(code) && workflow.describeResultCode(code) === null);
+  assert.deepEqual(uncovered, [], `every StatusLine-reachable code needs RESULT_CODE_COPY copy; missing: ${uncovered.join(", ")}`);
+
+  // Every DATA_ONLY_CODES entry must actually be one of the collected codes, or the exclusion is dead
+  // (and may be hiding a code that should really be covered).
+  const deadExclusions = [...DATA_ONLY_CODES].filter((code) => !allCodes.has(code));
+  assert.deepEqual(deadExclusions, [], `DATA_ONLY_CODES entries never collected -- remove them: ${deadExclusions.join(", ")}`);
+
+  // The verbatim success copy pinned by the brief.
+  assert.equal(workflow.describeResultCode("otp_requested"), "Check your email for a sign-in code.");
+  assert.equal(workflow.describeResultCode("logged_out"), "You're signed out.");
+  assert.equal(workflow.describeResultCode("checkout_ok"), "Seat started.");
+  assert.equal(workflow.describeResultCode("release_ok"), "Seat released.");
+  assert.equal(workflow.describeResultCode("device_released"), "Device released.");
+  assert.equal(workflow.describeResultCode("download_started"), "Download started.");
+
+  // No copy anywhere in the map leaks a raw snake_case code as its own text.
+  for (const code of allCodes) {
+    if (DATA_ONLY_CODES.has(code)) continue;
+    const copy = workflow.describeResultCode(code);
+    assert.ok(copy === null || !copy.includes(code), `copy for "${code}" must not embed the raw code: ${copy}`);
+  }
 });
 
 test("portal UI workflow builds filtered usage paths", async () => {
