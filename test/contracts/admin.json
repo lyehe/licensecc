@@ -1887,16 +1887,48 @@
         "EntitlementPatch": {
           "dependentSchemas": {
             "max_active_devices": {
-              "propertyNames": {
-                "enum": [
-                  "max_active_devices",
-                  "expected_customer_id",
-                  "expected_revocation_seq"
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "device_hash"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "assertion_ttl_seconds"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "valid_from"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "valid_until"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "notes"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "customer_id"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "license_id"
+                    ]
+                  }
                 ]
               }
             }
           },
-          "description": "All fields optional; only provided fields are updated. project/feature/license_fingerprint/status are NOT patchable. max_active_devices is its own audited capacity write and must be sent alone (with the optional expected_* precondition); combined with another field it returns 400 invalid_request.",
+          "description": "All fields optional; only provided fields are updated. project/feature/license_fingerprint/status are NOT patchable. max_active_devices is its own audited capacity write: none of the other fields may accompany it (the optional expected_* precondition may), or the PATCH returns 400 invalid_request.",
           "not": {
             "required": [
               "enforcement_mode"
@@ -3159,6 +3191,7 @@
                 "lease_history_exists",
                 "policy_mismatch",
                 "invalid_trial",
+                "devices_connected",
                 "invalid_capacity",
                 "unknown"
               ]

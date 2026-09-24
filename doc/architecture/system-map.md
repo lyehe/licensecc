@@ -103,7 +103,7 @@ repository-owned third-party `src/library/ini/` sources are excluded.
 | Path | Lines | Responsibility audit |
 | --- | ---: | --- |
 | `src/library/licensecc.cpp` | 1,486 | C++ public API orchestration; changes pair with public ABI tests and CMake packaging. |
-| `services/cloudflare-license-admin/src/worker/openapi/components.ts` | 1,279 | Admin contract components; API-contract ownership stays with the admin deployable. |
+| `services/cloudflare-license-admin/src/worker/openapi/components.ts` | 1,263 | Admin contract components; API-contract ownership stays with the admin deployable. |
 | `services/cloudflare-licensing-backend/src/fulfillment/order_ingest.mjs` | 1,147 | Backend order-ingest bounded context; persistence and exactly-once tests stay backend-owned. |
 | `services/cloudflare-licensing-backend/src/routes/verify.ts` | 933 | Backend verification route and abuse controls; it is not a shared package concern. |
 | `services/cloudflare-license-admin/src/ui/features/catalog/Catalog.tsx` | 724 | Catalog list/mutation coordinator; consequence-heavy import/projection workflows and presentation stay in sibling catalog modules. |
@@ -120,7 +120,7 @@ Composition roots remain intentionally small. Current counts are:
 | Portal Worker `src/worker/index.ts` / `src/worker/app.ts` | 2 | 84 |
 | Portal UI `src/ui/main.tsx` / `src/ui/app/App.tsx` | 6 | 156 |
 
-Current production-source totals are 20,326 lines for license-admin, 8,785 lines for licensing-backend, 6,934 lines for customer-portal, and 1,348 lines for D1-backup. These counts include tracked and non-ignored, untracked
+Current production-source totals are 20,383 lines for license-admin, 8,785 lines for licensing-backend, 6,934 lines for customer-portal, and 1,348 lines for D1-backup. These counts include tracked and non-ignored, untracked
 TypeScript, TSX, JavaScript, and MJS under each service's `src` tree. They are
 evidence for responsibility review, not a reason
 to move code without a behavioral or ownership boundary.
