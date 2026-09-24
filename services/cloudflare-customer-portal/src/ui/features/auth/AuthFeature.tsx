@@ -13,7 +13,7 @@ import {
   OTP_EXPIRY_COPY,
   RESEND_CODE_ACTION_LABEL,
 } from "../../portalWorkflow";
-import { api, localMessage, resultMessage, StatusLine } from "../../shared/api";
+import { api, beginNewSession, localMessage, resultMessage, StatusLine } from "../../shared/api";
 import { SupportContact } from "../../shared/SupportContact";
 import type { PortalMe, StatusMessage } from "../../types";
 
@@ -67,6 +67,9 @@ export function usePortalAuth({ setMessage, runOnce }: AuthOptions): PortalAuth 
       // would be circular -- so it is the one api() call in this file that opts out (task C3).
       const result = await api<PortalMe>(mePath(), undefined, { skipUnauthorizedHook: true });
       if (result.ok && result.data) {
+        // A confirmed session, new or reconfirmed. Bumps the epoch so a straggler response from a
+        // request sent under an OLDER session can never bounce this one back to sign-in (fix round 1).
+        beginNewSession();
         setCustomerId(result.data.customer_id);
         setEmail(result.data.email ?? null);
         setMessage(null);

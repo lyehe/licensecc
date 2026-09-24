@@ -40,29 +40,6 @@ function PortalShell(): React.ReactElement {
   const { busy, busyRef, runOnce } = useSingleFlight();
   const auth = usePortalAuth({ setMessage, runOnce });
 
-  // Task C3: a mid-session 401 (the server's `unauthorized` code, never a credential failure) must
-  // return the customer to sign-in no matter which api() call -- or the download's raw fetch, via
-  // reportUnauthorized() -- surfaced it. Registered exactly once here; `retrying` is a re-entrancy
-  // guard so several api() calls failing at once (e.g. usePortalData's concurrent reads) collapse into
-  // one retrySession() call rather than one each. retrySession() itself (AuthFeature's loadMe) makes
-  // its own /me check with skipUnauthorizedHook, so that check can never re-enter this handler.
-  useEffect(() => {
-    let retrying = false;
-    const handleUnauthorized = (): void => {
-      if (retrying) return;
-      retrying = true;
-      void auth.retrySession()
-        .then((stillAuthed) => {
-          if (!stillAuthed) setMessage(localMessage("session_ended", false));
-        })
-        .finally(() => {
-          retrying = false;
-        });
-    };
-    setOnUnauthorized(handleUnauthorized);
-    return () => setOnUnauthorized(null);
-  }, [auth.retrySession, setMessage]);
-
   const location = usePortalLocation();
   const { entitlements, devices, usage, usageAvailable, readState, stale, refreshData, clear: clearPortalData } = usePortalData({
     active: auth.phase === "authed" && enrollment === null && passwordAction === null,
@@ -78,6 +55,49 @@ function PortalShell(): React.ReactElement {
     runOnce,
     setMessage,
   });
+
+  // Fix round 1 (CRITICAL): PortalShell stays mounted across a session-ended transition, so a
+  // DIFFERENT customer signing in next in the same tab must never see the previous customer's
+  // entitlements, devices, usage, seat state (including its localStorage-backed cache) or a typed
+  // device key -- the same reset logout() already performs below. Read through a ref (updated on
+  // every render, just below) rather than closed over directly, because deviceController.clear is a
+  // plain function recreated every render; depending on it directly would force the effect after it
+  // to re-run on every unrelated render too, tearing down and rebuilding the re-entrancy guard the
+  // onUnauthorized hook needs to stay stable across the whole app lifetime.
+  const clearAllPortalStateRef = useRef<() => void>(() => {});
+  clearAllPortalStateRef.current = () => {
+    clearPortalData();
+    deviceController.clear();
+    downloads.clear();
+  };
+
+  // Task C3: a mid-session 401 (the server's `unauthorized` code, never a credential failure) must
+  // return the customer to sign-in no matter which api() call -- or the download's raw fetch, via
+  // reportUnauthorized() -- surfaced it. Registered exactly once here; `retrying` is a re-entrancy
+  // guard so several api() calls failing at once (e.g. usePortalData's concurrent reads) collapse into
+  // one retrySession() call rather than one each. retrySession() itself (AuthFeature's loadMe) makes
+  // its own /me check with skipUnauthorizedHook, so that check can never re-enter this handler. Never
+  // touches consent/enrollment state -- a saved consent mutation must survive and resume.
+  useEffect(() => {
+    let retrying = false;
+    const handleUnauthorized = (): void => {
+      if (retrying) return;
+      retrying = true;
+      void auth.retrySession()
+        .then((stillAuthed) => {
+          if (!stillAuthed) {
+            clearAllPortalStateRef.current();
+            setMessage(localMessage("session_ended", false));
+          }
+        })
+        .finally(() => {
+          retrying = false;
+        });
+    };
+    setOnUnauthorized(handleUnauthorized);
+    return () => setOnUnauthorized(null);
+  }, [auth.retrySession, setMessage]);
+
   const refreshFocusRef = useRef<HTMLElement | null>(null);
   const activeTabButtonRef = useRef<HTMLAnchorElement | null>(null);
 

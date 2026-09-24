@@ -9,7 +9,7 @@ import {
   canDownloadLicense,
   licenseDisplayStatus,
 } from "../../portalWorkflow";
-import { localMessage, reportUnauthorized, resultMessage } from "../../shared/api";
+import { currentSessionEpoch, localMessage, reportUnauthorized, resultMessage } from "../../shared/api";
 import { useLicenseClock } from "../../shared/useLicenseClock";
 import type { EntitlementRow, StatusMessage } from "../../types";
 
@@ -43,6 +43,10 @@ export function useLicenseDownloads({ runOnce, setMessage }: DownloadOptions): L
         setMessage(localMessage("device_key_required", false));
         return;
       }
+      // Captured before the raw fetch goes out, same as api() does internally, so a straggler response
+      // from a request sent under an OLDER session can't bounce a customer who already signed in again
+      // (fix round 1).
+      const requestEpoch = currentSessionEpoch();
       let response: Response;
       try {
         response = await fetch(downloadPath(), {
@@ -65,7 +69,7 @@ export function useLicenseDownloads({ runOnce, setMessage }: DownloadOptions): L
           // This download bypasses api() (see the fetch above), so a mid-session 401 needs its own
           // route to the same global onUnauthorized hook every other api() path already gets -- "every
           // api() path" (task C3) has to include the download too.
-          reportUnauthorized(response.status, result.code);
+          reportUnauthorized(response.status, result.code, requestEpoch);
           setMessage(resultMessage(result));
         } catch {
           setMessage(localMessage(`download_failed_${response.status}`, false));

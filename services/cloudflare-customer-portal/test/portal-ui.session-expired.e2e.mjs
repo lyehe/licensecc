@@ -261,3 +261,108 @@ test("consent: a page with a saved mutation survives a 401, then resumes after s
   await expect(page.getByRole("link", { name: "Open app" })).toBeVisible();
   expect(pageErrors).toEqual([]);
 });
+
+// ---- Fix round 1 (CRITICAL): the hook's confirmed-session-gone branch must clear all portal-local
+// customer data, the same way logout() already does, or a DIFFERENT customer signing in next in the
+// same tab can see the previous customer's licenses, devices and usage -- usePortalData skips its own
+// loading state when readState is already "ready", so stale data stays visible until (or unless) the
+// new fetch happens to overwrite it. --------------------------------------------------------------
+
+const SWITCH_CODE_A = "80315426";
+const SWITCH_CODE_B = "19283746";
+const SWITCH_ENTITLEMENT_A = { id: "ent_switch_a", project: "ALPHACORP", feature: "widget", status: "active", license_fingerprint: "a".repeat(64), valid_from: null, valid_until: null, license_mode: "floating", pool_size: 5, max_active_devices: 1, max_borrow_sec: 0, heartbeat_grace_sec: 900, policy_id: "pol_switch_a" };
+const SWITCH_ENTITLEMENT_B = { id: "ent_switch_b", project: "BETAWORKS", feature: "gadget", status: "active", license_fingerprint: "b".repeat(64), valid_from: null, valid_until: null, license_mode: "floating", pool_size: 5, max_active_devices: 1, max_borrow_sec: 0, heartbeat_grace_sec: 900, policy_id: "pol_switch_b" };
+const SWITCH_DEVICE_A = { project: "ALPHACORP", feature: "widget", license_fingerprint: "a".repeat(64), device_key_id: "device-alpha-001", created_at: 1_700_000_000 };
+const SWITCH_DEVICE_B = { project: "BETAWORKS", feature: "gadget", license_fingerprint: "b".repeat(64), device_key_id: "device-beta-002", created_at: 1_700_000_001 };
+
+test("a customer switch after a session-ending 401 never shows the previous customer's data", async ({ page }) => {
+  const pageErrors = [];
+  page.on("pageerror", (error) => pageErrors.push(error));
+  let customer = null; // "A" | "B" | null
+  let authed = false;
+  let releaseB;
+  const bDataGate = new Promise((resolve) => { releaseB = resolve; });
+  const fulfill = (route, status, body) => route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
+
+  page.route("**/portal/v1/auth/**", (route) => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname;
+    const method = request.method();
+    if (path === "/portal/v1/auth/providers") return fulfill(route, 200, makeEnvelope("auth_providers", { google: false, github: false, email: true, password: false }));
+    if (method === "POST" && path === "/portal/v1/auth/request") return fulfill(route, 200, makeEnvelope("otp_requested"));
+    if (method === "POST" && path === "/portal/v1/auth/verify") {
+      const body = jsonBody(request);
+      if (body.code === SWITCH_CODE_A) { customer = "A"; authed = true; return fulfill(route, 200, makeEnvelope("signed_in", { customer_id: "cus_switch_a" })); }
+      if (body.code === SWITCH_CODE_B) { customer = "B"; authed = true; return fulfill(route, 200, makeEnvelope("signed_in", { customer_id: "cus_switch_b" })); }
+      return fulfill(route, 401, { ok: false, code: "invalid_otp", request_id: "switch-e2e-bad" });
+    }
+    return fulfill(route, 404, { ok: false, code: "not_found", request_id: "switch-e2e-unhandled" });
+  });
+
+  page.route("**/api/portal/**", async (route) => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname;
+    const method = request.method();
+    if (!authed) return fulfill(route, 401, unauthorizedBody());
+    if (method === "GET" && path === "/api/portal/me") return fulfill(route, 200, makeEnvelope("me", { customer_id: customer === "A" ? "cus_switch_a" : "cus_switch_b", email: null }));
+    if (method === "GET" && path === "/api/portal/entitlements") {
+      if (customer === "B") await bDataGate;
+      return fulfill(route, 200, makeEnvelope("entitlements", { items: [customer === "A" ? SWITCH_ENTITLEMENT_A : SWITCH_ENTITLEMENT_B] }));
+    }
+    if (method === "GET" && path === "/api/portal/devices") {
+      if (customer === "B") await bDataGate;
+      return fulfill(route, 200, makeEnvelope("devices", { items: [customer === "A" ? SWITCH_DEVICE_A : SWITCH_DEVICE_B] }));
+    }
+    if (method === "GET" && path === "/api/portal/usage") {
+      if (customer === "B") await bDataGate;
+      return fulfill(route, 200, makeEnvelope("usage", { items: [] }));
+    }
+    if (method === "POST" && path === "/api/portal/checkout") return fulfill(route, 200, makeEnvelope("checkout_ok", { seat_id: "seat-switch-a", expires_at: 0 }));
+    if (method === "POST" && path === "/api/portal/heartbeat") { authed = false; return fulfill(route, 401, unauthorizedBody()); }
+    return fulfill(route, 404, { ok: false, code: "not_found", request_id: "switch-e2e-unhandled" });
+  });
+
+  await page.goto("/");
+  await page.getByLabel("Email").fill("alice@example.com");
+  await page.getByRole("button", { name: "Send code" }).click();
+  await page.getByLabel("8-digit code").fill(SWITCH_CODE_A);
+  await page.getByRole("button", { name: "Verify", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Apps", exact: true })).toBeVisible();
+  await expect(page.getByText("ALPHACORP", { exact: false })).toBeVisible();
+
+  // Customer A starts a floating seat (so deviceController's in-memory + localStorage-backed seat
+  // cache is populated), then renews it -- the renewal 401s and ends the session.
+  await page.getByRole("link", { name: "Devices", exact: true }).click();
+  await expect(page.getByText("device-alpha-001", { exact: true })).toBeVisible();
+  await page.getByText("Browser sessions", { exact: true }).click();
+  const seatCardA = page.locator(".seatCard").filter({ hasText: "widget" }).first();
+  await seatCardA.getByRole("button", { name: "Start seat" }).click();
+  await expect(seatCardA.getByRole("button", { name: "Renew seat" })).toBeEnabled();
+  await seatCardA.getByRole("button", { name: "Renew seat" }).click();
+  await expect(page.getByRole("heading", { name: "Sign in", exact: true })).toBeVisible();
+  await expect(page.getByText(SESSION_ENDED_COPY, { exact: true })).toBeVisible();
+
+  // Reset the location hash (still "#/nodes" from before A's session died) so the next sign-in lands
+  // on a clean Apps view with no leftover per-project filter -- not itself under test here.
+  await page.evaluate(() => { window.location.hash = "#/apps"; });
+
+  await page.getByLabel("Email").fill("bob@example.com");
+  await page.getByRole("button", { name: "Send code" }).click();
+  await page.getByLabel("8-digit code").fill(SWITCH_CODE_B);
+  await page.getByRole("button", { name: "Verify", exact: true }).click();
+
+  // B's own data is deliberately held back -- A's data must already be gone before B's data loads.
+  await expect(page.getByText("Loading your account", { exact: false })).toBeVisible();
+  await expect(page.getByText("ALPHACORP", { exact: false })).toHaveCount(0);
+  expect(await page.locator("body").innerHTML()).not.toContain("device-alpha-001");
+
+  // Release B's data: it shows correctly, and A's data is still nowhere to be found.
+  releaseB();
+  await expect(page.getByText("BETAWORKS", { exact: false })).toBeVisible();
+  await expect(page.getByText("ALPHACORP", { exact: false })).toHaveCount(0);
+  await page.getByRole("link", { name: "Devices", exact: true }).click();
+  await expect(page.getByText("device-beta-002", { exact: true })).toBeVisible();
+  await expect(page.getByText("device-alpha-001", { exact: false })).toHaveCount(0);
+
+  expect(pageErrors).toEqual([]);
+});

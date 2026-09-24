@@ -17,8 +17,27 @@ export function setOnUnauthorized(handler: UnauthorizedHandler | null): void {
   onUnauthorizedHandler = handler;
 }
 
-export function reportUnauthorized(status: number, code: string): void {
-  if (status === 401 && code === "unauthorized") onUnauthorizedHandler?.();
+// Fix round 1 (Minor): a straggler -- a request sent under an OLD, now-superseded session that only
+// answers 401 long after the customer already signed in again -- must not bounce that new sign-in back
+// a step. The re-entrancy guard in App.tsx's effect resets once its retry settles, so by itself it
+// cannot tell "a fresh 401 from the current session" apart from "a very late 401 from a dead one". A
+// session epoch does: beginNewSession() bumps it once per confirmed sign-in (called from
+// AuthFeature.tsx's loadMe, success branch only), api() captures the epoch when EACH request starts,
+// and reportUnauthorized() ignores a 401 whose request started in an epoch that is no longer current.
+let sessionEpoch = 0;
+
+export function beginNewSession(): void {
+  sessionEpoch += 1;
+}
+
+// Lets a caller that bypasses api() (the download's raw fetch) capture the epoch the same way api()
+// captures it internally, at the moment its own request starts.
+export function currentSessionEpoch(): number {
+  return sessionEpoch;
+}
+
+export function reportUnauthorized(status: number, code: string, requestEpoch: number): void {
+  if (status === 401 && code === "unauthorized" && requestEpoch === sessionEpoch) onUnauthorizedHandler?.();
 }
 
 // The HttpOnly session cookie is the only browser credential. Keeping every JSON request here makes
@@ -28,6 +47,7 @@ export async function api<T>(
   init?: RequestInit,
   options?: { skipUnauthorizedHook?: boolean },
 ): Promise<ApiEnvelope<T>> {
+  const requestEpoch = sessionEpoch; // captured before the request goes out, per fix round 1 (Minor)
   let response: Response;
   try {
     response = await fetch(path, {
@@ -54,7 +74,7 @@ export async function api<T>(
   }
   // retrySession()'s own /me check (AuthFeature.tsx's loadMe) must never re-trigger the hook it is
   // itself answering -- that would be circular -- so it alone passes skipUnauthorizedHook (task C3).
-  if (!options?.skipUnauthorizedHook) reportUnauthorized(response.status, envelope.code);
+  if (!options?.skipUnauthorizedHook) reportUnauthorized(response.status, envelope.code, requestEpoch);
   return envelope;
 }
 
