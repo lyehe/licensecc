@@ -20,11 +20,11 @@ async function approve(page){
   await page.getByRole("button",{name:"Approve",exact:true}).click();
 }
 
-async function fixture(page, { signedIn = true, inspect, approve, deny, logout } = {}) {
+async function fixture(page, { signedIn = true, inspect, approve, deny, logout, support } = {}) {
   const state = { signedIn, customer: "customer-a", requests: [], logins: [] };
   await page.route("**/portal/v1/auth/**", async route => {
     const request = route.request(), path = new URL(request.url()).pathname;
-    if (path.endsWith("/providers")) return route.fulfill({ json: envelope("auth_providers", { password: true, github: true, google: false, email: false }) });
+    if (path.endsWith("/providers")) return route.fulfill({ json: envelope("auth_providers", { password: true, github: true, google: false, email: false, ...(support === undefined ? {} : { support }) }) });
     if (path.endsWith("/password/login")) {
       state.logins.push(request.postDataJSON()); state.signedIn = true;
       return route.fulfill({ json: envelope("signed_in", { customer_id: state.customer }) });
@@ -58,6 +58,22 @@ test("consent: an unstarted trial explains activation timing without claiming no
   await expect(page.getByText('1 day from app activation. Approving here does not start the trial.')).toBeVisible();
   await expect(page.getByText('No expiry',{exact:true})).toHaveCount(0);
   await expect(page.getByRole('button',{name:'Approve',exact:true})).toBeDisabled();
+});
+
+test("consent: a signed-in account with no eligible license is pointed to the configured support contact", async ({ page }) => {
+  await fixture(page, { support: "https://support.example.com/help", inspect: route => route.fulfill({ json: envelope("authorization_inspected", inspection({ entitlements: [] })) }) });
+  await page.goto(entry);
+  const guidance = page.getByText("No eligible license is available for this app. Contact support.", { exact: true });
+  await expect(guidance).toBeVisible();
+  await expect(guidance.getByRole("link", { name: "Contact support", exact: true })).toHaveAttribute("href", "https://support.example.com/help");
+});
+
+test("consent: a request that cannot be submitted names the support contact for repeat failures", async ({ page }) => {
+  await fixture(page, { support: "mailto:help@example.com", inspect: route => route.fulfill({ status: 400, json: { ok: false, code: "invalid_request" } }) });
+  await page.goto(entry);
+  const alert = page.getByRole("alert");
+  await expect(alert).toHaveText("This connection request cannot be submitted. Restart from your app. Contact support if it happens again.");
+  await expect(alert.getByRole("link", { name: "Contact support", exact: true })).toHaveAttribute("href", "mailto:help@example.com");
 });
 
 test("consent: password login retains the attempt without leaking it into navigation or credentials", async ({ page }) => {

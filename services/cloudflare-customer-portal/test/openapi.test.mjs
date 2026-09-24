@@ -158,6 +158,18 @@ test("password settings GET and POST each document only the codes their own hand
   assert.deepEqual(documentedErrorCodes(path, 503, "post"), ["config_error"]);
 });
 
+test("password login documents the suspended-account denial separately from invalid credentials", () => {
+  const path = "/portal/v1/auth/password/login";
+  assert.deepEqual(documentedErrorCodes(path, 401), ["invalid_credentials"]);
+  assert.deepEqual([...documentedErrorCodes(path, 403)].sort(), ["account_suspended", "cross_site_forbidden"]);
+});
+
+test("the providers envelope documents its nullable support contact", () => {
+  const data = openApiDocument.paths["/portal/v1/auth/providers"].get.responses["200"].content["application/json"].schema.properties.data;
+  assert.deepEqual(data.properties.support.type, ["string", "null"]);
+  assert.ok(data.required.includes("support"), "the Worker always sends support, as a string or null");
+});
+
 test("spec is OpenAPI 3.1.0 with the shared envelope/server conventions", () => {
   assert.equal(openApiDocument.openapi, "3.1.0");
   assert.deepEqual(openApiDocument.servers, [{ url: "/" }]);

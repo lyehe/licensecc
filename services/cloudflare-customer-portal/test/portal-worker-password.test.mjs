@@ -32,17 +32,32 @@ test("scrypt encoding matches native crypto and supports long Unicode passwords 
   assert.equal(validPassword("x".repeat(14)), false);
   assert.equal(validPassword("x".repeat(129)), false);
 });
-test("wrong password, missing user and disabled customer share the same denial", async () => {
+test("wrong password, missing user and a wrong password on a suspended customer share the same denial", async () => {
   const { env, db } = fixture();
   await register(env);
   const wrong = await login(env, "new@example.com", NEXT);
   const missing = await login(env, "missing@example.com");
   db.prepare("UPDATE customers SET status = 'disabled' WHERE id IN (SELECT customer_id FROM portal_passwords)").run();
-  const disabled = await login(env);
-  for (const response of [wrong, missing, disabled]) {
+  // The password is checked before the account status, so a guess never reveals a suspension.
+  const suspendedWrong = await login(env, "new@example.com", NEXT);
+  for (const response of [wrong, missing, suspendedWrong]) {
     assert.equal(response.status, 401); assert.equal(response.body.code, "invalid_credentials");
     assert.equal(response.res.headers.get("set-cookie"), null);
   }
+});
+test("the correct password on a suspended customer is told the account is suspended, without a session", async () => {
+  const { env, db } = fixture();
+  await register(env);
+  db.prepare("UPDATE customers SET status = 'disabled' WHERE id IN (SELECT customer_id FROM portal_passwords)").run();
+  const sessions = () => db.prepare("SELECT count(*) AS n FROM portal_sessions").get().n;
+  const before = sessions();
+  const suspended = await login(env);
+  assert.equal(suspended.status, 403);
+  assert.equal(suspended.body.code, "account_suspended");
+  assert.equal(suspended.body.data, undefined);
+  assert.equal(suspended.res.headers.get("set-cookie"), null);
+  assert.equal(suspended.res.headers.get("cache-control"), "no-store");
+  assert.equal(sessions(), before);
 });
 test("CSRF, body limits, disabled configuration and throttling gate credential writes", async t => {
   // Keep the seeded counter and request in the same fixed rate-limit window.

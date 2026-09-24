@@ -77,6 +77,21 @@ test("password login errors clear the secret and explain recovery", async ({ pag
   await expect(page.getByRole("alert")).toContainText("Check your email");
 });
 
+test("a suspended account's correct password is told so, with the configured support contact", async ({ page }) => {
+  await page.route("**/api/portal/me", (route) => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" } }));
+  await page.route("**/portal/v1/auth/providers", (route) => route.fulfill({ json: makeEnvelope("auth_providers", { google: false, github: false, email: false, password: true, support: "mailto:help@example.com" }) }));
+  await page.route("**/portal/v1/auth/password/login", (route) => route.fulfill({ status: 403, json: { ok: false, code: "account_suspended", request_id: "portal-e2e-suspended" } }));
+  await page.goto("/");
+  await page.getByLabel("Email", { exact: true }).fill("suspended@example.com");
+  await page.getByLabel("Password", { exact: true }).fill("A correct testing passphrase 1!");
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  const alert = page.getByRole("alert");
+  await expect(alert).toHaveText("This account is suspended. Contact support.");
+  await expect(alert.getByRole("link", { name: "Contact support", exact: true })).toHaveAttribute("href", "mailto:help@example.com");
+  await expect(page.getByText("account_suspended")).toHaveCount(0);
+  await expect(page.getByLabel("Password", { exact: true })).toHaveValue("");
+});
+
 test("expired password link shows recovery guidance and reloading cannot retain the secret", async ({ page }) => {
   await page.route("**/api/portal/me", route => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" } }));
   await page.route("**/portal/v1/auth/providers", route => route.fulfill({ json: makeEnvelope("auth_providers", { password: true }) }));
@@ -167,6 +182,32 @@ test("link_expired shows the exact expired-link sentence, never the raw code", a
   await expect(page.getByText("This sign-in link has expired or was already used. Request a new code.")).toBeVisible();
   await expect(page.getByText("link_expired", { exact: false })).toHaveCount(0);
   expect(page.url()).not.toContain("auth_error");
+});
+
+test("OAuth sign-in to a suspended account explains it and names the administrator when no contact is set", async ({ page }) => {
+  await page.route("**/api/portal/me", (route) => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" } }));
+  // No support field at all, as from a Worker without PORTAL_SUPPORT_CONTACT: that means no contact.
+  await page.route("**/portal/v1/auth/providers", (route) => route.fulfill({ json: makeEnvelope("auth_providers", { google: true, github: true, email: false }) }));
+  await page.goto("/?auth_error=account_suspended");
+  await expect(page.getByText("This account is suspended. Contact your administrator.", { exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Contact support" })).toHaveCount(0);
+  await expect(page.getByText("account_suspended")).toHaveCount(0);
+  expect(page.url()).not.toContain("auth_error");
+});
+
+test("an existing-email conflict and an unconfigured portal link the configured support contact", async ({ page }) => {
+  let providers = { google: true, github: true, email: false, support: "https://support.example.com/help" };
+  await page.route("**/api/portal/me", (route) => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" } }));
+  await page.route("**/portal/v1/auth/providers", (route) => route.fulfill({ json: makeEnvelope("auth_providers", providers) }));
+  await page.goto("/?auth_error=account_link_required");
+  const conflict = page.getByRole("status").filter({ hasText: "An account already uses this email." });
+  await expect(conflict).toHaveText("An account already uses this email. Sign in with the method you already use for it, then connect Google or GitHub under Account. Contact support if you can't sign in.");
+  await expect(conflict.getByRole("link", { name: "Contact support", exact: true })).toHaveAttribute("href", "https://support.example.com/help");
+  providers = { google: false, github: false, email: false, password: false, support: "https://support.example.com/help" };
+  await page.goto("/");
+  const unconfigured = page.getByText("Sign-in is not configured yet. Contact support.", { exact: true });
+  await expect(unconfigured).toBeVisible();
+  await expect(unconfigured.getByRole("link", { name: "Contact support", exact: true })).toHaveAttribute("href", "https://support.example.com/help");
 });
 
 test("a signed-in user who opens an already-used magic link lands on Apps without a stale message", async ({ page }) => {

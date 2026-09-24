@@ -2,6 +2,8 @@ import { test } from "node:test";
 import { generateKeyPair, exportJWK, SignJWT } from "jose";
 import { assert, worker, baseFixture, call, cookieFor, NOW, CTX } from "./portal-worker-fixtures.mjs";
 import { identityCustomer } from "../dist-worker/worker/oauth/accounts.js";
+// Namespace import: a missing export fails its own test instead of the whole suite's module load.
+import * as support from "../dist-worker/worker/support.js";
 
 const configuration = { PORTAL_GOOGLE_CLIENT_ID: "google-client", PORTAL_GOOGLE_CLIENT_SECRET: "google-secret", PORTAL_GITHUB_CLIENT_ID: "github-client", PORTAL_GITHUB_CLIENT_SECRET: "github-secret" };
 async function start(env, provider = "github", sessionCookie) {
@@ -31,7 +33,7 @@ function githubStub(t, { email = "new@example.com", verified = true, id = 123, f
 }
 test("OAuth availability, exact-origin enforcement, disabled provider, authenticated identity inventory", async () => {
   const { env } = baseFixture();
-  assert.deepEqual((await call(env, "GET", "/portal/v1/auth/providers")).body.data, { google: false, github: false, email: false, password: false });
+  assert.deepEqual((await call(env, "GET", "/portal/v1/auth/providers")).body.data, { google: false, github: false, email: false, password: false, support: null });
   assert.equal((await call(env, "GET", "/portal/v1/auth/identities")).status, 401);
   assert.equal((await call(env, "POST", "/portal/v1/auth/github/start", { headers: { origin: "https://evil.test" } })).status, 403);
   assert.match((await call(env, "POST", "/portal/v1/auth/github/start")).res.headers.get("location"), /provider_unavailable/);
@@ -43,6 +45,36 @@ test("the providers envelope hides email actions when the configured email desti
     PORTAL_EMAIL_API_BASE: "http://insecure.test",
   });
   assert.equal((await call(env, "GET", "/portal/v1/auth/providers")).body.data.email, false);
+});
+test("the providers envelope publishes the support contact only as an https: URL or a mailto: address", async () => {
+  for (const [configured, published] of [
+    ["https://support.example.com/help", "https://support.example.com/help"],
+    ["mailto:help@example.com", "mailto:help@example.com"],
+    ["javascript:alert(1)", null],
+    ["http://support.example.com/help", null],
+    ["", null],
+  ]) {
+    const { env } = baseFixture({ PORTAL_SUPPORT_CONTACT: configured });
+    const providers = await call(env, "GET", "/portal/v1/auth/providers");
+    assert.equal(providers.body.data.support, published, `PORTAL_SUPPORT_CONTACT=${JSON.stringify(configured)}`);
+  }
+});
+test("supportContact accepts a credential-free https: URL or one mailto: address and treats anything else as unset", () => {
+  const contact = (value) => support.supportContact({ PORTAL_SUPPORT_CONTACT: value });
+  assert.equal(contact(undefined), null);
+  assert.equal(contact("  https://Support.Example.com/help?topic=sign-in  "), "https://support.example.com/help?topic=sign-in");
+  assert.equal(contact("https://support.example.com"), "https://support.example.com/");
+  assert.equal(contact(" mailto:help@example.com "), "mailto:help@example.com");
+  assert.equal(contact("MAILTO:Help@Example.com"), "MAILTO:Help@Example.com");
+  for (const rejected of [
+    "", "   ", "javascript:alert(1)", "JavaScript:alert(1)", "http://support.example.com", "data:text/html,<p>support</p>",
+    "ftp://support.example.com", "/support", "support.example.com", "//support.example.com",
+    "https://user:secret@support.example.com", "https://user@support.example.com",
+    "mailto:", "mailto:help", "mailto:@example.com", "mailto:help@", "mailto:help@example.com?subject=hi",
+    "mailto:a@example.com,b@example.com", "mailto:a b@example.com", "mailto:a@b@example.com",
+  ]) {
+    assert.equal(contact(rejected), null, `must reject ${JSON.stringify(rejected)}`);
+  }
 });
 test("GitHub registers an empty customer and mints a usable opaque session; callback replay fails", async (t) => {
   const { env, db } = baseFixture(configuration);
@@ -182,12 +214,20 @@ test("Google validates signature, issuer, audience, nonce, expiry and verified e
   assert.equal((await finish(env, activeFlow, "google")).headers.get("location"), "https://portal.test/#/apps");
   assert.equal(db.prepare("SELECT subject FROM portal_identities").get().subject, "google-subject");
 });
-test("Disabled customer cannot sign in through a previously linked provider", async (t) => {
+test("A suspended customer signing in through a previously linked provider is told so, without a session", async (t) => {
   const { env, db } = baseFixture(configuration);
   githubStub(t);
   await finish(env, await start(env));
   db.prepare("UPDATE customers SET status = 'disabled' WHERE email = 'new@example.com'").run();
-  assert.match((await finish(env, await start(env))).headers.get("location"), /sign_in_failed/);
+  const sessions = () => db.prepare("SELECT count(*) AS n FROM portal_sessions").get().n;
+  const before = sessions();
+  const suspended = await finish(env, await start(env));
+  assert.equal(suspended.status, 303);
+  assert.equal(suspended.headers.get("location"), "https://portal.test/?auth_error=account_suspended#/account");
+  assert.deepEqual(suspended.headers.getSetCookie().map((value) => value.split(";")[0]), ["__Host-lccp_oauth="]);
+  assert.equal(sessions(), before);
+  const { subject } = db.prepare("SELECT subject FROM portal_identities").get();
+  await assert.rejects(identityCustomer(env, { provider: "github", subject, email: "new@example.com", name: "Customer" }, null, NOW), { message: "account_suspended" });
 });
 
 test("Concurrent registration cannot leave an orphan customer or duplicate provider identity", async () => {
