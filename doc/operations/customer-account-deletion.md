@@ -15,7 +15,8 @@ the `customer_events` and `portal_bootstrap_events` audit rows.
 
 ## Before you start
 
-- Find the customer ID (`cust_…`) in the admin console under Customers.
+- Find the customer ID (for example `cust_…`) in the admin console under
+  Customers.
 - Use a ticket number as every reason, never the customer's name or email
   address. Reasons are kept in audit rows.
 - Keep a list of the customer IDs you have deleted, and nothing else about
@@ -49,7 +50,7 @@ which stays until your own retention policy removes it.
 | `order_events` | Order ingest journal and order webhook source. | `raw_payload` is the order exactly as your commerce system sent it, which can include the name and email. |
 | `account_token_events`, `policy_events`, `catalog_events`, `license_plan_assignment_events`, `webhook_events` | Admin audit. | Operator text only. |
 | `device_bound_devices`, `device_bound_bindings`, `device_bound_events`, `device_bound_operations` | Protected-device enforcement history. Triggers forbid deleting devices, bindings and operations. | None after the labels are cleared. |
-| `entitlements`, `licenses`, `orders`, `license_plan_assignments`, `entitlement_devices` | License records keyed by the customer ID. | Only what an operator wrote into a note or label (`entitlements.notes`, `licenses.label`, `licenses.metadata_json`, `entitlement_devices.notes`). If a note names the person, edit it in the admin console. |
+| `entitlements`, `licenses`, `orders`, `license_plan_assignments`, `entitlement_devices` | License records keyed by the customer ID. | Only what an operator wrote into a note or label (`entitlements.notes`, `licenses.label`, `licenses.metadata_json`, `entitlement_devices.notes`). If one names the person, clear it: entitlement notes in the admin console's entitlement editor, which records the change, and the others with a reviewed SQL `UPDATE`. |
 
 ## 1. Disable the customer and revoke their tokens
 
