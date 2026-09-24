@@ -5,7 +5,8 @@ import { SupportContact, SupportContactContext } from "../../shared/SupportConta
 type Providers = { google: boolean; github: boolean; email: boolean; password: boolean; support?: string | null };
 type ProvidersState = { providers: Providers | null; failed: boolean; retry(): void };
 const ProvidersContext = createContext<ProvidersState | null>(null);
-const LABELS = { google: "Google", github: "GitHub" };
+// Display names for the sign-in providers, shared with Account's connected-account rows.
+export const LABELS = { google: "Google", github: "GitHub" };
 
 // App mounts this once, so every screen (sign-in, Account, and the signed-in Connect flow) reads one
 // GET /portal/v1/auth/providers response: the sign-in options and the support contact.

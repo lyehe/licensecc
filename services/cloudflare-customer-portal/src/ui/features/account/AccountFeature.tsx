@@ -1,11 +1,11 @@
 import React, { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
-import { ProviderButtons, ProviderResult, useProviders } from "../auth/ProviderSignIn";
+import { LABELS, ProviderButtons, ProviderResult, useProviders } from "../auth/ProviderSignIn";
 import { PasswordSettings } from "./PasswordSettings";
 import { api } from "../../shared/api";
 import { useSingleFlight } from "../../shared/useSingleFlight";
 
-type Identity = { provider: string; email: string };
-const providerName = (provider: string): string => provider === "google" ? "Google" : "GitHub";
+type Provider = keyof typeof LABELS;
+type Identity = { provider: Provider; email: string };
 const LAST_SIGN_IN_METHOD = "You can't disconnect your only sign-in method. Set up another way to sign in first.";
 
 export function AccountFeature({ customerId }: {
@@ -29,10 +29,10 @@ export function AccountFeature({ customerId }: {
     return () => { cancelled = true; };
   }, [attempt]);
   // Resolves true when the identity is still connected, so its row can take focus back.
-  async function disconnect(provider: string): Promise<boolean> {
+  async function disconnect(provider: Provider): Promise<boolean> {
     let connected = true;
     await runOnce(async () => {
-      const name = providerName(provider);
+      const name = LABELS[provider];
       setNotice(null);
       try {
         const result = await api<{ provider: string }>("/portal/v1/auth/identities/unlink", { method: "POST", body: JSON.stringify({ provider }) });
@@ -52,11 +52,13 @@ export function AccountFeature({ customerId }: {
     if (!connected) heading.current?.focus();
     return connected;
   }
+  // The .accountNotice live region is mounted with the section, before any result, and only its text
+  // changes, so a screen reader announces the result wherever focus goes next.
   return <div className="accountPage">
     <div className="pageHeading"><div><h1>Account</h1><p>Manage how you sign in.</p></div></div>
     <ProviderResult />
     {(notice !== null || failed || identityError || !providers || !identities || providers.google || providers.github || identities.length > 0) && <section className="tablePane full"><h2 ref={heading} tabIndex={-1}>Connected accounts</h2>
-      {notice !== null && <p role="status">{notice}</p>}
+      <p role="status" className="accountNotice">{notice}</p>
       {(failed || identityError) ? <p>Unable to load sign-in methods. <button onClick={() => { retry(); setAttempt((value) => value + 1); }}>Retry</button></p> : !providers || !identities ? <p>Loading sign-in methods…</p> : <>
         {identities.map((identity) => <ConnectedIdentity key={identity.provider} identity={identity} busy={busy} onDisconnect={disconnect} />)}
         <ProviderButtons providers={providers} linked={identities.map((identity) => identity.provider)} link />
@@ -73,14 +75,14 @@ export function AccountFeature({ customerId }: {
 function ConnectedIdentity({ identity, busy, onDisconnect }: {
   identity: Identity;
   busy: boolean;
-  onDisconnect(provider: string): Promise<boolean>;
+  onDisconnect(provider: Provider): Promise<boolean>;
 }): React.ReactElement {
   const [confirming, setConfirming] = useState(false);
   const questionId = useId();
   const question = useRef<HTMLDivElement>(null);
   const disconnectButton = useRef<HTMLButtonElement>(null);
   const returnFocus = useRef(false);
-  const name = providerName(identity.provider);
+  const name = LABELS[identity.provider];
   useLayoutEffect(() => {
     if (confirming) question.current?.focus();
     else if (returnFocus.current) disconnectButton.current?.focus();

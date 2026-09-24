@@ -714,6 +714,8 @@ code {
 .disconnectConfirm { flex-basis:100%; display:grid; gap:12px; }
 .disconnectConfirm p { margin:0; color:inherit; }
 .disconnectActions { display:flex; flex-wrap:wrap; gap:12px; }
+/* Stays in the accessibility tree while empty (no display:none), so its next change is announced. */
+.accountNotice:empty { margin:0; }
 .protectedNodes .tablePane { padding:0; overflow-x:auto; }
 
 @media(max-width:767px) {
