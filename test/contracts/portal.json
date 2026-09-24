@@ -4545,7 +4545,7 @@
                   }
                 }
               },
-              "description": "Email login identifier, has_password, can_reset, email_verified, and recovery_available flags; no hash. recovery_available uses the exact eligibility predicate the emailed reset endpoint applies (RESET_ELIGIBLE_SQL), so the UI never promises a recovery the server would refuse."
+              "description": "Email login identifier, has_password, can_reset, email_verified, and recovery_available flags; no hash. recovery_available reports only this account's own eligibility for the emailed reset (the same check that endpoint applies to decide whether to send one); it says nothing about whether email delivery is configured -- see the `email` field from GET /portal/v1/auth/providers for that."
             },
             "401": {
               "content": {

@@ -91,11 +91,16 @@ are documented in the [enrollment contract](../../doc/api/device_enrollment.rst)
 These APIs and local Worker integration tests do not establish production
 readiness; see the maintained [release conditions](../../doc/operations/production-readiness.md).
 
-Administrators can provision password accounts from the admin console's
-**Customers → Add user** action when both services share D1. Customers sign in
-with their login email and initial password, then change the password in
-Account. Provisioning sends no email, grants no licenses, and leaves the email
-unverified. Password login must be enabled in the portal configuration.
+Administrators can provision portal accounts from the admin console's
+**Customers → Add user** action when both services share D1. Add user invites
+by default, and an invited account has no usable password: the customer sets
+one by using "Forgot your password?" in the portal, which requires portal
+email delivery and verifies the address in the process. When the portal
+cannot send email, the admin instead chooses "Set an initial password" and
+shares it with the customer through a private channel; the customer signs in
+with it and changes it in Account. Provisioning itself sends no email and
+grants no licenses. Password login must be enabled in the portal
+configuration.
 
 ## Customer interface
 
@@ -320,7 +325,7 @@ recent verified sign-in.
 
 Forgot password sends a link for an active password account whose login
 email matches its verified contact address, or whose contact email is still
-empty -- a legacy or admin-invited credential -- as long as no other customer
+empty -- a legacy or admin-created credential -- as long as no other customer
 has already verified that address; redeeming the link also sets it as the
 account's verified contact. This migration deliberately does not mark
 historical emails as verified. An address another customer already verified

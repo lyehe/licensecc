@@ -275,6 +275,29 @@ test("console: a present password must still be valid, and an invalid one is nev
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM portal_passwords").get().n, 0);
 });
 
+// A5 fix round 1, item 3: Invite and Set-password use separate idempotency scopes, so a key reused
+// across modes is a fresh request against the OTHER mode's already-claimed email, not a replay.
+test("console: reusing an idempotency key across Invite and Set-password modes never replays the other mode's cached success", async () => {
+  const db = freshDb(); seed(db); db.exec("PRAGMA foreign_keys=ON"); const env = devEnv(db);
+  const post = (body, key) => worker.fetch(devReq("/api/admin/customers", { method: "POST", headers: { "idempotency-key": key }, body: JSON.stringify(body) }), env);
+
+  const invited = await post({ name: "First", email: "invite-then-set@example.test" }, "cross-mode-a");
+  assert.equal(invited.status, 200);
+  assert.equal((await invited.json()).code, "customer_created");
+  const setAfterInvite = await post({ name: "First", email: "invite-then-set@example.test", password: "A long initial passphrase 123!" }, "cross-mode-a");
+  assert.equal(setAfterInvite.status, 409, "the same key under Set-password never replays the Invite success");
+  assert.equal((await setAfterInvite.json()).code, "email_in_use");
+
+  const withPassword = await post({ name: "Second", email: "set-then-invite@example.test", password: "A long initial passphrase 123!" }, "cross-mode-b");
+  assert.equal(withPassword.status, 200);
+  assert.equal((await withPassword.json()).code, "customer_created");
+  const inviteAfterSet = await post({ name: "Second", email: "set-then-invite@example.test" }, "cross-mode-b");
+  assert.equal(inviteAfterSet.status, 409, "the same key under Invite never replays the Set-password success");
+  assert.equal((await inviteAfterSet.json()).code, "email_in_use");
+
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM customers").get().n, 4, "each pair created exactly one customer, from its first call only");
+});
+
 test("console: customer access pagination exceeds legacy detail cap and cannot change customer scope", async () => {
   const db = freshDb(); seed(db); const env = devEnv(db);
   for (let i = 1; i <= 205; i++) await createEntitlementFor(env, "cus_a", i.toString(16).padStart(64, "0"));

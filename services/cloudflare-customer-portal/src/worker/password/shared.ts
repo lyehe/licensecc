@@ -6,13 +6,17 @@ import type { Env } from "../env.js";
 
 export const HEADERS = { "cache-control": "no-store" };
 export const primary = (env: Env) => env.DB.withSession?.("first-primary") ?? env.DB;
-// The one predicate deciding whether a credential (portal_passwords row `p`, joined or correlated to
-// its owning `customers` row `c`) may recover by email: its login address matches the customer's own
-// verified contact address, or the customer has no contact email yet (never verified -- including an
-// admin-invited account) and no OTHER customer has already claimed that address. Shared verbatim by
-// the emailed reset lookup (password-email.ts) and the password-settings `recovery_available` flag
-// (routes/password.ts) so the two can never silently diverge -- the UI must never promise a recovery
-// the server would refuse.
+// The predicate deciding whether a credential (portal_passwords row `p`, joined or correlated to its
+// owning `customers` row `c`) is ACCOUNT-eligible to recover by email: its login address matches the
+// customer's own verified contact address, or the customer has no contact email yet (never verified
+// -- an admin-created account, whether invited or given an initial password) and no OTHER customer
+// has already claimed that address. This says nothing about whether email delivery is configured.
+// Shared verbatim by the emailed reset lookup (password-email.ts's issueLink) and the
+// password-settings `recovery_available` flag (routes/password.ts) so those two account-eligibility
+// checks can never silently diverge. password-email.ts's complete() ALSO re-checks this same
+// eligibility at write time, as bind-parameter guards on its UPDATE statements (around lines 96 and
+// 102) rather than this constant, since it compares a request-scoped value instead of a joined
+// column -- a future change to this predicate must update those guards too.
 export const RESET_ELIGIBLE_SQL = "(lower(c.email) = p.email_lower OR (c.email = '' AND NOT EXISTS (SELECT 1 FROM customers o WHERE lower(o.email) = p.email_lower)))";
 export async function digest(value: string): Promise<string> {
   const bytes = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value)));

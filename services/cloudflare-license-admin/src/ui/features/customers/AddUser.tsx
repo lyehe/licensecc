@@ -65,7 +65,7 @@ export function AddUser({ onCancel, onOpen }: { onCancel(): void; onOpen(id: str
           <label><input type="radio" name="add-user-mode" checked={mode === "set-password"} onChange={() => selectMode("set-password")} /> Set an initial password</label>
         </fieldset>
         {mode === "invite"
-          ? <p>The customer sets their own password later, using "Forgot your password?" in the customer portal.</p>
+          ? <p>The customer sets their own password later, using 'Forgot your password?' in the customer portal.</p>
           : <>
             <p>Use this if the customer portal cannot send email.</p>
             <label>Initial password<input type="password" required autoComplete="new-password" aria-describedby="new-user-password-hint" value={password} onChange={event => setPassword(event.target.value)} /></label>

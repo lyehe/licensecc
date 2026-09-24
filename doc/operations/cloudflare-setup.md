@@ -198,9 +198,11 @@ peppers, and configure email delivery (`PORTAL_EMAIL_API_KEY`,
 password reset send a single-use link valid for 15 minutes; without a working
 sender both return `email_unconfigured` and the portal hides those actions.
 Registration creates an empty customer after the address is verified; it never
-grants a license. Accounts registered before email verification existed can
-recover through reset once, which records the proven address as their contact
-email.
+grants a license. Accounts registered before email verification existed, and
+accounts the admin console's Add user creates -- including invited ones
+(step 8) -- can recover through reset as long as no other customer has
+already verified the address, which records the proven address as their
+contact email.
 
 Alternatively, follow the portal's
 [Google/GitHub setup](https://github.com/lyehe/licensecc/blob/main/services/cloudflare-customer-portal/README.md#google-and-github-sign-in):

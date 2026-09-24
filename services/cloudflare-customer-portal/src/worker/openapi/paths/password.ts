@@ -24,7 +24,7 @@ const settingsSharedResponses = {
 };
 const settingsGetResponses = {
   ...settingsSharedResponses,
-  "200": { description: "Email login identifier, has_password, can_reset, email_verified, and recovery_available flags; no hash. recovery_available uses the exact eligibility predicate the emailed reset endpoint applies (RESET_ELIGIBLE_SQL), so the UI never promises a recovery the server would refuse.", content: { "application/json": { schema: { type: "object", properties: { data: { type: "object", properties: { email: { type: "string" }, has_password: { type: "boolean" }, can_reset: { type: "boolean" }, email_verified: { type: "boolean" }, recovery_available: { type: "boolean" } } } } } } } },
+  "200": { description: "Email login identifier, has_password, can_reset, email_verified, and recovery_available flags; no hash. recovery_available reports only this account's own eligibility for the emailed reset (the same check that endpoint applies to decide whether to send one); it says nothing about whether email delivery is configured -- see the `email` field from GET /portal/v1/auth/providers for that.", content: { "application/json": { schema: { type: "object", properties: { data: { type: "object", properties: { email: { type: "string" }, has_password: { type: "boolean" }, can_reset: { type: "boolean" }, email_verified: { type: "boolean" }, recovery_available: { type: "boolean" } } } } } } } },
   "401": errorResponse("Missing, invalid or expired session.", "unauthorized"),
 };
 const settingsPostResponses = {

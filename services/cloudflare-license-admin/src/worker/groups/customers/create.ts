@@ -30,7 +30,10 @@ export async function createPortalUser(request: Request, env: Env, actor: Actor,
   // silently treated as an invite.
   const passwordProvided = body.password !== undefined;
   if (!email || !name || name.length > 128 || Array.from(name).some(char => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127) || (passwordProvided && !validPassword(body.password))) return envelope(rid, "invalid_request", undefined, 400);
-  const scope = `POST:/api/admin/customers:${actor.subject}`;
+  // Invite and Set-password are partitioned into separate idempotency scopes: reusing a key across
+  // modes must never replay the OTHER mode's cached success. It runs as a brand-new request instead,
+  // and correctly reports email_in_use if the first attempt already claimed that email.
+  const scope = `POST:/api/admin/customers:${actor.subject}${passwordProvided ? "" : ":invite"}`;
   const replay = await idempotentReplay(env, scope, key);
   if (replay) return replay;
   const existingEmail = () => env.DB.prepare("SELECT id FROM customers WHERE lower(email) = ? UNION ALL SELECT customer_id AS id FROM portal_passwords WHERE email_lower = ? LIMIT 1").bind(email, email).first();

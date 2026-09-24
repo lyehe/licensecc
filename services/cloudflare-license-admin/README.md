@@ -30,9 +30,11 @@ the administrator role. **Invite** is the default: the server stores a
 random, never-disclosed credential, and the success panel tells the operator
 to ask the customer to open the customer portal and choose "Forgot your
 password?" to set their own password. That works because the portal treats
-an admin-created account's empty contact email as eligible for one recovery,
-the same as any other unverified address, as long as no other customer has
-already verified it.
+an admin-created account's empty contact email as eligible for password
+recovery as long as no other customer has already verified that same
+address -- a non-empty contact email that differs from the login is never
+eligible. The first successful recovery records the proven address as the
+account's verified contact, after which it recovers the ordinary way.
 
 Choose **Set an initial password** instead when the customer portal cannot
 send email: enter an initial password (15–128 characters) and share it with

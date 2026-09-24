@@ -148,7 +148,10 @@ test("password settings mark a credential eligible when it matches the customer'
   assert.equal(result.body.data.recovery_available, true);
 });
 
-test("password settings mark an admin-invite-shaped account eligible for one recovery when its address is unclaimed", async () => {
+test("password settings mark a legacy/set-password-shaped account eligible for one recovery when its address is unclaimed", async () => {
+  // register() seeds a KNOWN password (the set-password/legacy shape, empty contact email but a
+  // usable credential) -- not the random-secret Invite shape, which portal-worker-password-email.test.mjs
+  // covers separately.
   const { env } = fixture();
   const created = await register(env, "invited@example.com");
   const result = await call(env, "GET", PATH, { cookie: cookie(created) });
@@ -157,9 +160,9 @@ test("password settings mark an admin-invite-shaped account eligible for one rec
   assert.equal(result.body.data.recovery_available, true);
 });
 
-test("password settings never offer recovery for an admin-invite-shaped account whose address another customer already verified", async () => {
+test("password settings never offer recovery for a legacy/set-password-shaped account whose address another customer already verified", async () => {
   // baseFixture seeds customer A with the verified address a@x.com; a second, empty-contact account
-  // sharing that same login identifier (the admin-invite/legacy shape) must not recover with it.
+  // sharing that same login identifier (the legacy/set-password shape) must not recover with it.
   const { env } = fixture();
   const created = await register(env, "a@x.com");
   const result = await call(env, "GET", PATH, { cookie: cookie(created) });

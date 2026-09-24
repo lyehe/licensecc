@@ -59,9 +59,10 @@ test("admin adds a portal user and reconciles a lost creation response without d
 test("add user defaults to inviting the customer, hides the password field, and switching modes clears any typed password", async ({ page }) => {
   const api = makeAdminApiFixture();
   await page.route("**/api/admin/**", api.route);
+  let input;
   await page.route("**/api/admin/customers", async route => {
     if (route.request().method() !== "POST") return route.fallback();
-    const input = route.request().postDataJSON();
+    input = route.request().postDataJSON();
     const row = api.seed.customer({ id: "cust_invited_from_admin", name: input.name, email: "", login_email: input.email, status: "active" });
     return route.fulfill({ contentType: "application/json", body: JSON.stringify(makeEnvelope("customer_created", row)) });
   });
@@ -82,6 +83,9 @@ test("add user defaults to inviting the customer, hides the password field, and 
   await form.getByLabel("Login email", { exact: true }).fill("invited@example.test");
   await form.getByRole("button", { name: "Add user", exact: true }).click();
   await expect(page.getByRole("heading", { name: "User added", exact: true })).toBeVisible();
+  // The wire body must carry no `password` key at all in Invite mode -- toEqual fails closed if one
+  // leaked in, since it requires an exact key set, not just a subset match.
+  expect(input).toEqual({ name: "Invited user", email: "invited@example.test" });
   await expect(page.getByText("Ask invited@example.test to open the customer portal and choose 'Forgot your password?' to set a password.", { exact: true })).toBeVisible();
   await expect(page.getByText(/Share the initial password securely/)).toHaveCount(0);
   await expect(page.getByText("No licenses have been assigned.")).toBeVisible();
