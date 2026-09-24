@@ -7,7 +7,7 @@ import { sha256Hex, verifyBoundDeviceProof, signBoundDeviceLease } from "./bound
 import { commitBoundDeviceLease } from "./bound_store.mjs";
 import { recoverBoundDeviceLease } from "./bound_recovery.mjs";
 import { limitBoundVerified } from "./bound_rate.mjs";
-import { boundTrialState } from "./bound_trial.mjs";
+import { boundTrialState } from "@licensecc/cloudflare-runtime/device/bound_trial";
 
 /** @returns {never} */
 function deny(code, status) { throw new BoundRequestError(code, status); }

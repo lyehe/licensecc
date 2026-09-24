@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
-import { boundTrialState, boundTrialSql, boundTrialDeadlineSql } from "../../src/device/bound_trial.mjs";
+import { boundTrialState, boundTrialSql, boundTrialDeadlineSql } from "@licensecc/cloudflare-runtime/device/bound_trial";
 
 const key = `sha256:${"a".repeat(64)}`;
 const base = { is_trial: 1, trial_expiration_basis: "from_first_activation", trial_duration_sec: 100,

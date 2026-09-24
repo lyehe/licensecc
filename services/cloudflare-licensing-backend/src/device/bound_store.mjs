@@ -2,7 +2,7 @@
 // HTTP handlers must verify device proof and reconstruct the candidate from
 // primary DB reads, never pass caller JSON directly to this internal module.
 import { boundOccupiedSql } from "@licensecc/cloudflare-runtime/device/bound_capacity";
-import { boundTrialSql, boundTrialDeadlineSql } from "./bound_trial.mjs";
+import { boundTrialSql, boundTrialDeadlineSql } from "@licensecc/cloudflare-runtime/device/bound_trial";
 const fields = ["keyId", "purpose", "operationId", "invocationId", "requestDigest",
   "customerId", "customerRevision", "project", "feature", "fingerprint", "entitlementRevision",
   "deviceId", "deviceRevision", "publicKeySpki", "deviceLabel", "bindingId",

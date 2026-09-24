@@ -1,7 +1,7 @@
 import { encodeBase64url, decodeEnrollmentPageCursor } from "@licensecc/licensing-domain/lease/device_protocol";
 import { boundOccupiedSql } from "@licensecc/cloudflare-runtime/device/bound_capacity";
 import { BoundRequestError } from "./bound_request.mjs";
-import { boundTrialSql, boundTrialDeadlineSql } from "./bound_trial.mjs";
+import { boundTrialSql, boundTrialDeadlineSql } from "@licensecc/cloudflare-runtime/device/bound_trial";
 
 const encode=value=>encodeBase64url(new TextEncoder().encode(JSON.stringify(value)));
 // This unsigned cursor is a position, not authority. Every query rechecks the

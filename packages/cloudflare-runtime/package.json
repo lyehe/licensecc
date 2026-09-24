@@ -45,6 +45,10 @@
       "types": "./src/device/bound_capacity.d.ts",
       "default": "./src/device/bound_capacity.mjs"
     },
+    "./device/bound_trial": {
+      "types": "./src/device/bound_trial.d.ts",
+      "default": "./src/device/bound_trial.mjs"
+    },
     "./entitlements/policy_store": {
       "types": "./src/entitlements/policy_store.d.ts",
       "default": "./src/entitlements/policy_store.mjs"
