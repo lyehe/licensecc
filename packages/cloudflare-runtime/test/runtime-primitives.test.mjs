@@ -13,6 +13,7 @@ const RUNTIME_SUBPATHS = [
   "@licensecc/cloudflare-runtime/d1/contract",
   "@licensecc/cloudflare-runtime/d1/entitlement_mutation",
   "@licensecc/cloudflare-runtime/d1/idempotency_store",
+  "@licensecc/cloudflare-runtime/device/bound_capacity",
   "@licensecc/cloudflare-runtime/entitlements/policy_store",
   "@licensecc/cloudflare-runtime/http/kit",
   "@licensecc/cloudflare-runtime/lease/metering",

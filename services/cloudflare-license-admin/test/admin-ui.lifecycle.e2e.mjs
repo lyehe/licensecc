@@ -646,3 +646,60 @@ test("admin UI previews and applies a license plan projection", async ({ page })
   await expect(projectedEntitlement).toContainText("License ID");
   await expect(projectedEntitlement).toContainText("lic_plan");
 });
+
+// B2: a policy's patchable fields are editable in place; its project, name, and type are not.
+test("an operator edits a policy's device limit without touching its identity", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  api.seed.policy("pol_edit", "Editable", { project: "APP", type: "node_locked", max_active_devices: 3, notes: "tier" });
+  await page.route("**/api/admin/**", api.route);
+  await page.goto("/#/policies");
+  const row = page.locator(".tablePane table tbody tr").filter({ hasText: "Editable" });
+  await expect(row).toContainText("Max devices 3");
+  await row.getByRole("button", { name: "Edit", exact: true }).click();
+  const editor = page.getByRole("form", { name: "Edit policy", exact: true });
+  await expect(editor.getByLabel("Name (required)", { exact: true })).toHaveValue("Editable");
+  await expect(editor.getByLabel("Name (required)", { exact: true })).toHaveAttribute("readonly", "");
+  await expect(editor.getByLabel("Project", { exact: true })).toHaveAttribute("readonly", "");
+  await expect(editor.getByLabel("Type", { exact: true })).toBeDisabled();
+  await expect(editor.getByLabel("Device limit", { exact: true })).toHaveValue("3");
+  await editor.getByLabel("Device limit", { exact: true }).fill("5");
+  await editor.getByRole("button", { name: "Save changes", exact: true }).click();
+  await expect(page.getByText(/policy_patched/)).toBeVisible();
+  expect(api.requests.policyPatches).toHaveLength(1);
+  const [patch] = api.requests.policyPatches;
+  expect(patch.id).toBe("pol_edit");
+  expect(patch.idempotencyKey).toMatch(/^[0-9a-f-]{36}$/);
+  expect(patch.body).toMatchObject({ max_active_devices: 5, notes: "tier", pool_size: 0 });
+  for (const field of ["project", "name", "type", "status"]) expect(Object.hasOwn(patch.body, field)).toBe(false);
+  await expect(row).toContainText("Max devices 5");
+  await expect(editor).toHaveCount(0);
+});
+
+// B2: a protected grant's device limit is set on its own; a limit below its connected devices is
+// refused with their count, in words.
+test("an operator sets a protected grant's device limit and is told how many devices block a lower one", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  api.seed.entitlement({ project: "APP", feature: "PRO", enforcement_mode: "device_bound_v1", customer_id: "cus_acme", license_id: "lic_acme", max_active_devices: 5 });
+  api.behavior.devicesInUse = 3;
+  await page.route("**/api/admin/**", api.route);
+  await page.goto("/#/entitlements");
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
+  const limitForm = page.getByRole("form", { name: "Device limit", exact: true });
+  const limit = limitForm.getByLabel("Device limit", { exact: true });
+  await expect(limit).toHaveValue("5");
+  await limit.fill("2");
+  await limitForm.getByRole("button", { name: "Save device limit", exact: true }).click();
+  await expect(page.getByRole("alert")).toHaveText("3 devices are connected; disconnect one first. Reference ui-e2e-capacity-in-use.");
+  await expect(page.getByText(/capacity_in_use/)).toHaveCount(0);
+  await expect(limit).toHaveValue("2");
+  await limit.fill("3");
+  await limitForm.getByRole("button", { name: "Save device limit", exact: true }).click();
+  await expect(page.getByText("Device limit set to 3.", { exact: false })).toBeVisible();
+  expect(api.requests.patches).toEqual([
+    { max_active_devices: 2, expected_customer_id: "cus_acme", expected_revocation_seq: 1 },
+    { max_active_devices: 3, expected_customer_id: "cus_acme", expected_revocation_seq: 1 },
+  ]);
+  await expect(limit).toHaveValue("3");
+  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
+  await expect(page.locator(".desktopRecords tbody tr").first()).toContainText("Device limit 3");
+});

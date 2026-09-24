@@ -48,6 +48,7 @@ test("admin UI workflow normalizes create form payloads", async () => {
     notes: "operator note",
     customer_id: "cus_123",
     license_id: "lic_123",
+    max_active_devices: 1,
   });
   assert.throws(() => workflow.normalizeEntitlementForm({
     ...workflow.emptyEntitlementForm,

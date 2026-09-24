@@ -150,3 +150,130 @@ test("the protected license picker offers no creation when its license read fail
   await expect(lookup.getByRole("alert")).toContainText("Could not load license options.");
   await expect(form.getByRole("button", { name: /^Create license for/ })).toHaveCount(0);
 });
+
+// B2: the device limit is visible and settable, policies say what they grant, and the customer
+// field reads one bounded page per pause in typing.
+async function newEntitlement(page) {
+  await page.goto("/#/entitlements");
+  await page.getByRole("button", { name: "New entitlement", exact: true }).click();
+  return page.getByRole("form", { name: "New entitlement", exact: true });
+}
+
+test("a create without a policy sends its device limit, and a chosen policy shows and owns its own", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  api.seed.policy("pol_pro", "Pro", { project: "APP", type: "node_locked", max_active_devices: 3 });
+  api.seed.policy("pol_other", "Other app", { project: "OTHER", type: "node_locked", max_active_devices: 9 });
+  await page.route("**/api/admin/**", api.route);
+  const writes = [];
+  await page.route("**/api/admin/entitlements", async route => {
+    if (route.request().method() === "POST") writes.push(route.request().postDataJSON());
+    return route.fallback();
+  });
+  const form = await newEntitlement(page);
+  await form.getByLabel("Project", { exact: true }).fill("APP");
+  await form.getByLabel("Feature", { exact: true }).fill("PRO");
+  await form.getByLabel("License fingerprint", { exact: true }).fill("a".repeat(64));
+  const policy = form.getByLabel("Policy (optional)", { exact: true });
+  // Only this project's policies are offered, each with what it grants.
+  await expect(policy.locator("option")).toHaveText(["No policy · use fields below", "Pro · 3 devices · APP"]);
+  const own = form.getByLabel("Device limit", { exact: true });
+  await expect(own).toHaveValue("1");
+  await own.fill("4");
+  await policy.selectOption("pol_pro");
+  await expect(policy.locator("option:checked")).toHaveText("Pro · 3 devices · APP");
+  const inherited = form.getByLabel("Device limit (from policy Pro)", { exact: true });
+  await expect(inherited).toHaveValue("3");
+  await expect(inherited).toHaveAttribute("readonly", "");
+  await expect(own).toHaveCount(0);
+  await form.getByRole("button", { name: "Create entitlement", exact: true }).click();
+  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
+  expect(writes).toHaveLength(1);
+  expect(writes[0]).toMatchObject({ policy_id: "pol_pro", project: "APP", feature: "PRO" });
+  expect(Object.hasOwn(writes[0], "max_active_devices")).toBe(false);
+
+  await form.getByLabel("Project", { exact: true }).fill("APP");
+  await form.getByLabel("Feature", { exact: true }).fill("PLUS");
+  await form.getByLabel("License fingerprint", { exact: true }).fill("b".repeat(64));
+  await form.getByLabel("Device limit", { exact: true }).fill("0");
+  await form.getByRole("button", { name: "Create entitlement", exact: true }).click();
+  await expect(form.getByText("Enter a whole number of devices from 1 to 1,000,000.", { exact: true })).toBeVisible();
+  await expect(form.getByLabel("Device limit", { exact: true })).toBeFocused();
+  await form.getByLabel("Device limit", { exact: true }).fill("4");
+  await form.getByRole("button", { name: "Create entitlement", exact: true }).click();
+  await expect.poll(() => writes.length).toBe(2);
+  expect(writes[1]).toMatchObject({ project: "APP", feature: "PLUS", max_active_devices: 4 });
+  expect(Object.hasOwn(writes[1], "policy_id")).toBe(false);
+});
+
+test("the customer field reads one bounded page on open and one more per pause in typing", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  api.seed.customers(40);
+  await page.route("**/api/admin/**", api.route);
+  await page.goto("/#/entitlements");
+  await expect(page.getByRole("button", { name: "New entitlement", exact: true })).toBeEnabled();
+  const before = api.requests.customerReads.length;
+  await page.getByRole("button", { name: "New entitlement", exact: true }).click();
+  const form = page.getByRole("form", { name: "New entitlement", exact: true });
+  const lookup = form.getByRole("region", { name: "Customer relationship", exact: true });
+  await expect(relationship(form, "Customer").locator("option")).toHaveCount(21);
+  expect(api.requests.customerReads.slice(before)).toEqual(["?limit=20"]);
+  await expect(lookup.getByText("Showing the first 20 customers. Type more of a name, email, or ID to narrow the list.", { exact: true })).toBeVisible();
+
+  const search = lookup.getByLabel("Search customers", { exact: true });
+  await search.pressSequentially("acme", { delay: 40 });
+  await expect.poll(() => api.requests.customerReads.length).toBe(before + 2);
+  expect(api.requests.customerReads.at(-1)).toBe("?q=acme&limit=20");
+  await expect(relationship(form, "Customer").locator("option")).toHaveText(["No customer", "Acme Corp · cus_acme"]);
+  await expect(lookup.getByText(/^Showing the first 20/)).toHaveCount(0);
+  // Enter never submits the entitlement form from the search field, and a pause sends nothing new.
+  await search.press("Enter");
+  await page.waitForTimeout(700);
+  expect(api.requests.customerReads.length).toBe(before + 2);
+  expect(api.requests.creates).toBe(0);
+  await relationship(form, "Customer").selectOption("cus_acme");
+  await expect(relationship(form, "Customer")).toHaveValue("cus_acme");
+  await search.fill("no such customer");
+  await expect(lookup.getByText("No customers match. Try another search or enter the full ID below.", { exact: true })).toBeVisible();
+  await expect(relationship(form, "Customer")).toHaveValue("cus_acme");
+});
+
+test("Create policy… opens the policy form for the draft's project and returns to the intact draft", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  await page.route("**/api/admin/**", api.route);
+  const dialogs = [];
+  page.on("dialog", async (dialog) => { dialogs.push(dialog.message()); await dialog.dismiss(); });
+  const form = await newEntitlement(page);
+  await form.getByLabel("Protection", { exact: true }).selectOption("device_bound_v1");
+  await form.getByLabel("Project", { exact: true }).fill("APP");
+  await form.getByLabel("Feature", { exact: true }).fill("PRO");
+  await form.getByLabel("Notes", { exact: true }).fill("kept across the policy detour");
+
+  await form.getByRole("link", { name: "Create policy…", exact: true }).click();
+  const policyForm = page.getByRole("form", { name: "New policy", exact: true });
+  await expect(policyForm.getByLabel("Project", { exact: true })).toHaveValue("APP");
+  await expect(page.getByText("This policy is for your entitlement draft for APP. Creating it returns you to the draft with the policy chosen.", { exact: true })).toBeVisible();
+  // Going back without creating keeps the draft and chooses nothing.
+  await page.getByRole("button", { name: "Back to entitlement draft", exact: true }).click();
+  await expect(form.getByLabel("Notes", { exact: true })).toHaveValue("kept across the policy detour");
+  await expect(form.getByLabel("Policy (optional)", { exact: true })).toHaveValue("");
+
+  await form.getByRole("link", { name: "Create policy…", exact: true }).click();
+  await policyForm.getByLabel("Name (required)", { exact: true }).fill("Pro");
+  await policyForm.getByLabel("Type", { exact: true }).selectOption("node_locked");
+  await policyForm.getByLabel("Device limit", { exact: true }).fill("3");
+  await policyForm.getByRole("button", { name: "Create policy", exact: true }).click();
+
+  const policy = form.getByLabel("Policy (optional)", { exact: true });
+  await expect(policy).toHaveValue("pol_1");
+  await expect(policy.locator("option:checked")).toHaveText("Pro · 3 devices · APP");
+  await expect(form.getByLabel("Device limit (from policy Pro)", { exact: true })).toHaveValue("3");
+  await expect(form.getByLabel("Protection", { exact: true })).toHaveValue("device_bound_v1");
+  await expect(form.getByLabel("Feature", { exact: true })).toHaveValue("PRO");
+  await expect(form.getByLabel("Notes", { exact: true })).toHaveValue("kept across the policy detour");
+  expect(api.requests.policyCreates).toEqual([expect.objectContaining({ project: "APP", name: "Pro", type: "node_locked", max_active_devices: 3 })]);
+  expect(dialogs).toEqual([]);
+  // Leaving the draft for anything else still asks before discarding it.
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Customers", exact: true }).click();
+  await expect.poll(() => dialogs.length).toBe(1);
+  await expect(form.getByLabel("Notes", { exact: true })).toHaveValue("kept across the policy detour");
+});

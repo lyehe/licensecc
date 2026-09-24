@@ -44,6 +44,7 @@ export function makeAdminApiFixture() {
     catalogPlanFeatureTransitions: [],
     catalogImports: [],
     policyCreates: [],
+    policyPatches: [],
     webhookCreates: [],
     webhookCreateAttempts: [],
     webhookReads: [],
@@ -162,17 +163,20 @@ export function makeAdminApiFixture() {
     customerPageSize: null,
     settingsFailure: null,
     settingsResponse: null,
+    // Protected devices holding a slot on every grant; a PATCH below it models the capacity trigger.
+    devicesInUse: 0,
   };
   let nextProjectionPreviewId = 1;
   let nextCatalogImportPreviewId = 1;
 
-  function seedPolicy(id = "pol_confirm", name = "Confirm policy") {
+  function seedPolicy(id = "pol_confirm", name = "Confirm policy", overrides = {}) {
     const policy = {
       id, project: "DEFAULT", name, type: "trial", status: "active",
       valid_from_offset_sec: null, duration_sec: null, assertion_ttl_seconds: 300, pool_size: 0,
       max_active_devices: 1, max_borrow_sec: 0, meter_quota: 0, meter_period_sec: 2592000,
       expiry_strategy: "fixed_window", trial_expiration_basis: "from_issue", trial_duration_sec: 0,
       trial_one_per_device: 0, trial_require_device_proof: 0, notes: "", created_at: now, updated_at: now,
+      ...overrides,
     };
     policies.push(policy);
     return policy;
@@ -1058,6 +1062,17 @@ export function makeAdminApiFixture() {
       policies.push(row);
       return fulfill(200, makeEnvelope("policy_created", { ...row }));
     }
+    const policyDetailMatch = /^\/api\/admin\/policies\/([^/]+)$/.exec(path);
+    if (method === "PATCH" && policyDetailMatch !== null) {
+      const body = await jsonBody(request);
+      requests.policyPatches.push({ id: decodeURIComponent(policyDetailMatch[1]), body, idempotencyKey: request.headers()["idempotency-key"] ?? null });
+      const policy = policies.find((item) => item.id === decodeURIComponent(policyDetailMatch[1]));
+      if (policy === undefined) return fulfill(404, { ok: false, code: "not_found", request_id: "ui-e2e-policy-missing" });
+      if (["project", "name", "type", "status"].some((field) => field in body)) return fulfill(400, { ok: false, code: "invalid_request", request_id: "ui-e2e-policy-identity" });
+      now += 1;
+      Object.assign(policy, body, { updated_at: now });
+      return fulfill(200, makeEnvelope("policy_patched", { ...policy }));
+    }
     const policyActionMatch = /^\/api\/admin\/policies\/([^/]+)\/(disable|reenable)$/.exec(path);
     if (method === "POST" && policyActionMatch !== null) {
       const id = decodeURIComponent(policyActionMatch[1]);
@@ -1761,6 +1776,19 @@ export function makeAdminApiFixture() {
       if (method === "PATCH" && match[2] === undefined) {
         const body = await jsonBody(request);
         requests.patches.push(body);
+        // The device limit is patched alone, and a protected grant keeps room for its connected devices.
+        if (body.max_active_devices !== undefined) {
+          if (Object.keys(body).some((field) => !["max_active_devices", "expected_customer_id", "expected_revocation_seq"].includes(field))) {
+            return fulfill(400, { ok: false, code: "invalid_request", request_id: "ui-e2e-limit-combined" });
+          }
+          if (row.enforcement_mode === "device_bound_v1" && body.max_active_devices < behavior.devicesInUse) {
+            return fulfill(409, { ok: false, code: "capacity_in_use", request_id: "ui-e2e-capacity-in-use", data: { devices_in_use: behavior.devicesInUse } });
+          }
+          now += 1;
+          Object.assign(row, { max_active_devices: body.max_active_devices, revocation_seq: row.revocation_seq + 1, updated_at: now });
+          addEvent("update", row);
+          return fulfill(200, makeEnvelope("entitlement_patched", publicRecord(row)));
+        }
         now += 1;
         Object.assign(row, {
           device_hash: body.device_hash ?? row.device_hash,

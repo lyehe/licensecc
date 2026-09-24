@@ -12,6 +12,7 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { isDeepStrictEqual } from "node:util";
 import { assembleComponents, assemblePaths, assertUniqueOperationIds } from "../dist-worker/worker/openapi/assemble.js";
 import { openApiDocument } from "../dist-worker/worker/openapi/document.js";
 import "./worker/transition-contracts.test.mjs";
@@ -220,6 +221,39 @@ test("a protected creation conflict documents data.reason from the single runtim
     properties: { reason: { enum: [...sharedApi.PROTECTED_CREATE_REASONS] } },
   });
   assert.deepEqual(conflict.examples.protected_creation_conflict.value, { ok: false, code: "protected_creation_conflict", request_id: "1a2b3c-1", data: { reason: "customer_inactive" } });
+});
+
+test("the device limit is documented on create and PATCH, with the capacity conflict's device count", () => {
+  const schemas = openApiDocument.components.schemas;
+  const inRange = (schema) => schema?.type === "integer" && schema.minimum === 1 && schema.maximum === sharedApi.MAX_DEVICE_LIMIT;
+  assert.equal(sharedApi.MAX_DEVICE_LIMIT, 1_000_000);
+  const create = schemas.EntitlementCreateInput.allOf;
+  assert.ok(inRange(create[1].properties.max_active_devices), "create documents the device limit range");
+  // A selected policy owns the device limit, so a create cannot send both.
+  assert.ok(create.some((part) => isDeepStrictEqual(part, {
+    if: { required: ["policy_id"], properties: { policy_id: { type: "string", minLength: 1 } } },
+    then: { not: { required: ["max_active_devices"] } },
+  })), "create documents that a policy excludes max_active_devices");
+  const patch = schemas.EntitlementPatch;
+  assert.ok(inRange(patch.properties.max_active_devices), "PATCH documents the device limit range");
+  assert.deepEqual(patch.dependentSchemas.max_active_devices, { propertyNames: { enum: ["max_active_devices", "expected_customer_id", "expected_revocation_seq"] } });
+  assert.equal(schemas.EntitlementRecord.properties.max_active_devices.type, "integer");
+
+  const conflict = openApiDocument.paths["/api/admin/entitlements/{id}"].patch.responses["409"].content["application/json"];
+  assert.deepEqual(conflict.schema.oneOf, [
+    {
+      allOf: [
+        { $ref: "#/components/schemas/ErrorEnvelope" },
+        { type: "object", required: ["code"], properties: { code: { enum: ["revoked_entitlement_is_terminal", "stale_transition"] } } },
+      ],
+    },
+    { $ref: "#/components/schemas/CapacityInUseError" },
+  ]);
+  assert.deepEqual(schemas.CapacityInUseData.required, ["devices_in_use"]);
+  assert.equal(schemas.CapacityInUseData.additionalProperties, false);
+  assert.equal(schemas.CapacityInUseData.properties.devices_in_use.type, "integer");
+  assert.deepEqual(schemas.CapacityInUseError.allOf[1].properties.code, { const: "capacity_in_use" });
+  assert.deepEqual(conflict.examples.capacity_in_use.value, { ok: false, code: "capacity_in_use", request_id: "1a2b3c-1", data: { devices_in_use: 3 } });
 });
 
 test("catalog import documents its server-bound Preview/Apply protocol", () => {

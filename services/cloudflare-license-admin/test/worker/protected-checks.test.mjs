@@ -73,6 +73,24 @@ test("the diagnostic's would-be row provides every column a check reads from e",
   }
 });
 
+// B2: a create without a policy may set its own device limit. Its side-write rides the create batch,
+// so the would-be row carries that value instead of the kept one, and the batch requires the row to
+// hold exactly what the create wrote.
+test("a create's own device limit is modelled in the would-be row and required of the written row", async () => {
+  const { protectedCreateAssertion, protectedCreateChecks, protectedWouldBeRowQuery } = await checksModule();
+  const limited = { ...input, max_active_devices: 3 };
+  const wouldBe = protectedWouldBeRowQuery(limited);
+  assert.equal(JSON.parse(wouldBe.binds[0]).max_active_devices, 3);
+  assert.doesNotMatch(wouldBe.sql, /x\.max_active_devices, 1\) AS max_active_devices/);
+  const written = protectedCreateChecks(limited).find((check) => check.reason === "unknown");
+  assert.match(written.sql, /AND e\.max_active_devices IS \?$/);
+  assert.deepEqual(written.binds, ["owner", "license", 3]);
+  assert.deepEqual(protectedCreateAssertion(capturingEnv().env, limited).args.slice(-3), ["owner", "license", 3]);
+  // Without its own limit a create keeps the existing value; a policy's stamp is checked by policy_mismatch.
+  assert.deepEqual(protectedCreateChecks(input).find((check) => check.reason === "unknown").binds, ["owner", "license"]);
+  assert.deepEqual(protectedCreateChecks(input, policy).find((check) => check.reason === "unknown").binds, ["owner", "license"]);
+});
+
 test("the diagnostic falls back to unknown for an unrecognized answer or a failed read", async () => {
   const { protectedCreateReason } = await checksModule();
   for (const row of [null, { reason: "not_a_reason" }, { reason: 7 }, () => { throw new Error("D1 unavailable"); }]) {

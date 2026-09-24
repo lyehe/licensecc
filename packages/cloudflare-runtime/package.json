@@ -74,7 +74,7 @@
   "scripts": {
     "build": "npm run typecheck",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --test test/*.test.mjs"
+    "test": "node --experimental-sqlite --test test/*.test.mjs"
   },
   "devDependencies": {
     "typescript": "7.0.2"
