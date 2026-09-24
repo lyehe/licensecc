@@ -126,10 +126,10 @@ function PortalShell(): React.ReactElement {
         if (await refreshData()) {
           setMessage(null);
         } else {
-          setMessage(localMessage(DEVICES_REFRESH_FAILURE_CODE, false));
+          setMessage(localMessage("account_refresh_failed", false));
         }
       } catch {
-        setMessage(localMessage(DEVICES_REFRESH_FAILURE_CODE, false));
+        setMessage(localMessage("account_refresh_failed", false));
       }
     });
   }

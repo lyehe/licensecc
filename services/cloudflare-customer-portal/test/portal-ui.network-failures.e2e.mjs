@@ -170,3 +170,66 @@ test("an aborted seat-start call shows the network message and leaves the seat s
   await expect(page.getByText("network_unavailable", { exact: false })).not.toBeVisible();
   expect(pageErrors).toEqual([]);
 });
+
+test("an aborted account refresh shows the failure message with exactly one retry button", async ({ page }) => {
+  const pageErrors = [];
+  page.on("pageerror", (error) => pageErrors.push(error));
+  let deviceRequestCount = 0;
+  let authed = false;
+  const handler = (route) => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname;
+    const method = request.method();
+    const fulfill = (status, body) => route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
+
+    if (path === "/portal/v1/auth/providers") return fulfill(200, makeEnvelope("auth_providers", { google: false, github: false, email: true, password: false }));
+    if (method === "POST" && path === "/portal/v1/auth/request") return fulfill(200, makeEnvelope("otp_requested"));
+    if (method === "POST" && path === "/portal/v1/auth/verify") {
+      const body = jsonBody(request);
+      if (body.code !== VALID_CODE) return fulfill(401, { ok: false, code: "invalid_otp", request_id: "refresh-e2e-bad" });
+      authed = true;
+      return fulfill(200, makeEnvelope("signed_in", { customer_id: "cus_refresh" }));
+    }
+    if (method === "GET" && path === "/api/portal/me") {
+      if (!authed) return fulfill(401, { ok: false, code: "unauthorized", request_id: "refresh-e2e-401" });
+      return fulfill(200, makeEnvelope("me", { customer_id: "cus_refresh", email: null }));
+    }
+    if (method === "GET" && path === "/api/portal/entitlements") {
+      if (!authed) return fulfill(401, { ok: false, code: "unauthorized", request_id: "refresh-e2e-401" });
+      return fulfill(200, makeEnvelope("entitlements", { items: ENTITLEMENTS.map((item) => ({ ...item })) }));
+    }
+    if (method === "GET" && path === "/api/portal/devices") {
+      if (!authed) return fulfill(401, { ok: false, code: "unauthorized", request_id: "refresh-e2e-401" });
+      deviceRequestCount += 1;
+      // First two requests fail; third and onwards succeed.
+      if (deviceRequestCount <= 2) {
+        return route.abort("failed");
+      } else {
+        return fulfill(200, makeEnvelope("devices", { items: [] }));
+      }
+    }
+    if (method === "GET" && path === "/api/portal/usage") {
+      if (!authed) return fulfill(401, { ok: false, code: "unauthorized", request_id: "refresh-e2e-401" });
+      return fulfill(200, makeEnvelope("usage", { items: [] }));
+    }
+    return fulfill(404, { ok: false, code: "not_found", request_id: "refresh-e2e-unhandled" });
+  };
+  page.route("**/portal/v1/auth/**", handler);
+  page.route("**/api/portal/**", handler);
+  await page.goto("/");
+  // Sign in manually without waiting for Apps heading (since initial load will fail).
+  await page.getByLabel("Email").fill("user@example.com");
+  await page.getByRole("button", { name: "Send code" }).click();
+  await expect(page.getByRole("heading", { name: "Check your email" })).toBeVisible();
+  await page.getByLabel("8-digit code").fill(VALID_CODE);
+  await page.getByRole("button", { name: "Verify", exact: true }).click();
+  // Initial load fails; shows error state with Retry button.
+  await expect(page.getByRole("button", { name: "Retry" })).toBeVisible();
+  // Click Retry; this will fail again (deviceRequestCount === 1).
+  await page.getByRole("button", { name: "Retry" }).click();
+  await expect(page.getByText("Account refresh failed")).toBeVisible();
+  // Exactly one button should match the retry patterns.
+  await expect(page.getByRole("button", { name: /Retry|Refresh account|Refresh status/ })).toHaveCount(1);
+  await expect(page.getByText("account_refresh_failed", { exact: false })).not.toBeVisible();
+  expect(pageErrors).toEqual([]);
+});
