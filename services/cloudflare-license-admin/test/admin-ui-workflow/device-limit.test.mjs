@@ -85,3 +85,9 @@ test("the policy editor edits every patchable field and never the policy's ident
   assert.throws(() => workflow.normalizePolicyPatch({ ...form, max_active_devices: -1 }), /max_active_devices_must_be_between_0_and_1000000/);
   assert.throws(() => workflow.normalizePolicyPatch({ ...form, pool_size: 2 }), /node_locked_pool_size_must_be_0/);
 });
+
+test("a create refused for capacity suggests raising the limit, which a create without a policy now sets", async () => {
+  const onboarding = await loadWorkflowModule("features/entitlements/protectedCreate.ts");
+  const message = onboarding.protectedCreateFailureMessage({ code: "protected_creation_conflict", requestId: "req-5", data: { reason: "invalid_capacity" } });
+  assert.match(message, /^The device limit must be 1 to 1,000,000 and can't drop below the devices already connected; raise the limit, choose another policy, or disconnect devices first\. Reference req-5\.$/);
+});

@@ -700,6 +700,15 @@ test("an operator sets a protected grant's device limit and is told how many dev
     { max_active_devices: 3, expected_customer_id: "cus_acme", expected_revocation_seq: 1 },
   ]);
   await expect(limit).toHaveValue("3");
+  // An unsaved limit is a draft like any other: leaving asks before discarding it.
+  await limit.fill("7");
+  const prompts = [];
+  page.once("dialog", async (dialog) => { prompts.push(dialog.message()); await dialog.dismiss(); });
+  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
+  await expect.poll(() => prompts).toEqual([expect.stringMatching(/Discard your unsaved changes/)]);
+  await expect(limit).toHaveValue("7");
+  await limit.fill("3");
   await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
   await expect(page.locator(".desktopRecords tbody tr").first()).toContainText("Device limit 3");
+  expect(api.requests.patches).toHaveLength(2);
 });
