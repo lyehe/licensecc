@@ -298,6 +298,10 @@ test("Account disconnects a provider only after an inline confirm, then offers t
   await page.goto("/#/account");
   await expect(page.getByText("GitHub · octo@example.com")).toBeVisible();
   await expect(page.getByRole("button", { name: "Connect GitHub", exact: true })).toHaveCount(0);
+  // One live region is mounted, empty, before any result, so a screen reader announces its change.
+  const notice = page.locator(".accountNotice");
+  await expect(notice).toHaveAttribute("role", "status");
+  await expect(notice).toHaveText("");
   await page.getByRole("button", { name: "Disconnect GitHub", exact: true }).click();
   const confirm = page.getByRole("group", { name: "Disconnect GitHub? You won't be able to sign in with GitHub until you connect it again." });
   await expect(confirm).toBeVisible();
@@ -310,7 +314,7 @@ test("Account disconnects a provider only after an inline confirm, then offers t
   expect(unlinks).toEqual([]);
   await page.getByRole("button", { name: "Disconnect GitHub", exact: true }).click();
   await confirm.getByRole("button", { name: "Disconnect GitHub", exact: true }).click();
-  await expect(page.getByText("GitHub disconnected.", { exact: true })).toBeVisible();
+  await expect(notice).toHaveText("GitHub disconnected.");
   expect(unlinks).toEqual([{ provider: "github" }]);
   await expect(page.getByText("GitHub · octo@example.com")).toHaveCount(0);
   await expect(page.getByText("Google · customer@example.com")).toBeVisible();
@@ -328,15 +332,20 @@ test("Account explains that the last sign-in method cannot be disconnected, with
   ];
   await routeAccountIdentities(page, () => identities, (route) => route.fulfill(responses.shift()));
   await page.goto("/#/account");
+  // The failure text lands in the live region that was already mounted, while focus goes back to
+  // Disconnect, so it is announced rather than only shown.
+  const notice = page.locator(".accountNotice");
+  await expect(notice).toHaveAttribute("role", "status");
+  await expect(notice).toHaveText("");
   const disconnect = async () => {
     await page.getByRole("button", { name: "Disconnect Google", exact: true }).click();
     await page.getByRole("group", { name: /^Disconnect Google\?/ }).getByRole("button", { name: "Disconnect Google", exact: true }).click();
   };
   await disconnect();
-  await expect(page.getByText("Unable to disconnect Google. Please try again.", { exact: true })).toBeVisible();
+  await expect(notice).toHaveText("Unable to disconnect Google. Please try again.");
   await expect(page.getByRole("button", { name: "Disconnect Google", exact: true })).toBeFocused();
   await disconnect();
-  await expect(page.getByText("You can't disconnect your only sign-in method. Set up another way to sign in first.", { exact: true })).toBeVisible();
+  await expect(notice).toHaveText("You can't disconnect your only sign-in method. Set up another way to sign in first.");
   await expect(page.getByText("Unable to disconnect Google. Please try again.", { exact: true })).toHaveCount(0);
   await expect(page.getByText("Google · customer@example.com")).toBeVisible();
   for (const raw of ["last_sign_in_method", "config_error", "portal-e2e-unlink"]) await expect(page.getByText(raw)).toHaveCount(0);

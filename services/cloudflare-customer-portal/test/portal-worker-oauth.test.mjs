@@ -334,6 +334,8 @@ test("Unlink is refused as the last sign-in method when no other method is usabl
     ["a contact email while email delivery is not configured", configuration, () => {}],
     ["email delivery without a contact email", { ...configuration, ...EMAIL_DELIVERY }, (db) => clearContactEmail(db, "A")],
     ["no other method at all", { ...configuration, ...EMAIL_DELIVERY, PORTAL_PASSWORD_ENABLED: "1" }, (db) => clearContactEmail(db, "A")],
+    // Email codes also need the OTP peppers: without them requestOtp answers config_error.
+    ["email delivery without OTP peppers", { ...configuration, ...EMAIL_DELIVERY, PORTAL_OTP_PEPPERS: undefined }, () => {}],
   ];
   for (const [name, extraEnv, seed] of cases) {
     const { env, db } = baseFixture(extraEnv);
@@ -401,22 +403,46 @@ test("Concurrent unlinks of Google and GitHub cannot both succeed", async () => 
   clearContactEmail(db, "A");
   linkIdentity(db, "A", "google");
   linkIdentity(db, "A", "github");
-  const tabs = [await sessionFor(env, "A", "oauth"), await sessionFor(env, "A", "oauth")];
+  // Neither session signed in with a provider, so the winner's revocation cannot decide the race;
+  // only the conditional DELETE's remaining-method rule can.
+  const tabs = [await sessionFor(env, "A", "otp"), await sessionFor(env, "A", "legacy")];
   holdBatches(env, 2);
   const results = await Promise.all([unlink(env, tabs[0], "google"), unlink(env, tabs[1], "github")]);
   assert.deepEqual(results.map((result) => result.status).sort(), [200, 409]);
+  assert.equal(results.find((result) => result.status === 409).body.code, "last_sign_in_method");
   assert.equal(linkedProviders(db, "A").length, 1, "one sign-in method always remains");
+  for (const cookie of tabs) assert.ok(await signedIn(env, cookie), "neither session is an OAuth session to revoke");
 });
 
-test("Concurrent unlinks of the same provider keep the winner's session; the loser revokes nothing", async () => {
+test("A concurrent unlink cannot complete on an OAuth session that another unlink just revoked", async () => {
+  // A password remains, so each unlink alone would be allowed.
+  const { env, db } = baseFixture({ ...configuration, PORTAL_PASSWORD_ENABLED: "1" });
+  clearContactEmail(db, "A");
+  setPassword(db, "A");
+  linkIdentity(db, "A", "google");
+  linkIdentity(db, "A", "github");
+  const providers = ["google", "github"];
+  const tabs = [await sessionFor(env, "A", "oauth"), await sessionFor(env, "A", "oauth")];
+  holdBatches(env, 2);
+  const results = await Promise.all(tabs.map((cookie, index) => unlink(env, cookie, providers[index])));
+  assert.deepEqual(results.map((result) => result.status).sort(), [200, 401]);
+  const winner = results.findIndex((result) => result.status === 200);
+  assert.equal(results[1 - winner].body.code, "unauthorized");
+  assert.deepEqual(linkedProviders(db, "A"), [providers[1 - winner]], "the revoked tab disconnects nothing");
+  assert.ok(await signedIn(env, tabs[winner]), "the successful unlink keeps its own session");
+  assert.equal(await signedIn(env, tabs[1 - winner]), false);
+});
+
+test("Concurrent unlinks of the same provider: the loser gets 404 and revokes nothing, so the winner keeps its session", async () => {
   const { env, db } = baseFixture(configuration);
   linkIdentity(db, "A", "google");
   linkIdentity(db, "A", "github");
   const tabs = [await sessionFor(env, "A", "oauth"), await sessionFor(env, "A", "oauth")];
   holdBatches(env, 2);
   const results = await Promise.all(tabs.map((cookie) => unlink(env, cookie, "google")));
-  assert.deepEqual(results.map((result) => result.status).sort(), [200, 409]);
+  assert.deepEqual(results.map((result) => result.status).sort(), [200, 404]);
   const winner = results.findIndex((result) => result.status === 200);
+  assert.equal(results[1 - winner].body.code, "not_found", "the provider is already disconnected, not the last method");
   assert.deepEqual(linkedProviders(db, "A"), ["github"]);
   assert.ok(await signedIn(env, tabs[winner]), "the successful unlink keeps its own session");
   assert.equal(await signedIn(env, tabs[1 - winner]), false, "the successful unlink revokes the other OAuth session");
