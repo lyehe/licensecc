@@ -133,7 +133,7 @@ export function CatalogPlanFeatureEditor({
       <label>Display order<input type="number" value={form.display_order} onChange={(event) => onChange({ ...form, display_order: Number(event.target.value) })} /></label>
       <label>Status<select value={form.status} onChange={(event) => onChange({ ...form, status: event.target.value as CatalogPlanFeature["status"] })}><option value="active">active</option><option value="disabled">disabled</option></select></label>
       <label>Pool size<input type="number" value={form.pool_size} onChange={(event) => onChange({ ...form, pool_size: event.target.value })} /></label>
-      <label>Max devices<input type="number" value={form.max_active_devices} onChange={(event) => onChange({ ...form, max_active_devices: event.target.value })} /></label>
+      <label>Device limit<input type="number" value={form.max_active_devices} onChange={(event) => onChange({ ...form, max_active_devices: event.target.value })} /></label>
       <label>Max borrow (seconds)<input type="number" value={form.max_borrow_sec} onChange={(event) => onChange({ ...form, max_borrow_sec: event.target.value })} /></label>
       <button disabled={busy || !plansSettled || !activePoliciesSettled || !selectedPlanId || !plans.some((plan) => plan.id === selectedPlanId)} type="submit">Save plan feature</button>
     </form>

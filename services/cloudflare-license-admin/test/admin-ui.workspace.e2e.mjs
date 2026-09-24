@@ -75,9 +75,9 @@ test("customer app pages recover failed refreshes and manage only the selected o
   await expect(page.getByRole("alert")).toHaveCount(0);
   await page.getByRole("button", { name: "View app", exact: true }).click();
   await expect(page.getByRole("button", { name: "Manage access", exact: true })).toHaveCount(1);
-  await page.getByRole("button", { name: "Registered nodes", exact: true }).click();
+  await page.getByRole("button", { name: "Activated devices", exact: true }).click();
   await expect(page.getByText("No records found.", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "Floating sessions", exact: true }).click();
+  await page.getByRole("button", { name: "Floating seats", exact: true }).click();
   await expect(page.getByText("No records found.", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Access grants", exact: true }).click();
   await page.getByRole("button", { name: "Manage access", exact: true }).click();
@@ -92,7 +92,7 @@ test("customer app pages recover failed refreshes and manage only the selected o
   await confirmation.getByLabel("Reason (required)").fill("customer requested pause");
   await confirmation.getByRole("button", { name: "Confirm", exact: true }).click();
   await expect(confirmation).toHaveCount(0);
-  await expect(grantRow.locator(".status")).toHaveText("disabled");
+  await expect(grantRow.locator(".status")).toHaveText("suspended");
   expect(api.requests.transitions.at(-1).body).toMatchObject({ expected_customer_id: customer.id, expected_revocation_seq: 1 });
   await page.getByRole("button", { name: "Back to app", exact: true }).click();
   await expect(page.getByRole("button", { name: "Manage access", exact: true })).toHaveCount(1);

@@ -154,7 +154,7 @@ test("admin UI completes entitlement lifecycle and blocks duplicate create submi
   await clickAction(entitlementActions.getByRole("button", { name: "Disable", includeHidden: true }));
   await page.getByRole("dialog").getByLabel(/Reason/).fill("operator pause");
   await page.getByRole("dialog").getByRole("button", { name: "Confirm" }).click();
-  await expect(entitlementActions.locator(".status.disabled")).toHaveText("disabled");
+  await expect(entitlementActions.locator(".status.disabled")).toHaveText("suspended");
 
   await clickAction(entitlementActions.getByRole("button", { name: "Reenable", includeHidden: true }));
   await expect(entitlementActions.locator(".status.active")).toHaveText("active");
@@ -324,7 +324,7 @@ test("admin UI previews and applies a license plan projection", async ({ page })
   await planFeatureForm.getByLabel("Add-on key").fill("team_seats");
   await planFeatureForm.getByLabel("Policy", { exact: true }).selectOption("pol_float");
   await planFeatureForm.getByLabel("Pool size").fill("6");
-  await planFeatureForm.getByLabel("Max devices").fill("6");
+  await planFeatureForm.getByLabel("Device limit").fill("6");
   await planFeatureForm.getByLabel("Max borrow").fill("172800");
   await planFeatureForm.getByRole("button", { name: "Save plan feature" }).click();
   await expect.poll(() => api.requests.catalogPlanFeatures.length).toBe(2);

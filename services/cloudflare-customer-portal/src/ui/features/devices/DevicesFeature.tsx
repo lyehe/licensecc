@@ -393,7 +393,7 @@ export function DevicesFeature({ controller }: { controller: DevicesController }
               ref={(element) => { controller.seatReleaseButtonRefs.current[item.id] = element; }}
               disabled={controller.busy || controller.seatSessions[item.id] === undefined}
               onClick={() => controller.requestSeatRelease(item)}
-            >Release</button>
+            >Release seat</button>
           </div>
         </div>
       ))}

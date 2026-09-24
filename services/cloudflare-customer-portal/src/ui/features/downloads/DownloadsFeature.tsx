@@ -33,7 +33,7 @@ export function useLicenseDownloads({ runOnce, setMessage }: DownloadOptions): L
   }
 
   async function download(item: EntitlementRow): Promise<void> {
-    if (!canDownloadLicense(item) || licenseDisplayStatus(item, Math.floor(Date.now() / 1000)) !== "enabled") {
+    if (!canDownloadLicense(item) || licenseDisplayStatus(item, Math.floor(Date.now() / 1000)) !== "active") {
       setMessage(localMessage("license_unavailable", false));
       return;
     }
@@ -83,6 +83,6 @@ export function LicenseDownloadAction({item,downloads,busy}:{item:EntitlementRow
     <p>{ACTIVATION_DOWNLOAD_DISCLOSURE}</p>
     <label>Device key<input aria-label={`Device key for ${item.project} ${item.feature}`} placeholder="Device key ID" value={downloads.deviceKeys[item.id]??""} onChange={event=>downloads.setDeviceKey(item.id,event.target.value)} /></label>
     <p>{DEVICE_KEY_HELP_COPY}</p>
-    <button disabled={busy || licenseDisplayStatus(item,now)!=="enabled" || (downloads.deviceKeys[item.id]??"").trim()===""} onClick={()=>void downloads.download(item)}>{ACTIVATION_DOWNLOAD_ACTION_LABEL}</button>
+    <button disabled={busy || licenseDisplayStatus(item,now)!=="active" || (downloads.deviceKeys[item.id]??"").trim()===""} onClick={()=>void downloads.download(item)}>{ACTIVATION_DOWNLOAD_ACTION_LABEL}</button>
   </details>;
 }

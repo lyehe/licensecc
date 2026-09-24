@@ -77,7 +77,7 @@ export const OTP_EXPIRY_COPY = "Codes expire 10 minutes after they are sent.";
 export const ACTIVATION_DOWNLOAD_ACTION_LABEL = "Activate and download .lic";
 
 export const ACTIVATION_DOWNLOAD_DISCLOSURE =
-  "Downloading a license activates this entitlement and can start activation-based trial time.";
+  "Downloading a license activates this license and can start activation-based trial time.";
 
 export const DEVICE_KEY_HELP_COPY =
   "The device key ID is shown by the licensed application on the device you are activating. Registered IDs are also listed under Devices.";
@@ -92,7 +92,7 @@ export const DEVICE_RELEASE_CONFIRM_COPY =
 // Floating-seat release is also destructive: it ends the current checkout and makes that seat
 // available to another customer/device. The dialog supplies the exact seat/device/license context
 // beside this consequence copy; no backend reason field exists for this portal operation.
-export const FLOATING_SEAT_RELEASE_CONFIRM_TITLE = "Release floating seat?";
+export const FLOATING_SEAT_RELEASE_CONFIRM_TITLE = "Release seat?";
 
 export const FLOATING_SEAT_RELEASE_CONFIRM_COPY =
   "This release cannot be undone. It ends renewal for this checkout and makes the seat available to another user. An issued grant may remain usable until it expires. This browser must check out a new seat to renew access.";
@@ -109,7 +109,7 @@ export const PORTAL_STATUS_REFRESH_ACTION_LABEL = "Refresh status";
 
 // Empty-state copy for each portal tab. Shown when the tab has no rows so the customer sees an
 // explanation instead of a bare table header.
-export const NO_ENTITLEMENTS_EMPTY_COPY = "No entitlements yet — licenses appear here after purchase.";
+export const NO_ENTITLEMENTS_EMPTY_COPY = "No licenses yet — they appear here after purchase.";
 
 export const NO_DEVICES_EMPTY_COPY = "No devices registered yet — activate a license to register one.";
 
@@ -262,7 +262,7 @@ export function licenseDisplayStatus(item: { status: string; valid_from: number 
   if (item.status !== "active") return item.status;
   if (item.valid_until !== null && item.valid_until <= now) return "expired";
   if (item.valid_from !== null && item.valid_from > now) return "not_started";
-  return "enabled";
+  return "active";
 }
 
 export function canDownloadLicense(item: { enforcement_mode?: string; license_mode: string }): boolean {

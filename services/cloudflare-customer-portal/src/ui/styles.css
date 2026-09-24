@@ -369,8 +369,7 @@ code {
   background:#292929
 }
 
-.status.active,
-.status.enabled {
+.status.active {
   background:#203026;
   color:#9bc49b
 }

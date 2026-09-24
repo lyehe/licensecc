@@ -56,7 +56,7 @@ test("portal UI workflow exposes the self-serve device-release path + copy", asy
 
 test("portal UI workflow maps floating-seat release confirmation copy to its consequences", async () => {
   const workflow = await loadWorkflowModule();
-  assert.equal(workflow.FLOATING_SEAT_RELEASE_CONFIRM_TITLE, "Release floating seat?");
+  assert.equal(workflow.FLOATING_SEAT_RELEASE_CONFIRM_TITLE, "Release seat?");
   assert.match(workflow.FLOATING_SEAT_RELEASE_CONFIRM_COPY, /cannot be undone/i);
   assert.match(workflow.FLOATING_SEAT_RELEASE_CONFIRM_COPY, /available to another user/i);
   assert.match(workflow.FLOATING_SEAT_RELEASE_CONFIRM_COPY, /browser must check out a new seat/i);
@@ -79,7 +79,7 @@ test("portal UI workflow exposes resend-code action + 10-minute expiry copy", as
 
 test("portal UI workflow exposes empty-state copy for every tab", async () => {
   const workflow = await loadWorkflowModule();
-  assert.match(workflow.NO_ENTITLEMENTS_EMPTY_COPY, /No entitlements yet/);
+  assert.match(workflow.NO_ENTITLEMENTS_EMPTY_COPY, /No licenses yet/);
   assert.match(workflow.NO_ENTITLEMENTS_EMPTY_COPY, /after purchase/);
   assert.match(workflow.NO_DEVICES_EMPTY_COPY, /No devices/i);
 });
@@ -139,7 +139,7 @@ test("portal UI workflow copy discloses account-safe auth and activation downloa
   assert.match(workflow.LOGIN_CODE_SENT_COPY, /If this email is registered/);
   assert.doesNotMatch(workflow.LOGIN_CODE_SENT_COPY, /We sent.*to/);
   assert.equal(workflow.ACTIVATION_DOWNLOAD_ACTION_LABEL, "Activate and download .lic");
-  assert.match(workflow.ACTIVATION_DOWNLOAD_DISCLOSURE, /activates this entitlement/);
+  assert.match(workflow.ACTIVATION_DOWNLOAD_DISCLOSURE, /activates this license/);
   assert.match(workflow.ACTIVATION_DOWNLOAD_DISCLOSURE, /trial time/);
   // The download form asks for a raw "device key id"; the UI must say where it comes from.
   assert.match(workflow.DEVICE_KEY_HELP_COPY, /device key id/i);
@@ -228,8 +228,8 @@ test("license display preserves explicit status and handles exact date boundarie
   const { licenseDisplayStatus: status, canDownloadLicense: downloadable } = await loadWorkflowModule();
   const row = { status: "active", valid_from: 100, valid_until: 200 };
   assert.equal(status(row, 99), "not_started");
-  assert.equal(status(row, 100), "enabled");
-  assert.equal(status(row, 199), "enabled");
+  assert.equal(status(row, 100), "active");
+  assert.equal(status(row, 199), "active");
   assert.equal(status(row, 200), "expired");
   assert.equal(status({ ...row, status: "disabled" }, 300), "disabled");
   assert.equal(status({ ...row, status: "revoked" }, 300), "revoked");

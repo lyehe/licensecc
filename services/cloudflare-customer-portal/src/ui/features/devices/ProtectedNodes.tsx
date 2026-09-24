@@ -81,14 +81,14 @@ export function ProtectedNodes({customer,busy,runOnce,onSessionExpired}:Props):R
     {saved==="invalid"?<div role="alert" className="readNotice"><p>A saved disconnect request cannot be read. Review current devices before clearing it.</p>{unreadableReviewed?<button disabled={busy} onClick={discard}>Clear unreadable request</button>:<button disabled={busy||loading} onClick={()=>void review()}>Review current devices</button>}</div>:saved && <div className="readNotice"><p>A disconnect request for {saved.label} needs confirmation.</p><button disabled={busy} onClick={()=>{setPending(saved);setOpen(true);}}>Review disconnect request</button></div>}
     {stale && <p role="alert">Device information may be out of date. Refresh before disconnecting.</p>}
     {!ready?<p>{loading?"Loading connected devices…":"Connected devices unavailable."}</p>:rows.length===0?<div className="emptyState"><h3>No connected devices</h3><p>Open your application and choose Connect to add this machine.</p></div>:<div className="tablePane full"><table><thead><tr><th>Device</th><th>App</th><th>Status</th><th>Last verified</th><th>Action</th></tr></thead><tbody>
-      {rows.map(row=><tr key={row.binding_id}><td data-label="Device"><span>{row.label||"Unnamed device"}<details className="referenceDetails"><summary>Device ID</summary><small className="identifier">{row.binding_id}</small></details></span></td><td data-label="App"><span>{row.project}<small>{row.feature}</small></span></td>
+      {rows.map(row=><tr key={row.binding_id}><td data-label="Device"><span>{row.label||"Unnamed device"}<details className="referenceDetails"><summary>Connection ID</summary><small className="identifier">{row.binding_id}</small></details></span></td><td data-label="App"><span>{row.project}<small>{row.feature}</small></span></td>
         <td data-label="Status">{row.state==="active"?"Connected":row.state==="released"?"Disconnected":<>Disconnecting · slot available <time>{formatTimestamp(row.hold_until)}</time></>}</td><td data-label="Last verified">{formatTimestamp(row.last_proof_at)}</td>
         <td data-label="Action">{row.state==="active"?<button disabled={busy||loading||stale||!!saved} onClick={()=>choose(row)}>Disconnect</button>:row.state==="released"?"Slot available":"Renewal stopped"}</td></tr>)}
     </tbody></table></div>}
     {cursor && <button disabled={busy||loading||stale} onClick={()=>void load(cursor)}>Load more devices</button>}
     <dialog ref={dialog} className="retirementDialog" aria-labelledby="retirement-title" onCancel={event=>{event.preventDefault();close();}}>
       <h2 id="retirement-title">Disconnect {pending?.label}?</h2>
-      <p>{pending?.project} · {pending?.feature}<span className="retirementIdentity">Connection: {pending?.binding}</span></p>
+      <p>{pending?.project} · {pending?.feature}<span className="retirementIdentity">Connection ID: {pending?.binding}</span></p>
       <p>This device will stop receiving license renewals. It may keep working until its current license expires.</p>
       <p>Slot available: <strong>{formatTimestamp(pending?.hold??0)}</strong>. If this time has passed, the slot is available when disconnection completes. If the connection changes, review its updated release time.</p>
       <p>After the slot is available, connect another device from your app. This connection cannot be restored.</p>
