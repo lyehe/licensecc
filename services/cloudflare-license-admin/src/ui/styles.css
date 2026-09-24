@@ -512,6 +512,10 @@ button.danger:hover:not(:disabled) {
 .protectedConnection h4 { margin: 0; }
 .protectedConnection details { margin: 12px 0; }
 .connectionNotice { padding: 16px; border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 16px; }
+.connectionCapacity, .recentRefusals { padding: 16px; border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 16px; }
+.connectionCapacity h4, .recentRefusals h4 { margin: 0 0 8px; }
+.connectionCapacity ul, .recentRefusals ul { padding-left: 20px; margin: 0; }
+.connectionCapacity li, .recentRefusals li { margin: 4px 0; }
 .connectionHistory { padding-left: 20px; }
 .connectionHistory li { margin: 12px 0; }
 .connectionHistory span { display: block; overflow-wrap: anywhere; }

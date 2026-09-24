@@ -110,6 +110,8 @@ test("admin connections show device-limit capacity and recent refused connection
   const f=fixture();await open(page,f);
   await expect(region(page)).toContainText('Device limit');await expect(region(page)).toContainText('1 of 2 in use');
   await expect(region(page)).toContainText('Recent refused connections');await expect(region(page)).toContainText('sha256:dddddddd');
+  await expect(region(page).locator('.connectionCapacity')).toContainText('aaaaaaaa...aaaaaaaa');
+  await expect(region(page).locator('.recentRefusals')).toContainText('aaaaaaaa...aaaaaaaa');
 });
 
 test("admin connections report no refused connections when this list's licenses have none",async({page})=>{

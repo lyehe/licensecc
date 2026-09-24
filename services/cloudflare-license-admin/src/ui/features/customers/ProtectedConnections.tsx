@@ -1,6 +1,6 @@
 import React,{useEffect,useRef,useState} from 'react';
 import { useOperatorControls } from '../../shared/controls';
-import { formatEpoch } from '../../shared/format';
+import { formatEpoch, shortHash } from '../../shared/format';
 import { shortDeviceKeyId } from '../entitlements/workflow';
 import { clearPending,createPending,operatorKey,readConnections,readHistory,restorePending,retireConnection,savePending,type BindingEvent,type Connection,type Context,type Page,type Pending } from './connectionWorkflow';
 const contextIdentity=(value:Context)=>JSON.stringify([value.customer.id,value.customer.status,value.operator.actor_type,value.operator.subject,value.operator.role]);
@@ -109,11 +109,11 @@ export function ProtectedConnections({customer,active=true}:{customer:string;act
     {page && !page.items.length && !stale && <p>No protected connections yet. Customers connect a machine from their app.</p>}
     {page?.customer.status==='disabled' && <p>Customer suspended. Connections remain visible; disconnecting requires an active customer.</p>}
     {page && page.capacity.length>0 && <div className="connectionCapacity"><h4>Device limit</h4>
-      <ul>{page.capacity.map(row=><li key={`${row.project}\u0000${row.feature}\u0000${row.license_fingerprint}`}>{row.project} · {row.feature}: {row.in_use} of {row.limit} in use</li>)}</ul>
+      <ul>{page.capacity.map(row=><li key={`${row.project}\u0000${row.feature}\u0000${row.license_fingerprint}`}>{row.project} · {row.feature} · <code>{shortHash(row.license_fingerprint)}</code>: {row.in_use} of {row.limit} in use</li>)}</ul>
     </div>}
     {page && <div className="recentRefusals"><h4>Recent refused connections</h4>
       {page.denied.length
-        ? <ul>{page.denied.map((row,index)=><li key={index}>{formatEpoch(row.ts)} · {row.project}/{row.feature} · {shortDeviceKeyId(row.device_key_id)}</li>)}</ul>
+        ? <ul>{page.denied.map((row,index)=><li key={index}>{formatEpoch(row.ts)} · {row.project} · {row.feature} · <code>{shortHash(row.license_fingerprint)}</code> · {shortDeviceKeyId(row.device_key_id)}</li>)}</ul>
         : <p>No refused connections in this list's licenses.</p>}
     </div>}
     <div className="customerAccessRecords">{page?.items.map(row=><article className="recordCard protectedConnection" key={row.binding_id}>
