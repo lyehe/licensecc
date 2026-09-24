@@ -197,7 +197,7 @@ test("admin UI accepts a legitimate empty customer name in a transition RETURNIN
   await dialog.getByRole("button", { name: "Confirm" }).click();
   await expect(page.locator(".operatorNotice")).toHaveCount(0);
   await expect(page.locator(".modalError")).toHaveCount(0);
-  await expect(page.locator(".recordDetail .status")).toContainText("disabled");
+  await expect(page.locator(".recordDetail .status")).toContainText("suspended");
 });
 
 test("admin UI reconciles release seats through the exact entitlement GET even when the target is off page one", async ({ page }) => {
@@ -379,7 +379,7 @@ test("admin UI reconciles unknown customer transitions from the list using the o
   await page.goto("/#/customers");
 
   for (const scenario of [
-    { id: "cus_acme", action: "Disable", status: "disabled" },
+    { id: "cus_acme", action: "Disable", status: "suspended" },
     { id: "cus_globex", action: "Reenable", status: "active" },
   ]) {
     const openCustomer = page.locator(`#customer-open-${scenario.id}`);

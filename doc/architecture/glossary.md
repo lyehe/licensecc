@@ -80,8 +80,13 @@ words. Two notes:
   `packages/licensing-domain/src/entitlements/contracts.d.ts`); the code is
   unchanged, but rendered text for that code says **suspended**, not
   "disabled" or "enabled". A customer account's own suspension (a different
-  field, `customer.status`) is a related but separate concept and already
-  reads "suspended" per task A3/C5.
+  field, `customer.status`, also wire-coded `disabled`) is a related but
+  separate concept; the admin console's operator-facing views (the customer
+  detail badge, its status filter, and the account-token list) display it as
+  **suspended** too, as of this task. The portal does not yet apply this term
+  to a customer's own account: task A3 will say so at sign-in time, and task
+  C5 will say so in a customer's per-license status text — both still
+  pending.
 - "Expired" and "not started" for a portal license are computed from its
   validity window, not stored as a status code; "not started" is an
   additional, allowed nuance beyond the four canonical words, not a

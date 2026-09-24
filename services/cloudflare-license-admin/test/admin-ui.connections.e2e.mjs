@@ -31,7 +31,7 @@ test("admin connections let a changed reader review and clear without another re
   await expect(page.getByRole('dialog')).toContainText('result is not confirmed');await page.getByRole('dialog').getByRole('button',{name:'Close',exact:true}).click();
   f.behavior.role='reader';f.behavior.subject='reader-two';await region(page).getByRole('button',{name:'Refresh connections'}).click();
   await region(page).getByRole('button',{name:'Review saved request'}).click();const dialog=page.getByRole('dialog');await expect(dialog.getByRole('button',{name:'Retry same request'})).toBeDisabled();
-  await dialog.getByRole('button',{name:'Review current connection'}).click();await expect(dialog).toContainText('Current connection: retiring');
+  await dialog.getByRole('button',{name:'Review current connection'}).click();await expect(dialog).toContainText('Current connection: Disconnecting');
   await dialog.getByRole('button',{name:'Clear reviewed request'}).click();expect(f.posts).toHaveLength(1);await expect(region(page).getByRole('button',{name:'Disconnect',exact:true})).toHaveCount(0);
 });
 

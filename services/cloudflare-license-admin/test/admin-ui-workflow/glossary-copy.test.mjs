@@ -19,6 +19,9 @@ const RETIRED_TERMS = [
   { name: "'Registered nodes' list label (legacy device)", pattern: /Registered nodes/, useInstead: '"Activated devices"' },
   { name: "'Floating sessions' list label (floating seat)", pattern: /Floating sessions/, useInstead: '"Floating seats"' },
   { name: '\'"enabled"\' as a displayed status', pattern: /"enabled"/, useInstead: '"active"' },
+  // Quoted (not bare) so this never matches the lowercase `row.state==='retiring'` comparison
+  // value — only a capitalized, quoted display string such as `?'Retiring':...`.
+  { name: "'Retiring' connection-state label (protected binding)", pattern: /(['"])Retiring\1/, useInstead: '"Disconnecting"' },
 ];
 
 function collectSourceFiles(dir) {

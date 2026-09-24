@@ -69,7 +69,7 @@ export function EntitlementList(props: ListProps): React.ReactElement {
     if (props.scoped) return null;
     return <input type="checkbox" aria-label={`Select ${item.project}/${item.feature}`} checked={props.selectedIds.has(item.id)} disabled={locked || (!props.selectedIds.has(item.id) && selectedCount >= ENTITLEMENT_BATCH_MAX_IDS)} onChange={() => props.onSelect(item.id)} />;
   }
-  const capacity = (item: EntitlementRecord): React.ReactElement => <><div>{item.license_mode?.replaceAll("_", " ") || "Default mode"}</div><span className="muted">Pool {item.pool_size} · Device limit {item.max_active_devices}</span></>;
+  const capacity = (item: EntitlementRecord): React.ReactElement => <><div>{item.license_mode?.replaceAll("_", " ") || "Default mode"}</div><span className="muted">{item.license_mode === "floating" ? <>Pool {item.pool_size}</> : <>Device limit {item.max_active_devices}</>}</span></>;
   return <section className="tablePane" data-focus-section="entitlements" aria-label="Entitlement list">
     {filter.customer_id && <p role="status">License access for customer {filter.customer_id}. {!props.scoped && "Clear filters to browse all grants. This selection lasts for this navigation session."}</p>}
     {!props.scoped && <><div className="listHeader"><button type="button" className="primary" disabled={busy} onClick={props.onCreate}>New entitlement</button></div>

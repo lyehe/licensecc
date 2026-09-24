@@ -233,7 +233,7 @@ test("customer records retain desktop tables, mobile cards, and fluid detail sec
   await page.goto("/#/customers");
   const customerCard = page.locator(".recordCard").filter({ hasText: enterpriseCustomerName });
   await expect(customerCard).toBeVisible();
-  await expect(customerCard.getByText("disabled", { exact: true })).toBeVisible();
+  await expect(customerCard.getByText("suspended", { exact: true })).toBeVisible();
   await expect(customerCard.getByRole("button", { name: "Open details", exact: true })).toBeVisible();
 });
 
