@@ -875,7 +875,7 @@ export function makeAdminApiFixture() {
     }
     const protectedListMatch = /^\/api\/admin\/customers\/([^/]+)\/bindings$/.exec(path);
     if(method === "GET" && protectedListMatch) return fulfill(200,makeEnvelope("customer_bindings",{
-      customer:{id:decodeURIComponent(protectedListMatch[1]),status:"active"},operator:{subject:"test-admin",actor_type:"access",role:"admin"},server_time:now,items:[],next_cursor:null,
+      customer:{id:decodeURIComponent(protectedListMatch[1]),status:"active"},operator:{subject:"test-admin",actor_type:"access",role:"admin"},server_time:now,capacity:[],denied:[],items:[],next_cursor:null,
     }));
     const workspaceMatch = /^\/api\/admin\/customers\/([^/]+)\/(apps|access|resources)$/.exec(path);
     if (method === "GET" && workspaceMatch) {
@@ -1869,7 +1869,9 @@ export function makeAdminApiFixture() {
 
 export function makeProtectedConnectionsFixture(){
   const base=makeAdminApiFixture(),id=Buffer.alloc(16,1).toString('base64url'),posts=[];
-  const behavior={drop:false,failRead:false,malformed:false,role:'admin',subject:'operator-one',status:'active',postFailure:null,reviewGate:null,detailFailure:false};
+  const behavior={drop:false,failRead:false,malformed:false,role:'admin',subject:'operator-one',status:'active',postFailure:null,reviewGate:null,detailFailure:false,
+    capacity:[{project:'COLMAP',feature:'PRO',license_fingerprint:'a'.repeat(64),in_use:1,limit:2}],
+    denied:[{project:'COLMAP',feature:'PRO',license_fingerprint:'a'.repeat(64),device_key_id:`sha256:${'d'.repeat(64)}`,ts:1750000000}]};
   const row={binding_id:id,label:'Design workstation',project:'COLMAP',feature:'PRO',license_fingerprint:'a'.repeat(64),state:'active',generation:1,revision:0,hold_until:1900000000,last_proof_at:1760000000,created_at:1750000000};
   const context=()=>({customer:{id:'cus_acme',status:behavior.status},operator:{subject:behavior.subject,actor_type:'access',role:behavior.role},server_time:1760000000});
   return {behavior,posts,row,async route(route){
@@ -1887,6 +1889,6 @@ export function makeProtectedConnectionsFixture(){
     if(behavior.failRead)return send(503,{ok:false,code:'temporarily_unavailable',request_id:'read-failure'});
     if(url.searchParams.has('binding_id') && behavior.reviewGate)await behavior.reviewGate;
     if(url.pathname.endsWith('/events'))return send(200,makeEnvelope('binding_events',{...context(),binding_id:id,items:posts.length?[{id:1,event_type:'retire',actor:'operator:access:operator-one',occurred_at:1760000000}]:[],next_cursor:null}));
-    return send(200,makeEnvelope('customer_bindings',{...context(),items:behavior.malformed===true?[null]:behavior.malformed==='array-state'?[{...row,state:['active']}]:[{...row}],next_cursor:null}));
+    return send(200,makeEnvelope('customer_bindings',{...context(),capacity:behavior.capacity,denied:behavior.denied,items:behavior.malformed===true?[null]:behavior.malformed==='array-state'?[{...row,state:['active']}]:[{...row}],next_cursor:null}));
   }};
 }

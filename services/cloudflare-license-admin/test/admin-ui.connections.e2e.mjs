@@ -105,3 +105,14 @@ test("admin connections require a review before clearing unreadable saved state"
   await dialog.getByRole('button',{name:'Review current connection'}).click();await dialog.getByRole('button',{name:'Clear reviewed request'}).click();
   await expect(region(page).getByRole('button',{name:'Disconnect',exact:true})).toBeEnabled();expect(f.posts).toHaveLength(0);
 });
+
+test("admin connections show device-limit capacity and recent refused connections",async({page})=>{
+  const f=fixture();await open(page,f);
+  await expect(region(page)).toContainText('Device limit');await expect(region(page)).toContainText('1 of 2 in use');
+  await expect(region(page)).toContainText('Recent refused connections');await expect(region(page)).toContainText('sha256:dddddddd');
+});
+
+test("admin connections report no refused connections when this list's licenses have none",async({page})=>{
+  const f=fixture();f.behavior.denied=[];await open(page,f);
+  await expect(region(page)).toContainText("No refused connections in this list's licenses.");
+});
