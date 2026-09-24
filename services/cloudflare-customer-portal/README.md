@@ -138,8 +138,10 @@ From the repository root after `npm ci`, create the ignored
 live configuration exists. Set the intended account/Worker name, environment,
 shared D1 database ID, exact `PORTAL_PUBLIC_ORIGIN`, matching `BACKEND_ORIGIN`,
 and `DEVICE_CONSENT` service target. Configure session peppers and the chosen
-sign-in method as described below; the example is not a complete live setup.
-Keep actual configuration and secrets out of version control.
+sign-in method as described below, and optionally a
+[support contact](#suspended-accounts-and-the-support-contact); the example is
+not a complete live setup. Keep actual configuration and secrets out of version
+control.
 
 From the repository root in PowerShell, build the production UI and Worker:
 
@@ -347,3 +349,29 @@ Before deployment, apply the migration, verify the billing/CPU configuration,
 and test registration, sign-out/login, password changes, and provider recovery
 on staging. The local browser tests mock API responses; Worker integration
 tests separately exercise hashing, database ownership, and session rotation.
+
+## Suspended accounts and the support contact
+
+Disabling a customer in the admin console (status `disabled`) suspends their
+portal account. The customer is not notified; the portal says so only after
+they prove who they are:
+
+- Password sign-in verifies the password first, with the same work for every
+  login. A wrong password gets the usual `401 invalid_credentials`, suspended
+  or not. Only the correct password on a suspended account gets
+  `403 account_suspended`, and no session is issued.
+- Google or GitHub sign-in through an identity already linked to a suspended
+  customer returns to the portal with `auth_error=account_suspended` and no
+  session.
+- Email-code requests stay silent: a suspended address gets the same response
+  as an unknown one, and no code is sent.
+
+The portal then shows "This account is suspended." followed by a support
+contact. Set the optional `PORTAL_SUPPORT_CONTACT` variable to an `https:` URL
+or one `mailto:` address, for example `mailto:support@example.com`. The
+providers endpoint publishes it as `support`, and the portal links it as
+"Contact support" wherever it tells a customer to get help. A URL containing a
+user name or password, a `mailto:` with several addresses or a `?` query, any
+other scheme (`http:`, `javascript:` and so on), a relative path, or an empty
+value counts as unset, and the portal says "Contact your administrator"
+instead. The value is public configuration, not a secret.

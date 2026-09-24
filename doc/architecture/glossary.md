@@ -83,10 +83,11 @@ words. Two notes:
   field, `customer.status`, also wire-coded `disabled`) is a related but
   separate concept; the admin console's operator-facing views (the customer
   detail badge, its status filter, and the account-token list) display it as
-  **suspended** too, as of this task. The portal does not yet apply this term
-  to a customer's own account: task A3 will say so at sign-in time, and task
-  C5 will say so in a customer's per-license status text — both still
-  pending.
+  **suspended** too, as of this task. The portal applies the term to a
+  customer's own account at sign-in (task A3): the correct password, or a
+  linked Google or GitHub identity, on a suspended account gets "This account
+  is suspended." Task C5 will apply it to a customer's per-license status
+  text; that is still pending.
 - "Expired" and "not started" for a portal license are computed from its
   validity window, not stored as a status code; "not started" is an
   additional, allowed nuance beyond the four canonical words, not a

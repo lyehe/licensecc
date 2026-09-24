@@ -3626,7 +3626,7 @@
       },
       "/portal/v1/auth/github/callback": {
         "get": {
-          "description": "Validates browser binding and atomically consumes state before exchanging the code. Requires verified provider email. Stable provider subject identifies the account. A new identity registers an empty customer; existing email collisions require authenticated linking. Provider tokens are not persisted.",
+          "description": "Validates browser binding and atomically consumes state before exchanging the code. Requires verified provider email. Stable provider subject identifies the account. A new identity registers an empty customer; existing email collisions require authenticated linking (auth_error=account_link_required). An identity whose customer is suspended redirects with auth_error=account_suspended and no session. Provider tokens are not persisted.",
           "operationId": "authCallbackGitHub",
           "parameters": [
             {
@@ -3825,7 +3825,7 @@
       },
       "/portal/v1/auth/google/callback": {
         "get": {
-          "description": "Validates browser binding and atomically consumes state before exchanging the code. Requires verified provider email. Stable provider subject identifies the account. A new identity registers an empty customer; existing email collisions require authenticated linking. Provider tokens are not persisted.",
+          "description": "Validates browser binding and atomically consumes state before exchanging the code. Requires verified provider email. Stable provider subject identifies the account. A new identity registers an empty customer; existing email collisions require authenticated linking (auth_error=account_link_required). An identity whose customer is suspended redirects with auth_error=account_suspended and no session. Provider tokens are not persisted.",
           "operationId": "authCallbackGoogle",
           "parameters": [
             {
@@ -4992,7 +4992,7 @@
       },
       "/portal/v1/auth/password/login": {
         "post": {
-          "description": "Requires exact Origin. Wrong password, unknown login and disabled customer return the same denial. Per-IP 30/900s and per-email 10/900s. Session creation atomically checks the verified password hash is still current.",
+          "description": "Requires exact Origin. Wrong password and unknown login return the same denial. The password is verified before the account status is read, so only the correct password on a suspended (disabled) customer returns account_suspended, without a session. Per-IP 30/900s and per-email 10/900s. Session creation atomically checks the verified password hash is still current.",
           "operationId": "authLoginPassword",
           "requestBody": {
             "content": {
@@ -5076,13 +5076,16 @@
                     ],
                     "properties": {
                       "code": {
-                        "const": "cross_site_forbidden"
+                        "enum": [
+                          "cross_site_forbidden",
+                          "account_suspended"
+                        ]
                       }
                     }
                   }
                 }
               },
-              "description": "Origin mismatch."
+              "description": "Origin mismatch, or the correct password for a suspended customer."
             },
             "404": {
               "content": {
@@ -5542,13 +5545,21 @@
                           },
                           "password": {
                             "type": "boolean"
+                          },
+                          "support": {
+                            "description": "PORTAL_SUPPORT_CONTACT when it is a credential-free https: URL or a single mailto: address; otherwise null.",
+                            "type": [
+                              "string",
+                              "null"
+                            ]
                           }
                         },
                         "required": [
                           "google",
                           "github",
                           "email",
-                          "password"
+                          "password",
+                          "support"
                         ],
                         "type": "object"
                       }
@@ -5557,7 +5568,7 @@
                   }
                 }
               },
-              "description": "Provider availability."
+              "description": "Provider availability and the operator's support contact."
             }
           },
           "security": [],
