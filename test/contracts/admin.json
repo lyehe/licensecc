@@ -469,6 +469,42 @@
           ],
           "type": "object"
         },
+        "CapacityInUseData": {
+          "additionalProperties": false,
+          "properties": {
+            "devices_in_use": {
+              "description": "Devices holding a slot on this license (entitlement): active, or disconnected but still within their hold. Read after the refusal, so it is advisory.",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "devices_in_use"
+          ],
+          "type": "object"
+        },
+        "CapacityInUseError": {
+          "allOf": [
+            {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            },
+            {
+              "properties": {
+                "code": {
+                  "const": "capacity_in_use"
+                },
+                "data": {
+                  "$ref": "#/components/schemas/CapacityInUseData"
+                }
+              },
+              "required": [
+                "code",
+                "data"
+              ],
+              "type": "object"
+            }
+          ]
+        },
         "CatalogFeature": {
           "properties": {
             "category": {
@@ -1621,6 +1657,12 @@
                     "device_bound_v1"
                   ],
                   "type": "string"
+                },
+                "max_active_devices": {
+                  "description": "Device limit for a create that selects no policy; omitted, the create keeps the stored limit (1 for a new grant). It is written in the create's own batch. A selected policy stamps its own limit, so sending both returns 400 invalid_request. On a protected grant, a limit below the devices already connected is refused as protected_creation_conflict with data.reason invalid_capacity.",
+                  "maximum": 1000000,
+                  "minimum": 1,
+                  "type": "integer"
                 }
               },
               "then": {
@@ -1673,6 +1715,26 @@
                 ]
               },
               "type": "object"
+            },
+            {
+              "if": {
+                "properties": {
+                  "policy_id": {
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "policy_id"
+                ]
+              },
+              "then": {
+                "not": {
+                  "required": [
+                    "max_active_devices"
+                  ]
+                }
+              }
             }
           ]
         },
@@ -1823,7 +1885,18 @@
           "type": "object"
         },
         "EntitlementPatch": {
-          "description": "All fields optional; only provided fields are updated. project/feature/license_fingerprint/status are NOT patchable.",
+          "dependentSchemas": {
+            "max_active_devices": {
+              "propertyNames": {
+                "enum": [
+                  "max_active_devices",
+                  "expected_customer_id",
+                  "expected_revocation_seq"
+                ]
+              }
+            }
+          },
+          "description": "All fields optional; only provided fields are updated. project/feature/license_fingerprint/status are NOT patchable. max_active_devices is its own audited capacity write and must be sent alone (with the optional expected_* precondition); combined with another field it returns 400 invalid_request.",
           "not": {
             "required": [
               "enforcement_mode"
@@ -1852,6 +1925,12 @@
                 "string",
                 "null"
               ]
+            },
+            "max_active_devices": {
+              "description": "Device limit. A protected grant refuses a limit below its connected devices with 409 capacity_in_use and data.devices_in_use.",
+              "maximum": 1000000,
+              "minimum": 1,
+              "type": "integer"
             },
             "notes": {
               "maxLength": 1000,
@@ -1919,6 +1998,11 @@
                 "string",
                 "null"
               ]
+            },
+            "max_active_devices": {
+              "description": "Device limit: the most devices this license (entitlement) may have connected at once.",
+              "minimum": 0,
+              "type": "integer"
             },
             "notes": {
               "type": "string"
@@ -11341,7 +11425,7 @@
                   }
                 }
               },
-              "description": "Invalid request / json / id / idempotency key, or a policy_id was supplied while POLICY_STAMP_MODE is off."
+              "description": "Invalid request / json / id / idempotency key (including max_active_devices outside 1-1,000,000 or sent with a policy_id), or a policy_id was supplied while POLICY_STAMP_MODE is off."
             },
             "401": {
               "content": {
@@ -11842,7 +11926,7 @@
                   }
                 }
               },
-              "description": "Invalid request / json / id / idempotency key."
+              "description": "Invalid request / json / id / idempotency key, or max_active_devices outside 1-1,000,000 or sent with another patch field."
             },
             "401": {
               "content": {
@@ -11926,6 +12010,16 @@
               "content": {
                 "application/json": {
                   "examples": {
+                    "capacity_in_use": {
+                      "value": {
+                        "code": "capacity_in_use",
+                        "data": {
+                          "devices_in_use": 3
+                        },
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    },
                     "revoked_entitlement_is_terminal": {
                       "value": {
                         "code": "revoked_entitlement_is_terminal",
@@ -11942,11 +12036,36 @@
                     }
                   },
                   "schema": {
-                    "$ref": "#/components/schemas/ErrorEnvelope"
+                    "oneOf": [
+                      {
+                        "allOf": [
+                          {
+                            "$ref": "#/components/schemas/ErrorEnvelope"
+                          },
+                          {
+                            "properties": {
+                              "code": {
+                                "enum": [
+                                  "revoked_entitlement_is_terminal",
+                                  "stale_transition"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "code"
+                            ],
+                            "type": "object"
+                          }
+                        ]
+                      },
+                      {
+                        "$ref": "#/components/schemas/CapacityInUseError"
+                      }
+                    ]
                   }
                 }
               },
-              "description": "Target entitlement is revoked (terminal), or it changed after this request observed it; refetch and retry the latter."
+              "description": "Target entitlement is revoked (terminal), or it changed after this request observed it (refetch and retry), or a protected grant has more connected devices than the requested device limit (data.devices_in_use; disconnect devices first)."
             },
             "413": {
               "content": {
