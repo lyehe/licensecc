@@ -53,17 +53,30 @@ The whole path runs in the console; no SQL is needed.
 
 1. Create the customer with **Customers → Add user** (above).
 2. Open **License access → New entitlement** and choose **Protected devices**.
-   Set the application's project and feature, then choose the customer. The
-   license list shows only that customer's licenses for this project. If it is
-   empty, choose **Create license for {project}**: it creates the customer's
-   license record and selects it. A suspended customer cannot get one.
-3. Choose **Generate fingerprint** for a new protected license, or enter its
+   Set the application's project and feature, then choose the customer: the
+   customer list shows the first 20 matches, and typing part of a name, email,
+   or ID narrows it. The license list shows only that customer's licenses for
+   this project. If it is empty, choose **Create license for {project}**: it
+   creates the customer's license record and selects it. A suspended customer
+   cannot get one.
+3. Set the **Device limit**, the most devices that can be connected at once (1
+   to 1,000,000; 1 by default). Or choose a policy instead: the list shows this
+   project's active policies as "{name} · {n} devices · {project}", and a chosen
+   policy sets the limit, shown read-only as "Device limit (from policy
+   {name})". **Create policy…** opens the policy form for this project and
+   brings you back to the unchanged draft with the new policy chosen.
+4. Choose **Generate fingerprint** for a new protected license, or enter its
    exact lowercase 64-character fingerprint, then choose **Create entitlement**.
 
 Changing the project clears dependent selections. Protected project and feature
 IDs use ASCII letters, numbers, `_`, `.`, `:`, or `-` (127 and 15 characters).
 Leave the legacy device hash empty. A selected policy must have zero floating
 pool, at least one device slot, and usable trial/expiry settings.
+
+To change an existing grant's device limit, open it with **Edit** and use **Save
+device limit**. A protected grant cannot go below the devices already connected;
+the console then says "{n} devices are connected; disconnect one first." See
+[Device limit](#device-limit) for the API rules.
 
 A refused protected create returns `409 protected_creation_conflict`, and its
 `data.reason` names the first rule that failed. The console shows each reason
@@ -101,6 +114,26 @@ blocks protected creation; empty history does not prove that external or pruned
 legacy grants never existed. Production still requires the issuer/cohort inventory
 and cutover gates in ADR 0006. Apply backend migration 0036 before deploying the
 new entitlement projections; the complete deployment requires the current schema.
+
+### Device limit
+
+`max_active_devices` is the device limit of a license (entitlement), from 1 to
+1,000,000:
+
+- `POST /api/admin/entitlements` accepts it only without a policy. It is written
+  in the create's own batch, behind the create's claim, so it commits with the
+  grant or not at all. Omitted, a new grant gets 1 and a re-create keeps the
+  stored limit. With a `policy_id` it returns `400 invalid_request`: the policy
+  stamps its own limit.
+- `PATCH /api/admin/entitlements/{id}` sets it alone, with the optional
+  `expected_customer_id`/`expected_revocation_seq` precondition. Combined with
+  another field it returns `400 invalid_request`, because the limit is its own
+  audited capacity write.
+- A protected grant refuses a limit below its connected devices, counted as
+  active connections plus disconnected ones still within their hold (ADR 0006).
+  A PATCH returns `409 capacity_in_use` with `data.devices_in_use`, the count
+  read just after the refusal. A create reports the same rule as
+  `protected_creation_conflict` with `data.reason: "invalid_capacity"`.
 
 ## Hosted setup
 
@@ -455,6 +488,8 @@ operator switch:
 Use policy stamping for normal setup. Enable `POLICY_STAMP_MODE=on`, create a
 policy, then create an entitlement with that `policy_id`. The policy is frozen
 onto the entitlement at stamp time; later policy edits affect new stamps only.
+Edit a policy with **Policies → Edit** (`PATCH /api/admin/policies/{id}`); its
+project, name, and type cannot change.
 
 Node-locked policy example:
 
@@ -513,7 +548,9 @@ Client behavior differs by mode:
 
 The `/api/sync/entitlements` helper creates the base entitlement projection but
 does not expose seat capacity fields. Use policies, catalog plan projection, or
-the admin API paths that stamp capacity when setting up floating licenses.
+the admin API paths that stamp capacity when setting up floating licenses. An
+admin create without a policy, or a PATCH, can set the device limit directly
+([Device limit](#device-limit)).
 
 ### Break-glass CLI
 
