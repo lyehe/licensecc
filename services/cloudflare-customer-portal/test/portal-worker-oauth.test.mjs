@@ -100,19 +100,27 @@ test("A password-login account (empty customers.email, portal_passwords.email_lo
   db.prepare("INSERT INTO customers (id, name, email, created_at, updated_at) VALUES (?, 'Personal account', '', ?, ?)").run(passwordCustomerId, NOW, NOW);
   db.prepare("INSERT INTO portal_passwords (customer_id, email_lower, password_hash, created_at, updated_at) VALUES (?, 'alice@example.com', 'x', ?, ?)").run(passwordCustomerId, NOW, NOW);
   const before = db.prepare("SELECT count(*) AS n FROM customers").get().n;
-  githubStub(t, { email: "alice@example.com", id: 999 });
+  // Mixed case, as a real GitHub account can return it: also pins that oauth/providers.ts's
+  // email() lowercases before the guard compares against the always-lowercase email_lower column.
+  githubStub(t, { email: "Alice@Example.COM", id: 999 });
   const blocked = await finish(env, await start(env));
   assert.match(blocked.headers.get("location"), /account_link_required/);
   assert.equal(db.prepare("SELECT count(*) AS n FROM customers").get().n, before);
   assert.equal(db.prepare("SELECT count(*) AS n FROM portal_identities").get().n, 0);
 });
-test("RF1: a brand-new email creates exactly one customer", async (t) => {
+test("RF1: a brand-new email still self-registers when an unrelated password login already exists", async (t) => {
   const { env, db } = baseFixture(configuration);
+  // An unrelated password-login account must not make portal_passwords non-empty enough to trip
+  // a guard that forgets to compare the actual email (e.g. one keyed only on "some row exists").
+  const passwordCustomerId = "cust_pw_other";
+  db.prepare("INSERT INTO customers (id, name, email, created_at, updated_at) VALUES (?, 'Personal account', '', ?, ?)").run(passwordCustomerId, NOW, NOW);
+  db.prepare("INSERT INTO portal_passwords (customer_id, email_lower, password_hash, created_at, updated_at) VALUES (?, 'alice@example.com', 'x', ?, ?)").run(passwordCustomerId, NOW, NOW);
   const before = db.prepare("SELECT count(*) AS n FROM customers").get().n;
   githubStub(t, { email: "brandnew@example.com", id: 4242 });
   const response = await finish(env, await start(env));
   assert.equal(response.headers.get("location"), "https://portal.test/#/apps");
   assert.equal(db.prepare("SELECT count(*) AS n FROM customers").get().n, before + 1);
+  assert.equal(db.prepare("SELECT email FROM portal_identities").get().email, "brandnew@example.com");
 });
 test("Linking requires the initiating session at callback and rejects revoked sessions", async (t) => {
   const { env, db } = baseFixture(configuration);

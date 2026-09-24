@@ -31,7 +31,7 @@ const ERRORS: Record<string, string> = {
   provider_unavailable: "This sign-in method is not available yet. Please try another method.",
   rate_limited: "Too many sign-in attempts. Please try again later.",
   sign_in_cancelled: "Sign-in was cancelled. You can try again.",
-  account_link_required: "An account already uses this email. Sign in with your password, then connect Google or GitHub under Account.",
+  account_link_required: "An account already uses this email. Sign in with the method you already use for it, then connect Google or GitHub under Account. Contact your administrator if you can't sign in.",
   link_failed: "Unable to connect this provider. Sign in again and retry from Account.",
   sign_in_failed: "Unable to complete sign-in. Please try again.",
 };
