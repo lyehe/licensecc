@@ -4,7 +4,7 @@ import { portalRateLimit } from "../../auth/portal_ratelimit.mjs";
 import { deliveryErrorType, emitEmailDeliveryFailure } from "../../auth/portal_otp.mjs";
 import { clientIp, envelope, readJson } from "../support.js";
 import { hashPassword, loginEmail, validPassword } from "../password/crypto.js";
-import { HEADERS, primary, gate, throttle, signedIn, digest } from "../password/shared.js";
+import { HEADERS, primary, gate, throttle, signedIn, digest, RESET_ELIGIBLE_SQL } from "../password/shared.js";
 import { passwordInvalidations } from "../password/invalidation.js";
 import type { Env, ExecutionContextLike, TopRoute } from "../env.js";
 
@@ -44,7 +44,7 @@ async function issueLink(env: Env, email: string, now: number, purpose: Action["
     // verification (empty contact) may recover once, if no other customer owns it.
     const credential = await db.prepare(`SELECT p.customer_id, p.password_hash FROM portal_passwords p JOIN customers c ON c.id = p.customer_id
       WHERE p.email_lower = ? AND c.status = 'active'
-        AND (lower(c.email) = p.email_lower OR (c.email = '' AND NOT EXISTS (SELECT 1 FROM customers o WHERE lower(o.email) = p.email_lower)))`)
+        AND ${RESET_ELIGIBLE_SQL}`)
       .bind(email).first<{ customer_id: string; password_hash: string }>();
     const existing = await db.prepare("SELECT id FROM customers WHERE lower(email) = ? UNION ALL SELECT customer_id AS id FROM portal_passwords WHERE email_lower = ? LIMIT 1").bind(email, email).first();
     // The same response covers unknown, disabled, unverified and already registered addresses.

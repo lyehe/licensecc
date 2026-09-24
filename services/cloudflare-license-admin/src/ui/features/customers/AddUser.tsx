@@ -5,6 +5,7 @@ import { hasCustomerDetailData, parseMutationResponse, type MutationFailurePolic
 import { useNavigationGuard } from "../../app/navigation";
 
 type CreatedUser = { id: string; name: string; login_email: string; status: "active" };
+type Mode = "invite" | "set-password";
 const failures: MutationFailurePolicy = { initial: [
   { status: 400, codes: ["invalid_request", "invalid_json", "invalid_idempotency_key"] },
   { status: 401, codes: ["missing_access_jwt", "admin_auth_not_configured"] },
@@ -13,18 +14,24 @@ const failures: MutationFailurePolicy = { initial: [
 ], replay: [] };
 
 export function AddUser({ onCancel, onOpen }: { onCancel(): void; onOpen(id: string): void }): React.ReactElement {
+  const [mode, setMode] = useState<Mode>("invite");
   const [name, setName] = useState(""); const [email, setEmail] = useState(""); const [password, setPassword] = useState("");
   const [created, setCreated] = useState<CreatedUser | null>(null);
   const [error, setError] = useState("");
-  const mounted = useRef(true); const saved = useRef<CreatedUser | null>(null);
+  const mounted = useRef(true); const saved = useRef<CreatedUser | null>(null); const submittedMode = useRef<Mode>("invite");
   const { busy, operationLocked, runKeyedMutation } = useOperatorControls();
   const locked = busy || operationLocked;
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const { requestLeave } = useNavigationGuard({ when: !saved.current && !!(name || email || password), message: "Discard this unsaved user?", onDiscard: () => setPassword("") });
+  // Leaving "Set an initial password" clears any typed secret immediately -- the same hygiene as
+  // discarding the form -- rather than letting it linger, hidden, in component state.
+  function selectMode(next: Mode): void { setMode(next); if (next === "invite") setPassword(""); }
   async function submit(event: React.FormEvent): Promise<void> {
     event.preventDefault(); setError("");
-    if ([...password].length < 15 || [...password].length > 128 || new TextEncoder().encode(password).length > 512) { setError("Use a password between 15 and 128 characters."); return; }
-    const input = { name: name.trim(), email: email.trim().toLowerCase(), password };
+    if (mode === "set-password" && ([...password].length < 15 || [...password].length > 128 || new TextEncoder().encode(password).length > 512)) { setError("Use a password between 15 and 128 characters."); return; }
+    const input: { name: string; email: string; password?: string } = { name: name.trim(), email: email.trim().toLowerCase() };
+    if (mode === "set-password") input.password = password;
+    submittedMode.current = mode;
     await runKeyedMutation<CreatedUser>({
       request: { method: "POST", path: "/api/admin/customers", body: JSON.stringify(input) },
       send: attempt => api(attempt.path, { method: attempt.method, headers: { "idempotency-key": attempt.idempotencyKey }, body: attempt.body }),
@@ -44,14 +51,26 @@ export function AddUser({ onCancel, onOpen }: { onCancel(): void; onOpen(id: str
       isCurrent: () => mounted.current,
     });
   }
-  if (created) return <section className="editorLayout"><h3>User added</h3><p>{created.name} · {created.login_email}</p><p>Share the initial password securely. The user can change it in their portal account. No licenses have been assigned.</p><button disabled={locked} onClick={() => onOpen(created.id)}>Open user</button></section>;
+  if (created) return <section className="editorLayout"><h3>User added</h3><p>{created.name} · {created.login_email}</p>
+    <p>{submittedMode.current === "invite" ? `Ask ${created.login_email} to open the customer portal and choose 'Forgot your password?' to set a password.` : "Share the initial password securely. The user can change it in their portal account."}</p>
+    <p>No licenses have been assigned.</p>
+    <button disabled={locked} onClick={() => onOpen(created.id)}>Open user</button></section>;
   return <section className="editorLayout"><h3>Add user</h3><p>Create a customer portal account. No email is sent.</p>
     <form aria-label="Add portal user" onSubmit={event => void submit(event)}>
       <fieldset disabled={locked || saved.current !== null}>
         <label>Name<input autoFocus required maxLength={128} autoComplete="off" value={name} onChange={event => setName(event.target.value)} /></label>
         <label>Login email<input type="email" required maxLength={254} autoComplete="off" value={email} onChange={event => setEmail(event.target.value)} /></label>
-        <label>Initial password<input type="password" required autoComplete="new-password" aria-describedby="new-user-password-hint" value={password} onChange={event => setPassword(event.target.value)} /></label>
-        <p id="new-user-password-hint">15–128 characters. The login email remains unverified.</p>
+        <fieldset className="wide modeChoice"><legend>Initial access</legend>
+          <label><input type="radio" name="add-user-mode" checked={mode === "invite"} onChange={() => selectMode("invite")} /> Invite</label>
+          <label><input type="radio" name="add-user-mode" checked={mode === "set-password"} onChange={() => selectMode("set-password")} /> Set an initial password</label>
+        </fieldset>
+        {mode === "invite"
+          ? <p>The customer sets their own password later, using "Forgot your password?" in the customer portal.</p>
+          : <>
+            <p>Use this if the customer portal cannot send email.</p>
+            <label>Initial password<input type="password" required autoComplete="new-password" aria-describedby="new-user-password-hint" value={password} onChange={event => setPassword(event.target.value)} /></label>
+            <p id="new-user-password-hint">15–128 characters. The login email remains unverified.</p>
+          </>}
         {error && <p role="alert">{error}</p>}
         <div className="actions"><button className="primary" type="submit">Add user</button><button type="button" onClick={() => requestLeave(onCancel)}>Cancel</button></div>
       </fieldset>

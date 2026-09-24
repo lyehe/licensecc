@@ -6,6 +6,14 @@ import type { Env } from "../env.js";
 
 export const HEADERS = { "cache-control": "no-store" };
 export const primary = (env: Env) => env.DB.withSession?.("first-primary") ?? env.DB;
+// The one predicate deciding whether a credential (portal_passwords row `p`, joined or correlated to
+// its owning `customers` row `c`) may recover by email: its login address matches the customer's own
+// verified contact address, or the customer has no contact email yet (never verified -- including an
+// admin-invited account) and no OTHER customer has already claimed that address. Shared verbatim by
+// the emailed reset lookup (password-email.ts) and the password-settings `recovery_available` flag
+// (routes/password.ts) so the two can never silently diverge -- the UI must never promise a recovery
+// the server would refuse.
+export const RESET_ELIGIBLE_SQL = "(lower(c.email) = p.email_lower OR (c.email = '' AND NOT EXISTS (SELECT 1 FROM customers o WHERE lower(o.email) = p.email_lower)))";
 export async function digest(value: string): Promise<string> {
   const bytes = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value)));
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");

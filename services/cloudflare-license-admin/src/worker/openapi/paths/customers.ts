@@ -24,11 +24,11 @@ export const customerPaths: LabeledPathFragment = {
   entries: [
     ["/api/admin/customers", {
     post: {
-      tags: ["admin:customers"], operationId: "createPortalUser", summary: "Create a customer portal user with an initial password", security: ADMIN_SECURITY,
-      description: "Admin-only. Creates a new customer and password credential atomically. Does not attach an existing account, mark email verified, send email, mint a session, or grant licenses. Password sign-in must be enabled on the portal. A required idempotency key replays the original success without creating another user. Creator attribution is stored in customer metadata; passwords/hashes never enter the response or replay cache.",
+      tags: ["admin:customers"], operationId: "createPortalUser", summary: "Create a customer portal user, invited by default", security: ADMIN_SECURITY,
+      description: "Admin-only. Creates a new customer and password credential atomically. Does not attach an existing account, mark email verified, send email, mint a session, or grant licenses. Password sign-in must be enabled on the portal. A required idempotency key replays the original success without creating another user. Creator attribution is stored in customer metadata; passwords/hashes never enter the response or replay cache. Omitting `password` invites the customer: a random, never-disclosed credential is stored, and the customer sets their own password later from the portal's \"Forgot your password?\". Providing `password` sets it directly instead, for use when the portal cannot send email; a present-but-invalid value (including an empty string) is rejected rather than treated as an invite.",
       parameters: [{ ...idempotencyKeyHeader, required: true }],
-      requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["name", "email", "password"], properties: {
-        name: { type: "string", minLength: 1, maxLength: 128 }, email: { type: "string", format: "email", maxLength: 254 }, password: { type: "string", minLength: 15, maxLength: 128, writeOnly: true, description: "15–128 Unicode characters, at most 512 UTF-8 bytes." },
+      requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["name", "email"], properties: {
+        name: { type: "string", minLength: 1, maxLength: 128 }, email: { type: "string", format: "email", maxLength: 254 }, password: { type: "string", minLength: 15, maxLength: 128, writeOnly: true, description: "Optional; omit to invite the customer instead of setting a password. When present: 15–128 Unicode characters, at most 512 UTF-8 bytes." },
       } } } } },
       responses: { "200": okResponse("Created customer with unverified login_email; email remains empty.", "#/components/schemas/CustomerRow", "customer_created"),
         "400": errorResponse("Invalid body or missing/invalid idempotency key.", "invalid_request", "invalid_json", "invalid_idempotency_key"),

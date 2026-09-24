@@ -1,7 +1,7 @@
 import { authSession } from "./auth.js";
 import { envelope, readJson } from "../support.js";
 import { hashPassword, loginEmail, validPassword, verifyPassword } from "../password/crypto.js";
-import { HEADERS, primary, gate, throttle, signedIn } from "../password/shared.js";
+import { HEADERS, primary, gate, throttle, signedIn, RESET_ELIGIBLE_SQL } from "../password/shared.js";
 import { passwordInvalidations } from "../password/invalidation.js";
 import { PASSWORD_EMAIL_DISPATCH } from "./password-email.js";
 import type { Env, TopRoute } from "../env.js";
@@ -31,14 +31,21 @@ async function settings(request: Request, env: Env, reqId: string, now: number):
   const session = await authSession(request, env, reqId, now);
   if (session instanceof Response) return session;
   const db = primary(env);
-  const row = await db.prepare("SELECT c.email, s.auth_method, s.created_at FROM portal_sessions s JOIN customers c ON c.id = s.customer_id WHERE s.id = ? AND s.status = 'active' AND s.expires_at > ? AND c.status = 'active'")
-    .bind(session.id, now).first<{ email: string; auth_method: string; created_at: number }>();
+  // recovery_available reuses the reset endpoint's own eligibility predicate (RESET_ELIGIBLE_SQL),
+  // correlated to this customer's own credential, so the settings UI never promises a recovery the
+  // server would refuse. A customer with no credential at all is trivially ineligible (the EXISTS has
+  // no row to match).
+  const row = await db.prepare(`SELECT c.email, s.auth_method, s.created_at,
+      EXISTS (SELECT 1 FROM portal_passwords p WHERE p.customer_id = c.id AND ${RESET_ELIGIBLE_SQL}) AS recovery_eligible
+    FROM portal_sessions s JOIN customers c ON c.id = s.customer_id WHERE s.id = ? AND s.status = 'active' AND s.expires_at > ? AND c.status = 'active'`)
+    .bind(session.id, now).first<{ email: string; auth_method: string; created_at: number; recovery_eligible: number }>();
   if (!row) return envelope(reqId, "unauthorized", undefined, 401, HEADERS);
   const credential = await db.prepare("SELECT customer_id, email_lower, password_hash FROM portal_passwords WHERE customer_id = ?").bind(session.customer_id).first<Credential>();
   const recentVerifiedSignIn = (row.auth_method === "oauth" || row.auth_method === "otp") && row.created_at >= now - 600;
   if (request.method === "GET") return envelope(reqId, "password_settings", {
     has_password: Boolean(credential), email: credential?.email_lower ?? row.email, can_reset: recentVerifiedSignIn,
     email_verified: Boolean(row.email && row.email.toLowerCase() === credential?.email_lower),
+    recovery_available: Boolean(row.recovery_eligible),
   }, 200, HEADERS);
   const body = await readJson(request, reqId);
   if (body instanceof Response) return body;
