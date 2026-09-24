@@ -26,8 +26,20 @@ const mintSessionToken = (tokenModule as { mintSessionToken: MintSessionToken })
 const proxyBackend = (tokenModule as { proxyBackend: ProxyBackend }).proxyBackend;
 const portalRateLimit = (ratelimitModule as { portalRateLimit: PortalRateLimit }).portalRateLimit;
 
-async function apiMe(session: { customer_id: string }, reqId: string): Promise<Response> {
-  return envelope(reqId, "me", { customer_id: session.customer_id });
+// Resolve the signed-in customer's display email in ONE read, so the header/consent/empty-state UI
+// can show "Signed in as {email}" / "Connecting to {email}". Precedence (task A4): customers.email if
+// non-empty, else the customer's portal_passwords.email_lower (an admin-created password account has
+// no customers.email), else the EARLIEST portal_identities.email (deterministic via
+// ORDER BY created_at, provider), else null. Additive: customer_id is unchanged; email is a new sibling
+// field the client may ignore.
+async function apiMe(env: Env, session: { customer_id: string }, reqId: string): Promise<Response> {
+  const row = await env.DB.prepare(
+    "SELECT COALESCE(NULLIF(c.email,''), " +
+      "(SELECT p.email_lower FROM portal_passwords p WHERE p.customer_id = c.id), " +
+      "(SELECT i.email FROM portal_identities i WHERE i.customer_id = c.id ORDER BY i.created_at, i.provider LIMIT 1)) AS email " +
+      "FROM customers c WHERE c.id = ?",
+  ).bind(session.customer_id).first<{ email: string | null }>();
+  return envelope(reqId, "me", { customer_id: session.customer_id, email: row === null ? null : row.email });
 }
 
 async function apiEntitlements(env: Env, session: { customer_id: string }, reqId: string): Promise<Response> {
@@ -307,7 +319,7 @@ async function apiDownload(
 }
 
 export const SESSION_DISPATCH = {
-  "GET /api/portal/me": (_request: Request, _env: Env, session: SessionRow, reqId: string, _now: number) => apiMe(session, reqId),
+  "GET /api/portal/me": (_request: Request, env: Env, session: SessionRow, reqId: string, _now: number) => apiMe(env, session, reqId),
   "GET /api/portal/entitlements": (_request: Request, env: Env, session: SessionRow, reqId: string, _now: number) => apiEntitlements(env, session, reqId),
   "GET /api/portal/devices": (_request: Request, env: Env, session: SessionRow, reqId: string, _now: number) => apiDevices(env, session, reqId),
   "POST /api/portal/devices/release": (request: Request, env: Env, session: SessionRow, reqId: string, now: number) => apiDeviceRelease(request, env, session, reqId, now),

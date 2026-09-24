@@ -5,8 +5,8 @@ import { useSingleFlight } from "../../shared/useSingleFlight";
 import { clearEnrollment, saveEnrollment, type EnrollmentEntry, type PendingEnrollment, type PendingMutation } from "./pending";
 import { LicenseChoice } from "./LicenseChoice";
 
-export function ConsentFeature({entry,customerId,onDone,onSignOut,onSessionExpired,feedback}: {
-  entry: Exclude<EnrollmentEntry,null>; customerId:string; onDone():void; onSignOut():Promise<void>; onSessionExpired():Promise<boolean>; feedback?:React.ReactNode;
+export function ConsentFeature({entry,customerId,email,onDone,onSignOut,onSessionExpired,feedback}: {
+  entry: Exclude<EnrollmentEntry,null>; customerId:string; email:string|null; onDone():void; onSignOut():Promise<void>; onSessionExpired():Promise<boolean>; feedback?:React.ReactNode;
 }):React.ReactElement {
   const record=useRef<PendingEnrollment|null>(typeof entry==="string"?null:entry);
   const [details,setDetails]=useState<ConsentInspection|null>(null);
@@ -139,6 +139,6 @@ export function ConsentFeature({entry,customerId,onDone,onSignOut,onSessionExpir
         </div>:null}
       </>}
     </section>
-    {customerId && <div className="consentAccount"><details><summary>Account details</summary><p>{customerId}</p></details><button className="consentSignOut" disabled={busy} onClick={()=>void runOnce(onSignOut)}>Sign out</button><p>To use another account, sign out and restart Connect in your app.</p></div>}
+    {customerId && <div className="consentAccount">{email!==null && <p className="consentEmail">Connecting to {email}</p>}<details><summary>Account details</summary><p>{customerId}</p></details><button className="consentSignOut" disabled={busy} onClick={()=>void runOnce(onSignOut)}>Sign out</button><p>To use another account, sign out and restart Connect in your app.</p></div>}
   </main>;
 }

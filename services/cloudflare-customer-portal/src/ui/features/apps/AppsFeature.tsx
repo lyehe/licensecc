@@ -5,10 +5,10 @@ import { type LicenseDownloads } from "../downloads/DownloadsFeature";
 import { UsageFeature } from "../usage/UsageFeature";
 import type { EntitlementRow, UsageRow } from "../../types";
 
-export function AppsFeature({ entitlements, usage, usageAvailable, retry, downloads, busy, project }: {
+export function AppsFeature({ entitlements, usage, usageAvailable, retry, downloads, busy, project, email }: {
   usageAvailable: boolean; retry(): Promise<void>;
   entitlements: EntitlementRow[]; usage: UsageRow[]; downloads: LicenseDownloads;
-  busy: boolean; project: string | null;
+  busy: boolean; project: string | null; email: string | null;
 }): React.ReactElement {
   const accessByProject = new Map<string, EntitlementRow[]>();
   for (const item of entitlements) {
@@ -30,7 +30,7 @@ export function AppsFeature({ entitlements, usage, usageAvailable, retry, downlo
   }
   return <>
     <div className="pageHeading"><div><h1>Apps</h1></div></div>
-    {projects.length === 0 ? <div className="emptyState"><h2>No apps assigned yet</h2><p>Apps appear here when a license is assigned to your account.</p></div> : <div className="appList">
+    {projects.length === 0 ? <div className="emptyState"><h2>No apps assigned yet</h2><p>{email !== null ? <>Signed in as {email}. No apps are assigned to this account yet.</> : "No apps are assigned to this account yet."}</p></div> : <div className="appList">
       {projects.map(([name, access]) => {
         const featureCount = new Set(access.map((item) => item.feature)).size;
         return <article className="appRow" key={name}>

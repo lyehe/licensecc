@@ -1,5 +1,6 @@
 export interface PortalMe {
   customer_id: string;
+  email: string | null;
 }
 
 export interface EntitlementRow {

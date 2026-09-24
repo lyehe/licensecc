@@ -34,11 +34,16 @@ interface AuthOptions {
 
 export interface PortalAuth {
   customerId: string | null;
+  // The signed-in account's resolved display email (task A4): customers.email, else the password
+  // account's email, else the earliest linked identity's email, else null. Read-only from the
+  // consumer's side -- it is derived from /me, never typed by the user. Distinct from `loginEmail`
+  // below, the sign-in form's OWN draft value.
+  email: string | null;
   retrySession(): Promise<boolean>;
   phase: AuthPhase;
-  email: string;
+  loginEmail: string;
   code: string;
-  setEmail(value: string): void;
+  setLoginEmail(value: string): void;
   setCode(value: string): void;
   submitRequest(event: React.FormEvent): Promise<void>;
   submitVerify(event: React.FormEvent): Promise<void>;
@@ -49,7 +54,8 @@ export interface PortalAuth {
 
 export function usePortalAuth({ setMessage, runOnce }: AuthOptions): PortalAuth {
   const [phase, setPhase] = useState<AuthPhase>("loading");
-  const [email, setEmail] = useState("");
+  const [loginEmail, setLoginEmail] = useState("");
+  const [email, setEmail] = useState<string | null>(null);
   const [code, setCode] = useState("");
   const [customerId, setCustomerId] = useState<string | null>(null);
 
@@ -59,6 +65,7 @@ export function usePortalAuth({ setMessage, runOnce }: AuthOptions): PortalAuth 
       const result = await api<PortalMe>(mePath());
       if (result.ok && result.data) {
         setCustomerId(result.data.customer_id);
+        setEmail(result.data.email ?? null);
         setMessage(null);
         setPhase("authed");
         return true;
@@ -75,7 +82,7 @@ export function usePortalAuth({ setMessage, runOnce }: AuthOptions): PortalAuth 
   }, [loadMe]);
 
   async function requestCode(): Promise<string | null> {
-    const normalized = normalizeEmail(email);
+    const normalized = normalizeEmail(loginEmail);
     if (!isLikelyEmail(normalized)) {
       setMessage(localMessage("invalid_email", false));
       return null;
@@ -93,7 +100,7 @@ export function usePortalAuth({ setMessage, runOnce }: AuthOptions): PortalAuth 
     await runOnce(async () => {
       const normalized = await requestCode();
       if (normalized !== null) {
-        setEmail(normalized);
+        setLoginEmail(normalized);
         setPhase("verify");
       }
     });
@@ -115,7 +122,7 @@ export function usePortalAuth({ setMessage, runOnce }: AuthOptions): PortalAuth 
       }
       const result = await api(authVerifyPath(), {
         method: "POST",
-        body: JSON.stringify({ email: normalizeEmail(email), code: normalized }),
+        body: JSON.stringify({ email: normalizeEmail(loginEmail), code: normalized }),
       });
       setMessage(resultMessage(result));
       if (result.ok) {
@@ -137,7 +144,8 @@ export function usePortalAuth({ setMessage, runOnce }: AuthOptions): PortalAuth 
       if (!result.ok) return;
       afterLogout();
       setCustomerId(null);
-      setEmail("");
+      setEmail(null);
+      setLoginEmail("");
       setCode("");
       setPhase("request");
     });
@@ -145,11 +153,12 @@ export function usePortalAuth({ setMessage, runOnce }: AuthOptions): PortalAuth 
 
   return {
     customerId,
+    email,
     retrySession: loadMe,
     phase,
-    email,
+    loginEmail,
     code,
-    setEmail,
+    setLoginEmail,
     setCode,
     submitRequest,
     submitVerify,
@@ -202,8 +211,8 @@ export function AuthFeature({ auth, busy, message, connecting = false }: {
               <input
                 type="email"
                 autoComplete="email"
-                value={auth.email}
-                onChange={(event) => auth.setEmail(event.target.value)}
+                value={auth.loginEmail}
+                onChange={(event) => auth.setLoginEmail(event.target.value)}
               />
             </label>
             <button className="primary" disabled={busy} type="submit">Send code</button>

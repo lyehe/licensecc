@@ -15,6 +15,7 @@ export interface ApiEnvelope<T> {
 // What the portal exposes to its own browser app (never the backend bearer; cookie only).
 export interface PortalMe {
   customer_id: string;
+  email: string | null;
 }
 
 export interface PortalEntitlementSummary {

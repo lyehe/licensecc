@@ -136,6 +136,12 @@ button:disabled {
   margin-left:auto
 }
 
+.signedInAs {
+  min-width:0;
+  overflow-wrap:anywhere;
+  color:var(--muted)
+}
+
 nav {
   display:flex;
   gap:8px
@@ -289,6 +295,10 @@ nav a:hover {
 
 .emptyState>button {
   margin-top:20px
+}
+
+.emptyState p {
+  overflow-wrap:anywhere
 }
 
 .tablePane .emptyState {
@@ -479,6 +489,7 @@ code {
 .consentAccount { width:min(100%,520px); margin-top:20px; color:var(--muted); overflow-wrap:anywhere; }
 .consentAccount summary,.consentReference summary { cursor:pointer; padding:10px 0; min-height:44px; }
 .consentAccount p { font-size:inherit; }
+.consentEmail { color:#e8e8e8; }
 .consentCard .consentReference { margin-top:0; }
 .consentCard .consentReference summary { padding:4px 0; min-height:44px; }
 .consentCard>.button { display:inline-block; margin-top:20px; }
@@ -590,6 +601,10 @@ code {
   }
   .headerInner nav {
     order:3;
+    width:100%
+  }
+  .signedInAs {
+    order:2;
     width:100%
   }
   nav a {

@@ -39,7 +39,14 @@ export const selfServicePaths: LabeledPathFragment = {
                   allOf: [{ $ref: "#/components/schemas/Envelope" }],
                   properties: {
                     code: { const: "me" },
-                    data: { type: "object", required: ["customer_id"], properties: { customer_id: { type: "string" } } },
+                    data: {
+                      type: "object",
+                      required: ["customer_id", "email"],
+                      properties: {
+                        customer_id: { type: "string" },
+                        email: { type: ["string", "null"], description: "customers.email, else portal_passwords.email_lower, else the earliest portal_identities.email, else null." },
+                      },
+                    },
                   },
                 },
               },
