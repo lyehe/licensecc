@@ -10,8 +10,8 @@ const inspection = (overrides = {}) => ({
   app: { name: "Colmap", project: "COLMAP" }, device: { label: "My workstation" },
   status: "pending", revision: 0, expires_at: Math.floor(Date.now() / 1000) + 300,
   entitlements: [
-    { id: "license-basic", feature: "BASIC", valid_until: null, device_limit: 1 },
-    { id: "license-pro", feature: "PRO", valid_until: null, device_limit: 2 },
+    { id: "license-basic", feature: "BASIC", valid_until: null, device_limit: 1, devices_in_use: 0, slot_free_at: null, device_connected: false },
+    { id: "license-pro", feature: "PRO", valid_until: null, device_limit: 2, devices_in_use: 0, slot_free_at: null, device_connected: false },
   ], has_more: false, next_page_cursor:null, comparison_code:"0000-1111-2222", ...overrides,
 });
 
@@ -52,7 +52,7 @@ async function fixture(page, { signedIn = true, inspect, approve, deny, logout, 
 
 test("consent: an unstarted trial explains activation timing without claiming no expiry",async({page})=>{
   await fixture(page,{inspect:route=>route.fulfill({json:envelope('authorization_inspected',inspection({
-    entitlements:[{id:'trial',feature:'DEFAULT',valid_until:null,device_limit:1,activation_trial_seconds:86400}]
+    entitlements:[{id:'trial',feature:'DEFAULT',valid_until:null,device_limit:1,devices_in_use:0,slot_free_at:null,device_connected:false,activation_trial_seconds:86400}]
   }))})});
   await page.goto(entry);
   await expect(page.getByText('1 day from app activation. Approving here does not start the trial.')).toBeVisible();
@@ -300,14 +300,14 @@ for(const corrupt of ["expired","null-mutation","unknown-field","unbound-mutatio
 
 test("consent: otherwise identical licenses remain distinguishable",async({page})=>{
   await fixture(page,{inspect:route=>route.fulfill({json:envelope("authorization_inspected",inspection({entitlements:[
-    {id:"license-a",feature:"PRO",valid_until:null,device_limit:1},
-    {id:"license-b",feature:"PRO",valid_until:null,device_limit:3},
+    {id:"license-a",feature:"PRO",valid_until:null,device_limit:1,devices_in_use:0,slot_free_at:null,device_connected:false},
+    {id:"license-b",feature:"PRO",valid_until:null,device_limit:3,devices_in_use:0,slot_free_at:null,device_connected:false},
   ]}))})});
   await page.goto(entry);
   await expect(page.getByRole("option",{name:"1. PRO — license-a",exact:true})).toHaveCount(1);
   await expect(page.getByRole("option",{name:"2. PRO — license-b",exact:true})).toHaveCount(1);
   await page.getByRole("combobox",{name:"License",exact:true}).selectOption("license-b");
-  await expect(page.getByText("3 devices",{exact:true})).toBeVisible();
+  await expect(page.getByText("0 of 3 devices in use",{exact:true})).toBeVisible();
 });
 
 test("consent: failed loopback handoff allows Back and exact approval recovery",async({page})=>{
@@ -431,7 +431,7 @@ test("consent: a late approval from an old attempt cannot redirect or erase a ne
 test("consent: real encoded license references stay readable on mobile",async({page})=>{
   const project="A_LONG_PROJECT_".repeat(12),fingerprints=["a".repeat(52)+"000000000001","a".repeat(52)+"000000000002"];
   const ids=fingerprints.map(fp=>entitlementId(project,"PRO",fp));
-  await fixture(page,{inspect:route=>route.fulfill({json:envelope("authorization_inspected",inspection({entitlements:ids.map(id=>({id,feature:"PRO",valid_until:null,device_limit:2}))}))})});
+  await fixture(page,{inspect:route=>route.fulfill({json:envelope("authorization_inspected",inspection({entitlements:ids.map(id=>({id,feature:"PRO",valid_until:null,device_limit:2,devices_in_use:0,slot_free_at:null,device_connected:false}))}))})});
   await page.setViewportSize({width:390,height:844});
   await page.goto(entry);
   await expect(page.getByRole("option",{name:"1. PRO — …000000000001",exact:true})).toHaveCount(1);
@@ -443,9 +443,9 @@ test("consent: real encoded license references stay readable on mobile",async({p
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
 });
 
-const firstLicensePage=()=>Array.from({length:100},(_,i)=>({id:`license-${i+1}`,feature:"PRO",valid_until:null,device_limit:1}));
+const firstLicensePage=()=>Array.from({length:100},(_,i)=>({id:`license-${i+1}`,feature:"PRO",valid_until:null,device_limit:1,devices_in_use:0,slot_free_at:null,device_connected:false}));
 const pageTwoCursor=Buffer.from(JSON.stringify(["ep1","a".repeat(64),"b".repeat(64),"DEFAULT","c".repeat(64)])).toString("base64url");
-const laterLicense={id:"license-101",feature:"PRO",valid_until:null,device_limit:2};
+const laterLicense={id:"license-101",feature:"PRO",valid_until:null,device_limit:2,devices_in_use:0,slot_free_at:null,device_connected:false};
 test("consent: malformed next cursors fail before page navigation",async({page})=>{
   await fixture(page,{inspect:route=>route.fulfill({json:envelope("authorization_inspected",inspection({entitlements:firstLicensePage(),has_more:true,next_page_cursor:"cGFnZTI"}))})});
   await page.goto(entry);
@@ -534,4 +534,50 @@ test("consent: cursor cycles and account changes cannot append a new page",async
   await page.getByRole("button",{name:"Next",exact:true}).click();
   await expect(page.getByRole("alert")).toContainText("Your account changed");
   await expect(page.getByRole("navigation",{name:"License pages"})).toHaveCount(0);
+});
+
+// B3 (RF2): a full license blocks Approve until Check again finds a free slot. The selection
+// survives the re-inspect, and the approve body never carries a capacity claim.
+test("consent: a full license disables Approve; Check again keeps the selection, finds a free slot, and approves with an unchanged body",async({page})=>{
+  const freeAt=Math.floor(Date.now()/1000)+120;
+  let checks=0,approveBody=null;
+  await fixture(page,{
+    inspect:route=>{
+      checks++;
+      return route.fulfill({json:envelope("authorization_inspected",inspection({entitlements:[
+        {id:"license-basic",feature:"BASIC",valid_until:null,device_limit:1,devices_in_use:0,slot_free_at:null,device_connected:false},
+        {id:"license-pro",feature:"PRO",valid_until:null,device_limit:2,devices_in_use:checks===1?2:1,slot_free_at:checks===1?freeAt:null,device_connected:false},
+      ]}))});
+    },
+    approve:route=>{approveBody=route.request().postDataJSON();return route.fulfill({json:envelope("authorization_approved",{callback_url:callback,expires_at:Math.floor(Date.now()/1000)+60,revision:1})});},
+  });
+  await page.route("http://127.0.0.1:44888/**",route=>route.fulfill({status:204}));
+  await page.goto(entry);
+  await page.getByRole("combobox",{name:"License",exact:true}).selectOption("license-pro");
+  await page.getByRole("checkbox",{name:"This code matches my app",exact:true}).check();
+  await expect(page.getByText("2 of 2 devices in use",{exact:true})).toBeVisible();
+  await expect(page.getByText("All 2 device slots are in use. Disconnect a device under Devices, then check again.",{exact:true})).toBeVisible();
+  await expect(page.getByText(`A recently disconnected slot frees at ${new Date(freeAt*1000).toISOString().slice(0,10)}.`,{exact:true})).toBeVisible();
+  await expect(page.getByRole("button",{name:"Approve",exact:true})).toBeDisabled();
+  await page.getByRole("button",{name:"Check again",exact:true}).click();
+  await expect(page.getByRole("combobox",{name:"License",exact:true})).toHaveValue("license-pro");
+  await expect(page.getByText("1 of 2 devices in use",{exact:true})).toBeVisible();
+  await expect(page.getByText("All 2 device slots are in use",{exact:false})).toHaveCount(0);
+  await expect(page.getByRole("button",{name:"Approve",exact:true})).toBeEnabled();
+  await page.getByRole("button",{name:"Approve",exact:true}).click();
+  await expect(page.getByRole("link",{name:"Open app"})).toBeVisible();
+  expect(approveBody).toEqual({attempt_handle:handle,expected_attempt_revision:0,entitlement_id:"license-pro"});
+  expect(checks).toBe(2);
+});
+
+test("consent: a device already connected to a full license leaves Approve enabled and names the connection",async({page})=>{
+  await fixture(page,{inspect:route=>route.fulfill({json:envelope("authorization_inspected",inspection({entitlements:[
+    {id:"license-pro",feature:"PRO",valid_until:null,device_limit:2,devices_in_use:2,slot_free_at:null,device_connected:true},
+  ]}))})});
+  await page.goto(entry);
+  await page.getByRole("checkbox",{name:"This code matches my app",exact:true}).check();
+  await expect(page.getByText("This device is already connected to this license.",{exact:true})).toBeVisible();
+  await expect(page.getByText("All 2 device slots are in use",{exact:false})).toHaveCount(0);
+  await expect(page.getByRole("button",{name:"Check again",exact:true})).toHaveCount(0);
+  await expect(page.getByRole("button",{name:"Approve",exact:true})).toBeEnabled();
 });
