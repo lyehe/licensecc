@@ -49,14 +49,38 @@ use **Reconcile status** to recover the original creation safely.
 
 ## Create protected application access
 
-Create the customer and its license for the application's project, then open
-**License access → New entitlement**. Choose **Protected devices**, set the
-application's project and feature, then choose its customer and existing license
-and enter the license fingerprint. Changing the project clears dependent selections.
-Use the exact lowercase 64-character fingerprint. Protected project and feature
+The whole path runs in the console; no SQL is needed.
+
+1. Create the customer with **Customers → Add user** (above).
+2. Open **License access → New entitlement** and choose **Protected devices**.
+   Set the application's project and feature, then choose the customer. The
+   license list shows only that customer's licenses for this project. If it is
+   empty, choose **Create license for {project}**: it creates the customer's
+   license record and selects it. A suspended customer cannot get one.
+3. Choose **Generate fingerprint** for a new protected license, or enter its
+   exact lowercase 64-character fingerprint, then choose **Create entitlement**.
+
+Changing the project clears dependent selections. Protected project and feature
 IDs use ASCII letters, numbers, `_`, `.`, `:`, or `-` (127 and 15 characters).
 Leave the legacy device hash empty. A selected policy must have zero floating
 pool, at least one device slot, and usable trial/expiry settings.
+
+A refused protected create returns `409 protected_creation_conflict`, and its
+`data.reason` names the first rule that failed. The console shows each reason
+as a sentence with the request reference:
+
+| `data.reason` | Rule |
+| --- | --- |
+| `customer_inactive` | The customer is suspended or missing. |
+| `license_missing` | The chosen license record does not exist. |
+| `license_customer_mismatch` | The license belongs to another customer or project. |
+| `fingerprint_in_use` | Another license (entitlement) already pairs this fingerprint or license differently, or a concurrent create took this exact grant. |
+| `plan_assignment_conflict` | The license's plan assignment uses another fingerprint. |
+| `lease_history_exists` | The fingerprint has legacy device, lease, seat, usage, or non-protected audit history for this feature. |
+| `policy_mismatch` | The policy changed or was disabled after it was read. |
+| `invalid_trial` | The trial settings cannot start a protected trial. |
+| `invalid_capacity` | The device limit is outside 1–1,000,000, or below the devices already connected. |
+| `unknown` | Any other integrity rule, such as a device hash or a floating pool. |
 
 The application must already use the protected v2 integration. Creating access
 does not enroll a machine or allocate a slot; the customer signs in and consents
@@ -270,9 +294,19 @@ Customers:
 - `GET /api/admin/customers/{id}`
 - `POST /api/admin/customers/{id}/disable`
 - `POST /api/admin/customers/{id}/reenable`
+- `POST /api/admin/customers/{id}/licenses`
 - `GET /api/admin/customers/{id}/bindings`
 - `GET /api/admin/customers/{id}/bindings/{bindingId}/events`
 - `POST /api/admin/customers/{id}/bindings/{bindingId}/retire`
+
+License creation requires the administrator role and an `idempotency-key`.
+Send `{"project": "<protected project ID>", "label": "<optional>"}`; the label
+is trimmed, at most 128 characters, and has no control characters. It inserts
+one `lic_<uuid>` record for the customer and returns `license_created` with its
+`id`, `customer_id`, `project`, `label` and `created_at` (`no-store`). The same
+key replays that response without a second record. An unknown customer is
+`404 not_found`; a suspended one is `409 customer_inactive`, checked in the same
+statement as the insert. A license record alone grants no access.
 
 Protected binding reads allow readers and administrators, including inspection
 of disabled customers. They return at most 100 rows with live keyset pagination,

@@ -258,10 +258,15 @@ still need review. It does not validate that retained settings match the code.
    share it through an appropriate private channel. Letting the user
    register directly in the portal also requires step 6. No welcome email is
    sent by Add user either way.
-3. Create the application's customer license and entitlement. Follow
+3. Grant the application in the console; no SQL is needed. In **License
+   access → New entitlement**, choose **Protected devices**, the application's
+   project and feature, and the user from step 2. **Create license for
+   {project}** creates and selects that user's license record, and **Generate
+   fingerprint** fills in a new fingerprint. Follow
    [protected application access](https://github.com/lyehe/licensecc/blob/main/services/cloudflare-license-admin/README.md#create-protected-application-access)
-   for a new protected grant, its exact project/feature/fingerprint and device
-   limit. Do not convert an existing legacy grant to protected mode in place.
+   for the exact project/feature/fingerprint rules, the device limit, and what
+   each refusal reason means. Do not convert an existing legacy grant to
+   protected mode in place.
 4. Use the configured native app to Connect. Compare the app/browser codes,
    approve the intended license, and verify activation and renewal. The portal
    does not issue a replacement downloadable `.lic` for protected enrollment.
