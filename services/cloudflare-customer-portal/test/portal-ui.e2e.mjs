@@ -3,6 +3,7 @@ import "./portal-ui.consent.e2e.mjs";
 import "./portal-ui.nodes.e2e.mjs";
 import "./portal-ui.network-failures.e2e.mjs";
 import "./portal-ui.session-expired.e2e.mjs";
+import "./portal-ui.license-lifecycle.e2e.mjs";
 
 function makeEnvelope(code, data) {
   makeEnvelope.nextRequestId += 1;
@@ -561,7 +562,7 @@ test("customer portal signs in with an 8-digit code and walks every screen witho
   // --- Per-app access (read-only) ---
   await page.getByRole("link", { name: "View app DEFAULT" }).click();
   await expect(page.locator(".tablePane tbody tr").filter({hasText:"pro"}).first()).toBeVisible();
-  await expect(page.locator(".status.active").first()).toHaveText("active");
+  await expect(page.locator(".status.active").first()).toHaveText("Active");
   await expect(page.getByText("aaaaaaaa...aaaaaaaa").first()).toBeVisible();
 
   // --- My devices/seats: floating seat checkout/heartbeat/release ---
@@ -959,9 +960,11 @@ test("protected access uses app enrollment while legacy downloads respect date b
   await expect(page.getByRole("cell", { name: "Protected device", exact: true })).toBeVisible();
   await expect(page.getByLabel("Device key for DEFAULT protected")).toHaveCount(0);
   await expect(page.locator(".status.expired")).toHaveCount(1);
-  await page.locator("tr").filter({has:page.getByLabel("Device key for DEFAULT solo")}).getByText("Activate and download",{exact:true}).click();
-  await page.getByLabel("Device key for DEFAULT solo").fill("test-device");
-  await expect(page.getByRole("button", { name: "Activate and download .lic" })).toBeDisabled();
+  // C5: an expired license offers no download at all; its status says what to do instead.
+  const expiredRow = page.locator("tr").filter({ hasText: "solo" });
+  await expect(expiredRow.locator('td[data-label="Status"]')).toHaveText(/^Expired on \d{4}-\d{2}-\d{2}\. Contact your administrator to renew\.$/);
+  await expect(expiredRow.getByText("Activate and download")).toHaveCount(0);
+  await expect(page.getByLabel("Device key for DEFAULT solo")).toHaveCount(0);
   expect(api.requests.downloads).toBe(0);
   for (const width of [320, 390, 768, 1280, 1440]) {
     await page.setViewportSize({ width, height: 900 });

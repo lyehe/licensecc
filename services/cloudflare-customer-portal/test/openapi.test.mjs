@@ -189,6 +189,13 @@ test("the providers envelope documents its nullable support contact", () => {
   assert.ok(data.required.includes("support"), "the Worker always sends support, as a string or null");
 });
 
+test("the entitlements envelope documents each row's nullable trial end", () => {
+  const data = openApiDocument.paths["/api/portal/entitlements"].get.responses["200"].content["application/json"].schema.properties.data;
+  const row = data.properties.items.items;
+  assert.deepEqual(row.properties.trial_ends_at?.type, ["integer", "null"]);
+  assert.match(row.properties.trial_ends_at.description, /not started/, "the description says why an activation trial can have no end yet");
+});
+
 test("spec is OpenAPI 3.1.0 with the shared envelope/server conventions", () => {
   assert.equal(openApiDocument.openapi, "3.1.0");
   assert.deepEqual(openApiDocument.servers, [{ url: "/" }]);

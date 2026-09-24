@@ -331,13 +331,26 @@ test("portal UI workflow copy discloses account-safe auth and activation downloa
 
 test("portal UI workflow formats epoch windows and timestamps", async () => {
   const workflow = await loadWorkflowModule();
-  assert.equal(workflow.formatEpoch(null), "any");
-  assert.equal(workflow.formatEpoch(undefined), "any");
-  assert.equal(workflow.formatEpoch(0), "any");
-  assert.equal(workflow.formatEpoch(-5), "any");
   assert.equal(workflow.formatEpoch(1_710_000_000), "2024-03-09");
-  assert.equal(workflow.formatWindow(null, null), "any to any");
-  assert.equal(workflow.formatWindow(1_710_000_000, null), "2024-03-09 to any");
+  // C5: a missing start or end says so in words, through its own helper, never a bare "any".
+  assert.equal(workflow.formatStartDate(null), "No start date");
+  assert.equal(workflow.formatStartDate(undefined), "No start date");
+  assert.equal(workflow.formatStartDate(1_710_000_000), "2024-03-09");
+  assert.equal(workflow.formatEndDate(null), "No end date");
+  assert.equal(workflow.formatEndDate(undefined), "No end date");
+  assert.equal(workflow.formatEndDate(1_710_000_000), "2024-03-09");
+  // 0 is the epoch itself -- a real date, exactly as the license status and the server read it.
+  assert.equal(workflow.formatEndDate(0), "1970-01-01");
+  // A value no calendar date can show -- a "never" sentinel, a negative or a non-number -- is not
+  // a date, and must not throw mid-render (toISOString() does, past a JS Date's range).
+  assert.equal(workflow.formatEndDate(Number.MAX_SAFE_INTEGER), "No end date");
+  assert.equal(workflow.formatEndDate(253_402_300_800), "No end date");
+  assert.equal(workflow.formatEndDate(253_402_300_799), "9999-12-31");
+  assert.equal(workflow.formatStartDate(-5), "No start date");
+  assert.equal(workflow.formatStartDate(Number.NaN), "No start date");
+  assert.equal(workflow.formatWindow(null, null), "No start date to No end date");
+  assert.equal(workflow.formatWindow(1_710_000_000, null), "2024-03-09 to No end date");
+  assert.equal(workflow.formatWindow(null, 1_710_000_000), "No start date to 2024-03-09");
   assert.equal(workflow.formatTimestamp(0), "-");
   assert.equal(workflow.formatTimestamp(null), "-");
   assert.equal(typeof workflow.formatTimestamp(1_710_000_000), "string");
@@ -419,4 +432,70 @@ test("license display preserves explicit status and handles exact date boundarie
   assert.equal(downloadable({ license_mode: "node_locked", enforcement_mode: "device_bound_v1" }), false);
   assert.equal(downloadable({ license_mode: "trial", enforcement_mode: "legacy" }), true);
   assert.equal(downloadable({ license_mode: "floating" }), false);
+});
+
+// C5: a trial whose clock ran out is expired like any other ended license (the server refuses it
+// too), and a status code the portal does not know is never passed through to the page.
+test("license display treats an ended trial as expired and never passes an unknown status through (C5)", async () => {
+  const { licenseDisplayStatus: status } = await loadWorkflowModule();
+  const trial = { status: "active", valid_from: null, valid_until: null, trial_ends_at: 150 };
+  assert.equal(status(trial, 149), "active");
+  assert.equal(status(trial, 150), "expired");
+  assert.equal(status({ ...trial, trial_ends_at: null }, 10_000), "active", "an unstarted trial has not ended");
+  assert.equal(status({ ...trial, trial_ends_at: undefined }, 10_000), "active", "a row without the field claims nothing");
+  assert.equal(status({ ...trial, valid_until: 120 }, 130), "expired", "whichever end comes first ends the license");
+  assert.equal(status({ ...trial, status: "paused" }, 100), "unknown");
+  assert.equal(status({ ...trial, status: "constructor" }, 100), "unknown");
+});
+
+// C5: every lifecycle state reads as words with its date; the next step (contact support) is
+// rendered by <SupportContact/> after this lead, by the entitlements feature.
+test("license status copy names each lifecycle state with its UTC date (C5)", async () => {
+  const { licenseStatusLead: lead } = await loadWorkflowModule();
+  const row = { status: "active", valid_from: 1_700_000_000, valid_until: 1_750_000_000 };
+  assert.equal(lead(row, 1_710_000_000), "Active");
+  assert.equal(lead(row, 1_760_000_000), "Expired on 2025-06-15.");
+  assert.equal(lead(row, 1_600_000_000), "Starts 2023-11-14.");
+  assert.equal(lead({ ...row, status: "disabled" }, 1_710_000_000), "Suspended.");
+  assert.equal(lead({ ...row, status: "revoked" }, 1_710_000_000), "Revoked.");
+  // An ended trial is dated by when it actually ended: the earlier of the trial end and valid_until.
+  assert.equal(lead({ ...row, trial_ends_at: 1_705_000_000 }, 1_710_000_000), "Expired on 2024-01-11.");
+  assert.equal(lead({ ...row, valid_until: null, trial_ends_at: 1_705_000_000 }, 1_710_000_000), "Expired on 2024-01-11.");
+  assert.equal(lead({ ...row, status: "paused" }, 1_710_000_000), "Unavailable.");
+  for (const status of ["active", "disabled", "revoked", "paused"]) {
+    for (const now of [1_600_000_000, 1_710_000_000, 1_760_000_000]) {
+      const copy = lead({ ...row, status }, now);
+      assert.doesNotMatch(copy, /disabled|not_started|paused|_/, `no raw status code in "${copy}"`);
+    }
+  }
+});
+
+test("license mode names a trial's end, or says it starts when you activate (C5)", async () => {
+  const { licenseModeLabel: mode } = await loadWorkflowModule();
+  const now = 1_700_000_000;
+  const protectedTrial = { enforcement_mode: "device_bound_v1", license_mode: "trial" };
+  assert.equal(mode({ ...protectedTrial, trial_ends_at: 1_800_000_000 }, now), "Protected device · Trial · ends 2027-01-15");
+  assert.equal(mode({ ...protectedTrial, trial_ends_at: null }, now), "Protected device · Trial starts when you activate");
+  assert.equal(mode({ ...protectedTrial, trial_ends_at: 1_600_000_000 }, now), "Protected device · Trial · ended 2020-09-13");
+  assert.equal(mode({ ...protectedTrial, trial_ends_at: now }, now), "Protected device · Trial · ended 2023-11-14");
+  assert.equal(mode({ enforcement_mode: "legacy", license_mode: "trial", trial_ends_at: 1_800_000_000 }, now), "Trial · ends 2027-01-15");
+  assert.equal(mode({ license_mode: "trial", trial_ends_at: null }, now), "Trial starts when you activate");
+  // A row from a Worker that predates trial_ends_at makes no claim about the trial clock.
+  assert.equal(mode({ ...protectedTrial }, now), "Protected device · Trial");
+  assert.equal(mode({ license_mode: "trial" }, now), "Trial");
+  assert.equal(mode({ enforcement_mode: "device_bound_v1", license_mode: "node_locked", trial_ends_at: null }, now), "Protected device");
+  assert.equal(mode({ license_mode: "node_locked", trial_ends_at: null }, now), "Node-locked");
+  assert.equal(mode({ license_mode: "floating", trial_ends_at: null }, now), "Floating");
+});
+
+test("a license needs attention when it is expired, suspended or revoked, not when it is yet to start (C5)", async () => {
+  const { licenseNeedsAttention: attention, LICENSE_ATTENTION_COPY } = await loadWorkflowModule();
+  assert.equal(LICENSE_ATTENTION_COPY, "Needs attention");
+  const row = { status: "active", valid_from: null, valid_until: null };
+  assert.equal(attention(row, 1_000), false);
+  assert.equal(attention({ ...row, valid_until: 1_000 }, 1_000), true);
+  assert.equal(attention({ ...row, trial_ends_at: 900 }, 1_000), true);
+  assert.equal(attention({ ...row, status: "disabled" }, 1_000), true);
+  assert.equal(attention({ ...row, status: "revoked" }, 1_000), true);
+  assert.equal(attention({ ...row, valid_from: 2_000 }, 1_000), false);
 });

@@ -582,3 +582,46 @@ test("portal entitlement projection distinguishes protected enrollment without e
     assert.ok(!JSON.stringify(result.body).includes(FP_B));
   } finally { db.close(); }
 });
+
+// =================================================================================================
+// TRIAL END (task C5) — each row says when its trial ends, by the deadline rule the protected-device
+// lease path enforces, with no prospective start: a trial that starts at its first activation and
+// has not started yet has no end (null), and the portal then says it starts when you activate.
+// =================================================================================================
+
+const TRIAL_KEY = `sha256:${"e".repeat(64)}`;
+const DAY = 86400;
+
+function seedTrial(db, feature, fingerprint, { basis = null, duration = 0, started = null, validUntil = null, isTrial = 1 }) {
+  seedEntitlement(db, { feature, fingerprint, customerId: "A", poolSize: 0, validUntil });
+  db.prepare(
+    "UPDATE entitlements SET is_trial = ?, trial_expiration_basis = ?, trial_duration_sec = ?, trial_started_at = ?, trial_device_hash = ? " +
+      "WHERE license_fingerprint = ?",
+  ).run(isTrial, basis, duration, started, started === null ? null : TRIAL_KEY, fingerprint);
+}
+
+test("each entitlement row says when its trial ends; an activation trial not yet started has no end (C5)", async () => {
+  const { db, env } = baseFixture();
+  try {
+    seedTrial(db, "RUNNING", "1".repeat(64), { basis: "from_first_activation", duration: 14 * DAY, started: NOW - DAY });
+    seedTrial(db, "ENDED", "2".repeat(64), { basis: "from_first_activation", duration: 7 * DAY, started: NOW - 30 * DAY });
+    seedTrial(db, "UNSTARTED", "3".repeat(64), { basis: "from_first_use", duration: 7 * DAY });
+    seedTrial(db, "ISSUED", "4".repeat(64), { basis: "from_issue", duration: 7 * DAY, validUntil: NOW + 7 * DAY });
+    seedTrial(db, "PAID", "5".repeat(64), { isTrial: 0, validUntil: NOW + 30 * DAY });
+    const r = await call(env, "GET", "/api/portal/entitlements", { cookie: await cookieFor(env, "A") });
+    assert.equal(r.status, 200);
+    const endOf = (feature) => r.body.data.items.find((row) => row.feature === feature).trial_ends_at;
+    assert.equal(endOf("RUNNING"), NOW + 13 * DAY, "a started activation trial ends its duration after it started");
+    assert.equal(endOf("ENDED"), NOW - 23 * DAY, "an ended activation trial still reports when it ended");
+    assert.equal(endOf("UNSTARTED"), null, "an activation trial that has not started has no end yet");
+    assert.equal(endOf("ISSUED"), NOW + 7 * DAY, "a from_issue trial ends when the license does");
+    assert.equal(endOf("PAID"), null, "a license that is not a trial has no trial end");
+    assert.equal(endOf("DEFAULT"), null, "the floating license is not a trial either");
+    // Only the derived end reaches the browser, never the columns it is computed from.
+    for (const row of r.body.data.items) {
+      for (const column of ["trial_started_at", "trial_duration_sec", "trial_expiration_basis", "trial_device_hash"]) {
+        assert.ok(!Object.hasOwn(row, column), `${row.feature} must not expose ${column}`);
+      }
+    }
+  } finally { db.close(); }
+});
