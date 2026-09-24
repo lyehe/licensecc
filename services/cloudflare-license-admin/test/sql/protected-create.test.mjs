@@ -248,6 +248,16 @@ const REASON_CASES = [
   { reason: "invalid_trial", setup: "UPDATE entitlement_policies SET type='trial',trial_expiration_basis='from_first_activation',trial_duration_sec=1",
     body: { policy_id: "policy" }, fix: "UPDATE entitlement_policies SET trial_duration_sec=600" },
   { reason: "invalid_capacity", setup: "UPDATE entitlement_policies SET max_active_devices=0", body: { policy_id: "policy" }, fix: "UPDATE entitlement_policies SET max_active_devices=1" },
+  // B2 fix round 1 (ruling R27): the owner-change trigger also aborts with capacity_in_use. A move to
+  // another customer while a device is connected is its own rule; a higher device limit cannot fix it.
+  { reason: "devices_connected", name: "a move to another customer while a device is connected",
+    setup: `INSERT INTO entitlements(project,feature,license_fingerprint,status,customer_id,license_id,enforcement_mode,max_active_devices,created_at,updated_at)
+        VALUES('APP','PRO','${fp}','active','owner','license','device_bound_v1',5,1,1);
+      INSERT INTO licenses(id,customer_id,project,created_at,updated_at) VALUES('license-other','other','APP',1,1);
+      INSERT INTO device_bound_devices(id,customer_id,project,key_id,public_key_spki,created_at,last_proof_at) VALUES('device','owner','APP','key','synthetic',1,1);
+      INSERT INTO device_bound_bindings(id,project,feature,license_fingerprint,device_id,state,hold_until,created_at,updated_at)
+        VALUES('binding','APP','PRO','${fp}','device','active',0,1,1)`,
+    body: { customer_id: "other", license_id: "license-other" }, fix: "UPDATE device_bound_bindings SET state='retiring'" },
   { reason: "unknown", body: { device_hash: "d".repeat(64) }, fixedBody: {} },
 ];
 

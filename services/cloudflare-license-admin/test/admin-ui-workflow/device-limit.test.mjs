@@ -6,16 +6,25 @@ import { loadWorkflowModule } from "./helpers.mjs";
 // B2: the device limit is visible and settable, policies say what they grant, and a policy's
 // patchable fields are editable.
 const failure = (code, data, requestId = "req-3") => ({ kind: "failure", code, requestId, ...(data === undefined ? {} : { data }) });
+const refusal = (code, requestId, data) => Object.defineProperties(
+  { ok: false, code, request_id: requestId, ...(data === undefined ? {} : { data }) },
+  { __httpOk: { value: false }, __httpStatus: { value: 409 } },
+);
 
-test("a create without a policy sends its own device limit; a policy create leaves it to the policy", async () => {
+// Ruling R26: the console sends a device limit only when the operator sets one. An upsert of an
+// existing key then keeps its stored limit, as it did before B2.
+test("an untouched device limit is not sent; a typed one is; a policy create leaves it to the policy", async () => {
   const workflow = await loadWorkflowModule("features/entitlements/workflow.ts");
   const { MAX_DEVICE_LIMIT } = await loadWorkflowModule("../shared/api.ts");
   assert.equal(MAX_DEVICE_LIMIT, 1_000_000);
-  assert.equal(workflow.emptyEntitlementForm.max_active_devices, 1);
-  const form = { ...workflow.emptyEntitlementForm, license_fingerprint: "a".repeat(64), max_active_devices: 3 };
-  assert.equal(workflow.normalizeEntitlementForm(form).max_active_devices, 3);
-  assert.equal("max_active_devices" in workflow.normalizeCreateFromPolicy({ ...form, policy_id: "pol_1" }), false);
+  assert.equal(workflow.emptyEntitlementForm.max_active_devices, "");
+  const form = { ...workflow.emptyEntitlementForm, license_fingerprint: "a".repeat(64) };
+  assert.equal(Object.hasOwn(workflow.normalizeEntitlementForm(form), "max_active_devices"), false);
   assert.deepEqual(workflow.entitlementFormErrors(form), {});
+  const typed = { ...form, max_active_devices: 3 };
+  assert.equal(workflow.normalizeEntitlementForm(typed).max_active_devices, 3);
+  assert.deepEqual(workflow.entitlementFormErrors(typed), {});
+  assert.equal("max_active_devices" in workflow.normalizeCreateFromPolicy({ ...typed, policy_id: "pol_1" }), false);
   for (const value of [0, 1_000_001, 2.5, Number.NaN]) {
     assert.throws(() => workflow.normalizeEntitlementForm({ ...form, max_active_devices: value }), /max_active_devices_must_be_between_1_and_1000000/);
     assert.match(workflow.entitlementFormErrors({ ...form, max_active_devices: value }).max_active_devices, /1 to 1,000,000/);
@@ -29,8 +38,10 @@ test("policy options name what they grant and the project, and list only the dra
   const policy = (id, project, extra = {}) => ({ id, name: `Policy ${id}`, project, pool_size: 0, max_active_devices: 3, ...extra });
   assert.equal(workflow.policyOptionLabel(policy("pro", "APP")), "Policy pro · 3 devices · APP");
   assert.equal(workflow.policyOptionLabel(policy("solo", "APP", { max_active_devices: 1 })), "Policy solo · 1 device · APP");
-  // A floating policy grants a seat pool, not a device limit.
+  // A floating policy grants a seat pool, not a device limit; the read-only field says the same.
   assert.equal(workflow.policyOptionLabel(policy("team", "APP", { pool_size: 5 })), "Policy team · 5 seats · APP");
+  assert.deepEqual(workflow.policyGrant(policy("pro", "APP")), { label: "Device limit", count: 3 });
+  assert.deepEqual(workflow.policyGrant(policy("team", "APP", { pool_size: 5, max_active_devices: 9 })), { label: "Seats", count: 5 });
   const policies = [policy("a", "APP"), policy("b", "OTHER"), policy("c", "APP")];
   assert.deepEqual(workflow.policiesForProject(policies, "APP").map((item) => item.id), ["a", "c"]);
   assert.deepEqual(workflow.policiesForProject(policies, "NONE"), []);
@@ -41,30 +52,43 @@ test("a refused device limit names the connected devices in words, never its cod
   assert.equal(limits.deviceLimitFailureMessage(failure("capacity_in_use", { devices_in_use: 3 }), 2), "3 devices are connected; disconnect one first. Reference req-3.");
   // Saying "one" would send the operator back for a second refusal.
   assert.equal(limits.deviceLimitFailureMessage(failure("capacity_in_use", { devices_in_use: 5 }), 2), "5 devices are connected; disconnect 3 first. Reference req-3.");
+  // The count is read after the refusal; if devices disconnected meanwhile, nothing needs to go.
+  for (const [connected, requested] of [[2, 2], [0, 1], [1, 3]]) {
+    assert.equal(limits.deviceLimitFailureMessage(failure("capacity_in_use", { devices_in_use: connected }), requested),
+      "The connected devices changed while you were saving; try again. Reference req-3.", `${connected} for ${requested}`);
+  }
   for (const data of [undefined, null, {}, { devices_in_use: -1 }, { devices_in_use: 2.5 }, { devices_in_use: "3" }]) {
     const message = limits.deviceLimitFailureMessage(failure("capacity_in_use", data), 2);
     assert.match(message, /; disconnect one first\. Reference req-3\.$/, JSON.stringify(data));
     assert.doesNotMatch(message, /capacity_in_use|undefined|NaN|null/);
   }
-  assert.equal(limits.deviceLimitFailureMessage(failure("stale_transition"), 2), null);
+  assert.equal(limits.deviceLimitFailureMessage(failure("stale_transition"), 2),
+    "This license (entitlement) changed after you opened it; its current values were reloaded. Check the device limit and save again. Reference req-3.");
+  assert.equal(limits.deviceLimitFailureMessage(failure("revoked_entitlement_is_terminal"), 2),
+    "Revocation is permanent; this license (entitlement) can no longer change. Reference req-3.");
+  assert.equal(limits.deviceLimitFailureMessage(failure("invalid_request"), 2), null);
 });
 
-test("the device limit PATCH carries only the limit and the observed state, and admits the capacity refusal", async () => {
+test("the device limit PATCH carries only the limit and the observed state, and admits its refusals", async () => {
   const limits = await loadWorkflowModule("features/entitlements/deviceLimit.ts");
   const item = { id: "ent-1", customer_id: "cus_1", revocation_seq: 4 };
   assert.deepEqual(JSON.parse(limits.deviceLimitRequestBody(item, 5)), { max_active_devices: 5, expected_customer_id: "cus_1", expected_revocation_seq: 4 });
   assert.equal(limits.deviceLimitError(5), null);
   for (const value of [0, 1_000_001, 1.5, Number.NaN]) assert.match(limits.deviceLimitError(value), /1 to 1,000,000/);
   const guards = await loadWorkflowModule("shared/mutationGuards.ts");
-  const envelope = Object.defineProperties(
-    { ok: false, code: "capacity_in_use", request_id: "req-4", data: { devices_in_use: 3 } },
-    { __httpOk: { value: false }, __httpStatus: { value: 409 } },
-  );
+  const patchPolicy = guards.mutationFailurePolicies.entitlementPatch;
   assert.deepEqual(
-    guards.parseMutationResponse(envelope, "entitlement_patched", () => true, guards.mutationFailurePolicies.entitlementPatch, "initial"),
+    guards.parseMutationResponse(refusal("capacity_in_use", "req-4", { devices_in_use: 3 }), "entitlement_patched", () => true, patchPolicy, "initial"),
     { kind: "failure", code: "capacity_in_use", requestId: "req-4", data: { devices_in_use: 3 } },
   );
-  assert.deepEqual(guards.parseMutationResponse(envelope, "entitlement_patched", () => true, guards.mutationFailurePolicies.entitlementPatch, "replay"), { kind: "invalid" });
+  // A stale expectation writes nothing, so it is a definitive refusal, not an unknown outcome to reconcile.
+  assert.deepEqual(
+    guards.parseMutationResponse(refusal("stale_transition", "req-6"), "entitlement_patched", () => true, patchPolicy, "initial"),
+    { kind: "failure", code: "stale_transition", requestId: "req-6" },
+  );
+  for (const code of ["capacity_in_use", "stale_transition"]) {
+    assert.deepEqual(guards.parseMutationResponse(refusal(code, "req-7"), "entitlement_patched", () => true, patchPolicy, "replay"), { kind: "invalid" });
+  }
 });
 
 test("the policy editor edits every patchable field and never the policy's identity", async () => {
@@ -86,8 +110,13 @@ test("the policy editor edits every patchable field and never the policy's ident
   assert.throws(() => workflow.normalizePolicyPatch({ ...form, pool_size: 2 }), /node_locked_pool_size_must_be_0/);
 });
 
-test("a create refused for capacity suggests raising the limit, which a create without a policy now sets", async () => {
+test("a create refused for connected devices says which rule: the device limit, or a move to another customer", async () => {
   const onboarding = await loadWorkflowModule("features/entitlements/protectedCreate.ts");
-  const message = onboarding.protectedCreateFailureMessage({ code: "protected_creation_conflict", requestId: "req-5", data: { reason: "invalid_capacity" } });
-  assert.match(message, /^The device limit must be 1 to 1,000,000 and can't drop below the devices already connected; raise the limit, choose another policy, or disconnect devices first\. Reference req-5\.$/);
+  const say = (reason) => onboarding.protectedCreateFailureMessage({ code: "protected_creation_conflict", requestId: "req-5", data: { reason } });
+  assert.match(say("invalid_capacity"), /^The device limit must be 1 to 1,000,000 and can't drop below the devices already connected; raise the limit, choose another policy, or disconnect devices first\. Reference req-5\.$/);
+  // Ruling R27: moving a grant with connected devices to another customer is a different rule; a
+  // higher limit does not help there.
+  const moved = say("devices_connected");
+  assert.equal(moved, "This license (entitlement) still has connected devices; disconnect them before moving it to another customer. Reference req-5.");
+  assert.doesNotMatch(moved, /raise the limit/);
 });

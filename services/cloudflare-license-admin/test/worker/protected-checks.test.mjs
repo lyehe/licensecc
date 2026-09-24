@@ -91,6 +91,26 @@ test("a create's own device limit is modelled in the would-be row and required o
   assert.deepEqual(protectedCreateChecks(input, policy).find((check) => check.reason === "unknown").binds, ["owner", "license"]);
 });
 
+// B2 fix round 1 (ruling R27): capacity_in_use during a create comes from one of two schema
+// triggers. The owner-change rule is a named check in the same list, and it alone tells the two
+// apart against the would-be row.
+test("a capacity refusal is named by the list's owner-change rule: a move to another customer, or the device limit", async () => {
+  const { protectedCapacityReason, protectedCreateChecks, protectedWouldBeRowQuery } = await checksModule();
+  const owner = protectedCreateChecks(input).find((check) => check.reason === "devices_connected");
+  assert.ok(owner, "moving a grant with connected devices is a named rule");
+  assert.match(owner.sql, /cur\.customer_id IS NOT e\.customer_id/);
+  assert.match(owner.sql, /b\.state = 'active' OR \(b\.state = 'retiring' AND b\.hold_until > unixepoch\(\)\)/, "it counts with the shared occupancy predicate");
+  const wouldBe = protectedWouldBeRowQuery(input);
+  for (const [answer, reason] of [[{ holds: 0 }, "devices_connected"], [{ holds: 1 }, "invalid_capacity"], [null, "invalid_capacity"],
+    [() => { throw new Error("D1 unavailable"); }, "invalid_capacity"]]) {
+    const probe = capturingEnv(answer);
+    assert.equal(await protectedCapacityReason(probe.env, input), reason, JSON.stringify(answer));
+    assert.equal(probe.prepared.length, 1, "one read");
+    assert.ok(probe.prepared[0].sql.startsWith(wouldBe.sql) && probe.prepared[0].sql.includes(`(${owner.sql})`));
+    assert.deepEqual(probe.prepared[0].args, [...wouldBe.binds, ...owner.binds]);
+  }
+});
+
 test("the diagnostic falls back to unknown for an unrecognized answer or a failed read", async () => {
   const { protectedCreateReason } = await checksModule();
   for (const row of [null, { reason: "not_a_reason" }, { reason: 7 }, () => { throw new Error("D1 unavailable"); }]) {

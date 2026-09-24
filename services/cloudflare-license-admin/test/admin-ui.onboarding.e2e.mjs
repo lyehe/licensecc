@@ -163,6 +163,7 @@ test("a create without a policy sends its device limit, and a chosen policy show
   const api = makeAdminApiFixture();
   api.seed.policy("pol_pro", "Pro", { project: "APP", type: "node_locked", max_active_devices: 3 });
   api.seed.policy("pol_other", "Other app", { project: "OTHER", type: "node_locked", max_active_devices: 9 });
+  api.seed.policy("pol_team", "Team", { project: "APP", type: "floating", pool_size: 5, max_active_devices: 1 });
   await page.route("**/api/admin/**", api.route);
   const writes = [];
   await page.route("**/api/admin/entitlements", async route => {
@@ -175,10 +176,16 @@ test("a create without a policy sends its device limit, and a chosen policy show
   await form.getByLabel("License fingerprint", { exact: true }).fill("a".repeat(64));
   const policy = form.getByLabel("Policy (optional)", { exact: true });
   // Only this project's policies are offered, each with what it grants.
-  await expect(policy.locator("option")).toHaveText(["No policy · use fields below", "Pro · 3 devices · APP"]);
+  await expect(policy.locator("option")).toHaveText(["No policy · use fields below", "Pro · 3 devices · APP", "Team · 5 seats · APP"]);
+  // Blank sends nothing (ruling R26): a new grant gets 1, and an existing one keeps its limit.
   const own = form.getByLabel("Device limit", { exact: true });
-  await expect(own).toHaveValue("1");
+  await expect(own).toHaveValue("");
+  await expect(own).toHaveAttribute("placeholder", "1");
+  await expect(form.getByText("Blank: a new license (entitlement) gets 1; an existing one keeps its limit.", { exact: true })).toBeVisible();
   await own.fill("4");
+  // A floating policy grants seats, and says so in the read-only field too.
+  await policy.selectOption("pol_team");
+  await expect(form.getByLabel("Seats (from policy Team)", { exact: true })).toHaveValue("5");
   await policy.selectOption("pol_pro");
   await expect(policy.locator("option:checked")).toHaveText("Pro · 3 devices · APP");
   const inherited = form.getByLabel("Device limit (from policy Pro)", { exact: true });
@@ -203,6 +210,16 @@ test("a create without a policy sends its device limit, and a chosen policy show
   await expect.poll(() => writes.length).toBe(2);
   expect(writes[1]).toMatchObject({ project: "APP", feature: "PLUS", max_active_devices: 4 });
   expect(Object.hasOwn(writes[1], "policy_id")).toBe(false);
+
+  // An untouched field sends no limit at all.
+  await expect(form.getByLabel("Device limit", { exact: true })).toHaveValue("");
+  await form.getByLabel("Project", { exact: true }).fill("APP");
+  await form.getByLabel("Feature", { exact: true }).fill("BASIC");
+  await form.getByLabel("License fingerprint", { exact: true }).fill("c".repeat(64));
+  await form.getByRole("button", { name: "Create entitlement", exact: true }).click();
+  await expect.poll(() => writes.length).toBe(3);
+  expect(writes[2]).toMatchObject({ project: "APP", feature: "BASIC" });
+  expect(Object.hasOwn(writes[2], "max_active_devices")).toBe(false);
 });
 
 test("the customer field reads one bounded page on open and one more per pause in typing", async ({ page }) => {

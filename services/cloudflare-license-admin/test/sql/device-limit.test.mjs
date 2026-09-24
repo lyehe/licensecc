@@ -3,6 +3,8 @@ import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { entitlementId } from "@licensecc/cloudflare-runtime/d1/entitlement_mutation";
+import { openApiDocument } from "../../dist-worker/worker/openapi/document.js";
+import { loadWorkflowModule } from "../admin-ui-workflow/helpers.mjs";
 import { worker, baseEnv, authed } from "../worker/fixtures.mjs";
 
 // B2: the device limit is settable. A create without a policy writes it inside its own batch,
@@ -189,4 +191,49 @@ test("a missing or incorrect device-limit side-write rolls back the preceding up
     await refused(await f.send({ ...protectedGrant, max_active_devices: 3 }), 409, "protected_creation_conflict", { reason: "unknown" });
     assert.deepEqual(f.snapshot(), before);
   }
+});
+
+// Ruling R26: the console's untouched create form sends no device limit, so re-creating an existing
+// key keeps its stored limit, as every upsert did before B2. The body is built by the console's
+// own normalizer, so a console that starts sending a default again fails here.
+test("a console re-create of an existing key keeps its stored device limit", async t => {
+  const workflow = await loadWorkflowModule("features/entitlements/workflow.ts");
+  const consoleBody = (grant) => workflow.normalizeEntitlementForm({
+    ...workflow.emptyEntitlementForm, enforcement_mode: grant.enforcement_mode, project: grant.project, feature: grant.feature,
+    license_fingerprint: grant.license_fingerprint, customer_id: grant.customer_id ?? "", license_id: grant.license_id ?? "",
+  });
+  assert.equal(Object.hasOwn(consoleBody(protectedGrant), "max_active_devices"), false);
+  const cases = [
+    { name: "a legacy grant", grant: legacyGrant, create: { ...legacyGrant, max_active_devices: 5 }, devices: 0, limit: 5 },
+    { name: "a protected grant with two connected devices", grant: protectedGrant, create: { ...protectedGrant, max_active_devices: 5 }, devices: 2, limit: 5 },
+    { name: "a legacy grant stamped from a policy", grant: legacyGrant, create: { ...legacyGrant, policy_id: "policy" }, devices: 0, limit: 3 },
+  ];
+  for (const { name, grant, create, devices, limit } of cases) {
+    const f = fixture(t);
+    await created(await f.send(create));
+    for (let n = 0; n < devices; n += 1) f.connect("active", 0);
+    assert.equal(f.stored(grant), limit, name);
+    const again = await created(await f.send(consoleBody(grant)));
+    assert.equal(again.max_active_devices, limit, name);
+    assert.equal(f.stored(grant), limit, name);
+  }
+});
+
+// The PATCH body rule is stated once in OpenAPI: no other patchable field may accompany the limit.
+// The Worker must refuse exactly those, and, like every PATCH, ignore keys it does not patch.
+test("a device-limit PATCH refuses every other patchable field that OpenAPI names, and ignores the rest", async t => {
+  const f = fixture(t);
+  const grant = await created(await f.send(protectedGrant));
+  const excluded = openApiDocument.components.schemas.EntitlementPatch.dependentSchemas.max_active_devices.not.anyOf.map((rule) => rule.required[0]);
+  const samples = { device_hash: "", assertion_ttl_seconds: 300, valid_from: null, valid_until: null, notes: "kept", customer_id: "owner", license_id: "license" };
+  assert.deepEqual([...excluded].sort(), Object.keys(samples).sort(), "every patchable field is excluded beside the limit");
+  const before = f.snapshot();
+  for (const field of excluded) {
+    await refused(await f.patch(grant.id, { max_active_devices: 5, [field]: samples[field] }), 400, "invalid_request", undefined);
+    assert.equal((await f.patch(grant.id, { [field]: samples[field] })).status, 200, `${field} alone is patchable`);
+  }
+  assert.equal(f.snapshot()[0][0].max_active_devices, before[0][0].max_active_devices);
+  const ignored = await created(await f.patch(grant.id, { max_active_devices: 5, status: "disabled" }));
+  assert.equal(ignored.max_active_devices, 5);
+  assert.equal(ignored.status, "active", "status is not a PATCH field, so it is ignored");
 });

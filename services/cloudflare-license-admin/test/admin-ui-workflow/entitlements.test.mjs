@@ -48,8 +48,9 @@ test("admin UI workflow normalizes create form payloads", async () => {
     notes: "operator note",
     customer_id: "cus_123",
     license_id: "lic_123",
-    max_active_devices: 1,
   });
+  // An untouched device limit is not sent: the upsert then keeps a stored limit (ruling R26).
+  assert.equal(Object.hasOwn(body, "max_active_devices"), false);
   assert.throws(() => workflow.normalizeEntitlementForm({
     ...workflow.emptyEntitlementForm,
     assertion_ttl_seconds: 0,

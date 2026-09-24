@@ -236,7 +236,11 @@ test("the device limit is documented on create and PATCH, with the capacity conf
   })), "create documents that a policy excludes max_active_devices");
   const patch = schemas.EntitlementPatch;
   assert.ok(inRange(patch.properties.max_active_devices), "PATCH documents the device limit range");
-  assert.deepEqual(patch.dependentSchemas.max_active_devices, { propertyNames: { enum: ["max_active_devices", "expected_customer_id", "expected_revocation_seq"] } });
+  // Exactly what the Worker enforces: no other PATCH field beside the limit. Like every PATCH, keys
+  // the Worker does not patch are ignored, so the schema does not forbid them.
+  const otherFields = Object.keys(patch.properties).filter((field) => field !== "max_active_devices");
+  assert.ok(otherFields.length >= 7);
+  assert.deepEqual(patch.dependentSchemas.max_active_devices, { not: { anyOf: otherFields.map((field) => ({ required: [field] })) } });
   assert.equal(schemas.EntitlementRecord.properties.max_active_devices.type, "integer");
 
   const conflict = openApiDocument.paths["/api/admin/entitlements/{id}"].patch.responses["409"].content["application/json"];
