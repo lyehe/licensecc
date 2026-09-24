@@ -86,12 +86,14 @@ words. Two notes:
   **suspended** too, as of this task. The portal applies the term to a
   customer's own account at sign-in (task A3): the correct password, or a
   linked Google or GitHub identity, on a suspended account gets "This account
-  is suspended." Task C5 will apply it to a customer's per-license status
-  text; that is still pending.
+  is suspended." Task C5 applies it to a customer's per-license status
+  text: a license wire-coded `disabled` reads "Suspended." followed by the
+  support contact.
 - "Expired" and "not started" for a portal license are computed from its
-  validity window, not stored as a status code; "not started" is an
-  additional, allowed nuance beyond the four canonical words, not a
-  replacement for any of them.
+  validity window and, for a trial, the date its trial ends; neither is
+  stored as a status code. The portal words them "Expired on {date}" and
+  "Starts {date}" (task C5). "Not started" is an additional, allowed nuance
+  beyond the four canonical words, not a replacement for any of them.
 
 **Capacity.** The maximum concurrent devices an entitlement or policy
 allows (`max_active_devices`/`device_limit`). Both apps call this the

@@ -1,5 +1,6 @@
 // Session-scoped customer data, device release, seat actions, and signed downloads.
 
+import { boundTrialDeadlineSql } from "@licensecc/cloudflare-runtime/device/bound_trial";
 import * as tokenModule from "../../auth/portal_token.mjs";
 import * as ratelimitModule from "../../auth/portal_ratelimit.mjs";
 import { backendOrigin } from "../../auth/portal_destination.mjs";
@@ -42,11 +43,18 @@ async function apiMe(env: Env, session: { customer_id: string }, reqId: string):
   return envelope(reqId, "me", { customer_id: session.customer_id, email: row === null ? null : row.email });
 }
 
+// When each row's trial ends (task C5), by the deadline rule the protected-device lease path
+// enforces, with no prospective start: a trial that starts at its first activation and has not
+// started yet has no end (NULL), and the portal says it starts when you activate. Only this derived
+// value leaves the Worker; the trial columns it reads stay server-side.
+const TRIAL_ENDS_AT_SQL = `CASE WHEN e.is_trial=1 THEN ${boundTrialDeadlineSql("e", "NULL")} ELSE NULL END AS trial_ends_at`;
+type EntitlementListRow = Omit<OwnedEntitlement, "id" | "license_mode"> & { trial_ends_at: number | null };
+
 async function apiEntitlements(env: Env, session: { customer_id: string }, reqId: string): Promise<Response> {
   const rows = await env.DB.prepare(
-    "SELECT project, feature, license_fingerprint, enforcement_mode, status, valid_from, valid_until, pool_size, max_active_devices, max_borrow_sec, heartbeat_grace_sec, is_trial, policy_id " +
-      "FROM entitlements WHERE customer_id = ? ORDER BY project, feature, license_fingerprint",
-  ).bind(session.customer_id).all<Omit<OwnedEntitlement, "id" | "license_mode">>();
+    "SELECT project, feature, license_fingerprint, enforcement_mode, status, valid_from, valid_until, pool_size, max_active_devices, max_borrow_sec, heartbeat_grace_sec, is_trial, policy_id, " +
+      `${TRIAL_ENDS_AT_SQL} FROM entitlements e WHERE customer_id = ? ORDER BY project, feature, license_fingerprint`,
+  ).bind(session.customer_id).all<EntitlementListRow>();
   return envelope(reqId, "entitlements", { items: rows.results.map(withPortalEntitlement) });
 }
 

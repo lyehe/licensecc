@@ -10,7 +10,6 @@ import {
   licenseDisplayStatus,
 } from "../../portalWorkflow";
 import { currentSessionEpoch, localMessage, reportUnauthorized, resultMessage } from "../../shared/api";
-import { useLicenseClock } from "../../shared/useLicenseClock";
 import type { EntitlementRow, StatusMessage } from "../../types";
 
 interface DownloadOptions {
@@ -33,6 +32,7 @@ export function useLicenseDownloads({ runOnce, setMessage }: DownloadOptions): L
   }
 
   async function download(item: EntitlementRow): Promise<void> {
+    // Checked again at click time: the license (or its trial) may have ended since the row rendered.
     if (!canDownloadLicense(item) || licenseDisplayStatus(item, Math.floor(Date.now() / 1000)) !== "active") {
       setMessage(localMessage("license_unavailable", false));
       return;
@@ -94,12 +94,13 @@ export function useLicenseDownloads({ runOnce, setMessage }: DownloadOptions): L
   return { deviceKeys, setDeviceKey, download, clear };
 }
 
+// Rendered only for a license that is active now (EntitlementsFeature): an inactive license offers no
+// download at all, and download() re-checks the license when it is clicked.
 export function LicenseDownloadAction({item,downloads,busy}:{item:EntitlementRow;downloads:LicenseDownloads;busy:boolean}):React.ReactElement {
-  const now=useLicenseClock();
   return <details className="licenseDownload"><summary>Activate and download</summary>
     <p>{ACTIVATION_DOWNLOAD_DISCLOSURE}</p>
     <label>Device key<input aria-label={`Device key for ${item.project} ${item.feature}`} placeholder="Device key ID" value={downloads.deviceKeys[item.id]??""} onChange={event=>downloads.setDeviceKey(item.id,event.target.value)} /></label>
     <p>{DEVICE_KEY_HELP_COPY}</p>
-    <button disabled={busy || licenseDisplayStatus(item,now)!=="active" || (downloads.deviceKeys[item.id]??"").trim()===""} onClick={()=>void downloads.download(item)}>{ACTIVATION_DOWNLOAD_ACTION_LABEL}</button>
+    <button disabled={busy || (downloads.deviceKeys[item.id]??"").trim()===""} onClick={()=>void downloads.download(item)}>{ACTIVATION_DOWNLOAD_ACTION_LABEL}</button>
   </details>;
 }

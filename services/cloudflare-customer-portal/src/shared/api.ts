@@ -32,4 +32,5 @@ export interface PortalEntitlementSummary {
   max_borrow_sec: number;
   heartbeat_grace_sec: number;
   policy_id: string | null;
+  trial_ends_at: number | null;
 }

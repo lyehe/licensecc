@@ -71,7 +71,10 @@ function licenseMode(row: { is_trial?: number; pool_size?: number }): LicenseMod
   return Number(row.pool_size ?? 0) > 0 ? "floating" : "node_locked";
 }
 
-export function withPortalEntitlement(row: Omit<OwnedEntitlement, "id" | "license_mode">): OwnedEntitlement {
+// Keeps any extra column a caller selected (the list's trial_ends_at) in the returned row's type.
+export function withPortalEntitlement<Row extends Omit<OwnedEntitlement, "id" | "license_mode">>(
+  row: Row,
+): Row & Pick<OwnedEntitlement, "id" | "license_mode"> {
   return {
     ...row,
     id: entitlementId(row.project, row.feature, row.license_fingerprint),

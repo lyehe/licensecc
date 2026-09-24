@@ -1,5 +1,7 @@
 // Protected-only trial policy. Legacy trial evaluation remains unchanged.
 // Callers supply a verified/registered key, never a self-reported machine ID.
+// Shared by two deployables: the licensing backend decides protected-trial access with it, and the
+// customer portal shows when a trial ends by the same deadline rule (boundTrialDeadlineSql).
 const activationBases = new Set(["from_first_activation", "from_first_use"]);
 const safeTime = value => Number.isSafeInteger(value) && value >= 0;
 const keyId = value => typeof value === "string" && value.length === 71 && /^sha256:[0-9a-f]{64}$/.test(value);

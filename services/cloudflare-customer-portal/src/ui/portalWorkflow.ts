@@ -251,15 +251,34 @@ export function shortHash(value: string): string {
   return `${value.slice(0, 8)}...${value.slice(-8)}`;
 }
 
-// epoch seconds -> human date; null/0/invalid render as "any" (open-ended window).
-export function formatEpoch(value: number | null | undefined): string {
-  if (value === null || value === undefined || value === 0) {
-    return "any";
-  }
-  if (!Number.isFinite(value) || value < 0) {
-    return "any";
-  }
+// The last second toISOString() still writes as a plain four-digit-year date (9999-12-31T23:59:59Z).
+// A later epoch, such as a "never" sentinel, is no calendar date a customer can act on, and past a
+// JS Date's range toISOString() throws, which would take the whole page down mid-render.
+const LAST_CALENDAR_EPOCH = 253_402_300_799;
+
+function isCalendarEpoch(value: number | null | undefined): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= LAST_CALENDAR_EPOCH;
+}
+
+// epoch seconds -> "YYYY-MM-DD" in UTC. License dates are whole days, shown in UTC so every viewer
+// reads the same day. For a date that is present: an optional start or end goes through
+// formatStartDate/formatEndDate, which say what a missing one means.
+export function formatEpoch(value: number): string {
   return new Date(value * 1000).toISOString().slice(0, 10);
+}
+
+export const NO_START_DATE_COPY = "No start date";
+
+export const NO_END_DATE_COPY = "No end date";
+
+// A license's start date, or "No start date" when it has none a calendar can show.
+export function formatStartDate(value: number | null | undefined): string {
+  return isCalendarEpoch(value) ? formatEpoch(value) : NO_START_DATE_COPY;
+}
+
+// A license's (or its trial's) end date, or "No end date" when it has none a calendar can show.
+export function formatEndDate(value: number | null | undefined): string {
+  return isCalendarEpoch(value) ? formatEpoch(value) : NO_END_DATE_COPY;
 }
 
 // epoch seconds -> full local timestamp for event rows; invalid -> "-".
@@ -270,9 +289,9 @@ export function formatTimestamp(value: number | null | undefined): string {
   return new Date(value * 1000).toLocaleString();
 }
 
-// Render a validity window "<from> to <until>" using formatEpoch on both ends.
+// Render a validity window "<from> to <until>", naming a missing start or end.
 export function formatWindow(validFrom: number | null | undefined, validUntil: number | null | undefined): string {
-  return `${formatEpoch(validFrom)} to ${formatEpoch(validUntil)}`;
+  return `${formatStartDate(validFrom)} to ${formatEndDate(validUntil)}`;
 }
 
 // ---- Floating-seat session persistence ---------------------------------------------------------
@@ -365,12 +384,70 @@ export function isValidCode(value: string): boolean {
   return /^[0-9]{8}$/.test(normalizeCode(value));
 }
 
-// Display only: date eligibility does not establish device or trial authorization.
-export function licenseDisplayStatus(item: { status: string; valid_from: number | null; valid_until: number | null }, now: number): string {
-  if (item.status !== "active") return item.status;
-  if (item.valid_until !== null && item.valid_until <= now) return "expired";
+// ---- License lifecycle (display only) -----------------------------------------------------------
+
+// A license's lifecycle as the customer reads it. Display only: dates do not establish device or
+// trial authorization, which the server decides on every activation. The wire status "disabled"
+// reads as suspended (doc/architecture/glossary.md). A status this portal does not know is
+// "unknown", so a raw code never reaches the page.
+export type LicenseDisplayStatus = "active" | "not_started" | "expired" | "disabled" | "revoked" | "unknown";
+
+interface LicenseDates {
+  status: string;
+  valid_from: number | null;
+  valid_until: number | null;
+  // null while an activation trial has not started; absent from an older Worker's row.
+  trial_ends_at?: number | null;
+}
+
+// When access ends: the earlier of the license's end and its trial's end, or null for neither.
+function licenseEndsAt(item: LicenseDates): number | null {
+  const ends = [item.valid_until, item.trial_ends_at].filter((end): end is number => typeof end === "number");
+  return ends.length === 0 ? null : Math.min(...ends);
+}
+
+// A trial whose clock ran out is expired like any other ended license: the server refuses it too.
+export function licenseDisplayStatus(item: LicenseDates, now: number): LicenseDisplayStatus {
+  if (item.status === "disabled" || item.status === "revoked") return item.status;
+  if (item.status !== "active") return "unknown";
+  const endsAt = licenseEndsAt(item);
+  if (endsAt !== null && endsAt <= now) return "expired";
   if (item.valid_from !== null && item.valid_from > now) return "not_started";
   return "active";
+}
+
+// What the Status column says first. Where the customer has a next step, the entitlements feature
+// finishes the sentence with <SupportContact/>: "Expired on 2025-06-15. Contact support to renew."
+export function licenseStatusLead(item: LicenseDates, now: number): string {
+  switch (licenseDisplayStatus(item, now)) {
+    case "active": return "Active";
+    case "expired": return `Expired on ${formatEndDate(licenseEndsAt(item))}.`;
+    case "not_started": return `Starts ${formatStartDate(item.valid_from)}.`;
+    case "disabled": return "Suspended.";
+    case "revoked": return "Revoked.";
+    default: return "Unavailable.";
+  }
+}
+
+// The Mode column: how the license is enforced and, for a trial, when its clock runs out, or that it
+// starts at the first activation while trial_ends_at is null. A row without the field (an older
+// Worker's) makes no claim about the trial clock.
+export function licenseModeLabel(item: { enforcement_mode?: string; license_mode: string; trial_ends_at?: number | null }, now: number): string {
+  const enforcement = item.enforcement_mode === "device_bound_v1" ? "Protected device" : null;
+  if (item.license_mode !== "trial") return enforcement ?? (item.license_mode === "floating" ? "Floating" : "Node-locked");
+  const trial = item.trial_ends_at === undefined ? "Trial"
+    : item.trial_ends_at === null ? "Trial starts when you activate"
+    : `Trial · ${item.trial_ends_at <= now ? "ended" : "ends"} ${formatEndDate(item.trial_ends_at)}`;
+  return enforcement === null ? trial : `${enforcement} · ${trial}`;
+}
+
+export const LICENSE_ATTENTION_COPY = "Needs attention";
+
+// The Apps list flags an app with an expired, suspended or revoked license: each has a next step
+// for the customer. A license that has yet to start needs nothing from them.
+export function licenseNeedsAttention(item: LicenseDates, now: number): boolean {
+  const state = licenseDisplayStatus(item, now);
+  return state === "expired" || state === "disabled" || state === "revoked";
 }
 
 export function canDownloadLicense(item: { enforcement_mode?: string; license_mode: string }): boolean {

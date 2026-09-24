@@ -734,4 +734,15 @@ code {
 
 @media(max-width:1023px) { .licenseAction:has(.licenseDownload) { display:block; } .licenseAction:has(.licenseDownload)::before { display:none; } .licenseDownload { max-width:none; } }
 
+/* An inactive license offers no action. In the stacked phone layout, drop its empty cell rather than
+   show an "Action" label with nothing after it. */
+@media(max-width:767px) { .licenseAction:empty { display:none; } }
+
+/* A license date stays on one line; a narrow column would otherwise break it at a hyphen. */
+.licenseDate { white-space:nowrap; }
+
+/* Apps list: an app with an expired, suspended or revoked license. The words carry the meaning; the
+   colour only repeats it. */
+.attentionBadge { display:inline-block; border-radius:4px; padding:2px 8px; background:#302020; color:#db9292; }
+
 @media(min-width:1024px) { .licenseTable th:first-child { width:18%; } .licenseTable th:last-child { width:28%; } .licenseTable td { vertical-align:top; } }

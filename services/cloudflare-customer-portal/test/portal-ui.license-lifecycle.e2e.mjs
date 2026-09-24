@@ -62,6 +62,7 @@ test("license lifecycle: each state reads as words with its UTC date and next st
   await expect(alpha.getByText("Needs attention", { exact: true })).toBeVisible();
   await expect(beta).toBeVisible();
   await expect(beta.getByText("Needs attention", { exact: true })).toHaveCount(0);
+  await page.screenshot({ path: testInfo.outputPath("license-lifecycle-apps.png"), fullPage: true });
 
   await page.getByRole("link", { name: "View app ALPHA" }).click();
   await expect(page.getByRole("heading", { name: "ALPHA", exact: true })).toBeVisible();
@@ -102,9 +103,17 @@ test("license lifecycle: each state reads as words with its UTC date and next st
   for (const raw of ["disabled", "revoked", "not_started", "not started"]) expect(tableText).not.toContain(raw);
   expect(tableText).not.toMatch(/\bany\b/);
 
+  // Each date is a <time>, and it never breaks at a hyphen however narrow its column.
+  await expect(cell(page, "lapsed", "Status").locator("time")).toHaveAttribute("datetime", "2025-06-15");
   for (const width of [320, 390, 1280]) {
     await page.setViewportSize({ width, height: 900 });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    const wrappedDates = await page.locator(".licenseTable time").evaluateAll((dates) => dates.filter((date) => date.getClientRects().length !== 1).map((date) => date.textContent));
+    expect(wrappedDates, `dates split across lines at ${width}px`).toEqual([]);
+    // In the stacked phone layout a cell is a label | value grid; a date belongs in the value, never
+    // pushed under the label at the cell's left edge.
+    const datesUnderLabels = await page.locator(".licenseTable time").evaluateAll((dates) => dates.filter((date) => date.getBoundingClientRect().left <= date.closest("td").getBoundingClientRect().left).map((date) => date.textContent));
+    expect(datesUnderLabels, `dates under a cell label at ${width}px`).toEqual([]);
     await page.screenshot({ path: testInfo.outputPath(`license-lifecycle-${width}.png`), fullPage: true });
   }
 });

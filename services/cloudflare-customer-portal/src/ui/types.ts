@@ -18,6 +18,9 @@ export interface EntitlementRow {
   max_borrow_sec: number;
   heartbeat_grace_sec: number;
   policy_id: string | null;
+  // When the trial ends (epoch seconds); null for a license that is not a trial, and for a trial
+  // that starts at its first activation and has not started yet. Absent from an older Worker's row.
+  trial_ends_at?: number | null;
 }
 
 export interface DeviceRow {
