@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState, type FormEvent } from "react";
 import type { EntitlementRecord } from "../../../shared/api";
 import { MAX_DEVICE_LIMIT } from "../../../shared/api";
+import { useNavigationGuard } from "../../app/navigation";
 import { api } from "../../shared/api";
 import { useOperatorControls } from "../../shared/controls";
 import { useCoreRefresh } from "../../shared/coreRefresh";
@@ -20,6 +21,13 @@ export function DeviceLimitForm({ item, locked }: { item: EntitlementRecord; loc
   const [error, setError] = useState<string | null>(null);
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  // An untouched field follows the stored limit as the list refreshes; a typed one is a draft.
+  const shown = useRef(item.max_active_devices);
+  useEffect(() => {
+    setDraft((current) => current === shown.current ? item.max_active_devices : current);
+    shown.current = item.max_active_devices;
+  }, [item.max_active_devices]);
+  useNavigationGuard({ when: !locked && draft !== item.max_active_devices, onDiscard: () => setDraft(item.max_active_devices) });
 
   async function save(event: FormEvent): Promise<void> {
     event.preventDefault();
