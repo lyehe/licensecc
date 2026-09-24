@@ -435,14 +435,18 @@ export function licenseStatusLead(item: LicenseDates, now: number): string {
 // The Mode column: how the license is enforced and, for a trial, when the rule that enforces it ends
 // it; otherwise that the first activation starts its clock; otherwise plain "Trial" -- a trial with
 // no end of its own (the Valid column already says "No end date"), or a row from an older Worker.
+// "Starts when you activate" promises an activation the customer can still make, so it shows only
+// while the license is active or not yet valid; beside "Revoked.", "Suspended." or "Expired on ..."
+// it would contradict the status.
 export function licenseModeLabel(
-  item: { enforcement_mode?: string; license_mode: string; trial_ends_at?: number | null; trial_starts_on_activation?: boolean },
+  item: LicenseDates & { enforcement_mode?: string; license_mode: string; trial_starts_on_activation?: boolean },
   now: number,
 ): string {
   const enforcement = item.enforcement_mode === "device_bound_v1" ? "Protected device" : null;
   if (item.license_mode !== "trial") return enforcement ?? (item.license_mode === "floating" ? "Floating" : "Node-locked");
+  const activatable = ["active", "not_started"].includes(licenseDisplayStatus(item, now));
   const trial = typeof item.trial_ends_at === "number" ? `Trial · ${item.trial_ends_at <= now ? "ended" : "ends"} ${formatEndDate(item.trial_ends_at)}`
-    : item.trial_starts_on_activation === true ? "Trial starts when you activate"
+    : item.trial_starts_on_activation === true && activatable ? "Trial starts when you activate"
     : "Trial";
   return enforcement === null ? trial : `${enforcement} · ${trial}`;
 }

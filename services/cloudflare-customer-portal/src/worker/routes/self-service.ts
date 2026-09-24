@@ -49,14 +49,16 @@ async function apiMe(env: Env, session: { customer_id: string }, reqId: string):
 // start, so a trial clock the first activation has not started yet has no end (NULL). The end is
 // clamped to valid_until as the consent page does, since a trial never outlives its license;
 // SQLite's scalar min() is NULL when any argument is, so an unstarted trial stays NULL.
-// trial_starts_on_activation marks a clock the first activation starts; a trial with neither has no
-// end of its own. Only these two derived values leave the Worker; the trial columns stay server-side.
+// trial_starts_on_activation marks a clock the first activation starts: only for a duration the
+// enforcing rule accepts (the protected rule refuses one under 2 seconds; the legacy rule has no
+// clock without a positive duration). A trial with neither has no end of its own. Only these two
+// derived values leave the Worker; the trial columns stay server-side.
 const TRIAL_SQL =
   "CASE WHEN e.is_trial<>1 THEN NULL ELSE min(coalesce(e.valid_until,9007199254740991), " +
   `CASE WHEN e.enforcement_mode='device_bound_v1' THEN ${boundTrialDeadlineSql("e", "NULL")} ELSE ${legacyTrialDeadlineSql("e")} END) ` +
   "END AS trial_ends_at, " +
   "(e.is_trial=1 AND e.trial_started_at IS NULL AND e.trial_expiration_basis IN ('from_first_activation','from_first_use') " +
-  "AND (e.enforcement_mode='device_bound_v1' OR e.trial_duration_sec>0)) AS trial_starts_on_activation";
+  "AND CASE WHEN e.enforcement_mode='device_bound_v1' THEN e.trial_duration_sec>=2 ELSE e.trial_duration_sec>0 END) AS trial_starts_on_activation";
 type EntitlementListRow = Omit<OwnedEntitlement, "id" | "license_mode"> & {
   trial_ends_at: number | null;
   // SQLite truth value: 1, 0, or NULL (a NULL basis), mapped to a boolean below.

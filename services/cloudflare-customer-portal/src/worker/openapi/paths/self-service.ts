@@ -95,7 +95,7 @@ export const selfServicePaths: LabeledPathFragment = {
                               },
                               trial_starts_on_activation: {
                                 type: "boolean",
-                                description: "True for a trial whose clock starts at its first activation and has not started yet.",
+                                description: "True for a trial whose clock starts at its first activation and has not started yet, with a duration the enforcing rule accepts: at least 2 seconds for a protected row, more than 0 for a legacy row. Otherwise false.",
                               },
                             },
                           },
