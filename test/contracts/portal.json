@@ -2981,10 +2981,18 @@
                         "properties": {
                           "customer_id": {
                             "type": "string"
+                          },
+                          "email": {
+                            "description": "customers.email, else portal_passwords.email_lower, else the earliest portal_identities.email, else null.",
+                            "type": [
+                              "string",
+                              "null"
+                            ]
                           }
                         },
                         "required": [
-                          "customer_id"
+                          "customer_id",
+                          "email"
                         ],
                         "type": "object"
                       }
