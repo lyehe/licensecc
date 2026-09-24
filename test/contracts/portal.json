@@ -4533,6 +4533,9 @@
                           },
                           "has_password": {
                             "type": "boolean"
+                          },
+                          "recovery_available": {
+                            "type": "boolean"
                           }
                         },
                         "type": "object"
@@ -4542,7 +4545,7 @@
                   }
                 }
               },
-              "description": "Email login identifier, has_password, can_reset, and email_verified flags; no hash."
+              "description": "Email login identifier, has_password, can_reset, email_verified, and recovery_available flags; no hash. recovery_available uses the exact eligibility predicate the emailed reset endpoint applies (RESET_ELIGIBLE_SQL), so the UI never promises a recovery the server would refuse."
             },
             "401": {
               "content": {

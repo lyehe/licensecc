@@ -8066,7 +8066,7 @@
           ]
         },
         "post": {
-          "description": "Admin-only. Creates a new customer and password credential atomically. Does not attach an existing account, mark email verified, send email, mint a session, or grant licenses. Password sign-in must be enabled on the portal. A required idempotency key replays the original success without creating another user. Creator attribution is stored in customer metadata; passwords/hashes never enter the response or replay cache.",
+          "description": "Admin-only. Creates a new customer and password credential atomically. Does not attach an existing account, mark email verified, send email, mint a session, or grant licenses. Password sign-in must be enabled on the portal. A required idempotency key replays the original success without creating another user. Creator attribution is stored in customer metadata; passwords/hashes never enter the response or replay cache. Omitting `password` invites the customer: a random, never-disclosed credential is stored, and the customer sets their own password later from the portal's \"Forgot your password?\". Providing `password` sets it directly instead, for use when the portal cannot send email; a present-but-invalid value (including an empty string) is rejected rather than treated as an invite.",
           "operationId": "createPortalUser",
           "parameters": [
             {
@@ -8096,7 +8096,7 @@
                       "type": "string"
                     },
                     "password": {
-                      "description": "15–128 Unicode characters, at most 512 UTF-8 bytes.",
+                      "description": "Optional; omit to invite the customer instead of setting a password. When present: 15–128 Unicode characters, at most 512 UTF-8 bytes.",
                       "maxLength": 128,
                       "minLength": 15,
                       "type": "string",
@@ -8105,8 +8105,7 @@
                   },
                   "required": [
                     "name",
-                    "email",
-                    "password"
+                    "email"
                   ],
                   "type": "object"
                 }
@@ -8308,7 +8307,7 @@
               "devBearer": []
             }
           ],
-          "summary": "Create a customer portal user with an initial password",
+          "summary": "Create a customer portal user, invited by default",
           "tags": [
             "admin:customers"
           ]
