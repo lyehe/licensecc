@@ -72,6 +72,9 @@ test("supportContact accepts a credential-free https: URL or one mailto: address
     "https://user:secret@support.example.com", "https://user@support.example.com",
     "mailto:", "mailto:help", "mailto:@example.com", "mailto:help@", "mailto:help@example.com?subject=hi",
     "mailto:a@example.com,b@example.com", "mailto:a b@example.com", "mailto:a@b@example.com",
+    // A percent-encoded comma or a semicolon can still name a second recipient, and a control
+    // character has no place in an href.
+    "mailto:a%2Cb@example.com", "mailto:a@example.com;b", "mailto:help@example.com\u0000",
   ]) {
     assert.equal(contact(rejected), null, `must reject ${JSON.stringify(rejected)}`);
   }

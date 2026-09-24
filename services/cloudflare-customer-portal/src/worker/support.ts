@@ -118,7 +118,9 @@ export function publicOrigin(env: Env): string {
   return (env.PORTAL_PUBLIC_ORIGIN ?? "").replace(/\/$/, "");
 }
 
-const SUPPORT_MAILTO = /^mailto:[^\s@?,]+@[^\s@?,]+$/i;
+// One address only: no query, no list separator (",", ";" or a percent-encoded one), no controls.
+// eslint-disable-next-line no-control-regex -- control characters are rejected deliberately
+const SUPPORT_MAILTO = /^mailto:[^\s@?,;%\u0000-\u001f\u007f]+@[^\s@?,;%\u0000-\u001f\u007f]+$/i;
 
 // The operator's customer-facing support contact, published by the providers envelope and placed
 // in an href by the UI. Only a credential-free https: URL or a single mailto: address qualifies;
