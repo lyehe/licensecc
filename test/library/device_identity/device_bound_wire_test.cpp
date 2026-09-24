@@ -225,6 +225,8 @@ BOOST_AUTO_TEST_CASE(exchange_response_codes_distinguish_retry_from_new_enrollme
 			 {BoundWireOperation::exchange, 401, "invalid_proof", BoundWireKind::retry, BoundWireDetail::none},
 			 {BoundWireOperation::exchange, 409, "device_limit_reached", BoundWireKind::conflict,
 			  BoundWireDetail::device_limit},
+			 {BoundWireOperation::exchange, 503, "temporarily_unavailable", BoundWireKind::retry,
+			  BoundWireDetail::none},
 			 {BoundWireOperation::exchange, 404, "binding_unavailable", BoundWireKind::authority_denied,
 			  BoundWireDetail::none},
 			 {BoundWireOperation::exchange, 409, "idempotency_conflict", BoundWireKind::conflict,
@@ -294,6 +296,7 @@ BOOST_AUTO_TEST_CASE(status_code_and_operation_must_agree_before_classification)
 		BOOST_REQUIRE(
 			decode_bound_device_response(BoundWireOperation::renew, std::get<0>(item), error(std::get<1>(item)), out));
 		BOOST_CHECK(out.kind == std::get<2>(item));
+		BOOST_CHECK(out.detail == BoundWireDetail::none);
 		BOOST_CHECK(!decode_bound_device_response(BoundWireOperation::renew, 200, error(std::get<1>(item)), out));
 	}
 	BOOST_REQUIRE(

@@ -97,12 +97,14 @@ int main() {
 		const std::string device_limit =
 			"All device slots for this license are in use. Disconnect a device in the customer portal (Devices), then "
 			"try again.";
+		const std::string unresolved = "Issuance is unresolved (result 7).";
 		{
 			Console console("quit\n");
 			example_fault::primary = LCC_BOUND_CONFLICT;
 			example_fault::detail = LCC_BOUND_DETAIL_DEVICE_LIMIT;
 			require(update(client, true) == LCC_BOUND_CANCELLED);
 			require(console.output.str().find(device_limit) != std::string::npos);
+			require(console.output.str().find(unresolved) == std::string::npos);
 			require(example_fault::abandons == 2);
 		}
 		{
@@ -110,6 +112,7 @@ int main() {
 			example_fault::detail = LCC_BOUND_DETAIL_NONE;
 			require(update(client, true) == LCC_BOUND_CANCELLED);
 			require(console.output.str().find(device_limit) == std::string::npos);
+			require(console.output.str().find(unresolved) != std::string::npos);
 		}
 		{
 			Console console("quit\n");
