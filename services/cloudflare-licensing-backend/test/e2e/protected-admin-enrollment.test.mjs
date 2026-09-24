@@ -20,16 +20,20 @@ for (const [type, basis] of [["node_locked", "from_issue"], ["trial", "from_issu
   test(`admin-created protected ${type}/${basis} grant supports real consent and signed exchange`, async t => {
     const { db, env: portal } = baseFixture(); t.after(() => db.close());
     const now = Math.floor(Date.now() / 1000); db.function("unixepoch", () => now);
-    db.exec(`INSERT INTO customers(id,name,created_at,updated_at) VALUES('protected-owner','Owner',1,1);
-      INSERT INTO licenses(id,customer_id,project,created_at,updated_at) VALUES('protected-license','protected-owner','APP',1,1);`);
+    db.exec("INSERT INTO customers(id,name,created_at,updated_at) VALUES('protected-owner','Owner',1,1);");
     db.prepare(`INSERT INTO entitlement_policies(id,project,name,type,trial_expiration_basis,trial_duration_sec,created_at,updated_at)
       VALUES('protected-policy','APP','Policy',?,?,600,1,1)`).run(type, basis);
-    const created = await admin.fetch(new Request("https://admin.test/api/admin/entitlements", {
-      method: "POST", headers: { authorization: "Bearer test-admin", "content-type": "application/json", "idempotency-key": "protected-create" },
-      body: JSON.stringify({ project: "APP", feature: "PRO", license_fingerprint: "c".repeat(64), customer_id: "protected-owner",
-        license_id: "protected-license", policy_id: "protected-policy", enforcement_mode: "device_bound_v1" }),
+    const adminPost = (path, key, body) => admin.fetch(new Request(`https://admin.test${path}`, {
+      method: "POST", headers: { authorization: "Bearer test-admin", "content-type": "application/json", "idempotency-key": key }, body: JSON.stringify(body),
     }), { DB: portal.DB, ENVIRONMENT: "development", ADMIN_DEV_BEARER_ENABLED: "1", ADMIN_DEV_BEARER: "test-admin", POLICY_STAMP_MODE: "on" });
+    // The operator console path: the customer's license record comes from the admin route, not SQL.
+    const licensed = await adminPost("/api/admin/customers/protected-owner/licenses", "protected-license", { project: "APP", label: "Protected app" });
+    const license = await licensed.json(); assert.equal(licensed.status, 200, JSON.stringify(license));
+    assert.equal(license.data.customer_id, "protected-owner"); assert.equal(license.data.project, "APP");
+    const created = await adminPost("/api/admin/entitlements", "protected-create", { project: "APP", feature: "PRO", license_fingerprint: "c".repeat(64),
+      customer_id: "protected-owner", license_id: license.data.id, policy_id: "protected-policy", enforcement_mode: "device_bound_v1" });
     const grant = await created.json(); assert.equal(created.status, 200, JSON.stringify(grant));
+    assert.equal(grant.data.license_id, license.data.id);
     assert.equal(grant.data.enforcement_mode, "device_bound_v1");
     const env = { DB: portal.DB, BOUND_DEVICE_CONFIG: JSON.stringify(config), BOUND_LEASE_SIGNING_PRIVATE_KEY_PKCS8_PEM: privatePem,
       BOUND_LEASE_SIGNING_PUBLIC_KEY_SPKI_PEM: publicPem, DEVICE_PROOF_MODE: "off", ACCOUNT_TOKEN_MODE: "off", REQUEST_SIGNATURE_MODE: "off", D1_RATE_LIMIT_ENABLED: "0" };

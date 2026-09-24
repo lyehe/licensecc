@@ -6,6 +6,7 @@ import "./worker/customers.test.mjs";
 import "./worker/catalog.test.mjs";
 import "./worker/policies.test.mjs";
 import "./worker/entitlements.test.mjs";
+import "./worker/protected-checks.test.mjs";
 import "./worker/devices.test.mjs";
 import "./worker/webhooks.test.mjs";
 import "./worker/sync.test.mjs";

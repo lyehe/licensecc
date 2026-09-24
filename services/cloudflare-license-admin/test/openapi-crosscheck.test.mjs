@@ -23,6 +23,7 @@ import {
   ENTITLEMENT_BATCH_TOO_LARGE_CODE,
   ENTITLEMENT_BATCH_TOO_LARGE_GUIDANCE,
 } from "../dist-worker/shared/api.js";
+import * as sharedApi from "../dist-worker/shared/api.js";
 import { POLICY_TYPES } from "@licensecc/licensing-domain/entitlements/policy";
 import { MAX_SUPPORT_UNTIL_EPOCH_SECONDS } from "@licensecc/licensing-domain/catalog/plan_projection";
 
@@ -179,6 +180,45 @@ test("entitlement batch documents the Free-tier-safe pre-query cap and recovery 
       },
     },
   );
+});
+
+test("customer license creation documents its required key, customer failures, and created record", () => {
+  const operation = openApiDocument.paths["/api/admin/customers/{id}/licenses"]?.post;
+  assert.ok(operation, "POST /api/admin/customers/{id}/licenses must be documented");
+  assert.equal(operation.operationId, "createCustomerLicense");
+  assert.equal(operation.parameters.find((parameter) => parameter.name === "idempotency-key").required, true);
+  assert.deepEqual(Object.keys(operation.responses["404"].content["application/json"].examples), ["not_found"]);
+  assert.deepEqual(Object.keys(operation.responses["409"].content["application/json"].examples), ["customer_inactive"]);
+  const input = openApiDocument.components.schemas.LicenseCreateInput;
+  assert.deepEqual(input.required, ["project"]);
+  assert.equal(input.properties.project.pattern, "^[A-Za-z0-9_.:-]{1,127}$");
+  assert.equal(input.properties.label.maxLength, 128);
+  assert.deepEqual(openApiDocument.components.schemas.LicenseCreatedData.required, ["id", "customer_id", "project", "label", "created_at"]);
+});
+
+test("a protected creation conflict documents data.reason from the single runtime reason list", () => {
+  const conflict = openApiDocument.paths["/api/admin/entitlements"].post.responses["409"].content["application/json"];
+  assert.deepEqual(conflict.schema.oneOf, [
+    {
+      allOf: [
+        { $ref: "#/components/schemas/ErrorEnvelope" },
+        {
+          type: "object",
+          required: ["code"],
+          properties: { code: { enum: ["revoked_entitlement_is_terminal", "stale_transition", "enforcement_mode_conflict", "idempotency_request_conflict"] } },
+        },
+      ],
+    },
+    { $ref: "#/components/schemas/ProtectedCreationConflictError" },
+  ]);
+  assert.ok(Array.isArray(sharedApi.PROTECTED_CREATE_REASONS));
+  assert.deepEqual(openApiDocument.components.schemas.ProtectedCreationConflictData, {
+    type: "object",
+    additionalProperties: false,
+    required: ["reason"],
+    properties: { reason: { enum: [...sharedApi.PROTECTED_CREATE_REASONS] } },
+  });
+  assert.deepEqual(conflict.examples.protected_creation_conflict.value, { ok: false, code: "protected_creation_conflict", request_id: "1a2b3c-1", data: { reason: "customer_inactive" } });
 });
 
 test("catalog import documents its server-bound Preview/Apply protocol", () => {
