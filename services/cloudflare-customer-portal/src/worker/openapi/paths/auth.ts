@@ -1,7 +1,9 @@
 import type { LabeledPathFragment } from "../assemble.js";
 import { ERR_BODY_TOO_LARGE, ERR_CROSS_SITE, ERR_INVALID_JSON, errorResponse, LEASE_ACTION_REQUEST } from "../components.js";
 
-const ERR_INVALID_MAGIC_BODY = errorResponse("Body was not valid JSON or application/x-www-form-urlencoded.", ["invalid_json", "invalid_request"]);
+// Ruling R10: the form-encoded caller never gets a 400 (a malformed/undecodable form 303s to
+// sign_in_failed instead — see the 303 response below). This 400 is JSON-caller-only.
+const ERR_INVALID_MAGIC_BODY = errorResponse("Body was not valid JSON (application/json caller only).", "invalid_json");
 const ERR_UNSUPPORTED_MEDIA_TYPE = errorResponse("Content-Type must be application/json or application/x-www-form-urlencoded.", "unsupported_media_type");
 
 export const authPaths: LabeledPathFragment = {

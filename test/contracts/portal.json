@@ -4373,16 +4373,13 @@
                     ],
                     "properties": {
                       "code": {
-                        "enum": [
-                          "invalid_json",
-                          "invalid_request"
-                        ]
+                        "const": "invalid_json"
                       }
                     }
                   }
                 }
               },
-              "description": "Body was not valid JSON or application/x-www-form-urlencoded."
+              "description": "Body was not valid JSON (application/json caller only)."
             },
             "401": {
               "content": {
