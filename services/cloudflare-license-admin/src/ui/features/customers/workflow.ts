@@ -26,5 +26,5 @@ export function canRunCustomerAction(status: string, action: CustomerAction): bo
 
 export function disableCustomerConfirm(customer: { id: string; name: string }): string {
   const who = customer.name !== "" ? `${customer.name} (${customer.id})` : customer.id;
-  return `Disable customer ${who}. This immediately severs all of their license/token auth and customer-portal access until you re-enable them.`;
+  return `Disable customer ${who}. This immediately severs all of their license/token auth and customer-portal access until you re-enable them. The customer is not notified.`;
 }
