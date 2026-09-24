@@ -318,11 +318,14 @@ and no licenses are granted. Existing accounts are never claimed or merged by
 registration. Existing OAuth customers can set a password from Account after a
 recent verified sign-in.
 
-Forgot password sends a link only for an active password account whose login
-email matches its verified contact address. Legacy/admin-created credentials
-with an unverified login email retain their existing login but cannot use email
-recovery; connect a provider or use the protected operator recovery procedure.
-This migration deliberately does not mark historical emails as verified.
+Forgot password sends a link for an active password account whose login
+email matches its verified contact address, or whose contact email is still
+empty -- a legacy or admin-invited credential -- as long as no other customer
+has already verified that address; redeeming the link also sets it as the
+account's verified contact. This migration deliberately does not mark
+historical emails as verified. An address another customer already verified
+is refused with the same generic response; connect a provider or use the
+protected operator recovery procedure instead.
 
 Links expire after 15 minutes and are single-use. The random token is hashed in
 D1, placed in the link fragment (not query string), and immediately removed

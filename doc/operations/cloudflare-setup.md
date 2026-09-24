@@ -249,10 +249,13 @@ still need review. It does not validate that retained settings match the code.
 
 1. Sign into the admin through Access. This is an operator identity, separate
    from a customer portal account.
-2. In **Customers → Add user**, create a synthetic portal user with an initial
-   password, or let the user register in the portal (requires email delivery,
-   step 6). No welcome email is sent by Add user. Share an initial password
-   through an appropriate private channel.
+2. In **Customers → Add user**, invite a synthetic portal user (the
+   default) so they set their own password from the portal's "Forgot your
+   password?" -- this needs a working sender, so choose **Set an initial
+   password** instead if email delivery is not yet configured (step 6), and
+   share it through an appropriate private channel. Letting the user
+   register directly in the portal also requires step 6. No welcome email is
+   sent by Add user either way.
 3. Create the application's customer license and entitlement. Follow
    [protected application access](https://github.com/lyehe/licensecc/blob/main/services/cloudflare-license-admin/README.md#create-protected-application-access)
    for a new protected grant, its exact project/feature/fingerprint and device

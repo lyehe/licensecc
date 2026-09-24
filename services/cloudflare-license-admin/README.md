@@ -25,10 +25,19 @@ backend's named `DeviceOperator` capability.
 
 ## Add a customer portal user
 
-Open **Customers → Add user** and enter a name, login email, and initial
-password (15–128 characters). This requires the administrator role. Share the
-initial password with the customer securely; no email is sent. They can sign in
-to the customer portal and change their password in Account.
+Open **Customers → Add user** and enter a name and login email. This requires
+the administrator role. **Invite** is the default: the server stores a
+random, never-disclosed credential, and the success panel tells the operator
+to ask the customer to open the customer portal and choose "Forgot your
+password?" to set their own password. That works because the portal treats
+an admin-created account's empty contact email as eligible for one recovery,
+the same as any other unverified address, as long as no other customer has
+already verified it.
+
+Choose **Set an initial password** instead when the customer portal cannot
+send email: enter an initial password (15–128 characters) and share it with
+the customer through a secure channel. No email is sent either way. They can
+sign in to the customer portal and change their password in Account.
 
 The portal must use the same D1 database and have password login enabled.
 Creating a user grants no licenses and does not verify ownership of the login
