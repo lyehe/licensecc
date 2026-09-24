@@ -4271,7 +4271,7 @@
       },
       "/portal/v1/auth/magic-redeem": {
         "post": {
-          "description": "Accepts the token either as JSON { token } or as application/x-www-form-urlencoded token=<secret> (posted by the interstitial form). The request body is capped at 8192 bytes before parsing; multipart and other media types are rejected. Email-independent; single-use via an atomic UPDATE. On success sets the lccp_session cookie. The form-encoded caller never receives JSON: every outcome of that branch (success or failure) is instead a 303 redirect — see the 303 response. The 400/401/413/429/503 envelopes below apply to JSON callers only; 403 (cross-site) and 415 (unsupported media type) apply to both JSON and form-encoded callers.",
+          "description": "Accepts the token either as JSON { token } or as application/x-www-form-urlencoded token=<secret> (posted by the interstitial form). The request body is capped at 8192 bytes before parsing; multipart and other media types are rejected. Email-independent; single-use via an atomic UPDATE. On success sets the lccp_session cookie. The form-encoded caller never receives JSON: every outcome of that branch (success or failure) is instead a 303 redirect — see the 303 response. The 200/400/401/413/429/503 envelopes below apply to JSON callers only; 403 (cross-site) is decided before either media type is known, and 415 is returned for any Content-Type that is neither JSON nor form-encoded.",
           "operationId": "authMagicRedeem",
           "requestBody": {
             "content": {
@@ -4346,7 +4346,7 @@
               }
             },
             "303": {
-              "description": "Form-encoded caller only (application/x-www-form-urlencoded): every outcome is a no-store redirect instead of JSON. Success redirects to /#/apps with the lccp_session cookie. Failure redirects to /?auth_error=<code>: link_expired (invalid, consumed, expired, or over-cap secret — the same no-oracle 401 the JSON branch would otherwise return as invalid_otp), rate_limited, or sign_in_failed (config_error and any body/media parsing failure, including an oversized or undecodable form).",
+              "description": "Form-encoded caller only (application/x-www-form-urlencoded): every outcome is a no-store redirect instead of JSON. Success redirects to /#/apps with the lccp_session cookie. Failure redirects to /?auth_error=<code>: link_expired (invalid, consumed, expired, or over-cap secret — the same no-oracle 401 the JSON branch would otherwise return as invalid_otp), rate_limited, or sign_in_failed (config_error, a body/token parsing failure such as an oversized or undecodable form, or any unexpected server error).",
               "headers": {
                 "Location": {
                   "schema": {
