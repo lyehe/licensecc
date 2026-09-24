@@ -34,7 +34,10 @@ function streamingMagicRequest(chunks, { contentType = "application/x-www-form-u
 
 async function magicResponse(env, request) {
   const res = await worker.fetch(request, env, CTX);
-  return { status: res.status, body: await res.json(), res };
+  // The form-encoded branch (R10) answers with a 303 + null body; only parse JSON for JSON responses.
+  const isJson = (res.headers.get("content-type") ?? "").includes("application/json");
+  const body = isJson ? await res.json() : null;
+  return { status: res.status, body, res };
 }
 
 function unreadMagicRequest({ contentType, contentLength, cancelBehavior = "resolve" }) {
@@ -236,8 +239,8 @@ test("auth magic redeem accepts a bounded form at exactly 8192 bytes across chun
     body.slice(4097),
   ]);
   const result = await magicResponse(env, request);
-  assert.equal(result.status, 401);
-  assert.equal(result.body.code, "invalid_otp");
+  assert.equal(result.status, 303);
+  assert.equal(result.res.headers.get("location"), "https://portal.test/?auth_error=link_expired");
   assert.equal(state.cancelled, false, "an exactly-boundary form must not be cancelled");
   assert.ok(state.pulls >= 3, "the bounded reader must consume split chunks through the exact boundary");
   db.close();
@@ -247,8 +250,8 @@ test("auth magic redeem rejects a declared oversized body before reading it", as
   const { db, env } = baseFixture();
   const { request, state } = unreadMagicRequest({ contentType: "application/x-www-form-urlencoded", contentLength: 8193, cancelBehavior: "never" });
   const result = await within(magicResponse(env, request));
-  assert.equal(result.status, 413);
-  assert.equal(result.body.code, "body_too_large");
+  assert.equal(result.status, 303);
+  assert.equal(result.res.headers.get("location"), "https://portal.test/?auth_error=sign_in_failed");
   assert.equal(state.readerRequested, false, "declared oversize is rejected before the body is read");
   assert.equal(state.bodyCancelled, true, "declared oversize must cancel the unread body");
   db.close();
@@ -265,8 +268,8 @@ test("auth magic redeem enforces the actual byte cap with missing and lying Cont
       body.slice(8192),
     ], { contentLength });
     const result = await magicResponse(env, request);
-    assert.equal(result.status, 413, contentLength === undefined ? "missing length" : "lying length");
-    assert.equal(result.body.code, "body_too_large");
+    assert.equal(result.status, 303, contentLength === undefined ? "missing length" : "lying length");
+    assert.equal(result.res.headers.get("location"), "https://portal.test/?auth_error=sign_in_failed");
     assert.equal(state.cancelled, true, "overflow must cancel the request reader");
   }
   db.close();
@@ -285,8 +288,8 @@ test("auth magic redeem parses fatal UTF-8 and malformed forms before OTP side e
   for (const body of cases) {
     const { request } = streamingMagicRequest([body]);
     const result = await magicResponse(env, request);
-    assert.equal(result.status, 400);
-    assert.equal(result.body.code, "invalid_request");
+    assert.equal(result.status, 303);
+    assert.equal(result.res.headers.get("location"), "https://portal.test/?auth_error=sign_in_failed");
     assert.deepEqual(otpRow(db), before, "invalid bounded form input must not redeem or rate-limit an OTP");
   }
   db.close();
@@ -324,8 +327,8 @@ test("auth magic redeem does not wait for stalled or throwing cancellation and r
     cancel: () => new Promise(() => {}),
   });
   const overflowResult = await within(magicResponse(env, overflow.request));
-  assert.equal(overflowResult.status, 413);
-  assert.equal(overflowResult.body.code, "body_too_large");
+  assert.equal(overflowResult.status, 303);
+  assert.equal(overflowResult.res.headers.get("location"), "https://portal.test/?auth_error=sign_in_failed");
   assert.equal(overflow.state.cancelCalls, 1);
   assert.equal(overflow.state.released, true);
 
@@ -338,8 +341,8 @@ test("auth magic redeem does not wait for stalled or throwing cancellation and r
     },
   });
   const readErrorResult = await within(magicResponse(env, readError.request));
-  assert.equal(readErrorResult.status, 400);
-  assert.equal(readErrorResult.body.code, "invalid_request");
+  assert.equal(readErrorResult.status, 303);
+  assert.equal(readErrorResult.res.headers.get("location"), "https://portal.test/?auth_error=sign_in_failed");
   assert.equal(readError.state.cancelCalls, 1);
   assert.equal(readError.state.released, true);
   db.close();
@@ -351,11 +354,28 @@ test("auth magic redeem preserves token redemption semantics for a valid bounded
   assert.equal(issued.ok, true);
   const { request } = streamingMagicRequest([`token=${encodeURIComponent(issued.secret)}`]);
   const result = await magicResponse(env, request);
-  assert.equal(result.status, 200);
-  assert.equal(result.body.code, "signed_in");
-  assert.equal(result.body.data.customer_id, "A");
+  assert.equal(result.status, 303);
+  assert.equal(result.res.headers.get("location"), "https://portal.test/#/apps");
   assert.match(result.res.headers.get("set-cookie") ?? "", /lccp_session=lccp_/);
   assert.notEqual(otpRow(db)?.consumed_at, null);
+  db.close();
+});
+
+test("auth magic redeem: a reused token redirects to link_expired, not the earlier success", async () => {
+  const { db, env } = baseFixture();
+  const issued = await requestOtp(env, { email: "a@x.com", clientIp: "seed", returnSecret: true, now: NOW });
+  assert.equal(issued.ok, true);
+  const firstRequest = streamingMagicRequest([`token=${encodeURIComponent(issued.secret)}`]).request;
+  const first = await magicResponse(env, firstRequest);
+  assert.equal(first.status, 303);
+  assert.equal(first.res.headers.get("location"), "https://portal.test/#/apps");
+  assert.match(first.res.headers.get("set-cookie") ?? "", /lccp_session=lccp_/);
+
+  const secondRequest = streamingMagicRequest([`token=${encodeURIComponent(issued.secret)}`]).request;
+  const second = await magicResponse(env, secondRequest);
+  assert.equal(second.status, 303);
+  assert.equal(second.res.headers.get("location"), "https://portal.test/?auth_error=link_expired");
+  assert.equal(second.res.headers.get("set-cookie"), null, "a reused token must never mint a second session");
   db.close();
 });
 
