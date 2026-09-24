@@ -262,6 +262,33 @@ export interface BatchResultData {
   results: BatchRowResult[];
 }
 
+// ── Protected onboarding ─────────────────────────────────────────────────────
+// Why a protected entitlement create was refused: 409 protected_creation_conflict carries
+// `data.reason`. The Worker derives it from the same named checks its create batch enforces;
+// the UI maps each reason to a sentence, and OpenAPI documents this exact list.
+export const PROTECTED_CREATE_REASONS = [
+  "customer_inactive",
+  "license_missing",
+  "license_customer_mismatch",
+  "fingerprint_in_use",
+  "plan_assignment_conflict",
+  "lease_history_exists",
+  "policy_mismatch",
+  "invalid_trial",
+  "invalid_capacity",
+  "unknown",
+] as const;
+export type ProtectedCreateReason = typeof PROTECTED_CREATE_REASONS[number];
+
+// POST /api/admin/customers/{id}/licenses returns the license record it created.
+export interface CreatedLicense {
+  id: string;
+  customer_id: string;
+  project: string;
+  label: string;
+  created_at: number;
+}
+
 // GET /api/admin/search returns mixed-type rows; `type` + the type-specific identity fields drive
 // the UI deep-link (see navigationForResult in operatorWorkflow.ts).
 export type SearchResultType = "customer" | "license" | "entitlement" | "order";

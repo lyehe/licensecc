@@ -16,6 +16,7 @@ export const API_ROUTES = [
   { method: "GET", path: "/api/admin/customers/{id}/bindings/{bindingId}/events" },
   { method: "POST", path: "/api/admin/customers/{id}/bindings/{bindingId}/retire" },
   { method: "POST", path: "/api/admin/customers" },
+  { method: "POST", path: "/api/admin/customers/{id}/licenses" },
   { method: "GET", path: "/api/admin/customers/{id}/apps" },
   { method: "GET", path: "/api/admin/customers/{id}/resources" },
   { method: "GET", path: "/api/admin/summary" },

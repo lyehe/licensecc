@@ -143,7 +143,7 @@ export interface KeyedMutationAttempt extends KeyedMutationRequest {
 
 export type KeyedMutationParseResult<T> =
   | { kind: "success"; code: string; requestId: string; data: T }
-  | { kind: "failure"; code: string; requestId: string }
+  | { kind: "failure"; code: string; requestId: string; data?: unknown }
   | { kind: "invalid" };
 
 /**

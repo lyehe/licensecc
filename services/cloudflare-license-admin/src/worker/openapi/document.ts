@@ -5,6 +5,7 @@ import { bindingPaths } from "./paths/bindings.js";
 
 import { assembleComponents, assemblePaths, assertUniqueOperationIds } from "./assemble.js";
 import { ADMIN_SECURITY, openApiComponents } from "./components.js";
+import { protectedOnboardingComponents } from "./protected-onboarding.js";
 import { catalogPaths } from "./paths/catalog.js";
 import { customerPaths, searchPaths } from "./paths/customers.js";
 import { devicePaths } from "./paths/devices.js";
@@ -73,7 +74,7 @@ export const openApiDocument: OpenApiDocument = {
   ],
   security: ADMIN_SECURITY,
   paths,
-  components: assembleComponents(openApiComponents),
+  components: assembleComponents(openApiComponents, protectedOnboardingComponents),
 };
 
 // Serialized once at module load — the /openapi.json route returns this verbatim.

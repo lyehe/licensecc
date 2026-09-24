@@ -5,7 +5,7 @@ type UnknownRecord = Record<string, unknown>;
 
 export type MutationParseResult<T> =
   | { kind: "success"; code: string; requestId: string; data: T }
-  | { kind: "failure"; code: string; requestId: string }
+  | { kind: "failure"; code: string; requestId: string; data?: unknown }
   | { kind: "invalid" };
 
 /**
@@ -334,7 +334,7 @@ export function parseMutationResponse<T>(
     typeof envelope.__httpStatus === "number" &&
     policy[phase].some((rule) => rule.status === envelope.__httpStatus && rule.codes.includes(typeof envelope.code === "string" ? envelope.code : ""));
   if (envelope !== null && envelope.ok === false && documentedFailure && nonEmptyString(envelope.code) && nonEmptyString(envelope.request_id)) {
-    return { kind: "failure", code: envelope.code, requestId: envelope.request_id };
+    return { kind: "failure", code: envelope.code, requestId: envelope.request_id, ...(envelope.data === undefined ? {} : { data: envelope.data }) };
   }
   return { kind: "invalid" };
 }

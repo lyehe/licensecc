@@ -15,6 +15,7 @@ import { focusWorkspaceTarget } from "../../shared/workspaceFocus";
 import { EntitlementEditor } from "./EntitlementEditor";
 import { EntitlementList } from "./EntitlementList";
 import { EntitlementInspectors } from "./EntitlementInspectors";
+import { protectedCreateFailureMessage } from "./protectedCreate";
 import { useEntitlementInspection } from "./useEntitlementInspection";
 import {
   batchBody,
@@ -62,7 +63,7 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const previousEditorOpen = useRef(false);
   const { rememberFilters } = useAdminNavigation();
-  const { busy: requestBusy, operationLocked, currentReason, runKeyedMutation, runMutation, setMessage, setReason } = useOperatorControls();
+  const { busy: requestBusy, operationLocked, currentReason, runKeyedMutation, runMutation, setFeedback, setMessage, setReason } = useOperatorControls();
   const busy = requestBusy || operationLocked;
   const { refreshCore, registerCoreRefresh } = useCoreRefresh();
   const entitlementsUrl = useMemo(() => entitlementsPath(filter), [filter]);
@@ -190,9 +191,10 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
       },
       refresh: async () => await refreshCore(true),
       onUnapplied: (parsed) => {
-        if (isCurrent()) {
-        setMessage(`${parsed.code} (${parsed.requestId})`);
-        }
+        if (!isCurrent()) return;
+        const refusal = protectedCreateFailureMessage(parsed);
+        if (refusal === null) setMessage(`${parsed.code} (${parsed.requestId})`);
+        else setFeedback({ tone: "error", message: refusal });
       },
       isCurrent,
     });

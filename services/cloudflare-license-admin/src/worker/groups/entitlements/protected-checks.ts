@@ -1,0 +1,123 @@
+import { PROTECTED_CREATE_REASONS, type EntitlementInput, type Policy, type ProtectedCreateReason } from "../../../shared/api.js";
+import type { Env } from "../../env.js";
+import { stampFromPolicy } from "@licensecc/licensing-domain/entitlements/policy";
+import type { D1PreparedStatementLike } from "@licensecc/cloudflare-runtime/d1/entitlement_mutation";
+
+// Every protected-create rule is written once, here, and tagged with the reason an operator is
+// told. protectedCreateAssertion ANDs the list inside the create batch; protectedCreateReason walks
+// the same list, in the same order, after a refused batch has rolled back. Never copy a predicate
+// into either query: a reason that drifted from the rule it names sends the operator after the
+// wrong fix.
+export interface ProtectedCheck {
+  readonly reason: ProtectedCreateReason;
+  /** True when the rule holds for the entitlement row aliased `e`. */
+  readonly sql: string;
+  readonly binds: readonly unknown[];
+}
+
+// Compare all fields used by stampFromPolicy, including nullable values. An
+// updated_at comparison alone misses changes made within the same second.
+const POLICY_FIELDS = ["id", "project", "status", "type", "valid_from_offset_sec", "duration_sec", "assertion_ttl_seconds",
+  "pool_size", "max_active_devices", "max_borrow_sec", "expiry_strategy", "trial_expiration_basis", "trial_duration_sec",
+  "trial_one_per_device", "trial_require_device_proof", "meter_quota", "meter_period_sec"] as const;
+
+// The columns the policy stamp writes after the upsert, with the schema default each keeps when a
+// create stamps nothing (pinned to schema.sql by the SQL suite). A create that updates an existing
+// protected grant without a policy keeps that grant's values instead.
+export const STAMP_COLUMN_DEFAULTS = {
+  policy_id: null, pool_size: 0, max_active_devices: 1, max_borrow_sec: 0, meter_quota: 0, meter_period_sec: 2592000,
+  is_trial: 0, trial_expiration_basis: null, trial_duration_sec: 0, trial_one_per_device: 0, trial_require_device_proof: 0,
+} as const;
+type StampColumn = keyof typeof STAMP_COLUMN_DEFAULTS;
+
+// Pre-protection history: legacy activations, leases, seats, and usage for this exact key.
+const HISTORY_TABLES = ["lease_issuance", "entitlement_devices", "seat_checkouts", "usage_events"] as const;
+const sameKey = (alias: string): string => `${alias}.project=e.project AND ${alias}.feature=e.feature AND ${alias}.license_fingerprint=e.license_fingerprint`;
+
+/** The stamp columns this create writes after its upsert; none without a policy. */
+function stampColumns(input: EntitlementInput, policy?: Policy): Partial<Record<StampColumn, unknown>> {
+  if (policy === undefined) return {};
+  const stamp = stampFromPolicy(policy, input, 0);
+  return { policy_id: policy.id, ...stamp.capacity, ...stamp.trial };
+}
+
+export function protectedCreateChecks(input: EntitlementInput, policy?: Policy): readonly ProtectedCheck[] {
+  const expected = Object.entries(stampColumns(input, policy));
+  return [
+    { reason: "customer_inactive", sql: "EXISTS (SELECT 1 FROM customers c WHERE c.id=e.customer_id AND c.status='active')", binds: [] },
+    { reason: "license_missing", sql: "EXISTS (SELECT 1 FROM licenses l WHERE l.id=e.license_id)", binds: [] },
+    { reason: "license_customer_mismatch", sql: "EXISTS (SELECT 1 FROM licenses l WHERE l.id=e.license_id AND l.customer_id=e.customer_id AND l.project=e.project)", binds: [] },
+    // Another row pairs this license or fingerprint differently. The key's own row is excluded: in
+    // the batch that is e itself, which never matches; after a rollback it is the pre-update grant.
+    { reason: "fingerprint_in_use", sql: `NOT EXISTS (SELECT 1 FROM entitlements other WHERE other.project=e.project
+        AND NOT (other.feature=e.feature AND other.license_fingerprint=e.license_fingerprint)
+        AND ((other.license_id=e.license_id AND other.license_fingerprint<>e.license_fingerprint)
+          OR (other.license_fingerprint=e.license_fingerprint AND (other.license_id IS NOT e.license_id OR other.customer_id IS NOT e.customer_id))))`, binds: [] },
+    { reason: "plan_assignment_conflict", sql: "NOT EXISTS (SELECT 1 FROM license_plan_assignments a WHERE a.project=e.project AND a.license_id=e.license_id AND a.license_fingerprint<>e.license_fingerprint)", binds: [] },
+    { reason: "lease_history_exists", sql: [
+      ...HISTORY_TABLES.map((table) => `NOT EXISTS (SELECT 1 FROM ${table} h WHERE ${sameKey("h")})`),
+      `NOT EXISTS (SELECT 1 FROM entitlement_events h WHERE ${sameKey("h")}
+        AND CASE WHEN json_valid(h.next_json) THEN json_extract(h.next_json,'$.enforcement_mode') IS NOT 'device_bound_v1' ELSE 1 END)`,
+    ].join("\n      AND "), binds: [] },
+    // The policy is unchanged since it was read, and the stamp wrote exactly its values.
+    { reason: "policy_mismatch", sql: policy === undefined ? "1" : `EXISTS (SELECT 1 FROM entitlement_policies p WHERE ${POLICY_FIELDS.map((field) => `p.${field} IS ?`).join(" AND ")} AND p.status='active' AND p.project=e.project)
+      AND ${expected.map(([column]) => `e.${column} IS ?`).join(" AND ")}`,
+    binds: policy === undefined ? [] : [...POLICY_FIELDS.map((field) => policy[field]), ...expected.map(([, value]) => value)] },
+    { reason: "invalid_trial", sql: `e.is_trial=0 OR (e.is_trial=1 AND e.trial_one_per_device IN (0,1) AND e.trial_require_device_proof IN (0,1)
+      AND ((e.trial_expiration_basis='from_issue' AND typeof(e.valid_until)='integer' AND e.valid_until>unixepoch())
+        OR (e.trial_expiration_basis IN ('from_first_activation','from_first_use') AND typeof(e.trial_duration_sec)='integer'
+          AND e.trial_duration_sec BETWEEN 2 AND 3153600000)))`, binds: [] },
+    { reason: "invalid_capacity", sql: "typeof(e.max_active_devices)='integer' AND e.max_active_devices BETWEEN 1 AND 1000000", binds: [] },
+    // Integrity rules with no operator-specific fix: the row is exactly what this create wrote.
+    { reason: "unknown", sql: `e.device_hash='' AND e.pool_size=0
+      AND (e.valid_from IS NULL OR (typeof(e.valid_from)='integer' AND e.valid_from BETWEEN 0 AND 9007199254740991))
+      AND (e.valid_until IS NULL OR (typeof(e.valid_until)='integer' AND e.valid_until BETWEEN 0 AND 9007199254740991))
+      AND (e.valid_from IS NULL OR e.valid_until IS NULL OR e.valid_from<e.valid_until)
+      AND e.customer_id IS ? AND e.license_id IS ?`, binds: [input.customer_id ?? null, input.license_id ?? null] },
+  ];
+}
+
+export function protectedCreateAssertion(env: Env, input: EntitlementInput, policy?: Policy): D1PreparedStatementLike {
+  const checks = protectedCreateChecks(input, policy);
+  // SELECT does not alter changes(), so the following audit/cache statements
+  // still observe the claim/stamp. Failure raises inside D1's batch and rolls
+  // back the preceding write; it never reports a failure after partial commit.
+  return env.DB.prepare(`SELECT CASE WHEN changes()=1 AND EXISTS (
+    SELECT 1 FROM entitlements e WHERE e.project=? AND e.feature=? AND e.license_fingerprint=? AND e.enforcement_mode='device_bound_v1'
+      AND ${checks.map((check) => `(${check.sql})`).join("\n      AND ")}
+    ) THEN 1 ELSE json('protected_creation_conflict') END`)
+    .bind(input.project, input.feature, input.license_fingerprint, ...checks.flatMap((check) => check.binds));
+}
+
+/**
+ * Names the first rule a refused create broke, after its batch rolled back. The checks run against
+ * the row the create would have written: its input columns, its policy stamp, and otherwise what an
+ * existing protected grant with this key keeps (or the schema default). Values travel as one JSON
+ * document so json_extract types numbers the way an INTEGER column stores them. A key that already
+ * has a row, with every rule holding, means the claim lost to a concurrent write.
+ */
+export async function protectedCreateReason(env: Env, input: EntitlementInput, policy?: Policy): Promise<ProtectedCreateReason> {
+  const checks = protectedCreateChecks(input, policy);
+  const stamp = stampColumns(input, policy);
+  const written = {
+    project: input.project, feature: input.feature, license_fingerprint: input.license_fingerprint, device_hash: input.device_hash ?? "",
+    valid_from: input.valid_from ?? null, valid_until: input.valid_until ?? null, customer_id: input.customer_id ?? null, license_id: input.license_id ?? null,
+    ...stamp,
+  };
+  const kept = Object.entries(STAMP_COLUMN_DEFAULTS).filter(([column]) => !(column in stamp))
+    .map(([column, fallback]) => `${fallback === null ? `x.${column}` : `coalesce(x.${column}, ${fallback})`} AS ${column}`);
+  const sql = `WITH w(doc) AS (SELECT ?),
+    x AS (SELECT ${Object.keys(STAMP_COLUMN_DEFAULTS).join(", ")} FROM entitlements WHERE project=? AND feature=? AND license_fingerprint=? AND enforcement_mode='device_bound_v1'),
+    e AS (SELECT ${[...Object.keys(written).map((column) => `json_extract(w.doc,'$.${column}') AS ${column}`), ...kept].join(", ")} FROM w LEFT JOIN x ON 1)
+    SELECT CASE ${checks.map((check) => `WHEN NOT coalesce((${check.sql}), 0) THEN '${check.reason}'`).join("\n      ")}
+      WHEN EXISTS (SELECT 1 FROM entitlements s WHERE ${sameKey("s")}) THEN 'fingerprint_in_use'
+      ELSE 'unknown' END AS reason FROM e`;
+  try {
+    const row = await env.DB.prepare(sql)
+      .bind(JSON.stringify(written), input.project, input.feature, input.license_fingerprint, ...checks.flatMap((check) => check.binds))
+      .first<{ reason: unknown }>();
+    return PROTECTED_CREATE_REASONS.find((reason) => reason === row?.reason) ?? "unknown";
+  } catch {
+    return "unknown";
+  }
+}
