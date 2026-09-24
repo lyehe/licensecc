@@ -114,24 +114,106 @@ export const NO_ENTITLEMENTS_EMPTY_COPY = "No licenses yet — they appear here 
 export const NO_DEVICES_EMPTY_COPY = "No devices registered yet — activate a license to register one.";
 
 // Map a raw server/result code to customer-facing copy. Returns null for any code we do not humanize,
-// so the caller can fall back to showing the raw code (kept visible as small print for support). Codes
-// mirror the backend envelope `code` field; this is the single source of humane portal feedback strings.
+// so the caller (StatusLine) falls back to a generic message -- never the raw code itself. Codes mirror
+// the backend envelope `code` field emitted by routes/auth.ts, routes/self-service.ts, support.ts and
+// app.ts; `BACKEND_PROXY_ERROR_MANIFEST`'s codes; and this app's own local UI-only codes (passed via
+// localMessage()). This is the single source of humane portal feedback strings for StatusLine.
+// `passwordMessage()` (passwordMessages.tsx) and `ProviderSignIn`'s ERRORS map their own, separate code
+// domains (password flows and the `?auth_error=` redirect) and never read this map.
 const RESULT_CODE_COPY: Record<string, string> = {
-  account_refresh_failed: "Account refresh failed. Displayed data may be out of date; retry to refresh it.",
-  pool_exhausted: "All seats are in use — release one or ask your administrator.",
-  device_limit_exceeded: "This license's device limit is reached — release a device under Devices.",
-  expired_subscription: "This subscription has expired — renew it to continue.",
+  // ---- Session / identity (routes/auth.ts) -------------------------------------------------------
+  unauthorized: "Your session ended. Sign in again.",
+  config_error: "The service is temporarily unavailable. Try again shortly.",
+  cross_site_forbidden: "That request couldn't be verified. Reload the page and try again.",
   invalid_otp: "That code is wrong or expired — request a new one.",
-  seat_reclaimed: "Your seat was reclaimed after inactivity — check out again.",
+  signed_in: "Signed in.",
+  unsupported_media_type: "That request wasn't formatted correctly. Reload the page and try again.",
+  logged_out: "You're signed out.",
+  not_found: "We couldn't find that. It may have been removed or already changed.",
+  access_required: "Additional verification is required for this action.",
+  invalid_request: "That request wasn't valid. Check the details and try again.",
   rate_limited: "Too many attempts — wait a moment and try again.",
+  otp_requested: "Check your email for a sign-in code.",
+
+  // ---- Request/body validation (support.ts) ------------------------------------------------------
+  body_too_large: "That request was too large. Try again with less data.",
+  invalid_json: "That request wasn't valid. Reload the page and try again.",
+
+  // ---- Self-service actions (routes/self-service.ts) ----------------------------------------------
+  device_status_conflict: "That device's status changed. Refresh to see its current status.",
+  portal_error: "Something went wrong on our end. Try again.",
+  device_released: "Device released.",
+  backend_unconfigured: "The service is temporarily unavailable. Try again shortly.",
+  device_key_required: "Enter the device key ID shown by the application before continuing.",
+  backend_invalid_response: "The service returned an unexpected response. Try again.",
+
+  // ---- Worker-wide fallback (app.ts) ---------------------------------------------------------------
+  temporarily_unavailable: "This is temporarily unavailable. Try again shortly.",
+
+  // ---- Backend-proxied seat/download errors (BACKEND_PROXY_ERROR_MANIFEST) ------------------------
+  token_revoked: "Your session ended. Sign in again.",
+  token_expired: "Your session ended. Sign in again.",
+  floating_disabled: "This license doesn't support seats.",
+  forbidden_scope: "You don't have access to do that.",
+  no_active_entitlement: "This license is no longer active.",
+  device_proof_required: "This device needs to be verified. Use the application to verify it, then try again.",
+  device_proof_invalid: "This device couldn't be verified. Use the application to verify it again.",
+  borrowing_disabled: "Offline borrowing isn't enabled for this license.",
+  pool_exhausted: "All seats are in use — release one or ask your administrator.",
+  seat_signing_error: "We couldn't complete that seat action. Try again.",
+  verification_error: "We couldn't verify that request. Try again.",
+  seat_signing_unavailable: "Seat actions are temporarily unavailable. Try again shortly.",
+  seat_reclaimed: "Your seat was reclaimed after inactivity — check out again.",
+  expired_subscription: "This subscription has expired — renew it to continue.",
+  device_limit_exceeded: "This license's device limit is reached — release a device under Devices.",
+  trial_device_proof_required: "This trial requires device verification. Use the application to verify it, then try again.",
+  trial_device_locked: "This trial is locked to a different device.",
+  lease_signing_error: "We couldn't complete that download. Try again.",
+  lease_signing_unavailable: "Downloads are temporarily unavailable. Try again shortly.",
+
+  // ---- Local UI-only codes (src/ui, passed via localMessage()) -------------------------------------
+  invalid_email: "Enter a valid email address.",
+  invalid_code: "Enter the 8-digit code exactly as sent.",
+  invalid_response: "The service returned an unexpected response. Try again.",
+  account_refresh_failed: "Account refresh failed. Displayed data may be out of date; retry to refresh it.",
+  seat_not_checked_out: "Start a seat before doing that.",
+  license_unavailable: "This license can't be downloaded right now.",
+  download_started: "Download started.",
   [FLOATING_SEAT_RELEASE_REFRESH_FAILED_CODE]: FLOATING_SEAT_RELEASE_REFRESH_ERROR_COPY,
+
+  // ---- Seat-action success (self-service.ts apiAction's default `${operation}_ok`) ----------------
+  checkout_ok: "Seat started.",
+  heartbeat_ok: "Seat renewed.",
+  release_ok: "Seat released.",
 };
+
+// download_failed_<http-status> (DownloadsFeature.tsx) is a dynamic family -- one status per failed
+// download -- so it is matched by prefix instead of enumerating every possible status. The status
+// itself still reaches the customer, just under Technical details (StatusLine renders the full code
+// there), never as the main sentence.
+export const DOWNLOAD_FAILED_PREFIX = "download_failed_";
+export const DOWNLOAD_FAILED_COPY = "The download failed. Try again.";
 
 export function describeResultCode(code: string): string | null {
   if (typeof code !== "string") {
     return null;
   }
-  return RESULT_CODE_COPY[code] ?? null;
+  if (code.startsWith(DOWNLOAD_FAILED_PREFIX)) {
+    return DOWNLOAD_FAILED_COPY;
+  }
+  // Object.hasOwn -- not `RESULT_CODE_COPY[code] ?? null` -- because a code equal to an
+  // Object.prototype member name ("constructor", "__proto__", "toString", ...) would otherwise
+  // resolve to that inherited function/value instead of null: React then throws ("Objects are not
+  // valid as a React child") or silently renders a function. Mirrors the fix already applied to
+  // ProviderSignIn's ERRORS and passwordMessage()'s MESSAGES (both Object.hasOwn too).
+  return Object.hasOwn(RESULT_CODE_COPY, code) ? RESULT_CODE_COPY[code] : null;
+}
+
+// StatusLine's fallback for a code describeResultCode could not map: an unmapped code, or a
+// prototype-polluting key name. Never the raw code; includes the request id (so support can trace it)
+// when one is present, and never dangles the word "Reference" when the id is empty.
+export function describeUnknownResult(requestId: string): string {
+  return requestId === "" ? "Something went wrong. Try again." : `Something went wrong. Reference ${requestId}.`;
 }
 
 // A license_fingerprint is a long hex digest; show a head...tail summary, never the full value in a
