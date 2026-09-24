@@ -153,7 +153,11 @@ an explicit `restart`: abandon the pending local request and renew the same
 binding with a new operation. This is useful after the 48-hour exact-response
 recovery window expires. It neither frees a slot nor reverses an earlier server
 commit. A failed abandonment stops the action; it does not start another request.
-Enrollment conflicts still require resolving consent/capacity rather than
+When activation reports the device-limit detail, the example says that all device
+slots for the license are in use and asks the user to disconnect a device in the
+customer portal (Devices) before retrying; the server issued nothing, and a retry
+after the short-lived approval expires needs a new enrollment. Other enrollment
+conflicts still require resolving consent/capacity rather than
 silently reusing a consumed code. Choosing `quit` or
 closing input exits without claiming that an uncertain server allocation was
 undone; recovery may then need operator assistance. No example action deletes

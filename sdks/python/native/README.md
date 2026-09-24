@@ -54,6 +54,14 @@ to a new `renew()` call; a busy or failed abandonment must not be treated as
 success. This recovers from an expired 48-hour response window without changing
 the binding. See the [renewal recovery contract](../../../doc/api/device_enrollment.rst).
 
+When activation is refused because every device slot of the license is in use,
+the code is `Result.CONFLICT` and `outcome.detail` is `DenialDetail.DEVICE_LIMIT`
+(.NET: `Outcome.Detail` is `DeviceBoundDenialDetail.DeviceLimit`). Ask the user
+to disconnect a device in the customer portal (Devices), then try again. A detail
+never grants access. A value the SDK does not name keeps its number; treat it as
+no detail. Python and .NET releases before this detail reject any non-zero value
+as an invalid outcome, so upgrade the package together with this bridge.
+
 Every protected operation requires a fresh native check:
 
 ```python

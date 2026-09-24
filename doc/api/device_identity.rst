@@ -79,6 +79,29 @@ succeeded. Cancellation immediately disables authority; if capture fails,
 save/cancel retry retains recovery until cleanup can finish. Close requires all
 other calls to have returned and never deletes a TPM key or server allocation.
 
+``denial_detail`` says why an operation was refused, when the library can tell
+(``LCC_BOUND_DETAIL``). It never grants access and never replaces the primary
+result, so handle the result first. When activation is refused because every
+device slot of the license is in use, the result stays ``LCC_BOUND_CONFLICT``
+and the detail is ``LCC_BOUND_DETAIL_DEVICE_LIMIT``; the server issued nothing.
+Ask the user to disconnect a device in the customer portal (Devices), then call
+``activate`` again. The approval behind the attempt is short-lived, so a later
+retry often reports ``LCC_BOUND_ENROLLMENT_REQUIRED`` and needs a new enrollment.
+Every other outcome, including other conflicts, reports
+``LCC_BOUND_DETAIL_NONE``. Renewal and feature sessions never report the device
+limit. Treat a value the header does not name as ``LCC_BOUND_DETAIL_NONE``.
+
+The detail occupies the outcome's former ``reserved`` member. This C ABI change
+is additive: the outcome's size and offsets, ``LCC_DEVICE_BOUND_VERSION`` and
+every existing enumeration value are unchanged, and
+``lcc_init_device_bound_outcome`` still sets the member to zero. Source code that
+named ``reserved`` must use ``denial_detail``. The .NET and Python SDK releases
+before this change treat any non-zero value in that member as an invalid outcome,
+so a device-limit refusal makes them throw instead of returning a conflict:
+upgrade the SDK together with the native bridge library. The Java JNI adapter now
+uses protocol 2, whose outcome arrays carry the detail; a JAR and JNI library
+from different protocols fail at load.
+
 The installed-header-only desktop example is maintained in
 ``examples/device_bound/README.md`` and listed in :doc:`../usage/examples`.
 Its local build/link check does not prove the live TPM/browser/backend journey,

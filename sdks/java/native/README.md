@@ -1,11 +1,14 @@
 # Java device-bound native adapter
 
 The JNI library also exposes optional `FeatureSessionLibrary` support through
-four separate `FeatureSessionNative` exports. The existing six
-`DeviceBoundNative` exports retain their contracts. An older library rejects
-the feature-session adapter explicitly while remaining usable for enrollment
-and device-bound operations. The installed gate tests this fallback in a
-separate JVM as well as the current library's no-effect and malformed-input paths.
+four separate `FeatureSessionNative` exports. The six `DeviceBoundNative`
+exports use JNI protocol 2: every outcome array also carries the refusal detail.
+Build the JNI library from the same SDK version as the JAR; a JAR and library
+from different protocols fail at load with "Incompatible Licensecc JNI protocol".
+A library without the feature-session exports rejects the feature-session
+adapter explicitly while remaining usable for enrollment and device-bound
+operations. The installed gate tests this fallback in a separate JVM as well as
+the current library's no-effect and malformed-input paths.
 
 The optional Java 17 JNI adapter calls the installed public
 `licensecc/device_bound.h` owner. Enrollment secrets, TPM handles, platform HTTPS,
@@ -78,7 +81,11 @@ UTF-8. Native policy validation remains authoritative.
 2. Enrollment: call `prepare()`, display and flush its comparison code, then
    call `launch()`. Poll the owned listener with `poll(0..1000)` until
    `CALLBACK_RECEIVED`; `WAITING` and rejected callbacks are not approval.
-   Call `activate()` only after the callback arrives.
+   Call `activate()` only after the callback arrives. If every device slot of
+   the license is in use, `activate()` returns `CONFLICT` with
+   `Outcome.detail()` set to `DenialDetail.DEVICE_LIMIT`: ask the user to
+   disconnect a device in the customer portal (Devices), then try again. A
+   detail never grants access; treat `UNKNOWN`, a newer value, like `NONE`.
 3. Resume: call `renew()` for fresh online authority. Restart/reboot does not
    restore offline permission from a checkpoint.
 4. Immediately before every protected operation, call `authorize()` and allow

@@ -50,6 +50,11 @@ are recorded in [ADR 0005](doc/architecture/decisions/0005-platform-version-and-
   native code (remediation).
 - The protected-device readiness script accepts `--env=<name>` to check
   environment-scoped Wrangler vars (remediation).
+- Protected activation says when a license is full: the result stays
+  `LCC_BOUND_CONFLICT` and the new `LccDeviceBoundOutcome.denial_detail` is
+  `LCC_BOUND_DETAIL_DEVICE_LIMIT`. The .NET (`Outcome.Detail`), Java
+  (`Outcome.detail()`) and Python (`Outcome.detail`) SDKs expose it, and the
+  protected example tells the user to disconnect a device in the customer portal.
 
 ### Changed
 - Advanced the unpublished platform candidate from `0.1.0-rc.1` to `0.1.0-rc.2`.
@@ -111,6 +116,16 @@ are recorded in [ADR 0005](doc/architecture/decisions/0005-platform-version-and-
   (`additionalProperties: false` on both sides): deploy and roll back the
   backend and portal together for this path, or consent inspection returns
   `temporarily_unavailable` (503).
+- Public C ABI compatibility: `LccDeviceBoundOutcome.denial_detail` takes the
+  place of the outcome's former `reserved` member. The change is additive: the
+  structure's size and offsets, `LCC_DEVICE_BOUND_VERSION` and every existing
+  enum value are unchanged, and `lcc_init_device_bound_outcome` still sets it to
+  zero; source that named `reserved` must use `denial_detail`. .NET and Python
+  SDK releases before this change treat a non-zero value there as an invalid
+  outcome and throw on a device-limit refusal instead of returning a conflict, so
+  upgrade the SDK together with the native bridge library. The Java JNI adapter
+  now uses protocol 2 (its outcome arrays carry the detail): build the JNI library
+  from the same SDK version as the JAR, because a mismatched pair fails at load.
 
 ### Fixed
 - C++ core: unstable disk-derived hardware ids on device-path fstab entries; `confirm_license`
