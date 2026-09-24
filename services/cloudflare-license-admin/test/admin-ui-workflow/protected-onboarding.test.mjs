@@ -24,6 +24,11 @@ test("every protected-create reason reads as one actionable sentence, never its 
     assert.equal(onboarding.protectedCreateFailureMessage(failure("protected_creation_conflict", data)), generic, JSON.stringify(data));
   }
   assert.equal(onboarding.protectedCreateFailureMessage(failure("enforcement_mode_conflict", { reason: "customer_inactive" })), null);
+  const say = (reason) => onboarding.protectedCreateFailureMessage(failure("protected_creation_conflict", { reason }));
+  // Its likeliest trigger is another project's policy, which a plain retry repeats; say so first.
+  assert.match(say("policy_mismatch"), /^The policy isn't an active policy for this project, or it changed while you were saving; choose an active policy for this project/);
+  // The trial state can come from the existing grant, not only from a policy.
+  assert.match(say("invalid_trial"), /^This license's trial settings can't be used: /);
 });
 
 test("generate fingerprint turns 32 random bytes into 64 lowercase hex characters", async () => {
@@ -52,9 +57,14 @@ test("create license targets one customer and accepts only that customer's new r
   assert.equal(onboarding.hasCreatedLicenseData(null, "cust_1", "APP"), false);
   for (const project of ["APP", "a.b:c-d_e", "A".repeat(127)]) assert.equal(onboarding.isProtectedProject(project), true, project);
   for (const project of ["", "APP SPACE", "A".repeat(128), "应用", "APP\n"]) assert.equal(onboarding.isProtectedProject(project), false, project);
-  const rules = onboarding.licenseCreateFailures.initial;
-  assert.ok(rules.some((rule) => rule.status === 404 && rule.codes.includes("not_found")));
-  assert.ok(rules.some((rule) => rule.status === 409 && rule.codes.includes("customer_inactive")));
+  // The route's own rejections, wrapped by the shared auth/body-size rules rather than a copy of them.
+  const guards = await loadWorkflowModule("shared/mutationGuards.ts");
+  assert.equal(typeof guards.documentedMutationPolicy, "function");
+  assert.deepEqual(onboarding.licenseCreateFailures, guards.documentedMutationPolicy(
+    { status: 400, codes: ["invalid_request", "invalid_json", "invalid_idempotency_key"] },
+    { status: 404, codes: ["not_found"] },
+    { status: 409, codes: ["customer_inactive"] },
+  ));
   assert.deepEqual(onboarding.licenseCreateFailures.replay, []);
   for (const code of ["customer_inactive", "not_found", "invalid_request", "admin_role_required"]) {
     const message = onboarding.licenseCreateFailureMessage(failure(code));

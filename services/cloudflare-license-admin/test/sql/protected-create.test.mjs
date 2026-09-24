@@ -240,6 +240,11 @@ const REASON_CASES = [
     fix: `UPDATE license_plan_assignments SET license_fingerprint='${fp}'` },
   { reason: "lease_history_exists", setup: `INSERT INTO usage_events(project,feature,license_fingerprint,event_type,ts) VALUES('APP','PRO','${fp}','checkout',1)`, fix: "DELETE FROM usage_events" },
   { reason: "policy_mismatch", body: { policy_id: "policy" }, race: "UPDATE entitlement_policies SET max_borrow_sec=60" },
+  // The likeliest trigger: an active policy of another project, which the create never re-checks
+  // against the grant's project before the batch guard refuses it.
+  { reason: "policy_mismatch", name: "another project's active policy",
+    setup: "INSERT INTO entitlement_policies(id,project,name,type,created_at,updated_at) VALUES('elsewhere','ELSEWHERE','Elsewhere','node_locked',1,1)",
+    body: { policy_id: "elsewhere" }, fixedBody: { policy_id: "policy" } },
   { reason: "invalid_trial", setup: "UPDATE entitlement_policies SET type='trial',trial_expiration_basis='from_first_activation',trial_duration_sec=1",
     body: { policy_id: "policy" }, fix: "UPDATE entitlement_policies SET trial_duration_sec=600" },
   { reason: "invalid_capacity", setup: "UPDATE entitlement_policies SET max_active_devices=0", body: { policy_id: "policy" }, fix: "UPDATE entitlement_policies SET max_active_devices=1" },
@@ -278,6 +283,37 @@ test("a create without a policy is judged with the trial state it keeps from the
   await refusedFor(await f.send({ ...input, valid_until: 1000 }, "expired-trial"), "invalid_trial");
   assert.deepEqual(f.snapshot(), before);
 });
+
+// Differential net for the diagnostic: after a create commits, the would-be row it rebuilds from the
+// same inputs must equal the row the batch actually wrote. A new side-write that the would-be row
+// does not model (for example a create-time device limit) makes this fail instead of making every
+// refusal of that create read as unknown. Policies here keep stamped validity independent of time.
+const WOULD_BE_ROW_CASES = [
+  { name: "a fresh grant without a policy", creates: [{}] },
+  { name: "a fresh grant stamped from a policy", policy: "type='trial',trial_expiration_basis='from_first_activation',trial_duration_sec=600,max_active_devices=3,max_borrow_sec=60", creates: [{ policy_id: "policy" }] },
+  { name: "a grant re-created without a policy over a stamped one", policy: "type='trial',trial_expiration_basis='from_first_activation',trial_duration_sec=600,max_active_devices=3", creates: [{ policy_id: "policy" }, { notes: "again" }] },
+  { name: "a grant re-created from a policy over an unstamped one", policy: "max_active_devices=4,meter_quota=9", creates: [{}, { policy_id: "policy" }] },
+];
+
+for (const { name, policy, creates } of WOULD_BE_ROW_CASES) {
+  test(`the diagnostic's would-be row equals the committed row for ${name}`, async t => {
+    const { protectedWouldBeRowQuery } = await import("../../dist-worker/worker/groups/entitlements/protected-checks.js");
+    const { stampFromPolicy } = await import("@licensecc/licensing-domain/entitlements/policy");
+    const f = fixture(t);
+    if (policy) f.sql.exec(`UPDATE entitlement_policies SET ${policy}`);
+    for (const [index, change] of creates.entries()) assert.equal((await f.send({ ...input, ...change }, `create-${index}`)).status, 200);
+    const last = { ...input, ...creates.at(-1) };
+    const policyRow = last.policy_id === undefined ? undefined : f.sql.prepare("SELECT * FROM entitlement_policies WHERE id=?").get(last.policy_id);
+    // The Worker hands the diagnostic what createFromPolicy stamped, or the validated body otherwise.
+    const used = policyRow === undefined ? last : { ...stampFromPolicy(policyRow, last, 0).input, enforcement_mode: last.enforcement_mode };
+    const { sql, binds } = protectedWouldBeRowQuery(used, policyRow);
+    const wouldBe = f.sql.prepare(`${sql} SELECT * FROM e`).get(...binds);
+    const committed = f.sql.prepare(`SELECT ${Object.keys(wouldBe).join(", ")} FROM entitlements WHERE project=? AND feature=? AND license_fingerprint=?`)
+      .get(input.project, input.feature, input.license_fingerprint);
+    assert.ok(Object.keys(wouldBe).length >= 19);
+    assert.deepEqual({ ...wouldBe }, { ...committed });
+  });
+}
 
 test("the diagnostic's unwritten columns fall back to the schema's own entitlement defaults", async t => {
   const { STAMP_COLUMN_DEFAULTS } = await import("../../dist-worker/worker/groups/entitlements/protected-checks.js");

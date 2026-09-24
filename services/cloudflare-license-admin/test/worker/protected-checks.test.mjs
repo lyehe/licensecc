@@ -27,38 +27,37 @@ function capturingEnv(row = { reason: "customer_inactive" }) {
   };
 }
 
-function inOrder(haystack, needles) {
-  let from = 0;
-  for (const needle of needles) {
-    const at = haystack.indexOf(needle, from);
-    assert.ok(at >= 0, `missing, or out of order: ${needle.slice(0, 80)}`);
-    from = at + needle.length;
-  }
-}
 
 for (const selected of [undefined, policy]) {
   test(`the batch assertion and the diagnostic come from one ordered check list (${selected ? "policy" : "no policy"})`, async () => {
-    const { protectedCreateAssertion, protectedCreateChecks, protectedCreateReason } = await checksModule();
+    const { protectedCreateAssertion, protectedCreateChecks, protectedCreateReason, protectedWouldBeRowQuery } = await checksModule();
     const checks = protectedCreateChecks(input, selected);
     const tagged = new Set(checks.map((check) => check.reason));
     // The claim (an existing row with this key) is the diagnostic's last named rule; unknown is its default.
     assert.deepEqual([...new Set([...tagged, "fingerprint_in_use", "unknown"])].sort(), [...sharedApi.PROTECTED_CREATE_REASONS].sort());
     for (const check of checks) assert.ok(Array.isArray(check.binds) && typeof check.sql === "string" && check.sql.trim() !== "", check.reason);
 
+    // Both queries must be exactly their fixed skeleton around the list, so a predicate added
+    // outside the list (even a bind-free one) fails here instead of drifting from the diagnostic.
+    const checkBinds = checks.flatMap((check) => check.binds);
     const assertion = capturingEnv();
     const statement = protectedCreateAssertion(assertion.env, input, selected);
-    inOrder(statement.sql, checks.map((check) => `(${check.sql})`));
-    assert.match(statement.sql, /^SELECT CASE WHEN changes\(\)=1 AND EXISTS \(/);
-    assert.match(statement.sql, /THEN 1 ELSE json\('protected_creation_conflict'\) END$/);
-    assert.deepEqual(statement.args, [input.project, input.feature, input.license_fingerprint, ...checks.flatMap((check) => check.binds)]);
+    assert.equal(statement.sql, `SELECT CASE WHEN changes()=1 AND EXISTS (
+    SELECT 1 FROM entitlements e WHERE e.project=? AND e.feature=? AND e.license_fingerprint=? AND e.enforcement_mode='device_bound_v1'
+      AND ${checks.map((check) => `(${check.sql})`).join("\n      AND ")}
+    ) THEN 1 ELSE json('protected_creation_conflict') END`);
+    assert.deepEqual(statement.args, [input.project, input.feature, input.license_fingerprint, ...checkBinds]);
 
     const diagnostic = capturingEnv();
     assert.equal(await protectedCreateReason(diagnostic.env, input, selected), "customer_inactive");
     assert.equal(diagnostic.prepared.length, 1, "one diagnostic SELECT");
     const [query] = diagnostic.prepared;
-    inOrder(query.sql, [...checks.map((check) => `WHEN NOT coalesce((${check.sql}), 0) THEN '${check.reason}'`), "THEN 'fingerprint_in_use'", "ELSE 'unknown' END"]);
-    const checkBinds = checks.flatMap((check) => check.binds);
-    assert.deepEqual(query.args.slice(query.args.length - checkBinds.length), checkBinds, "the checks bind the same values in both queries");
+    const wouldBe = protectedWouldBeRowQuery(input, selected);
+    assert.equal(query.sql, `${wouldBe.sql}
+    SELECT CASE ${checks.map((check) => `WHEN NOT coalesce((${check.sql}), 0) THEN '${check.reason}'`).join("\n      ")}
+      WHEN EXISTS (SELECT 1 FROM entitlements s WHERE s.project=e.project AND s.feature=e.feature AND s.license_fingerprint=e.license_fingerprint) THEN 'fingerprint_in_use'
+      ELSE 'unknown' END AS reason FROM e`);
+    assert.deepEqual(query.args, [...wouldBe.binds, ...checkBinds], "the checks bind the same values in both queries");
   });
 }
 

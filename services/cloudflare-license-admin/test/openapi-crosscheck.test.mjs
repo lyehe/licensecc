@@ -193,6 +193,7 @@ test("customer license creation documents its required key, customer failures, a
   assert.deepEqual(input.required, ["project"]);
   assert.equal(input.properties.project.pattern, "^[A-Za-z0-9_.:-]{1,127}$");
   assert.equal(input.properties.label.maxLength, 128);
+  assert.match(input.properties.label.description, /Trimmed; C0 control characters and DEL are rejected\./);
   assert.deepEqual(openApiDocument.components.schemas.LicenseCreatedData.required, ["id", "customer_id", "project", "label", "created_at"]);
 });
 

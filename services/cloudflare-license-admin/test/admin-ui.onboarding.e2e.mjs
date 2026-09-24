@@ -94,3 +94,59 @@ test("a refused protected grant names the broken rule in words, never as a code"
   await expect(page.getByText(/protected_creation_conflict|customer_inactive|rule_this_console_predates/)).toHaveCount(0);
   await expect(form.getByLabel("Protection", { exact: true })).toHaveValue("device_bound_v1");
 });
+
+async function openProtectedCreate(page, project = "APP") {
+  await page.goto("/#/entitlements");
+  await page.getByRole("button", { name: "New entitlement", exact: true }).click();
+  const form = page.getByRole("form", { name: "New entitlement", exact: true });
+  await form.getByLabel("Protection", { exact: true }).selectOption("device_bound_v1");
+  await form.getByLabel("Project", { exact: true }).fill(project);
+  await relationship(form, "Customer").selectOption("cus_acme");
+  return form;
+}
+
+const licenseRow = (id, project, label = null) => ({ id, customer_id: "cus_acme", project, label, created_at: 1_760_000_000, updated_at: 1_760_000_000 });
+
+test("the protected license picker hides other projects' licenses and offers creation only while none is listed", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  api.behavior.licenseRows = [licenseRow("lic_other_app", "OTHER", "Other app")];
+  await page.route("**/api/admin/**", api.route);
+  const form = await openProtectedCreate(page);
+  const offer = form.getByRole("button", { name: "Create license for APP", exact: true });
+  await expect(offer).toBeVisible();
+  await expect(relationship(form, "License").locator("option")).toHaveText(["No license"]);
+  // A search that matches nothing says nothing about the customer's licenses, so it offers none.
+  const lookup = form.getByRole("region", { name: "License relationship", exact: true });
+  await lookup.getByLabel("Search licenses", { exact: true }).fill("seat pack");
+  await lookup.getByRole("button", { name: "Find licenses", exact: true }).click();
+  await expect(lookup.getByText("No licenses match. Try another search or enter the full ID below.", { exact: true })).toBeVisible();
+  await expect(offer).toHaveCount(0);
+  await lookup.getByLabel("Search licenses", { exact: true }).fill("");
+  await lookup.getByRole("button", { name: "Find licenses", exact: true }).click();
+  await expect(offer).toBeVisible();
+  // A legacy grant is neither narrowed to its project nor offered a new license.
+  await form.getByLabel("Protection", { exact: true }).selectOption("legacy");
+  await expect(relationship(form, "License").locator("option")).toHaveText(["No license", "Other app · lic_other_app"]);
+  await expect(form.getByRole("button", { name: /^Create license for/ })).toHaveCount(0);
+});
+
+test("the protected license picker offers no creation when this project already has a license", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  api.behavior.licenseRows = [licenseRow("lic_app", "APP"), licenseRow("lic_other_app", "OTHER", "Other app")];
+  await page.route("**/api/admin/**", api.route);
+  const form = await openProtectedCreate(page);
+  await expect(relationship(form, "License").locator("option")).toHaveText(["No license", "APP · lic_app"]);
+  await expect(form.getByRole("button", { name: /^Create license for/ })).toHaveCount(0);
+});
+
+test("the protected license picker offers no creation when its license read fails", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  await page.route("**/api/admin/**", api.route);
+  await page.route(/\/api\/admin\/licenses(?:\?|$)/, route => route.fulfill({
+    status: 503, contentType: "application/json", body: JSON.stringify({ ok: false, code: "unavailable", request_id: "licenses-down" }),
+  }));
+  const form = await openProtectedCreate(page);
+  const lookup = form.getByRole("region", { name: "License relationship", exact: true });
+  await expect(lookup.getByRole("alert")).toContainText("Could not load license options.");
+  await expect(form.getByRole("button", { name: /^Create license for/ })).toHaveCount(0);
+});
