@@ -4129,7 +4129,7 @@
       },
       "/portal/v1/auth/identities/unlink": {
         "post": {
-          "description": "Requires a session and a same-site request. Allowed only while another sign-in method is usable now: a password while password sign-in is enabled, the other provider's identity while that provider is configured, or a non-empty contact email while email codes are configured (the same predicates as GET /portal/v1/auth/providers). The rule and the delete are one conditional statement, so concurrent requests cannot remove the last method. The same transaction revokes the customer's other OAuth sessions; the current session and sessions from other sign-in methods are kept.",
+          "description": "Requires a session and a same-site request. Allowed only while another sign-in method is usable now: a password while password sign-in is enabled (PORTAL_PASSWORD_ENABLED=1), the other provider's identity while that provider is configured, or a non-empty contact email while email codes can be sent, which needs email delivery configured and PORTAL_OTP_PEPPERS set (stricter than the providers envelope's `email`, which reports delivery only). Configuration is judged per request. The rule, a still-live session and the delete are one conditional statement, so concurrent requests cannot remove the last method, and a session revoked by a concurrent unlink cannot finish its own. The same transaction revokes the customer's other OAuth sessions; the current session and sessions from other sign-in methods are kept.",
           "operationId": "authUnlinkIdentity",
           "requestBody": {
             "content": {
@@ -4235,7 +4235,7 @@
                   }
                 }
               },
-              "description": "Missing, invalid or expired session."
+              "description": "Missing, invalid or expired session, including one a concurrent unlink revoked before this delete ran."
             },
             "403": {
               "content": {
@@ -4273,7 +4273,7 @@
                   }
                 }
               },
-              "description": "This customer has no identity for that provider (absent and foreign identities look the same)."
+              "description": "This customer has no identity for that provider (absent and foreign identities look the same), including one a concurrent unlink removed first."
             },
             "409": {
               "content": {
