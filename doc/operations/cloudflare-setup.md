@@ -262,9 +262,10 @@ still need review. It does not validate that retained settings match the code.
    access → New entitlement**, choose **Protected devices**, the application's
    project and feature, and the user from step 2. **Create license for
    {project}** creates and selects that user's license record, and **Generate
-   fingerprint** fills in a new fingerprint. Keep **Device limit** at 1 for
-   this test, or choose one of the project's policies, which sets its own limit
-   (**Create policy…** makes one and returns to the draft). Follow
+   fingerprint** fills in a new fingerprint. Leave **Device limit** blank for
+   this test (a new license gets 1), or choose one of the project's policies,
+   which sets its own limit (**Create policy…** makes one and returns to the
+   draft). Follow
    [protected application access](https://github.com/lyehe/licensecc/blob/main/services/cloudflare-license-admin/README.md#create-protected-application-access)
    for the exact project/feature/fingerprint rules, the device limit, and what
    each refusal reason means. Do not convert an existing legacy grant to

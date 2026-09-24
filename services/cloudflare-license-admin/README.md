@@ -59,10 +59,12 @@ The whole path runs in the console; no SQL is needed.
    this project. If it is empty, choose **Create license for {project}**: it
    creates the customer's license record and selects it. A suspended customer
    cannot get one.
-3. Set the **Device limit**, the most devices that can be connected at once (1
-   to 1,000,000; 1 by default). Or choose a policy instead: the list shows this
-   project's active policies as "{name} · {n} devices · {project}", and a chosen
-   policy sets the limit, shown read-only as "Device limit (from policy
+3. Optionally set the **Device limit**, the most devices that can be connected
+   at once (1 to 1,000,000). Blank sends none: a new license (entitlement) gets
+   1, and an existing one keeps its limit. Or choose a policy instead: the list
+   shows this project's active policies as "{name} · {n} devices · {project}"
+   ("{n} seats" for a floating policy), and a chosen policy sets the capacity,
+   shown read-only as "Device limit (from policy {name})" or "Seats (from policy
    {name})". **Create policy…** opens the policy form for this project and
    brings you back to the unchanged draft with the new policy chosen.
 4. Choose **Generate fingerprint** for a new protected license, or enter its
@@ -92,6 +94,7 @@ as a sentence with the request reference:
 | `lease_history_exists` | The fingerprint has legacy device, lease, seat, usage, or non-protected audit history for this feature. |
 | `policy_mismatch` | The policy is not an active policy of this project, or it changed or was disabled after it was read. |
 | `invalid_trial` | The trial settings cannot start a protected trial. |
+| `devices_connected` | The create would move the grant to another customer while devices are still connected; disconnect them first. |
 | `invalid_capacity` | The device limit is outside 1–1,000,000, or below the devices already connected. |
 | `unknown` | Any other integrity rule, such as a device hash or a floating pool. |
 
@@ -123,17 +126,20 @@ new entitlement projections; the complete deployment requires the current schema
 - `POST /api/admin/entitlements` accepts it only without a policy. It is written
   in the create's own batch, behind the create's claim, so it commits with the
   grant or not at all. Omitted, a new grant gets 1 and a re-create keeps the
-  stored limit. With a `policy_id` it returns `400 invalid_request`: the policy
-  stamps its own limit.
+  stored limit; the console sends it only when the field is filled in. With a
+  `policy_id` it returns `400 invalid_request`: the policy stamps its own limit.
 - `PATCH /api/admin/entitlements/{id}` sets it alone, with the optional
-  `expected_customer_id`/`expected_revocation_seq` precondition. Combined with
-  another field it returns `400 invalid_request`, because the limit is its own
-  audited capacity write.
+  `expected_customer_id`/`expected_revocation_seq` precondition. With another
+  PATCH field it returns `400 invalid_request`, because the limit is its own
+  audited capacity write; keys a PATCH does not write are ignored, as always.
+  A stale precondition returns `409 stale_transition` and writes nothing.
 - A protected grant refuses a limit below its connected devices, counted as
   active connections plus disconnected ones still within their hold (ADR 0006).
   A PATCH returns `409 capacity_in_use` with `data.devices_in_use`, the count
   read just after the refusal. A create reports the same rule as
-  `protected_creation_conflict` with `data.reason: "invalid_capacity"`.
+  `protected_creation_conflict` with `data.reason: "invalid_capacity"`, and a
+  create that would move a grant with connected devices to another customer as
+  `data.reason: "devices_connected"`.
 
 ## Hosted setup
 
