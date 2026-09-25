@@ -74,16 +74,6 @@ export const RESEND_CODE_ACTION_LABEL = "Resend code";
 // the OTP email itself states in src/auth/portal_otp.mjs).
 export const OTP_EXPIRY_COPY = "Codes expire 10 minutes after they are sent.";
 
-// Client-side-only cooldown (task C6): after a code is sent, Resend is disabled for this many
-// seconds and shows the remaining time, e.g. "Resend code (0:59)". Never a full minute, so the
-// label's minutes digit is always "0".
-export const RESEND_COOLDOWN_SECONDS = 60;
-
-export function resendCodeLabel(secondsRemaining: number): string {
-  if (secondsRemaining <= 0) return RESEND_CODE_ACTION_LABEL;
-  return `${RESEND_CODE_ACTION_LABEL} (0:${String(secondsRemaining).padStart(2, "0")})`;
-}
-
 // The one rate-limit sentence for every auth 429 that carries the server's `retry-after` header
 // (OTP request/verify, magic JSON redeem, password login/register/reset/complete), and the same
 // fallback wherever that header is absent -- a redirect-driven rate_limited (ProviderSignIn's
@@ -96,25 +86,6 @@ export function rateLimitMessage(retryAfterSeconds?: number | null): string {
   }
   const minutes = Math.max(1, Math.ceil(retryAfterSeconds / 60));
   return `Too many attempts. Try again in ${minutes} minutes.`;
-}
-
-// Recovery hints (passwordMessages' verified_sign_in_required, PasswordSettings' own sentence) list
-// only the sign-in methods GET /portal/v1/auth/providers actually reports as configured -- never a
-// method the operator has not turned on. `email` here means the email-code/magic-link method.
-export function configuredRecoveryMethods(providers: { google?: boolean; github?: boolean; email?: boolean } | null | undefined): string[] {
-  const methods: string[] = [];
-  if (providers?.google) methods.push("Google");
-  if (providers?.github) methods.push("GitHub");
-  if (providers?.email) methods.push("an email code");
-  return methods;
-}
-
-// "Google", "Google or GitHub", "Google, GitHub, or an email code" -- an Oxford comma before the
-// final item only once there are 3+, matching ordinary English list prose.
-export function joinWithOr(items: string[]): string {
-  if (items.length <= 1) return items[0] ?? "";
-  if (items.length === 2) return `${items[0]} or ${items[1]}`;
-  return `${items.slice(0, -1).join(", ")}, or ${items[items.length - 1]}`;
 }
 
 export const ACTIVATION_DOWNLOAD_ACTION_LABEL = "Activate and download .lic";

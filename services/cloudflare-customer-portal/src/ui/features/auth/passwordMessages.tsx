@@ -1,6 +1,7 @@
 import React from "react";
-import { configuredRecoveryMethods, joinWithOr, rateLimitMessage } from "../../portalWorkflow";
+import { rateLimitMessage } from "../../portalWorkflow";
 import { SupportContact } from "../../shared/SupportContact";
+import { configuredRecoveryMethods, joinWithOr } from "./authCopy";
 import { useProviders } from "./ProviderSignIn";
 
 // Recovery hints (here, and PasswordSettings.tsx's own near-identical sentence) list only the

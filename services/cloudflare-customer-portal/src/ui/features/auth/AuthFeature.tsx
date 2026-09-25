@@ -11,13 +11,12 @@ import {
   normalizeCode,
   normalizeEmail,
   OTP_EXPIRY_COPY,
-  resendCodeLabel,
-  RESEND_COOLDOWN_SECONDS,
 } from "../../portalWorkflow";
 import { api, beginNewSession, localMessage, resultMessage, StatusLine } from "../../shared/api";
 import { SupportContact } from "../../shared/SupportContact";
 import type { PortalMe, StatusMessage } from "../../types";
 
+import { resendCodeLabel, RESEND_COOLDOWN_SECONDS } from "./authCopy";
 import { PasswordSignIn, type PasswordMode } from "./PasswordSignIn";
 import { ProviderButtons, ProviderResult, useProviders } from "./ProviderSignIn";
 

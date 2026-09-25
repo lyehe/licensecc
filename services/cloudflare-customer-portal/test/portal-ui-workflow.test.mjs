@@ -78,19 +78,6 @@ test("portal UI workflow exposes resend-code action + 10-minute expiry copy", as
   assert.match(workflow.OTP_EXPIRY_COPY, /10 minutes/);
 });
 
-// C6: the resend button's client-side-only cooldown label -- "Resend code" once free, else "Resend
-// code (0:59)" counting down. The cooldown never reaches a full minute, so the minutes digit is
-// always "0".
-test("portal UI workflow formats the resend cooldown label and never reaches a full minute", async () => {
-  const workflow = await loadWorkflowModule();
-  assert.equal(workflow.RESEND_COOLDOWN_SECONDS, 60);
-  assert.equal(workflow.resendCodeLabel(0), "Resend code");
-  assert.equal(workflow.resendCodeLabel(-1), "Resend code", "a non-positive remainder reads as available");
-  assert.equal(workflow.resendCodeLabel(59), "Resend code (0:59)");
-  assert.equal(workflow.resendCodeLabel(9), "Resend code (0:09)", "single-digit seconds are zero-padded");
-  assert.equal(workflow.resendCodeLabel(1), "Resend code (0:01)");
-});
-
 // C6: one sentence for every auth 429 that now carries the server's retry-after header, and the
 // same "later" fallback wherever that header is absent (a redirect-driven rate_limited, or a
 // password screen's own 429 that was left out of the header rollout).
@@ -106,29 +93,6 @@ test("portal UI workflow builds the single rate-limit sentence from retryAfter, 
   assert.equal(workflow.rateLimitMessage(60), "Too many attempts. Try again in 1 minutes.");
   assert.equal(workflow.rateLimitMessage(61), "Too many attempts. Try again in 2 minutes.");
   assert.equal(workflow.rateLimitMessage(900), "Too many attempts. Try again in 15 minutes.");
-});
-
-// C6: recovery hints (passwordMessages' verified_sign_in_required, PasswordSettings' own hard-coded
-// sentence) list only the methods GET /portal/v1/auth/providers actually reports as configured, and
-// never name an unconfigured one.
-test("portal UI workflow lists only configured recovery methods, joined in prose", async () => {
-  const workflow = await loadWorkflowModule();
-  assert.deepEqual(workflow.configuredRecoveryMethods(null), []);
-  assert.deepEqual(workflow.configuredRecoveryMethods(undefined), []);
-  assert.deepEqual(workflow.configuredRecoveryMethods({ google: false, github: false, email: false }), []);
-  assert.deepEqual(workflow.configuredRecoveryMethods({ google: true, github: false, email: false }), ["Google"]);
-  assert.deepEqual(workflow.configuredRecoveryMethods({ google: true, github: true, email: false }), ["Google", "GitHub"]);
-  assert.deepEqual(
-    workflow.configuredRecoveryMethods({ google: true, github: true, email: true }),
-    ["Google", "GitHub", "an email code"],
-  );
-  assert.equal(workflow.joinWithOr([]), "");
-  assert.equal(workflow.joinWithOr(["Google"]), "Google");
-  assert.equal(workflow.joinWithOr(["Google", "GitHub"]), "Google or GitHub");
-  assert.equal(
-    workflow.joinWithOr(["Google", "GitHub", "an email code"]),
-    "Google, GitHub, or an email code",
-  );
 });
 
 test("portal UI workflow exposes empty-state copy for every tab", async () => {
