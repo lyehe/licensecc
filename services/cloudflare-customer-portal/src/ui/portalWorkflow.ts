@@ -68,8 +68,6 @@ export function deviceReleasePath(): string {
 
 export const LOGIN_CODE_SENT_COPY = "If this email is registered, we sent an 8-digit code. Enter it below.";
 
-export const RESEND_CODE_ACTION_LABEL = "Resend code";
-
 // Shown on the verify screen so a customer knows the code is short-lived (mirrors the 10-minute TTL
 // the OTP email itself states in src/auth/portal_otp.mjs).
 export const OTP_EXPIRY_COPY = "Codes expire 10 minutes after they are sent.";

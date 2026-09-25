@@ -230,6 +230,47 @@ test("password settings hide the recovery promise when the portal has no email d
   await expect(page.getByText("Use 'Forgot your password?' once to verify this email.", { exact: true })).toHaveCount(0);
 });
 
+// C6 fix round 1 (Important): no existing PasswordSettings fixture ever set has_password:false, so
+// RecoveryHint's actual list-only-configured-methods rendering (as opposed to the pure
+// configuredRecoveryMethods/joinWithOr helpers it calls) was never exercised end to end. These five
+// cover every case the controller named, each with a distinct providers response so the exact
+// sentence pins to that exact configuration.
+async function goToPasswordSettingsNeedingSetup(page, providers) {
+  await page.route("**/api/portal/**", (route) => route.fulfill({ json: makeEnvelope("ok", route.request().url().endsWith("/me") ? { customer_id: "cus_self" } : { items: [] }) }));
+  await page.route("**/portal/v1/auth/providers", (route) => route.fulfill({ json: makeEnvelope("auth_providers", { password: true, ...providers }) }));
+  await page.route("**/portal/v1/auth/identities", (route) => route.fulfill({ json: makeEnvelope("identities", { items: [] }) }));
+  await page.route("**/portal/v1/auth/password", (route) => route.fulfill({ json: makeEnvelope("password_settings", { has_password: false, can_reset: false, email_verified: false, email: "" }) }));
+  await page.goto("/#/account");
+}
+
+test("password settings' recovery hint names only Google when only Google is configured", async ({ page }) => {
+  await goToPasswordSettingsNeedingSetup(page, { google: true, github: false, email: false });
+  await expect(page.getByText("Sign in again with Google to set a password.", { exact: true })).toBeVisible();
+});
+
+test("password settings' recovery hint names both Google and email codes when both are configured", async ({ page }) => {
+  await goToPasswordSettingsNeedingSetup(page, { google: true, github: false, email: true });
+  await expect(page.getByText("Sign in again with Google or an email code to set a password.", { exact: true })).toBeVisible();
+});
+
+test("password settings' recovery hint names only GitHub when only GitHub is configured", async ({ page }) => {
+  await goToPasswordSettingsNeedingSetup(page, { google: false, github: true, email: false });
+  await expect(page.getByText("Sign in again with GitHub to set a password.", { exact: true })).toBeVisible();
+});
+
+test("password settings' recovery hint falls back to the administrator when no method is configured", async ({ page }) => {
+  await goToPasswordSettingsNeedingSetup(page, { google: false, github: false, email: false });
+  await expect(page.getByText("Contact your administrator to set a password.", { exact: true })).toBeVisible();
+  await expect(page.getByText("Sign in again with", { exact: false })).toHaveCount(0);
+});
+
+test("password settings' recovery hint falls back to the configured support contact when no method is configured", async ({ page }) => {
+  await goToPasswordSettingsNeedingSetup(page, { google: false, github: false, email: false, support: "mailto:help@example.com" });
+  const hint = page.getByText("Contact support to set a password.", { exact: true });
+  await expect(hint).toBeVisible();
+  await expect(hint.getByRole("link", { name: "Contact support", exact: true })).toHaveAttribute("href", "mailto:help@example.com");
+});
+
 test("social sign-in buttons submit to their own start routes and hide unavailable email", async ({ page }) => {
   await page.route("**/api/portal/me", (route) => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" } }));
   await page.route("**/portal/v1/auth/providers", (route) => route.fulfill({ json: makeEnvelope("auth_providers", { google: true, github: true, email: false }) }));

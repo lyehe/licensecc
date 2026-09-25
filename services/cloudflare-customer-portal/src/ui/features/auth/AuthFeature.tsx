@@ -203,7 +203,7 @@ export function AuthFeature({ auth, busy, message, connecting = false }: {
   const [emailCode, setEmailCode] = useState(false);
   const [passwordMode, setPasswordMode] = useState<PasswordMode>(initialPasswordMode);
   const [resendDeadline, setResendDeadline] = useState(0);
-  const [resendCountdown, setResendCountdown] = useState(0);
+  const [, forceResendTick] = useState(0);
   const heading = useRef<HTMLHeadingElement>(null);
   const passwordHeading = !emailCode && providers?.password && auth.phase === "request"
     ? PASSWORD_HEADINGS[passwordMode]
@@ -229,16 +229,19 @@ export function AuthFeature({ auth, busy, message, connecting = false }: {
   useLayoutEffect(() => {
     if (message?.code === "otp_requested") setResendDeadline(Date.now() + (RESEND_COOLDOWN_SECONDS - 1) * 1000);
   }, [message]);
-  // A single recurring interval (registered once per deadline) rather than a chain of one-shot
-  // timeouts: it keeps ticking under its own steam regardless of how promptly React gets to render
-  // each intermediate value, so the display still lands on the correct remaining second.
+  // resendCountdown is DERIVED from resendDeadline during render, not tracked as its own state that
+  // an effect updates a beat later: the layout effect above sets resendDeadline synchronously, before
+  // paint, so this computation already reflects the fresh deadline on that same pre-paint render --
+  // the button is disabled from its very first painted frame, never flashing "Resend code" first. A
+  // single recurring interval (registered once per deadline) forces the periodic re-renders needed to
+  // count down after that; it keeps ticking under its own steam regardless of how promptly React gets
+  // to render each intermediate frame, and the value is recomputed fresh from Date.now() every time.
   useEffect(() => {
     if (resendDeadline === 0) return undefined;
-    const tick = (): void => setResendCountdown(Math.max(0, Math.ceil((resendDeadline - Date.now()) / 1000)));
-    tick();
-    const id = setInterval(tick, 250);
+    const id = setInterval(() => forceResendTick((tick) => tick + 1), 250);
     return () => clearInterval(id);
   }, [resendDeadline]);
+  const resendCountdown = resendDeadline === 0 ? 0 : Math.max(0, Math.ceil((resendDeadline - Date.now()) / 1000));
   if (auth.phase === "authed") return null;
   if (auth.phase === "loading" || auth.phase === "error") {
     return (

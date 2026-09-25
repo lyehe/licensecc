@@ -72,9 +72,8 @@ test("portal UI workflow maps floating-seat release confirmation copy to its con
   assert.equal(workflow.PORTAL_STATUS_REFRESH_ACTION_LABEL, "Refresh status");
 });
 
-test("portal UI workflow exposes resend-code action + 10-minute expiry copy", async () => {
+test("portal UI workflow exposes the OTP 10-minute expiry copy", async () => {
   const workflow = await loadWorkflowModule();
-  assert.match(workflow.RESEND_CODE_ACTION_LABEL, /resend/i);
   assert.match(workflow.OTP_EXPIRY_COPY, /10 minutes/);
 });
 
