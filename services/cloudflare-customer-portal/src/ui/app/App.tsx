@@ -105,6 +105,24 @@ function PortalShell(): React.ReactElement {
     document.getElementById("content")?.focus();
   }, [location.page, location.project]);
 
+  // Each view sets document.title (task C6): the SAME branches PortalShell's own return below uses
+  // to pick which screen renders, read here instead of duplicated per screen component, so this one
+  // effect can never drift from what is actually on screen. Apps/Devices/Account, Sign in/Check your
+  // email (AuthFeature's own two step headings), Set a password (PasswordAction) and Connect a
+  // device (ConsentFeature) are the only views a customer can distinguish by tab title; a password
+  // sub-mode (register/reset) or the auth loading/error interstitial are still "Sign in" for title
+  // purposes -- they are not separately navigable screens.
+  useEffect(() => {
+    const view = passwordAction !== null ? "Set a password"
+      : (typeof enrollment === "string" || (enrollment && auth.phase === "authed")) ? "Connect a device"
+      : auth.phase === "verify" ? "Check your email"
+      : auth.phase !== "authed" ? "Sign in"
+      : location.page === "nodes" ? "Devices"
+      : location.page === "account" ? "Account"
+      : "Apps";
+    document.title = `${view} · Licensecc`;
+  }, [passwordAction, enrollment, auth.phase, location.page]);
+
   // A signed-in auth_error/auth_result (e.g. an already-used magic link, or an OAuth start/callback
   // failure that targets #/account) only has somewhere to render on Account, via AccountFeature's
   // own <ProviderResult/>, which reads and then strips it itself. Every other page has nowhere to

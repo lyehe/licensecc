@@ -1,5 +1,5 @@
 import type { LabeledPathFragment } from "../assemble.js";
-import { errorResponse } from "../components.js";
+import { errorResponse, RETRY_AFTER_HEADER } from "../components.js";
 
 const body = (register: boolean) => ({ required: true, content: { "application/json": { schema: {
   type: "object", required: register ? ["email", "password"] : ["password"],
@@ -10,11 +10,16 @@ const body = (register: boolean) => ({ required: true, content: { "application/j
 // check/the batch write. Each verb gets its own map below so neither can claim a code its own
 // handler path cannot emit.
 const signedInResponse = { description: "Signed in with a rotated opaque HttpOnly session cookie. No password/hash is returned." };
+// task C6: login, register, reset and complete all answer their 429 with a real retry-after header
+// (portalRateLimit's own fixed-window seconds left). The signed-in password-change action (the POST
+// verb of settings, below) was deliberately left out of that rollout -- it is not one of the auth
+// entry points the UI drives a countdown from -- so it keeps the plain, headerless 429.
+const RATE_LIMITED_NO_HEADER = errorResponse("Per-IP or login-identifier limit reached.", "rate_limited");
 const common = {
   "403": errorResponse("Origin mismatch.", "cross_site_forbidden"),
   "404": errorResponse("Password sign-in disabled.", "not_found"),
   "413": errorResponse("Request body exceeds 8192 bytes.", "body_too_large"),
-  "429": errorResponse("Per-IP or login-identifier limit reached.", "rate_limited"),
+  "429": { ...errorResponse("Per-IP or login-identifier limit reached. Answers with a retry-after header giving the exact seconds left in the fixed window.", "rate_limited"), headers: RETRY_AFTER_HEADER },
   "503": errorResponse("Session/database configuration unavailable.", "config_error"),
 };
 const settingsSharedResponses = {
@@ -35,7 +40,7 @@ const settingsPostResponses = {
   "403": errorResponse("Origin mismatch or fresh verified sign-in required.", ["cross_site_forbidden", "verified_sign_in_required"]),
   "409": errorResponse("Settings changed concurrently.", "password_change_conflict"),
   "413": common["413"],
-  "429": common["429"],
+  "429": RATE_LIMITED_NO_HEADER,
 };
 const accepted = { description: "Generic verification_requested envelope, including ineligible addresses and delivery failures. No session or account is created.",
   content: { "application/json": { schema: { type: "object", required: ["ok", "code"], properties: { ok: { type: "boolean", const: true }, code: { type: "string", const: "verification_requested" } } } } } };

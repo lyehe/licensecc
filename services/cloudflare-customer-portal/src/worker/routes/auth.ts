@@ -13,10 +13,11 @@ import {
   publicOrigin,
   readJson,
   redirect,
+  retryAfterHeaders,
 } from "../support.js";
 
-type RequestOtpResult = { ok: true; code: string; secret?: string } | { ok: false; code: string; secret?: string };
-type RedeemOtpResult = { ok: true; code: string; customerId: string } | { ok: false; code: string };
+type RequestOtpResult = { ok: true; code: string; secret?: string; retryAfter?: number } | { ok: false; code: string; secret?: string; retryAfter?: number };
+type RedeemOtpResult = { ok: true; code: string; customerId: string; retryAfter?: number } | { ok: false; code: string; retryAfter?: number };
 type RequestOtp = (env: Env, options: Record<string, unknown>) => Promise<RequestOtpResult>;
 type RedeemOtp = (env: Env, options: Record<string, unknown>) => Promise<RedeemOtpResult>;
 type MintSession = (env: Env, options: Record<string, unknown>) => Promise<{ ok: true; raw: string } | { ok: false }>;
@@ -195,7 +196,7 @@ async function handleAuthRequest(request: Request, env: Env, ctx: ExecutionConte
     now,
   });
   if (result.code === "config_error") return envelope(reqId, "config_error", undefined, 503);
-  if (result.code === "rate_limited") return envelope(reqId, "rate_limited", undefined, 429);
+  if (result.code === "rate_limited") return envelope(reqId, "rate_limited", undefined, 429, retryAfterHeaders(result.retryAfter));
   // Always ok (no enumeration): an unknown email returns the same shape.
   return envelope(reqId, "otp_requested");
 }
@@ -203,7 +204,7 @@ async function handleAuthRequest(request: Request, env: Env, ctx: ExecutionConte
 type RedeemOutcome =
   | { code: "signed_in"; customerId: string; cookie: string }
   | { code: "invalid_otp" }
-  | { code: "rate_limited" }
+  | { code: "rate_limited"; retryAfter?: number | undefined }
   | { code: "config_error" };
 
 // Redeems an OTP (an 8-digit code or a magic-link secret) and, on success, mints a session. Shared
@@ -219,7 +220,7 @@ async function redeemOtpSession(
 ): Promise<RedeemOutcome> {
   const redeemed = await redeemOtp(env, { ...args, clientIp: clientIp(request), now });
   if (redeemed.code === "config_error") return { code: "config_error" };
-  if (redeemed.code === "rate_limited") return { code: "rate_limited" };
+  if (redeemed.code === "rate_limited") return { code: "rate_limited", retryAfter: redeemed.retryAfter };
   if (!redeemed.ok) return { code: "invalid_otp" };
   const minted = await mintSession(env, { customerId: redeemed.customerId, authMethod: "otp", userAgent: request.headers.get("user-agent") ?? "", now });
   if (!minted.ok) return { code: "config_error" };
@@ -235,7 +236,7 @@ async function redeemAsEnvelope(
 ): Promise<Response> {
   const outcome = await redeemOtpSession(env, request, now, args);
   if (outcome.code === "config_error") return envelope(reqId, "config_error", undefined, 503);
-  if (outcome.code === "rate_limited") return envelope(reqId, "rate_limited", undefined, 429);
+  if (outcome.code === "rate_limited") return envelope(reqId, "rate_limited", undefined, 429, retryAfterHeaders(outcome.retryAfter));
   if (outcome.code === "invalid_otp") return envelope(reqId, "invalid_otp", undefined, 401);
   return envelope(reqId, "signed_in", { customer_id: outcome.customerId }, 200, { "set-cookie": outcome.cookie });
 }

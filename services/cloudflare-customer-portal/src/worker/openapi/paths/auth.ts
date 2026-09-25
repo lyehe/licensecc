@@ -1,5 +1,11 @@
 import type { LabeledPathFragment } from "../assemble.js";
-import { ERR_BODY_TOO_LARGE, ERR_CROSS_SITE, ERR_INVALID_JSON, errorResponse, LEASE_ACTION_REQUEST } from "../components.js";
+import { ERR_BODY_TOO_LARGE, ERR_CROSS_SITE, ERR_INVALID_JSON, errorResponse, LEASE_ACTION_REQUEST, RETRY_AFTER_HEADER } from "../components.js";
+
+// task C6: OTP request/verify and magic-redeem's JSON branch now answer their 429 with a real
+// retry-after header (the form-encoded/redirect branch of magic-redeem never gets one -- a top-level
+// navigation has no script to read a header with -- so its own 429... there is none: see the 303
+// response below, which covers every outcome of that branch instead).
+const rateLimited = (description: string): Record<string, unknown> => ({ ...errorResponse(description, "rate_limited"), headers: RETRY_AFTER_HEADER });
 
 // The form-encoded caller never gets a 400 (a malformed/undecodable form redirects to
 // sign_in_failed instead — see the 303 response below). This 400 is JSON-caller-only.
@@ -47,7 +53,7 @@ export const authPaths: LabeledPathFragment = {
           "400": ERR_INVALID_JSON,
           "403": ERR_CROSS_SITE,
           "413": ERR_BODY_TOO_LARGE,
-          "429": errorResponse("Rate limited (per-email 5/900s + per-IP 30/900s, fail-closed).", "rate_limited"),
+          "429": rateLimited("Rate limited (per-email 5/900s + per-IP 30/900s, fail-closed). Answers with a retry-after header giving the exact seconds left in the fixed window."),
           "503": errorResponse("PORTAL_OTP_PEPPERS unset.", "config_error"),
         },
       },
@@ -99,7 +105,7 @@ export const authPaths: LabeledPathFragment = {
           "401": errorResponse("Invalid OTP (wrong/consumed/expired/over-cap code), or unauthorized config_error from redeemOtp. Byte-identical for all failure reasons.", "invalid_otp"),
           "403": ERR_CROSS_SITE,
           "413": ERR_BODY_TOO_LARGE,
-          "429": errorResponse("Rate limited (per-IP verify 30/900s).", "rate_limited"),
+          "429": rateLimited("Rate limited (per-IP verify 30/900s). Answers with a retry-after header giving the exact seconds left in the fixed window."),
           "503": errorResponse("PORTAL_OTP_PEPPERS or PORTAL_SESSION_PEPPERS unset.", "config_error"),
         },
       },
@@ -211,7 +217,7 @@ export const authPaths: LabeledPathFragment = {
           "403": ERR_CROSS_SITE,
           "413": ERR_BODY_TOO_LARGE,
           "415": ERR_UNSUPPORTED_MEDIA_TYPE,
-          "429": errorResponse("Rate limited (per-IP verify 30/900s).", "rate_limited"),
+          "429": rateLimited("Rate limited (per-IP verify 30/900s). JSON caller only (application/json); the form-encoded caller's own rate limit redirects to /?auth_error=rate_limited instead, with no header a top-level navigation could read. Answers with a retry-after header giving the exact seconds left in the fixed window."),
           "503": errorResponse("PORTAL_OTP_PEPPERS or PORTAL_SESSION_PEPPERS unset.", "config_error"),
         },
       },

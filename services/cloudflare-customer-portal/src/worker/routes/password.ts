@@ -1,5 +1,5 @@
 import { authSession } from "./auth.js";
-import { envelope, readJson } from "../support.js";
+import { envelope, readJson, retryAfterHeaders } from "../support.js";
 import { hashPassword, loginEmail, validPassword, verifyPassword } from "../password/crypto.js";
 import { HEADERS, primary, gate, throttle, signedIn, RESET_ELIGIBLE_SQL } from "../password/shared.js";
 import { passwordInvalidations } from "../password/invalidation.js";
@@ -14,7 +14,8 @@ async function login(request: Request, env: Env, reqId: string, now: number): Pr
   if (body instanceof Response) return body;
   const email = loginEmail(body.email);
   if (!email || !validPassword(body.password)) return envelope(reqId, "invalid_credentials", undefined, 401, HEADERS);
-  if (await throttle(request, env, email, "login", now)) return envelope(reqId, "rate_limited", undefined, 429, HEADERS);
+  const throttled = await throttle(request, env, email, "login", now);
+  if (throttled.limited) return envelope(reqId, "rate_limited", undefined, 429, { ...HEADERS, ...retryAfterHeaders(throttled.retryAfter) });
   const credential = await primary(env).prepare("SELECT p.customer_id, p.password_hash, p.email_lower, c.status FROM portal_passwords p JOIN customers c ON c.id = p.customer_id WHERE p.email_lower = ?")
     .bind(email).first<Credential & { status: string }>();
   // Verify before looking at the account status (a missing login still pays the full KDF): only
@@ -52,7 +53,10 @@ async function settings(request: Request, env: Env, reqId: string, now: number):
   if (!validPassword(body.password)) return envelope(reqId, "invalid_registration", undefined, 400, HEADERS);
   const email = credential?.email_lower ?? loginEmail(row.email);
   if (!email) return envelope(reqId, "verified_sign_in_required", undefined, 403, HEADERS);
-  if (await throttle(request, env, email, "change", now)) return envelope(reqId, "rate_limited", undefined, 429, HEADERS);
+  // The password-change action was deliberately left out of the retry-after rollout (task C6): it is
+  // a signed-in settings action, not one of the auth entry points the UI drives a countdown from, so
+  // its 429 keeps answering with no header, exactly as before.
+  if ((await throttle(request, env, email, "change", now)).limited) return envelope(reqId, "rate_limited", undefined, 429, HEADERS);
   if (!recentVerifiedSignIn) {
     if (!credential) return envelope(reqId, "verified_sign_in_required", undefined, 403, HEADERS);
     if (!validPassword(body.current_password) || !await verifyPassword(body.current_password, credential.password_hash)) return envelope(reqId, "invalid_credentials", undefined, 401, HEADERS);

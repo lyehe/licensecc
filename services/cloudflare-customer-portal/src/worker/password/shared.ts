@@ -31,11 +31,15 @@ export function gate(request: Request, env: Env, reqId: string): Response | null
   if (loadSessionPeppers(env) === null) return envelope(reqId, "config_error", undefined, 503, HEADERS);
   return null;
 }
-export async function throttle(request: Request, env: Env, email: string, action: string, now: number): Promise<boolean> {
+// Returns retryAfter alongside `limited` (task C6) so a caller in the retry-after rollout can answer
+// its 429 with the exact wait; a caller left out of that rollout (the password-change action) simply
+// ignores the field, as it already does for every other 429 shape it does not carry a header for.
+export async function throttle(request: Request, env: Env, email: string, action: string, now: number): Promise<{ limited: boolean; retryAfter: number }> {
   const ip = await portalRateLimit(env, `password:${action}:ip:${clientIp(request)}`, action === "register" ? 5 : 30, 900, now);
-  if (ip.limited) return true;
+  if (ip.limited) return { limited: true, retryAfter: ip.retryAfter };
   const key = await digest(email);
-  return (await portalRateLimit(env, `password:${action}:email:${key}`, 10, 900, now)).limited;
+  const byEmail = await portalRateLimit(env, `password:${action}:email:${key}`, 10, 900, now);
+  return { limited: byEmail.limited, retryAfter: byEmail.retryAfter };
 }
 export async function signedIn(request: Request, env: Env, reqId: string, customerId: string, passwordHash: string, now: number): Promise<Response> {
   const minted = await mintSession(env, { customerId, passwordHash, authMethod: "password", userAgent: request.headers.get("user-agent") ?? "", now });

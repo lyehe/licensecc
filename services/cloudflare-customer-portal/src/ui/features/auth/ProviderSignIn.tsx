@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { rateLimitMessage } from "../../portalWorkflow";
 import { api } from "../../shared/api";
 import { SupportContact, SupportContactContext } from "../../shared/SupportContact";
 
@@ -46,7 +47,9 @@ export function ProviderButtons({ providers, linked = [], link = false }: { prov
 
 const ERRORS: Record<string, React.ReactNode> = {
   provider_unavailable: "This sign-in method is not available yet. Please try another method.",
-  rate_limited: "Too many sign-in attempts. Please try again later.",
+  // A redirect carries no retry-after header a top-level navigation could read, so this always uses
+  // the shared sentence's "later" fallback -- the same one every other headerless 429 falls back to.
+  rate_limited: rateLimitMessage(),
   link_expired: "This sign-in link has expired or was already used. Request a new code.",
   sign_in_cancelled: "Sign-in was cancelled. You can try again.",
   account_suspended: <>This account is suspended. <SupportContact />.</>,

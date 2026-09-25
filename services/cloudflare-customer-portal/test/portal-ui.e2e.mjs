@@ -348,6 +348,7 @@ test("providers failing once then succeeding recovers through Retry sign-in opti
 test("focus moves to the new heading on every sign-in step and mode switch", async ({ page }) => {
   await page.route("**/api/portal/me", (route) => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" } }));
   await page.route("**/portal/v1/auth/providers", (route) => route.fulfill({ json: makeEnvelope("auth_providers", { google: false, github: false, email: true, password: true }) }));
+  await page.route("**/portal/v1/auth/request", (route) => route.fulfill({ json: makeEnvelope("otp_requested") }));
   await page.goto("/");
   const heading = page.getByRole("heading", { level: 1 });
   await expect(heading).toHaveText("Sign in");
@@ -378,7 +379,9 @@ test("a mocked 429 with retry-after shows the shared rate-limit sentence with mi
   await page.getByLabel("Email", { exact: true }).fill("user@example.com");
   await page.getByRole("button", { name: "Send code" }).click();
   await expect(page.getByText("Too many attempts. Try again in 2 minutes.", { exact: true })).toBeVisible();
-  await expect(page.getByText("rate_limited", { exact: false })).toHaveCount(0);
+  // StatusLine still tucks the raw code under a collapsed "Technical details" disclosure (C1) -- it
+  // is present in the DOM but not visible, so this checks visibility, not (non-)existence.
+  await expect(page.getByText("rate_limited", { exact: false })).not.toBeVisible();
 });
 
 // Same sentence, same header, on a password screen -- proving the UI copy is genuinely shared

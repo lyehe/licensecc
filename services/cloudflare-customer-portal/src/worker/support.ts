@@ -43,6 +43,13 @@ export function envelope<T>(reqId: string, code: string, data?: T, status = 200,
   return json(body, status, headers);
 }
 
+// A `retry-after` header (seconds) for a 429 whose wait time portalRateLimit already computed (task
+// C6). Returns {} when no value is given, so `{ ...HEADERS, ...retryAfterHeaders(x) }` is always
+// safe to spread regardless of whether this specific 429 was in the header rollout.
+export function retryAfterHeaders(retryAfter?: number): HeadersInit {
+  return typeof retryAfter === "number" && Number.isFinite(retryAfter) ? { "retry-after": String(retryAfter) } : {};
+}
+
 export function entitlementId(project: string, feature: string, licenseFingerprint: string): string {
   const raw = JSON.stringify([project, feature, licenseFingerprint]);
   const bytes = new TextEncoder().encode(raw);

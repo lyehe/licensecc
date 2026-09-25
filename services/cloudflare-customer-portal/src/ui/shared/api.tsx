@@ -1,7 +1,7 @@
 import React from "react";
 
 import type { ApiEnvelope } from "../../shared/api";
-import { describeResultCode, describeUnknownResult } from "../portalWorkflow";
+import { describeResultCode, describeUnknownResult, rateLimitMessage } from "../portalWorkflow";
 import type { StatusMessage } from "../types";
 
 // A mid-session 401 (task C3): the server's `unauthorized` code means the session cookie is gone or
@@ -75,11 +75,15 @@ export async function api<T>(
   // retrySession()'s own /me check (AuthFeature.tsx's loadMe) must never re-trigger the hook it is
   // itself answering -- that would be circular -- so it alone passes skipUnauthorizedHook (task C3).
   if (!options?.skipUnauthorizedHook) reportUnauthorized(response.status, envelope.code, requestEpoch);
-  return envelope;
+  // The auth 429s carry a real `retry-after` header (task C6); it never rides the JSON body, so it
+  // is read here, once, and attached for every caller instead of each one re-parsing headers.
+  const retryAfterHeader = response.headers.get("retry-after");
+  const retryAfter = retryAfterHeader === null ? Number.NaN : Number(retryAfterHeader);
+  return Number.isFinite(retryAfter) ? { ...envelope, retryAfter } : envelope;
 }
 
 export function resultMessage(result: ApiEnvelope<unknown>): StatusMessage {
-  return { code: result.code, request_id: result.request_id, ok: result.ok };
+  return { code: result.code, request_id: result.request_id, ok: result.ok, retryAfter: result.retryAfter };
 }
 
 export function localMessage(code: string, ok: boolean): StatusMessage {
@@ -94,7 +98,12 @@ export function StatusLine({ message, fallback }: { message: StatusMessage | nul
   if (message === null) {
     return <p role="status" className="statusline">{fallback}</p>;
   }
-  const human = describeResultCode(message.code) ?? describeUnknownResult(message.request_id);
+  // rate_limited gets the one dynamic sentence ONLY when a real retry-after header reached this
+  // specific call (the auth 429s in the header rollout); every other rate_limited (e.g. self-service's
+  // own 429, which never carries the header) keeps the existing generic RESULT_CODE_COPY text.
+  const human = message.code === "rate_limited" && typeof message.retryAfter === "number"
+    ? rateLimitMessage(message.retryAfter)
+    : describeResultCode(message.code) ?? describeUnknownResult(message.request_id);
   const detail = message.request_id === "" ? message.code : `${message.code} (${message.request_id})`;
   return (
     <div role="status" className={message.ok ? "statusline" : "statusline error"}>

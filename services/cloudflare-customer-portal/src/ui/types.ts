@@ -57,4 +57,7 @@ export interface StatusMessage {
   code: string;
   request_id: string;
   ok: boolean;
+  // The `retry-after` header seconds, when the response carried one (task C6); StatusLine uses it to
+  // build "Too many attempts. Try again in {n} minutes." for a rate_limited code.
+  retryAfter?: number;
 }

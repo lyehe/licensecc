@@ -24,6 +24,18 @@ export const ERR_CROSS_SITE = errorResponse("Cross-site request rejected (Sec-Fe
 export const ERR_BODY_TOO_LARGE = errorResponse("Request body exceeded 8192 bytes.", "body_too_large");
 export const ERR_INVALID_JSON = errorResponse("Body was not a JSON object.", "invalid_json");
 
+// task C6: the response headers object for the seven auth 429s that carry the exact wait
+// (portalRateLimit's own fixed-window retryAfter, in seconds) instead of leaving the customer to
+// guess. Spread this into an errorResponse()'s result for exactly those routes -- every other 429
+// (the signed-in password-change action, device consent/bindings' own fixed 60s header, and the
+// operator break-glass bootstrap route) is unaffected and keeps its existing shape.
+export const RETRY_AFTER_HEADER = {
+  "retry-after": {
+    description: "Seconds until portalRateLimit's current fixed window resets. The UI reads this to show \"Try again in {n} minutes.\"",
+    schema: { type: "integer", minimum: 1 },
+  },
+};
+
 // Request body shared by the four lease/action routes + the data fields they accept.
 export const LEASE_ACTION_REQUEST = {
   required: true,

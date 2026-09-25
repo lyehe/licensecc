@@ -15,12 +15,17 @@ function fixedWindowStart(nowSeconds, periodSeconds) {
 }
 
 /**
- * portalRateLimit(env, key, limit, windowSec, now?) -> { limited, count }
+ * portalRateLimit(env, key, limit, windowSec, now?) -> { limited, count, retryAfter }
  *
  * ALWAYS increments the per-(namespace,key,window) counter and returns whether the post-increment
  * count exceeds `limit`. `key` should already encode the namespace + identity (e.g.
  * "request:email:foo@bar" or "verify:cust:A:ip:1.2.3.4"). The caller MUST throttle BEFORE any write
  * (blueprint (a)): a request that is rate-limited never reaches the OTP/session mutation.
+ *
+ * `retryAfter` is the seconds left in the CURRENT fixed window (windowStart + period - now), so a
+ * caller can answer a 429 with a real `retry-after` header (task C6) instead of a vague "later". It
+ * is a pure function of (now, period) -- computed up front, so it is correct even on the fail-closed
+ * branch below, where the counter write itself never happened.
  *
  * Fail-closed: if the counter write throws (DB unavailable), we treat it as limited rather than
  * silently allowing an unthrottled brute-force.
@@ -29,6 +34,7 @@ export async function portalRateLimit(env, key, limit, windowSec, now = Math.flo
   const period = Number.isInteger(windowSec) && windowSec > 0 ? windowSec : 60;
   const max = Number.isInteger(limit) && limit > 0 ? limit : 1;
   const windowStart = fixedWindowStart(now, period);
+  const retryAfter = windowStart + period - now;
   const expiresAt = windowStart + period * 2;
   try {
     const row = await env.DB.prepare(
@@ -48,9 +54,9 @@ export async function portalRateLimit(env, key, limit, windowSec, now = Math.flo
         // best-effort GC; never gate the request on cleanup.
       }
     }
-    return { limited: count > max, count };
+    return { limited: count > max, count, retryAfter };
   } catch {
     // Fail closed: a counter we cannot increment means we cannot prove we are under the cap.
-    return { limited: true, count: Number.POSITIVE_INFINITY };
+    return { limited: true, count: Number.POSITIVE_INFINITY, retryAfter };
   }
 }

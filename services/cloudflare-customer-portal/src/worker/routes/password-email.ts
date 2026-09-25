@@ -2,7 +2,7 @@ import { sendEmail } from "../../auth/portal_email.mjs";
 import { canonicalHttpsOrigin, emailApiOrigin } from "../../auth/portal_destination.mjs";
 import { portalRateLimit } from "../../auth/portal_ratelimit.mjs";
 import { deliveryErrorType, emitEmailDeliveryFailure } from "../../auth/portal_otp.mjs";
-import { clientIp, envelope, readJson } from "../support.js";
+import { clientIp, envelope, readJson, retryAfterHeaders } from "../support.js";
 import { hashPassword, loginEmail, validPassword } from "../password/crypto.js";
 import { HEADERS, primary, gate, throttle, signedIn, digest, RESET_ELIGIBLE_SQL } from "../password/shared.js";
 import { passwordInvalidations } from "../password/invalidation.js";
@@ -18,9 +18,10 @@ async function requestLink(request: Request, env: Env, ctx: ExecutionContextLike
   const email = loginEmail(body.email);
   if (!email) return envelope(reqId, "invalid_email", undefined, 400, HEADERS);
   if (!env.PORTAL_EMAIL_API_KEY || !env.PORTAL_EMAIL_FROM || !emailApiOrigin(env)) return envelope(reqId, "email_unconfigured", undefined, 503, HEADERS);
-  if (await throttle(request, env, email, purpose, now) || (await portalRateLimit(env, `password:mail:${await digest(email)}`, 1, 60, now)).limited) {
-    return envelope(reqId, "rate_limited", undefined, 429, HEADERS);
-  }
+  const throttled = await throttle(request, env, email, purpose, now);
+  if (throttled.limited) return envelope(reqId, "rate_limited", undefined, 429, { ...HEADERS, ...retryAfterHeaders(throttled.retryAfter) });
+  const mailRl = await portalRateLimit(env, `password:mail:${await digest(email)}`, 1, 60, now);
+  if (mailRl.limited) return envelope(reqId, "rate_limited", undefined, 429, { ...HEADERS, ...retryAfterHeaders(mailRl.retryAfter) });
   // Eligibility, proof storage and delivery run after the response so every address gets the same
   // 202 with the same latency.
   const work = issueLink(env, email, now, purpose);
@@ -77,8 +78,10 @@ async function complete(request: Request, env: Env, reqId: string, now: number):
   if (typeof body.token !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(body.token)) return invalid();
   if (!validPassword(body.password)) return envelope(reqId, "invalid_registration", undefined, 400, HEADERS);
   const tokenHash = await digest(body.token);
-  if ((await portalRateLimit(env, `password:complete:ip:${clientIp(request)}`, 10, 900, now)).limited ||
-      (await portalRateLimit(env, `password:complete:token:${tokenHash}`, 5, 900, now)).limited) return envelope(reqId, "rate_limited", undefined, 429, HEADERS);
+  const ipRl = await portalRateLimit(env, `password:complete:ip:${clientIp(request)}`, 10, 900, now);
+  if (ipRl.limited) return envelope(reqId, "rate_limited", undefined, 429, { ...HEADERS, ...retryAfterHeaders(ipRl.retryAfter) });
+  const tokenRl = await portalRateLimit(env, `password:complete:token:${tokenHash}`, 5, 900, now);
+  if (tokenRl.limited) return envelope(reqId, "rate_limited", undefined, 429, { ...HEADERS, ...retryAfterHeaders(tokenRl.retryAfter) });
   const action = await primary(env).prepare("SELECT purpose, email_lower, customer_id, credential_hash FROM portal_password_actions WHERE token_hash = ? AND consumed_at IS NULL AND expires_at > ?").bind(tokenHash, now).first<Action>();
   if (!action) return invalid();
   if (!env.DB.batch) return envelope(reqId, "config_error", undefined, 503, HEADERS);

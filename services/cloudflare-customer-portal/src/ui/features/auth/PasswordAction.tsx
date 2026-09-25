@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useLayoutEffect, useRef, useState } from "react";
 import { api } from "../../shared/api";
 import { passwordActionMessage } from "./passwordMessages";
 
@@ -17,6 +17,10 @@ export function PasswordAction({ token, onDone }: { token: string; onDone(): Pro
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<React.ReactNode>(token ? "" : "Open the link from your email again, or request a new link.");
   const [finished, setFinished] = useState(false);
+  const heading = useRef<HTMLHeadingElement>(null);
+  useLayoutEffect(() => {
+    heading.current?.focus();
+  }, []);
   async function submit(event: React.FormEvent): Promise<void> {
     event.preventDefault();
     if (busy) return;
@@ -27,12 +31,12 @@ export function PasswordAction({ token, onDone }: { token: string; onDone(): Pro
       setPassword(""); setConfirmation("");
       if (result.ok && result.code === "password_updated") { setFinished(true); setMessage("Password saved. Sign in with your new password."); }
       else if (result.ok) { setFinished(true); await onDone(); }
-      else setMessage(passwordActionMessage(result.code));
+      else setMessage(passwordActionMessage(result.code, result.retryAfter));
     } catch { setMessage("Unable to connect. Please try again."); }
     finally { setPassword(""); setConfirmation(""); setBusy(false); }
   }
   return <main className="authPane"><section className="authCard">
-    <h1>Choose your password</h1>
+    <h1 ref={heading} tabIndex={-1}>Choose your password</h1>
     <p>15–128 characters. Use a password you don’t use elsewhere.</p>
     {message && <p role="alert">{message}</p>}
     {token && !finished && <form onSubmit={event => void submit(event)}>

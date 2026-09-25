@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import {
   authRequestPath,
@@ -11,7 +11,8 @@ import {
   normalizeCode,
   normalizeEmail,
   OTP_EXPIRY_COPY,
-  RESEND_CODE_ACTION_LABEL,
+  resendCodeLabel,
+  RESEND_COOLDOWN_SECONDS,
 } from "../../portalWorkflow";
 import { api, beginNewSession, localMessage, resultMessage, StatusLine } from "../../shared/api";
 import { SupportContact } from "../../shared/SupportContact";
@@ -180,6 +181,19 @@ export function usePortalAuth({ setMessage, runOnce }: AuthOptions): PortalAuth 
   };
 }
 
+// AuthFeature-owned marker: PasswordAction.tsx's "Request a new link" (invalid_link) navigates here
+// with it so the reset form opens immediately, reusing PasswordSignIn's own `mode` rather than
+// inventing a second, parallel way to say "open the reset form" (task C6, decision 5). Read once on
+// mount and stripped immediately, exactly like ProviderResult already does for auth_error/auth_result.
+function initialPasswordMode(): PasswordMode {
+  if (typeof window === "undefined") return "login";
+  const url = new URL(window.location.href);
+  if (url.searchParams.get("password_action") !== "reset") return "login";
+  url.searchParams.delete("password_action");
+  window.history.replaceState(null, "", url.pathname + url.search + url.hash);
+  return "reset";
+}
+
 export function AuthFeature({ auth, busy, message, connecting = false }: {
   auth: PortalAuth;
   busy: boolean;
@@ -188,15 +202,49 @@ export function AuthFeature({ auth, busy, message, connecting = false }: {
 }): React.ReactElement | null {
   const { providers, failed, retry } = useProviders();
   const [emailCode, setEmailCode] = useState(false);
-  const [passwordMode, setPasswordMode] = useState<PasswordMode>("login");
+  const [passwordMode, setPasswordMode] = useState<PasswordMode>(initialPasswordMode);
+  const [resendDeadline, setResendDeadline] = useState(0);
+  const [resendCountdown, setResendCountdown] = useState(0);
+  const heading = useRef<HTMLHeadingElement>(null);
   const passwordHeading = !emailCode && providers?.password && auth.phase === "request"
     ? PASSWORD_HEADINGS[passwordMode]
     : "Sign in";
+  // One heading for every auth step (loading/error/verify/request), so focus and document.title logic
+  // elsewhere can each key off a single source of truth instead of re-deriving the same branches.
+  const stepHeading = auth.phase === "loading" ? "Checking your session…"
+    : auth.phase === "error" ? "Unable to check your session"
+    : auth.phase === "verify" ? "Check your email"
+    : passwordHeading;
+  // Focus moves to the new h1 on every step/mode change (task C6, decision 6): a fresh render whose
+  // heading text actually changed is exactly a "new step" from the customer's perspective, whether
+  // that is a phase transition or a login/register/reset mode switch within "request".
+  useLayoutEffect(() => {
+    heading.current?.focus();
+  }, [stepHeading]);
+  // The resend cooldown (task C6, decision 4) restarts every time a fresh otp_requested message
+  // arrives -- the initial send AND every resend alike -- and is purely a client-side display timer;
+  // the server enforces its own, separate rate limit regardless of what this countdown shows.
+  // `resendDeadline` is the moment the button reads "Resend code" again; it is set (RESEND_COOLDOWN_
+  // SECONDS - 1) seconds out so the very next render already shows the full "(0:59)", matching the
+  // countdown then ticking down one displayed second at a time to zero.
+  useLayoutEffect(() => {
+    if (message?.code === "otp_requested") setResendDeadline(Date.now() + (RESEND_COOLDOWN_SECONDS - 1) * 1000);
+  }, [message]);
+  // A single recurring interval (registered once per deadline) rather than a chain of one-shot
+  // timeouts: it keeps ticking under its own steam regardless of how promptly React gets to render
+  // each intermediate value, so the display still lands on the correct remaining second.
+  useEffect(() => {
+    if (resendDeadline === 0) return undefined;
+    const tick = (): void => setResendCountdown(Math.max(0, Math.ceil((resendDeadline - Date.now()) / 1000)));
+    tick();
+    const id = setInterval(tick, 250);
+    return () => clearInterval(id);
+  }, [resendDeadline]);
   if (auth.phase === "authed") return null;
   if (auth.phase === "loading" || auth.phase === "error") {
     return (
       <main className="authPane">
-        <section className="authCard"><h1>{auth.phase === "loading" ? "Checking your session…" : "Unable to check your session"}</h1>
+        <section className="authCard"><h1 ref={heading} tabIndex={-1}>{stepHeading}</h1>
           <p>{auth.phase === "loading" ? "Your account will appear shortly." : "Please try again when your connection is available."}</p>
           {auth.phase === "error" && <button onClick={() => void auth.retrySession()}>Retry</button>}
         </section>
@@ -208,7 +256,7 @@ export function AuthFeature({ auth, busy, message, connecting = false }: {
     <main className="authPane">
       <div className="authBrand brand"><span aria-hidden="true">L</span>Licensecc</div>
       <section className="authCard">
-        <h1>{passwordHeading}</h1>
+        <h1 ref={heading} tabIndex={-1}>{stepHeading}</h1>
         <p>{connecting ? "Sign in to approve this device connection." : "Sign in to manage your licenses and devices."}</p>
         <StatusLine message={message} fallback="" />
         <ProviderResult />
@@ -243,7 +291,6 @@ export function AuthFeature({ auth, busy, message, connecting = false }: {
         )}
         {auth.phase === "verify" && (
           <form onSubmit={(event) => void auth.submitVerify(event)}>
-            <h2>Check your email</h2>
             <p>{LOGIN_CODE_SENT_COPY}</p>
             <p className="muted">{OTP_EXPIRY_COPY}</p>
             <label>
@@ -258,7 +305,7 @@ export function AuthFeature({ auth, busy, message, connecting = false }: {
             </label>
             <div className="actions">
               <button disabled={busy} type="submit">Verify</button>
-              <button disabled={busy} type="button" onClick={() => void auth.resendCode()}>{RESEND_CODE_ACTION_LABEL}</button>
+              <button disabled={busy || resendCountdown > 0} type="button" onClick={() => void auth.resendCode()}>{resendCodeLabel(resendCountdown)}</button>
               <button disabled={busy} type="button" onClick={auth.useDifferentEmail}>Use a different email</button>
             </div>
           </form>
