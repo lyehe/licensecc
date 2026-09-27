@@ -25,10 +25,14 @@ const ENT_ALPHA = { id: "ent_alpha", project: "DEFAULT", feature: "alpha", statu
 const ENT_BETA = { id: "ent_beta", project: "DEFAULT", feature: "beta", status: "active", license_fingerprint: "b".repeat(64), valid_from: NOW - 10000, valid_until: null, license_mode: "floating", pool_size: 3, max_active_devices: 1, max_borrow_sec: 0, heartbeat_grace_sec: 900, policy_id: "pol_beta" };
 const ENT_NODE = { id: "ent_node", project: "DEFAULT", feature: "solo", status: "active", license_fingerprint: "c".repeat(64), valid_from: null, valid_until: null, license_mode: "node_locked", pool_size: 0, max_active_devices: 1, max_borrow_sec: 0, heartbeat_grace_sec: 900, policy_id: "pol_node" };
 
-function setup(page, { entitlements, support, checkoutResponse } = {}) {
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function setup(page, { entitlements, support, checkoutResponse, checkoutDelayMs, downloadDelayMs } = {}) {
   let authed = false;
   const requests = { checkouts: 0, releases: 0, downloads: 0 };
-  const handler = (route) => {
+  const handler = async (route) => {
     const request = route.request();
     const url = new URL(request.url());
     const path = url.pathname;
@@ -65,6 +69,7 @@ function setup(page, { entitlements, support, checkoutResponse } = {}) {
     if (method === "POST" && path === "/api/portal/checkout") {
       requests.checkouts += 1;
       const body = jsonBody(request);
+      if (checkoutDelayMs) await delay(checkoutDelayMs);
       if (checkoutResponse) {
         const response = checkoutResponse(body, requests.checkouts);
         if (response) return fulfill(response.status ?? 200, response.body);
@@ -78,6 +83,7 @@ function setup(page, { entitlements, support, checkoutResponse } = {}) {
     }
     if (method === "POST" && path === "/api/portal/download") {
       requests.downloads += 1;
+      if (downloadDelayMs) await delay(downloadDelayMs);
       return route.fulfill({
         status: 200,
         contentType: "application/octet-stream",
@@ -250,6 +256,85 @@ test("leaving and returning to Apps clears a stale license-download result", asy
 
   // Leave Apps (Devices) and come back to the same app's license list.
   await page.getByRole("link", { name: "Devices", exact: true }).click();
+  await page.getByRole("link", { name: "Apps", exact: true }).click();
+  await page.getByRole("link", { name: "View licenses for DEFAULT" }).click();
+  await page.locator("tr").filter({ has: page.getByLabel("Device key for DEFAULT solo") }).getByText("Activate and download", { exact: true }).click();
+  await expect(page.locator(".licenseDownload").getByRole("status")).toHaveCount(0);
+});
+
+// Fix round 2 (Important): clearMessages() (fix round 1) only wipes what is ALREADY showing at the
+// moment a page is left. It does nothing about a response that is still in flight at that moment and
+// arrives later -- possibly after the customer has come back. This is a real race, not a theoretical
+// one: the SPA never aborts an in-flight fetch on a hash-route change, so the delayed response's
+// `.then` still runs and would otherwise write straight back into the (already-cleared) map.
+const RACE_DELAY_MS = 1000;
+const RACE_WAIT_MS = 1500;
+
+test("a delayed seat-start response that arrives after leaving Devices does not show a stale result, and the real session still exists", async ({ page }) => {
+  setup(page, { entitlements: [ENT_ALPHA], checkoutDelayMs: RACE_DELAY_MS });
+  await signIn(page);
+  await page.getByRole("link", { name: "Devices", exact: true }).click();
+  await page.getByText("Browser seats", { exact: true }).click();
+  const alphaCard = page.locator(".seatCard").filter({ hasText: "alpha" });
+
+  // Click Start seat, then leave for Apps immediately -- well before the delayed response arrives.
+  await alphaCard.getByRole("button", { name: "Start seat" }).click();
+  await page.getByRole("link", { name: "Apps", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Apps", exact: true })).toBeVisible();
+  await page.waitForTimeout(RACE_WAIT_MS); // past the delayed response, still on Apps
+
+  await page.getByRole("link", { name: "Devices", exact: true }).click();
+  await page.getByText("Browser seats", { exact: true }).click();
+  // No stale "Seat started." line...
+  await expect(alphaCard.getByRole("status")).toHaveCount(0);
+  // ...but the checkout genuinely completed: a real session exists (Renew/Release are enabled, Start
+  // is disabled), so the guard drops only the shown RESULT, never the real state it describes.
+  await expect(alphaCard.getByRole("button", { name: "Start seat" })).toBeDisabled();
+  await expect(alphaCard.getByRole("button", { name: "Release seat" })).toBeEnabled();
+});
+
+test("a delayed, FAILING seat-start response that arrives after leaving Devices shows no error line, and the panel stays collapsed since there is no session", async ({ page }) => {
+  setup(page, {
+    entitlements: [ENT_ALPHA],
+    checkoutDelayMs: RACE_DELAY_MS,
+    checkoutResponse: () => ({ status: 503, body: { ok: false, code: "seat_signing_unavailable", request_id: "devices-results-race-fail" } }),
+  });
+  await signIn(page);
+  await page.getByRole("link", { name: "Devices", exact: true }).click();
+  await page.getByText("Browser seats", { exact: true }).click();
+  const alphaCard = page.locator(".seatCard").filter({ hasText: "alpha" });
+
+  await alphaCard.getByRole("button", { name: "Start seat" }).click();
+  await page.getByRole("link", { name: "Apps", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Apps", exact: true })).toBeVisible();
+  await page.waitForTimeout(RACE_WAIT_MS);
+
+  await page.getByRole("link", { name: "Devices", exact: true }).click();
+  // No session was ever created (the checkout failed) and no message survived the visit, so the panel
+  // is genuinely collapsed -- not left artificially expanded by a leftover error result.
+  await expect(page.locator("details.browserSessions")).toHaveCount(1);
+  await expect(page.locator("section.browserSessions")).toHaveCount(0);
+  await page.getByText("Browser seats", { exact: true }).click();
+  await expect(alphaCard.getByRole("status")).toHaveCount(0);
+  await expect(page.getByText("seat_signing_unavailable", { exact: false })).not.toBeVisible();
+});
+
+test("a delayed download response that arrives after leaving Apps does not show a stale result", async ({ page }) => {
+  setup(page, { entitlements: [ENT_NODE], downloadDelayMs: RACE_DELAY_MS });
+  await signIn(page);
+  await page.getByRole("link", { name: "View licenses for DEFAULT" }).click();
+  await page.locator("tr").filter({ has: page.getByLabel("Device key for DEFAULT solo") }).getByText("Activate and download", { exact: true }).click();
+  await page.getByLabel("Device key for DEFAULT solo").fill("device-e2e");
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Activate and download .lic" }).click();
+
+  await page.getByRole("link", { name: "Devices", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Devices", exact: true })).toBeVisible();
+  // The real download still completes in the background regardless of which page is showing -- an
+  // SPA hash-route change never aborts an in-flight fetch.
+  await downloadPromise;
+  await page.waitForTimeout(RACE_WAIT_MS);
+
   await page.getByRole("link", { name: "Apps", exact: true }).click();
   await page.getByRole("link", { name: "View licenses for DEFAULT" }).click();
   await page.locator("tr").filter({ has: page.getByLabel("Device key for DEFAULT solo") }).getByText("Activate and download", { exact: true }).click();
