@@ -135,8 +135,11 @@ td button { min-width: max-content; white-space: nowrap; }
 .recordCards { display: none; }
 /* Entitlements renders exactly one of table or cards via useMediaQuery(max-width: 1023px), so once
    that choice puts .recordCards in the DOM here it must show regardless of the narrower global
-   phone breakpoint below, which still gates every other list's CSS-toggled dual layout. */
-.tablePane[data-focus-section="entitlements"] .recordCards { display: grid; gap: 12px; }
+   phone breakpoint below, which still gates every other list's CSS-toggled dual layout. Matching
+   that same breakpoint here keeps the CSS from claiming a wider range than the JS ever renders it. */
+@media (max-width: 1023px) {
+  .tablePane[data-focus-section="entitlements"] .recordCards { display: grid; gap: 12px; }
+}
 .summaryCards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr)); gap: 16px; }
 .summaryCards > details { grid-column: 1 / -1; }
 pre { max-width: 100%; white-space: pre-wrap; overflow-wrap: anywhere; }

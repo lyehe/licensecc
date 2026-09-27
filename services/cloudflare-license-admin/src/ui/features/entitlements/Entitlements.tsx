@@ -77,23 +77,22 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
   // The filter alone (never `active`) decides when the list must reload: switching tabs without
   // touching a filter field costs zero requests, and typing coalesces onto one request 300ms after
   // the operator stops, rather than one request per keystroke. The generation is debounced rather
-  // than the filter string itself: a filter that returns to an earlier value (A -> B -> A) within
-  // one debounce window still must reload, and debouncing the string would collapse that back to
-  // the same value React already holds, silently dropping the reload.
-  const filterKey = `${filter.project}\u0000${filter.feature}\u0000${filter.status}\u0000${filter.id ?? ""}\u0000${filter.customer_id ?? ""}`;
-  const { generation: rawFilterGeneration, isCurrent: isRawFilterGenerationCurrent } = useContextGeneration(filterKey);
+  // than the URL itself: a filter that returns to an earlier value (A -> B -> A) within one debounce
+  // window still must reload, and debouncing the URL string would collapse that back to the same
+  // value React already holds, silently dropping the reload.
+  const { generation: rawFilterGeneration, isCurrent: isRawFilterGenerationCurrent } = useContextGeneration(entitlementsUrl);
   const reloadGeneration = useDebouncedValue(rawFilterGeneration, 300);
   const lastRequestedReload = useRef<number | null>(null);
-  // The exact filter this list is currently showing settled data for; unlike the request fence
-  // above, this never resets just because `active` toggled, so returning to this tab never leaves
-  // actions stuck disabled with no request left that could ever re-settle them.
-  const settledFilterKey = useRef<string | null>(null);
-  const ready = settledFilterKey.current === filterKey;
   const formContextKey = JSON.stringify(form);
   const { generation: formGeneration, isCurrent: isFormGenerationCurrent } = useContextGeneration(formContextKey);
   const editContextKey = `${editingId ?? ""}\u0000${JSON.stringify(editForm)}`;
   const { generation: editGeneration, isCurrent: isEditGenerationCurrent } = useContextGeneration(editContextKey);
-  const entitlementsFence = useRequestFence(`${active ? "active" : "inactive"}\u0000${entitlementsUrl}`);
+  // Tab re-entry sends no request (see the reload effect below), so this fence must not depend on
+  // `active`: if it did, a tab switch would reset it and `canLoadMore()`/`isSettled()` would stay
+  // false forever, since nothing would ever fire again to re-settle them -- Load More would stay
+  // hidden and every action would stay disabled for good.
+  const entitlementsFence = useRequestFence(entitlementsUrl);
+  const ready = entitlementsFence.canLoadMore();
   const releaseDetailFence = useRequestFence(`${active ? "active" : "inactive"}\u0000${filterContextKey}\u0000release-detail`);
   const activePoliciesContext = `${active ? "active" : "inactive"}\u0000active-policies`;
   const activePoliciesFence = useRequestFence(activePoliciesContext);
@@ -133,7 +132,6 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
       if (entitlementsFence.settle(ticket, parsed.data.next_cursor ?? null)) {
         setEntitlements(parsed.data.items);
         setEntitlementsCursor(parsed.data.next_cursor ?? null);
-        settledFilterKey.current = filterKey;
         return EXACT_READ_PROOF;
       }
     } else {
@@ -145,7 +143,7 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
       setMessage(apiFailureMessage(response));
     }
     return null;
-  }, [entitlementsFence, entitlementsUrl, filterContextKey, filterKey, setMessage]);
+  }, [entitlementsFence, entitlementsUrl, filterContextKey, setMessage]);
 
   useEffect(() => {
     return registerCoreRefresh(refresh);
@@ -545,11 +543,9 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
   }
 
   // The previous rows stay on screen through a reload (aria-busy marks the region instead); the
-  // request fence above still drops any response that no longer matches the current request. Load
-  // More stays keyed to that same fence (not `ready`) since it drives the fence's own cursor
-  // bookkeeping directly.
+  // request fence above still drops any response that no longer matches the current request.
   const visibleEntitlements = entitlements;
-  const visibleEntitlementsCursor = entitlementsFence.canLoadMore() ? entitlementsCursor : null;
+  const visibleEntitlementsCursor = ready ? entitlementsCursor : null;
   const selectedVisibleIds = visibleEntitlements.filter((item) => selectedIds.has(item.id)).map((item) => item.id);
   const selectedCount = selectedVisibleIds.length;
   const selectableLoadedIds = boundedBatchSelection(visibleEntitlements.map((item) => item.id));
