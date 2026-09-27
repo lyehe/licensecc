@@ -362,6 +362,34 @@ test("admin UI issues zero entitlements requests when leaving and reentering the
   expect(api.requests.entitlementReads.length).toBe(before);
 });
 
+test("admin UI keeps Load More working across a tab switch and still sends zero requests on reentry", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  api.seed.entitlements([{}, {}, {}]);
+  api.behavior.entitlementsPageSize = 1;
+  await page.route("**/api/admin/**", api.route);
+  await page.goto("/");
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "License access", exact: true }).click();
+  await expect(page.locator(".tablePane table tbody tr")).toHaveCount(1);
+  const loadMore = page.getByRole("button", { name: "Load more", exact: true });
+  await expect(loadMore).toBeVisible();
+  await expect.poll(() => api.requests.entitlementReads.length).toBeGreaterThan(0);
+  const readsAfterFirstPage = api.requests.entitlementReads.length;
+
+  // Leaving and reentering the tab with the filter unchanged must still cost zero requests, and
+  // the request fence must not have gotten stuck by the tab switch: Load More must still work.
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Overview", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Overview", exact: true })).toBeVisible();
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "License access", exact: true }).click();
+  await expect(page.locator(".tablePane table tbody tr")).toHaveCount(1);
+  await page.waitForTimeout(600);
+  expect(api.requests.entitlementReads.length).toBe(readsAfterFirstPage);
+
+  await expect(loadMore).toBeVisible();
+  await loadMore.click();
+  await expect(page.locator(".tablePane table tbody tr")).toHaveCount(2);
+  expect(api.requests.entitlementReads.length).toBe(readsAfterFirstPage + 1);
+});
+
 test("admin UI entitlement list renders exactly one of table rows or cards at any viewport", async ({ page }) => {
   const api = makeAdminApiFixture();
   await page.route("**/api/admin/**", api.route);

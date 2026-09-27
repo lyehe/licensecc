@@ -148,6 +148,9 @@ export function makeAdminApiFixture() {
     deviceTransitionResponse: null,
     reportVersioned: false,
     activePolicyPagination: false,
+    // A number here pages the entitlements list for real (offset cursor), so Load More can be
+    // exercised across a genuine tab switch instead of the fixed single-cursor release-seat page.
+    entitlementsPageSize: null,
     deliveryPagination: false,
     ordersPagination: false,
     expiringPagination: false,
@@ -1014,6 +1017,13 @@ export function makeAdminApiFixture() {
         (feature === null || item.feature === feature) &&
         (status === null || item.status === status),
       );
+      if (behavior.entitlementsPageSize !== null) {
+        const offset = Number(url.searchParams.get("cursor") ?? "0");
+        const page = filteredEntitlements.slice(offset, offset + behavior.entitlementsPageSize).map(publicRecord);
+        const nextOffset = offset + behavior.entitlementsPageSize;
+        const nextCursor = nextOffset < filteredEntitlements.length ? String(nextOffset) : null;
+        return fulfill(200, makeEnvelope("entitlements_listed", { items: page, next_cursor: nextCursor }));
+      }
       const releaseTargetOnSecondPage = behavior.releaseSeatTargetOnSecondPage && behavior.releaseSeatTargetId !== null;
       const items = releaseTargetOnSecondPage
         ? filteredEntitlements.filter((item) => item.id !== behavior.releaseSeatTargetId).map(publicRecord)
