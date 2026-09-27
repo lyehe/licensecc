@@ -571,26 +571,74 @@ test("an unsaved catalog draft still asks before a link or Back discards it", as
   await expect.poll(() => new URL(page.url()).hash).toBe(`#/plans?plan=${plan.id}`);
 });
 
-test("a plan save in flight keeps its editor through Back and closes it once the save settles", async ({ page }) => {
-  const api = makeAdminApiFixture();
-  api.seed.catalogPlan();
-  await page.route("**/api/admin/**", api.route);
-  const prompts = recordLeavePrompts(page);
+async function editPlanDetail(page, plan, name) {
   await page.goto("/#/plans");
   await page.getByRole("row", { name: /Plan confirm/ }).getByRole("button", { name: "View plan", exact: true }).click();
   await page.getByRole("button", { name: "Edit plan", exact: true }).click();
   const form = page.getByRole("form", { name: "Catalog plan" });
-  await form.getByLabel("Name").fill("Renamed plan");
+  await form.getByLabel("Name").fill(name);
+  await expect.poll(() => new URL(page.url()).hash).toBe(`#/plans?plan=${plan.id}`);
+  return form;
+}
+
+async function expectLeaveRefused(page, plan, form, name) {
+  await leaveForOverview(page);
+  await expect(page.locator("[data-workspace-heading]")).toHaveText("Plans & features");
+  await page.goBack();
+  await expect.poll(() => new URL(page.url()).hash).toBe(`#/plans?plan=${plan.id}`);
+  await expect(page.locator("[data-workspace-heading]")).toHaveText("Plans & features");
+  await expect(form.getByLabel("Name")).toHaveValue(name);
+}
+
+test("a plan save in flight blocks leaving, and a save that fails keeps its draft", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  const plan = api.seed.catalogPlan();
+  await page.route("**/api/admin/**", api.route);
+  let releasePatch;
+  const patchGate = new Promise((resolve) => { releasePatch = resolve; });
+  let patches = 0;
+  await page.route(`**/api/admin/catalog/plans/${plan.id}`, async (route) => {
+    if (route.request().method() !== "PATCH") return route.fallback();
+    patches += 1;
+    await patchGate;
+    return route.fulfill({ status: 400, contentType: "application/json", body: JSON.stringify({ ok: false, code: "invalid_request", request_id: "ui-e2e-plan-patch-rejected" }) });
+  });
+  const prompts = recordLeavePrompts(page);
+  const form = await editPlanDetail(page, plan, "Kept draft");
+  await form.getByRole("button", { name: "Update plan" }).click();
+  await expect.poll(() => patches).toBe(1);
+
+  // Neither a link nor browser Back may leave while the save owns this editor.
+  await expectLeaveRefused(page, plan, form, "Kept draft");
+  expect(prompts).toEqual([]);
+
+  releasePatch();
+  await expect(page.getByText(/invalid_request/)).toBeVisible();
+  await expect(form.getByLabel("Name")).toHaveValue("Kept draft");
+  // The draft the save did not take is still unsaved: leaving asks before discarding it.
+  await leaveForOverview(page);
+  await expect.poll(() => prompts).toEqual(["Discard this unsaved catalog task? Choose Cancel to keep editing."]);
+  await expect(form.getByLabel("Name")).toHaveValue("Kept draft");
+  await expect.poll(() => new URL(page.url()).hash).toBe(`#/plans?plan=${plan.id}`);
+});
+
+test("a plan save in flight blocks leaving until it succeeds, then navigation works again", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  const plan = api.seed.catalogPlan();
+  await page.route("**/api/admin/**", api.route);
+  const prompts = recordLeavePrompts(page);
+  const form = await editPlanDetail(page, plan, "Renamed plan");
   api.behavior.deferMutations.add("catalog-plan-patch");
   await form.getByRole("button", { name: "Update plan" }).click();
   await expect.poll(() => api.behavior.releaseMutations.has("catalog-plan-patch")).toBe(true);
 
-  await page.goBack();
-  await expect.poll(() => new URL(page.url()).hash).toBe("#/plans");
-  await expect(form).toBeVisible();
+  await expectLeaveRefused(page, plan, form, "Renamed plan");
   api.behavior.releaseMutations.get("catalog-plan-patch")();
   await expect(page.getByText(/catalog_plan_patched/)).toBeVisible();
-  await expect(form).toHaveCount(0);
-  await expect(page.getByRole("row", { name: /Renamed plan/ })).toBeVisible();
+  await leaveForOverview(page);
+  await expect(page.locator("[data-workspace-heading]")).toHaveText("Overview");
+  await page.goBack();
+  await expect.poll(() => new URL(page.url()).hash).toBe(`#/plans?plan=${plan.id}`);
+  await expect(page.getByRole("heading", { name: "Renamed plan", exact: true })).toBeVisible();
   expect(prompts).toEqual([]);
 });
