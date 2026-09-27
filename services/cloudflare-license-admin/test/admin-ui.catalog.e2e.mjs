@@ -113,7 +113,7 @@ test("admin UI reconciles an unknown catalog-import Apply with the original prev
   await dialog.getByRole("button", { name: "Confirm" }).click();
   await expect.poll(() => api.requests.catalogImports.length).toBe(2);
   const first = api.requests.catalogImports[1];
-  await expect(dialog.locator(".modalError")).toContainText("Mutation outcome unknown; do not retry.");
+  await expect(dialog.locator(".modalError")).toContainText("The outcome of this change is unknown. Don't repeat it; reconcile its status first.");
   await expect(page.getByRole("button", { name: "Reconcile catalog import" })).toBeVisible();
 
   // The modal remains a true modal while the error is announced. Closing it
@@ -154,7 +154,7 @@ test("admin UI replays a retained catalog-import Apply after a tab round-trip wi
   await dialog.getByRole("button", { name: "Confirm" }).click();
   await expect.poll(() => api.requests.catalogImports.length).toBe(2);
   const first = api.requests.catalogImports[1];
-  await expect(dialog.locator(".modalError")).toContainText("Mutation outcome unknown; do not retry.");
+  await expect(dialog.locator(".modalError")).toContainText("The outcome of this change is unknown. Don't repeat it; reconcile its status first.");
   await dialog.getByRole("button", { name: "Cancel" }).click();
   await expect(dialog).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Reconcile catalog import" })).toBeVisible();
@@ -227,7 +227,7 @@ test("admin UI retains a substituted initial catalog-import Apply response for e
   await dialog.getByRole("button", { name: "Confirm" }).click();
   await expect.poll(() => api.requests.catalogImports.length).toBe(2);
   const first = api.requests.catalogImports[1];
-  await expect(dialog.locator(".modalError")).toContainText("Mutation outcome unknown; do not retry.");
+  await expect(dialog.locator(".modalError")).toContainText("The outcome of this change is unknown. Don't repeat it; reconcile its status first.");
   await dialog.getByRole("button", { name: "Cancel" }).click();
   await page.getByRole("button", { name: "Reconcile catalog import" }).click();
   await expect.poll(() => api.requests.catalogImports.length).toBe(3);
@@ -259,7 +259,7 @@ test("admin UI retains a substituted replayed catalog-import response until an e
   await dialog.getByRole("button", { name: "Confirm" }).click();
   await expect.poll(() => api.requests.catalogImports.length).toBe(2);
   const first = api.requests.catalogImports[1];
-  await expect(dialog.locator(".modalError")).toContainText("Mutation outcome unknown; do not retry.");
+  await expect(dialog.locator(".modalError")).toContainText("The outcome of this change is unknown. Don't repeat it; reconcile its status first.");
   await dialog.getByRole("button", { name: "Cancel" }).click();
 
   api.behavior.catalogImportApplyResponseTransforms.push((preview) => ({
@@ -271,7 +271,7 @@ test("admin UI retains a substituted replayed catalog-import response until an e
   const substitutedReplay = api.requests.catalogImports[2];
   expect(substitutedReplay.idempotency_key).toBe(first.idempotency_key);
   expect(substitutedReplay.body).toEqual(first.body);
-  await expect(page.locator(".operatorNotice")).toContainText("Mutation outcome unknown; do not retry.");
+  await expect(page.locator(".operatorNotice")).toContainText("The outcome of this change is unknown. Don't repeat it; reconcile its status first.");
   await expect(page.getByRole("button", { name: "Reconcile catalog import" })).toBeVisible();
 
   await page.getByRole("button", { name: "Reconcile catalog import" }).click();
@@ -337,7 +337,7 @@ test("admin UI surfaces catalog-import capability failures exactly and recovers 
   api.behavior.catalogImportReadFailures.push("response-error");
   dialog = await attempt();
   await expect(dialog).toHaveCount(0);
-  await expect(page.locator(".operatorNotice")).toContainText("Action succeeded; status refresh failed");
+  await expect(page.locator(".operatorNotice")).toContainText("The change was saved, but its status could not be refreshed.");
   await expect(form.getByRole("button", { name: "Apply import" })).toBeDisabled();
   await page.getByRole("button", { name: "Refresh status" }).click();
   await expect(page.locator(".operatorNotice")).toHaveCount(0);

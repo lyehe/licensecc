@@ -627,7 +627,7 @@ test("admin UI treats accepted mutation plus aborted refresh as success with man
   await dialog.getByRole("button", { name: "Confirm" }).click();
   await expect.poll(() => api.requests.transitions.length).toBe(1);
   await expect(dialog).toHaveCount(0);
-  await expect(page.locator(".operatorNotice")).toContainText("Action succeeded; status refresh failed");
+  await expect(page.locator(".operatorNotice")).toContainText("The change was saved, but its status could not be refreshed.");
   await expect(page.getByRole("button", { name: "Refresh status" })).toBeVisible();
   await expect(row.locator(".status")).toBeFocused();
   expect(await page.evaluate(() => document.activeElement === document.body)).toBe(false);
@@ -660,7 +660,7 @@ test("admin UI treats malformed post-success refresh as success with manual reco
   await dialog.getByRole("button", { name: "Confirm" }).click();
   await expect.poll(() => api.requests.transitions.length).toBe(1);
   await expect(dialog).toHaveCount(0);
-  await expect(page.locator(".operatorNotice")).toContainText("Action succeeded; status refresh failed");
+  await expect(page.locator(".operatorNotice")).toContainText("The change was saved, but its status could not be refreshed.");
   await expect(page.getByRole("button", { name: "Refresh status" })).toBeVisible();
   await expect(row.locator(".status")).toBeFocused();
   expect(await page.evaluate(() => document.activeElement === document.body)).toBe(false);
@@ -692,7 +692,7 @@ for (const refreshFailure of ["truncated", "wrong-enum"]) {
     await dialog.getByRole("button", { name: "Confirm" }).click();
 
     await expect.poll(() => api.requests.transitions.length).toBe(1);
-    await expect(page.locator(".operatorNotice")).toContainText("Action succeeded; status refresh failed");
+    await expect(page.locator(".operatorNotice")).toContainText("The change was saved, but its status could not be refreshed.");
     const refreshButton = page.getByRole("button", { name: "Refresh status" });
     await refreshButton.click();
     await expect(page.locator(".operatorNotice")).toHaveCount(0);
@@ -718,7 +718,7 @@ test("admin UI rejects a nested-null customer detail refresh before clearing a s
   await dialog.getByRole("button", { name: "Confirm" }).click();
 
   await expect.poll(() => api.requests.customerTransitions.length).toBe(1);
-  await expect(page.locator(".operatorNotice")).toContainText("Action succeeded; status refresh failed");
+  await expect(page.locator(".operatorNotice")).toContainText("The change was saved, but its status could not be refreshed.");
   await page.getByRole("button", { name: "Refresh status" }).click();
   await expect(page.locator(".operatorNotice")).toHaveCount(0);
   const reenable = page.getByRole("button", { name: "Reenable", exact: true, includeHidden: true }).first();
@@ -747,7 +747,7 @@ test("admin UI rejects a non-2xx refresh carrying an ok response", async ({ page
   await dialog.getByRole("button", { name: "Confirm" }).click();
   await expect.poll(() => api.requests.transitions.length).toBe(1);
   await expect(dialog).toHaveCount(0);
-  await expect(page.locator(".operatorNotice")).toContainText("Action succeeded; status refresh failed");
+  await expect(page.locator(".operatorNotice")).toContainText("The change was saved, but its status could not be refreshed.");
   await expect(page.getByRole("button", { name: "Refresh status" })).toBeVisible();
   await expect(row.locator(".status")).toBeFocused();
   expect(await page.evaluate(() => document.activeElement === document.body)).toBe(false);
@@ -775,13 +775,13 @@ test("admin UI keeps the success warning after a parsed refresh error and clears
   await dialog.getByRole("button", { name: "Confirm" }).click();
   await expect.poll(() => api.requests.transitions.length).toBe(1);
   await expect(dialog).toHaveCount(0);
-  await expect(page.locator(".operatorNotice")).toContainText("Action succeeded; status refresh failed");
+  await expect(page.locator(".operatorNotice")).toContainText("The change was saved, but its status could not be refreshed.");
   const refreshButton = page.getByRole("button", { name: "Refresh status" });
   await expect(refreshButton).toBeVisible();
   await expect(row.locator(".status")).toBeFocused();
 
   await refreshButton.click();
-  await expect(page.locator(".operatorNotice")).toContainText("Action succeeded; status refresh failed");
+  await expect(page.locator(".operatorNotice")).toContainText("The change was saved, but its status could not be refreshed.");
   await expect(row.locator(".status")).toBeFocused();
   await expect.poll(() => api.requests.transitions.length).toBe(1);
 
@@ -815,7 +815,7 @@ test("admin UI treats missing refresh data as success with manual recovery", asy
   await dialog.getByRole("button", { name: "Confirm" }).click();
   await expect.poll(() => api.requests.transitions.length).toBe(1);
   await expect(dialog).toHaveCount(0);
-  await expect(page.locator(".operatorNotice")).toContainText("Action succeeded; status refresh failed");
+  await expect(page.locator(".operatorNotice")).toContainText("The change was saved, but its status could not be refreshed.");
   const refreshButton = page.getByRole("button", { name: "Refresh status" });
   await expect(row.locator(".status")).toBeFocused();
   await refreshButton.click();
@@ -1097,7 +1097,7 @@ test("admin UI retains an ambiguous keyed ordinary mutation and replays its immu
   await form.getByLabel("URL").fill("https://hooks.example.test/recovered");
   await form.getByRole("button", { name: "Create endpoint" }).click();
   await expect.poll(() => api.requests.webhookCreateAttempts.length).toBe(1);
-  await expect(page.locator(".operatorNotice")).toContainText("Mutation outcome unknown; do not retry.");
+  await expect(page.locator(".operatorNotice")).toContainText("The outcome of this change is unknown. Don't repeat it; reconcile its status first.");
   await expect(form.getByLabel("URL")).toBeDisabled();
   await expect(form.getByRole("button", { name: "Create endpoint" })).toBeDisabled();
 
@@ -1108,7 +1108,7 @@ test("admin UI retains an ambiguous keyed ordinary mutation and replays its immu
   await expect.poll(() => api.requests.webhookCreateAttempts.length).toBe(2);
   expect(api.requests.webhookCreateAttempts[1].idempotencyKey).toBe(api.requests.webhookCreateAttempts[0].idempotencyKey);
   expect(api.requests.webhookCreateAttempts[1].body).toBe(api.requests.webhookCreateAttempts[0].body);
-  await expect(page.locator(".operatorNotice")).toContainText("Action succeeded; status refresh failed");
+  await expect(page.locator(".operatorNotice")).toContainText("The change was saved, but its status could not be refreshed.");
   await expect(page.locator(".operatorNotice")).not.toContainText("Other actions are unavailable until reconciliation completes.");
   await page.getByRole("button", { name: "Refresh status" }).click();
   await expect(page.locator(".operatorNotice")).toHaveCount(0);
@@ -1134,7 +1134,7 @@ test("admin UI keeps an exact ordinary success in GET-only recovery after a 5xx 
   api.behavior.webhookRefreshFailures.push("response-error");
   await form.getByRole("button", { name: "Create endpoint" }).click();
   await expect.poll(() => api.requests.webhookCreateAttempts.length).toBe(1);
-  await expect(page.locator(".operatorNotice")).toContainText("Action succeeded; status refresh failed");
+  await expect(page.locator(".operatorNotice")).toContainText("The change was saved, but its status could not be refreshed.");
   // The known write opened its endpoint; the editor stays locked until the status read succeeds.
   await expect(form.getByLabel("URL (required)")).toHaveValue("https://hooks.example.test/exact-refresh");
   await expect(form.getByRole("button", { name: "Save changes" })).toBeDisabled();

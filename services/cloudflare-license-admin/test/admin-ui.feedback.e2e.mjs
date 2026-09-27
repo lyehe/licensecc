@@ -65,18 +65,18 @@ test("a retained unknown outcome keeps its notice, lock and Reconcile control ac
   const dialog = page.getByRole("dialog");
   await dialog.getByLabel("Reason (required)").fill("operator review");
   await dialog.getByRole("button", { name: "Confirm" }).click();
-  await expect(dialog.locator(".modalError")).toContainText("Mutation outcome unknown; do not retry.");
+  await expect(dialog.locator(".modalError")).toContainText("The outcome of this change is unknown. Don't repeat it; reconcile its status first.");
   await dialog.getByRole("button", { name: "Cancel" }).click();
 
   const notice = page.locator(".operatorNotice");
-  await expect(notice).toContainText("Mutation outcome unknown; do not retry.");
+  await expect(notice).toContainText("The outcome of this change is unknown. Don't repeat it; reconcile its status first.");
   await expect(notice).toContainText("Other actions are unavailable until reconciliation completes.");
   // The notice is the one surface for this outcome: the page banner neither repeats it nor keeps
   // the earlier export message beside it.
   await expect(page.locator(".activityMessage")).toHaveCount(0);
 
   await goTo(page, "Overview");
-  await expect(notice).toContainText("Mutation outcome unknown; do not retry.");
+  await expect(notice).toContainText("The outcome of this change is unknown. Don't repeat it; reconcile its status first.");
   await expect(notice.getByRole("button", { name: "Reconcile status", exact: true })).toBeEnabled();
   await expect(page.locator("main.consoleShell")).toHaveClass(/hasOperationNotice/);
   await goTo(page, "License access");
@@ -112,9 +112,19 @@ test("a policy validation error sits beside its field, and a name conflict marks
 
   await form.getByLabel("Name (required)").fill("Taken name");
   await form.getByRole("button", { name: "Create policy", exact: true }).click();
-  await expectFieldError(form.getByLabel("Name (required)"), "A policy with this name already exists in this project. Choose another name.");
+  const name = form.getByLabel("Name (required)");
+  await expectFieldError(name, "A policy with this name already exists in this project. Choose another name.");
   await expect(page.locator(".activityMessage")).toHaveCount(0);
   expect(api.requests.policyCreates).toHaveLength(1);
+  // A server refusal keeps its code and request id under Technical details beside the field, while
+  // the input still names only the error sentence.
+  expect((await name.getAttribute("aria-describedby")).split(" ")).toHaveLength(1);
+  const technical = form.locator(".feedbackDetails").filter({ hasText: "policy_name_conflict" });
+  await technical.getByText("Technical details", { exact: true }).click();
+  await expect(technical.getByText("policy_name_conflict · ui-e2e-policy-conflict", { exact: true })).toBeVisible();
+  // A local rule has no request to name.
+  await name.fill("Fresh name");
+  await expect(form.locator(".feedbackDetails")).toHaveCount(0);
 });
 
 test("a webhook URL error sits beside the URL, and a whole-form rule stays with the form", async ({ page }) => {
@@ -278,4 +288,146 @@ test("a stale save of the entitlement editor explains itself and reloads the ent
   await editor.getByRole("button", { name: "Save changes", exact: true }).click();
   await expect(banner).toContainText("Entitlement changes saved.");
   expect(api.requests.patches).toHaveLength(1);
+});
+
+test("a discarded catalog editor keeps none of its old inline errors", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  api.seed.catalogPlan("plan_pro", "DEFAULT", "pro");
+  api.seed.catalogFeature();
+  await page.route("**/api/admin/**", api.route);
+  page.on("dialog", (prompt) => prompt.accept());
+  const openPlan = async () => {
+    await page.getByRole("row", { name: /Plan pro pro/ }).getByRole("button", { name: "View plan", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Plan pro", exact: true })).toBeVisible();
+  };
+  await page.goto("/#/plans");
+
+  // A projection previewed without a plan, discarded, then opened again from plan "pro".
+  await page.getByRole("button", { name: "Apply plan", exact: true }).click();
+  const projection = page.getByRole("form", { name: "Plan projection", exact: true });
+  await projection.getByLabel("License ID").fill("lic_1");
+  await projection.getByRole("button", { name: "Preview", exact: true }).click();
+  const planKey = projection.getByLabel("Plan key");
+  await expectFieldError(planKey, "Enter a plan key or a plan ID.");
+  await page.getByRole("button", { name: "Back to plans", exact: true }).click();
+  await openPlan();
+  await page.getByRole("button", { name: "Apply plan", exact: true }).click();
+  await expect(planKey).toHaveValue("pro");
+  await expect(planKey).not.toHaveAttribute("aria-invalid", "true");
+  await expect(projection.locator(".fieldError")).toHaveCount(0);
+  await page.getByRole("button", { name: "Back to plans", exact: true }).click();
+
+  // A plan feature refused for its display order, discarded, then added again.
+  await openPlan();
+  await page.getByRole("button", { name: "Add feature", exact: true }).click();
+  const row = page.getByRole("form", { name: "Plan feature", exact: true });
+  await row.getByLabel("Feature key").fill("confirm");
+  const order = row.getByLabel("Display order");
+  await order.fill("-1");
+  await row.getByRole("button", { name: "Save plan feature", exact: true }).click();
+  await expectFieldError(order, "Enter a whole number from 0 to 1,000,000.");
+  await page.getByRole("button", { name: "Back to plans", exact: true }).click();
+  await openPlan();
+  await page.getByRole("button", { name: "Add feature", exact: true }).click();
+  await expect(order).toHaveValue("0");
+  await expect(order).not.toHaveAttribute("aria-invalid", "true");
+  await expect(row.locator(".fieldError")).toHaveCount(0);
+});
+
+test("a device limit cleared after unreadable text creates with the default limit", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  const writes = [];
+  await page.route("**/api/admin/**", api.route);
+  await page.route("**/api/admin/entitlements", async (route) => {
+    if (route.request().method() === "POST") writes.push(route.request().postDataJSON());
+    await route.fallback();
+  });
+  await page.goto("/#/entitlements");
+  await page.getByRole("button", { name: "New entitlement", exact: true }).click();
+  const form = page.getByRole("form", { name: "New entitlement", exact: true });
+  await form.getByLabel("Feature").fill("cleared");
+  await form.getByLabel("License fingerprint").fill("c".repeat(64));
+  const limit = form.getByLabel("Device limit");
+  await limit.pressSequentially("5e");
+  // Clearing unreadable text leaves the value blank both before and after, so no change event fires.
+  await limit.fill("");
+  await form.getByRole("button", { name: "Create entitlement", exact: true }).click();
+  await expect(page.locator(".activityMessage")).toContainText("License (entitlement) created.");
+  expect(writes).toHaveLength(1);
+  expect(Object.hasOwn(writes[0], "max_active_devices")).toBe(false);
+});
+
+test("a created entitlement outside the current filter opens alone, and its id stays out of the address", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  await page.route("**/api/admin/**", api.route);
+  await page.goto("/#/entitlements");
+  await page.getByLabel("Filter by status").selectOption("disabled");
+  await expect(page).toHaveURL(/status=disabled/);
+  await page.getByRole("button", { name: "New entitlement", exact: true }).click();
+  const fingerprint = "ab".repeat(32);
+  const form = page.getByRole("form", { name: "New entitlement", exact: true });
+  await form.getByLabel("Feature").fill("alone");
+  await form.getByLabel("License fingerprint").fill(fingerprint);
+  await form.getByRole("button", { name: "Create entitlement", exact: true }).click();
+  await expect(page.locator(".activityMessage")).toContainText("License (entitlement) created.");
+  // Active, so not in the suspended list: the list shows the new record on its own.
+  await expect(page.getByText("Showing 1 entitlement")).toBeVisible();
+  const created = page.locator("[data-focus-row]").filter({ hasText: "alone" });
+  await expect(created).toHaveCount(1);
+  await expect.poll(() => page.evaluate(() => document.activeElement?.closest("[data-focus-row]")?.textContent ?? "")).toContain("alone");
+  const entitlementId = (await created.getAttribute("data-focus-row")).replace("entitlement:", "");
+  expect(entitlementId).not.toBe("");
+  // The single-record view is session memory: neither the address nor history state names the record.
+  for (const secret of [entitlementId, fingerprint]) {
+    expect(page.url()).not.toContain(secret);
+    expect(await page.evaluate(() => JSON.stringify(history.state))).not.toContain(secret);
+  }
+});
+
+test("a create that settles after the operator changes the filter leaves that filter alone", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  await page.route("**/api/admin/**", api.route);
+  await page.goto("/#/entitlements");
+  await page.getByRole("button", { name: "New entitlement", exact: true }).click();
+  const form = page.getByRole("form", { name: "New entitlement", exact: true });
+  await form.getByLabel("Feature").fill("late");
+  await form.getByLabel("License fingerprint").fill("d".repeat(64));
+  // The write lands, but the list read that should show it fails.
+  api.behavior.refreshFailure = "response-error";
+  await form.getByRole("button", { name: "Create entitlement", exact: true }).click();
+  const notice = page.locator(".operatorNotice");
+  await expect(notice).toContainText("The change was saved, but its status could not be refreshed.");
+  // The operator moves to another view of the list before the new record could be shown.
+  const status = page.getByLabel("Filter by status");
+  await status.selectOption("disabled");
+  await expect(page).toHaveURL(/status=disabled/);
+  await notice.getByRole("button", { name: "Refresh status", exact: true }).click();
+  await expect(notice).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "Entitlement records", exact: true })).toBeVisible();
+  await expect(status).toHaveValue("disabled");
+  await expect(page.getByText("Showing 1 entitlement")).toHaveCount(0);
+});
+
+test("a stale save whose reload fails says the values were not reloaded", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  api.seed.entitlement();
+  await page.route("**/api/admin/**", api.route);
+  await page.route("**/api/admin/entitlements/ent-1", async (route) => {
+    if (route.request().method() === "PATCH") {
+      await route.fulfill({ status: 409, contentType: "application/json", body: JSON.stringify({ ok: false, code: "stale_transition", request_id: "ui-e2e-stale-unreloaded" }) });
+      return;
+    }
+    await route.fallback();
+  });
+  await page.goto("/#/entitlements");
+  const row = page.getByRole("region", { name: "Entitlement records", exact: true }).locator("tbody tr").first();
+  await row.getByRole("button", { name: "Edit", exact: true }).click();
+  const editor = page.getByRole("form", { name: "Edit entitlement", exact: true });
+  await editor.getByLabel("Notes").fill("changed meanwhile");
+  api.behavior.refreshFailure = "response-error";
+  await editor.getByRole("button", { name: "Save changes", exact: true }).click();
+  const banner = page.locator(".activityMessage");
+  await expect(banner).toContainText("This license (entitlement) changed after you opened it, and its current values could not be reloaded. Reload the list before you save again.");
+  await expect(banner).not.toContainText("were reloaded");
+  await expect(editor.getByLabel("Notes")).toHaveValue("changed meanwhile");
 });

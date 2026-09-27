@@ -287,6 +287,8 @@ test("Create policy… opens the policy form for the draft's project and returns
 
   const policy = form.getByLabel("Policy (optional)", { exact: true });
   await expect(policy).toHaveValue("pol_1");
+  // The create's confirmation follows the operator back to the draft.
+  await expect(page.locator(".activityMessage")).toContainText("Policy created.");
   await expect(policy.locator("option:checked")).toHaveText("Pro · 3 devices · APP");
   await expect(form.getByLabel("Device limit (from policy Pro)", { exact: true })).toHaveValue("3");
   await expect(form.getByLabel("Protection", { exact: true })).toHaveValue("device_bound_v1");

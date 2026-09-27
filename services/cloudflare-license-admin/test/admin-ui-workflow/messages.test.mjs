@@ -109,7 +109,8 @@ function collectClientCodes() {
       if (/^[a-z][a-z0-9_]*$/.test(sample)) add(sample, `${origin} (template ${match[1]})`);
     }
     for (const match of source.matchAll(new RegExp(`\\b(?:codeFeedback|failureFeedback|refusalOutcome|showCode)\\(\\s*"${CODE}"`, "g"))) add(match[1], origin);
-    for (const match of source.matchAll(new RegExp(`\\bmessage:\\s*"${CODE}"`, "g"))) add(match[1], origin);
+    // A form's own feedback: `someFormFeedback.show("code", …)`.
+    for (const match of source.matchAll(new RegExp(`\\.show\\(\\s*"${CODE}"`, "g"))) add(match[1], origin);
   }
   // Built from an expression rather than a literal at the feedback call.
   for (const code of ["action_failed", "status_refresh_failed", "invalid_api_response", "invalid_mutation_response", "invalid_target_identity", "duplicate_page_item", "repeated_cursor", "invalid_form", "csv_export_failed"]) {
@@ -174,6 +175,15 @@ test("every Worker code and every client-local code has operator copy", async ()
   assert.deepEqual(dataOnlyFromClient, [], "a data-only code is handed to feedback somewhere");
 });
 
+test("no console code is ever used as a message", () => {
+  // A literal code handed to `message:` would render as text; every code goes through the catalog.
+  const offenders = [];
+  for (const file of sourceFiles(join(serviceRoot, "src/ui"), [".ts", ".tsx"])) {
+    for (const match of readFileSync(file, "utf8").matchAll(/\bmessage:\s*"([a-z][a-z0-9_]*)"/g)) offenders.push(`${relativePath(file)}: ${match[1]}`);
+  }
+  assert.deepEqual(offenders, []);
+});
+
 test("operator copy never shows a snake_case code as its text", async () => {
   const messages = await loadWorkflowModule("shared/messages.ts");
   for (const [code, copy] of Object.entries(messages.RESULT_CODE_COPY)) {
@@ -211,9 +221,12 @@ test("known codes keep their tone, refusals are always errors, and the code trav
   assert.deepEqual(messages.codeFeedback("policy_created", "req-1"), { tone: "success", message: "Policy created.", detail: { code: "policy_created", requestId: "req-1" } });
   assert.deepEqual(messages.codeFeedback("stale_transition", "req-2"), {
     tone: "error",
-    message: "This license (entitlement) changed after you opened it. Reload it and try again.",
+    message: "This record changed after you loaded it. Reload it and try again.",
     detail: { code: "stale_transition", requestId: "req-2" },
   });
+  // Emitted for a plan feature whose project differs from its plan's, and for a policy of another project.
+  assert.match(messages.describeCode("invalid_plan_config").text, /project/);
+  assert.match(messages.describeCode("invalid_plan_config").text, /polic/);
   // The same code is a success after a policy is disabled and a refusal when a catalog row names it.
   assert.equal(messages.codeFeedback("policy_disabled", "req-3").tone, "success");
   assert.equal(messages.failureFeedback("policy_disabled", "req-3").tone, "error");
@@ -246,6 +259,38 @@ test("a failed response becomes feedback from its envelope, and a malformed one 
   }
   assert.deepEqual(messages.apiFailureFeedback({ ok: false, code: "toString", request_id: "req-9" }).message, "Something went wrong. Reference req-9.");
   assert.deepEqual(messages.apiFailureFeedback({ ok: false, code: "not_found" }).detail, { code: "not_found", requestId: null });
+  // A success envelope that failed its guard is an unreadable response, never its own success code.
+  const unreadSuccess = messages.apiFailureFeedback({ ok: true, code: "policy_created", request_id: "req-10" });
+  assert.equal(unreadSuccess.tone, "error");
+  assert.equal(unreadSuccess.message, "The server's response could not be read. Check your connection and try again.");
+  assert.deepEqual(unreadSuccess.detail, { code: "invalid_api_response", requestId: "req-10" });
+});
+
+test("the retained-notice sentences are full sentences from the catalog", async () => {
+  const [actions, messages] = await loadWorkflowModules(["shared/operatorActions.ts", "shared/messages.ts"]);
+  assert.equal(actions.CONFIRM_MUTATION_UNKNOWN_MESSAGE, "The outcome of this change is unknown. Don't repeat it; reconcile its status first.");
+  assert.equal(actions.CONFIRM_REFRESH_FAILURE_MESSAGE, "The change was saved, but its status could not be refreshed.");
+  assert.equal(actions.CONFIRM_MUTATION_UNKNOWN_MESSAGE, messages.OUTCOME_UNKNOWN_TEXT);
+  assert.equal(actions.CONFIRM_REFRESH_FAILURE_MESSAGE, messages.STATUS_NOT_REFRESHED_TEXT);
+  // A strict read's failure carries its code for handling, but its message never reads as one.
+  const failure = new actions.ConfirmRefreshFailure("not_found", "req-11");
+  assert.equal(failure.code, "not_found");
+  assert.equal(failure.requestId, "req-11");
+  assert.doesNotMatch(failure.message, /not_found|req-11|\(/);
+});
+
+test("a failed CSV export keeps its HTTP status under Technical details", async () => {
+  const [pagination, text] = await loadWorkflowModules(["shared/pagination.ts", "shared/FeedbackText.tsx"]);
+  const shown = [];
+  const savedFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response("unavailable", { status: 503 });
+  try {
+    await pagination.downloadCsv("/api/admin/entitlements", "entitlements.csv", (work) => work(), (feedback) => shown.push(feedback));
+  } finally {
+    globalThis.fetch = savedFetch;
+  }
+  assert.deepEqual(shown, [{ tone: "error", message: "The CSV export failed. Try again.", detail: { code: "csv_export_failed", requestId: null, httpStatus: 503 } }]);
+  assert.equal(text.feedbackDetailText(shown[0].detail), "csv_export_failed · HTTP 503");
 });
 
 test("validation families share one sentence per rule and read their bounds", async () => {

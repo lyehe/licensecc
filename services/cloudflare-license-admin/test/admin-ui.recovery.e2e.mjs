@@ -171,12 +171,12 @@ test("admin UI keeps a same-key replay conflict indeterminate after a post-commi
   const dialog = page.getByRole("dialog");
   await dialog.getByLabel("Reason (required)").fill("operator review");
   await dialog.getByRole("button", { name: "Confirm" }).click();
-  await expect(page.locator(".operatorNotice")).toContainText("Mutation outcome unknown; do not retry.");
+  await expect(page.locator(".operatorNotice")).toContainText("The outcome of this change is unknown. Don't repeat it; reconcile its status first.");
   await dialog.getByRole("button", { name: "Cancel" }).click();
   await page.getByRole("button", { name: "Reconcile status" }).click();
   await expect.poll(() => api.requests.transitions.length).toBe(2);
   expect(api.requests.transitions[1].idempotencyKey).toBe(api.requests.transitions[0].idempotencyKey);
-  await expect(page.locator(".operatorNotice")).toContainText("Mutation outcome unknown; do not retry.");
+  await expect(page.locator(".operatorNotice")).toContainText("The outcome of this change is unknown. Don't repeat it; reconcile its status first.");
   await expect(page.getByRole("button", { name: "Reconcile status" })).toBeEnabled();
 });
 
@@ -243,7 +243,7 @@ test("admin UI keeps a release-seat result unknown when same-key replay evidence
   await dialog.getByLabel("Reason (required)").fill("compare replay proof");
   await dialog.getByRole("button", { name: "Confirm" }).click();
   await expect.poll(() => api.requests.releaseSeats.length).toBe(2);
-  await expect(page.locator(".operatorNotice")).toContainText("Mutation outcome unknown; do not retry.");
+  await expect(page.locator(".operatorNotice")).toContainText("The outcome of this change is unknown. Don't repeat it; reconcile its status first.");
 });
 
 test("admin UI keeps an undocumented release-seat 4xx indeterminate", async ({ page }) => {
@@ -269,7 +269,7 @@ test("admin UI keeps an undocumented release-seat 4xx indeterminate", async ({ p
   const dialog = page.getByRole("dialog");
   await dialog.getByLabel("Reason (required)").fill("unexpected response");
   await dialog.getByRole("button", { name: "Confirm" }).click();
-  await expect(dialog.locator(".modalError")).toContainText("Mutation outcome unknown; do not retry.");
+  await expect(dialog.locator(".modalError")).toContainText("The outcome of this change is unknown. Don't repeat it; reconcile its status first.");
   await expect(dialog.getByRole("button", { name: "Confirm" })).toBeDisabled();
   await expect(page.locator(".operatorNotice")).toContainText("Other actions are unavailable until reconciliation completes.");
   expect(api.requests.releaseSeats).toHaveLength(1);
@@ -292,7 +292,7 @@ test("admin UI clears known webhook recovery only after an additional current-co
   await form.getByLabel("URL").fill("https://hooks.example.test/stale-refresh");
   api.behavior.webhookRefreshFailures.push("response-error");
   await form.getByRole("button", { name: "Create endpoint" }).click();
-  await expect(page.locator(".operatorNotice")).toContainText("Action succeeded; status refresh failed");
+  await expect(page.locator(".operatorNotice")).toContainText("The change was saved, but its status could not be refreshed.");
 
   // This changes the list's read context after the known-success POST. The
   // saved recovery callback may not clear solely because its old closure is a
@@ -307,7 +307,7 @@ test("admin UI clears known webhook recovery only after an additional current-co
   await expect.poll(() => api.requests.webhookReads.length).toBe(readsBeforeRecovery + 1);
   expect(new URLSearchParams(api.requests.webhookReads.at(-1)).get("status")).toBe("disabled");
   await expect.poll(() => api.behavior.releaseReads.has("webhooks:disabled")).toBe(true);
-  await expect(page.locator(".operatorNotice")).toContainText("Action succeeded; status refresh failed");
+  await expect(page.locator(".operatorNotice")).toContainText("The change was saved, but its status could not be refreshed.");
   api.behavior.releaseReads.get("webhooks:disabled")();
   await expect(page.locator(".operatorNotice")).toHaveCount(0);
   expect(api.requests.webhookCreateAttempts).toHaveLength(1);
@@ -330,7 +330,7 @@ test("admin UI retains known webhook recovery after its current read becomes sta
   await form.getByLabel("URL").fill("https://hooks.example.test/noop-refresh");
   api.behavior.webhookRefreshFailures.push("response-error");
   await form.getByRole("button", { name: "Create endpoint" }).click();
-  await expect(page.locator(".operatorNotice")).toContainText("Action succeeded; status refresh failed");
+  await expect(page.locator(".operatorNotice")).toContainText("The change was saved, but its status could not be refreshed.");
 
   const filter = page.getByLabel("Filter endpoints by status");
   await filter.selectOption("disabled");
@@ -350,7 +350,7 @@ test("admin UI retains known webhook recovery after its current read becomes sta
   // recovery notice; otherwise this assertion can pass before its no-op
   // callback has actually run.
   await expect(page.getByRole("button", { name: "Refresh status", exact: true })).toBeEnabled();
-  await expect(page.locator(".operatorNotice")).toContainText("Action succeeded; status refresh failed");
+  await expect(page.locator(".operatorNotice")).toContainText("The change was saved, but its status could not be refreshed.");
   expect(api.requests.webhookCreateAttempts).toHaveLength(1);
 });
 
@@ -385,10 +385,10 @@ test("admin UI reconciles unknown customer transitions from the list using the o
       const dialog = page.getByRole("dialog");
       await dialog.getByLabel("Reason (required)").fill("review while returning to the customer list");
       await dialog.getByRole("button", { name: "Confirm", exact: true }).click();
-      await expect(page.locator(".operatorNotice")).toContainText("Mutation outcome unknown; do not retry.");
+      await expect(page.locator(".operatorNotice")).toContainText("The outcome of this change is unknown. Don't repeat it; reconcile its status first.");
       await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
     } else {
-      await expect(page.locator(".operatorNotice")).toContainText("Mutation outcome unknown; do not retry.");
+      await expect(page.locator(".operatorNotice")).toContainText("The outcome of this change is unknown. Don't repeat it; reconcile its status first.");
     }
     // A retained recovery notice must not cover mobile navigation or search.
     await page.setViewportSize({ width: 320, height: 740 });

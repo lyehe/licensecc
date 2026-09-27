@@ -400,7 +400,7 @@ test("admin UI typed failures keep consequence dialogs open and restore focus", 
   expect(api.requests.transitions[2].idempotencyKey).not.toBe(secondRetryableKey);
   await expect(dialog).toBeVisible();
   await expect(dialog.locator(".modalError")).toBeVisible();
-  await expect(dialog.locator(".modalError")).toContainText("Mutation outcome unknown; do not retry.");
+  await expect(dialog.locator(".modalError")).toContainText("The outcome of this change is unknown. Don't repeat it; reconcile its status first.");
   await expect(dialog.locator(".modalError")).toBeFocused();
   await expect(dialog.getByRole("button", { name: "Confirm" })).toBeDisabled();
   await expect.poll(() => api.requests.transitions.length).toBe(3);
@@ -411,7 +411,7 @@ test("admin UI typed failures keep consequence dialogs open and restore focus", 
   // trigger; focus must still remain in a usable in-app target, never BODY.
   expect(await page.evaluate(() => document.activeElement === document.body)).toBe(false);
 
-  await expect(page.locator(".operatorNotice")).toContainText("Mutation outcome unknown; do not retry.");
+  await expect(page.locator(".operatorNotice")).toContainText("The outcome of this change is unknown. Don't repeat it; reconcile its status first.");
   await expect(page.locator(".operatorNotice")).toContainText("Other actions are unavailable until reconciliation completes.");
   await expect(page.getByRole("button", { name: "New entitlement", exact: true })).toBeDisabled();
   await expect(page.getByRole("button", { name: "Reconcile status" })).toBeVisible();
@@ -459,7 +459,7 @@ test("admin UI direct re-enable replays an unknown mutation with the same key", 
   await reenable.focus();
   await clickAction(reenable);
   await expect.poll(() => api.requests.transitions.filter((item) => item.action === "reenable").length).toBe(1);
-  await expect(page.locator(".operatorNotice")).toContainText("Mutation outcome unknown; do not retry.");
+  await expect(page.locator(".operatorNotice")).toContainText("The outcome of this change is unknown. Don't repeat it; reconcile its status first.");
   await expect.poll(() => api.requests.transitions.filter((item) => item.action === "reenable").length).toBe(1);
   await expect(reenable).toBeDisabled();
   expect(await page.evaluate(() => document.activeElement === document.body)).toBe(false);
@@ -499,7 +499,7 @@ test("admin UI keeps a wrong-action reason_required rejection indeterminate", as
   const attempts = () => api.requests.transitions.filter((item) => item.action === "reenable");
   await expect.poll(() => attempts().length).toBe(1);
   const key = attempts()[0].idempotencyKey;
-  await expect(page.locator(".operatorNotice")).toContainText("Mutation outcome unknown; do not retry.");
+  await expect(page.locator(".operatorNotice")).toContainText("The outcome of this change is unknown. Don't repeat it; reconcile its status first.");
   expect(await page.evaluate(() => document.activeElement === document.body)).toBe(false);
 
   api.behavior.transitionStatus = 200;
@@ -534,14 +534,14 @@ test("admin UI keeps every same-key replay failure indeterminate until exact suc
   api.behavior.abortTransition = true;
   await clickAction(row.getByRole("button", { name: "Reenable", exact: true, includeHidden: true }).first());
   await expect.poll(() => api.requests.transitions.filter((item) => item.action === "reenable").length).toBe(1);
-  await expect(page.locator(".operatorNotice")).toContainText("Mutation outcome unknown; do not retry.");
+  await expect(page.locator(".operatorNotice")).toContainText("The outcome of this change is unknown. Don't repeat it; reconcile its status first.");
   const attempts = () => api.requests.transitions.filter((item) => item.action === "reenable");
   const first = attempts()[0];
 
   // Network/response loss on the replay is indeterminate: the notice and key remain.
   await page.getByRole("button", { name: "Reconcile status" }).click();
   await expect.poll(() => attempts().length).toBe(2);
-  await expect(page.locator(".operatorNotice")).toContainText("Mutation outcome unknown; do not retry.");
+  await expect(page.locator(".operatorNotice")).toContainText("The outcome of this change is unknown. Don't repeat it; reconcile its status first.");
   expect(attempts()[1].idempotencyKey).toBe(first.idempotencyKey);
   expect(attempts()[1].body).toEqual(first.body);
 
@@ -553,7 +553,7 @@ test("admin UI keeps every same-key replay failure indeterminate until exact suc
   api.behavior.transitionResponse = { ok: false, code: "revoked_entitlement_is_terminal", request_id: "ui-e2e-replay-conflict" };
   await page.getByRole("button", { name: "Reconcile status" }).click();
   await expect.poll(() => attempts().length).toBe(3);
-  await expect(page.locator(".operatorNotice")).toContainText("Mutation outcome unknown; do not retry.");
+  await expect(page.locator(".operatorNotice")).toContainText("The outcome of this change is unknown. Don't repeat it; reconcile its status first.");
   expect(attempts()[2].idempotencyKey).toBe(first.idempotencyKey);
   expect(attempts()[2].body).toEqual(first.body);
 
@@ -598,7 +598,7 @@ test("admin UI rejects a partial successful mutation envelope as unknown", async
   await dialog.getByRole("button", { name: "Confirm" }).click();
   await expect.poll(() => api.requests.transitions.length).toBe(1);
   await expect(dialog).toBeVisible();
-  await expect(dialog.locator(".modalError")).toContainText("Mutation outcome unknown; do not retry.");
+  await expect(dialog.locator(".modalError")).toContainText("The outcome of this change is unknown. Don't repeat it; reconcile its status first.");
   await expect(dialog.getByRole("button", { name: "Confirm" })).toBeDisabled();
   expect(await page.evaluate(() => document.activeElement === document.body)).toBe(false);
 });
@@ -638,7 +638,7 @@ test("admin UI rejects a non-2xx response carrying a successful mutation envelop
   await dialog.getByRole("button", { name: "Confirm" }).click();
   await expect.poll(() => api.requests.transitions.length).toBe(1);
   await expect(dialog).toBeVisible();
-  await expect(dialog.locator(".modalError")).toContainText("Mutation outcome unknown; do not retry.");
+  await expect(dialog.locator(".modalError")).toContainText("The outcome of this change is unknown. Don't repeat it; reconcile its status first.");
   await expect(dialog.getByRole("button", { name: "Confirm" })).toBeDisabled();
 });
 
@@ -664,7 +664,7 @@ test("admin UI treats a well-formed 5xx rejection envelope as an unknown mutatio
   await dialog.getByRole("button", { name: "Confirm" }).click();
 
   await expect.poll(() => api.requests.transitions.length).toBe(1);
-  await expect(dialog.locator(".modalError")).toContainText("Mutation outcome unknown; do not retry.");
+  await expect(dialog.locator(".modalError")).toContainText("The outcome of this change is unknown. Don't repeat it; reconcile its status first.");
   await expect(dialog.getByRole("button", { name: "Confirm" })).toBeDisabled();
 });
 
@@ -703,7 +703,7 @@ test("admin UI rejects duplicate batch result identities as unknown", async ({ p
 
   await expect.poll(() => api.requests.batches.length).toBe(1);
   await expect(dialog).toBeVisible();
-  await expect(dialog.locator(".modalError")).toContainText("Mutation outcome unknown; do not retry.");
+  await expect(dialog.locator(".modalError")).toContainText("The outcome of this change is unknown. Don't repeat it; reconcile its status first.");
   await expect(dialog.getByRole("button", { name: "Confirm" })).toBeDisabled();
   expect(await page.evaluate(() => document.activeElement === document.body)).toBe(false);
   // A single-request batch keeps the single-request recovery copy; there is no chunk to name.
@@ -748,7 +748,7 @@ test("admin UI rejects substituted batch result identities as unknown", async ({
 
   await expect.poll(() => api.requests.batches.length).toBe(1);
   await expect(dialog).toBeVisible();
-  await expect(dialog.locator(".modalError")).toContainText("Mutation outcome unknown; do not retry.");
+  await expect(dialog.locator(".modalError")).toContainText("The outcome of this change is unknown. Don't repeat it; reconcile its status first.");
   await expect(dialog.getByRole("button", { name: "Confirm" })).toBeDisabled();
   expect(await page.evaluate(() => document.activeElement === document.body)).toBe(false);
 });
@@ -791,6 +791,8 @@ test("admin UI reports a known partial batch outcome when every row identity and
   expect(api.requests.batches[0].ids).toEqual(["ent-1", "ent-2"]);
   await expect(dialog).toHaveCount(0);
   await expect(page.getByText("Disable finished: 1 done, 1 not found.")).toBeVisible();
+  // A row that did not change is not a success.
+  await expect(page.locator(".activityMessage")).toHaveAttribute("data-tone", "info");
 });
 
 test("admin UI rejects an unknown per-row batch failure code as ambiguous", async ({ page }) => {
@@ -823,7 +825,7 @@ test("admin UI rejects an unknown per-row batch failure code as ambiguous", asyn
     },
   };
   await dialog.getByRole("button", { name: "Confirm" }).click();
-  await expect(dialog.locator(".modalError")).toContainText("Mutation outcome unknown; do not retry.");
+  await expect(dialog.locator(".modalError")).toContainText("The outcome of this change is unknown. Don't repeat it; reconcile its status first.");
 });
 
 test("admin UI rejects reordered batch proof rows as an unknown outcome", async ({ page }) => {
@@ -862,7 +864,7 @@ test("admin UI rejects reordered batch proof rows as an unknown outcome", async 
 
   await expect.poll(() => api.requests.batches.length).toBe(1);
   expect(api.requests.batches[0].ids).toEqual(["ent-1", "ent-2"]);
-  await expect(dialog.locator(".modalError")).toContainText("Mutation outcome unknown; do not retry.");
+  await expect(dialog.locator(".modalError")).toContainText("The outcome of this change is unknown. Don't repeat it; reconcile its status first.");
   await expect(dialog.getByRole("button", { name: "Confirm" })).toBeDisabled();
 });
 
@@ -907,7 +909,7 @@ test("admin UI stops a twenty-row batch at a 500 on chunk 3 and reconciles that 
     : undefined);
 
   await expect.poll(() => attempts.length).toBe(3);
-  await expect(dialog.locator(".modalError")).toContainText("Mutation outcome unknown; do not retry.");
+  await expect(dialog.locator(".modalError")).toContainText("The outcome of this change is unknown. Don't repeat it; reconcile its status first.");
   await expect(dialog.getByRole("button", { name: "Confirm" })).toBeDisabled();
   await expect(dialog.locator(".batchRun").getByRole("listitem")).toHaveText(["8 done", "4 outcome unknown", "8 not attempted"]);
   // The control cannot be reached from inside the modal, so the guidance says where it is.
@@ -988,7 +990,9 @@ test("admin UI never reports success when the status refresh fails after a parti
   await expect(dialog).toHaveCount(0);
   const notice = page.locator(".operatorNotice");
   await expect(notice).toContainText("Disable stopped at chunk 2 of 5");
-  await expect(notice).toContainText("Status refresh failed");
+  // The notice replaces the page message, so it says why the run stopped as well as the failed read.
+  await expect(notice).toContainText("This request key was already used for a different change.");
+  await expect(notice).toContainText("The status could not be refreshed.");
   await expect(page.getByText(/succeeded/i)).toHaveCount(0);
   await expect(page.locator(".tablePane .batchRun").getByRole("listitem")).toHaveText(["4 done", "4 failed", "12 not attempted"]);
 
@@ -1072,7 +1076,7 @@ test("admin UI rejects duplicate release-seat identities as unknown", async ({ p
 
   await expect.poll(() => api.requests.releaseSeats.length).toBe(1);
   await expect(dialog).toBeVisible();
-  await expect(dialog.locator(".modalError")).toContainText("Mutation outcome unknown; do not retry.");
+  await expect(dialog.locator(".modalError")).toContainText("The outcome of this change is unknown. Don't repeat it; reconcile its status first.");
   await expect(dialog.getByRole("button", { name: "Confirm" })).toBeDisabled();
   expect(await page.evaluate(() => document.activeElement === document.body)).toBe(false);
 });
@@ -1106,7 +1110,7 @@ test("admin UI rejects a device transition that proves a different entitlement",
   });
   await dialog.getByRole("button", { name: "Confirm" }).click();
   await expect.poll(() => api.requests.deviceTransitions.length).toBe(1);
-  await expect(dialog.locator(".modalError")).toContainText("Mutation outcome unknown; do not retry.");
+  await expect(dialog.locator(".modalError")).toContainText("The outcome of this change is unknown. Don't repeat it; reconcile its status first.");
 });
 
 test("admin UI gates ordinary mutations while consequence recovery is pending", async ({ page }) => {
@@ -1202,7 +1206,7 @@ test("admin UI direct re-enable treats a malformed mutation response as unknown"
   const reenable = row.getByRole("button", { name: "Reenable", exact: true, includeHidden: true }).first();
   await clickAction(reenable);
   await expect.poll(() => api.requests.transitions.filter((item) => item.action === "reenable").length).toBe(1);
-  await expect(page.locator(".operatorNotice")).toContainText("Mutation outcome unknown; do not retry.");
+  await expect(page.locator(".operatorNotice")).toContainText("The outcome of this change is unknown. Don't repeat it; reconcile its status first.");
   await expect.poll(() => api.requests.transitions.filter((item) => item.action === "reenable").length).toBe(1);
   await expect(reenable).toBeDisabled();
   expect(await page.evaluate(() => document.activeElement === document.body)).toBe(false);
@@ -1231,10 +1235,10 @@ test("admin UI direct re-enable keeps parsed refresh recovery visible", async ({
   api.behavior.refreshFailures = ["response-error", "response-error"];
   await clickAction(row.getByRole("button", { name: "Reenable", exact: true, includeHidden: true }).first());
   await expect.poll(() => api.requests.transitions.filter((item) => item.action === "reenable").length).toBe(1);
-  await expect(page.locator(".operatorNotice")).toContainText("Action succeeded; status refresh failed");
+  await expect(page.locator(".operatorNotice")).toContainText("The change was saved, but its status could not be refreshed.");
   const refreshButton = page.getByRole("button", { name: "Refresh status" });
   await refreshButton.click();
-  await expect(page.locator(".operatorNotice")).toContainText("Action succeeded; status refresh failed");
+  await expect(page.locator(".operatorNotice")).toContainText("The change was saved, but its status could not be refreshed.");
   await refreshButton.click();
   await expect(page.locator(".operatorNotice")).toHaveCount(0);
   await expect(row.getByRole("button", { name: "Reenable", exact: true, includeHidden: true })).toHaveCount(0);
@@ -1333,7 +1337,7 @@ test("admin UI settles an ABA filter switch after an exact same-key replay", asy
   await expect(filter).toBeFocused();
   // The replay's original strict GET started before the A → B → A switch, so
   // it cannot prove the final A view. A current-context GET-only recovery can.
-  await expect(page.locator(".operatorNotice")).toContainText("Action succeeded; status refresh failed");
+  await expect(page.locator(".operatorNotice")).toContainText("The change was saved, but its status could not be refreshed.");
   await page.getByRole("button", { name: "Refresh status" }).click();
   await expect(page.locator(".operatorNotice")).toHaveCount(0);
   const replay = api.requests.transitions.at(-1);
@@ -1364,11 +1368,11 @@ test("admin UI keeps unresolved recovery exclusive without stealing focus after 
 
   api.behavior.refreshFailures = ["response-error"];
   await clickAction(row.getByRole("button", { name: "Reenable", exact: true, includeHidden: true }).first());
-  await expect(page.locator(".operatorNotice")).toContainText("Action succeeded; status refresh failed");
+  await expect(page.locator(".operatorNotice")).toContainText("The change was saved, but its status could not be refreshed.");
   const transitionCount = api.requests.transitions.filter((item) => item.action === "reenable").length;
   await expect(row.getByRole("button", { name: "Reenable", exact: true, includeHidden: true }).first()).toBeDisabled();
   await expect(page.getByRole("dialog")).toHaveCount(0);
-  await expect(page.locator(".operatorNotice")).toContainText("Action succeeded; status refresh failed");
+  await expect(page.locator(".operatorNotice")).toContainText("The change was saved, but its status could not be refreshed.");
   expect(api.requests.transitions.filter((item) => item.action === "reenable").length).toBe(transitionCount);
 
   api.behavior.deferRefresh = true;
@@ -1380,7 +1384,7 @@ test("admin UI keeps unresolved recovery exclusive without stealing focus after 
   await filter.fill("no-such-project");
   api.behavior.releaseRefresh();
   await expect(filter).toBeFocused();
-  await expect(page.locator(".operatorNotice")).toContainText("Action succeeded; status refresh failed");
+  await expect(page.locator(".operatorNotice")).toContainText("The change was saved, but its status could not be refreshed.");
   expect(api.requests.transitions.filter((item) => item.action === "reenable").length).toBe(transitionCount);
   await filter.fill("");
   await refreshButton.click();
@@ -1416,7 +1420,7 @@ test("admin UI discards stale device recovery after filter supersession while ac
   await disableDialog.getByLabel("Reason (required)").fill("operator review");
   await disableDialog.getByRole("button", { name: "Confirm" }).click();
   await expect.poll(() => api.requests.deviceTransitions.length).toBe(1);
-  await expect(page.locator(".operatorNotice")).toContainText("Action succeeded; status refresh failed");
+  await expect(page.locator(".operatorNotice")).toContainText("The change was saved, but its status could not be refreshed.");
 
   // The retained recovery owns the operation gate, so switching device rows
   // is visibly unavailable. A still-editable filter can supersede the source
@@ -1434,7 +1438,7 @@ test("admin UI discards stale device recovery after filter supersession while ac
   releaseOriginalDeviceRefresh();
   if (api.behavior.releaseDeviceRefresh !== releaseOriginalDeviceRefresh) api.behavior.releaseDeviceRefresh();
   await expect(filter).toBeFocused();
-  await expect(page.locator(".operatorNotice")).toContainText("Action succeeded; status refresh failed");
+  await expect(page.locator(".operatorNotice")).toContainText("The change was saved, but its status could not be refreshed.");
   await filter.fill("");
   await expect.poll(() => api.requests.entitlementReads.at(-1)).toBe("");
   await refreshButton.click();

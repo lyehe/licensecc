@@ -165,3 +165,25 @@ test("Send test event waits while the endpoint list is reloading", async ({ page
   await expect(send).toBeEnabled();
   expect(api.requests.webhookTests).toEqual([]);
 });
+
+// A result that arrives after the operator changed the filter belongs to a view that is gone.
+test("a Send test event result that arrives after a filter change is dropped", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  api.seed.webhook("wh_test", "https://hooks.example.test/test");
+  await page.route("**/api/admin/**", api.route);
+  let release = null;
+  await page.route("**/api/admin/webhooks/wh_test/test", async (route) => {
+    await new Promise((resolve) => { release = resolve; });
+    await route.fallback();
+  });
+  await page.goto("/#/webhooks");
+  const row = page.locator("tr").filter({ hasText: "https://hooks.example.test/test" });
+  const send = row.getByRole("button", { name: "Send test event", exact: true });
+  await send.click();
+  await expect.poll(() => release !== null).toBe(true);
+  await page.getByLabel("Filter endpoints by status").selectOption("active");
+  release();
+  await expect.poll(() => api.requests.webhookTests.length).toBe(1);
+  await expect(send).toBeEnabled();
+  await expect(page.getByRole("status").filter({ hasText: "Test event to" })).toHaveCount(0);
+});

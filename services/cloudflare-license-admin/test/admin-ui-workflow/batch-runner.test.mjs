@@ -238,7 +238,7 @@ test("reconcile guidance says where the control is, and a refresh failure after 
 
   const refused = await runner.runBatchChunks("disable", runner.planBatchChunks("disable", twenty, "audit", "k"), async (chunk) => chunk.index === 2 ? refusal(409, "idempotency_request_conflict") : batchDone(chunk.ids), () => {});
   const message = runner.batchRefreshFailureMessage(refused);
-  assert.match(message, /^Disable stopped at chunk 2 of 5/);
-  assert.match(message, /status refresh failed/i);
+  // The notice replaces the stop banner, so it must keep why the run stopped as well as the failed read.
+  assert.equal(message, "Disable stopped at chunk 2 of 5: the request was refused. This request key was already used for a different change. Reload the page and try again. The status could not be refreshed.");
   assert.doesNotMatch(message, /succeeded/i);
 });
