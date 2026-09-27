@@ -102,20 +102,3 @@ export function useFormFeedback(form: string, resetKey: unknown): FormFeedback {
   const clear = useCallback((): void => { setErrors({}); setStatus(null); }, []);
   return { errors, status, show, showFields, setStatus, clearField, clear };
 }
-
-/** Tracks number inputs whose text the browser could not read (`validity.badInput`), by field name. */
-export function useUnreadableNumbers(): { unreadable: ReadonlySet<string>; track: (field: string, event: React.ChangeEvent<HTMLInputElement>) => void; reset: () => void } {
-  const [unreadable, setUnreadable] = useState<ReadonlySet<string>>(new Set());
-  const track = useCallback((field: string, event: React.ChangeEvent<HTMLInputElement>): void => {
-    const bad = event.target.validity.badInput;
-    setUnreadable((current) => {
-      if (current.has(field) === bad) return current;
-      const next = new Set(current);
-      if (bad) next.add(field);
-      else next.delete(field);
-      return next;
-    });
-  }, []);
-  const reset = useCallback((): void => setUnreadable(new Set()), []);
-  return { unreadable, track, reset };
-}
