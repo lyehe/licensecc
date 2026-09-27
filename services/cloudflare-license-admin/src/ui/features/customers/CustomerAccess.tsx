@@ -1,7 +1,7 @@
 import { useAdminNavigation } from "../../app/navigation";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { api, apiFailureMessage, parseExactApiSuccess } from "../../shared/api";
-import { formatEpoch } from "../../shared/format";
+import { formatEpoch, formatUtcDate } from "../../shared/format";
 import { Entitlements } from "../entitlements/Entitlements";
 import type { EntitlementFilter } from "../entitlements/workflow";
 import { hasEntitlementRecordData } from "../../shared/mutationGuards";
@@ -81,9 +81,9 @@ export function CustomerAccess({ customerId }: { customerId: string }): React.Re
     <PagedRecords key={url} url={url} customerId={customerId} kind={project === null ? "apps" : view} code={project === null ? "customer_apps" : view === "grants" ? "entitlements_listed" : "customer_resources"} render={(rows, now) => <div className="customerAccessRecords">
       {rows.map(row => <article className="recordCard" key={JSON.stringify([row.project, row.feature, row.license_fingerprint, row.device_key_id, row.seat_id])}>
         {project === null ? <><h4>{String(row.project)}</h4><p>{Number(row.grant_count)} grants · {Number(row.in_date_count)} active and within grant dates</p>
-          <p>{row.earliest_expiry === row.latest_expiry && Number(row.no_expiry_count) === 0 ? `Valid until ${formatEpoch(Number(row.earliest_expiry))}` : "Mixed or non-expiring validity — view grants"}</p>
-          <button onClick={() => { setProject(String(row.project)); setView("grants"); }}>View app</button></> : view === "grants" ? <><h4>{String(row.feature)}</h4><p>{row.status === "disabled" ? "suspended" : String(row.status)} · Valid until {row.valid_until === null ? "No expiry" : formatEpoch(Number(row.valid_until))}</p>
-          <button onClick={() => setManaged({ project, feature: String(row.feature), status: "", id: String(row.id), customer_id: customerId })}>Manage access</button></> : view === "nodes" ? <><h4>{String(row.feature)}</h4><p>{String(row.device_key_id)}</p><p>{row.status === "disabled" ? "suspended" : String(row.status)} · Last seen {formatEpoch(row.last_seen_at as number | null)}</p></> : <><h4>{String(row.feature)} · {String(row.mode)}</h4><p>{String(row.seat_id)}</p><p>{Number(row.heartbeat_deadline) > now ? "Current" : "Expired"} · Deadline {formatEpoch(Number(row.heartbeat_deadline))}</p></>}
+          <p>{row.earliest_expiry === row.latest_expiry && Number(row.no_expiry_count) === 0 ? `Valid until ${formatUtcDate(Number(row.earliest_expiry))}` : "Mixed or non-expiring validity — view grants"}</p>
+          <button onClick={() => { setProject(String(row.project)); setView("grants"); }}>View app</button></> : view === "grants" ? <><h4>{String(row.feature)}</h4><p>{row.status === "disabled" ? "suspended" : String(row.status)} · Valid until {row.valid_until === null ? "No expiry" : formatUtcDate(Number(row.valid_until))}</p>
+          <button onClick={() => setManaged({ project, feature: String(row.feature), status: "", id: String(row.id), customer_id: customerId })}>Manage access</button></> : view === "nodes" ? <><h4>{String(row.feature)}</h4><p>{String(row.device_key_id)}</p><p>{row.status === "disabled" ? "suspended" : String(row.status)} · Last seen {formatEpoch(row.last_seen_at as number | null)}</p></> : <><h4>{String(row.feature)} · {String(row.mode)}</h4><p>{String(row.seat_id)}</p><p>{Number(row.heartbeat_deadline) > now ? "Current" : "Expired"} · Deadline {formatUtcDate(Number(row.heartbeat_deadline))}</p></>}
       </article>)}
     </div>} />
     <p className="muted">Grant dates do not override customer suspension or runtime checks. Activated devices and floating seats are separate records.</p>

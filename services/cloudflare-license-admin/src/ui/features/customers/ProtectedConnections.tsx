@@ -1,6 +1,6 @@
 import React,{useEffect,useRef,useState} from 'react';
 import { useOperatorControls } from '../../shared/controls';
-import { formatEpoch, shortHash } from '../../shared/format';
+import { formatEpoch, formatUtcDate, shortHash } from '../../shared/format';
 import { focusableElements } from '../../shared/operatorFocus';
 import { TypedConfirmationField, typedConfirmationMatches } from '../../shared/TypedConfirmationField';
 import { shortDeviceKeyId } from '../entitlements/workflow';
@@ -90,7 +90,7 @@ export function ProtectedConnections({customer,active=true}:{customer:string;act
         setConfirmed(true);
         if(!clearPending(customer)){setDialogError('Disconnection was confirmed, but the saved request could not be cleared. Retry to recover the same result.');return;}
         setSaved(null);setDraft(null);setOpen(false);setStale(true);
-        setMessage(`Renewal stopped for ${intent.label}. Its slot becomes available ${formatEpoch(result.data.effective_release_at)}. Connect the replacement machine from its app after that time.`);
+        setMessage(`Renewal stopped for ${intent.label}. Its slot becomes available ${formatUtcDate(result.data.effective_release_at)}. Connect the replacement machine from its app after that time.`);
         await load();if(live.current)heading.current?.focus();
       }finally{sendingRef.current=false;if(live.current)setSending(false);}
     });
@@ -130,7 +130,7 @@ export function ProtectedConnections({customer,active=true}:{customer:string;act
     </div>}
     <div className="customerAccessRecords">{page?.items.map(row=><article className="recordCard protectedConnection" key={row.binding_id}>
       <h4>{row.label||'Unnamed connection'}</h4><p>{row.project} · {row.feature}</p>
-      <p><strong>{row.state==='active'?'Connected':row.state==='retiring'?'Disconnecting':'Disconnected'}</strong>{row.state==='retiring' && <> · Slot available {formatEpoch(row.hold_until)}</>}</p>
+      <p><strong>{row.state==='active'?'Connected':row.state==='retiring'?'Disconnecting':'Disconnected'}</strong>{row.state==='retiring' && <> · Slot available {formatUtcDate(row.hold_until)}</>}</p>
       <p>Last verified {formatEpoch(row.last_proof_at)}</p>
       <details><summary>Connection details</summary><p>Connection ID: {row.binding_id}</p><p>License: {row.license_fingerprint}</p></details>
       <ConnectionHistory customer={customer} binding={row.binding_id} expected={contextIdentity(page)} onContextChanged={()=>{setStale(true);setError('Operator or customer access changed. Refresh connections before making changes.');}} />
@@ -140,13 +140,13 @@ export function ProtectedConnections({customer,active=true}:{customer:string;act
     <dialog ref={dialog} tabIndex={-1} className="connectionDialog" aria-labelledby="connection-dialog-title" onKeyDown={retainDialogFocus} onCancel={event=>{event.preventDefault();close();}}>
       <h2 id="connection-dialog-title">{saved?'Resolve disconnect request':`Disconnect ${pending?.label}?`}</h2>
       {pending && <><p><strong>{pending.label}</strong> · {pending.project} / {pending.feature}</p><p>Customer: {customer}</p><p>Connection ID: {pending.binding}</p>
-        <p>Renewal stops immediately. Existing signed offline access can continue until its deadline. The slot remains reserved until at least {formatEpoch(pending.hold)}.</p>
+        <p>Renewal stops immediately. Existing signed offline access can continue until its deadline. The slot remains reserved until at least {formatUtcDate(pending.hold)}.</p>
         <p>This connection cannot be re-enabled. To transfer, disconnect it, wait for the slot to become available, then connect the new machine from its app.</p></>}
       {saved && <p>The original request is saved in this browser tab. Closing this dialog does not cancel it.</p>}
       {confirmed && <p role="status">Disconnection has been confirmed. The saved request still needs local cleanup.</p>}
       {pending && page && (!sameOperator || !mayRetire) && <p role="alert">Your operator or customer access has changed. Review the connection before clearing this saved request.</p>}
       {dialogError && <p role="alert">{dialogError}</p>}
-      {reviewReady && <p role="status">{pending ? reviewed ? `Current connection: ${reviewed.state==='active'?'Connected':reviewed.state==='retiring'?'Disconnecting':'Disconnected'}. Reserved until ${formatEpoch(reviewed.hold_until)}.`:'This binding is unavailable in the current customer context.':'Current customer connections have been refreshed.'} Clearing the saved request does not cancel or undo a disconnection.</p>}
+      {reviewReady && <p role="status">{pending ? reviewed ? `Current connection: ${reviewed.state==='active'?'Connected':reviewed.state==='retiring'?'Disconnecting':'Disconnected'}. Reserved until ${formatUtcDate(reviewed.hold_until)}.`:'This binding is unavailable in the current customer context.':'Current customer connections have been refreshed.'} Clearing the saved request does not cancel or undo a disconnection.</p>}
       {pending && !reviewReady && <TypedConfirmationField phrase={DISCONNECT_PHRASE} value={typedConfirm} onChange={setTypedConfirm} disabled={sending} inputRef={typedConfirmInput} />}
       <div className="actions">
         {pending && !reviewReady && <button className="danger" disabled={locked || loading || stale || stopped || !mayRetire || !sameOperator || !typedConfirmationMatches(typedConfirm,DISCONNECT_PHRASE)} onClick={()=>void send()}>{sending?'Checking…':saved?'Retry same request':'Disconnect'}</button>}

@@ -6,7 +6,7 @@ import { ReadNotice } from "../../shared/ReadNotice";
 import { BatchRunPanel } from "./BatchRunPanel";
 import type { EntitlementBatch } from "./useEntitlementBatch";
 import { focusTargetInRow, type ConfirmActionOutcome, useOperatorControls } from "../../shared/controls";
-import { formatEpoch } from "../../shared/format";
+import { formatUtcDate } from "../../shared/format";
 import { useMediaQuery } from "../../shared/useMediaQuery";
 import { focusWorkspaceTarget } from "../../shared/workspaceFocus";
 import { canEditEntitlement, canRunAction, disableEntitlementConfirm, ENTITLEMENT_DISABLE_REASON_PRESETS, filterAfterShowAll, isSingleEntitlementFilter, releaseSeatsConfirm, revokeEntitlementConfirm, revokeTypedConfirmation, type EntitlementAction, type EntitlementFilter } from "./workflow";
@@ -46,11 +46,11 @@ interface ListProps {
 export function EntitlementValidity({ item }: { item: EntitlementRecord }): React.ReactElement {
   const now = Math.floor(Date.now() / 1000);
   const validity = item.valid_until !== null && item.valid_until <= now ? "Expired" : item.valid_from !== null && item.valid_from > now ? "Not started" : item.valid_until !== null && item.valid_until <= now + 30 * 86400 ? "Expires soon" : null;
-  return <><span className={`status ${item.status}`}>{item.status === "disabled" ? "suspended" : item.status}</span>{validity ? <span className={`healthBadge health-${validity === "Expired" ? "expired" : validity === "Expires soon" ? "expiring" : "pending"}`}>{validity}</span> : null}<div className="muted">{item.valid_until === null ? "No expiry" : `Expires ${formatEpoch(item.valid_until)}`}</div></>;
+  return <><span className={`status ${item.status}`}>{item.status === "disabled" ? "suspended" : item.status}</span>{validity ? <span className={`healthBadge health-${validity === "Expired" ? "expired" : validity === "Expires soon" ? "expiring" : "pending"}`}>{validity}</span> : null}<div className="muted">{item.valid_until === null ? "No expiry" : `Expires ${formatUtcDate(item.valid_until)}`}</div></>;
 }
 
 function EntitlementDetails({ item }: { item: EntitlementRecord }): React.ReactElement {
-  return <details><summary>Technical details</summary><dl className="recordMeta"><div><dt>Entitlement ID</dt><dd><code>{item.id}</code></dd></div><div><dt>License fingerprint</dt><dd><code>{item.license_fingerprint}</code></dd></div><div><dt>Device restriction</dt><dd><code>{item.device_hash || "None"}</code></dd></div><div><dt>License ID</dt><dd><code>{item.license_id ?? "None"}</code></dd></div><div><dt>Policy ID</dt><dd><code>{item.policy_id ?? "None"}</code></dd></div><div><dt>Assertion TTL</dt><dd>{item.assertion_ttl_seconds} seconds</dd></div><div><dt>Valid from</dt><dd>{item.valid_from === null ? "Starts immediately" : formatEpoch(item.valid_from)}</dd></div><div><dt>Revocation revision</dt><dd>{item.revocation_seq}</dd></div><div><dt>Maximum borrow</dt><dd>{item.max_borrow_sec} seconds</dd></div><div><dt>Notes</dt><dd>{item.notes || "None"}</dd></div></dl></details>;
+  return <details><summary>Technical details</summary><dl className="recordMeta"><div><dt>Entitlement ID</dt><dd><code>{item.id}</code></dd></div><div><dt>License fingerprint</dt><dd><code>{item.license_fingerprint}</code></dd></div><div><dt>Device restriction</dt><dd><code>{item.device_hash || "None"}</code></dd></div><div><dt>License ID</dt><dd><code>{item.license_id ?? "None"}</code></dd></div><div><dt>Policy ID</dt><dd><code>{item.policy_id ?? "None"}</code></dd></div><div><dt>Assertion TTL</dt><dd>{item.assertion_ttl_seconds} seconds</dd></div><div><dt>Valid from</dt><dd>{item.valid_from === null ? "Starts immediately" : formatUtcDate(item.valid_from)}</dd></div><div><dt>Revocation revision</dt><dd>{item.revocation_seq}</dd></div><div><dt>Maximum borrow</dt><dd>{item.max_borrow_sec} seconds</dd></div><div><dt>Notes</dt><dd>{item.notes || "None"}</dd></div></dl></details>;
 }
 
 export function EntitlementList(props: ListProps): React.ReactElement {

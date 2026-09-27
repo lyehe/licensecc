@@ -27,7 +27,7 @@ test("an operator-typed validity date shows the same UTC day in the list and the
   await expect(row).not.toContainText("2026-12-30");
 
   await row.getByRole("button", { name: "Edit" }).click();
-  const editForm = page.locator("section.editorLayout form");
+  const editForm = page.getByRole("form", { name: "Edit entitlement" });
   await expect(editForm).toContainText("Stored expiry: 2026-12-31 UTC.");
   await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
 

@@ -7,7 +7,7 @@ import { useAdminNavigation } from "../../app/navigation";
 import type { CustomerSection, NavigationIntent } from "../../app/types";
 import { api, apiFailureDetails, apiFailureMessage, parseExactApiSuccess } from "../../shared/api";
 import { confirmMutationUnknown, confirmSuccessWithRefreshFailure, ConfirmRefreshFailure, EXACT_READ_PROOF, focusTargetInRow, type ConfirmActionContext, type ConfirmActionOutcome, type ConfirmActionResolution, type ExactReadProof, useContextGeneration, useOperatorControls } from "../../shared/controls";
-import { formatEpoch, shortHash } from "../../shared/format";
+import { formatEpoch, formatUtcDate, shortHash } from "../../shared/format";
 import { hasCustomerDetailData, hasCustomerListData, hasCustomerTransitionData, mutationFailurePolicies, parseMutationResponse } from "../../shared/mutationGuards";
 import { downloadCsv, loadMore } from "../../shared/pagination";
 import { useRequestFence } from "../../shared/requestFence";
@@ -335,7 +335,7 @@ export function Customers({ active, navigationIntent, onNavigationHandled }: {
             {customerDetail.licenses.map((license) => <tr key={license.id}><td><code>{license.id}</code></td><td>{license.project}</td><td>{license.label || "—"}</td><td>{formatEpoch(license.created_at)}</td><td><button type="button" onClick={() => navigate({ tab: "licenses", filter: { project: license.project, customer_id: customerDetail.customer.id, q: license.id } })}>View licenses</button></td></tr>)}
           </DetailTable>}
           {customerSection === "tokens" && <DetailTable caption="Account tokens" empty="No account tokens are shown for this customer." limit="100" headers={["Prefix", "Name", "Status", "Scopes", "Expires", "Last used"]}>
-            {customerDetail.account_tokens.map((token) => <tr key={token.id}><td><code>{token.token_prefix}</code></td><td>{token.name || "—"}</td><td><span className={`status ${token.status}`}>{token.status === "disabled" ? "suspended" : token.status}</span></td><td><span>{readableScopes(token.scopes_json)}</span><details><summary>Raw scopes</summary><code>{token.scopes_json}</code></details></td><td>{formatEpoch(token.expires_at)}</td><td>{formatEpoch(token.last_used_at)}</td></tr>)}
+            {customerDetail.account_tokens.map((token) => <tr key={token.id}><td><code>{token.token_prefix}</code></td><td>{token.name || "—"}</td><td><span className={`status ${token.status}`}>{token.status === "disabled" ? "suspended" : token.status}</span></td><td><span>{readableScopes(token.scopes_json)}</span><details><summary>Raw scopes</summary><code>{token.scopes_json}</code></details></td><td>{formatUtcDate(token.expires_at)}</td><td>{formatEpoch(token.last_used_at)}</td></tr>)}
           </DetailTable>}
           {customerSection === "orders" && <DetailTable caption="Customer orders" empty="No orders are shown for this customer." limit="100" headers={["Subscription", "Project", "Feature", "Fingerprint", "Sequence", "Updated"]}>
             {customerDetail.orders.map((order) => <tr key={`${order.subscription_id}/${order.project}/${order.feature}`}><td>{order.subscription_id}</td><td>{order.project}</td><td>{order.feature}</td><td><code>{shortHash(order.license_fingerprint)}</code></td><td>{order.last_seq}</td><td>{formatEpoch(order.updated_at)}</td></tr>)}

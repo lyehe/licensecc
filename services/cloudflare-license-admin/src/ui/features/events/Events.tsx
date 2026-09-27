@@ -6,7 +6,7 @@ import { ReadNotice } from "../../shared/ReadNotice";
 import { api, apiFailureDetails, apiFailureMessage, parseExactApiSuccess } from "../../shared/api";
 import { ConfirmRefreshFailure, EXACT_READ_PROOF, type ExactReadProof, useContextGeneration, useOperatorControls } from "../../shared/controls";
 import { useCoreRefresh } from "../../shared/coreRefresh";
-import { shortHash } from "../../shared/format";
+import { formatEpoch, shortHash } from "../../shared/format";
 import { downloadCsv } from "../../shared/pagination";
 import { hasEventListData } from "../../shared/mutationGuards";
 import { useDebouncedValue } from "../../shared/useDebouncedValue";
@@ -130,7 +130,7 @@ export function Events({ active, navigationIntent, onNavigationHandled }: {
         <tbody>
           {events.map((item) => (
             <tr key={item.id}>
-              <td>{new Date(item.created_at * 1000).toLocaleString()}</td>
+              <td>{formatEpoch(item.created_at)}</td>
               <td>{item.event_type}</td>
               <td>{item.project}</td>
               <td>{item.feature}</td>
