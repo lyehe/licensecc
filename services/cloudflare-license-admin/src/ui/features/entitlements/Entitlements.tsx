@@ -72,7 +72,7 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
   const busy = requestBusy || operationLocked;
   const { refreshCore, registerCoreRefresh } = useCoreRefresh();
   const entitlementsUrl = useMemo(() => entitlementsPath(filter), [filter]);
-  const filterContextKey = `${active ? "active" : "inactive"}\u0000${filter.project}\u0000${filter.feature}\u0000${filter.status}\u0000${filter.id ?? ""}\u0000${filter.customer_id ?? ""}`;
+  const filterContextKey = `${active ? "active" : "inactive"}\u0000${filter.project}\u0000${filter.feature}\u0000${filter.status}\u0000${filter.id ?? ""}\u0000${filter.customer_id ?? ""}\u0000${filter.license_id ?? ""}`;
   const { generation: filterGeneration, isCurrent: isFilterGenerationCurrent, currentGeneration: currentFilterGeneration, currentContext: currentFilterContext } = useContextGeneration(filterContextKey);
   // The filter alone (never `active`) decides when the list must reload: switching tabs without
   // touching a filter field costs zero requests, and typing coalesces onto one request 300ms after
@@ -170,7 +170,7 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
     if (navigationIntent?.tab !== "entitlements") return;
     // Navigation has already passed the dirty-draft and pending-operation guards.
     setCreateOpen(false); setForm(emptyEntitlementForm); cancelEdit();
-    setFilter({ id: navigationIntent.filter.id, customer_id: navigationIntent.filter.customer_id, project: navigationIntent.filter.project ?? "", feature: navigationIntent.filter.feature ?? "", status: navigationIntent.filter.status ?? "" });
+    setFilter({ id: navigationIntent.filter.id, customer_id: navigationIntent.filter.customer_id, license_id: navigationIntent.filter.license_id, project: navigationIntent.filter.project ?? "", feature: navigationIntent.filter.feature ?? "", status: navigationIntent.filter.status ?? "" });
     onNavigationHandled(navigationIntent);
   }, [navigationIntent, onNavigationHandled]);
 

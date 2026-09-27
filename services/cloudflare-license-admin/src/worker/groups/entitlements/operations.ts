@@ -43,7 +43,7 @@ export async function listEntitlements(request: Request, env: Env, requestIdValu
   const url = new URL(request.url);
   const filters: string[] = [];
   const values: unknown[] = [];
-  for (const [query, column] of [["project", "project"], ["feature", "feature"], ["status", "status"], ["customer_id", "customer_id"]] as const) {
+  for (const [query, column] of [["project", "project"], ["feature", "feature"], ["status", "status"], ["customer_id", "customer_id"], ["license_id", "license_id"]] as const) {
     const value = url.searchParams.get(query);
     if (value !== null && value !== "") {
       filters.push(`${column} = ?`);

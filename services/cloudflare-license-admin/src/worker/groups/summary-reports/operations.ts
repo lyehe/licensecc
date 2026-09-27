@@ -2,6 +2,7 @@ import { accessCounts } from "./access-counts.js";
 import { envelope, json } from "../../responses.js";
 import type { TimeseriesBucket, ExpiringEntitlement } from "../../../shared/api";
 import { verifyAuditChain } from "@licensecc/cloudflare-runtime/d1/audit_digest";
+import { entitlementId } from "@licensecc/licensing-domain/entitlements/contracts";
 import type { Env } from "../../env.js";
 import { envFlag } from "../../support.js";
 import { boundedCursor } from "../../query.js";
@@ -161,6 +162,17 @@ export async function auditVerify(env: Env, requestIdValue: string): Promise<Res
   }
 }
 
+// A grant's effective deadline is normally its stamped valid_until. An activation-basis trial
+// (from_first_activation/from_first_use) that has already been activated instead deadlines at
+// trial_started_at + trial_duration_sec, since valid_until is never stamped for that basis; one not
+// yet activated has no known deadline yet and is excluded, same as a non-expiring grant.
+const EFFECTIVE_UNTIL_EXPRESSION = `CASE
+             WHEN e.is_trial = 1 AND e.trial_expiration_basis IN ('from_first_activation', 'from_first_use')
+                  AND e.trial_started_at IS NOT NULL AND e.trial_duration_sec > 0
+             THEN e.trial_started_at + e.trial_duration_sec
+             ELSE e.valid_until
+           END`;
+
 export async function reportExpiring(request: Request, env: Env, requestIdValue: string): Promise<Response> {
   const url = new URL(request.url);
   const now = Math.floor(Date.now() / 1000);
@@ -175,19 +187,27 @@ export async function reportExpiring(request: Request, env: Env, requestIdValue:
   }
   const { limit, cursor } = pagination;
   const rows = await env.DB.prepare(
-    `SELECT project, feature, license_fingerprint, customer_id, valid_until
-       FROM entitlements
-      WHERE status = 'active' AND valid_until IS NOT NULL AND valid_until > ? AND valid_until <= ?
-      ORDER BY valid_until ASC, project, feature, license_fingerprint
+    `SELECT project, feature, license_fingerprint, customer_id, customer_name, effective_until
+       FROM (
+         SELECT e.project AS project, e.feature AS feature, e.license_fingerprint AS license_fingerprint,
+                e.customer_id AS customer_id, c.name AS customer_name, ${EFFECTIVE_UNTIL_EXPRESSION} AS effective_until
+           FROM entitlements e
+           LEFT JOIN customers c ON c.id = e.customer_id
+          WHERE e.status = 'active'
+       )
+      WHERE effective_until IS NOT NULL AND effective_until > ? AND effective_until <= ?
+      ORDER BY effective_until ASC, project, feature, license_fingerprint
       LIMIT ? OFFSET ?`,
-  ).bind(now, horizon, limit + 1, cursor).all<Omit<ExpiringEntitlement, "days_left">>();
+  ).bind(now, horizon, limit + 1, cursor).all<{ project: string; feature: string; license_fingerprint: string; customer_id: string | null; customer_name: string | null; effective_until: number }>();
   const items: ExpiringEntitlement[] = rows.results.slice(0, limit).map((row) => ({
+    id: entitlementId(row.project, row.feature, row.license_fingerprint),
     project: row.project,
     feature: row.feature,
     license_fingerprint: row.license_fingerprint,
     customer_id: row.customer_id ?? null,
-    valid_until: row.valid_until,
-    days_left: Math.max(1, Math.ceil((row.valid_until - now) / SECONDS_PER_DAY)),
+    customer_name: row.customer_name ?? null,
+    valid_until: row.effective_until,
+    days_left: Math.max(1, Math.ceil((row.effective_until - now) / SECONDS_PER_DAY)),
   }));
   return envelope(requestIdValue, "report_expiring", {
     items,

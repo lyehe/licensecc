@@ -2244,11 +2244,21 @@
                       "null"
                     ]
                   },
+                  "customer_name": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
                   "days_left": {
                     "description": "ceil((valid_until - now)/86400); >=1 for a still-future expiry.",
                     "type": "integer"
                   },
                   "feature": {
+                    "type": "string"
+                  },
+                  "id": {
+                    "description": "The entitlement's canonical id (project+feature+license_fingerprint), for deep-linking the exact record.",
                     "type": "string"
                   },
                   "license_fingerprint": {
@@ -2258,11 +2268,12 @@
                     "type": "string"
                   },
                   "valid_until": {
-                    "description": "Epoch seconds the entitlement expires at.",
+                    "description": "Epoch seconds the entitlement expires at (an activated activation-basis trial reports its trial deadline here instead).",
                     "type": "integer"
                   }
                 },
                 "required": [
+                  "id",
                   "project",
                   "feature",
                   "license_fingerprint",
@@ -11243,6 +11254,15 @@
               "description": "Exact customer ownership filter.",
               "in": "query",
               "name": "customer_id",
+              "required": false,
+              "schema": {
+                "type": "string"
+              }
+            },
+            {
+              "description": "Exact license ownership filter.",
+              "in": "query",
+              "name": "license_id",
               "required": false,
               "schema": {
                 "type": "string"

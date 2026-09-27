@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useRef } from "react";
 import type { EntitlementRecord } from "../../../shared/api";
 import { ENTITLEMENT_BATCH_MAX_IDS } from "../../../shared/api";
 import { ActionMenu } from "../../shared/ActionMenu";
@@ -6,7 +6,8 @@ import { ReadNotice } from "../../shared/ReadNotice";
 import { focusTargetInRow, focusTargetInSection, type ConfirmActionOutcome, useOperatorControls } from "../../shared/controls";
 import { formatEpoch } from "../../shared/format";
 import { useMediaQuery } from "../../shared/useMediaQuery";
-import { canEditEntitlement, canRunAction, disableEntitlementConfirm, releaseSeatsConfirm, revokeEntitlementConfirm, type EntitlementAction, type EntitlementFilter } from "./workflow";
+import { focusWorkspaceTarget } from "../../shared/workspaceFocus";
+import { canEditEntitlement, canRunAction, disableEntitlementConfirm, filterAfterShowAll, isSingleEntitlementFilter, releaseSeatsConfirm, revokeEntitlementConfirm, type EntitlementAction, type EntitlementFilter } from "./workflow";
 
 interface ListProps {
   scoped?: boolean;
@@ -57,6 +58,19 @@ export function EntitlementList(props: ListProps): React.ReactElement {
   // DOM that must only ever hold one shape of row.
   const narrow = useMediaQuery("(max-width: 1023px)");
   const filtered = Object.values(filter).some((value) => value !== "");
+  // A search or "Expiring soon" deep link focuses its one row once the list settles on it; it never
+  // steals focus back on a later, unrelated reload of the same deep link.
+  const singleRecordFocusRef = useRef<string | null>(null);
+  useEffect(() => {
+    const id = filter.id;
+    if (!ready || id === undefined || id === "") { singleRecordFocusRef.current = null; return; }
+    if (singleRecordFocusRef.current === id) return;
+    const match = items.find((item) => item.id === id);
+    if (match === undefined) return;
+    singleRecordFocusRef.current = id;
+    const target = focusTargetInRow(`entitlement:${match.id}`, []);
+    focusWorkspaceTarget(typeof target === "function" ? target() : target);
+  }, [filter.id, ready, items]);
   function actions(item: EntitlementRecord): React.ReactElement {
     const focus = focusTargetInRow(`entitlement:${item.id}`, ['button[data-focus-action="reenable"]', ".status"]);
     return <div className="actions"><button disabled={locked || !canEditEntitlement(item.status)} onClick={() => props.onEdit(item)}>Edit</button>{(!props.scoped || canEditEntitlement(item.status)) && <ActionMenu label="More actions">
@@ -75,6 +89,7 @@ export function EntitlementList(props: ListProps): React.ReactElement {
   }
   const capacity = (item: EntitlementRecord): React.ReactElement => <><div>{item.license_mode?.replaceAll("_", " ") || "Default mode"}</div><span className="muted">{item.license_mode === "floating" ? <>Pool {item.pool_size}</> : <>Device limit {item.max_active_devices}</>}</span></>;
   return <section className="tablePane" data-focus-section="entitlements" aria-label="Entitlement list">
+    {isSingleEntitlementFilter(filter) && <p role="status" className="singleRecordBanner">Showing 1 entitlement · <button type="button" onClick={() => onFilter(filterAfterShowAll(filter))}>Show all</button></p>}
     {filter.customer_id && <p role="status">License access for customer {filter.customer_id}. {!props.scoped && "Clear filters to browse all grants. This selection lasts for this navigation session."}</p>}
     {!props.scoped && <><div className="listHeader"><button type="button" className="primary" disabled={busy} onClick={props.onCreate}>New entitlement</button></div>
     <div className="filterBar"><label>Project filter<input aria-label="Filter by project" value={filter.project} onChange={(event) => onFilter({ ...filter, project: event.target.value })} /></label><label>Feature filter<input aria-label="Filter by feature" value={filter.feature} onChange={(event) => onFilter({ ...filter, feature: event.target.value })} /></label><label>Status filter<select aria-label="Filter by status" value={filter.status} onChange={(event) => onFilter({ ...filter, status: event.target.value })}><option value="">All statuses</option><option value="active">Active</option><option value="disabled">Suspended</option><option value="revoked">Revoked</option></select></label><button type="button" disabled={!filtered} onClick={() => onFilter({ project: "", feature: "", status: "" })}>Clear filters</button><button type="button" disabled={busy} onClick={props.onExport}>Export CSV</button></div>

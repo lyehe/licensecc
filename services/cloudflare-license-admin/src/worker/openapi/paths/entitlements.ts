@@ -44,6 +44,7 @@ export const entitlementPaths: LabeledPathFragment = {
       parameters: [
         { name: "id", in: "query", required: false, description: "Exact canonical entitlement ID.", schema: { type: "string" } },
         { name: "customer_id", in: "query", required: false, description: "Exact customer ownership filter.", schema: { type: "string" } },
+        { name: "license_id", in: "query", required: false, description: "Exact license ownership filter.", schema: { type: "string" } },
         { name: "project", in: "query", required: false, description: "Exact-match project filter.", schema: { type: "string" } },
         { name: "feature", in: "query", required: false, description: "Exact-match feature filter.", schema: { type: "string" } },
         { name: "status", in: "query", required: false, description: "Exact-match status filter.", schema: { type: "string", enum: ["active", "disabled", "revoked"] } },

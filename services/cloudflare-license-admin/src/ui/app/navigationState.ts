@@ -5,7 +5,11 @@ const customerSections: readonly CustomerSection[] = ["overview", "access", "lic
 const catalogViews: readonly CatalogView[] = ["plans", "features", "import"];
 const filterKeys: Partial<Record<AdminTab, readonly string[]>> = {
   customers: ["status"],
-  entitlements: ["project", "feature", "status"],
+  // id and customer_id are deliberately absent: a search or "Expiring soon" deep link sets them to
+  // pin one exact record, but the id encodes the license fingerprint (via project+feature+fingerprint),
+  // so it must stay session-only and never reach the URL. license_id is an ordinary browsing filter
+  // (like project/feature/status) and is safe to keep on refresh/back.
+  entitlements: ["project", "feature", "status", "license_id"],
   licenses: ["project", "customer_id"],
   fulfillment: ["status", "subscription_id"],
 };

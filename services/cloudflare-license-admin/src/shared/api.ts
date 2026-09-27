@@ -428,13 +428,19 @@ export interface TimeseriesData {
   buckets: TimeseriesBucket[];
 }
 
-// GET /api/admin/report/expiring — active entitlements whose valid_until falls in (now, now+within].
-// days_left is the ceil of (valid_until - now) / 86400 so "0 days left" never appears for a future row.
+// GET /api/admin/report/expiring — active entitlements expiring in (now, now+within]. For most
+// grants that window is against the stamped valid_until; an activated activation-basis trial
+// (trial_started_at set) reports trial_started_at + trial_duration_sec instead, since that is its
+// real deadline even when valid_until was never stamped. days_left is the ceil of
+// (valid_until - now) / 86400 so "0 days left" never appears for a future row. id is the entitlement's
+// canonical id (project+feature+license_fingerprint), for deep-linking the exact record.
 export interface ExpiringEntitlement {
+  id: string;
   project: string;
   feature: string;
   license_fingerprint: string;
   customer_id: string | null;
+  customer_name: string | null;
   valid_until: number;
   days_left: number;
 }

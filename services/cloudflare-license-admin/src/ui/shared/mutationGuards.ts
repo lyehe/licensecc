@@ -823,8 +823,8 @@ export function hasExpiringListData(value: unknown): boolean {
   const data = record(value);
   return data !== null && cursorField(data) && Array.isArray(data.items) && data.items.every((item) => {
     const row = record(item);
-    return row !== null && stringField(row, "project") && stringField(row, "feature") && stringField(row, "license_fingerprint") &&
-      nullableStringField(row, "customer_id") && nonNegativeIntegerField(row, "valid_until") && integerInRangeField(row, "days_left", 1, 365_250);
+    return row !== null && stringField(row, "id") && stringField(row, "project") && stringField(row, "feature") && stringField(row, "license_fingerprint") &&
+      nullableStringField(row, "customer_id") && nullableStringField(row, "customer_name") && nonNegativeIntegerField(row, "valid_until") && integerInRangeField(row, "days_left", 1, 365_250);
   });
 }
 

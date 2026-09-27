@@ -15,6 +15,7 @@ export type EntitlementAction = "disable" | "reenable" | "revoke";
 export interface EntitlementFilter {
   id?: string;
   customer_id?: string;
+  license_id?: string;
   project: string;
   feature: string;
   status: string;
@@ -80,6 +81,7 @@ export function entitlementsPath(filter: EntitlementFilter): string {
   const params = new URLSearchParams();
   if (filter.id) params.set("id", filter.id);
   if (filter.customer_id) params.set("customer_id", filter.customer_id);
+  if (filter.license_id) params.set("license_id", filter.license_id);
   if (filter.project !== "") params.set("project", filter.project);
   if (filter.feature !== "") params.set("feature", filter.feature);
   if (filter.status !== "") params.set("status", filter.status);
@@ -89,6 +91,18 @@ export function entitlementsPath(filter: EntitlementFilter): string {
 /** Exact target read used to reconcile a release-seat mutation. */
 export function entitlementDetailPath(id: string): string {
   return `/api/admin/entitlements/${encodeURIComponent(id)}`;
+}
+
+/** A deep link naming the exact entitlement id (from search, or the "Expiring soon" report)
+ * guarantees exactly one row; only then does the list show the "Showing 1 entitlement" banner. */
+export function isSingleEntitlementFilter(filter: Pick<EntitlementFilter, "id">): boolean {
+  return typeof filter.id === "string" && filter.id !== "";
+}
+
+/** "Show all" drops the deep link's identity filters (id, customer_id, license_id) and keeps only
+ * the plain browsing filters. */
+export function filterAfterShowAll(filter: EntitlementFilter): EntitlementFilter {
+  return { project: filter.project, feature: filter.feature, status: filter.status };
 }
 
 export function normalizeEntitlementForm(form: EntitlementFormState): AdminEntitlementCreateInput {

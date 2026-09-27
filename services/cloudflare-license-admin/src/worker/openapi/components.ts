@@ -1201,13 +1201,15 @@ export const openApiComponents: LabeledComponentFragment = {
             type: "array",
             items: {
               type: "object",
-              required: ["project", "feature", "license_fingerprint", "valid_until", "days_left"],
+              required: ["id", "project", "feature", "license_fingerprint", "valid_until", "days_left"],
               properties: {
+                id: { type: "string", description: "The entitlement's canonical id (project+feature+license_fingerprint), for deep-linking the exact record." },
                 project: { type: "string" },
                 feature: { type: "string" },
                 license_fingerprint: { type: "string" },
                 customer_id: { type: ["string", "null"] },
-                valid_until: { type: "integer", description: "Epoch seconds the entitlement expires at." },
+                customer_name: { type: ["string", "null"] },
+                valid_until: { type: "integer", description: "Epoch seconds the entitlement expires at (an activated activation-basis trial reports its trial deadline here instead)." },
                 days_left: { type: "integer", description: "ceil((valid_until - now)/86400); >=1 for a still-future expiry." },
               },
             },
