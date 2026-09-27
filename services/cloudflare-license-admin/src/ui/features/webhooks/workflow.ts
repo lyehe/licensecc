@@ -1,4 +1,5 @@
-import type { WebhookEndpoint, WebhookEndpointInput } from "../../../shared/api";
+import type { WebhookEndpoint, WebhookEndpointInput, WebhookEndpointPatch } from "../../../shared/api";
+import { WEBHOOK_EVENT_TYPES } from "@licensecc/cloudflare-runtime/webhooks/event_types";
 
 export interface WebhookFilter {
   status: string;
@@ -29,36 +30,26 @@ export const emptyWebhookForm: WebhookFormState = {
 
 export type WebhookEventSource = "entitlement" | "customer" | "order";
 
+const WEBHOOK_EVENT_SOURCES: readonly WebhookEventSource[] = ["entitlement", "customer", "order"];
+const WEBHOOK_EVENT_SOURCE_LABELS: Record<WebhookEventSource, string> = { entitlement: "Entitlement", customer: "Customer", order: "Order" };
+
 /**
- * The checkbox editor's grouping, by source. Mirrors WEBHOOK_EVENT_TYPES in
- * packages/cloudflare-runtime/src/webhooks/event_types.mjs (which in turn mirrors the
- * entitlement_events / customer_events CHECK constraints in schema.sql, plus the order-ingest
- * ORDER_INTENTS). This UI keeps its own copy -- the same way normalizeWebhookForm below already
- * mirrors the Worker's validators -- so the browser bundle never depends on the Worker runtime
- * package. "disable"/"reenable" deliberately appear in BOTH the entitlement and customer groups:
- * they are the exact same csv token either way, so checking either box selects the identical
- * filter value and both checkboxes reflect the same state.
+ * The checkbox editor's grouping, by source -- DERIVED from WEBHOOK_EVENT_TYPES
+ * (packages/cloudflare-runtime/src/webhooks/event_types.mjs), the single source of truth also
+ * used by the admin worker's validator and the schema-parity test, so the token lists can never
+ * drift from what the dispatcher actually emits. That module is pure (its only import is the
+ * pure domain intents module), so importing it here is the same shape of import this file already
+ * makes into `@licensecc/licensing-domain` elsewhere in the admin UI. Only the 3 source names and
+ * their display labels are UI-local. "disable"/"reenable" deliberately appear in BOTH the
+ * entitlement and customer groups: they are the exact same csv token either way, so checking
+ * either box selects the identical filter value and both checkboxes reflect the same state.
  */
-export const WEBHOOK_EVENT_TYPE_GROUPS: ReadonlyArray<{ source: WebhookEventSource; label: string; tokens: readonly string[] }> = [
-  { source: "entitlement", label: "Entitlement", tokens: ["create", "update", "disable", "reenable", "revoke", "upsert", "revoked-override"] },
-  { source: "customer", label: "Customer", tokens: ["disable", "reenable"] },
-  {
-    source: "order",
-    label: "Order",
-    tokens: [
-      "subscription.active",
-      "subscription.renewed",
-      "subscription.past_due",
-      "subscription.paused",
-      "subscription.payment_failed",
-      "subscription.canceled_at_period_end",
-      "subscription.resumed",
-      "quantity.changed",
-      "fraud.confirmed",
-      "chargeback",
-    ],
-  },
-];
+export const WEBHOOK_EVENT_TYPE_GROUPS: ReadonlyArray<{ source: WebhookEventSource; label: string; tokens: readonly string[] }> =
+  WEBHOOK_EVENT_SOURCES.map((source) => ({
+    source,
+    label: WEBHOOK_EVENT_SOURCE_LABELS[source],
+    tokens: WEBHOOK_EVENT_TYPES[source],
+  }));
 
 // De-duplicated: "disable"/"reenable" appear in two groups above, but each is one csv token.
 const WEBHOOK_EVENT_TYPE_CANONICAL_ORDER: readonly string[] = [...new Set(WEBHOOK_EVENT_TYPE_GROUPS.flatMap((group) => group.tokens))];
@@ -71,7 +62,23 @@ export function isWebhookEventTypeChecked(csv: string, token: string): boolean {
   return webhookEventTypesArray(csv).includes(token);
 }
 
-/** Toggle one token's membership in the csv filter, re-serialized in a stable, deduplicated order. */
+/**
+ * Every token in the csv filter that WEBHOOK_EVENT_TYPE_GROUPS does not define -- e.g. a legacy
+ * value an existing endpoint already stored before today's closed set existed (there is no
+ * database CHECK on webhook_endpoints.event_types). The edit form shows these explicitly rather
+ * than ever dropping them without saying so.
+ */
+export function unknownWebhookEventTypes(csv: string): string[] {
+  const known = new Set(WEBHOOK_EVENT_TYPE_CANONICAL_ORDER);
+  return webhookEventTypesArray(csv).filter((token) => !known.has(token));
+}
+
+/**
+ * Toggle one token's membership in the csv filter, re-serialized in canonical order. A checkbox
+ * only ever names a KNOWN token, so this can only add/remove a known one; any token outside
+ * WEBHOOK_EVENT_TYPE_GROUPS already present in `csv` (a legacy value) is dropped here -- the edit
+ * form's legacy note (unknownWebhookEventTypes) tells the operator that before it happens.
+ */
 export function toggleWebhookEventType(csv: string, token: string, checked: boolean): string {
   const tokens = new Set(webhookEventTypesArray(csv));
   if (checked) {
@@ -157,6 +164,26 @@ export function normalizeWebhookForm(form: WebhookFormState): WebhookEndpointInp
   };
 }
 
+/**
+ * PATCH /api/admin/webhooks/{id}: only the fields that actually differ from `baseline` (the form
+ * as it was loaded from the endpoint). This matters beyond bandwidth: webhook_endpoints.event_types
+ * has no database CHECK, so an existing row can hold a token outside today's closed set. Always
+ * sending event_types (even unchanged) would make the server re-validate that legacy value on
+ * every edit and reject it -- an endpoint with a legacy token could then never be edited for ANY
+ * field. Comparing against the raw form fields (not the normalized output) means an edit that
+ * only reformats a value (e.g. re-typing the identical URL) still counts as unchanged.
+ */
+export function normalizeWebhookPatch(form: WebhookFormState, baseline: WebhookFormState): WebhookEndpointPatch {
+  const normalized = normalizeWebhookForm(form);
+  const patch: WebhookEndpointPatch = {};
+  if (form.url !== baseline.url) patch.url = normalized.url;
+  if (form.event_types !== baseline.event_types) patch.event_types = normalized.event_types;
+  if (form.description !== baseline.description) patch.description = normalized.description;
+  if (form.scope_project !== baseline.scope_project) patch.scope_project = normalized.scope_project;
+  if (form.scope_customer_id !== baseline.scope_customer_id) patch.scope_customer_id = normalized.scope_customer_id;
+  return patch;
+}
+
 const MAX_WEBHOOK_URL_SIZE = 2048;
 const MAX_WEBHOOK_EVENT_TYPES_SIZE = 1024;
 const MAX_WEBHOOK_DESCRIPTION_SIZE = 500;
@@ -189,8 +216,6 @@ function normalizeWebhookScope(value: string, label: string): string {
   }
   return trimmed;
 }
-
-const WEBHOOK_EVENT_SOURCE_LABELS: Record<string, string> = { entitlement: "Entitlement", customer: "Customer", order: "Order" };
 
 /**
  * Human copy for a 400 invalid_event_types response (the checkboxes prevent an operator from

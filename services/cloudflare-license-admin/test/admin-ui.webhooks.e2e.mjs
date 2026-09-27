@@ -56,12 +56,38 @@ test("an operator creates a webhook via grouped event-type checkboxes and then e
 
   expect(api.requests.webhookPatches).toHaveLength(1);
   expect(api.requests.webhookPatches[0].id).toBe("wh_1");
-  expect(api.requests.webhookPatches[0].body).toMatchObject({
-    url: "https://hooks.example.test/e4",
-    event_types: "update,disable",
-  });
+  // The URL was never touched in the edit form, so the PATCH omits it entirely -- only the field
+  // that actually changed (event_types) is sent.
+  expect(api.requests.webhookPatches[0].body).toEqual({ event_types: "update,disable" });
 
   await expect(row).toContainText("update,disable");
   // A successful patch closes the editor (mirrors the Policies edit flow).
   await expect(page.getByRole("form", { name: "Edit webhook endpoint", exact: true })).toHaveCount(0);
+});
+
+// Fix round 1 (CRITICAL): webhook_endpoints.event_types has no database CHECK, so an existing row
+// can already hold a token outside today's closed set. The PATCH form must never re-validate that
+// legacy value just because some OTHER field changed, or such an endpoint could never be edited.
+test("editing only the URL of an endpoint with a legacy event type still succeeds, and the legacy note names it", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  api.seed.webhook("wh_legacy", "https://hooks.example.test/legacy", { event_types: "legacy_unknown_type" });
+  await page.route("**/api/admin/**", api.route);
+
+  await page.goto("/#/webhooks");
+  const row = page.locator("tr").filter({ hasText: "https://hooks.example.test/legacy" });
+  await row.getByRole("button", { name: "Edit", exact: true }).click();
+  const editForm = page.getByRole("form", { name: "Edit webhook endpoint", exact: true });
+  await expect(editForm.getByText("Legacy event types not in the current list: legacy_unknown_type. Changing event types will remove them.", { exact: true })).toBeVisible();
+
+  await editForm.getByLabel("URL", { exact: false }).fill("https://hooks.example.test/legacy-updated");
+  await editForm.getByRole("button", { name: "Save changes", exact: true }).click();
+  await expect(page.getByText(/webhook_patched/)).toBeVisible();
+
+  expect(api.requests.webhookPatches).toHaveLength(1);
+  // event_types was never touched, so the PATCH omits it -- the legacy value is never
+  // re-validated against today's closed set just because the URL changed.
+  expect(api.requests.webhookPatches[0].body).toEqual({ url: "https://hooks.example.test/legacy-updated" });
+
+  const updatedRow = page.locator("tr").filter({ hasText: "https://hooks.example.test/legacy-updated" });
+  await expect(updatedRow).toContainText("legacy_unknown_type");
 });

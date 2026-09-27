@@ -11,7 +11,7 @@ import { isRetryableAppendFailure, loadMore, pageAppendError, withCursor } from 
 import { hasWebhookData, hasWebhookDeliveryData, hasWebhookDeliveryListData, hasWebhookListData, hasWebhookTransitionData, mutationFailurePolicies, parseMutationResponse } from "../../shared/mutationGuards";
 import { useDebouncedValue } from "../../shared/useDebouncedValue";
 import { useRequestFence } from "../../shared/requestFence";
-import { canRunWebhookAction, disableWebhookConfirm, emptyWebhookForm, isWebhookEventTypeChecked, normalizeWebhookForm, toggleWebhookEventType, webhookDeliveriesPath, webhookEventTypesErrorMessage, webhookFormFromEndpoint, webhookPath, webhookRedrivePath, webhookTransitionPath, webhooksPath, WEBHOOK_EVENT_TYPE_GROUPS, WebhookAction, WebhookDeliveryFilter, WebhookFilter, WebhookFormState } from "./workflow";
+import { canRunWebhookAction, disableWebhookConfirm, emptyWebhookForm, isWebhookEventTypeChecked, normalizeWebhookForm, normalizeWebhookPatch, toggleWebhookEventType, unknownWebhookEventTypes, webhookDeliveriesPath, webhookEventTypesErrorMessage, webhookFormFromEndpoint, webhookPath, webhookRedrivePath, webhookTransitionPath, webhooksPath, WEBHOOK_EVENT_TYPE_GROUPS, WebhookAction, WebhookDeliveryFilter, WebhookFilter, WebhookFormState } from "./workflow";
 
 export function Webhooks({ active }: { active: boolean }): React.ReactElement | null {
   const [deliveriesOpen,setDeliveriesOpen]=useState(false);
@@ -24,13 +24,17 @@ export function Webhooks({ active }: { active: boolean }): React.ReactElement | 
   const [readState, setReadState] = useState<{ key: string; loading: boolean; error: string | null }>({ key: "", loading: true, error: null });
   const [deliveryRead, setDeliveryRead] = useState<{ key: string; loading: boolean; error: string | null }>({ key: "", loading: true, error: null });
   const [webhookForm, setWebhookForm] = useState<WebhookFormState>(emptyWebhookForm);
-  const [baseline, setBaseline] = useState(() => JSON.stringify(emptyWebhookForm));
+  // The form as loaded from the endpoint (or emptyWebhookForm for a new one). Kept as the actual
+  // WebhookFormState -- not a JSON string -- so a PATCH can diff field-by-field and omit anything
+  // unchanged (see normalizeWebhookPatch): webhook_endpoints.event_types has no database CHECK, so
+  // an existing row's legacy token must never be re-validated just because some OTHER field changed.
+  const [baseline, setBaseline] = useState<WebhookFormState>(emptyWebhookForm);
   const [webhookDeliveries, setWebhookDeliveries] = useState<WebhookDelivery[]>([]);
   const [webhookDeliveriesCursor, setWebhookDeliveriesCursor] = useState<string | null>(null);
   const [webhookDeliveryFilter, setWebhookDeliveryFilter] = useState<WebhookDeliveryFilter>({ endpoint_id: "", status: "" });
   const { busy: requestBusy, operationLocked, currentReason, requestConfirm, runConsequenceAction, runKeyedMutation, runMutation, setMessage, setReason } = useOperatorControls();
   const busy = requestBusy || operationLocked;
-  const { requestLeave } = useNavigationGuard({ when: active && editorOpen && JSON.stringify(webhookForm) !== baseline, onDiscard: () => closeEditor() });
+  const { requestLeave } = useNavigationGuard({ when: active && editorOpen && JSON.stringify(webhookForm) !== JSON.stringify(baseline), onDiscard: () => closeEditor() });
   const webhooksUrl = useMemo(() => webhooksPath(webhookFilter), [webhookFilter]);
   // The filter alone reloads the endpoint list; active only gates whether a reload may fire, so
   // leaving and returning to this tab with the filter unchanged costs zero requests. The debounce
@@ -57,7 +61,7 @@ export function Webhooks({ active }: { active: boolean }): React.ReactElement | 
   function openEditor(next: WebhookFormState, target: WebhookEndpoint | null): void {
     setEditing(target);
     setWebhookForm(next);
-    setBaseline(JSON.stringify(next));
+    setBaseline(next);
     setEditorOpen(true);
   }
 
@@ -65,7 +69,7 @@ export function Webhooks({ active }: { active: boolean }): React.ReactElement | 
     setEditorOpen(false);
     setEditing(null);
     setWebhookForm(emptyWebhookForm);
-    setBaseline(JSON.stringify(emptyWebhookForm));
+    setBaseline(emptyWebhookForm);
   }
 
   async function refreshWebhooks(strict = false, isCurrent: () => boolean = () => true): Promise<ExactReadProof | null> {
@@ -197,7 +201,7 @@ export function Webhooks({ active }: { active: boolean }): React.ReactElement | 
       onApplied: async (parsed) => {
         if (!isCurrent()) return;
         setMessage(`${parsed.code} (${parsed.requestId})`);
-        if (isWebhookFormGenerationCurrent(formGeneration)) { setWebhookForm(emptyWebhookForm); setBaseline(JSON.stringify(emptyWebhookForm)); }
+        if (isWebhookFormGenerationCurrent(formGeneration)) { setWebhookForm(emptyWebhookForm); setBaseline(emptyWebhookForm); }
       },
       refresh: async () => await currentWebhooksRefreshRef.current(),
       onUnapplied: (parsed) => {
@@ -214,9 +218,9 @@ export function Webhooks({ active }: { active: boolean }): React.ReactElement | 
     const contextGeneration = filterGeneration;
     const formGeneration = webhookFormGeneration;
     const isCurrent = (): boolean => isFilterGenerationCurrent(contextGeneration) && isWebhookFormGenerationCurrent(formGeneration);
-    let body: ReturnType<typeof normalizeWebhookForm>;
+    let body: ReturnType<typeof normalizeWebhookPatch>;
     try {
-      body = normalizeWebhookForm(webhookForm);
+      body = normalizeWebhookPatch(webhookForm, baseline);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "invalid_form");
       return;
@@ -352,6 +356,11 @@ export function Webhooks({ active }: { active: boolean }): React.ReactElement | 
 
   if (!active) return null;
   const editorTitle = editing === null ? "New webhook endpoint" : "Edit webhook endpoint";
+  // webhook_endpoints.event_types has no database CHECK, so an existing row can already hold a
+  // token outside today's closed set (e.g. a legacy value, or one from before a source's list
+  // changed). The checkboxes can only represent known tokens, so name any others explicitly
+  // instead of ever dropping them from view without saying so.
+  const legacyEventTypes = unknownWebhookEventTypes(webhookForm.event_types);
   return (
     <section className="listPage">
       <div className="listHeader"><button className="primary" type="button" disabled={busy} onClick={() => { if (!editorOpen || editing !== null) requestLeave(() => openEditor(emptyWebhookForm, null)); }}>New endpoint</button></div>
@@ -374,6 +383,7 @@ export function Webhooks({ active }: { active: boolean }): React.ReactElement | 
               </label>)}
             </fieldset>)}
             <p className="muted">"disable" and "reenable" match both entitlement and customer events — checking either box selects the same filter for both sources.</p>
+            {legacyEventTypes.length > 0 && <p className="muted" role="note">Legacy event types not in the current list: {legacyEventTypes.join(", ")}. Changing event types will remove them.</p>}
           </div>
           <label>Description<input value={webhookForm.description} onChange={(event) => setWebhookForm({ ...webhookForm, description: event.target.value })} /></label>
           <label>Scope: project (blank = all)<input placeholder="DEFAULT" value={webhookForm.scope_project} onChange={(event) => setWebhookForm({ ...webhookForm, scope_project: event.target.value })} /></label>

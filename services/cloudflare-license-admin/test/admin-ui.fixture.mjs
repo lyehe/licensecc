@@ -194,10 +194,11 @@ export function makeAdminApiFixture() {
     return policy;
   }
 
-  function seedWebhook(id = "wh_confirm", url = "https://hooks.example.test/confirm") {
+  function seedWebhook(id = "wh_confirm", url = "https://hooks.example.test/confirm", overrides = {}) {
     const endpoint = {
       id, url, event_types: "", status: "active",
       description: "", scope_project: null, scope_customer_id: null, created_at: now, updated_at: now,
+      ...overrides,
     };
     webhooks.push(endpoint);
     return endpoint;

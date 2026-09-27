@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 // at dist-worker/worker/webhooks.js. These lock the validator contracts that moved
 // verbatim out of index.ts, proving the extraction preserved behavior.
 import { validateWebhookInput, validateWebhookPatch } from "../dist-worker/worker/webhooks.js";
+import { safeWebhookEventTypesShape, webhookEventTypesUnknownTokens } from "../dist-worker/worker/webhook_event_types.js";
 
 test("validateWebhookInput accepts a minimal https endpoint and normalizes optionals", () => {
   const result = validateWebhookInput({ url: "https://example.com/hook" });
@@ -96,8 +97,28 @@ test("validateWebhookPatch collects only the provided mutable fields", () => {
   });
 });
 
-test("validateWebhookPatch rejects a token outside the known entitlement/customer/order set", () => {
-  assert.equal(validateWebhookPatch({ event_types: "not_a_real_event_type" }), "invalid_event_types");
+test("validateWebhookPatch accepts a shape-valid event_types token even outside the known set (membership is checked separately, against the stored row)", () => {
+  // webhook_endpoints.event_types has no database CHECK, so an existing row can already hold a
+  // legacy token. validateWebhookPatch only validates SHAPE; handleWebhookPatch enforces
+  // membership itself, and only for a value that actually changes from what's stored.
+  assert.deepEqual(validateWebhookPatch({ event_types: "not_a_real_event_type" }), { event_types: "not_a_real_event_type" });
+});
+
+test("validateWebhookPatch still rejects a malformed event_types shape (internal whitespace, oversized)", () => {
+  assert.equal(validateWebhookPatch({ event_types: "a b" }), null);
+  assert.equal(validateWebhookPatch({ event_types: "x".repeat(1025) }), null);
+});
+
+test("safeWebhookEventTypesShape canonicalizes csv without checking membership", () => {
+  assert.equal(safeWebhookEventTypesShape(" legacy_type , create ,, "), "legacy_type,create");
+  assert.equal(safeWebhookEventTypesShape(undefined), "");
+  assert.equal(safeWebhookEventTypesShape("a b"), null);
+});
+
+test("webhookEventTypesUnknownTokens names every token WEBHOOK_EVENT_TYPES does not define", () => {
+  assert.deepEqual(webhookEventTypesUnknownTokens(""), []);
+  assert.deepEqual(webhookEventTypesUnknownTokens("create,disable"), []);
+  assert.deepEqual(webhookEventTypesUnknownTokens("create,legacy_type,also_bogus"), ["legacy_type", "also_bogus"]);
 });
 
 test("validateWebhookPatch rejects attempts to patch immutable fields", () => {

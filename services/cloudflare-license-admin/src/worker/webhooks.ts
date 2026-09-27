@@ -23,7 +23,7 @@ import type {
   WebhookEndpointPatch,
 } from "../shared/api";
 import { clientIp } from "@licensecc/cloudflare-runtime/http/kit";
-import { INVALID_EVENT_TYPES, safeWebhookEventTypes, WEBHOOK_EVENT_TYPES } from "./webhook_event_types.js";
+import { INVALID_EVENT_TYPES, safeWebhookEventTypes, safeWebhookEventTypesShape, webhookEventTypesUnknownTokens, WEBHOOK_EVENT_TYPES } from "./webhook_event_types.js";
 
 // Sentinel distinguishing a present-but-invalid value from an absent one, module-local to the
 // webhook validators (mirrors index.ts's INVALID symbol; compared only within this module).
@@ -121,7 +121,13 @@ export function validateWebhookInput(value: unknown): WebhookEndpointInput | "in
 // Validate a patch body. Only url / event_types / description are mutable; status / id /
 // timestamps are NOT patchable (reject if present). All fields optional. A present-but-bad
 // url returns "invalid_url"; any other invalid field returns null.
-export function validateWebhookPatch(value: unknown): WebhookEndpointPatch | "invalid_url" | "invalid_event_types" | null {
+//
+// event_types is checked for SHAPE only here (never membership): webhook_endpoints.event_types
+// has no database CHECK, so an existing row can already hold a token outside today's closed set.
+// The caller (handleWebhookPatch) knows the stored row and only enforces membership when this
+// patch actually CHANGES event_types, so resending (or leaving untouched) a legacy value never
+// blocks an edit to some other field.
+export function validateWebhookPatch(value: unknown): WebhookEndpointPatch | "invalid_url" | null {
   if (typeof value !== "object" || value === null) {
     return null;
   }
@@ -138,10 +144,7 @@ export function validateWebhookPatch(value: unknown): WebhookEndpointPatch | "in
     patch.url = url;
   }
   if (input.event_types !== undefined) {
-    const eventTypes = safeWebhookEventTypes(input.event_types);
-    if (eventTypes === INVALID_EVENT_TYPES) {
-      return "invalid_event_types";
-    }
+    const eventTypes = safeWebhookEventTypesShape(input.event_types);
     if (eventTypes === null) {
       return null;
     }
@@ -304,9 +307,6 @@ async function handleWebhookPatch(request: Request, env: Env, actor: Actor, endp
   if (patch === "invalid_url") {
     return envelope(requestIdValue, "invalid_url", undefined, 400);
   }
-  if (patch === "invalid_event_types") {
-    return envelope(requestIdValue, "invalid_event_types", { allowed: WEBHOOK_EVENT_TYPES }, 400);
-  }
   if (patch === null) {
     return envelope(requestIdValue, "invalid_request", undefined, 400);
   }
@@ -324,6 +324,15 @@ async function handleWebhookPatch(request: Request, env: Env, actor: Actor, endp
     }
     if (existing === null) {
       return envelope(requestIdValue, "not_found", undefined, 404);
+    }
+    // Only a NEW or CHANGED event_types value is checked against the closed set: resending (or
+    // omitting) the stored value must never block an edit to some other field just because that
+    // row predates today's closed set (webhook_endpoints.event_types has no database CHECK).
+    if (patch.event_types !== undefined && patch.event_types !== existing.event_types) {
+      const unknown = webhookEventTypesUnknownTokens(patch.event_types);
+      if (unknown.length > 0) {
+        return envelope(requestIdValue, "invalid_event_types", { allowed: WEBHOOK_EVENT_TYPES }, 400);
+      }
     }
     const effectiveScopeProject = patch.scope_project !== undefined ? patch.scope_project : (existing.scope_project ?? "");
     const effectiveScopeCustomer = patch.scope_customer_id !== undefined ? patch.scope_customer_id : (existing.scope_customer_id ?? "");
