@@ -1,17 +1,16 @@
-import React, { useState } from "react";
+import React from "react";
 import { DEVICE_RELEASE_ACTION_LABEL, formatTimestamp } from "../../portalWorkflow";
+import { matchesDeviceSearch } from "./deviceSearch";
 import type { DeviceRow } from "../../types";
 
-export function DeviceRegistrations({ devices, busy, releaseDevice }: {
+export function DeviceRegistrations({ devices, busy, releaseDevice, query, project }: {
   devices: DeviceRow[]; busy: boolean; releaseDevice(item: DeviceRow): Promise<void>;
+  // D1: the page-level search box and the route's exact app filter, both owned by DevicesFeature.
+  query: string; project: string | null;
 }): React.ReactElement {
-  const [project, setProject] = useState("");
-  const [search, setSearch] = useState("");
-  const projects = [...new Set([...devices.map((item) => item.project), ...(project ? [project] : [])])].sort();
-  const visible = devices.filter((item) => (!project || item.project === project) && item.device_key_id.toLowerCase().includes(search.toLowerCase()));
+  const visible = devices.filter((item) => matchesDeviceSearch([item.device_key_id], item.project, query, project));
   return <section className="registrations">
-    <div className="filterBar"><label>Find a device<input type="search" placeholder="Search by device ID" value={search} onChange={(event) => setSearch(event.target.value)} /></label><label>App<select value={project} onChange={(event) => setProject(event.target.value)}><option value="">All apps</option>{projects.map((name) => <option key={name}>{name}</option>)}</select></label></div>
-    <section className="tablePane full"><h2>Legacy device registrations</h2>
+    <section className="tablePane full"><h2>Activated devices (older app versions)</h2>
       <p>Registration time does not indicate whether a device is online.</p>
       {visible.length > 0 ? <table><thead><tr><th>Device ID</th><th>App</th><th>Feature</th><th>Registered</th><th>Action</th></tr></thead><tbody>
         {visible.map((item, index) => <tr key={`${item.device_key_id}/${index}`}>

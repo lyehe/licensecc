@@ -2,14 +2,23 @@ import { useEffect, useState } from "react";
 
 export interface PortalLocation { page: "apps" | "nodes" | "account"; project: string | null }
 
+function decodeProject(raw: string | undefined): string | null {
+  if (!raw) return null;
+  try { return decodeURIComponent(raw); }
+  catch { return null; }
+}
+
 function readLocation(): PortalLocation {
   const [page, project] = window.location.hash.replace(/^#\/?/, "").split("/");
-  if (page === "nodes" || page === "account") return { page, project: null };
-  try { return { page: "apps", project: project ? decodeURIComponent(project) : null }; }
-  catch { return { page: "apps", project: null }; }
+  if (page === "account") return { page, project: null };
+  // D1: nodes carries the same `/{project}` segment apps does, so "View devices" can open the
+  // devices page pre-filtered to one app's exact name.
+  if (page === "nodes") return { page, project: decodeProject(project) };
+  return { page: "apps", project: decodeProject(project) };
 }
 
 export function appLocation(project: string): string { return `#/apps/${encodeURIComponent(project)}`; }
+export function devicesLocation(project: string): string { return `#/nodes/${encodeURIComponent(project)}`; }
 
 export function usePortalLocation(): PortalLocation {
   const [location, setLocation] = useState(readLocation);

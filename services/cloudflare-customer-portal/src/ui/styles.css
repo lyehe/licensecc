@@ -308,12 +308,24 @@ nav a:hover {
 
 .filterBar {
   display:flex;
+  flex-wrap:wrap;
+  align-items:center;
   gap:16px;
   margin-bottom:24px
 }
 
 .filterBar label {
   width:260px
+}
+
+.appFilterChip {
+  display:inline-flex;
+  align-items:center;
+  gap:8px;
+  margin:0;
+  padding:6px 12px;
+  border:1px solid var(--border);
+  border-radius:999px
 }
 
 label {
@@ -421,6 +433,10 @@ code {
   display:grid;
   gap:16px;
   overflow-wrap:anywhere
+}
+
+.seatGrid>.emptyState {
+  grid-column:1/-1
 }
 
 .muted {

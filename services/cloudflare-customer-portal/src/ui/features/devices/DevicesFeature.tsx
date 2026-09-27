@@ -1,13 +1,12 @@
 import React, { useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import { DeviceRegistrations } from "./DeviceRegistrations";
+import { ProtectedNodes } from "./ProtectedNodes";
+import { BrowserSeats } from "./BrowserSeats";
 
 import {
   checkoutPath,
   DEVICE_RELEASE_CONFIRM_COPY,
   deviceReleasePath,
-  FLOATING_SEAT_RELEASE_CONFIRM_COPY,
-  FLOATING_SEAT_RELEASE_CONFIRM_TITLE,
   FLOATING_SEAT_RELEASE_NETWORK_ERROR_COPY,
   FLOATING_SEAT_RELEASE_REFRESH_FAILED_CODE,
   heartbeatPath,
@@ -16,7 +15,6 @@ import {
   releasePath,
   SEATS_KEY,
   serializeSeatSessions,
-  shortHash,
   type SeatSession,
 } from "../../portalWorkflow";
 import { api, localMessage, resultMessage } from "../../shared/api";
@@ -382,92 +380,53 @@ export function useDevicesController(options: DeviceFeatureOptions): DevicesCont
   };
 }
 
-export function DevicesFeature({ controller }: { controller: DevicesController }): React.ReactElement {
-  const hasBrowserSession=Object.keys(controller.seatSessions).length>0 || controller.pendingSeatRelease!==null;
-  const floatingEntitlements = controller.entitlements.filter((item) => item.license_mode === "floating");
-  const seatGridContent = (
-    <div className="seatGrid">
-      <div className="seatHeading"><p>These controls manage seats created in this browser. They do not list or control native app sessions on other machines.</p></div>
-      {floatingEntitlements.map((item, index) => (
-        <div
-          className="seatCard"
-          key={`seat/${item.id}/${index}`}
-          ref={(element) => { controller.seatCardRefs.current[item.id] = element; }}
-          tabIndex={-1}
-        >
-          <div>
-            <strong>{item.project}</strong>
-            <span className="muted"> / {item.feature}</span>
-            <span className="muted"> pool {item.pool_size}</span>
-          </div>
-          <div className="actions">
-            <button
-              ref={(element) => { controller.seatStartButtonRefs.current[item.id] = element; }}
-              disabled={controller.busy || item.status !== "active" || controller.seatSessions[item.id] !== undefined}
-              onClick={() => void controller.seatAction(item, "checkout")}
-            >Start seat</button>
-            <button disabled={controller.busy || item.status !== "active" || controller.seatSessions[item.id] === undefined} onClick={() => void controller.seatAction(item, "heartbeat")}>Renew seat</button>
-            <button
-              ref={(element) => { controller.seatReleaseButtonRefs.current[item.id] = element; }}
-              disabled={controller.busy || controller.seatSessions[item.id] === undefined}
-              onClick={() => controller.requestSeatRelease(item)}
-            >Release seat</button>
-          </div>
-        </div>
-      ))}
-    </div>
-  );
+// D1: one devices page in customer terms. This is now the single page-level owner for Connected
+// devices, Activated devices (older app versions) and Browser seats: it owns the one search box
+// above all three sections and the route's exact app filter (shown as a removable "App: {project}"
+// chip), and passes both down. Connected devices loads and paginates independently of the
+// entitlements/devices read that gates the other two sections, so it always renders regardless of
+// accountDataState -- matching the previous behaviour where a legacy-data failure never blocked
+// connected-device management.
+export function DevicesFeature({
+  controller,
+  customer,
+  busy,
+  runOnce,
+  onSessionExpired,
+  project,
+  accountDataState,
+  onRetryAccountData,
+}: {
+  controller: DevicesController;
+  customer: string;
+  busy: boolean;
+  runOnce(work: () => Promise<void>): Promise<void>;
+  onSessionExpired(): Promise<boolean>;
+  project: string | null;
+  accountDataState: "loading" | "ready" | "error";
+  onRetryAccountData(): Promise<void>;
+}): React.ReactElement {
+  const [query, setQuery] = useState("");
   return (
     <div>
-      {controller.devices.length>0 && <DeviceRegistrations devices={controller.devices} busy={controller.busy} releaseDevice={controller.releaseDevice} />}
-      {floatingEntitlements.length > 0 && (
-        hasBrowserSession ? (
-          <section className="browserSessions" aria-labelledby="browser-sessions-heading">
-            <h3
-              id="browser-sessions-heading"
-              ref={(element) => { controller.panelHeadingRef.current = element; }}
-              tabIndex={-1}
-            >Browser sessions</h3>
-            {seatGridContent}
-          </section>
-        ) : (
-          <details className="browserSessions"><summary ref={(element) => { controller.browserSessionsSummaryRef.current = element; }}>Browser sessions</summary>{seatGridContent}</details>
-        )
+      <div className="pageHeading"><div><h1>Devices</h1><p>Manage the devices using your licenses.</p></div></div>
+      <div className="filterBar">
+        <label>Find a device<input type="search" placeholder="Search by name, ID or app" value={query} onChange={(event) => setQuery(event.target.value)} /></label>
+        {project !== null && <p className="appFilterChip">App: {project} <a href="#/nodes">Show all apps</a></p>}
+      </div>
+      <ProtectedNodes customer={customer} busy={busy} runOnce={runOnce} onSessionExpired={onSessionExpired} query={query} project={project} />
+      {accountDataState !== "ready" ? (
+        <section className="emptyState">
+          <h2>Registered machines unavailable</h2>
+          <p>{accountDataState === "loading" ? "Fetching your licenses and devices." : "We could not refresh your account. Retry to see current access."}</p>
+          {accountDataState === "error" && <button disabled={busy} onClick={() => void onRetryAccountData()}>Retry</button>}
+        </section>
+      ) : (
+        <>
+          {controller.devices.length > 0 && <DeviceRegistrations devices={controller.devices} busy={controller.busy} releaseDevice={controller.releaseDevice} query={query} project={project} />}
+          <BrowserSeats controller={controller} query={query} project={project} />
+        </>
       )}
     </div>
   );
-}
-
-export function SeatReleaseDialog({ controller }: { controller: DevicesController }): React.ReactElement | null {
-  const pending = controller.pendingSeatRelease;
-  if (pending === null) return null;
-  return createPortal((
-    <div className="modalOverlay" role="presentation">
-      <div
-        ref={controller.seatReleaseDialogRef}
-        className="modal danger"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="floatingSeatReleaseTitle"
-        aria-describedby="floatingSeatReleaseDescription"
-        aria-busy={controller.busy}
-        tabIndex={-1}
-      >
-        <h2 id="floatingSeatReleaseTitle">{FLOATING_SEAT_RELEASE_CONFIRM_TITLE}</h2>
-        <p id="floatingSeatReleaseDescription">{FLOATING_SEAT_RELEASE_CONFIRM_COPY}</p>
-        {controller.busy && <p className="modalProgress" role="status" aria-live="polite">Releasing…</p>}
-        {controller.seatReleaseError !== null && <p className="modalError" role="alert">{controller.seatReleaseError}</p>}
-        <dl className="releaseContext">
-          <div><dt>License</dt><dd>{pending.item.project} / {pending.item.feature}</dd></div>
-          <div><dt>License fingerprint</dt><dd><code>{pending.item.license_fingerprint ? shortHash(pending.item.license_fingerprint) : "-"}</code></dd></div>
-          <div><dt>Seat</dt><dd><code>{pending.session.seat_id}</code></dd></div>
-          <div><dt>Device</dt><dd><code>{pending.session.client_instance_id}</code></dd></div>
-        </dl>
-        <div className="actions">
-          <button type="button" disabled={controller.busy} onClick={controller.dismissSeatRelease}>Cancel</button>
-          <button type="button" className="danger" disabled={controller.busy || controller.seatReleaseOutcomeUnknown} onClick={() => void controller.confirmSeatRelease()}>Confirm release</button>
-        </div>
-      </div>
-    </div>
-  ), document.body);
 }

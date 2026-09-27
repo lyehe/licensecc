@@ -3,9 +3,12 @@ import type { BindingRow } from "../../../shared/bindings";
 import { readBinding,readBindings,retireBinding } from "./bindingApi";
 import { clearRetirement,restoreRetirement,saveRetirement,type PendingRetirement } from "./pendingRetirement";
 import { formatTimestamp } from "../../portalWorkflow";
+import { matchesDeviceSearch } from "./deviceSearch";
 
-type Props={customer:string;busy:boolean;runOnce(work:()=>Promise<void>):Promise<void>;onSessionExpired():Promise<boolean>};
-export function ProtectedNodes({customer,busy,runOnce,onSessionExpired}:Props):React.ReactElement {
+// D1: query/project are owned by the page-level DevicesFeature and shared with the other two
+// sections; this component still loads and paginates its own rows.
+type Props={customer:string;busy:boolean;runOnce(work:()=>Promise<void>):Promise<void>;onSessionExpired():Promise<boolean>;query:string;project:string|null};
+export function ProtectedNodes({customer,busy,runOnce,onSessionExpired,query,project}:Props):React.ReactElement {
   const [rows,setRows]=useState<BindingRow[]>([]),[cursor,setCursor]=useState<string|null>(null),[loading,setLoading]=useState(false),[ready,setReady]=useState(false),[stale,setStale]=useState(false);
   const [saved,setSaved]=useState(()=>restoreRetirement(customer));
   const [pending,setPending]=useState<PendingRetirement|null>(saved && saved!=="invalid"?saved:null);
@@ -74,17 +77,21 @@ export function ProtectedNodes({customer,busy,runOnce,onSessionExpired}:Props):R
     if(!clearRetirement(customer)){setMessage("Could not clear the saved request. Check browser session storage.");return;}
     setSaved(null);setPending(null);setOpen(false);setError("");setTerminal(false);setReviewed(undefined);setUnreadableReviewed(false);void load();
   }
+  const visibleRows=rows.filter(row=>matchesDeviceSearch([row.label||"Unnamed device",row.binding_id],row.project,query,project));
+  const filtering=query.trim()!==""||project!==null;
   return <section className="protectedNodes" aria-busy={loading}>
     <div className="sectionHeading"><div><h2 ref={heading} tabIndex={-1}>Connected devices</h2></div><button disabled={busy||loading} onClick={()=>void load()}>Refresh devices</button></div>
     {message && <p role="status" className="readNotice">{message}</p>}
     {signInNeeded && <button disabled={busy} onClick={()=>void onSessionExpired()}>Check sign-in</button>}
     {saved==="invalid"?<div role="alert" className="readNotice"><p>A saved disconnect request cannot be read. Review current devices before clearing it.</p>{unreadableReviewed?<button disabled={busy} onClick={discard}>Clear unreadable request</button>:<button disabled={busy||loading} onClick={()=>void review()}>Review current devices</button>}</div>:saved && <div className="readNotice"><p>A disconnect request for {saved.label} needs confirmation.</p><button disabled={busy} onClick={()=>{setPending(saved);setOpen(true);}}>Review disconnect request</button></div>}
     {stale && <p role="alert">Device information may be out of date. Refresh before disconnecting.</p>}
-    {!ready?<p>{loading?"Loading connected devices…":"Connected devices unavailable."}</p>:rows.length===0?<div className="emptyState"><h3>No connected devices</h3><p>Open your application and choose Connect to add this machine.</p></div>:<div className="tablePane full"><table><thead><tr><th>Device</th><th>App</th><th>Status</th><th>Last verified</th><th>Action</th></tr></thead><tbody>
-      {rows.map(row=><tr key={row.binding_id}><td data-label="Device"><span>{row.label||"Unnamed device"}<details className="referenceDetails"><summary>Connection ID</summary><small className="identifier">{row.binding_id}</small></details></span></td><td data-label="App"><span>{row.project}<small>{row.feature}</small></span></td>
+    {!ready?<p>{loading?"Loading connected devices…":"Connected devices unavailable."}</p>:rows.length===0?<div className="emptyState"><h3>No connected devices</h3><p>Open your application and choose Connect to add this machine.</p></div>:visibleRows.length===0?<div className="emptyState"><h3>No matching devices</h3><p>Try another name, ID or app.</p></div>:<>
+      {filtering && cursor && <p className="readNotice">Showing matches from loaded devices.</p>}
+      <div className="tablePane full"><table><thead><tr><th>Device</th><th>App</th><th>Status</th><th>Last verified</th><th>Action</th></tr></thead><tbody>
+      {visibleRows.map(row=><tr key={row.binding_id}><td data-label="Device"><span>{row.label||"Unnamed device"}<details className="referenceDetails"><summary>Connection ID</summary><small className="identifier">{row.binding_id}</small></details></span></td><td data-label="App"><span>{row.project}<small>{row.feature}</small></span></td>
         <td data-label="Status">{row.state==="active"?"Connected":row.state==="released"?"Disconnected":<>Disconnecting · slot available <time>{formatTimestamp(row.hold_until)}</time></>}</td><td data-label="Last verified">{formatTimestamp(row.last_proof_at)}</td>
         <td data-label="Action">{row.state==="active"?<button disabled={busy||loading||stale||!!saved} onClick={()=>choose(row)}>Disconnect</button>:row.state==="released"?"Slot available":"Renewal stopped"}</td></tr>)}
-    </tbody></table></div>}
+    </tbody></table></div></>}
     {cursor && <button disabled={busy||loading||stale} onClick={()=>void load(cursor)}>Load more devices</button>}
     <dialog ref={dialog} className="retirementDialog" aria-labelledby="retirement-title" onCancel={event=>{event.preventDefault();close();}}>
       <h2 id="retirement-title">Disconnect {pending?.label}?</h2>

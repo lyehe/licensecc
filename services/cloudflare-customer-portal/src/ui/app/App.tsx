@@ -5,12 +5,12 @@ import { AuthFeature, usePortalAuth } from "../features/auth/AuthFeature";
 import { PasswordAction, capturePasswordAction } from "../features/auth/PasswordAction";
 import { ProvidersScope } from "../features/auth/ProviderSignIn";
 import { usePortalData } from "../features/data/usePortalData";
-import { DEVICES_REFRESH_ACTION_LABEL, DEVICES_REFRESH_FAILURE_CODE, DevicesFeature, SeatReleaseDialog, useDevicesController } from "../features/devices/DevicesFeature";
+import { DEVICES_REFRESH_ACTION_LABEL, DEVICES_REFRESH_FAILURE_CODE, DevicesFeature, useDevicesController } from "../features/devices/DevicesFeature";
+import { SeatReleaseDialog } from "../features/devices/BrowserSeats";
 import { useLicenseDownloads } from "../features/downloads/DownloadsFeature";
 import { AppsFeature } from "../features/apps/AppsFeature";
 import { AccountFeature } from "../features/account/AccountFeature";
 import { ConsentFeature } from "../features/consent/ConsentFeature";
-import { ProtectedNodes } from "../features/devices/ProtectedNodes";
 import { captureEnrollment, clearEnrollment } from "../features/consent/pending";
 import { usePortalLocation } from "../shared/navigation";
 import type { StatusMessage } from "../types";
@@ -204,11 +204,9 @@ function PortalShell(): React.ReactElement {
             <button disabled={busy} onClick={() => void refreshPortalData()}>{DEVICES_REFRESH_ACTION_LABEL}</button>
           )}
         </div>
-        {location.page === "nodes" && <><div className="pageHeading"><div><h1>Devices</h1><p>Manage the devices using your licenses.</p></div></div><ProtectedNodes key={auth.customerId} customer={auth.customerId??""} busy={busy} runOnce={runOnce} onSessionExpired={auth.retrySession} /></>}
-        {location.page === "account" ? <AccountFeature customerId={auth.customerId} /> : readState !== "ready" ? <section className="emptyState"><h2>{location.page==="nodes"?"Registered machines unavailable":readState === "loading" ? "Loading your account…" : "Account data unavailable"}</h2><p>{readState === "loading" ? "Fetching your licenses and devices." : "We could not refresh your account. Retry to see current access."}</p>{readState === "error" && <button disabled={busy} onClick={() => void refreshPortalData()}>Retry</button>}</section> : <>
-          {location.page === "apps" && <AppsFeature entitlements={entitlements} usage={usage} usageAvailable={usageAvailable} retry={refreshPortalData} downloads={downloads} busy={busy || stale} project={location.project} email={auth.email} />}
-          {location.page === "nodes" && <DevicesFeature controller={deviceController} />}
-        </>}
+        {location.page === "nodes" && <DevicesFeature key={auth.customerId} controller={deviceController} customer={auth.customerId??""} busy={busy} runOnce={runOnce} onSessionExpired={auth.retrySession} project={location.project} accountDataState={readState} onRetryAccountData={refreshPortalData} />}
+        {location.page === "account" && <AccountFeature customerId={auth.customerId} />}
+        {location.page === "apps" && (readState !== "ready" ? <section className="emptyState"><h2>{readState === "loading" ? "Loading your account…" : "Account data unavailable"}</h2><p>{readState === "loading" ? "Fetching your licenses and devices." : "We could not refresh your account. Retry to see current access."}</p>{readState === "error" && <button disabled={busy} onClick={() => void refreshPortalData()}>Retry</button>}</section> : <AppsFeature entitlements={entitlements} usage={usage} usageAvailable={usageAvailable} retry={refreshPortalData} downloads={downloads} busy={busy || stale} project={location.project} email={auth.email} />)}
       </div>
     </main>
     <SeatReleaseDialog controller={deviceController} />
