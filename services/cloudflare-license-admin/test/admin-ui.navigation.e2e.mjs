@@ -118,6 +118,31 @@ test("entitlement, license, and fulfillment history restore edited list filters"
   }
 });
 
+test("a global search entitlement result lands on exactly that row with no fingerprint in the URL; Show all restores the list", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  const fingerprint = "5".repeat(64);
+  const target = api.seed.entitlement({ project: "DEFAULT", feature: "pro", license_fingerprint: fingerprint, customer_id: "cus_acme" });
+  api.seed.entitlement({ project: "DEFAULT", feature: "pro", license_fingerprint: "6".repeat(64) });
+  await page.route("**/api/admin/**", api.route);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Search", exact: true }).click();
+  await page.getByRole("searchbox", { name: "Global search" }).fill(fingerprint);
+  await page.getByRole("button", { name: "Search records", exact: true }).click();
+  await page.getByRole("link", { name: new RegExp(target.id) }).click();
+
+  await expect(page.locator(".sidebar nav a[aria-current=page]")).toHaveText("License access");
+  await expect(page.getByText("Showing 1 entitlement", { exact: false })).toBeVisible();
+  await expect(page.locator(".desktopRecords tbody tr")).toHaveCount(1);
+  expect(page.url()).not.toContain(fingerprint);
+  expect(new URL(page.url()).hash).toBe("#/entitlements");
+
+  await page.getByRole("button", { name: "Show all", exact: true }).click();
+  await expect(page.locator(".desktopRecords tbody tr")).toHaveCount(2);
+  expect(new URL(page.url()).hash).toBe("#/entitlements");
+});
+
 test("mobile customer Back restores the visible card action and list scroll", async ({ page }) => {
   const api = makeAdminApiFixture();
   api.seed.customers(20);

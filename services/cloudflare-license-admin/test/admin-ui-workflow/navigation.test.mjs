@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { entitlementId } from "@licensecc/licensing-domain/entitlements/contracts";
 
 import { loadWorkflowModule } from "./helpers.mjs";
 
@@ -38,6 +39,25 @@ test("admin URL adapter excludes private queries, draft content, and credential 
   assert.equal(target.filter.q, "person@example.com", "the in-memory navigation target is preserved");
   assert.deepEqual(navigation.parseAdminHash("#/entitlements?project=DEMO&q=person%40example.com&token=secret").route.filter, { project: "DEMO" });
   assert.deepEqual(navigation.parseAdminHash("#/customers?status=untrusted").route.filter, {});
+});
+
+test("a deep-linked entitlement id and its customer_id are session-only; the URL never carries the fingerprint it encodes", async () => {
+  const navigation = await loadWorkflowModule("app/navigationState.ts");
+  const fingerprint = "a".repeat(64);
+  const id = entitlementId("DEFAULT", "pro", fingerprint);
+  const target = { tab: "entitlements", filter: { id, customer_id: "cus_1", project: "", feature: "", status: "" } };
+  const hash = navigation.hashForTarget(target);
+  assert.equal(hash, "#/entitlements");
+  assert.ok(!hash.includes(fingerprint), "the id encodes the fingerprint; it must never reach the URL");
+  assert.ok(!hash.includes("id="));
+  assert.ok(!hash.includes("customer_id="));
+  // license_id is an ordinary browsing filter (like project/feature/status), not a deep-link secret,
+  // so it stays in the URL and survives a refresh.
+  assert.equal(
+    navigation.hashForTarget({ tab: "entitlements", filter: { license_id: "lic_1", project: "", feature: "", status: "" } }),
+    "#/entitlements?license_id=lic_1",
+  );
+  assert.deepEqual(navigation.parseAdminHash("#/entitlements?license_id=lic_1&id=x&customer_id=y").route.filter, { license_id: "lic_1" });
 });
 
 test("admin catalog URLs expose only the supported Plans, Features, and Import views", async () => {

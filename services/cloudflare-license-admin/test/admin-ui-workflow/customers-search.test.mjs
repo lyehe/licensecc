@@ -86,13 +86,22 @@ test("admin UI workflow maps each search-result type to its deep-link navigation
     workflow.navigationForResult({ type: "customer", id: "cus_1", label: "Acme", email: "a@b.c", status: "active" }),
     { tab: "customers", filter: { status: "", q: "cus_1" }, selectCustomerId: "cus_1" },
   );
+  // An entitlement result deep-links by its exact id (+ customer_id when known), never by
+  // project/feature alone: that guarantees exactly one row, where project/feature could match many.
   assert.deepEqual(
-    workflow.navigationForResult({ type: "entitlement", id: "ent-enc", label: "a".repeat(64), project: "DEFAULT", feature: "pro", status: "active" }),
-    { tab: "entitlements", filter: { project: "DEFAULT", feature: "pro", status: "" } },
+    workflow.navigationForResult({ type: "entitlement", id: "ent-enc", label: "a".repeat(64), project: "DEFAULT", feature: "pro", status: "active", customer_id: "cus_1" }),
+    { tab: "entitlements", filter: { id: "ent-enc", project: "", feature: "", status: "", customer_id: "cus_1" } },
   );
   assert.deepEqual(
+    workflow.navigationForResult({ type: "entitlement", id: "ent-enc", label: "a".repeat(64), project: "DEFAULT", feature: "pro", status: "active" }),
+    { tab: "entitlements", filter: { id: "ent-enc", project: "", feature: "", status: "" } },
+    "no customer on the result -> no customer_id key at all (never a blank one)",
+  );
+  // A license result deep-links into the entitlements it backs (the license row itself has no
+  // detail view), via the new license_id list filter, never a fuzzy licenses-tab text search.
+  assert.deepEqual(
     workflow.navigationForResult({ type: "license", id: "lic_9", label: "Seat pack", project: "DEFAULT", customer_id: "cus_1" }),
-    { tab: "licenses", filter: { project: "DEFAULT", customer_id: "", q: "lic_9" } },
+    { tab: "entitlements", filter: { license_id: "lic_9", project: "", feature: "", status: "", customer_id: "cus_1" } },
   );
   assert.deepEqual(
     workflow.navigationForResult({ type: "order", id: "sub_42", label: "sub_42", project: "DEFAULT", feature: "pro" }),
@@ -100,10 +109,10 @@ test("admin UI workflow maps each search-result type to its deep-link navigation
   );
   assert.deepEqual(
     workflow.navigationForResult({ type: "entitlement", id: "x", label: "y" }),
-    { tab: "entitlements", filter: { project: "", feature: "", status: "" } },
+    { tab: "entitlements", filter: { id: "x", project: "", feature: "", status: "" } },
   );
   assert.deepEqual(
     workflow.navigationForResult({ type: "license", id: "lic_x", label: "z" }),
-    { tab: "licenses", filter: { project: "", customer_id: "", q: "lic_x" } },
+    { tab: "entitlements", filter: { license_id: "lic_x", project: "", feature: "", status: "" } },
   );
 });

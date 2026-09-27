@@ -778,9 +778,16 @@ export function makeAdminApiFixture() {
         const response = behavior.expiringAppendResponses.shift();
         return fulfill(response.status ?? 200, fixtureResponseBody(response));
       }
+      // The id/customer_id a real deep link needs come from a seeded entitlement sharing the row's
+      // fingerprint when one exists (so a click resolves to exactly that record); otherwise a
+      // synthetic id is used that matches nothing, same as the pre-E2 fixture's unlinked rows.
+      const linkToRealEntitlement = (spec) => {
+        const real = entitlements.find((item) => item.license_fingerprint === spec.license_fingerprint);
+        return { ...spec, id: real ? real.id : spec.id, customer_id: real ? real.customer_id : spec.customer_id };
+      };
       const items = [
-        { project: "DEFAULT", feature: `pro-${withinDays}`, license_fingerprint: "a".repeat(64), customer_id: "cus_acme", valid_until: 1_760_500_000, days_left: 3 },
-        { project: "DEFAULT", feature: "ent", license_fingerprint: "b".repeat(64), customer_id: null, valid_until: 1_762_000_000, days_left: 21 },
+        linkToRealEntitlement({ id: "exp-1", project: "DEFAULT", feature: `pro-${withinDays}`, license_fingerprint: "a".repeat(64), customer_id: "cus_acme", customer_name: "Acme Corp", valid_until: 1_760_500_000, days_left: 3 }),
+        linkToRealEntitlement({ id: "exp-2", project: "DEFAULT", feature: "ent", license_fingerprint: "b".repeat(64), customer_id: null, customer_name: null, valid_until: 1_762_000_000, days_left: 21 }),
       ];
       const page = behavior.expiringPagination ? (cursor === null ? items.slice(0, 1) : items.slice(1)) : items;
       return fulfill(200, makeEnvelope("report_expiring", {
@@ -1013,6 +1020,7 @@ export function makeAdminApiFixture() {
       const filteredEntitlements = entitlements.filter((item) =>
         (!url.searchParams.has("id") || item.id === url.searchParams.get("id")) &&
         (!url.searchParams.has("customer_id") || item.customer_id === url.searchParams.get("customer_id")) &&
+        (!url.searchParams.has("license_id") || item.license_id === url.searchParams.get("license_id")) &&
         (project === null || item.project === project) &&
         (feature === null || item.feature === feature) &&
         (status === null || item.status === status),

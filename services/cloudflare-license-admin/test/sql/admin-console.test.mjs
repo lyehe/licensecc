@@ -197,10 +197,16 @@ async function body(response) {
 }
 
 // Seed an entitlement through the worker so createEntitlement owns the full column set (no drift).
-async function createEntitlementFor(env, customerId, fingerprint) {
+async function createEntitlementFor(env, customerId, fingerprint, licenseId) {
   const res = await worker.fetch(devReq("/api/admin/entitlements", {
     method: "POST",
-    body: JSON.stringify({ project: "DEFAULT", feature: "DEFAULT", license_fingerprint: fingerprint, customer_id: customerId }),
+    body: JSON.stringify({
+      project: "DEFAULT",
+      feature: "DEFAULT",
+      license_fingerprint: fingerprint,
+      customer_id: customerId,
+      ...(licenseId === undefined ? {} : { license_id: licenseId }),
+    }),
   }), env);
   assert.equal(res.status, 200, "seed entitlement");
 }
@@ -384,6 +390,21 @@ test("console: exact grant selection and optional owner/revision preconditions r
   assert.equal(staleDisable.status, 409);
   assert.equal((await patch({})).status, 200, "legacy callers remain supported");
   assert.equal(db.prepare("SELECT status FROM entitlements WHERE license_fingerprint=?").get(FP_A).status, "active");
+});
+
+test("console: the entitlement list filters by license_id, exactly like the other identity filters", async () => {
+  const db = freshDb(); seed(db); const env = devEnv(db);
+  await createEntitlementFor(env, "cus_a", FP_A, "lic_a1");
+  await createEntitlementFor(env, "cus_b", FP_B, "lic_b1");
+  const matched = await body(await worker.fetch(devReq("/api/admin/entitlements?license_id=lic_a1"), env));
+  assert.equal(matched.data.items.length, 1);
+  assert.equal(matched.data.items[0].license_fingerprint, FP_A);
+  assert.equal(matched.data.items[0].license_id, "lic_a1");
+  const noMatch = await body(await worker.fetch(devReq("/api/admin/entitlements?license_id=does-not-exist"), env));
+  assert.equal(noMatch.data.items.length, 0);
+  // Combined with another filter, both must hold (same posture as customer_id + project today).
+  const combined = await body(await worker.fetch(devReq("/api/admin/entitlements?license_id=lic_a1&customer_id=cus_b"), env));
+  assert.equal(combined.data.items.length, 0);
 });
 
 test("console: workspace query plans and bounded responses at 20000 grants", async t => {

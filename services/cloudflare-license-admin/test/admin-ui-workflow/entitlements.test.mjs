@@ -21,6 +21,25 @@ test("admin UI workflow builds filtered entitlement API paths", async () => {
     workflow.entitlementsPath({ project: "DEFAULT", feature: "pro seats", status: "active" }),
     "/api/admin/entitlements?project=DEFAULT&feature=pro+seats&status=active",
   );
+  assert.equal(
+    workflow.entitlementsPath({ project: "", feature: "", status: "", license_id: "lic_1" }),
+    "/api/admin/entitlements?license_id=lic_1",
+  );
+  assert.equal(
+    workflow.entitlementsPath({ project: "", feature: "", status: "", id: "ent-1", customer_id: "cus_1", license_id: "lic_1" }),
+    "/api/admin/entitlements?id=ent-1&customer_id=cus_1&license_id=lic_1",
+  );
+});
+
+test("admin UI workflow flags a single-entitlement deep link and Show all drops its identity filters", async () => {
+  const workflow = await loadWorkflowModule("features/entitlements/workflow.ts");
+  assert.equal(workflow.isSingleEntitlementFilter({ project: "", feature: "", status: "" }), false);
+  assert.equal(workflow.isSingleEntitlementFilter({ project: "", feature: "", status: "", id: "" }), false);
+  assert.equal(workflow.isSingleEntitlementFilter({ project: "", feature: "", status: "", id: "ent-1" }), true);
+  assert.deepEqual(
+    workflow.filterAfterShowAll({ project: "DEFAULT", feature: "pro", status: "active", id: "ent-1", customer_id: "cus_1", license_id: "lic_1" }),
+    { project: "DEFAULT", feature: "pro", status: "active" },
+  );
 });
 
 test("admin UI workflow normalizes create form payloads", async () => {

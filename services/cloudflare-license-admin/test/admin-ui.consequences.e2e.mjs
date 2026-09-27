@@ -67,9 +67,14 @@ test("admin UI renders Workstream F charts, expiring panel, validity indicators,
   await page.locator(".chartPanels .rangeSelector").getByRole("button", { name: "last 30d" }).click();
   await expect.poll(() => api.requests.timeseries.length).toBeGreaterThan(before);
 
-  // Deep-link from an expiring row into the Entitlements tab filtered to that project/feature.
+  // Deep-link from an expiring row lands on exactly that one entitlement, not the whole
+  // project/feature list, and the URL carries neither the row's identity nor its fingerprint.
   await page.locator(".expiringPanel tbody tr").first().getByRole("button", { name: "View" }).click();
   await expect(page.locator(".sidebar nav a[aria-current=page]")).toHaveText("License access");
+  await expect(page.getByText("Showing 1 entitlement", { exact: false })).toBeVisible();
+  await expect(page.locator(".desktopRecords tbody tr")).toHaveCount(1);
+  expect(page.url()).not.toContain("a".repeat(64));
+  expect(new URL(page.url()).hash).toBe("#/entitlements");
 
   // FULFILLMENT TAB: the fulfillment-events bar spark renders (aria-labelled).
   if (await page.getByRole("button", { name: "Activity", exact: true }).getAttribute("aria-expanded") === "false") await page.getByRole("button", { name: "Activity", exact: true }).click();
