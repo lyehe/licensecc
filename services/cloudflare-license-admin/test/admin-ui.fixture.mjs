@@ -50,6 +50,7 @@ export function makeAdminApiFixture() {
     webhookPatches: [],
     webhookReads: [],
     webhookRedrives: [],
+    webhookTests: [],
     customerTransitions: [],
     policyTransitions: [],
     webhookTransitions: [],
@@ -126,6 +127,8 @@ export function makeAdminApiFixture() {
     customerTransitionEmptyName: false,
     webhookCreateResponses: [],
     webhookRefreshFailures: [],
+    // Scripted { status, body } answers for POST /api/admin/webhooks/{id}/test, in call order.
+    webhookTestResponses: [],
     catalogPlanPagination: false,
     catalogPlanRepeatCursor: false,
     catalogPlanDuplicatePage: false,
@@ -1269,6 +1272,16 @@ export function makeAdminApiFixture() {
       row.next_attempt_at = now;
       row.delivered_at = null;
       return fulfill(200, makeEnvelope("webhook_delivery_redriven", { ...row }));
+    }
+    const webhookTestMatch = /^\/api\/admin\/webhooks\/([^/]+)\/test$/.exec(path);
+    if (method === "POST" && webhookTestMatch !== null) {
+      const id = decodeURIComponent(webhookTestMatch[1]);
+      requests.webhookTests.push(id);
+      const scripted = behavior.webhookTestResponses.shift();
+      if (scripted !== undefined) return fulfill(scripted.status, scripted.body);
+      const endpoint = webhooks.find((item) => item.id === id && item.status === "active");
+      if (endpoint === undefined) return fulfill(404, { ok: false, code: "not_found", request_id: "ui-e2e-webhook-test-missing" });
+      return fulfill(200, makeEnvelope("webhook_test_sent", { status_class: "2xx" }));
     }
     const webhookActionMatch = /^\/api\/admin\/webhooks\/([^/]+)\/(disable|reenable)$/.exec(path);
     if (method === "POST" && webhookActionMatch !== null) {

@@ -61,6 +61,16 @@ test("customer license creation is an admin-only customers route that captures t
   assert.equal(matchRoute("GET", "/api/admin/customers/cust_1/licenses"), null, "license listing stays on GET /api/admin/licenses");
 });
 
+test("webhook test sends are an admin-only webhooks route distinct from the disable/reenable transitions", () => {
+  assert.ok(API_ROUTES.some((route) => route.method === "POST" && route.path === "/api/admin/webhooks/{id}/test"));
+  const matched = matchRoute("POST", "/api/admin/webhooks/wh_1/test");
+  assert.ok(matched, "POST /api/admin/webhooks/{id}/test did not resolve");
+  assert.equal(matched.descriptor.path, "/api/admin/webhooks/{id}/test");
+  assert.equal(matched.descriptor.group, "webhooks");
+  assert.equal(matched.descriptor.authorization, "admin");
+  assert.equal(matchRoute("POST", "/api/admin/webhooks/deliveries/1/test"), null, "a delivery has no test route");
+});
+
 test("route descriptors make API authorization explicit for every bounded context", () => {
   for (const descriptor of ROUTE_DESCRIPTORS) {
     if (descriptor.group === "meta") {

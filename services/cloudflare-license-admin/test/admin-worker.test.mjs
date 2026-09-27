@@ -9,6 +9,7 @@ import "./worker/entitlements.test.mjs";
 import "./worker/protected-checks.test.mjs";
 import "./worker/devices.test.mjs";
 import "./worker/webhooks.test.mjs";
+import "./worker/webhook-test-send.test.mjs";
 import "./worker/sync.test.mjs";
 import "./worker/structure.test.mjs";
 import "./worker/query-boundaries.test.mjs";

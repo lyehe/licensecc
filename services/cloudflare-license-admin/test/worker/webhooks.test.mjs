@@ -5,7 +5,7 @@ import { authed, baseEnv, worker } from "./fixtures.mjs";
 import { assertRouteGroup, assertRouteGroupRejectsUnauthenticated } from "./route-group-assertions.mjs";
 
 test("webhook routes have direct owners and reject anonymous access", async () => {
-  assertRouteGroup("webhooks", 8);
+  assertRouteGroup("webhooks", 9);
   await assertRouteGroupRejectsUnauthenticated("webhooks");
 });
 

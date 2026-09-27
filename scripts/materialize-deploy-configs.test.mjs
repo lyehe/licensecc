@@ -428,6 +428,44 @@ test("operator binding cannot cross profiles, target consent, or accept hidden o
   }finally{rmSync(root,{recursive:true,force:true});}}
 });
 
+test("the optional webhook operator binding is accepted only when pinned to the same profile's backend", () => {
+  const webhookOperator = (suffix) => ({ binding: "WEBHOOK_OPERATOR", service: `licensecc-online-verifier${suffix}`, entrypoint: "WebhookOperator" });
+  for (const place of ["append", "prepend"]) {
+    const root = mkdtempSync(join(tmpdir(), "licensecc-webhook-operator-ok-"));
+    try {
+      const environment = validEnvironment("staging");
+      mutateJson(environment, "LICENSECC_ADMIN_WRANGLER_CONFIG_B64", (config) => {
+        if (place === "append") config.services.push(webhookOperator("-staging"));
+        else config.services.unshift(webhookOperator("-staging"));
+      });
+      materializeDeploymentConfigs({ root, environment, profile: "staging" });
+      const admin = JSON.parse(readFileSync(join(root, "services/cloudflare-license-admin/wrangler.jsonc"), "utf8"));
+      assert.deepEqual(admin.services.map((service) => service.binding).sort(), ["DEVICE_OPERATOR", "WEBHOOK_OPERATOR"]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+  const mutations = [
+    [(config) => { config.services.push(webhookOperator("")); }, /WEBHOOK_OPERATOR service/u],
+    [(config) => { config.services.push({ ...webhookOperator("-staging"), entrypoint: "DeviceOperator" }); }, /WEBHOOK_OPERATOR entrypoint/u],
+    [(config) => { config.services.push({ ...webhookOperator("-staging"), environment: "staging" }); }, /WEBHOOK_OPERATOR must contain only/u],
+    [(config) => { config.services.push(webhookOperator("-staging"), webhookOperator("-staging")); }, /exactly one WEBHOOK_OPERATOR/u],
+    [(config) => { config.services = [webhookOperator("-staging")]; }, /exactly one DEVICE_OPERATOR/u],
+    [(config) => { config.services.push({ binding: "OTHER_CAPABILITY", service: "licensecc-online-verifier-staging", entrypoint: "Other" }); }, /DEVICE_OPERATOR/u],
+  ];
+  for (const [mutate, message] of mutations) {
+    const root = mkdtempSync(join(tmpdir(), "licensecc-webhook-operator-bad-"));
+    try {
+      const environment = validEnvironment("staging");
+      mutateJson(environment, "LICENSECC_ADMIN_WRANGLER_CONFIG_B64", mutate);
+      assert.throws(() => materializeDeploymentConfigs({ root, environment, profile: "staging" }), message);
+      assertNoConfigsWritten(root, "invalid webhook operator capability");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+});
+
 test("rejects plaintext Worker secrets in every service while ignoring comment-only examples", () => {
   const cases = [
     ["bound approval encryption key", (env) => mutateBackend(env, (source) => source.replace('[vars]', '[vars]\nBOUND_APPROVAL_ENCRYPTION_KEYS = "plaintext"')), /Worker secret/u],

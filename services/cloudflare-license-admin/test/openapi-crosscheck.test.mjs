@@ -458,3 +458,23 @@ test("pagination option matrix matches the route inventory and OpenAPI parameter
   }
   assert.deepEqual(documented, expected, "every runtime bounded route option must be documented exactly once");
 });
+
+test("the webhook test send documents a status-class-only result, the rate limit and the missing capability", () => {
+  const operation = openApiDocument.paths["/api/admin/webhooks/{id}/test"]?.post;
+  assert.ok(operation, "POST /api/admin/webhooks/{id}/test must be documented");
+  assert.equal(operation.operationId, "sendWebhookTest");
+  const success = operation.responses["200"].content["application/json"].schema.allOf[1];
+  assert.equal(success.properties.code.const, "webhook_test_sent");
+  assert.deepEqual(success.properties.data, {
+    type: "object",
+    additionalProperties: false,
+    required: ["status_class"],
+    properties: { status_class: { type: "string", enum: ["2xx", "3xx", "4xx", "5xx", "network_error"], description: success.properties.data.properties.status_class.description } },
+  });
+  assert.deepEqual(Object.keys(operation.responses["429"].content["application/json"].examples), ["rate_limited"]);
+  assert.ok(operation.responses["429"].headers["retry-after"], "a rate limit documents retry-after");
+  assert.deepEqual(Object.keys(operation.responses["503"].content["application/json"].examples).sort(),
+    ["temporarily_unavailable", "webhook_operator_not_configured", "webhook_signing_unconfigured"]);
+  assert.deepEqual(Object.keys(operation.responses["404"].content["application/json"].examples), ["not_found"]);
+  assert.ok(operation.responses["403"], "reader RBAC is documented");
+});

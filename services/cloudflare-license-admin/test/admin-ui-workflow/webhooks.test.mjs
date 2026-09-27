@@ -92,3 +92,80 @@ test("disable-webhook confirm copy echoes the endpoint URL and clarifies queued 
   assert.match(copy, /Disable webhook endpoint https:\/\/hooks\.example\.com\/lcc/);
   assert.match(copy, /queued or failed deliveries already recorded are unaffected/);
 });
+
+// "Send test event": the backend reports only a status class. The operator sees a sentence; the
+// code and request id stay under Technical details, and an unknown code never becomes the text.
+function uiEnvelope(httpStatus, body) {
+  return Object.defineProperties({ ...body }, {
+    __httpOk: { value: httpStatus >= 200 && httpStatus < 300, enumerable: false },
+    __httpStatus: { value: httpStatus, enumerable: false },
+    __rawBody: { value: body, enumerable: false },
+  });
+}
+
+test("webhook test path encodes the endpoint id", async () => {
+  const testEvent = await loadWorkflowModule("features/webhooks/testEvent.ts");
+  assert.equal(testEvent.webhookTestPath("wh_1"), "/api/admin/webhooks/wh_1/test");
+  assert.equal(testEvent.webhookTestPath("wh/1 x"), "/api/admin/webhooks/wh%2F1%20x/test");
+});
+
+test("each status class becomes a sentence that names the class, with the request id kept as a detail", async () => {
+  const testEvent = await loadWorkflowModule("features/webhooks/testEvent.ts");
+  const expected = {
+    "2xx": ["success", /^The endpoint answered with a 2xx success\./],
+    "3xx": ["warning", /^The endpoint answered with a 3xx redirect\. Deliveries never follow redirects/],
+    "4xx": ["warning", /^The endpoint answered with a 4xx client error\./],
+    "5xx": ["warning", /^The endpoint answered with a 5xx server error\./],
+    network_error: ["warning", /^The endpoint could not be reached, or did not answer within 5 seconds\./],
+  };
+  for (const [statusClass, [tone, sentence]] of Object.entries(expected)) {
+    const outcome = testEvent.webhookTestOutcome(uiEnvelope(200, { ok: true, code: "webhook_test_sent", request_id: "rid-1", data: { status_class: statusClass } }));
+    assert.equal(outcome.tone, tone, statusClass);
+    assert.match(outcome.sentence, sentence);
+    assert.equal(outcome.code, "webhook_test_sent");
+    assert.equal(outcome.requestId, "rid-1");
+    assert.equal(outcome.sentence.includes("rid-1"), false);
+  }
+});
+
+test("refusals get human copy; a rate limit says how long to wait", async () => {
+  const testEvent = await loadWorkflowModule("features/webhooks/testEvent.ts");
+  const limited = testEvent.webhookTestOutcome(uiEnvelope(429, { ok: false, code: "rate_limited", request_id: "rid-2", data: { retry_after: 42 } }));
+  assert.equal(limited.tone, "error");
+  assert.equal(limited.sentence, "A test event was sent to this endpoint less than a minute ago. Try again in 42 seconds.");
+  assert.equal(testEvent.webhookTestOutcome(uiEnvelope(429, { ok: false, code: "rate_limited", request_id: "r", data: { retry_after: 1 } })).sentence,
+    "A test event was sent to this endpoint less than a minute ago. Try again in 1 second.");
+  assert.equal(testEvent.webhookTestOutcome(uiEnvelope(429, { ok: false, code: "rate_limited", request_id: "r" })).sentence,
+    "A test event was sent to this endpoint less than a minute ago. Try again in a minute.");
+  const copy = {
+    not_found: "This endpoint no longer exists or is disabled, so no test event was sent.",
+    invalid_url: "This endpoint's saved URL is not a valid https address, so no test event was sent. Edit the URL first.",
+    webhook_signing_unconfigured: "Webhook signing is not configured on the licensing backend, so no test event was sent.",
+    webhook_operator_not_configured: "Sending test events is not set up for this admin console yet. Connect it to the licensing backend first.",
+    admin_role_required: "Only administrators can send test events.",
+    temporarily_unavailable: "The test event could not be sent. Try again shortly.",
+  };
+  for (const [code, sentence] of Object.entries(copy)) {
+    const outcome = testEvent.webhookTestOutcome(uiEnvelope(code === "admin_role_required" ? 403 : 503, { ok: false, code, request_id: "rid-3" }));
+    assert.equal(outcome.sentence, sentence, code);
+    assert.equal(outcome.tone, "error");
+    assert.equal(outcome.code, code);
+    assert.equal(outcome.requestId, "rid-3");
+  }
+});
+
+test("an unknown code, malformed success or lost response never shows a raw code as the sentence", async () => {
+  const testEvent = await loadWorkflowModule("features/webhooks/testEvent.ts");
+  const unknown = testEvent.webhookTestOutcome(uiEnvelope(500, { ok: false, code: "some_new_backend_code", request_id: "rid-4" }));
+  assert.equal(unknown.sentence, "The test event could not be sent. Try again shortly.");
+  assert.equal(unknown.code, "some_new_backend_code");
+  assert.equal(unknown.requestId, "rid-4");
+  const malformed = testEvent.webhookTestOutcome(uiEnvelope(200, { ok: true, code: "webhook_test_sent", request_id: "rid-5", data: { status_class: "200" } }));
+  assert.equal(malformed.tone, "error");
+  assert.equal(malformed.sentence, "The test event could not be sent. Try again shortly.");
+  assert.equal(malformed.code, "invalid_api_response");
+  assert.equal(malformed.requestId, "rid-5");
+  const lost = testEvent.webhookTestOutcome(uiEnvelope(0, {}));
+  assert.equal(lost.sentence, "The test event could not be sent. Try again shortly.");
+  assert.equal(lost.requestId, "missing_request_id");
+});

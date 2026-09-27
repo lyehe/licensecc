@@ -91,3 +91,39 @@ test("editing only the URL of an endpoint with a legacy event type still succeed
   const updatedRow = page.locator("tr").filter({ hasText: "https://hooks.example.test/legacy-updated" });
   await expect(updatedRow).toContainText("legacy_unknown_type");
 });
+
+// E4b: "Send test event" runs through the backend, which alone holds the signing secret. The
+// operator sees a sentence naming the receiver's status class; the request id stays under
+// Technical details, and a disabled endpoint cannot be tested.
+test("Send test event shows the receiver's status class, with the request id under Technical details", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  api.seed.webhook("wh_test", "https://hooks.example.test/test");
+  api.seed.webhook("wh_off", "https://hooks.example.test/off", { status: "disabled" });
+  api.behavior.webhookTestResponses.push(
+    { status: 200, body: { ok: true, code: "webhook_test_sent", request_id: "ui-e2e-test-5xx", data: { status_class: "5xx" } } },
+    { status: 429, body: { ok: false, code: "rate_limited", request_id: "ui-e2e-test-limited", data: { retry_after: 42 } } },
+  );
+  await page.route("**/api/admin/**", api.route);
+
+  await page.goto("/#/webhooks");
+  const disabledRow = page.locator("tr").filter({ hasText: "https://hooks.example.test/off" });
+  await expect(disabledRow.getByRole("button", { name: "Send test event", exact: true })).toBeDisabled();
+
+  const row = page.locator("tr").filter({ hasText: "https://hooks.example.test/test" });
+  const result = page.getByRole("status").filter({ hasText: "Test event to https://hooks.example.test/test" });
+
+  await row.getByRole("button", { name: "Send test event", exact: true }).click();
+  await expect(result).toContainText("The endpoint answered with a 5xx server error.");
+  await expect(result.getByText("ui-e2e-test-5xx")).toBeHidden();
+  await result.getByText("Technical details", { exact: true }).click();
+  await expect(result.getByText(/webhook_test_sent · ui-e2e-test-5xx/)).toBeVisible();
+
+  await row.getByRole("button", { name: "Send test event", exact: true }).click();
+  await expect(result).toContainText("A test event was sent to this endpoint less than a minute ago. Try again in 42 seconds.");
+
+  // With no scripted answer left the fixture behaves like a healthy receiver.
+  await row.getByRole("button", { name: "Send test event", exact: true }).click();
+  await expect(result).toContainText("The endpoint answered with a 2xx success.");
+
+  expect(api.requests.webhookTests).toEqual(["wh_test", "wh_test", "wh_test"]);
+});
