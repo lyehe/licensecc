@@ -27,7 +27,11 @@ export function BrowserSeats({ controller, query, project }: {
     || controller.pendingSeatRelease !== null
     || Object.values(controller.seatMessages).some((message) => message !== null);
   const floatingEntitlements = controller.entitlements.filter((item) => item.license_mode === "floating");
-  if (floatingEntitlements.length === 0) return null;
+  // D4 review (carried, Minor 1): keep the release dialog mounted while a release is pending even if
+  // floatingEntitlements ever shrinks to zero in the meantime -- App.tsx keeps `main` inert for as
+  // long as controller.pendingSeatRelease is set, and an inert main with no dialog left to close it
+  // would strand the customer.
+  if (floatingEntitlements.length === 0 && controller.pendingSeatRelease === null) return null;
   const visibleEntitlements = floatingEntitlements.filter((item) => matchesDeviceSearch(
     [item.feature, controller.seatSessions[item.id]?.seat_id],
     item.project,
@@ -57,11 +61,12 @@ export function BrowserSeats({ controller, query, project }: {
             <span className="muted"> / {item.feature}</span>
           </div>
           {/* D2: seat state visible -- what starting a seat means while none is held, and when the
-              held one stops working once one is. */}
+              held one stops working once one is. D5 carried (decision 8): its own class, not
+              `.muted` -- this is live state, not secondary copy. */}
           {session === undefined ? (
-            <p className="muted">Uses 1 of {item.pool_size} shared seats until released or it expires.</p>
+            <p className="seatState">Uses 1 of {item.pool_size} shared seats until released or it expires.</p>
           ) : session.expires_at > 0 ? (
-            <p className="muted">Active until {formatTimestamp(session.expires_at)}.</p>
+            <p className="seatState">Active until {formatTimestamp(session.expires_at)}.</p>
           ) : null}
           <div className="actions">
             <button

@@ -16,6 +16,10 @@ export function PasswordAction({ token, onDone }: { token: string; onDone(): Pro
   const [confirmation, setConfirmation] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<React.ReactNode>(token ? "" : "Open the link from your email again, or request a new link.");
+  // D5: told apart from the "Password saved" confirmation below so only an actual failure gets the
+  // error colour (decision 1) -- both currently share this one message slot and role="alert". A
+  // missing/malformed token is itself a failure.
+  const [messageIsError, setMessageIsError] = useState(!token);
   const [finished, setFinished] = useState(false);
   const heading = useRef<HTMLHeadingElement>(null);
   useLayoutEffect(() => {
@@ -24,21 +28,21 @@ export function PasswordAction({ token, onDone }: { token: string; onDone(): Pro
   async function submit(event: React.FormEvent): Promise<void> {
     event.preventDefault();
     if (busy) return;
-    if (password !== confirmation) { setMessage("Passwords do not match."); return; }
-    setBusy(true); setMessage("");
+    if (password !== confirmation) { setMessage("Passwords do not match."); setMessageIsError(true); return; }
+    setBusy(true); setMessage(""); setMessageIsError(false);
     try {
       const result = await api("/portal/v1/auth/password/complete", { method: "POST", body: JSON.stringify({ token, password }) });
       setPassword(""); setConfirmation("");
       if (result.ok && result.code === "password_updated") { setFinished(true); setMessage("Password saved. Sign in with your new password."); }
       else if (result.ok) { setFinished(true); await onDone(); }
-      else setMessage(passwordActionMessage(result.code, result.retryAfter));
-    } catch { setMessage("Unable to connect. Please try again."); }
+      else { setMessage(passwordActionMessage(result.code, result.retryAfter)); setMessageIsError(true); }
+    } catch { setMessage("Unable to connect. Please try again."); setMessageIsError(true); }
     finally { setPassword(""); setConfirmation(""); setBusy(false); }
   }
   return <main className="authPane"><section className="authCard">
     <h1 ref={heading} tabIndex={-1}>Choose your password</h1>
     <p>15–128 characters. Use a password you don’t use elsewhere.</p>
-    {message && <p role="alert">{message}</p>}
+    {message && <p role="alert" className={messageIsError ? "statusline error" : "statusline"}>{message}</p>}
     {token && !finished && <form onSubmit={event => void submit(event)}>
       <label>New password<input type="password" autoComplete="new-password" required minLength={15} maxLength={128} value={password} onChange={event => setPassword(event.target.value)} /></label>
       <label>Confirm password<input type="password" autoComplete="new-password" required minLength={15} maxLength={128} value={confirmation} onChange={event => setConfirmation(event.target.value)} /></label>

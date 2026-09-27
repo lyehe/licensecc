@@ -87,6 +87,8 @@ button.primary {
   font-weight:600
 }
 
+button.primary:hover:not(:disabled){background:#d4d4d4;border-color:#d4d4d4}
+
 button:disabled {
   color:#858585;
   border-color:#3a3a3a;
@@ -132,7 +134,7 @@ button:disabled {
   border-radius:6px
 }
 
-.headerInner>button {
+.headerInner>.signOutControl {
   margin-left:auto
 }
 
@@ -206,7 +208,9 @@ nav a:hover {
   overflow-wrap:anywhere
 }
 
-.statusline.error {
+/* D5 carried (B3, decision 7): the full-license capacity message reuses this same error colour for
+   clear emphasis, rather than adding a second literal for the same tone. */
+.statusline.error,.consentCapacity p {
   color:#db9292
 }
 
@@ -443,6 +447,13 @@ code {
   color:var(--muted)
 }
 
+/* D5 carried (D2, decision 8): the live seat-state text ("Active until…"/"Uses 1 of N shared
+   seats…") is not secondary copy, so it gets its own class instead of `.muted` and stays at the
+   default text colour. */
+.seatState {
+  color:inherit
+}
+
 .authPane {
   max-width:480px;
   margin:auto;
@@ -488,6 +499,9 @@ code {
 .consentSummary dd { margin:0; overflow-wrap:anywhere; }
 .consentChoice { display:grid; gap:8px; margin-bottom:16px; }
 .consentChoice select { width:100%; min-width:0; }
+/* D5 carried (B3, decision 7): not the default muted paragraph colour -- this is live state about the
+   chosen license, not secondary copy. */
+.consentConnected { color:inherit; }
 .consentComparison { margin:20px 0; padding:16px; background:#0f0f0f; border-radius:8px; text-align:center; }
 .consentComparison p { margin:0 0 10px; }
 .consentComparison .consentCode { margin:8px 0 12px; color:inherit; font-size:clamp(20px,5vw,28px); font-weight:600; letter-spacing:.06em; font-variant-numeric:tabular-nums; }

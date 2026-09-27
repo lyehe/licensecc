@@ -22,11 +22,16 @@ export function PasswordSignIn({ onSignedIn, mode, onModeChange, emailLinks }: {
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<React.ReactNode>("");
+  // D5: an actual failure (invalid credentials, a network error, a rate limit…) is told apart from
+  // the "Check your email" confirmation below so only the former gets the error colour (decision 1) --
+  // both currently share this one message slot and role="alert".
+  const [messageIsError, setMessageIsError] = useState(false);
   async function submit(event: React.FormEvent): Promise<void> {
     event.preventDefault();
     if (busy) return;
     setBusy(true);
     setMessage("");
+    setMessageIsError(false);
     try {
       const result = await api(`/portal/v1/auth/password/${mode}`, {
         method: "POST", body: JSON.stringify(mode === "login" ? { email, password } : { email }),
@@ -34,10 +39,11 @@ export function PasswordSignIn({ onSignedIn, mode, onModeChange, emailLinks }: {
       setPassword("");
       if (result.ok && mode === "login") await onSignedIn();
       else if (result.ok) setMessage("Check your email. If this address is eligible, you’ll receive a link valid for 15 minutes. Check spam too. You can resend after one minute.");
-      else setMessage(passwordMessage(result.code, result.retryAfter));
+      else { setMessage(passwordMessage(result.code, result.retryAfter)); setMessageIsError(true); }
     } catch {
       setPassword("");
       setMessage("Unable to connect. Please try again.");
+      setMessageIsError(true);
     } finally {
       setBusy(false);
     }
@@ -46,12 +52,13 @@ export function PasswordSignIn({ onSignedIn, mode, onModeChange, emailLinks }: {
     onModeChange(nextMode);
     setPassword("");
     setMessage("");
+    setMessageIsError(false);
   };
   return <section className="passwordSignIn" aria-label="Email and password">
     <form onSubmit={(event) => void submit(event)}>
       <label>Email<input type="email" autoComplete="username" required value={email} onChange={(event) => setEmail(event.target.value)} /></label>
       {mode === "login" ? <label>Password<input type="password" autoComplete="current-password" required maxLength={128} value={password} onChange={(event) => setPassword(event.target.value)} /></label> : <p>{MODE_COPY[mode]}</p>}
-      {message && <p role="alert">{message}</p>}
+      {message && <p role="alert" className={messageIsError ? "statusline error" : "statusline"}>{message}</p>}
       <button className="primary" disabled={busy} type="submit">{busy ? "Please wait…" : SUBMIT_LABEL[mode]}</button>
       {(emailLinks || mode !== "login") && <button disabled={busy} type="button" onClick={() => switchMode(mode === "login" ? "register" : "login")}>{mode === "login" ? "Create an account" : "Back to sign in"}</button>}
     </form>

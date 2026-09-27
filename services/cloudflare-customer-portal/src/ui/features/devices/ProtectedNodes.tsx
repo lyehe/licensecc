@@ -89,7 +89,7 @@ export function ProtectedNodes({customer,busy,runOnce,onSessionExpired,query,pro
       {filtering && cursor && <p className="readNotice">Showing matches from loaded devices.</p>}
       <div className="tablePane full"><table><thead><tr><th>Device</th><th>App</th><th>Status</th><th>Last verified</th><th>Action</th></tr></thead><tbody>
       {visibleRows.map(row=><tr key={row.binding_id}><td data-label="Device"><span>{row.label||"Unnamed device"}<details className="referenceDetails"><summary>Connection ID</summary><small className="identifier">{row.binding_id}</small></details></span></td><td data-label="App"><span>{row.project}<small>{row.feature}</small></span></td>
-        <td data-label="Status">{row.state==="active"?"Connected":row.state==="released"?"Disconnected":<>Disconnecting · slot available <time>{formatTimestamp(row.hold_until)}</time></>}</td><td data-label="Last verified">{formatTimestamp(row.last_proof_at)}</td>
+        <td data-label="Status">{row.state==="active"?"Connected":row.state==="released"?"Disconnected":<><span>Disconnecting · slot available</span> <time>{formatTimestamp(row.hold_until)}</time></>}</td><td data-label="Last verified">{formatTimestamp(row.last_proof_at)}</td>
         <td data-label="Action">{row.state==="active"?<button disabled={busy||loading||stale||!!saved} onClick={()=>choose(row)}>Disconnect</button>:row.state==="released"?"Slot available":"Renewal stopped"}</td></tr>)}
     </tbody></table></div></>}
     {cursor && <button disabled={busy||loading||stale} onClick={()=>void load(cursor)}>Load more devices</button>}
