@@ -81,7 +81,7 @@ test("password login errors clear the secret and explain recovery", async ({ pag
   await expect(page.getByRole("alert")).toHaveCSS("color", "rgb(219, 146, 146)");
   await expect(page.getByLabel("Password", { exact: true })).toHaveValue("");
   await page.getByText("Forgot your password?", { exact: true }).click();
-  // R20 (carried from A5): reworded to drop "verified" -- an admin-invited account with an
+  // Carried from A5: reworded to drop "verified" -- an admin-invited account with an
   // unverified login email also recovers, and verifies, through this same reset.
   await expect(page.getByText(/We’ll email a reset link to your login address/)).toBeVisible();
   await page.route("**/portal/v1/auth/password/reset", route => {
@@ -208,9 +208,32 @@ test("Account password change requires the current password and confirms session
   await page.getByLabel("Current password", { exact: true }).fill("A long testing passphrase 1!");
   await page.getByLabel("New password", { exact: true }).fill("A replacement passphrase 2!");
   await page.getByRole("button", { name: "Change password", exact: true }).click();
-  await expect(page.getByText("Password saved. Other browser sessions have been signed out.")).toBeVisible();
+  const savedMessage = page.getByText("Password saved. Other browser sessions have been signed out.");
+  await expect(savedMessage).toBeVisible();
+  // Fix round 1: this result shares one role="status" slot with a failed change below -- a
+  // confirmation must not use the error colour.
+  await expect(savedMessage).toHaveCSS("color", "rgb(155, 196, 155)");
   expect(submitted).toEqual({ current_password: "A long testing passphrase 1!", password: "A replacement passphrase 2!" });
   await expect(page.getByLabel("New password", { exact: true })).toHaveValue("");
+});
+
+// Fix round 1: the same result slot must use the error colour for an actual failure.
+test("Account password change failure uses the error colour, not the confirmation's", async ({ page }) => {
+  await page.route("**/api/portal/**", (route) => route.fulfill({ json: makeEnvelope("ok", route.request().url().endsWith("/me") ? { customer_id: "cus_self" } : { items: [] }) }));
+  await page.route("**/portal/v1/auth/providers", (route) => route.fulfill({ json: makeEnvelope("auth_providers", { google: false, github: false, email: false, password: true }) }));
+  await page.route("**/portal/v1/auth/identities", (route) => route.fulfill({ json: makeEnvelope("identities", { items: [] }) }));
+  await page.route("**/portal/v1/auth/password", (route) => {
+    if (route.request().method() === "POST") return route.fulfill({ status: 409, json: { ok: false, code: "password_change_conflict", request_id: "portal-e2e-conflict" } });
+    return route.fulfill({ json: makeEnvelope("password_settings", { has_password: true, can_reset: false, email_verified: false, email: "new@example.com" }) });
+  });
+  await page.goto("/#/account");
+  await page.locator("summary").filter({ hasText: /^Change password$/ }).click();
+  await page.getByLabel("Current password", { exact: true }).fill("A wrong testing passphrase");
+  await page.getByLabel("New password", { exact: true }).fill("A replacement passphrase 2!");
+  await page.getByRole("button", { name: "Change password", exact: true }).click();
+  const failureMessage = page.getByText("Your sign-in settings changed. Reload and try again.");
+  await expect(failureMessage).toBeVisible();
+  await expect(failureMessage).toHaveCSS("color", "rgb(219, 146, 146)");
 });
 
 // A5: `recovery_available` (routes/password.ts) shares the reset query's own eligibility predicate,
@@ -337,10 +360,28 @@ test("OAuth sign-in to a suspended account explains it and names the administrat
   // No support field at all, as from a Worker without PORTAL_SUPPORT_CONTACT: that means no contact.
   await page.route("**/portal/v1/auth/providers", (route) => route.fulfill({ json: makeEnvelope("auth_providers", { google: true, github: true, email: false }) }));
   await page.goto("/?auth_error=account_suspended");
-  await expect(page.getByText("This account is suspended. Contact your administrator.", { exact: true })).toBeVisible();
+  const suspendedMessage = page.getByText("This account is suspended. Contact your administrator.", { exact: true });
+  await expect(suspendedMessage).toBeVisible();
+  // Fix round 1: ProviderResult shares one role="status" slot with the "Sign-in provider connected."
+  // confirmation below -- an actual auth failure must get the error colour.
+  await expect(suspendedMessage).toHaveCSS("color", "rgb(219, 146, 146)");
   await expect(page.getByRole("link", { name: "Contact support" })).toHaveCount(0);
   await expect(page.getByText("account_suspended")).toHaveCount(0);
   expect(page.url()).not.toContain("auth_error");
+});
+
+// Fix round 1: the SAME ProviderResult component (ProviderSignIn.tsx) renders the "Sign-in provider
+// connected." confirmation after linking a provider under Account -- it must NOT get the error colour
+// the failure above does.
+test("a linked-provider confirmation under Account is not coloured like an error", async ({ page }) => {
+  await page.route("**/api/portal/**", (route) => route.fulfill({ json: makeEnvelope("ok", route.request().url().endsWith("/me") ? { customer_id: "cus_self" } : { items: [] }) }));
+  await page.route("**/portal/v1/auth/providers", (route) => route.fulfill({ json: makeEnvelope("auth_providers", { google: true, github: true, email: false }) }));
+  await page.route("**/portal/v1/auth/identities", (route) => route.fulfill({ json: makeEnvelope("identities", { items: [{ provider: "google", email: "customer@example.com" }] }) }));
+  await page.goto("/?auth_result=linked#/account");
+  const linkedMessage = page.getByText("Sign-in provider connected.", { exact: true });
+  await expect(linkedMessage).toBeVisible();
+  await expect(linkedMessage).toHaveCSS("color", "rgb(155, 196, 155)");
+  expect(page.url()).not.toContain("auth_result");
 });
 
 test("an existing-email conflict and an unconfigured portal link the configured support contact", async ({ page }) => {
@@ -381,7 +422,7 @@ test("unconfigured providers show a clear unavailable state", async ({ page }) =
   await expect(page.getByRole("button", { name: /Continue with|Send code/ })).toHaveCount(0);
 });
 
-// Carried from A3 (Minor 2 / R15): providers failing once must recover through Retry sign-in
+// Carried from A3 (Minor 2): providers failing once must recover through Retry sign-in
 // options, landing back on a usable sign-in form -- not a stuck "Unable to load" state.
 test("providers failing once then succeeding recovers through Retry sign-in options (carried from A3)", async ({ page }) => {
   await page.route("**/api/portal/me", (route) => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" } }));
