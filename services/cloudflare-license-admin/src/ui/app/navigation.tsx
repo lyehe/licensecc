@@ -111,7 +111,12 @@ export function AdminNavigationProvider({ children }: { children: ReactNode }): 
     entries.current.set(entry.current.key, entry.current);
   }, []);
 
+  // True while a requestLeave action runs. That leave is already settled (nothing was unsaved, or
+  // the operator chose to discard), and guards read again in the same event would still see the
+  // render from before the discard, so a navigation inside the action is not asked twice.
+  const leaveApproved = useRef(false);
   const allowLeave = useCallback((): boolean => {
+    if (leaveApproved.current) return true;
     if (modalActiveRef.current) return false;
     const dirty = [...guards.current].map((read) => read()).filter(guardActive);
     if (dirty.length === 0) return true;
@@ -290,7 +295,13 @@ export function AdminNavigationProvider({ children }: { children: ReactNode }): 
   const onNavigationHandled = useCallback((intent: NavigationIntent): void => setNavigationIntent((current) => current?.id === intent.id ? null : current), []);
   const requestLeave = useCallback((action: () => void): boolean => {
     if (!allowLeave()) return false;
-    action();
+    const outer = leaveApproved.current;
+    leaveApproved.current = true;
+    try {
+      action();
+    } finally {
+      leaveApproved.current = outer;
+    }
     return true;
   }, [allowLeave]);
   const registerGuard = useCallback((read: () => NavigationGuard): (() => void) => {
