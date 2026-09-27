@@ -320,8 +320,8 @@ test("consent: otherwise identical licenses remain distinguishable",async({page}
     {id:"license-b",feature:"PRO",valid_until:null,device_limit:3,devices_in_use:0,slot_free_at:null,device_connected:false},
   ]}))})});
   await page.goto(entry);
-  await expect(page.getByRole("option",{name:"1. PRO — license-a",exact:true})).toHaveCount(1);
-  await expect(page.getByRole("option",{name:"2. PRO — license-b",exact:true})).toHaveCount(1);
+  await expect(page.getByRole("option",{name:/PRO.*expires never.*0\/1 device$/})).toHaveCount(1);
+  await expect(page.getByRole("option",{name:/PRO.*expires never.*0\/3 devices$/})).toHaveCount(1);
   await page.getByRole("combobox",{name:"License",exact:true}).selectOption("license-b");
   await expect(page.getByText("0 of 3 devices in use",{exact:true})).toBeVisible();
 });
@@ -450,13 +450,46 @@ test("consent: real encoded license references stay readable on mobile",async({p
   await fixture(page,{inspect:route=>route.fulfill({json:envelope("authorization_inspected",inspection({entitlements:ids.map(id=>({id,feature:"PRO",valid_until:null,device_limit:2,devices_in_use:0,slot_free_at:null,device_connected:false}))}))})});
   await page.setViewportSize({width:390,height:844});
   await page.goto(entry);
-  await expect(page.getByRole("option",{name:"1. PRO — …000000000001",exact:true})).toHaveCount(1);
-  await expect(page.getByRole("option",{name:"2. PRO — …000000000002",exact:true})).toHaveCount(1);
+  const options=page.locator("select option");
+  await expect(options).toHaveCount(3);
+  for(const idx of [0,1]) {
+    const text=await options.nth(idx+1).textContent();
+    expect(text).not.toContain(fingerprints[idx]);
+  }
   await page.getByRole("combobox",{name:"License",exact:true}).selectOption(ids[1]);
   await expect(page.getByText(fingerprints[1],{exact:true})).toBeHidden();
   await page.getByText("License details", {exact:true}).click();
   await expect(page.getByText(fingerprints[1],{exact:true})).toBeVisible();
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+});
+
+test("consent: license choice options show meaningful labels with expiry and usage",async({page})=>{
+  const expiryTime=Math.floor(Date.now()/1000)+86400*30;
+  await fixture(page,{inspect:route=>route.fulfill({json:envelope("authorization_inspected",inspection({entitlements:[
+    {id:"license-basic",feature:"BASIC",valid_until:expiryTime,device_limit:1,devices_in_use:0,slot_free_at:null,device_connected:false},
+    {id:"license-pro",feature:"PRO",valid_until:null,device_limit:2,devices_in_use:1,slot_free_at:null,device_connected:false},
+  ]}))})});
+  await page.goto(entry);
+  const basicOption=page.getByRole("option",{name:/BASIC.*expires.*0\/1 device$/});
+  const proOption=page.getByRole("option",{name:/PRO.*expires.*never.*1\/2 devices/});
+  await expect(basicOption).toHaveCount(1);
+  await expect(proOption).toHaveCount(1);
+  const basicText=await basicOption.textContent();
+  const proText=await proOption.textContent();
+  expect(basicText).not.toContain("license-basic");
+  expect(proText).not.toContain("license-pro");
+});
+
+test("consent: a connected device option shows the connection note",async({page})=>{
+  await fixture(page,{inspect:route=>route.fulfill({json:envelope("authorization_inspected",inspection({entitlements:[
+    {id:"license-basic",feature:"BASIC",valid_until:null,device_limit:1,devices_in_use:0,slot_free_at:null,device_connected:false},
+    {id:"license-pro",feature:"PRO",valid_until:null,device_limit:2,devices_in_use:2,slot_free_at:null,device_connected:true},
+  ]}))})});
+  await page.goto(entry);
+  const select=page.locator("select");
+  await expect(select).toBeVisible();
+  const innerHTML=await select.innerHTML();
+  expect(innerHTML).toContain("this device");
 });
 
 const firstLicensePage=()=>Array.from({length:100},(_,i)=>({id:`license-${i+1}`,feature:"PRO",valid_until:null,device_limit:1,devices_in_use:0,slot_free_at:null,device_connected:false}));
