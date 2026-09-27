@@ -193,3 +193,65 @@ test("an expired or not-yet-valid floating license disables Start seat even whil
   await expect(page.locator(".seatCard").filter({ hasText: "expired-feature" }).getByRole("button", { name: "Start seat" })).toBeDisabled();
   await expect(page.locator(".seatCard").filter({ hasText: "future-feature" }).getByRole("button", { name: "Start seat" })).toBeDisabled();
 });
+
+// Fix round 1 (Important): seatMessages/deviceMessages/downloads.messages live one level ABOVE the
+// components that only render while their own page is showing, so nothing used to reset them when
+// that page was left and revisited -- a stale "Seat started." would reappear in a freshly mounted
+// role="status" node, and (because BrowserSeats' hasBrowserSession also reads seatMessages) the panel
+// could never collapse again for the rest of the session even once every real session was gone.
+test("leaving and returning to Devices clears the seat's stale local result, and the panel follows real session state again", async ({ page }) => {
+  setup(page, { entitlements: [ENT_ALPHA] });
+  await signIn(page);
+  await page.getByRole("link", { name: "Devices", exact: true }).click();
+  await page.getByText("Browser seats", { exact: true }).click();
+  const alphaCard = page.locator(".seatCard").filter({ hasText: "alpha" });
+  await alphaCard.getByRole("button", { name: "Start seat" }).click();
+  await expect(alphaCard.getByRole("status")).toContainText("Seat started.");
+  // Expanded on real-session grounds (a live seat), not a leftover result.
+  await expect(page.locator("section.browserSessions")).toHaveCount(1);
+
+  // Leave Devices (Apps) and come back.
+  await page.getByRole("link", { name: "Apps", exact: true }).click();
+  await page.getByRole("link", { name: "Devices", exact: true }).click();
+
+  // The seat is still genuinely checked out (sessions persist across navigation, by design), so the
+  // panel is still expanded -- but the STALE "Seat started." result must be gone, and the buttons
+  // must reflect the real (still-checked-out) session, not a remembered result.
+  await expect(page.locator("section.browserSessions")).toHaveCount(1);
+  await expect(alphaCard.getByRole("status")).toHaveCount(0);
+  await expect(alphaCard.getByRole("button", { name: "Start seat" })).toBeDisabled();
+  await expect(alphaCard.getByRole("button", { name: "Release seat" })).toBeEnabled();
+
+  // Release the seat (its own result shows and keeps the panel open for this same visit), then leave
+  // and return again: now there is neither a session nor a message, so the panel must collapse back
+  // to its plain <details> -- it must not stay expanded forever just because a result was once shown.
+  await alphaCard.getByRole("button", { name: "Release seat" }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Confirm release" }).click();
+  await expect(alphaCard.getByRole("status")).toContainText("Seat released.");
+  await expect(page.locator("section.browserSessions")).toHaveCount(1);
+
+  await page.getByRole("link", { name: "Apps", exact: true }).click();
+  await page.getByRole("link", { name: "Devices", exact: true }).click();
+  await expect(page.locator("details.browserSessions")).toHaveCount(1);
+  await expect(page.locator("section.browserSessions")).toHaveCount(0);
+  await expect(page.locator(".seatCard").getByRole("status")).toHaveCount(0);
+});
+
+test("leaving and returning to Apps clears a stale license-download result", async ({ page }) => {
+  setup(page, { entitlements: [ENT_NODE] });
+  await signIn(page);
+  await page.getByRole("link", { name: "View licenses for DEFAULT" }).click();
+  await page.locator("tr").filter({ has: page.getByLabel("Device key for DEFAULT solo") }).getByText("Activate and download", { exact: true }).click();
+  await page.getByLabel("Device key for DEFAULT solo").fill("device-e2e");
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Activate and download .lic" }).click();
+  await downloadPromise;
+  await expect(page.locator(".licenseDownload").getByRole("status")).toContainText("Download started.");
+
+  // Leave Apps (Devices) and come back to the same app's license list.
+  await page.getByRole("link", { name: "Devices", exact: true }).click();
+  await page.getByRole("link", { name: "Apps", exact: true }).click();
+  await page.getByRole("link", { name: "View licenses for DEFAULT" }).click();
+  await page.locator("tr").filter({ has: page.getByLabel("Device key for DEFAULT solo") }).getByText("Activate and download", { exact: true }).click();
+  await expect(page.locator(".licenseDownload").getByRole("status")).toHaveCount(0);
+});
