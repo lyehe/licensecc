@@ -47,6 +47,7 @@ export function makeAdminApiFixture() {
     policyPatches: [],
     webhookCreates: [],
     webhookCreateAttempts: [],
+    webhookPatches: [],
     webhookReads: [],
     webhookRedrives: [],
     customerTransitions: [],
@@ -1185,6 +1186,22 @@ export function makeAdminApiFixture() {
       };
       webhooks.push(row);
       return fulfill(200, makeEnvelope("webhook_created", { ...row }));
+    }
+    const webhookDetailMatch = /^\/api\/admin\/webhooks\/([^/]+)$/.exec(path);
+    if (method === "PATCH" && webhookDetailMatch !== null) {
+      const id = decodeURIComponent(webhookDetailMatch[1]);
+      const body = await jsonBody(request);
+      requests.webhookPatches.push({ id, body, idempotencyKey: request.headers()["idempotency-key"] ?? null });
+      const endpoint = webhooks.find((item) => item.id === id);
+      if (endpoint === undefined) return fulfill(404, { ok: false, code: "not_found", request_id: "ui-e2e-webhook-missing" });
+      now += 1;
+      if ("url" in body) endpoint.url = body.url;
+      if ("event_types" in body) endpoint.event_types = body.event_types;
+      if ("description" in body) endpoint.description = body.description;
+      if ("scope_project" in body) endpoint.scope_project = body.scope_project === "" ? null : body.scope_project;
+      if ("scope_customer_id" in body) endpoint.scope_customer_id = body.scope_customer_id === "" ? null : body.scope_customer_id;
+      endpoint.updated_at = now;
+      return fulfill(200, makeEnvelope("webhook_patched", { ...endpoint }));
     }
     if (method === "GET" && path === "/api/admin/webhooks/deliveries") {
       const endpointId = url.searchParams.get("endpoint_id") ?? "";

@@ -21,6 +21,7 @@ const RUNTIME_SUBPATHS = [
   "@licensecc/cloudflare-runtime/lease/seat_reclaim",
   "@licensecc/cloudflare-runtime/lease/trial_store",
   "@licensecc/cloudflare-runtime/webhooks/webhook",
+  "@licensecc/cloudflare-runtime/webhooks/event_types",
 ];
 
 test("every explicit runtime export resolves without a service import", async () => {

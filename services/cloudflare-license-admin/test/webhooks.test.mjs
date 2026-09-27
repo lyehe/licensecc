@@ -20,9 +20,28 @@ test("validateWebhookInput accepts a minimal https endpoint and normalizes optio
 test("validateWebhookInput canonicalizes a csv event_types filter", () => {
   const result = validateWebhookInput({
     url: "https://example.com/hook",
-    event_types: " a , b ,, c ",
+    event_types: " create , update ,, disable ",
   });
-  assert.equal(result?.event_types, "a,b,c");
+  assert.equal(result?.event_types, "create,update,disable");
+});
+
+test("validateWebhookInput rejects a token outside the known entitlement/customer/order set", () => {
+  assert.equal(
+    validateWebhookInput({ url: "https://example.com/hook", event_types: "not_a_real_event_type" }),
+    "invalid_event_types",
+  );
+  assert.equal(
+    validateWebhookInput({ url: "https://example.com/hook", event_types: "create,bogus" }),
+    "invalid_event_types",
+  );
+});
+
+test("validateWebhookInput accepts a mix of valid entitlement/customer/order tokens", () => {
+  const result = validateWebhookInput({
+    url: "https://example.com/hook",
+    event_types: "create,disable,subscription.active",
+  });
+  assert.equal(result?.event_types, "create,disable,subscription.active");
 });
 
 test("validateWebhookInput reports a non-https url as invalid_url", () => {
@@ -67,14 +86,18 @@ test("validateWebhookPatch accepts an empty patch", () => {
 test("validateWebhookPatch collects only the provided mutable fields", () => {
   const patch = validateWebhookPatch({
     url: "https://example.com/new",
-    event_types: "created",
+    event_types: "create",
     description: "renamed",
   });
   assert.deepEqual(patch, {
     url: "https://example.com/new",
-    event_types: "created",
+    event_types: "create",
     description: "renamed",
   });
+});
+
+test("validateWebhookPatch rejects a token outside the known entitlement/customer/order set", () => {
+  assert.equal(validateWebhookPatch({ event_types: "not_a_real_event_type" }), "invalid_event_types");
 });
 
 test("validateWebhookPatch rejects attempts to patch immutable fields", () => {

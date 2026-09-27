@@ -14,6 +14,7 @@ const expectedSpecs = [
   "admin-ui.onboarding.e2e.mjs",
   "admin-ui.reads.e2e.mjs",
   "admin-ui.recovery.e2e.mjs",
+  "admin-ui.webhooks.e2e.mjs",
   "admin-ui.workspace.e2e.mjs",
 ];
 
@@ -30,7 +31,7 @@ test("admin browser coverage stays partitioned by operator concern", () => {
     assert.ok(localTitles.length > 0, `${path} must own browser scenarios`);
     titles.push(...localTitles);
   }
-  assert.equal(titles.length, 120);
+  assert.equal(titles.length, 121);
   assert.equal(new Set(titles).size, titles.length, "browser scenario titles must be unique");
 
   const fixture = readFileSync(join(directory, "admin-ui.fixture.mjs"), "utf8");
