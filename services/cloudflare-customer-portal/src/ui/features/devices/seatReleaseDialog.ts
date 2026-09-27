@@ -12,10 +12,13 @@ import type { EntitlementRow, SeatActionResult, SeatOperation, StatusMessage } f
 // returned.
 //
 // D4: replaced the manual overlay/div modal (its own focus trap and a return-to-trigger-button focus
-// restoration) with the native <dialog> pattern from nativeDialog.ts/ProtectedNodes.tsx. A native modal
-// dialog traps Tab itself (the rest of the document becomes inert), so the manual keydown handler is
-// gone; every close -- Cancel, Escape, a successful release, or an ordinary (non-network) failure --
-// now returns focus to the "Browser seats" heading instead of the seat's own buttons, per decision.
+// restoration) with the native <dialog> pattern from nativeDialog.ts/ProtectedNodes.tsx. Verified
+// directly against this Chromium build: a modally-invoked <dialog> keeps real Tab/keyboard focus from
+// reaching background content on its own, so the manual keydown Tab-trap is gone -- but it does NOT by
+// itself remove that background from the accessibility tree or from a scripted click, which is why
+// App.tsx still makes `main` inert by hand (see confirmSeatRelease's own comment below). Every close --
+// Cancel, Escape, a successful release, or an ordinary (non-network) failure -- now returns focus to
+// the "Browser seats" heading instead of the seat's own buttons, per decision.
 export interface PendingSeatRelease {
   item: EntitlementRow;
   session: SeatSession;
@@ -84,11 +87,11 @@ export function useSeatReleaseDialog(options: SeatReleaseDialogOptions): SeatRel
     try {
       const outcome = await seatAction(pending.item, "release");
       // Carried from D2 (fix-round-2 re-review, observation 1): these two setters run after an await,
-      // with no visitGenerationRef guard. That is safe because the native <dialog> this hook opened
-      // (showModal()) makes the rest of the document inert for as long as pendingSeatRelease is set --
-      // exactly like the inert `main` this replaces -- so the customer cannot navigate away from
-      // Devices while a release is pending, the same guarantee the other visit-generation guards exist
-      // to substitute for.
+      // with no visitGenerationRef guard. That is safe because App.tsx keeps `main` inert (aria-hidden
+      // + inert) for as long as pendingSeatRelease is set -- the same mechanism this guarded before D4,
+      // now shared with the device-release dialog -- so the customer cannot navigate away from Devices
+      // while a release is pending, the same guarantee the other visit-generation guards exist to
+      // substitute for.
       if (outcome.succeeded) {
         if (outcome.refreshFailed) setMessage(localMessage(FLOATING_SEAT_RELEASE_REFRESH_FAILED_CODE, false));
         setPendingSeatRelease(null);
