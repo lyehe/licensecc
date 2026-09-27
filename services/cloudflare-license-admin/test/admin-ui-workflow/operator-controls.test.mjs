@@ -285,9 +285,13 @@ test("useConfirmDialog renders an accessible modal, keeps the non-native fallbac
     assert.match(blank.markup, /<button type="button" class="danger" disabled="">Confirm<\/button>/u, "Confirm waits for a reason");
     assert.equal(blank.confirm.currentReason(), "");
 
-    // Another operation cannot open over the open confirmation.
+    // Another operation cannot open over the open confirmation. The refused
+    // request must never touch focus state; a sentinel proves this assertion
+    // can actually fail (the server render otherwise writes no state at all).
+    blank.focus.pendingRestoreFocusRef.current = "sentinel";
     blank.confirm.requestConfirm({ ...action, title: "Second" });
     assert.equal(blank.confirm.confirmActionRef.current, action);
+    assert.equal(blank.focus.pendingRestoreFocusRef.current, "sentinel");
 
     // With a reason typed, Confirm runs the action.
     const typed = renderDialog("Customer request");
@@ -328,4 +332,43 @@ test("useConfirmDialog renders an accessible modal, keeps the non-native fallbac
     assert.match(native.markup, /^<dialog class="modal danger" role="dialog" aria-modal="true"/u);
     assert.doesNotMatch(native.markup, /modalOverlay/u);
   }, { HTMLDialogElement: StubDialog });
+});
+
+test("useConfirmDialog gates a renamed Confirm behind an exact typed phrase and offers reason presets", async () => {
+  const hooks = await loadHooks();
+  const action = {
+    title: "Revoke selected entitlements",
+    body: "Revocation is TERMINAL and cannot be undone.",
+    requiresReason: true,
+    confirmLabel: "Revoke",
+    typedConfirmation: "REVOKE 4",
+    reasonPresets: ["Payment failed", "Customer request", "Fraud review"],
+    run: async () => ({ ok: true }),
+  };
+  const renderDialog = () => {
+    let requested = false;
+    return renderHooks(() => {
+      const gate = hooks.useOperationGate();
+      const focus = hooks.useOperatorFocus();
+      const notice = hooks.useActionNotice(gate);
+      const confirm = hooks.useConfirmDialog({ gate, focus, notice, setMessage: () => {} });
+      if (!requested) {
+        requested = true;
+        confirm.requestConfirm(action);
+      }
+      return { gate, focus, notice, confirm, element: confirm.dialog };
+    });
+  };
+
+  await withBrowserGlobals(async () => {
+    const rendered = renderDialog();
+    // The typed phrase gets its own labelled field, so a screen reader announces exactly what to type.
+    assert.match(rendered.markup, /Type REVOKE 4 to confirm<input/u);
+    // The button is renamed and stays really disabled (the `disabled` attribute, not just styling)
+    // on a fresh open, before either the reason or the exact typed phrase is supplied.
+    assert.match(rendered.markup, /<button type="button" class="danger" disabled="">Revoke<\/button>/u);
+    // Reason presets are plain, keyboard-reachable buttons; they never disable the reason field.
+    assert.match(rendered.markup, /<div class="reasonPresets"><button type="button">Payment failed<\/button><button type="button">Customer request<\/button><button type="button">Fraud review<\/button><\/div>/u);
+    assert.doesNotMatch(rendered.markup, /Reason \(required\)<input[^>]*disabled=""/u);
+  });
 });

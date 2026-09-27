@@ -7,9 +7,16 @@ const region=page=>page.getByRole('region',{name:'Protected connections'});
 test("admin connections retire with explicit hold, exact request and audit history",async({page},testInfo)=>{
   const f=fixture();await open(page,f);
   await expect(region(page)).toContainText('Design workstation');await region(page).screenshot({path:testInfo.outputPath('connections-desktop.png')});
-  await region(page).getByRole('button',{name:'Disconnect',exact:true}).click();
+  const trigger=region(page).getByRole('button',{name:'Disconnect',exact:true});
+  await expect(trigger).toHaveClass(/danger/);
+  await trigger.click();
   const dialog=page.getByRole('dialog');await expect(dialog).toContainText('Existing signed offline access');await expect(dialog).toContainText('cus_acme');
-  await dialog.getByRole('button',{name:'Disconnect',exact:true}).evaluate(button=>{button.click();button.click();});
+  const commit=dialog.getByRole('button',{name:'Disconnect',exact:true});
+  await expect(commit).toHaveClass(/danger/);
+  await expect(commit).toBeDisabled();
+  await dialog.getByLabel('Type DISCONNECT to confirm').fill('DISCONNECT');
+  await expect(commit).toBeEnabled();
+  await commit.evaluate(button=>{button.click();button.click();});
   await expect(dialog).not.toBeVisible();await expect(region(page)).toContainText('Renewal stopped for Design workstation');
   expect(f.posts).toHaveLength(1);expect(JSON.parse(f.posts[0].body)).toEqual({expected_revision:0});expect(f.posts[0].key).toMatch(/^[A-Za-z0-9_-]{43}$/);
   await expect(region(page).getByRole('heading',{name:'Protected connections',exact:true})).toBeFocused();
@@ -18,16 +25,22 @@ test("admin connections retire with explicit hold, exact request and audit histo
 
 test("admin connections recover a lost response after reload using the original operator and key",async({page})=>{
   const f=fixture();f.behavior.drop=true;await open(page,f);
-  await region(page).getByRole('button',{name:'Disconnect',exact:true}).click();await page.getByRole('dialog').getByRole('button',{name:'Disconnect',exact:true}).click();
+  await region(page).getByRole('button',{name:'Disconnect',exact:true}).click();
+  await page.getByRole('dialog').getByLabel('Type DISCONNECT to confirm').fill('DISCONNECT');
+  await page.getByRole('dialog').getByRole('button',{name:'Disconnect',exact:true}).click();
   await expect(page.getByRole('dialog')).toContainText('result is not confirmed');await expect(page.getByRole('dialog').getByRole('button',{name:'Review current connection'})).toHaveCount(0);await page.reload();
   await page.getByRole('navigation',{name:'Main navigation'}).getByRole('link',{name:'Customers',exact:true}).click();await page.locator('#customer-open-cus_acme').click();
-  await region(page).getByRole('button',{name:'Review saved request'}).click();await page.getByRole('dialog').getByRole('button',{name:'Retry same request'}).click();
+  await region(page).getByRole('button',{name:'Review saved request'}).click();
+  await page.getByRole('dialog').getByLabel('Type DISCONNECT to confirm').fill('DISCONNECT');
+  await page.getByRole('dialog').getByRole('button',{name:'Retry same request'}).click();
   await expect(page.getByRole('dialog')).not.toBeVisible();expect(f.posts).toHaveLength(2);expect(f.posts[1]).toEqual(f.posts[0]);
 });
 
 test("admin connections let a changed reader review and clear without another retirement",async({page})=>{
   const f=fixture();f.behavior.drop=true;await open(page,f);
-  await region(page).getByRole('button',{name:'Disconnect',exact:true}).click();await page.getByRole('dialog').getByRole('button',{name:'Disconnect',exact:true}).click();
+  await region(page).getByRole('button',{name:'Disconnect',exact:true}).click();
+  await page.getByRole('dialog').getByLabel('Type DISCONNECT to confirm').fill('DISCONNECT');
+  await page.getByRole('dialog').getByRole('button',{name:'Disconnect',exact:true}).click();
   await expect(page.getByRole('dialog')).toContainText('result is not confirmed');await page.getByRole('dialog').getByRole('button',{name:'Close',exact:true}).click();
   f.behavior.role='reader';f.behavior.subject='reader-two';await region(page).getByRole('button',{name:'Refresh connections'}).click();
   await region(page).getByRole('button',{name:'Review saved request'}).click();const dialog=page.getByRole('dialog');await expect(dialog.getByRole('button',{name:'Retry same request'})).toBeDisabled();
@@ -37,7 +50,9 @@ test("admin connections let a changed reader review and clear without another re
 
 test("admin connections block a write when durable tab storage is unavailable",async({page})=>{
   const f=fixture();await open(page,f);await page.evaluate(()=>{Storage.prototype.setItem=()=>{throw Error('unavailable');};});
-  await region(page).getByRole('button',{name:'Disconnect',exact:true}).click();await page.getByRole('dialog').getByRole('button',{name:'Disconnect',exact:true}).click();
+  await region(page).getByRole('button',{name:'Disconnect',exact:true}).click();
+  await page.getByRole('dialog').getByLabel('Type DISCONNECT to confirm').fill('DISCONNECT');
+  await page.getByRole('dialog').getByRole('button',{name:'Disconnect',exact:true}).click();
   await expect(page.getByRole('dialog')).toContainText('No request was sent');expect(f.posts).toHaveLength(0);
 });
 
@@ -60,12 +75,15 @@ test("admin connections invalidate parent actions when audit reveals another ope
 
 test("admin connections never clear an unknown outcome from an undocumented error",async({page})=>{
   const f=fixture();f.behavior.postFailure='not_found';await open(page,f);await region(page).getByRole('button',{name:'Disconnect',exact:true}).click();
+  await page.getByRole('dialog').getByLabel('Type DISCONNECT to confirm').fill('DISCONNECT');
   await page.getByRole('dialog').getByRole('button',{name:'Disconnect',exact:true}).click();await expect(page.getByRole('dialog')).toContainText('result is not confirmed');
   await expect(page.getByRole('dialog').getByRole('button',{name:'Review current connection'})).toHaveCount(0);await expect(page.getByRole('dialog').getByRole('button',{name:'Retry same request'})).toBeEnabled();
 });
 
 test("admin connections discard a late exact review after its dialog is reopened",async({page})=>{
-  const f=fixture();f.behavior.drop=true;await open(page,f);await region(page).getByRole('button',{name:'Disconnect',exact:true}).click();await page.getByRole('dialog').getByRole('button',{name:'Disconnect',exact:true}).click();
+  const f=fixture();f.behavior.drop=true;await open(page,f);await region(page).getByRole('button',{name:'Disconnect',exact:true}).click();
+  await page.getByRole('dialog').getByLabel('Type DISCONNECT to confirm').fill('DISCONNECT');
+  await page.getByRole('dialog').getByRole('button',{name:'Disconnect',exact:true}).click();
   await expect(page.getByRole('dialog')).toContainText('result is not confirmed');await page.getByRole('dialog').getByRole('button',{name:'Close',exact:true}).click();
   f.behavior.role='reader';await region(page).getByRole('button',{name:'Refresh connections'}).click();await region(page).getByRole('button',{name:'Review saved request'}).click();
   let release;f.behavior.reviewGate=new Promise(resolve=>{release=resolve;});await page.getByRole('dialog').getByRole('button',{name:'Review current connection'}).click();
@@ -93,7 +111,9 @@ test("admin connections reopen an unsent confirmation after section navigation",
 
 test("admin connections preserve known success after local cleanup and retry failures",async({page})=>{
   const f=fixture();await open(page,f);await page.evaluate(()=>{Storage.prototype.removeItem=()=>{throw Error('cleanup blocked');};});
-  await region(page).getByRole('button',{name:'Disconnect',exact:true}).click();await page.getByRole('dialog').getByRole('button',{name:'Disconnect',exact:true}).click();
+  await region(page).getByRole('button',{name:'Disconnect',exact:true}).click();
+  await page.getByRole('dialog').getByLabel('Type DISCONNECT to confirm').fill('DISCONNECT');
+  await page.getByRole('dialog').getByRole('button',{name:'Disconnect',exact:true}).click();
   await expect(page.getByRole('dialog')).toContainText('Disconnection has been confirmed');f.behavior.drop=true;
   await page.getByRole('dialog').getByRole('button',{name:'Retry same request'}).click();await expect(page.getByRole('dialog')).toContainText('Disconnection was already confirmed');expect(f.posts[1]).toEqual(f.posts[0]);
 });

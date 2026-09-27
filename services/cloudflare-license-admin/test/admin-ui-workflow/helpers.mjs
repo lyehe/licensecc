@@ -65,8 +65,8 @@ export async function loadWorkflowModules(relativePaths) {
     writeFileSync(outputPath, rewritten, "utf8");
   }
 
-  rootRelativePaths.forEach(compileModule);
   try {
+    rootRelativePaths.forEach(compileModule);
     return await Promise.all(rootRelativePaths.map((rootRelativePath) => import(pathToFileURL(join(dir, outputRelativePath(rootRelativePath))).href)));
   } finally {
     rmSync(dir, { recursive: true, force: true });

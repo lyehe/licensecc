@@ -96,7 +96,7 @@ test("admin UI keeps destructive operator actions consequence-led, reason-gated,
   api.seed.catalogFeature();
   await page.route("**/api/admin/**", api.route);
 
-  async function assertConfirmation(button, consequence, dismissWithEscape = false) {
+  async function assertConfirmation(button, consequence, dismissWithEscape = false, typedPhrase = null) {
     await clickAction(button);
     const dialog = page.getByRole("dialog");
     await expect(dialog).toBeVisible();
@@ -104,6 +104,11 @@ test("admin UI keeps destructive operator actions consequence-led, reason-gated,
     const confirm = dialog.getByRole("button", { name: "Confirm" });
     await expect(confirm).toBeDisabled();
     await dialog.getByLabel("Reason (required)").fill("operator review");
+    if (typedPhrase !== null) {
+      // A reason alone never satisfies a terminal action; the exact typed phrase is a second, independent gate.
+      await expect(confirm).toBeDisabled();
+      await dialog.getByLabel(`Type ${typedPhrase} to confirm`).fill(typedPhrase);
+    }
     await expect(confirm).toBeEnabled();
     if (dismissWithEscape) {
       await page.keyboard.press("Escape");
@@ -125,7 +130,7 @@ test("admin UI keeps destructive operator actions consequence-led, reason-gated,
 
   const entitlementRow = page.locator(".tablePane table tbody tr").first();
   await assertConfirmation(entitlementRow.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first(), "Verification and downloads stop until it is re-enabled", true);
-  await assertConfirmation(entitlementRow.getByRole("button", { name: "Revoke", exact: true, includeHidden: true }).first(), "TERMINAL and cannot be undone");
+  await assertConfirmation(entitlementRow.getByRole("button", { name: "Revoke", exact: true, includeHidden: true }).first(), "TERMINAL and cannot be undone", false, "REVOKE 1");
   await assertConfirmation(entitlementRow.getByRole("button", { name: "Release seats", exact: true, includeHidden: true }).first(), "dead/unreachable machine");
   expect(api.requests.transitions).toHaveLength(0);
   expect(api.requests.releaseSeats).toHaveLength(0);
@@ -164,6 +169,40 @@ test("admin UI keeps destructive operator actions consequence-led, reason-gated,
   await expect(webhookRow).toBeVisible();
   await assertConfirmation(webhookRow.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first(), "queued or failed deliveries already recorded are unaffected");
   expect(api.requests.webhookTransitions).toHaveLength(0);
+});
+
+test("admin UI entitlement disable reason presets fill the field and leave it editable", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  await page.route("**/api/admin/**", api.route);
+  await page.goto("/");
+  await page.getByRole("link", { name: "License access", exact: true }).click();
+  if (!await page.locator(".editorLayout form").isVisible()) await page.getByRole("button", { name: "New entitlement", exact: true }).click();
+  const createForm = page.locator(".editorLayout form");
+  await createForm.getByLabel("Feature").fill("float");
+  await createForm.getByLabel("License fingerprint").fill("a".repeat(64));
+  await createForm.getByRole("button", { name: "Create entitlement" }).click();
+  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
+  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
+
+  const entitlementRow = page.locator(".tablePane table tbody tr").first();
+  await clickAction(entitlementRow.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first());
+  const dialog = page.getByRole("dialog");
+  const reason = dialog.getByLabel("Reason (required)");
+
+  await dialog.getByRole("button", { name: "Fraud review", exact: true }).click();
+  await expect(reason).toHaveValue("Fraud review");
+  // A preset only fills the field; it stays an ordinary, editable text input.
+  await expect(reason).toBeEditable();
+  await reason.fill("Fraud review, escalated to trust & safety");
+  await expect(reason).toHaveValue("Fraud review, escalated to trust & safety");
+  await dialog.getByRole("button", { name: "Payment failed", exact: true }).click();
+  await expect(reason).toHaveValue("Payment failed");
+  await dialog.getByRole("button", { name: "Customer request", exact: true }).click();
+  await expect(reason).toHaveValue("Customer request");
+
+  await dialog.getByRole("button", { name: "Confirm" }).click();
+  await expect.poll(() => api.requests.transitions.length).toBe(1);
+  expect(api.requests.transitions[0]).toMatchObject({ action: "disable", reason: "Customer request" });
 });
 
 test("admin UI consequence dialogs contain focus, isolate the background, and reflow long targets", async ({ page }) => {

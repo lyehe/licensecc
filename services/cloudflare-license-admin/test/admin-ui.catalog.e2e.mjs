@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { makeAdminApiFixture } from "./admin-ui.fixture.mjs";
+import { makeAdminApiFixture, makeEnvelope } from "./admin-ui.fixture.mjs";
 
 async function openCatalogView(page, name) {
   const back = page.getByRole("button", { name: /^Back to (features|plans)$/ });
@@ -392,4 +392,93 @@ test("admin UI clears its bound preview for stale and fingerprint-conflict Apply
   // mutation path; the UI has only sent the server-bound preview_id.
   expect(api.requests.planApplies).toHaveLength(2);
   expect(api.requests.planApplies.every((body) => Object.keys(body).length === 1 && typeof body.preview_id === "string")).toBe(true);
+});
+
+test("admin UI opens a confirm dialog before a plan projection Apply that would disable a grant", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  await page.route("**/api/admin/**", api.route);
+  const previewId = "ppv_ui_disable_test";
+  const fingerprint = "e".repeat(64);
+  let lastPreviewBody = null;
+  function buildPreview(body) {
+    return {
+      plan: { id: "plan_pro", project: "DEFAULT", plan_key: "pro", name: "Pro", status: "active", version: 1 },
+      assignment: {
+        project: body.project,
+        license_id: body.license_id,
+        license_fingerprint: body.license_fingerprint,
+        customer_id: body.customer_id ?? null,
+        plan_id: "plan_pro",
+        plan_key: "pro",
+        support_until: body.support_until ?? null,
+        addons: body.addons ?? [],
+      },
+      desired: [],
+      will_create: [],
+      will_update: [],
+      will_disable: [{
+        project: "DEFAULT",
+        feature: "legacy",
+        license_fingerprint: body.license_fingerprint,
+        policy_id: null,
+        source: "included",
+        addon_key: null,
+        license_mode: "node_locked",
+        status: "active",
+        valid_from: null,
+        valid_until: null,
+        assertion_ttl_seconds: 600,
+        pool_size: 0,
+        max_active_devices: 1,
+        max_borrow_sec: 0,
+        meter_quota: 0,
+        meter_period_sec: 2592000,
+        reason: "not_in_plan",
+      }],
+      blocked: [],
+      unchanged: [],
+      summary: { create: 0, update: 0, disable: 1, blocked: 0, unchanged: 0 },
+      preview_id: previewId,
+      effective_at: 0,
+      expires_at: 9999999999,
+      source_generation: 1,
+    };
+  }
+  await page.route("**/api/admin/license-plans/preview", async (route) => {
+    lastPreviewBody = route.request().postDataJSON();
+    return route.fulfill({ contentType: "application/json", body: JSON.stringify(makeEnvelope("license_plan_projection_previewed", buildPreview(lastPreviewBody))) });
+  });
+  let applyCount = 0;
+  await page.route("**/api/admin/license-plans/apply", async (route) => {
+    applyCount += 1;
+    const preview = buildPreview(lastPreviewBody);
+    return route.fulfill({ contentType: "application/json", body: JSON.stringify(makeEnvelope("license_plan_projection_applied", { ...preview, applied: { created: [], updated: [], disabled: [], assignment: null } })) });
+  });
+
+  await page.goto("/");
+  await page.getByRole("link", { name: "Plans & features" }).click();
+  await openProjectionTask(page);
+  const projectionForm = page.getByRole("form", { name: "Plan projection" });
+  await projectionForm.getByLabel("License ID").fill("lic_disable_test");
+  await projectionForm.getByLabel("Fingerprint").fill(fingerprint);
+  await projectionForm.getByLabel("Plan key").fill("pro");
+  await projectionForm.getByRole("button", { name: "Preview" }).click();
+  await expect.poll(() => lastPreviewBody !== null).toBe(true);
+  const applyButton = projectionForm.getByRole("button", { name: "Apply" });
+  await expect(applyButton).toBeEnabled();
+
+  // Cancelling the warning sends no apply request.
+  await applyButton.click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toContainText("This will disable 1 grant.");
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await expect(dialog).toHaveCount(0);
+  expect(applyCount).toBe(0);
+
+  // Confirming runs the exact same Apply the ungated path would have sent.
+  await applyButton.click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await page.getByRole("dialog").getByRole("button", { name: "Confirm" }).click();
+  await expect.poll(() => applyCount).toBe(1);
+  await expect(page.getByRole("dialog")).toHaveCount(0);
 });

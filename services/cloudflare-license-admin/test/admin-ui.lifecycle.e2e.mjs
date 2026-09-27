@@ -164,7 +164,12 @@ test("admin UI completes entitlement lifecycle and blocks duplicate create submi
   await expect(page.getByRole("dialog")).toBeVisible();
   await expect(page.locator(".status.revoked")).toHaveCount(0); // not revoked until confirmed
   await page.getByRole("dialog").getByLabel(/Reason/).fill("chargeback");
-  await page.getByRole("dialog").getByRole("button", { name: "Confirm" }).click();
+  const revokeConfirm = page.getByRole("dialog").getByRole("button", { name: "Confirm" });
+  await expect(revokeConfirm).toBeDisabled();
+  // A reason alone is not enough for a terminal action: the operator must also type the exact phrase.
+  await page.getByRole("dialog").getByLabel("Type REVOKE 1 to confirm").fill("REVOKE 1");
+  await expect(revokeConfirm).toBeEnabled();
+  await revokeConfirm.click();
   await expect(entitlementActions.locator(".status.revoked")).toHaveText("revoked");
   await expect(entitlementActions.getByRole("button", { name: "Edit" })).toBeDisabled();
   const revokedReenable = entitlementActions.getByRole("button", { name: "Reenable", includeHidden: true });
@@ -277,6 +282,45 @@ test("admin UI retains the server-owned four-entitlement batch limit", async ({ 
   await dialog.getByRole("button", { name: "Confirm" }).click();
   await expect.poll(() => api.requests.batches.length).toBe(2);
   expect(api.requests.batches.map((batch) => batch.ids)).toEqual([["ent-1", "ent-2", "ent-3", "ent-4"], ["ent-5"]]);
+});
+
+test("admin UI gates a batch revoke behind an exact typed REVOKE phrase", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  await page.route("**/api/admin/**", api.route);
+  await page.goto("/");
+  await page.getByRole("link", { name: "License access", exact: true }).click();
+  if (!await page.locator("section.editorLayout form").isVisible()) await page.getByRole("button", { name: "New entitlement", exact: true }).click();
+  const createForm = page.locator("section.editorLayout form");
+  for (const [index, fingerprint] of ["a", "b", "c", "d"].entries()) {
+    await createForm.getByLabel("Feature").fill(`revoke-batch-${index}`);
+    await createForm.getByLabel("License fingerprint").fill(fingerprint.repeat(64));
+    await createForm.getByRole("button", { name: "Create entitlement" }).click();
+    await expect.poll(() => api.requests.creates).toBe(index + 1);
+  }
+  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
+  await page.getByLabel("Select all 4 loaded", { exact: true }).check();
+  await expect(page.locator(".bulkBar")).toContainText("4 selected");
+  await clickAction(page.locator(".bulkBar").getByRole("button", { name: "Revoke selected", includeHidden: true }));
+  const dialog = page.getByRole("dialog");
+  const confirm = dialog.getByRole("button", { name: "Confirm" });
+  await dialog.getByLabel(/Reason/).fill("mass revoke test");
+  const typed = dialog.getByLabel("Type REVOKE 4 to confirm");
+  await expect(confirm).toBeDisabled();
+  await typed.fill("revoke 4");
+  await expect(confirm).toBeDisabled(); // the match is case-sensitive
+  await typed.fill("REVOKE 3");
+  await expect(confirm).toBeDisabled(); // the count must match exactly
+  await typed.fill("REVOKE 4");
+  await expect(confirm).toBeEnabled();
+  await typed.fill(" REVOKE 4 ");
+  await expect(confirm).toBeEnabled(); // surrounding whitespace is trimmed
+  expect(api.requests.batches).toHaveLength(0);
+  await confirm.click();
+  await expect.poll(() => api.requests.batches.length).toBe(1);
+  expect(api.requests.batches[0]).toMatchObject({ action: "revoke", reason: "mass revoke test" });
+  expect(api.requests.batches[0].ids).toHaveLength(4);
+  await expect(dialog).toHaveCount(0);
+  await expect(page.locator(".desktopRecords .status.revoked")).toHaveCount(4);
 });
 
 test("admin UI disables twenty loaded entitlements with one confirmation, one reason and five keyed requests", async ({ page }) => {
