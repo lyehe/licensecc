@@ -454,7 +454,9 @@ test("consent: real encoded license references stay readable on mobile",async({p
   await expect(options).toHaveCount(3);
   for(const idx of [0,1]) {
     const text=await options.nth(idx+1).textContent();
-    expect(text).not.toContain(fingerprints[idx]);
+    expect(text).toContain("expires");
+    expect(text).toContain("0/2 devices");
+    expect(text).not.toContain(fingerprints[idx].slice(-12));
   }
   await page.getByRole("combobox",{name:"License",exact:true}).selectOption(ids[1]);
   await expect(page.getByText(fingerprints[1],{exact:true})).toBeHidden();

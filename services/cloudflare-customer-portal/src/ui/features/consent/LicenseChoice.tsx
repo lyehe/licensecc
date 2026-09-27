@@ -4,7 +4,6 @@ import { formatEpoch } from "../../portalWorkflow";
 import type { ConsentInspection } from "../../shared/consentApi";
 
 const reference=(id:string):string=>decodeEntitlementId(id)?.license_fingerprint??id;
-const shortReference=(id:string):string=>{const value=reference(id);return value.length>16?`…${value.slice(-12)}`:value;};
 const duration=(seconds:number):string=>{
   for(const [size,unit] of [[86400,"day"],[3600,"hour"],[60,"minute"],[1,"second"]] as const){
     if(seconds%size===0){const n=seconds/size;return `${n} ${unit}${n===1?"":"s"}`;}
