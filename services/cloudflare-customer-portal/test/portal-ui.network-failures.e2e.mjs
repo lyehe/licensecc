@@ -68,6 +68,9 @@ function setup(page, abortPath) {
     if (method === "POST" && path === "/api/portal/checkout") {
       return fulfill(200, makeEnvelope("checkout_ok", { seat_id: "seat-net", expires_at: 0 }));
     }
+    if (method === "POST" && path === "/api/portal/release") {
+      return fulfill(200, makeEnvelope("release_ok", { seat_id: "seat-net" }));
+    }
     if (method === "POST" && path === "/api/portal/download") {
       return route.fulfill({
         status: 200,
@@ -155,6 +158,30 @@ test("an aborted logout call keeps the customer signed in and explains the failu
   await expect(page.getByRole("heading", { name: "Apps", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Sign out" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Send code" })).toHaveCount(0);
+  await expect(page.getByText("logout_failed", { exact: false })).not.toBeVisible();
+  expect(pageErrors).toEqual([]);
+});
+
+// D3 fix round 1 (Minor 5): the seat-release POSTs sign-out sends are independent of the sign-out POST
+// itself -- a seat can genuinely be released even though the final sign-out request then fails. The
+// customer must be told BOTH facts, not just "logout_failed" (which would wrongly imply nothing at all
+// happened).
+test("an aborted logout call after a successful seat release explains both the release and the failure", async ({ page }) => {
+  const pageErrors = [];
+  page.on("pageerror", (error) => pageErrors.push(error));
+  setup(page, "/portal/v1/auth/logout");
+  await page.goto("/");
+  await signInThroughCode(page);
+  await page.getByRole("link", { name: "Devices", exact: true }).click();
+  await page.getByText("Browser seats", { exact: true }).click();
+  const seatCard = page.locator(".seatCard").filter({ hasText: "pro" }).first();
+  await seatCard.getByRole("button", { name: "Start seat" }).click();
+  await expect(seatCard.getByRole("status")).toContainText("Seat started.");
+
+  await page.getByRole("button", { name: "Sign out" }).click();
+  await expect(page.getByText(`${LOGOUT_FAILED_COPY} Released 1 browser seat.`, { exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Devices", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Sign out" })).toBeVisible();
   await expect(page.getByText("logout_failed", { exact: false })).not.toBeVisible();
   expect(pageErrors).toEqual([]);
 });

@@ -33,7 +33,7 @@ function delay(ms) {
 // in as more than one customer on the SAME browser (e.g. an explicit sign-out, then a different
 // customer's sign-in). The single-account tests below never pass it -- they keep signing in as
 // VALID_CODE / "cus_results" exactly as before.
-function setup(page, { entitlements, support, checkoutResponse, checkoutDelayMs, downloadDelayMs, releaseResponse, customers } = {}) {
+function setup(page, { entitlements, support, checkoutResponse, checkoutDelayMs, downloadDelayMs, releaseResponse, releaseDelayMs, customers } = {}) {
   const accounts = customers ?? { [VALID_CODE]: { customerId: "cus_results", entitlements: entitlements ?? [] } };
   let authedCode = null;
   const requests = { checkouts: 0, releases: 0, downloads: 0 };
@@ -92,6 +92,7 @@ function setup(page, { entitlements, support, checkoutResponse, checkoutDelayMs,
     if (method === "POST" && path === "/api/portal/release") {
       requests.releases += 1;
       const body = jsonBody(request);
+      if (releaseDelayMs) await delay(releaseDelayMs);
       if (releaseResponse) {
         const response = releaseResponse(body, requests.releases);
         if (response) return fulfill(response.status ?? 200, response.body);
@@ -466,4 +467,33 @@ test("a different customer signing in after an explicit sign-out never sees the 
   expect(storedForB).toBeNull();
   const storedForA = await page.evaluate(() => window.localStorage.getItem("licensecc.portal.seats.v1:cus_signout_a"));
   expect(storedForA).toContain("ent_switch_a");
+});
+
+// D3 fix round 1 (Important 2): while sign-out's seat releases are still in flight, the UI must not
+// look idle -- Sign out itself reads "Signing out…" and is disabled, and every other busy-gated
+// control (another seat's Start seat button here) is disabled too, so a seat cannot be started mid-
+// release and left out of the batch that was already sent.
+test("signing out disables Sign out and other busy-gated controls while a seat release is in flight", async ({ page }) => {
+  const requests = setup(page, { entitlements: [ENT_ALPHA, ENT_BETA], releaseDelayMs: RACE_DELAY_MS });
+  await signIn(page);
+  await page.getByRole("link", { name: "Devices", exact: true }).click();
+  await page.getByText("Browser seats", { exact: true }).click();
+  const alphaCard = page.locator(".seatCard").filter({ hasText: "alpha" });
+  const betaCard = page.locator(".seatCard").filter({ hasText: "beta" });
+  await alphaCard.getByRole("button", { name: "Start seat" }).click();
+  await expect(alphaCard.getByRole("status")).toContainText("Seat started.");
+
+  await page.getByRole("button", { name: "Sign out" }).click();
+  const signingOutButton = page.getByRole("button", { name: "Signing out…" });
+  await expect(signingOutButton).toBeVisible();
+  await expect(signingOutButton).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Sign out", exact: true })).toHaveCount(0);
+  // Beta was never started, but it is busy-gated the same as every other Devices control: it must not
+  // be startable while its sibling's release is still in flight.
+  await expect(betaCard.getByRole("button", { name: "Start seat" })).toBeDisabled();
+
+  // Once the delayed release resolves, sign-out completes normally.
+  await expect(page.getByRole("button", { name: "Send code" })).toBeVisible();
+  await expect(page.getByText("Released 1 browser seat.", { exact: true })).toBeVisible();
+  await expect.poll(() => requests.releases).toBe(1);
 });

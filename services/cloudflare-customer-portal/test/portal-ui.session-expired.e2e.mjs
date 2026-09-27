@@ -375,3 +375,71 @@ test("a customer switch after a session-ending 401 never shows the previous cust
 
   expect(pageErrors).toEqual([]);
 });
+
+// D3 fix round 1 (Critical): a session-ending 401 never nulls customerId (only an explicit sign-out
+// does), so when the SAME customer signs back in with no page reload, the customer id passed to
+// useDevicesController never changes -- only App.tsx's reactive session epoch does. Without threading
+// that epoch into the hydrate effect's dependency array, a seat this browser genuinely still holds
+// (the server was never asked to release it -- a session-ending 401 is not a sign-out) would stay
+// unlisted after re-signing in, even though it is still checked out server-side.
+test("a session-ending 401 preserves a stored seat, which reappears after the SAME customer signs in again with no reload", async ({ page }) => {
+  const pageErrors = [];
+  page.on("pageerror", (error) => pageErrors.push(error));
+  let authed = false;
+  const fulfill = (route, status, body) => route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
+  const handler = (route) => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname;
+    const method = request.method();
+    if (path === "/portal/v1/auth/providers") return fulfill(route, 200, makeEnvelope("auth_providers", { google: false, github: false, email: true, password: false }));
+    if (method === "POST" && path === "/portal/v1/auth/request") return fulfill(route, 200, makeEnvelope("otp_requested"));
+    if (method === "POST" && path === "/portal/v1/auth/verify") {
+      const body = jsonBody(request);
+      if (body.code !== VALID_CODE) return fulfill(route, 401, { ok: false, code: "invalid_otp", request_id: "session-e2e-bad" });
+      authed = true;
+      return fulfill(route, 200, makeEnvelope("signed_in", { customer_id: "cus_rehydrate" }));
+    }
+    if (!authed) return fulfill(route, 401, unauthorizedBody());
+    if (method === "GET" && path === "/api/portal/me") return fulfill(route, 200, makeEnvelope("me", { customer_id: "cus_rehydrate", email: null }));
+    if (method === "GET" && path === "/api/portal/entitlements") return fulfill(route, 200, makeEnvelope("entitlements", { items: ENTITLEMENTS.map((item) => ({ ...item })) }));
+    if (method === "GET" && path === "/api/portal/devices") return fulfill(route, 200, makeEnvelope("devices", { items: [] }));
+    if (method === "GET" && path === "/api/portal/usage") return fulfill(route, 200, makeEnvelope("usage", { items: [] }));
+    if (method === "POST" && path === "/api/portal/checkout") return fulfill(route, 200, makeEnvelope("checkout_ok", { seat_id: "seat-rehydrate", expires_at: 0 }));
+    // The renew (heartbeat) is what ends the session -- NOT a sign-out, so the seat is never asked to
+    // release; it must still be listed (and releasable) once the customer signs back in.
+    if (method === "POST" && path === "/api/portal/heartbeat") { authed = false; return fulfill(route, 401, unauthorizedBody()); }
+    if (method === "POST" && path === "/api/portal/release") return fulfill(route, 200, makeEnvelope("release_ok", { seat_id: "seat-rehydrate" }));
+    return fulfill(route, 404, { ok: false, code: "not_found", request_id: "session-e2e-unhandled" });
+  };
+  page.route("**/portal/v1/auth/**", handler);
+  page.route("**/api/portal/**", handler);
+
+  await page.goto("/");
+  await signInThroughCode(page);
+  await page.getByRole("link", { name: "Devices", exact: true }).click();
+  await page.getByText("Browser seats", { exact: true }).click();
+  const seatCard = page.locator(".seatCard").filter({ hasText: "pro" }).first();
+  await seatCard.getByRole("button", { name: "Start seat" }).click();
+  await expect(seatCard.getByRole("button", { name: "Renew seat" })).toBeEnabled();
+  await seatCard.getByRole("button", { name: "Renew seat" }).click();
+  await expect(page.getByRole("heading", { name: "Sign in", exact: true })).toBeVisible();
+  await expect(page.getByText(SESSION_ENDED_COPY, { exact: true })).toBeVisible();
+
+  // Sign back in as the SAME customer, no page reload: the stored seat must reappear, pre-expanded,
+  // releasable -- and Start seat must stay disabled, since this browser still genuinely holds it.
+  // (Not signInThroughCode(): the hash is still "#/nodes" from before the session ended -- a session
+  // end, unlike an explicit sign-out, never resets it -- so re-signing in lands directly on Devices.)
+  await page.getByLabel("Email").fill("user@example.com");
+  await page.getByRole("button", { name: "Send code" }).click();
+  await expect(page.getByRole("heading", { name: "Check your email" })).toBeVisible();
+  await page.getByLabel("8-digit code").fill(VALID_CODE);
+  await page.getByRole("button", { name: "Verify", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Browser seats" })).toBeVisible();
+  const seatCardAgain = page.locator(".seatCard").filter({ hasText: "pro" }).first();
+  await expect(seatCardAgain.getByRole("button", { name: "Start seat" })).toBeDisabled();
+  await expect(seatCardAgain.getByRole("button", { name: "Release seat" })).toBeEnabled();
+  await seatCardAgain.getByRole("button", { name: "Release seat" }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Confirm release" }).click();
+  await expect(seatCardAgain.getByRole("status")).toContainText("Seat released.");
+  expect(pageErrors).toEqual([]);
+});
