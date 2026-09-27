@@ -101,13 +101,6 @@ async function signIn(page) {
   await expect(page.getByRole("heading", { name: "Apps", exact: true })).toBeVisible();
 }
 
-async function elementInViewport(locator) {
-  return locator.evaluate((element) => {
-    const rect = element.getBoundingClientRect();
-    return rect.top >= 0 && rect.bottom <= window.innerHeight && rect.left >= 0 && rect.right <= window.innerWidth;
-  });
-}
-
 test("seat start, seat release and a license download each show their own result in the mobile viewport, with expiry visible", async ({ page }) => {
   setup(page, { entitlements: [ENT_ALPHA, ENT_BETA, ENT_NODE] });
   await page.setViewportSize({ width: 390, height: 844 });
@@ -124,9 +117,10 @@ test("seat start, seat release and a license download each show their own result
   await alphaCard.getByRole("button", { name: "Start seat" }).click();
   const alphaResult = alphaCard.getByRole("status");
   await expect(alphaResult).toContainText("Seat started.");
-  expect(await elementInViewport(alphaResult)).toBe(true);
-  await expect(alphaCard).toContainText(/Active until/);
-  expect(await elementInViewport(alphaCard.getByText(/Active until/))).toBe(true);
+  await expect(alphaResult).toBeInViewport();
+  const alphaExpiry = alphaCard.getByText(/Active until/);
+  await expect(alphaExpiry).toBeVisible();
+  await expect(alphaExpiry).toBeInViewport();
 
   // Start a second seat so releasing the first below does not leave zero live sessions -- unrelated
   // to what this test is checking, and D3 (a later task) covers what happens once the LAST seat is
@@ -145,7 +139,7 @@ test("seat start, seat release and a license download each show their own result
 
   // Release seat A: its own local result line shows the result, still in the viewport.
   await expect(alphaResult).toContainText("Seat released.");
-  expect(await elementInViewport(alphaResult)).toBe(true);
+  await expect(alphaResult).toBeInViewport();
 
   // A license download's own local result also stays in the viewport, next to its own control.
   await page.getByRole("link", { name: "Apps", exact: true }).click();
@@ -157,7 +151,7 @@ test("seat start, seat release and a license download each show their own result
   await downloadPromise;
   const downloadResult = page.locator(".licenseDownload").getByRole("status");
   await expect(downloadResult).toContainText("Download started.");
-  expect(await elementInViewport(downloadResult)).toBe(true);
+  await expect(downloadResult).toBeInViewport();
 });
 
 test("a seat action's own result never reaches the page-level status line", async ({ page }) => {
