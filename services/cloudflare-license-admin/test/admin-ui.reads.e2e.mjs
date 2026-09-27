@@ -276,7 +276,7 @@ test("admin UI keeps 5xx null and scalar append cursors retryable", async ({ pag
   await expect(deliveriesMore).toHaveCount(0);
 });
 
-test("admin UI invalidates a batch selection when its entitlement filter context changes", async ({ page }) => {
+test("admin UI keeps a batch selection and its row visible through a filter reload, then clears it once the row is confirmed gone", async ({ page }) => {
   const api = makeAdminApiFixture();
   await page.route("**/api/admin/**", api.route);
   await page.goto("/");
@@ -288,7 +288,8 @@ test("admin UI invalidates a batch selection when its entitlement filter context
   await createForm.getByRole("button", { name: "Create entitlement" }).click();
   await expect(page.getByText(/entitlement_saved/)).toBeVisible();
   await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
-  const row = page.getByRole("region", { name: "Entitlement records", exact: true }).locator("tbody tr").first();
+  const region = page.getByRole("region", { name: "Entitlement records", exact: true });
+  const row = region.locator("tbody tr").first();
   const selectRow = row.getByLabel("Select selection-context/float");
   await selectRow.check();
   await expect(page.locator(".bulkBar")).toContainText("1 selected");
@@ -306,16 +307,154 @@ test("admin UI invalidates a batch selection when its entitlement filter context
   const projectFilter = page.locator('input[aria-label="Filter by project"]');
   await projectFilter.fill("no-such-project");
   await expect.poll(() => filteredReadStarted).toBe(true);
-  await expect(page.locator(".tablePane table tbody tr")).toHaveCount(0);
-  await expect(page.locator(".bulkBar")).toHaveCount(0);
+  // The new filter's request is in flight, but the previous row and its selection stay on screen
+  // (no blanking), with the region marked busy instead of emptied.
+  await expect(page.locator(".tablePane table tbody tr")).toHaveCount(1);
+  await expect(row).toBeVisible();
+  await expect(selectRow).toBeChecked();
+  await expect(page.locator(".bulkBar")).toContainText("1 selected");
+  await expect(region).toHaveAttribute("aria-busy", "true");
   expect(api.requests.batches).toHaveLength(0);
 
-  await projectFilter.fill("selection-context");
-  try {
-    await expect(selectRow).not.toBeChecked();
-  } finally {
-    releaseFilteredRead();
-  }
+  releaseFilteredRead();
+  // Once the "no-such-project" response settles with zero rows, the selected row is confirmed
+  // gone and only then does the selection clear.
+  await expect(page.locator(".tablePane table tbody tr")).toHaveCount(0);
+  await expect(page.locator(".bulkBar")).toHaveCount(0);
+  await expect(region).toHaveAttribute("aria-busy", "false");
+});
+
+test("admin UI debounces a single entitlements filter change to one request and triggers no summary or events reads", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  await page.route("**/api/admin/**", api.route);
+  await page.goto("/");
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "License access", exact: true }).click();
+  await expect.poll(() => api.requests.entitlementReads.length).toBeGreaterThan(0);
+  const entitlementReadsBefore = api.requests.entitlementReads.length;
+  const summaryReadsBefore = api.requests.summaryReads.length;
+  const eventsReadsBefore = api.requests.eventsReads.length;
+
+  // A single change event, matching how a real keystroke settles once typing pauses.
+  await page.locator('input[aria-label="Filter by project"]').fill("DEFAULT");
+  // Longer than the 300ms debounce, so the coalesced request has time to land.
+  await page.waitForTimeout(600);
+
+  expect(api.requests.entitlementReads.length - entitlementReadsBefore).toBeLessThanOrEqual(1);
+  expect(api.requests.entitlementReads.length).toBeGreaterThan(entitlementReadsBefore);
+  expect(api.requests.summaryReads.length).toBe(summaryReadsBefore);
+  expect(api.requests.eventsReads.length).toBe(eventsReadsBefore);
+});
+
+test("admin UI issues zero entitlements requests when leaving and reentering the tab without changing the filter", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  await page.route("**/api/admin/**", api.route);
+  await page.goto("/");
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "License access", exact: true }).click();
+  await expect.poll(() => api.requests.entitlementReads.length).toBeGreaterThan(0);
+  const before = api.requests.entitlementReads.length;
+
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Overview", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Overview", exact: true })).toBeVisible();
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "License access", exact: true }).click();
+  await expect(page.locator(".tablePane")).toBeVisible();
+  await page.waitForTimeout(600);
+
+  expect(api.requests.entitlementReads.length).toBe(before);
+});
+
+test("admin UI entitlement list renders exactly one of table rows or cards at any viewport", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  await page.route("**/api/admin/**", api.route);
+  await page.goto("/");
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "License access", exact: true }).click();
+  const createForm = await newEntitlementForm(page);
+  await createForm.getByLabel("Project").fill("layout-check");
+  await createForm.getByLabel("Feature").fill("float");
+  await createForm.getByLabel("License fingerprint").fill("b".repeat(64));
+  await createForm.getByRole("button", { name: "Create entitlement" }).click();
+  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
+  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
+
+  await expect(page.locator(".tablePane table tbody tr")).toHaveCount(1);
+  await expect(page.locator(".tablePane .recordCards .recordCard")).toHaveCount(0);
+
+  await page.setViewportSize({ width: 500, height: 900 });
+  await expect(page.locator(".tablePane .recordCards .recordCard")).toHaveCount(1);
+  await expect(page.locator(".tablePane table tbody tr")).toHaveCount(0);
+
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await expect(page.locator(".tablePane table tbody tr")).toHaveCount(1);
+  await expect(page.locator(".tablePane .recordCards .recordCard")).toHaveCount(0);
+});
+
+test("admin UI keeps license rows visible with aria-busy during a filter reload and debounces the request", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  api.behavior.licenseRows = [
+    { id: "lic_keep", customer_id: null, project: "keep-project", label: null, created_at: 1_760_000_000, updated_at: 1_760_000_000 },
+  ];
+  await page.route("**/api/admin/**", api.route);
+  await page.goto("/");
+  if (await page.getByRole("button", { name: "Related records", exact: true }).getAttribute("aria-expanded") === "false") await page.getByRole("button", { name: "Related records", exact: true }).click();
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Issued licenses", exact: true }).click();
+  await expect(page.locator(".desktopRecords tbody tr")).toHaveCount(1);
+  await expect.poll(() => api.requests.licenseReads.length).toBeGreaterThan(0);
+  const readsBefore = api.requests.licenseReads.length;
+
+  let releaseFilteredRead;
+  let filteredReadStarted = false;
+  const filteredRead = new Promise((resolve) => { releaseFilteredRead = resolve; });
+  await page.route("**/api/admin/licenses?**", async (route) => {
+    filteredReadStarted = true;
+    await filteredRead;
+    await route.fallback();
+  });
+  await page.getByLabel("Project", { exact: true }).fill("no-such-project");
+  await expect.poll(() => filteredReadStarted).toBe(true);
+  // The previous row stays on screen while the reload is in flight; the region is marked busy
+  // instead of being emptied, and the reload itself is exactly one request.
+  await expect(page.locator(".desktopRecords tbody tr")).toHaveCount(1);
+  await expect(page.locator(".desktopRecords")).toHaveAttribute("aria-busy", "true");
+
+  releaseFilteredRead();
+  await expect.poll(() => api.requests.licenseReads.length).toBe(readsBefore + 1);
+  await expect(page.locator(".desktopRecords")).toHaveAttribute("aria-busy", "false");
+});
+
+test("admin UI debounces policy and webhook filter reloads to one request each", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  await page.route("**/api/admin/**", api.route);
+  await page.goto("/");
+
+  if (await page.getByRole("button", { name: "Configuration", exact: true }).getAttribute("aria-expanded") === "false") await page.getByRole("button", { name: "Configuration", exact: true }).click();
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Policies", exact: true }).click();
+  await expect.poll(() => api.requests.policyReads.length).toBeGreaterThan(0);
+  const policyReadsBefore = api.requests.policyReads.length;
+  await page.getByLabel("Project", { exact: true }).fill("policy-project");
+  await page.waitForTimeout(600);
+  expect(api.requests.policyReads.length - policyReadsBefore).toBe(1);
+
+  if (await page.getByRole("button", { name: "Configuration", exact: true }).getAttribute("aria-expanded") === "false") await page.getByRole("button", { name: "Configuration", exact: true }).click();
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Webhooks", exact: true }).click();
+  await expect.poll(() => api.requests.webhookReads.length).toBeGreaterThan(0);
+  const webhookReadsBefore = api.requests.webhookReads.length;
+  await page.getByLabel("Filter endpoints by status", { exact: true }).selectOption("active");
+  await page.waitForTimeout(600);
+  expect(api.requests.webhookReads.length - webhookReadsBefore).toBe(1);
+
+  // Leaving and reentering either tab with its filter unchanged must cost zero further requests.
+  const policyReadsSettled = api.requests.policyReads.length;
+  const webhookReadsSettled = api.requests.webhookReads.length;
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Overview", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Overview", exact: true })).toBeVisible();
+  if (await page.getByRole("button", { name: "Configuration", exact: true }).getAttribute("aria-expanded") === "false") await page.getByRole("button", { name: "Configuration", exact: true }).click();
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Policies", exact: true }).click();
+  await expect(page.locator(".tablePane")).toBeVisible();
+  if (await page.getByRole("button", { name: "Configuration", exact: true }).getAttribute("aria-expanded") === "false") await page.getByRole("button", { name: "Configuration", exact: true }).click();
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Webhooks", exact: true }).click();
+  await expect(page.locator(".tablePane")).toBeVisible();
+  await page.waitForTimeout(600);
+  expect(api.requests.policyReads.length).toBe(policyReadsSettled);
+  expect(api.requests.webhookReads.length).toBe(webhookReadsSettled);
 });
 
 test("admin UI fences ordinary device and meter reads across an ABA selection", async ({ page }) => {

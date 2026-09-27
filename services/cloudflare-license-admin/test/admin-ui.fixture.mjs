@@ -64,6 +64,12 @@ export function makeAdminApiFixture() {
     entitlementDetailReads: [],
     customerReads: [],
     customerCursors: [],
+    // Workstream E1 -- a filter-driven list reload must never fan out to the cross-feature
+    // summary/events core refresh; these count every GET regardless of which feature triggers it.
+    summaryReads: [],
+    eventsReads: [],
+    policyReads: [],
+    licenseReads: [],
   };
   const catalogFeatures = [];
   const catalogPlans = [];
@@ -704,6 +710,7 @@ export function makeAdminApiFixture() {
     }
 
     if (method === "GET" && path === "/api/admin/summary") {
+      requests.summaryReads.push(true);
       return fulfill(200, makeEnvelope("summary", summary()));
     }
     if (method === "GET" && path === "/api/admin/settings") {
@@ -867,6 +874,7 @@ export function makeAdminApiFixture() {
       }));
     }
     if (method === "GET" && path === "/api/admin/licenses") {
+      requests.licenseReads.push(url.search);
       return fulfill(200, makeEnvelope("licenses_listed", { items: behavior.licenseRows.map((item) => ({ ...item })), next_cursor: null }));
     }
     if (method === "GET" && path === "/api/admin/catalog/projects") {
@@ -952,6 +960,7 @@ export function makeAdminApiFixture() {
       return fulfill(200, makeEnvelope("batch_done", { results }));
     }
     if (method === "GET" && path === "/api/admin/events") {
+      requests.eventsReads.push(true);
       return fulfill(200, makeEnvelope("events_listed", { items: events.map((item) => ({ ...item })) }));
     }
     const entitlementDetailMatch = /^\/api\/admin\/entitlements\/([^/]+)$/.exec(path);
@@ -1013,6 +1022,7 @@ export function makeAdminApiFixture() {
     }
     // The Entitlements and Plans tabs load active policies for policy selectors.
     if (method === "GET" && path === "/api/admin/policies") {
+      requests.policyReads.push(url.search);
       const status = url.searchParams.get("status");
       const project = url.searchParams.get("project");
       const type = url.searchParams.get("type");
