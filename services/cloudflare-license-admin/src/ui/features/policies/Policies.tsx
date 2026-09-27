@@ -9,6 +9,7 @@ import { api, apiFailureDetails, apiFailureMessage, parseExactApiSuccess } from 
 import { confirmMutationUnknown, confirmSuccessWithRefreshFailure, ConfirmRefreshFailure, EXACT_READ_PROOF, focusTargetInRow, type ConfirmActionContext, type ConfirmActionOutcome, type ConfirmActionResolution, type ExactReadProof, useContextGeneration, useOperatorControls } from "../../shared/controls";
 import { loadMore } from "../../shared/pagination";
 import { hasPolicyData, hasPolicyListData, hasPolicyTransitionData, mutationFailurePolicies, parseMutationResponse } from "../../shared/mutationGuards";
+import { useDebouncedValue } from "../../shared/useDebouncedValue";
 import { useRequestFence } from "../../shared/requestFence";
 import { canRunPolicyAction, disablePolicyConfirm, emptyPolicyForm, normalizePolicyForm, normalizePolicyPatch, policiesPath, policyFormFromPolicy, policyPath, policyTransitionPath, PolicyFilter, PolicyFormState } from "./workflow";
 
@@ -32,11 +33,18 @@ export function Policies({ active, draftRequest = null, onReturnToDraft }: { act
   const busy = requestBusy || operationLocked;
   const { requestLeave } = useNavigationGuard({ when: active && editorOpen && JSON.stringify(policyForm) !== baseline, onDiscard: () => closeEditor() });
   const policiesUrl = useMemo(() => policiesPath(policyFilter), [policyFilter]);
-  const filterContextKey = `${active ? "active" : "inactive"}\u0000${policyFilter.project}\u0000${policyFilter.type}\u0000${policyFilter.status}`;
+  // The filter alone reloads the list; active only gates whether a reload may fire, so leaving and
+  // returning to this tab with the filter unchanged costs zero requests. The debounce runs over the
+  // generation number, not the filter itself: a filter that returns to an earlier value within one
+  // debounce window (A -> B -> A) still must reload, and debouncing the value would collapse that
+  // back to a value React already holds, silently dropping the reload.
+  const filterContextKey = `${policyFilter.project}\u0000${policyFilter.type}\u0000${policyFilter.status}`;
   const { generation: filterGeneration, isCurrent: isFilterGenerationCurrent, currentGeneration: currentFilterGeneration, currentContext: currentFilterContext } = useContextGeneration(filterContextKey);
+  const policiesReloadGeneration = useDebouncedValue(filterGeneration, 300);
+  const lastRequestedPoliciesGeneration = useRef<number | null>(null);
   const policyFormContextKey = JSON.stringify(policyForm);
   const { generation: policyFormGeneration, isCurrent: isPolicyFormGenerationCurrent } = useContextGeneration(policyFormContextKey);
-  const policiesFence = useRequestFence(`${active ? "active" : "inactive"}\u0000${policiesUrl}`);
+  const policiesFence = useRequestFence(policiesUrl);
   const currentPoliciesRefreshRef = useRef<() => Promise<ExactReadProof | null>>(() => Promise.resolve(null));
 
   function openEditor(next: PolicyFormState, target: Policy | null): void {
@@ -97,9 +105,10 @@ export function Policies({ active, draftRequest = null, onReturnToDraft }: { act
   currentPoliciesRefreshRef.current = () => active ? refreshPolicies(true) : Promise.resolve(null);
 
   useEffect(() => {
-    const generation = filterGeneration;
-    if (active) void refreshPolicies(false, () => isFilterGenerationCurrent(generation));
-  }, [active, filterGeneration, isFilterGenerationCurrent, policiesUrl]);
+    if (!active || lastRequestedPoliciesGeneration.current === policiesReloadGeneration) return;
+    lastRequestedPoliciesGeneration.current = policiesReloadGeneration;
+    void refreshPolicies(false, () => isFilterGenerationCurrent(policiesReloadGeneration));
+  }, [active, policiesReloadGeneration, isFilterGenerationCurrent]);
 
   function setPolicyType(type: Policy["type"]): void {
     setPolicyForm((current) => ({
@@ -260,9 +269,10 @@ export function Policies({ active, draftRequest = null, onReturnToDraft }: { act
     }
   }
 
-  const policiesSettled = policiesFence.isSettled();
-  const visiblePolicies = policiesSettled ? policies : [];
+  // The previous rows stay on screen through a reload; the region below is marked aria-busy instead.
+  const visiblePolicies = policies;
   const visiblePoliciesCursor = policiesFence.canLoadMore() ? policiesCursor : null;
+  const policiesLoading = readState.key !== filterContextKey || readState.loading;
 
   if (!active) return null;
   const editorTitle = editing === null ? "New policy" : "Edit policy";
@@ -294,9 +304,9 @@ export function Policies({ active, draftRequest = null, onReturnToDraft }: { act
         <button type="button" disabled={busy} onClick={() => requestLeave(closeEditor)}>Close editor</button>
       </aside>}
       <section className="tablePane">
-        <ReadNotice label="policies" hasData={policiesFence.isSettled()} loading={readState.key !== filterContextKey || readState.loading} error={readState.key === filterContextKey ? readState.error : null} onRetry={() => void refreshPolicies()} />
+        <ReadNotice label="policies" hasData={policiesFence.isSettled()} loading={policiesLoading} error={readState.key === filterContextKey ? readState.error : null} onRetry={() => void refreshPolicies()} />
         <div className="filters"><label>Project<input placeholder="project" value={policyFilter.project} onChange={(event) => setPolicyFilter({ ...policyFilter, project: event.target.value })} /></label><label>Policy type<select value={policyFilter.type} onChange={(event) => setPolicyFilter({ ...policyFilter, type: event.target.value })}><option value="">all types</option><option value="trial">Trial</option><option value="node_locked">Device-locked</option><option value="floating">Floating</option><option value="subscription">Subscription</option></select></label><label>Status<select value={policyFilter.status} onChange={(event) => setPolicyFilter({ ...policyFilter, status: event.target.value })}><option value="">all</option><option value="active">active</option><option value="disabled">disabled</option></select></label><button type="button" onClick={() => setPolicyFilter({ project: "", type: "", status: "" })}>Clear filters</button></div>
-        <div className="tableScroll" role="region" aria-label="Policy records" tabIndex={0}><table><thead><tr><th>Name</th><th>Project</th><th>Type</th><th>Details</th><th>Status</th><th>Actions</th></tr></thead><tbody>{visiblePolicies.map((policy) => <tr key={policy.id} data-focus-row={`policy:${policy.id}`}><td>{policy.name}</td><td>{policy.project}</td><td>{policy.type}</td><td><div className="details"><span>TTL {policy.assertion_ttl_seconds}s</span><span>Expiry {policy.expiry_strategy}</span><span>Offset {policy.valid_from_offset_sec ?? "-"} / Duration {policy.duration_sec ?? "-"}</span><span>Pool {policy.pool_size} / Max devices {policy.max_active_devices} / Borrow {policy.max_borrow_sec}s</span>{policy.meter_quota > 0 && <span>Meter quota {policy.meter_quota} / {policy.meter_period_sec}s</span>}{policy.type === "trial" && <span>Trial {policy.trial_expiration_basis} {policy.trial_duration_sec}s {policy.trial_one_per_device === 1 ? "one-per-device" : ""} {policy.trial_require_device_proof === 1 ? "proof-required" : ""}</span>}{policy.notes !== "" && <span>Notes {policy.notes}</span>}</div></td><td><span className={`status ${policy.status}`}>{policy.status}</span></td><td className="actions"><button type="button" disabled={busy || operationLocked || !policiesFence.canLoadMore()} onClick={() => requestLeave(() => openEditor(policyFormFromPolicy(policy), policy))}>Edit</button><StatusActions status={policy.status}><button className="danger" disabled={busy || operationLocked || !policiesFence.canLoadMore() || !canRunPolicyAction(policy.status, "disable")} onClick={() => requestConfirm({ title: "Disable policy", body: disablePolicyConfirm(policy), requiresReason: true, run: ({ idempotencyKey }: ConfirmActionContext) => policyTransition(policy, "disable", idempotencyKey), successFocusTarget: focusTargetInRow(`policy:${policy.id}`, ['button[data-focus-action="reenable"]', ".status"]), isCurrent: () => isFilterGenerationCurrent(filterGeneration) })}>Disable</button><button data-focus-action="reenable" disabled={busy || operationLocked || !policiesFence.canLoadMore() || !canRunPolicyAction(policy.status, "reenable")} onClick={() => void runConsequenceAction({ run: ({ idempotencyKey }: ConfirmActionContext) => policyTransition(policy, "reenable", idempotencyKey), successFocusTarget: focusTargetInRow(`policy:${policy.id}`, ['button[data-focus-action="reenable"]', ".status"]), isCurrent: () => isFilterGenerationCurrent(filterGeneration) })}>Reenable</button></StatusActions></td></tr>)}</tbody></table></div>
+        <div className="tableScroll" role="region" aria-label="Policy records" tabIndex={0} aria-busy={policiesLoading}><table><thead><tr><th>Name</th><th>Project</th><th>Type</th><th>Details</th><th>Status</th><th>Actions</th></tr></thead><tbody>{visiblePolicies.map((policy) => <tr key={policy.id} data-focus-row={`policy:${policy.id}`}><td>{policy.name}</td><td>{policy.project}</td><td>{policy.type}</td><td><div className="details"><span>TTL {policy.assertion_ttl_seconds}s</span><span>Expiry {policy.expiry_strategy}</span><span>Offset {policy.valid_from_offset_sec ?? "-"} / Duration {policy.duration_sec ?? "-"}</span><span>Pool {policy.pool_size} / Max devices {policy.max_active_devices} / Borrow {policy.max_borrow_sec}s</span>{policy.meter_quota > 0 && <span>Meter quota {policy.meter_quota} / {policy.meter_period_sec}s</span>}{policy.type === "trial" && <span>Trial {policy.trial_expiration_basis} {policy.trial_duration_sec}s {policy.trial_one_per_device === 1 ? "one-per-device" : ""} {policy.trial_require_device_proof === 1 ? "proof-required" : ""}</span>}{policy.notes !== "" && <span>Notes {policy.notes}</span>}</div></td><td><span className={`status ${policy.status}`}>{policy.status}</span></td><td className="actions"><button type="button" disabled={busy || operationLocked || !policiesFence.canLoadMore()} onClick={() => requestLeave(() => openEditor(policyFormFromPolicy(policy), policy))}>Edit</button><StatusActions status={policy.status}><button className="danger" disabled={busy || operationLocked || !policiesFence.canLoadMore() || !canRunPolicyAction(policy.status, "disable")} onClick={() => requestConfirm({ title: "Disable policy", body: disablePolicyConfirm(policy), requiresReason: true, run: ({ idempotencyKey }: ConfirmActionContext) => policyTransition(policy, "disable", idempotencyKey), successFocusTarget: focusTargetInRow(`policy:${policy.id}`, ['button[data-focus-action="reenable"]', ".status"]), isCurrent: () => isFilterGenerationCurrent(filterGeneration) })}>Disable</button><button data-focus-action="reenable" disabled={busy || operationLocked || !policiesFence.canLoadMore() || !canRunPolicyAction(policy.status, "reenable")} onClick={() => void runConsequenceAction({ run: ({ idempotencyKey }: ConfirmActionContext) => policyTransition(policy, "reenable", idempotencyKey), successFocusTarget: focusTargetInRow(`policy:${policy.id}`, ['button[data-focus-action="reenable"]', ".status"]), isCurrent: () => isFilterGenerationCurrent(filterGeneration) })}>Reenable</button></StatusActions></td></tr>)}</tbody></table></div>
         {policiesFence.isSettled() && visiblePolicies.length === 0 && <p className="emptyState">No policies match this view.</p>}
         <div className="tableFooter"><span className="muted">{policiesFence.isSettled() ? `${visiblePolicies.length} shown` : ""}</span>{visiblePoliciesCursor !== null && <button type="button" disabled={busy || operationLocked} onClick={() => void loadMore(policiesUrl, visiblePoliciesCursor, visiblePolicies, setPolicies, setPoliciesCursor, setMessage, hasPolicyListData, "policies_listed", policiesFence, (policy) => policy.id)}>Load more</button>}</div>
       </section>

@@ -1,4 +1,4 @@
-import React, { FormEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import React, { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { EntitlementDeviceRecord, EntitlementRecord, Policy } from "../../../shared/api";
 import { ENTITLEMENT_BATCH_MAX_IDS } from "../../../shared/api";
@@ -8,6 +8,7 @@ import { confirmMutationUnknown, confirmSuccessWithRefreshFailure, ConfirmRefres
 import { useCoreRefresh } from "../../shared/coreRefresh";
 import { hasBatchResultsData, hasDeviceTransitionData, hasEntitlementListData, hasEntitlementRecordData, hasEntitlementTransitionData, hasPolicyListData, hasReleaseSeatsData, mutationFailurePolicies, parseMutationResponse } from "../../shared/mutationGuards";
 import { downloadCsv, loadAllExactPages, loadMore } from "../../shared/pagination";
+import { useDebouncedValue } from "../../shared/useDebouncedValue";
 import { useRequestFence } from "../../shared/requestFence";
 import { useAdminNavigation, useNavigationGuard } from "../../app/navigation";
 import { ReadNotice } from "../../shared/ReadNotice";
@@ -73,6 +74,21 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
   const entitlementsUrl = useMemo(() => entitlementsPath(filter), [filter]);
   const filterContextKey = `${active ? "active" : "inactive"}\u0000${filter.project}\u0000${filter.feature}\u0000${filter.status}\u0000${filter.id ?? ""}\u0000${filter.customer_id ?? ""}`;
   const { generation: filterGeneration, isCurrent: isFilterGenerationCurrent, currentGeneration: currentFilterGeneration, currentContext: currentFilterContext } = useContextGeneration(filterContextKey);
+  // The filter alone (never `active`) decides when the list must reload: switching tabs without
+  // touching a filter field costs zero requests, and typing coalesces onto one request 300ms after
+  // the operator stops, rather than one request per keystroke. The generation is debounced rather
+  // than the filter string itself: a filter that returns to an earlier value (A -> B -> A) within
+  // one debounce window still must reload, and debouncing the string would collapse that back to
+  // the same value React already holds, silently dropping the reload.
+  const filterKey = `${filter.project}\u0000${filter.feature}\u0000${filter.status}\u0000${filter.id ?? ""}\u0000${filter.customer_id ?? ""}`;
+  const { generation: rawFilterGeneration, isCurrent: isRawFilterGenerationCurrent } = useContextGeneration(filterKey);
+  const reloadGeneration = useDebouncedValue(rawFilterGeneration, 300);
+  const lastRequestedReload = useRef<number | null>(null);
+  // The exact filter this list is currently showing settled data for; unlike the request fence
+  // above, this never resets just because `active` toggled, so returning to this tab never leaves
+  // actions stuck disabled with no request left that could ever re-settle them.
+  const settledFilterKey = useRef<string | null>(null);
+  const ready = settledFilterKey.current === filterKey;
   const formContextKey = JSON.stringify(form);
   const { generation: formGeneration, isCurrent: isFormGenerationCurrent } = useContextGeneration(formContextKey);
   const editContextKey = `${editingId ?? ""}\u0000${JSON.stringify(editForm)}`;
@@ -81,7 +97,6 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
   const releaseDetailFence = useRequestFence(`${active ? "active" : "inactive"}\u0000${filterContextKey}\u0000release-detail`);
   const activePoliciesContext = `${active ? "active" : "inactive"}\u0000active-policies`;
   const activePoliciesFence = useRequestFence(activePoliciesContext);
-  const hasLoadedEntitlements = useRef(false);
   const inspection = useEntitlementInspection(active, filterContextKey, setMessage);
   const { deviceEntitlementId, deviceContextKey, deviceGeneration, isDeviceGenerationCurrent, currentDeviceGeneration, currentDeviceContext, currentDevicesRefreshRef } = inspection;
   // "Create policy…" parks the create draft: the guard stands down for that one departure, and the
@@ -118,6 +133,7 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
       if (entitlementsFence.settle(ticket, parsed.data.next_cursor ?? null)) {
         setEntitlements(parsed.data.items);
         setEntitlementsCursor(parsed.data.next_cursor ?? null);
+        settledFilterKey.current = filterKey;
         return EXACT_READ_PROOF;
       }
     } else {
@@ -129,21 +145,20 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
       setMessage(apiFailureMessage(response));
     }
     return null;
-  }, [entitlementsFence, entitlementsUrl, filterContextKey, setMessage]);
+  }, [entitlementsFence, entitlementsUrl, filterContextKey, filterKey, setMessage]);
 
   useEffect(() => {
     return registerCoreRefresh(refresh);
   }, [refresh, registerCoreRefresh]);
 
+  // A filter change reloads just this list (never the summary/events core refresh); entering or
+  // leaving this tab with the filter unchanged dispatches nothing, since `reloadGeneration` only
+  // advances when the debounced filter itself changes.
   useEffect(() => {
-    const isCurrent = (): boolean => isFilterGenerationCurrent(filterGeneration);
-    if (hasLoadedEntitlements.current) {
-      void refreshCore(false, isCurrent);
-      return;
-    }
-    hasLoadedEntitlements.current = true;
-    void refresh(false, isCurrent);
-  }, [entitlementsUrl, filterGeneration, isFilterGenerationCurrent, refresh, refreshCore]);
+    if (!active || lastRequestedReload.current === reloadGeneration) return;
+    lastRequestedReload.current = reloadGeneration;
+    void refresh(false, () => isRawFilterGenerationCurrent(reloadGeneration));
+  }, [active, reloadGeneration, isRawFilterGenerationCurrent, refresh]);
 
   const refreshPolicies = useCallback(async (): Promise<void> => {
     setPolicyRead({ context: activePoliciesContext, error: null });
@@ -166,7 +181,8 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
     rememberFilters("entitlements", { ...filter });
   }, [active, filter, navigationIntent, rememberFilters, scopedGrant]);
 
-  useLayoutEffect(() => setSelectedIds(new Set()), [filterGeneration]);
+  // Selection survives a reload; a row only drops out of it once it is confirmed gone from the
+  // freshly loaded list, never merely because the filter changed or the tab was left and reentered.
   useEffect(() => {
     setSelectedIds((previous) => {
       const present = new Set(entitlements.map((item) => item.id));
@@ -239,7 +255,7 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
 
   async function submitPatch(event: FormEvent, item: EntitlementRecord): Promise<void> {
     event.preventDefault();
-    if (!entitlementsFence.canLoadMore() || item.status === "revoked") { setMessage("Select a current, editable entitlement before saving changes."); return; }
+    if (!ready || item.status === "revoked") { setMessage("Select a current, editable entitlement before saving changes."); return; }
     const contextGeneration = filterGeneration;
     const capturedEditGeneration = editGeneration;
     const isListCurrent = (): boolean => isFilterGenerationCurrent(contextGeneration);
@@ -528,12 +544,12 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
     });
   }
 
-  const entitlementsSettled = entitlementsFence.isSettled();
-  const visibleEntitlements = entitlementsSettled ? entitlements : [];
+  // The previous rows stay on screen through a reload (aria-busy marks the region instead); the
+  // request fence above still drops any response that no longer matches the current request. Load
+  // More stays keyed to that same fence (not `ready`) since it drives the fence's own cursor
+  // bookkeeping directly.
+  const visibleEntitlements = entitlements;
   const visibleEntitlementsCursor = entitlementsFence.canLoadMore() ? entitlementsCursor : null;
-  // A filter/context change hides the previous snapshot synchronously.  Keep
-  // the batch body equally scoped to the newly settled rows so a short React
-  // effect window can never submit IDs selected in the previous context.
   const selectedVisibleIds = visibleEntitlements.filter((item) => selectedIds.has(item.id)).map((item) => item.id);
   const selectedCount = selectedVisibleIds.length;
   const selectableLoadedIds = boundedBatchSelection(visibleEntitlements.map((item) => item.id));
@@ -635,7 +651,6 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
   if (!active) return null;
   const listError = listRead.context === filterContextKey ? listRead.error : null;
   const policyError = policyRead.context === activePoliciesContext ? policyRead.error : null;
-  const ready = entitlementsFence.canLoadMore();
   const editingItem = visibleEntitlements.find((item) => item.id === editingId);
   const closeEditor = (): void => { requestLeave(() => { setCreateOpen(false); setForm(emptyEntitlementForm); cancelEdit(); }); };
   return <section className="listPage">

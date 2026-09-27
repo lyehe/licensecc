@@ -9,6 +9,7 @@ import { confirmMutationUnknown, confirmSuccessWithRefreshFailure, ConfirmRefres
 import { formatEpoch, shortHash } from "../../shared/format";
 import { isRetryableAppendFailure, loadMore, pageAppendError, withCursor } from "../../shared/pagination";
 import { hasWebhookData, hasWebhookDeliveryData, hasWebhookDeliveryListData, hasWebhookListData, hasWebhookTransitionData, mutationFailurePolicies, parseMutationResponse } from "../../shared/mutationGuards";
+import { useDebouncedValue } from "../../shared/useDebouncedValue";
 import { useRequestFence } from "../../shared/requestFence";
 import { canRunWebhookAction, disableWebhookConfirm, emptyWebhookForm, normalizeWebhookForm, webhookDeliveriesPath, webhookRedrivePath, webhookTransitionPath, webhooksPath, WebhookAction, WebhookDeliveryFilter, WebhookFilter, WebhookFormState } from "./workflow";
 
@@ -28,14 +29,21 @@ export function Webhooks({ active }: { active: boolean }): React.ReactElement | 
   const busy = requestBusy || operationLocked;
   const { requestLeave } = useNavigationGuard({ when: active && editorOpen && JSON.stringify(webhookForm) !== JSON.stringify(emptyWebhookForm), onDiscard: () => { setWebhookForm(emptyWebhookForm); setEditorOpen(false); } });
   const webhooksUrl = useMemo(() => webhooksPath(webhookFilter), [webhookFilter]);
-  const filterContextKey = `${active ? "active" : "inactive"}\u0000${webhookFilter.status}`;
+  // The filter alone reloads the endpoint list; active only gates whether a reload may fire, so
+  // leaving and returning to this tab with the filter unchanged costs zero requests. The debounce
+  // runs over the generation number, not the filter itself: a filter that returns to an earlier
+  // value within one debounce window (A -> B -> A) still must reload, and debouncing the value
+  // would collapse that back to a value React already holds, silently dropping the reload.
+  const filterContextKey = `${webhookFilter.status}`;
   const { generation: filterGeneration, isCurrent: isFilterGenerationCurrent, currentGeneration: currentFilterGeneration, currentContext: currentFilterContext } = useContextGeneration(filterContextKey);
+  const webhooksReloadGeneration = useDebouncedValue(filterGeneration, 300);
+  const lastRequestedWebhooksGeneration = useRef<number | null>(null);
   const webhookFormContextKey = JSON.stringify(webhookForm);
   const { generation: webhookFormGeneration, isCurrent: isWebhookFormGenerationCurrent } = useContextGeneration(webhookFormContextKey);
   const webhookDeliveriesUrl = useMemo(() => webhookDeliveriesPath(webhookDeliveryFilter), [webhookDeliveryFilter]);
   const deliveryContextKey = `${active ? "active" : "inactive"}\u0000${webhookDeliveryFilter.endpoint_id}\u0000${webhookDeliveryFilter.status}`;
   const { generation: deliveryGeneration, isCurrent: isDeliveryGenerationCurrent } = useContextGeneration(deliveryContextKey);
-  const webhooksFence = useRequestFence(`${active ? "active" : "inactive"}\u0000${webhooksUrl}`);
+  const webhooksFence = useRequestFence(webhooksUrl);
   const deliveriesFence = useRequestFence(`${active ? "active" : "inactive"}\u0000${webhookDeliveriesUrl}`);
   // A mutation/form context may have moved by the time a known-success GET
   // recovery runs.  These refs intentionally dereference the current rendered
@@ -136,9 +144,10 @@ export function Webhooks({ active }: { active: boolean }): React.ReactElement | 
   }
 
   useEffect(() => {
-    const generation = filterGeneration;
-    if (active) void refreshWebhooks(false, () => isFilterGenerationCurrent(generation));
-  }, [active, filterGeneration, isFilterGenerationCurrent, webhooksUrl]);
+    if (!active || lastRequestedWebhooksGeneration.current === webhooksReloadGeneration) return;
+    lastRequestedWebhooksGeneration.current = webhooksReloadGeneration;
+    void refreshWebhooks(false, () => isFilterGenerationCurrent(webhooksReloadGeneration));
+  }, [active, webhooksReloadGeneration, isFilterGenerationCurrent]);
 
   useEffect(() => {
     const generation = deliveryGeneration;
@@ -280,10 +289,12 @@ export function Webhooks({ active }: { active: boolean }): React.ReactElement | 
     });
   }
 
-  const webhooksSettled = webhooksFence.isSettled();
   const deliveriesSettled = deliveriesFence.isSettled();
-  const visibleWebhooks = webhooksSettled ? webhooks : [];
+  // The previous endpoint rows stay on screen through a reload; the table below is marked
+  // aria-busy instead of being emptied.
+  const visibleWebhooks = webhooks;
   const visibleWebhooksCursor = webhooksFence.canLoadMore() ? webhooksCursor : null;
+  const webhooksLoading = readState.key !== filterContextKey || readState.loading;
   const visibleDeliveries = deliveriesSettled ? webhookDeliveries : [];
   const visibleDeliveriesCursor = deliveriesFence.canLoadMore() ? webhookDeliveriesCursor : null;
 
@@ -305,9 +316,9 @@ export function Webhooks({ active }: { active: boolean }): React.ReactElement | 
         <button type="button" disabled={busy} onClick={() => requestLeave(() => setEditorOpen(false))}>Close editor</button>
       </aside>}
       <section className="tablePane">
-        <ReadNotice label="webhooks" hasData={webhooksFence.isSettled()} loading={readState.key !== filterContextKey || readState.loading} error={readState.key === filterContextKey ? readState.error : null} onRetry={() => void refreshWebhooks()} />
+        <ReadNotice label="webhooks" hasData={webhooksFence.isSettled()} loading={webhooksLoading} error={readState.key === filterContextKey ? readState.error : null} onRetry={() => void refreshWebhooks()} />
         <div className="filters"><label>Status<select aria-label="Filter endpoints by status" value={webhookFilter.status} onChange={(event) => setWebhookFilter({ status: event.target.value })}><option value="">all</option><option value="active">active</option><option value="disabled">disabled</option></select></label></div>
-        <div className="tableScroll" role="region" aria-label="Webhook records" tabIndex={0}><table><caption className="srOnly">Webhook endpoints</caption><thead><tr><th scope="col">URL</th><th scope="col">Events</th><th scope="col">Scope</th><th scope="col">Status</th><th scope="col">Created</th><th scope="col">Actions</th></tr></thead><tbody>{visibleWebhooks.map((endpoint) => <tr key={endpoint.id} data-focus-row={`webhook:${endpoint.id}`}><td className="mono">{endpoint.url}</td><td>{endpoint.event_types === "" ? "(all)" : endpoint.event_types}</td><td>{endpoint.scope_project !== null && endpoint.scope_project !== "" ? `project:${endpoint.scope_project}` : endpoint.scope_customer_id !== null && endpoint.scope_customer_id !== "" ? `customer:${endpoint.scope_customer_id}` : "(global)"}</td><td><span className={`status ${endpoint.status}`}>{endpoint.status}</span></td><td>{formatEpoch(endpoint.created_at)}</td><td className="actions"><button type="button" disabled={busy || operationLocked} onClick={() => { setDeliveriesOpen(true); setWebhookDeliveryFilter({ endpoint_id: endpoint.id, status: "" }); }}>Deliveries</button><StatusActions status={endpoint.status}><button className="danger" disabled={busy || operationLocked || !webhooksFence.canLoadMore() || !canRunWebhookAction(endpoint.status, "disable")} onClick={() => requestConfirm({ title: "Disable webhook", body: disableWebhookConfirm(endpoint), requiresReason: true, run: ({ idempotencyKey }: ConfirmActionContext) => webhookTransition(endpoint, "disable", idempotencyKey), successFocusTarget: focusTargetInRow(`webhook:${endpoint.id}`, ['button[data-focus-action="reenable"]', ".status"]), isCurrent: () => isFilterGenerationCurrent(filterGeneration) })}>Disable</button><button data-focus-action="reenable" disabled={busy || operationLocked || !webhooksFence.canLoadMore() || !canRunWebhookAction(endpoint.status, "reenable")} onClick={() => void runConsequenceAction({ run: ({ idempotencyKey }: ConfirmActionContext) => webhookTransition(endpoint, "reenable", idempotencyKey), successFocusTarget: focusTargetInRow(`webhook:${endpoint.id}`, ['button[data-focus-action="reenable"]', ".status"]), isCurrent: () => isFilterGenerationCurrent(filterGeneration) })}>Reenable</button></StatusActions></td></tr>)}</tbody></table></div>
+        <div className="tableScroll" role="region" aria-label="Webhook records" tabIndex={0} aria-busy={webhooksLoading}><table><caption className="srOnly">Webhook endpoints</caption><thead><tr><th scope="col">URL</th><th scope="col">Events</th><th scope="col">Scope</th><th scope="col">Status</th><th scope="col">Created</th><th scope="col">Actions</th></tr></thead><tbody>{visibleWebhooks.map((endpoint) => <tr key={endpoint.id} data-focus-row={`webhook:${endpoint.id}`}><td className="mono">{endpoint.url}</td><td>{endpoint.event_types === "" ? "(all)" : endpoint.event_types}</td><td>{endpoint.scope_project !== null && endpoint.scope_project !== "" ? `project:${endpoint.scope_project}` : endpoint.scope_customer_id !== null && endpoint.scope_customer_id !== "" ? `customer:${endpoint.scope_customer_id}` : "(global)"}</td><td><span className={`status ${endpoint.status}`}>{endpoint.status}</span></td><td>{formatEpoch(endpoint.created_at)}</td><td className="actions"><button type="button" disabled={busy || operationLocked} onClick={() => { setDeliveriesOpen(true); setWebhookDeliveryFilter({ endpoint_id: endpoint.id, status: "" }); }}>Deliveries</button><StatusActions status={endpoint.status}><button className="danger" disabled={busy || operationLocked || !webhooksFence.canLoadMore() || !canRunWebhookAction(endpoint.status, "disable")} onClick={() => requestConfirm({ title: "Disable webhook", body: disableWebhookConfirm(endpoint), requiresReason: true, run: ({ idempotencyKey }: ConfirmActionContext) => webhookTransition(endpoint, "disable", idempotencyKey), successFocusTarget: focusTargetInRow(`webhook:${endpoint.id}`, ['button[data-focus-action="reenable"]', ".status"]), isCurrent: () => isFilterGenerationCurrent(filterGeneration) })}>Disable</button><button data-focus-action="reenable" disabled={busy || operationLocked || !webhooksFence.canLoadMore() || !canRunWebhookAction(endpoint.status, "reenable")} onClick={() => void runConsequenceAction({ run: ({ idempotencyKey }: ConfirmActionContext) => webhookTransition(endpoint, "reenable", idempotencyKey), successFocusTarget: focusTargetInRow(`webhook:${endpoint.id}`, ['button[data-focus-action="reenable"]', ".status"]), isCurrent: () => isFilterGenerationCurrent(filterGeneration) })}>Reenable</button></StatusActions></td></tr>)}</tbody></table></div>
         {webhooksFence.isSettled() && visibleWebhooks.length === 0 && <p className="emptyState">No webhooks match this view.</p>}
         <div className="tableFooter"><span className="muted">{webhooksFence.isSettled() ? `${visibleWebhooks.length} shown` : ""}</span>{visibleWebhooksCursor !== null && <button type="button" disabled={busy || operationLocked} onClick={() => void loadMore(webhooksUrl, visibleWebhooksCursor, visibleWebhooks, setWebhooks, setWebhooksCursor, setMessage, hasWebhookListData, "webhooks_listed", webhooksFence, (webhook) => webhook.id)}>Load more</button>}</div>
         <details role="region" aria-label="Recent webhook deliveries" className="deliveriesPane" open={deliveriesOpen} onToggle={event=>setDeliveriesOpen(event.currentTarget.open)}><summary>Recent deliveries{webhookDeliveryFilter.endpoint_id !== "" ? ` for ${shortHash(webhookDeliveryFilter.endpoint_id)}` : ""}</summary>

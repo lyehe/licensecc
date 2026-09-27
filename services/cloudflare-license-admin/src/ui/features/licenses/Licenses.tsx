@@ -1,12 +1,13 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 
 import { useAdminNavigation } from "../../app/navigation";
 import type { NavigationIntent } from "../../app/types";
 import { api, apiFailureMessage, parseExactApiSuccess } from "../../shared/api";
-import { useOperatorControls } from "../../shared/controls";
+import { useContextGeneration, useOperatorControls } from "../../shared/controls";
 import { formatEpoch, shortHash } from "../../shared/format";
 import { hasLicenseListData } from "../../shared/mutationGuards";
 import { loadMore } from "../../shared/pagination";
+import { useDebouncedValue } from "../../shared/useDebouncedValue";
 import { useRequestFence } from "../../shared/requestFence";
 import { LicenseListFilter, licensesPath } from "./workflow";
 
@@ -32,7 +33,15 @@ export function Licenses({ active, navigationIntent, onNavigationHandled }: {
   const { busy: requestBusy, operationLocked, setMessage } = useOperatorControls();
   const busy = requestBusy || operationLocked;
   const licensesUrl = useMemo(() => licensesPath(licenseFilter), [licenseFilter]);
-  const licensesFence = useRequestFence(`${active ? "active" : "inactive"}\u0000${licensesUrl}`);
+  // The filter alone drives reloads; active only gates whether one may fire, so leaving and
+  // reentering this tab with an unchanged filter costs zero requests. The debounce runs over the
+  // generation number, not the URL string: a filter that returns to an earlier value within one
+  // debounce window (A -> B -> A) still must reload, and debouncing the string would collapse that
+  // back to a value React already holds, silently dropping the reload.
+  const { generation: rawLicensesGeneration } = useContextGeneration(licensesUrl);
+  const licensesReloadGeneration = useDebouncedValue(rawLicensesGeneration, 300);
+  const lastRequestedLicensesGeneration = useRef<number | null>(null);
+  const licensesFence = useRequestFence(licensesUrl);
 
   async function refreshLicenses(): Promise<void> {
     const ticket = licensesFence.begin();
@@ -68,12 +77,14 @@ export function Licenses({ active, navigationIntent, onNavigationHandled }: {
   }, [active, licenseFilter, navigationIntent, rememberFilters]);
 
   useEffect(() => {
-    if (!active) return;
+    if (!active || lastRequestedLicensesGeneration.current === licensesReloadGeneration) return;
+    lastRequestedLicensesGeneration.current = licensesReloadGeneration;
     setListFailure(null);
     void refreshLicenses();
-  }, [active, licensesFence, licensesUrl, setMessage]);
+  }, [active, licensesReloadGeneration]);
 
-  const licenses = licensesFence.isSettled() ? licensesSnapshot : [];
+  // The previous rows stay on screen through a reload; "Updating…" below marks it busy instead.
+  const licenses = licensesSnapshot;
   const licensesCursor = licensesFence.canLoadMore() ? licensesCursorSnapshot : null;
 
   if (!active) return null;
@@ -92,8 +103,8 @@ export function Licenses({ active, navigationIntent, onNavigationHandled }: {
       {listFailure !== null && <div className="readState error" role="alert"><p>Could not load licenses: {listFailure}</p><button type="button" onClick={() => void refreshLicenses()}>Retry</button></div>}
       {licenses.length === 0 && licensesFence.isSettled() && <div className="emptyState"><h3>No licenses found</h3><p>Try clearing or changing the filters.</p></div>}
       {licenses.length > 0 && <>
-        <div className="desktopRecords tableScroll"><table><thead><tr><th>License</th><th>Customer</th><th>Project</th><th>Label</th><th>Created</th><th>Related records</th></tr></thead><tbody>{licenses.map((item) => <tr key={item.id}><td><code>{item.id}</code></td><td>{item.customer_id === null ? "—" : <button type="button" onClick={() => openCustomer(item.customer_id!)}>{shortHash(item.customer_id)}</button>}</td><td>{item.project}</td><td>{item.label || "—"}</td><td>{formatEpoch(item.created_at)}</td><td><button type="button" onClick={() => navigate({ tab: "entitlements", filter: { project: item.project, feature: "", status: "" } })}>View project access</button></td></tr>)}</tbody></table></div>
-        <div className="recordCards">{licenses.map((item) => <article className="recordCard" key={item.id}><h3>{item.label || item.id}</h3><code>{item.id}</code><p>Project: {item.project}</p><p>Created {formatEpoch(item.created_at)}</p><div className="actions">{item.customer_id !== null && <button type="button" onClick={() => openCustomer(item.customer_id!)}>Open customer</button>}<button type="button" onClick={() => navigate({ tab: "entitlements", filter: { project: item.project, feature: "", status: "" } })}>View project access</button></div></article>)}</div>
+        <div className="desktopRecords tableScroll" aria-busy={loading || updating}><table><thead><tr><th>License</th><th>Customer</th><th>Project</th><th>Label</th><th>Created</th><th>Related records</th></tr></thead><tbody>{licenses.map((item) => <tr key={item.id}><td><code>{item.id}</code></td><td>{item.customer_id === null ? "—" : <button type="button" onClick={() => openCustomer(item.customer_id!)}>{shortHash(item.customer_id)}</button>}</td><td>{item.project}</td><td>{item.label || "—"}</td><td>{formatEpoch(item.created_at)}</td><td><button type="button" onClick={() => navigate({ tab: "entitlements", filter: { project: item.project, feature: "", status: "" } })}>View project access</button></td></tr>)}</tbody></table></div>
+        <div className="recordCards" aria-busy={loading || updating}>{licenses.map((item) => <article className="recordCard" key={item.id}><h3>{item.label || item.id}</h3><code>{item.id}</code><p>Project: {item.project}</p><p>Created {formatEpoch(item.created_at)}</p><div className="actions">{item.customer_id !== null && <button type="button" onClick={() => openCustomer(item.customer_id!)}>Open customer</button>}<button type="button" onClick={() => navigate({ tab: "entitlements", filter: { project: item.project, feature: "", status: "" } })}>View project access</button></div></article>)}</div>
       </>}
       {licensesFence.isSettled() && <div className="tableFooter"><span className="muted">{licenses.length} shown</span>{licensesCursor !== null && <button type="button" disabled={busy} onClick={() => void loadMore(licensesUrl, licensesCursor, licenses, setLicenses, setLicensesCursor, setMessage, hasLicenseListData, "licenses_listed", licensesFence, (license) => license.id)}>Load more</button>}</div>}
     </section>
