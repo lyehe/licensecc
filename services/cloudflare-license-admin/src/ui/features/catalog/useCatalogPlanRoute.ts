@@ -4,21 +4,22 @@ import type { CatalogPlan } from "../../../shared/api";
 import { useAdminNavigation } from "../../app/navigation";
 import { api, parseExactApiSuccess } from "../../shared/api";
 import { hasCatalogPlanData } from "../../shared/mutationGuards";
-import type { LoadMoreOutcome } from "../../shared/pagination";
 import { catalogPlanPath, type CatalogFilter } from "./workflow";
 
 interface CatalogPlanRouteOptions {
   /** The routed plan id while its detail (not an editor over it) is shown. */
   planId: string | null;
-  /** The current settled plans list; null while page one loads or after it failed. */
+  /** The settled plans list of the current filter, kept through a refresh of that same list; null before one settles. */
   plans: readonly CatalogPlan[] | null;
+  /** A page-one read of the list is in flight. */
+  listPending: boolean;
   listFailed: boolean;
   cursor: string | null;
   filter: CatalogFilter;
   selectedId: string;
   select: (plan: CatalogPlan) => void;
   clearFilter: () => void;
-  loadMore: () => Promise<LoadMoreOutcome>;
+  loadMore: () => Promise<void>;
   reloadList: () => void;
 }
 
@@ -27,10 +28,12 @@ interface Resolution {
   planId: string;
   read: "pending" | "found" | "failed";
   plan: CatalogPlan | null;
-  /** The cursor this resolution last appended from, so an append that did nothing never repeats. */
-  appendedCursor: string | null;
+  /**
+   * The list snapshot this resolution last appended to. Any new snapshot (an appended page or a
+   * page-one refresh) allows one more append; an append that changed nothing is not repeated.
+   */
+  appendedFrom: readonly CatalogPlan[] | null;
   appending: boolean;
-  appendFailed: boolean;
 }
 
 export interface CatalogPlanRoute {
@@ -59,7 +62,7 @@ function filterHides(filter: CatalogFilter, plan: CatalogPlan): boolean {
  * the entry in place with Retry.
  */
 export function useCatalogPlanRoute(options: CatalogPlanRouteOptions): CatalogPlanRoute {
-  const { planId, plans, listFailed, cursor, filter, selectedId } = options;
+  const { planId, plans, listPending, listFailed, cursor, filter, selectedId } = options;
   const { resolveMissingDrillDown } = useAdminNavigation();
   const [resolution, setResolution] = useState<Resolution | null>(null);
   const [clearedFor, setClearedFor] = useState<string | null>(null);
@@ -71,7 +74,7 @@ export function useCatalogPlanRoute(options: CatalogPlanRouteOptions): CatalogPl
 
   function readPlan(id: string): void {
     const mine = ++ticket.current;
-    setResolution({ planId: id, read: "pending", plan: null, appendedCursor: null, appending: false, appendFailed: false });
+    setResolution({ planId: id, read: "pending", plan: null, appendedFrom: null, appending: false });
     void (async () => {
       const response = await api<CatalogPlan>(catalogPlanPath(id));
       if (mine !== ticket.current) return;
@@ -83,12 +86,12 @@ export function useCatalogPlanRoute(options: CatalogPlanRouteOptions): CatalogPl
       setResolution((state) => state?.planId === id ? { ...state, read: found === null ? "failed" : "found", plan: found?.data ?? null } : state);
     })();
   }
-  function append(state: Resolution, from: string): void {
+  function append(state: Resolution, from: readonly CatalogPlan[]): void {
     const mine = ticket.current;
-    setResolution({ ...state, appendedCursor: from, appending: true });
-    void options.loadMore().then((outcome) => {
+    setResolution({ ...state, appendedFrom: from, appending: true });
+    void options.loadMore().then(() => {
       if (mine !== ticket.current) return;
-      setResolution((latest) => latest?.planId === state.planId ? { ...latest, appending: false, appendFailed: outcome === "failed" } : latest);
+      setResolution((latest) => latest?.planId === state.planId ? { ...latest, appending: false } : latest);
     });
   }
 
@@ -112,14 +115,14 @@ export function useCatalogPlanRoute(options: CatalogPlanRouteOptions): CatalogPl
       readPlan(planId);
       return;
     }
-    if (current.read !== "found" || current.plan === null || plans === null || current.appending || current.appendFailed) return;
+    if (current.read !== "found" || current.plan === null || plans === null || listPending || listFailed || current.appending) return;
     if (filterHides(filter, current.plan)) {
       options.clearFilter();
       setClearedFor(planId);
-    } else if (cursor !== null && cursor !== current.appendedCursor) append(current, cursor);
-  }, [planId, plans, cursor, filter, selectedId, current]);
+    } else if (cursor !== null && plans !== current.appendedFrom) append(current, plans);
+  }, [planId, plans, listPending, listFailed, cursor, filter, selectedId, current]);
 
-  const pending = current === null || current.read === "pending" || current.appending || (plans === null && !listFailed);
+  const pending = current === null || current.read === "pending" || current.appending || listPending;
   return {
     unavailable: planId !== null && !inList && !pending,
     retry: () => {

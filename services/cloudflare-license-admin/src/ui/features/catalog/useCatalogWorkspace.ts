@@ -62,6 +62,9 @@ export function useCatalogWorkspace(options: CatalogWorkspaceOptions): {
   }
   const { requestLeave } = useNavigationGuard({
     when: dirtyNow,
+    // A save in flight owns its editor: no route step may happen until it settles, so the editor
+    // never outlives its address and a draft the save did not take is never discarded unasked.
+    blocks: () => latest.current.active && latest.current.busy && editorRef.current !== null,
     message: "Discard this unsaved catalog task? Choose Cancel to keep editing.",
     onDiscard: () => {
       const current = draftTask(latest.current.view, editorRef.current);
@@ -72,19 +75,14 @@ export function useCatalogWorkspace(options: CatalogWorkspaceOptions): {
     },
   });
 
-  // Every route step (catalog view, plan detail, Back or Forward) closes an open editor, but not
-  // under an in-flight save: the step applies once the save settles, and a draft the save did not
-  // take (it failed) stays open rather than being discarded unasked.
-  const routeKey = `${options.view}\u0000${catalogPlan ?? ""}`;
-  const closedFor = useRef(routeKey);
+  // Every route step (catalog view, plan detail, Back or Forward) closes an open editor. A step
+  // happens only once leaving was allowed: an unsaved draft was confirmed and discarded, and a
+  // save in flight refuses the step (`blocks`), so nothing unsaved is closed here.
   useEffect(() => {
-    if (closedFor.current === routeKey || options.busy || options.operationLocked) return;
-    closedFor.current = routeKey;
-    if (dirtyNow()) return;
     latest.current.invalidate();
     showEditor(null);
     setRevision((value) => value + 1);
-  }, [routeKey, options.busy, options.operationLocked]);
+  }, [options.view, catalogPlan]);
   const shownPlan = useRef(planId);
   // The plan an in-page "Back to plans" just left, whose row takes focus as browser Back gives it.
   const returnToRow = useRef<string | null>(null);

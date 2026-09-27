@@ -9,6 +9,11 @@ import { focusWorkspaceTarget, usableFocusTarget } from "../shared/workspaceFocu
 interface NavigationGuard {
   /** A function is evaluated when the operator tries to leave, so it reads current state rather than the last render's. */
   when: boolean | (() => boolean);
+  /**
+   * While true the view cannot be left at all, as under a modal: a link or tab does nothing and
+   * browser Back or Forward is undone. For work in flight that owns the view, such as a save.
+   */
+  blocks?: () => boolean;
   message?: string;
   onDiscard: () => void;
 }
@@ -124,8 +129,9 @@ export function AdminNavigationProvider({ children }: { children: ReactNode }): 
   const leaveApproved = useRef(false);
   const allowLeave = useCallback((): boolean => {
     if (leaveApproved.current) return true;
-    if (modalActiveRef.current) return false;
-    const dirty = [...guards.current].map((read) => read()).filter(guardActive);
+    const current = [...guards.current].map((read) => read());
+    if (modalActiveRef.current || current.some((guard) => guard.blocks?.() === true)) return false;
+    const dirty = current.filter(guardActive);
     if (dirty.length === 0) return true;
     const message = dirty[0].message ?? "Discard your unsaved changes? Choose Cancel to keep editing.";
     if (!window.confirm(message)) return false;
