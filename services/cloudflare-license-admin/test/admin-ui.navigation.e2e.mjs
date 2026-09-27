@@ -258,3 +258,174 @@ test("mobile customer Back restores the visible card action and list scroll", as
   await expect(opener).toBeFocused();
   expect(Math.abs(await page.evaluate(() => window.scrollY) - scrollY)).toBeLessThan(2);
 });
+
+function seedCustomerApps(api) {
+  const customer = api.seed.customer();
+  const [grant] = api.seed.entitlements([
+    { customer_id: customer.id, project: "CAD", feature: "render", id: "ent_history_probe_cad_render", license_fingerprint: "c".repeat(64) },
+    { customer_id: customer.id, project: "CAM", feature: "mill" },
+  ]);
+  return { customer, grant };
+}
+
+const currentHash = (page) => () => new URL(page.url()).hash;
+
+test("a customer's app and record view are history entries that survive reload", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  const { customer } = seedCustomerApps(api);
+  await page.route("**/api/admin/**", api.route);
+  const accessHash = `#/customers/${customer.id}?section=access`;
+  await page.goto(`/${accessHash}`);
+  const records = page.getByRole("navigation", { name: "App records" });
+  const recordView = (name) => records.getByRole("button", { name, exact: true });
+
+  await page.locator(".recordCard").filter({ hasText: "CAD" }).getByRole("button", { name: "View app", exact: true }).click();
+  await expect(recordView("Access grants")).toHaveAttribute("aria-current", "page");
+  await expect.poll(currentHash(page)).toBe(`${accessHash}&app=CAD`);
+  await recordView("Activated devices").click();
+  await expect(recordView("Activated devices")).toHaveAttribute("aria-current", "page");
+  await expect.poll(currentHash(page)).toBe(`${accessHash}&app=CAD&view=nodes`);
+
+  await page.reload();
+  await expect(recordView("Activated devices")).toHaveAttribute("aria-current", "page");
+  await expect(page.getByText("CAD", { exact: true })).toBeVisible();
+  await expect.poll(currentHash(page)).toBe(`${accessHash}&app=CAD&view=nodes`);
+
+  await page.goBack();
+  await expect(recordView("Access grants")).toHaveAttribute("aria-current", "page");
+  await expect(page.getByRole("button", { name: "Manage access", exact: true })).toBeVisible();
+  await expect.poll(currentHash(page)).toBe(`${accessHash}&app=CAD`);
+  await page.goBack();
+  await expect(page.getByRole("button", { name: "View app", exact: true })).toHaveCount(2);
+  await expect(records).toHaveCount(0);
+  await expect.poll(currentHash(page)).toBe(accessHash);
+  await page.goForward();
+  await expect(recordView("Access grants")).toHaveAttribute("aria-current", "page");
+  await expect.poll(currentHash(page)).toBe(`${accessHash}&app=CAD`);
+});
+
+test("Back from Manage access returns to the app's access grants and Forward reopens it in the same session", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  const { customer, grant } = seedCustomerApps(api);
+  await page.route("**/api/admin/**", api.route);
+  const appHash = `#/customers/${customer.id}?section=access&app=CAD`;
+  await page.goto(`/${appHash}`);
+  const scoped = page.getByText(/License access for customer/);
+
+  await page.getByRole("button", { name: "Manage access", exact: true }).click();
+  await expect(scoped).toContainText(customer.id);
+  await expect(page.locator(".desktopRecords tbody tr")).toHaveCount(1);
+  await expect.poll(currentHash(page)).toBe(`${appHash}&manage=1`);
+  // The managed grant's id encodes its fingerprint: neither may reach the address or history.state.
+  const state = await page.evaluate(() => JSON.stringify(window.history.state));
+  for (const secret of [grant.id, grant.license_fingerprint]) {
+    expect(page.url()).not.toContain(secret);
+    expect(state).not.toContain(secret);
+  }
+
+  await page.goBack();
+  await expect(page.getByRole("button", { name: "Manage access", exact: true })).toBeVisible();
+  await expect(page.getByText("CAD", { exact: true })).toBeVisible();
+  await expect(scoped).toHaveCount(0);
+  await expect.poll(currentHash(page)).toBe(appHash);
+
+  await page.goForward();
+  await expect(scoped).toContainText(customer.id);
+  await expect(page.locator(".desktopRecords tbody tr")).toHaveCount(1);
+  await expect.poll(currentHash(page)).toBe(`${appHash}&manage=1`);
+  await expect(page.getByText("Reopen Manage access from the list.", { exact: true })).toHaveCount(0);
+});
+
+test("reloading or entering a Manage access address shows the app's access grants with a reopen notice", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  const { customer } = seedCustomerApps(api);
+  await page.route("**/api/admin/**", api.route);
+  const appHash = `#/customers/${customer.id}?section=access&app=CAD`;
+  const scoped = page.getByText(/License access for customer/);
+  const notice = page.getByText("Reopen Manage access from the list.", { exact: true });
+  await page.goto(`/${appHash}`);
+  await page.getByRole("button", { name: "Manage access", exact: true }).click();
+  await expect(scoped).toContainText(customer.id);
+
+  await page.reload();
+  await expect(notice).toBeVisible();
+  await expect(page.getByRole("button", { name: "Manage access", exact: true })).toBeVisible();
+  await expect(scoped).toHaveCount(0);
+  await expect.poll(currentHash(page)).toBe(appHash);
+
+  await page.goto("/#/overview");
+  await expect(notice).toHaveCount(0);
+  await page.goto(`/${appHash}&manage=1`);
+  await expect(notice).toBeVisible();
+  await expect(page.getByRole("button", { name: "Manage access", exact: true })).toBeVisible();
+  await expect(scoped).toHaveCount(0);
+  await expect.poll(currentHash(page)).toBe(appHash);
+});
+
+test("app, record-view, and plan combinations the console cannot address fall back with the unrecognized-address notice", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  const { customer } = seedCustomerApps(api);
+  const plan = api.seed.catalogPlan();
+  await page.route("**/api/admin/**", api.route);
+  for (const hash of [
+    `#/customers/${customer.id}?section=access&view=nodes`,
+    `#/customers/${customer.id}?section=history&app=CAD`,
+    `#/customers/${customer.id}?section=access&app=CAD&view=sideways`,
+    `#/plans?view=features&plan=${plan.id}`,
+  ]) {
+    await page.goto(`/${hash}`);
+    await expect(page.getByText("This workspace address is not recognized. Overview is shown.", { exact: true })).toBeVisible();
+    await expect(page.locator("[data-workspace-heading]")).toHaveText("Overview");
+    await expect.poll(currentHash(page)).toBe("#/overview");
+    await page.goto("/#/reports");
+    await expect(page.locator("[data-workspace-heading]")).toHaveText("Reports");
+  }
+});
+
+test("a deep link to an app the customer no longer has shows all apps with a not-found notice", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  const { customer } = seedCustomerApps(api);
+  await page.route("**/api/admin/**", api.route);
+  const accessHash = `#/customers/${customer.id}?section=access`;
+  await page.goto(`/${accessHash}&app=RETIRED&view=nodes`);
+  await expect(page.getByText("That app was not found for this customer. All apps are shown.", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "View app", exact: true })).toHaveCount(2);
+  await expect(page.getByRole("navigation", { name: "App records" })).toHaveCount(0);
+  await expect.poll(currentHash(page)).toBe(accessHash);
+});
+
+test("catalog plan detail is a history entry that survives reload", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  const plan = api.seed.catalogPlan();
+  await page.route("**/api/admin/**", api.route);
+  await page.goto("/#/plans");
+  const viewPlan = page.getByRole("row", { name: /Plan confirm/ }).getByRole("button", { name: "View plan", exact: true });
+  const detail = page.getByRole("heading", { name: "Plan confirm", exact: true });
+
+  await viewPlan.click();
+  await expect(detail).toBeVisible();
+  await expect.poll(currentHash(page)).toBe(`#/plans?plan=${plan.id}`);
+  await page.reload();
+  await expect(detail).toBeVisible();
+  await expect(page.getByRole("button", { name: "Add feature", exact: true })).toBeVisible();
+  await expect.poll(currentHash(page)).toBe(`#/plans?plan=${plan.id}`);
+
+  await page.goBack();
+  await expect(viewPlan).toBeVisible();
+  await expect(detail).toHaveCount(0);
+  await expect.poll(currentHash(page)).toBe("#/plans");
+  await page.goForward();
+  await expect(detail).toBeVisible();
+  await expect.poll(currentHash(page)).toBe(`#/plans?plan=${plan.id}`);
+});
+
+test("a deep link to a plan that does not exist shows the plans list with a not-found notice", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  api.seed.catalogPlan();
+  await page.route("**/api/admin/**", api.route);
+  await page.goto("/#/plans?plan=plan_retired");
+  await expect(page.getByText("That plan was not found. The plans list is shown.", { exact: true })).toBeVisible();
+  await expect(page.getByRole("row", { name: /Plan confirm/ }).getByRole("button", { name: "View plan", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Plan unavailable", exact: true })).toHaveCount(0);
+  await expect.poll(currentHash(page)).toBe("#/plans");
+});

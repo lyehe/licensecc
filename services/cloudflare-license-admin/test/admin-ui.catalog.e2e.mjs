@@ -493,3 +493,80 @@ test("admin UI opens a confirm dialog before a plan projection Apply that would 
   expect(applyRequests[0]).toEqual({ preview_id: previewId });
   await expect(page.getByRole("dialog")).toHaveCount(0);
 });
+
+function recordLeavePrompts(page) {
+  const prompts = [];
+  page.on("dialog", (dialog) => {
+    prompts.push(dialog.message());
+    void dialog.dismiss();
+  });
+  return prompts;
+}
+
+async function leaveForOverview(page) {
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Overview", exact: true }).click();
+}
+
+test("an applied plan projection or catalog import leaves no unsaved-changes prompt for the next navigation", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  await page.route("**/api/admin/**", api.route);
+  const prompts = recordLeavePrompts(page);
+  const heading = page.locator("[data-workspace-heading]");
+
+  await page.goto("/#/plans");
+  await page.getByRole("button", { name: "Apply plan", exact: true }).click();
+  const projectionForm = page.getByRole("form", { name: "Plan projection" });
+  await projectionForm.getByLabel("License ID").fill("lic_applied_then_leave");
+  await projectionForm.getByLabel("Fingerprint").fill("a".repeat(64));
+  await projectionForm.getByLabel("Plan key").fill("pro");
+  await projectionForm.getByRole("button", { name: "Preview" }).click();
+  const applyProjection = projectionForm.getByRole("button", { name: "Apply" });
+  await expect(applyProjection).toBeEnabled();
+  await applyProjection.click();
+  await expect(page.getByText(/license_plan_projection_applied/)).toBeVisible();
+  await leaveForOverview(page);
+  await expect(heading).toHaveText("Overview");
+  expect(api.requests.planApplies).toHaveLength(1);
+  expect(prompts).toEqual([]);
+
+  await page.goto("/#/plans?view=import");
+  const importForm = page.getByRole("form", { name: "Catalog import" });
+  await importForm.getByLabel("Manifest JSON").fill(JSON.stringify({
+    format_version: 1,
+    features: [{ project: "DEFAULT", feature_key: "applied_then_leave", name: "Applied then leave" }],
+    plans: [],
+  }));
+  await importForm.getByRole("button", { name: "Preview import" }).click();
+  await expect.poll(() => api.requests.catalogImports.length).toBe(1);
+  await importForm.getByRole("button", { name: "Apply import" }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Confirm" }).click();
+  await expect(page.getByText(/catalog_import_applied/)).toBeVisible();
+  await leaveForOverview(page);
+  await expect(heading).toHaveText("Overview");
+  expect(api.requests.catalogImports).toHaveLength(2);
+  expect(prompts).toEqual([]);
+});
+
+test("an unsaved catalog draft still asks before a link or Back discards it", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  const plan = api.seed.catalogPlan();
+  await page.route("**/api/admin/**", api.route);
+  const prompts = recordLeavePrompts(page);
+  const discardPrompt = "Discard this unsaved catalog task? Choose Cancel to keep editing.";
+  await page.goto("/#/plans");
+  await page.getByRole("row", { name: /Plan confirm/ }).getByRole("button", { name: "View plan", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Plan confirm", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Edit plan", exact: true }).click();
+  const name = page.getByRole("form", { name: "Catalog plan" }).getByLabel("Name");
+  await name.fill("Unsaved plan name");
+
+  await leaveForOverview(page);
+  await expect.poll(() => prompts).toEqual([discardPrompt]);
+  await expect(name).toHaveValue("Unsaved plan name");
+  await expect(page.locator("[data-workspace-heading]")).toHaveText("Plans & features");
+
+  await page.goBack();
+  await expect.poll(() => prompts).toEqual([discardPrompt, discardPrompt]);
+  await expect(name).toHaveValue("Unsaved plan name");
+  await expect.poll(() => new URL(page.url()).hash).toBe(`#/plans?plan=${plan.id}`);
+});
