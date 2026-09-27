@@ -9,3 +9,4 @@ import "./admin-ui-workflow/customers-search.test.mjs";
 import "./admin-ui-workflow/lists-reports.test.mjs";
 import "./admin-ui-workflow/navigation.test.mjs";
 import "./admin-ui-workflow/glossary-copy.test.mjs";
+import "./admin-ui-workflow/operator-controls.test.mjs";
