@@ -58,11 +58,17 @@ const ERRORS: Record<string, React.ReactNode> = {
   sign_in_failed: "Unable to complete sign-in. Please try again.",
 };
 export function ProviderResult(): React.ReactElement | null {
-  const [result] = useState<React.ReactNode>(() => {
+  // Fix round 1: this one status slot renders real auth failures (account_suspended, link_expired,
+  // sign_in_cancelled, link_failed, sign_in_failed, provider_unavailable, rate_limited) on the same
+  // screen as the "Sign-in provider connected." confirmation -- track isError alongside the text so
+  // only a genuine failure gets the error colour.
+  const [result] = useState<{ text: React.ReactNode; isError: boolean } | null>(() => {
     const url = new URL(window.location.href);
     const error = url.searchParams.get("auth_error");
     const linked = url.searchParams.get("auth_result") === "linked";
-    return error ? (Object.hasOwn(ERRORS, error) ? ERRORS[error] : ERRORS.sign_in_failed) : linked ? "Sign-in provider connected." : null;
+    if (error) return { text: Object.hasOwn(ERRORS, error) ? ERRORS[error] : ERRORS.sign_in_failed, isError: true };
+    if (linked) return { text: "Sign-in provider connected.", isError: false };
+    return null;
   });
   useEffect(() => {
     const url = new URL(window.location.href);
@@ -70,5 +76,5 @@ export function ProviderResult(): React.ReactElement | null {
     url.searchParams.delete("auth_error"); url.searchParams.delete("auth_result");
     window.history.replaceState(null, "", url.pathname + url.search + url.hash);
   }, []);
-  return result ? <p role="status">{result}</p> : null;
+  return result ? <p role="status" className={result.isError ? "statusline error" : "statusline"}>{result.text}</p> : null;
 }
