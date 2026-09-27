@@ -107,6 +107,29 @@ function PortalShell(): React.ReactElement {
     document.getElementById("content")?.focus();
   }, [location.page, location.project]);
 
+  // Fix round 1 (Important): DevicesFeature/LicenseDownloadAction only render while location.page is
+  // "nodes"/"apps", but seatMessages/deviceMessages/downloads.messages live one level up, in the
+  // controllers below, so they otherwise outlive a single visit -- a stale "Seat started." or
+  // "Download started." would reappear in a freshly mounted role="status" node on a later visit, and
+  // (for seats) keep the panel expanded forever since hasBrowserSession reads seatMessages too. Clear
+  // each page's own results the moment that page is left. Read through refs (updated every render,
+  // like clearAllPortalStateRef above) so these effects depend on nothing but location.page itself --
+  // deviceController/downloads are plain objects recreated every render, and depending on them
+  // directly would fire the cleanup (clearing a result that was just set) on every unrelated render.
+  const clearDeviceMessagesRef = useRef<() => void>(() => {});
+  clearDeviceMessagesRef.current = () => deviceController.clearMessages();
+  useEffect(() => {
+    if (location.page !== "nodes") return undefined;
+    return () => clearDeviceMessagesRef.current();
+  }, [location.page]);
+
+  const clearDownloadMessagesRef = useRef<() => void>(() => {});
+  clearDownloadMessagesRef.current = () => downloads.clearMessages();
+  useEffect(() => {
+    if (location.page !== "apps") return undefined;
+    return () => clearDownloadMessagesRef.current();
+  }, [location.page]);
+
   // Each view sets document.title (task C6): the SAME branches PortalShell's own return below uses
   // to pick which screen renders, read here instead of duplicated per screen component, so this one
   // effect can never drift from what is actually on screen. Apps/Devices/Account, Sign in/Check your

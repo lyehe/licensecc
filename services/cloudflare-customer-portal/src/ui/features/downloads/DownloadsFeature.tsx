@@ -25,6 +25,11 @@ export interface LicenseDownloads {
   setDeviceKey(entitlementId: string, value: string): void;
   download(item: EntitlementRow): Promise<void>;
   clear(): void;
+  // Fix round 1 (Important): messages lives here, one level above the Apps page's own components, so
+  // it otherwise outlives a visit to Apps -- a stale "Download started." would reappear on a later
+  // visit. App.tsx calls this when the Apps page is left. Deliberately narrower than clear(): typed
+  // device keys are untouched.
+  clearMessages(): void;
 }
 
 export function useLicenseDownloads({ runOnce }: DownloadOptions): LicenseDownloads {
@@ -102,7 +107,11 @@ export function useLicenseDownloads({ runOnce }: DownloadOptions): LicenseDownlo
     setMessages({});
   }, []);
 
-  return { deviceKeys, messages, setDeviceKey, download, clear };
+  // Fix round 1 (Important): called from App.tsx when the Apps page is left, so a stale local result
+  // never reappears on a later visit. Typed device keys survive navigation; only shown results do not.
+  const clearMessages = useCallback((): void => setMessages({}), []);
+
+  return { deviceKeys, messages, setDeviceKey, download, clear, clearMessages };
 }
 
 // Rendered only for a license that is active now (EntitlementsFeature): an inactive license offers no

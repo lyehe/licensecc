@@ -68,6 +68,14 @@ export interface DevicesController {
   confirmSeatRelease(): Promise<void>;
   releaseDevice(item: DeviceRow): Promise<void>;
   clear(): void;
+  // Fix round 1 (Important): seatMessages/deviceMessages live here, one level above DevicesFeature,
+  // so they otherwise outlive a visit to the Devices page (DevicesFeature only renders while
+  // location.page === "nodes") -- a stale "Seat started." would reappear in a freshly mounted
+  // role="status" node on a later visit, and keep the seat panel expanded forever (hasBrowserSession
+  // in BrowserSeats.tsx reads seatMessages too). App.tsx calls this when the Devices page is left, so
+  // only the CURRENT visit's results ever show; seatSessions/pendingSeatRelease/etc. are untouched --
+  // those are meant to survive navigation.
+  clearMessages(): void;
 }
 
 // Verify-then-fallback focus: try the primary target (skipping a disabled button), then the
@@ -351,6 +359,14 @@ export function useDevicesController(options: DeviceFeatureOptions): DevicesCont
     setDeviceMessages({});
   }
 
+  // Fix round 1 (Important): called from App.tsx when the Devices page is left, so a stale local
+  // result never reappears on a later visit. Deliberately narrower than clear() -- seatSessions and
+  // everything else about the live seat state survive navigation, only the shown RESULTS do not.
+  function clearMessages(): void {
+    setSeatMessages({});
+    setDeviceMessages({});
+  }
+
   return {
     busy,
     devices,
@@ -373,6 +389,7 @@ export function useDevicesController(options: DeviceFeatureOptions): DevicesCont
     confirmSeatRelease,
     releaseDevice,
     clear,
+    clearMessages,
   };
 }
 

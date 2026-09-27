@@ -90,6 +90,15 @@ export function localMessage(code: string, ok: boolean): StatusMessage {
   return { code, request_id: "", ok };
 }
 
+// Fix round 1 (Minor): the "Technical details" line -- the raw code, plus the request id in
+// parentheses when one is present -- shared verbatim between StatusLine (below, the page-level line)
+// and ActionResult.tsx (every local per-row/card line), so the two never drift apart. Lives here
+// rather than in portalWorkflow.ts: it needs no React, but api.tsx (not the pure RESULT_CODE_COPY
+// module) is where both callers already look for shared StatusLine-adjacent helpers.
+export function formatMessageDetail(message: Pick<StatusMessage, "code" | "request_id">): string {
+  return message.request_id === "" ? message.code : `${message.code} (${message.request_id})`;
+}
+
 // Human-readable status text for the SPA: describeResultCode's copy when the code is mapped, else the
 // generic reference fallback -- never the raw snake_case code as the visible sentence (task C1). The
 // code and request id remain available, tucked under a collapsed "Technical details" disclosure so
@@ -104,7 +113,7 @@ export function StatusLine({ message, fallback }: { message: StatusMessage | nul
   const human = message.code === "rate_limited" && typeof message.retryAfter === "number"
     ? rateLimitMessage(message.retryAfter)
     : describeResultCode(message.code) ?? describeUnknownResult(message.request_id);
-  const detail = message.request_id === "" ? message.code : `${message.code} (${message.request_id})`;
+  const detail = formatMessageDetail(message);
   return (
     <div role="status" className={message.ok ? "statusline" : "statusline error"}>
       <p>{human}</p>

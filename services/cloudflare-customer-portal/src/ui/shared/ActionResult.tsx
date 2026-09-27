@@ -1,5 +1,6 @@
 import React from "react";
 import { describeResultCode, describeUnknownResult, rateLimitMessage } from "../portalWorkflow";
+import { formatMessageDetail } from "./api";
 import { SupportContact } from "./SupportContact";
 import type { StatusMessage } from "../types";
 
@@ -35,7 +36,7 @@ export function ActionResult({ message }: { message: StatusMessage | null }): Re
   const human = message.code === "rate_limited" && typeof message.retryAfter === "number"
     ? rateLimitMessage(message.retryAfter)
     : describeResultNode(message.code) ?? describeResultCode(message.code) ?? describeUnknownResult(message.request_id);
-  const detail = message.request_id === "" ? message.code : `${message.code} (${message.request_id})`;
+  const detail = formatMessageDetail(message);
   return (
     <div role="status" className={message.ok ? "statusline" : "statusline error"}>
       <p>{human}</p>
