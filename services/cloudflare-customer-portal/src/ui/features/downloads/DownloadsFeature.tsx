@@ -15,6 +15,11 @@ import type { EntitlementRow, StatusMessage } from "../../types";
 
 interface DownloadOptions {
   runOnce(work: () => Promise<void>): Promise<void>;
+  // Fix round 2 (Important): bumped by App.tsx whenever the Apps page is entered or left. A ref, read
+  // (never written) here, so download() can compare "the generation when this download started"
+  // against "the generation now" once its response arrives, and drop a result that arrives after the
+  // customer has moved on -- see App.tsx's own comment for the full race.
+  visitGenerationRef: React.RefObject<number>;
 }
 
 export interface LicenseDownloads {
@@ -32,7 +37,7 @@ export interface LicenseDownloads {
   clearMessages(): void;
 }
 
-export function useLicenseDownloads({ runOnce }: DownloadOptions): LicenseDownloads {
+export function useLicenseDownloads({ runOnce, visitGenerationRef }: DownloadOptions): LicenseDownloads {
   const [deviceKeys, setDeviceKeys] = useState<Record<string, string>>({});
   const [messages, setMessages] = useState<Record<string, StatusMessage | null>>({});
 
@@ -50,6 +55,12 @@ export function useLicenseDownloads({ runOnce }: DownloadOptions): LicenseDownlo
       setMessage(item.id, localMessage("license_unavailable", false));
       return;
     }
+    // Fix round 2 (Important): captured before runOnce may queue this download, so a response that
+    // arrives after the customer has left (and possibly returned to) Apps can be told apart from one
+    // that arrives while they are still on this same visit. The download itself (the actual file save
+    // below) is real state, not a shown result, so it always proceeds regardless of this guard --
+    // only the LOCAL result line it is guarded.
+    const startGeneration = visitGenerationRef.current;
     await runOnce(async () => {
       const deviceKeyId = (deviceKeys[item.id] ?? "").trim();
       if (deviceKeyId === "") {
@@ -72,7 +83,7 @@ export function useLicenseDownloads({ runOnce }: DownloadOptions): LicenseDownlo
         // This download bypasses api() (it needs the raw Response to read a blob), so a dropped
         // connection needs the same guard here -- same code and copy as api()'s own fetch rejection
         // (task C2), so the customer sees an identical message either way.
-        setMessage(item.id, localMessage("network_unavailable", false));
+        if (visitGenerationRef.current === startGeneration) setMessage(item.id, localMessage("network_unavailable", false));
         return;
       }
       const contentType = response.headers.get("content-type") ?? "";
@@ -83,9 +94,9 @@ export function useLicenseDownloads({ runOnce }: DownloadOptions): LicenseDownlo
           // route to the same global onUnauthorized hook every other api() path already gets -- "every
           // api() path" (task C3) has to include the download too.
           reportUnauthorized(response.status, result.code, requestEpoch);
-          setMessage(item.id, resultMessage(result));
+          if (visitGenerationRef.current === startGeneration) setMessage(item.id, resultMessage(result));
         } catch {
-          setMessage(item.id, localMessage(`download_failed_${response.status}`, false));
+          if (visitGenerationRef.current === startGeneration) setMessage(item.id, localMessage(`download_failed_${response.status}`, false));
         }
         return;
       }
@@ -98,7 +109,7 @@ export function useLicenseDownloads({ runOnce }: DownloadOptions): LicenseDownlo
       anchor.click();
       anchor.remove();
       URL.revokeObjectURL(objectUrl);
-      setMessage(item.id, localMessage("download_started", true));
+      if (visitGenerationRef.current === startGeneration) setMessage(item.id, localMessage("download_started", true));
     });
   }
 

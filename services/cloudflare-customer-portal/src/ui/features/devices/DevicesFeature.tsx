@@ -28,6 +28,11 @@ interface DeviceFeatureOptions {
   refreshData(): Promise<boolean>;
   runOnce(work: () => Promise<void>): Promise<void>;
   setMessage: React.Dispatch<React.SetStateAction<StatusMessage | null>>;
+  // Fix round 2 (Important): bumped by App.tsx whenever the Devices page is entered or left. A ref,
+  // read (never written) here, so seatAction()/releaseDevice() can compare "the generation when this
+  // action started" against "the generation now" once their response arrives, and drop a result that
+  // arrives after the customer has moved on -- see App.tsx's own comment for the full race.
+  visitGenerationRef: React.RefObject<number>;
 }
 
 interface PendingSeatRelease {
@@ -93,7 +98,7 @@ function focusFirstAvailable(
 }
 
 export function useDevicesController(options: DeviceFeatureOptions): DevicesController {
-  const { busy, busyRef, devices, entitlements, refreshData, runOnce, setMessage } = options;
+  const { busy, busyRef, devices, entitlements, refreshData, runOnce, setMessage, visitGenerationRef } = options;
   const [seatSessions, setSeatSessionsRaw] = useState<Record<string, SeatSession>>(
     () => hydrateSeatSessions(readStoredSeats(), Math.floor(Date.now() / 1000)),
   );
@@ -134,6 +139,10 @@ export function useDevicesController(options: DeviceFeatureOptions): DevicesCont
     let refreshFailed = false;
     let checkedOut = false;
     let networkFailure = false;
+    // Fix round 2 (Important): captured before the request goes out (and before runOnce may queue
+    // it), so a response that arrives after the customer has left (and possibly returned to) Devices
+    // can be told apart from one that arrives while they are still on this same visit.
+    const startGeneration = visitGenerationRef.current;
     await runOnce(async () => {
       const existing = seatSessions[item.id];
       if ((operation === "heartbeat" || operation === "release") && existing === undefined) {
@@ -151,7 +160,10 @@ export function useDevicesController(options: DeviceFeatureOptions): DevicesCont
         method: "POST",
         body: JSON.stringify(body),
       });
-      setSeatMessage(item.id, resultMessage(result));
+      // The visit has moved on since this action started: the real outcome below (session/storage/
+      // refresh) still applies, but this result must not write into a map the customer is no longer
+      // looking at, or reappear as if it belonged to a later visit.
+      if (visitGenerationRef.current === startGeneration) setSeatMessage(item.id, resultMessage(result));
       const resultData = result.data;
       const leaseExpiresAt = typeof resultData?.expires_at === "number" ? resultData.expires_at : 0;
       const seatId = typeof resultData?.seat_id === "string" ? resultData.seat_id : null;
@@ -339,12 +351,14 @@ export function useDevicesController(options: DeviceFeatureOptions): DevicesCont
 
   async function releaseDevice(item: DeviceRow): Promise<void> {
     if (!window.confirm(DEVICE_RELEASE_CONFIRM_COPY)) return;
+    // Fix round 2 (Important): same guard as seatAction() above -- see its comment.
+    const startGeneration = visitGenerationRef.current;
     await runOnce(async () => {
       const result = await api<Record<string, unknown>>(deviceReleasePath(), {
         method: "POST",
         body: JSON.stringify({ device_key_id: item.device_key_id }),
       });
-      setDeviceMessage(item.device_key_id, resultMessage(result));
+      if (visitGenerationRef.current === startGeneration) setDeviceMessage(item.device_key_id, resultMessage(result));
       if (result.ok) await refreshData();
     });
   }

@@ -45,9 +45,30 @@ function PortalShell(): React.ReactElement {
     active: auth.phase === "authed" && enrollment === null && passwordAction === null,
     setMessage,
   });
+
+  // Fix round 2 (Important): a visit generation per owning page ("nodes" for seats/legacy devices,
+  // "apps" for downloads), bumped whenever that page is entered OR left. Refs, not state -- bumping
+  // one must never itself cause a render, and the controllers below need to read the CURRENT value
+  // both when an action starts and again whenever its response arrives, arbitrarily later. This closes
+  // a race fix round 1's clearMessages() alone could not: Start seat, then navigate to Apps before the
+  // ~1.5s response arrives -- clearMessages() already wiped what was showing, but the LATE response
+  // would otherwise still write "Seat started." back into the map, and it would reappear on a later
+  // visit. Real state (seat sessions, storage, the account refresh, the actual downloaded file) still
+  // updates regardless of this guard -- only the shown LOCAL result is ever dropped.
+  const previousPageRef = useRef(location.page);
+  const devicesVisitGenerationRef = useRef(0);
+  const appsVisitGenerationRef = useRef(0);
+  useEffect(() => {
+    const previousPage = previousPageRef.current;
+    if (previousPage === location.page) return; // initial mount: nothing was "entered or left" yet
+    if (previousPage === "nodes" || location.page === "nodes") devicesVisitGenerationRef.current += 1;
+    if (previousPage === "apps" || location.page === "apps") appsVisitGenerationRef.current += 1;
+    previousPageRef.current = location.page;
+  }, [location.page]);
+
   // D2: download results now show next to their own control (LicenseDownloadAction), not the
   // page-level line, so setMessage is no longer passed through here.
-  const downloads = useLicenseDownloads({ runOnce });
+  const downloads = useLicenseDownloads({ runOnce, visitGenerationRef: appsVisitGenerationRef });
   const deviceController = useDevicesController({
     busy: busy || stale,
     busyRef,
@@ -56,6 +77,7 @@ function PortalShell(): React.ReactElement {
     refreshData,
     runOnce,
     setMessage,
+    visitGenerationRef: devicesVisitGenerationRef,
   });
 
   // Fix round 1 (CRITICAL): PortalShell stays mounted across a session-ended transition, so a
