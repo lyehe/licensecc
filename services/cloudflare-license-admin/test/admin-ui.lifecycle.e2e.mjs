@@ -269,7 +269,7 @@ test("admin UI retains the server-owned four-entitlement batch limit", async ({ 
   // its own request, so no single request ever carries more than the Worker's four ids.
   await page.getByLabel("Select all 5 loaded", { exact: true }).check();
   await expect(page.locator(".bulkBar")).toContainText("5 selected");
-  await expect(page.locator(".bulkBar")).toContainText("2 requests of up to 4");
+  await expect(page.locator(".bulkBar")).toContainText("2 chunks of up to 4");
   await expect(rowChecks.nth(4)).toBeEnabled();
   await clickAction(page.locator(".bulkBar").getByRole("button", { name: "Disable", includeHidden: true }));
   const dialog = page.getByRole("dialog");
@@ -306,10 +306,10 @@ test("admin UI disables twenty loaded entitlements with one confirmation, one re
 
   await page.getByLabel("Select all 20 loaded", { exact: true }).check();
   await expect(page.locator(".bulkBar")).toContainText("20 selected");
-  await expect(page.locator(".bulkBar")).toContainText("5 requests of up to 4");
+  await expect(page.locator(".bulkBar")).toContainText("5 chunks of up to 4");
   await clickAction(page.locator(".bulkBar").getByRole("button", { name: "Disable", includeHidden: true }));
   const dialog = page.getByRole("dialog");
-  await expect(dialog).toContainText("5 requests of up to 4");
+  await expect(dialog).toContainText("5 chunks of up to 4");
   await dialog.getByLabel(/Reason/).fill("contract ended");
   await dialog.getByRole("button", { name: "Confirm" }).click();
 

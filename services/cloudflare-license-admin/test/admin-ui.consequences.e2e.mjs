@@ -660,6 +660,11 @@ test("admin UI rejects duplicate batch result identities as unknown", async ({ p
   await expect(dialog.locator(".modalError")).toContainText("Mutation outcome unknown; do not retry.");
   await expect(dialog.getByRole("button", { name: "Confirm" })).toBeDisabled();
   expect(await page.evaluate(() => document.activeElement === document.body)).toBe(false);
+  // A single-request batch keeps the single-request recovery copy; there is no chunk to name.
+  await expect(dialog.locator(".batchRun")).not.toContainText(/chunk/i);
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await expect(page.getByRole("button", { name: "Reconcile status", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Reconcile chunk/ })).toHaveCount(0);
 });
 
 test("admin UI rejects substituted batch result identities as unknown", async ({ page }) => {
@@ -819,19 +824,28 @@ test("admin UI rejects reordered batch proof rows as an unknown outcome", async 
   await expect(dialog.getByRole("button", { name: "Confirm" })).toBeDisabled();
 });
 
-/** Seeds twenty active rows and records every batch POST (its key and body) before the fixture answers it. */
-async function openTwentyRowBatch(page, respond) {
-  const api = makeAdminApiFixture();
-  api.seed.entitlements(20);
+/**
+ * Records every batch POST (its key and body) before it is answered: by `respond(attempt, api)` when that
+ * returns `{ status, body }`, otherwise by the fixture.
+ */
+async function routeBatchPosts(page, api, respond) {
   const attempts = [];
   await page.route("**/api/admin/**", api.route);
   await page.route("**/api/admin/entitlements/batch", async (route) => {
     const request = route.request();
     attempts.push({ key: request.headers()["idempotency-key"], body: request.postDataJSON() });
-    const scripted = respond(attempts.length);
+    const scripted = respond(attempts.length, api);
     if (scripted === undefined) return route.fallback();
     return route.fulfill({ status: scripted.status, contentType: "application/json", body: JSON.stringify(scripted.body) });
   });
+  return attempts;
+}
+
+/** Seeds twenty active rows, then selects them all and confirms a bulk Disable with one reason. */
+async function openTwentyRowBatch(page, respond) {
+  const api = makeAdminApiFixture();
+  api.seed.entitlements(20);
+  const attempts = await routeBatchPosts(page, api, respond);
   await page.goto("/");
   await page.getByRole("link", { name: "License access", exact: true }).click();
   await expect(page.locator("tbody input[type=checkbox]")).toHaveCount(20);
@@ -854,6 +868,8 @@ test("admin UI stops a twenty-row batch at a 500 on chunk 3 and reconciles that 
   await expect(dialog.locator(".modalError")).toContainText("Mutation outcome unknown; do not retry.");
   await expect(dialog.getByRole("button", { name: "Confirm" })).toBeDisabled();
   await expect(dialog.locator(".batchRun").getByRole("listitem")).toHaveText(["8 done", "4 outcome unknown", "8 not attempted"]);
+  // The control cannot be reached from inside the modal, so the guidance says where it is.
+  await expect(dialog.locator(".batchRun")).toContainText("Close this dialog, then use “Reconcile chunk 3” in the notice at the bottom of the page.");
   // The run stopped: chunks 4 and 5 are never sent.
   await page.waitForTimeout(400);
   expect(attempts.map((attempt) => attempt.body.ids)).toEqual([chunkIds(1), chunkIds(2), chunkIds(3)]);
@@ -862,6 +878,7 @@ test("admin UI stops a twenty-row batch at a 500 on chunk 3 and reconciles that 
   await dialog.getByRole("button", { name: "Cancel" }).click();
   const panel = page.locator(".tablePane .batchRun");
   await expect(panel.getByRole("listitem")).toHaveText(["8 done", "4 outcome unknown", "8 not attempted"]);
+  await expect(panel).toContainText("Use “Reconcile chunk 3” in the notice at the bottom of the page.");
   await expect(panel).toContainText(attempts[2].key);
   await expect(page.locator(".desktopRecords .status.disabled")).toHaveCount(8);
 
@@ -915,6 +932,77 @@ test("admin UI keeps the confirmation open when chunk 1 is refused, and a retry 
   expect(attempts[1].body).toEqual(attempts[0].body);
   expect(new Set(attempts.map((attempt) => attempt.key)).size).toBe(6);
   await expect(page.locator(".tablePane .batchRun").getByRole("listitem")).toHaveText(["20 done"]);
+});
+
+test("admin UI never reports success when the status refresh fails after a partially refused run", async ({ page }) => {
+  const { attempts, dialog } = await openTwentyRowBatch(page, (attempt, api) => {
+    if (attempt !== 2) return undefined;
+    // The strict status read that follows the stop fails once.
+    api.behavior.refreshFailure = "response-error";
+    return { status: 409, body: { ok: false, code: "idempotency_request_conflict", request_id: "ui-e2e-batch-refresh-lost" } };
+  });
+
+  await expect.poll(() => attempts.length).toBe(2);
+  await expect(dialog).toHaveCount(0);
+  const notice = page.locator(".operatorNotice");
+  await expect(notice).toContainText("Disable stopped at chunk 2 of 5");
+  await expect(notice).toContainText("Status refresh failed");
+  await expect(page.getByText(/succeeded/i)).toHaveCount(0);
+  await expect(page.locator(".tablePane .batchRun").getByRole("listitem")).toHaveText(["4 done", "4 failed", "12 not attempted"]);
+
+  // The recovery is a status read only: it proves the view and sends no batch request.
+  await notice.getByRole("button", { name: "Refresh status", exact: true }).click();
+  await expect(notice).toHaveCount(0);
+  await expect(page.locator(".desktopRecords .status.disabled")).toHaveCount(4);
+  expect(attempts).toHaveLength(2);
+});
+
+/** Seeds five suspended rows, then selects them all and starts a bulk Reenable, which has no dialog. */
+async function reenableFiveRows(page, respond) {
+  const api = makeAdminApiFixture();
+  api.seed.entitlements(Array.from({ length: 5 }, () => ({ status: "disabled" })));
+  const attempts = await routeBatchPosts(page, api, respond);
+  await page.goto("/");
+  await page.getByRole("link", { name: "License access", exact: true }).click();
+  await expect(page.locator("tbody input[type=checkbox]")).toHaveCount(5);
+  await page.getByLabel("Select all 5 loaded", { exact: true }).check();
+  await clickAction(page.locator(".bulkBar").getByRole("button", { name: "Reenable", includeHidden: true }).first());
+  return { attempts };
+}
+
+test("admin UI reenables five suspended rows without a dialog as two chunks with their own keys", async ({ page }) => {
+  const { attempts } = await reenableFiveRows(page, () => undefined);
+
+  await expect.poll(() => attempts.length).toBe(2);
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  expect(attempts.map((attempt) => attempt.body.ids)).toEqual([["ent-1", "ent-2", "ent-3", "ent-4"], ["ent-5"]]);
+  for (const attempt of attempts) expect(attempt.body.action).toBe("reenable");
+  expect(new Set(attempts.map((attempt) => attempt.key)).size).toBe(2);
+  const panel = page.locator(".tablePane .batchRun");
+  await expect(panel.getByRole("listitem")).toHaveText(["5 done"]);
+  await expect(panel).toContainText("Reenable finished.");
+  await expect(page.locator(".desktopRecords .status.active")).toHaveCount(5);
+});
+
+test("admin UI reconciles an unknown second reenable chunk by replaying its frozen key and body", async ({ page }) => {
+  const { attempts } = await reenableFiveRows(page, (attempt) => attempt === 2
+    ? { status: 500, body: { ok: false, code: "internal_error", request_id: "ui-e2e-reenable-chunk-two" } }
+    : undefined);
+
+  await expect.poll(() => attempts.length).toBe(2);
+  const panel = page.locator(".tablePane .batchRun");
+  await expect(panel.getByRole("listitem")).toHaveText(["4 done", "1 outcome unknown", "0 not attempted"]);
+  await expect(panel).toContainText("Use “Reconcile chunk 2” in the notice at the bottom of the page.");
+  await page.waitForTimeout(400);
+  expect(attempts).toHaveLength(2);
+
+  await page.getByRole("button", { name: "Reconcile chunk 2", exact: true }).click();
+  await expect.poll(() => attempts.length).toBe(3);
+  expect(attempts[2]).toEqual(attempts[1]);
+  expect(attempts[1].body.ids).toEqual(["ent-5"]);
+  await expect(panel.getByRole("listitem")).toHaveText(["5 done"]);
+  await expect(panel).toContainText("Reenable finished; chunk 2 is now reconciled.");
+  await expect(page.locator(".desktopRecords .status.active")).toHaveCount(5);
 });
 
 test("admin UI rejects duplicate release-seat identities as unknown", async ({ page }) => {
