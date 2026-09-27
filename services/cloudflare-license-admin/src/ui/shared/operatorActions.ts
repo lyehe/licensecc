@@ -1,5 +1,7 @@
 import type { ReactNode } from "react";
 
+import type { FeedbackDetail } from "./operatorFeedback";
+
 /*
  * The contract through which feature code hands confirmations, consequence
  * actions and keyed mutations to the operator controls. `controls.tsx`
@@ -50,7 +52,9 @@ export interface ConfirmActionSuccess {
 
 export interface ConfirmActionFailure {
   ok: false;
+  /** The operator's sentence; its result code, if any, travels as `detail`. */
   message?: string;
+  detail?: FeedbackDetail;
   retryable?: boolean;
   unknown?: boolean;
   reconciliation?: ConfirmActionRecovery;

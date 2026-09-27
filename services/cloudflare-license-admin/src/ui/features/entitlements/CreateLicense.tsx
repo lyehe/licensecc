@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from "react";
 import type { CreatedLicense } from "../../../shared/api";
 import { api, parseExactApiSuccess } from "../../shared/api";
 import { EXACT_READ_PROOF, useOperatorControls } from "../../shared/controls";
+import { feedbackWith } from "../../shared/messages";
 import { hasLicenseListData, parseMutationResponse } from "../../shared/mutationGuards";
 import { createLicensePath, hasCreatedLicenseData, licenseCreateFailureMessage, licenseCreateFailures } from "./protectedCreate";
 
@@ -32,7 +33,7 @@ export function CreateLicenseButton({ customerId, project, onCreated }: { custom
         setMessage(`Created a license for ${project} and selected it.`);
         return EXACT_READ_PROOF;
       },
-      onUnapplied: (result) => setFeedback({ tone: "error", message: licenseCreateFailureMessage(result) }),
+      onUnapplied: (result) => setFeedback(feedbackWith(licenseCreateFailureMessage(result), result.code, result.requestId)),
       isCurrent: () => mounted.current,
     });
   }

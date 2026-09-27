@@ -1,6 +1,7 @@
 import React, { ReactNode, createContext, useCallback, useContext, useRef } from "react";
 import type { ConfirmAction, ConsequenceAction, KeyedMutationAction } from "./operatorActions";
-import { type OperatorFeedback, useOperatorFeedback } from "./operatorFeedback";
+import { FeedbackText } from "./FeedbackText";
+import { NO_FEEDBACK, type OperatorFeedback, useOperatorFeedback } from "./operatorFeedback";
 import { useOperationGate } from "./operationGate";
 import { useOperatorFocus } from "./operatorFocus";
 import { useActionNotice } from "./useActionNotice";
@@ -65,9 +66,9 @@ export function OperatorControlsProvider({ children }: { children: ReactNode }):
   const { message, feedback, setMessage, setFeedback } = useOperatorFeedback();
   const gate = useOperationGate();
   const focus = useOperatorFocus();
-  const notice = useActionNotice(gate);
-  const confirm = useConfirmDialog({ gate, focus, notice, setMessage });
-  const { runMutation, runKeyedMutation, runConsequenceAction, runNoticeRecovery } = useKeyedMutation({ gate, focus, notice, confirmActionRef: confirm.confirmActionRef, setMessage, setFeedback });
+  const notice = useActionNotice(gate, () => setFeedback(NO_FEEDBACK));
+  const confirm = useConfirmDialog({ gate, focus, notice });
+  const { runMutation, runKeyedMutation, runConsequenceAction, runNoticeRecovery } = useKeyedMutation({ gate, focus, notice, confirmActionRef: confirm.confirmActionRef, setFeedback });
   const { busy } = gate;
   const { actionNotice, noticePending, operationLocked, acknowledgeNotice } = notice;
   const { modalActive, currentReason, reason, requestConfirm, setReason } = confirm;
@@ -77,7 +78,7 @@ export function OperatorControlsProvider({ children }: { children: ReactNode }):
       {children}
       {actionNotice !== null && (
         <div className="operatorNotice" role="status" aria-live="polite">
-          <span>{actionNotice.message}</span>
+          <div className="noticeMessage"><FeedbackText feedback={actionNotice} /></div>
           {actionNotice.unresolvedKey !== undefined && <span>Other actions are unavailable until reconciliation completes.</span>}
           {actionNotice.manualRefresh !== undefined && <button type="button" disabled={noticePending} onClick={() => void runNoticeRecovery()}>{noticePending ? "Refreshing…" : actionNotice.manualRefresh.label}</button>}
           {actionNotice.dismissible === true && <button type="button" disabled={noticePending} onClick={acknowledgeNotice}>Acknowledge</button>}

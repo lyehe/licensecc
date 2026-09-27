@@ -200,6 +200,8 @@ test("a create without a policy sends its device limit, and a chosen policy show
   expect(writes[0]).toMatchObject({ policy_id: "pol_pro", project: "APP", feature: "PRO" });
   expect(Object.hasOwn(writes[0], "max_active_devices")).toBe(false);
 
+  // The create opened its record; the next license starts from a new form.
+  await page.getByRole("button", { name: "New entitlement", exact: true }).click();
   await form.getByLabel("Project", { exact: true }).fill("APP");
   await form.getByLabel("Feature", { exact: true }).fill("PLUS");
   await form.getByLabel("License fingerprint", { exact: true }).fill("b".repeat(64));
@@ -214,6 +216,7 @@ test("a create without a policy sends its device limit, and a chosen policy show
   expect(Object.hasOwn(writes[1], "policy_id")).toBe(false);
 
   // An untouched field sends no limit at all.
+  await page.getByRole("button", { name: "New entitlement", exact: true }).click();
   await expect(form.getByLabel("Device limit", { exact: true })).toHaveValue("");
   await form.getByLabel("Project", { exact: true }).fill("APP");
   await form.getByLabel("Feature", { exact: true }).fill("BASIC");

@@ -1,6 +1,9 @@
 import { useAdminNavigation } from "../../app/navigation";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api, apiFailureMessage, parseExactApiSuccess } from "../../shared/api";
+import { api, parseExactApiSuccess } from "../../shared/api";
+import { FeedbackText } from "../../shared/FeedbackText";
+import { apiFailureFeedback } from "../../shared/messages";
+import type { OperatorFeedback } from "../../shared/operatorFeedback";
 import { formatEpoch, formatUtcDate } from "../../shared/format";
 import { Entitlements } from "../entitlements/Entitlements";
 import type { EntitlementFilter } from "../entitlements/workflow";
@@ -17,7 +20,7 @@ function PagedRecords({ url, code, customerId, kind, render }: {
   const [cursor, setCursor] = useState<string | null>(null);
   const [time, setTime] = useState(0);
   const [busy, setBusy] = useState(true);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<OperatorFeedback | null>(null);
   const generation = useRef(0);
   const consumed = useRef(new Set<string>());
   const failedCursor = useRef<string | null>(null);
@@ -25,7 +28,7 @@ function PagedRecords({ url, code, customerId, kind, render }: {
   const load = useCallback(async (next: string | null): Promise<void> => {
     const ticket = ++generation.current;
     failedCursor.current = next;
-    setBusy(true); setError("");
+    setBusy(true); setError(null);
     try {
       const path = new URL(url, window.location.origin);
       if (next !== null) path.searchParams.set("cursor", next);
@@ -45,7 +48,7 @@ function PagedRecords({ url, code, customerId, kind, render }: {
             : typeof item.seat_id === "string" && typeof item.mode === "string" && typeof item.heartbeat_deadline === "number");
         });
       });
-      if (!parsed) throw new Error(apiFailureMessage(response));
+      if (!parsed) { setError(apiFailureFeedback(response)); return; }
       if (parsed.data.next_cursor !== null && (parsed.data.next_cursor === next || (next !== null && consumed.current.has(parsed.data.next_cursor)))) throw new Error("Pagination changed. Refresh this view.");
       const keys = parsed.data.items.map(item => JSON.stringify([item.project, item.feature, item.license_fingerprint, item.device_key_id, item.seat_id]));
       if (new Set(keys).size !== keys.length || (next !== null && keys.some(key => loadedKeys.current.has(key)))) throw new Error("Records changed between pages. Refresh this view.");
@@ -53,12 +56,12 @@ function PagedRecords({ url, code, customerId, kind, render }: {
       if (next === null) consumed.current.clear(); else consumed.current.add(next);
       setRows(previous => next === null ? parsed.data.items : [...previous, ...parsed.data.items]);
       setCursor(parsed.data.next_cursor); setTime(parsed.data.server_time ?? 0);
-    } catch (failure) { if (ticket === generation.current) setError(failure instanceof Error ? failure.message : "Unable to load records."); }
+    } catch (failure) { if (ticket === generation.current) setError({ tone: "error", message: failure instanceof Error ? failure.message : "Unable to load records." }); }
     finally { if (ticket === generation.current) setBusy(false); }
   }, [url, code, customerId, kind]);
   useEffect(() => { void load(null); return () => { generation.current++; }; }, [load]);
   return <section aria-busy={busy}>
-    {error && <p role="alert">{error} <button disabled={busy} onClick={() => void load(failedCursor.current)}>Retry</button></p>}
+    {error && <div role="alert"><FeedbackText feedback={error} /> <button disabled={busy} onClick={() => void load(failedCursor.current)}>Retry</button></div>}
     {busy && <p role="status">Loading…</p>}
     {!busy && !error && rows.length === 0 && <p>No records found.</p>}
     {rows.length > 0 && render(rows, time)}

@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import type { OperatorFeedback } from "../../shared/operatorFeedback";
 import { ReadNotice } from "../../shared/ReadNotice";
 import { hasCustomerListData, hasLicenseListData } from "../../shared/mutationGuards";
 import { loadAllExactPages, loadExactFirstPage } from "../../shared/pagination";
@@ -21,7 +22,7 @@ function RelationshipLookup({ kind, value, onChange, scope = "", project = "", r
   const term = typeahead ? typed : search;
   const [items, setItems] = useState<RelationshipOption[]>([]);
   const [more, setMore] = useState(false);
-  const [read, setRead] = useState<{ context: string; error: string | null; loading: boolean }>({ context: "", error: null, loading: true });
+  const [read, setRead] = useState<{ context: string; error: OperatorFeedback | null; loading: boolean }>({ context: "", error: null, loading: true });
   const [revision, setRevision] = useState(0);
   const selectRef = useRef<HTMLSelectElement>(null);
   const loadsStarted = useRef(0);
@@ -50,7 +51,7 @@ function RelationshipLookup({ kind, value, onChange, scope = "", project = "", r
         setMore("more" in result && result.more === true);
       }
       loadsSettled.current = load;
-      setRead({ context: path, loading: false, error: result.kind === "failure" ? result.message : null });
+      setRead({ context: path, loading: false, error: result.kind === "failure" ? result.feedback : null });
     })();
     return () => { mounted = false; };
   }, [path, typeahead, fence, revision]);

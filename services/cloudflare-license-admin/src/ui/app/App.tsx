@@ -18,6 +18,7 @@ import { Search } from "../features/search/Search";
 import { Webhooks } from "../features/webhooks/Webhooks";
 import { OperatorControlsProvider, useOperatorControls } from "../shared/controls";
 import { CoreRefreshProvider } from "../shared/coreRefresh";
+import { FeedbackText } from "../shared/FeedbackText";
 import { UsageTimeseriesProvider } from "../shared/usageTimeseries";
 import { focusWorkspaceTarget } from "../shared/workspaceFocus";
 import "../styles.css";
@@ -81,7 +82,7 @@ function ConsoleShell(): React.ReactElement {
         <div id="workspace-content" className="workspaceContent" tabIndex={-1}>
           <div className="pageHeading"><div><h2 data-workspace-heading tabIndex={-1}>{label}</h2><p>{descriptions[activeTab]}</p></div></div>
           {navigationNotice !== null && <p className="activityMessage" data-tone="info" role="status">{navigationNotice}</p>}
-          {feedback.message && <div className="activityMessage" data-tone={feedback.tone} role={feedback.tone === "error" ? "alert" : "status"}>{feedback.message}</div>}
+          {feedback.message && <div className="activityMessage" data-tone={feedback.tone} role={feedback.tone === "error" ? "alert" : "status"}><FeedbackText feedback={feedback} /></div>}
           {activeTab === "overview" && <div className="quickActions"><button className="primary" onClick={() => navigateTab("entitlements")}>Manage access <span aria-hidden="true">→</span></button><button onClick={() => navigateTab("reports")}>View usage</button></div>}
           <Overview active={activeTab === "overview"} />
           <Entitlements active={activeTab === "entitlements"} navigationIntent={navigationIntent} onNavigationHandled={onNavigationHandled} onCreatePolicy={requestPolicy} draftPolicy={draftPolicy} onDraftPolicyUsed={clearDraftPolicy} />

@@ -18,12 +18,15 @@ const REASON_SENTENCES: Readonly<Record<ProtectedCreateReason, string>> = {
   unknown: "This protected license (entitlement) can't be created with these settings.",
 };
 
-/** The operator's sentence for a refused protected create, or null for any other failure. */
+/**
+ * The operator's sentence for a refused protected create, or null for any other failure. The code
+ * and request id stay under Technical details.
+ */
 export function protectedCreateFailureMessage(failure: { code: string; requestId: string; data?: unknown }): string | null {
   if (failure.code !== "protected_creation_conflict") return null;
   const data = failure.data !== null && typeof failure.data === "object" ? failure.data as { reason?: unknown } : {};
   const reason = PROTECTED_CREATE_REASONS.find((known) => known === data.reason) ?? "unknown";
-  return `${REASON_SENTENCES[reason]} Reference ${failure.requestId}.`;
+  return REASON_SENTENCES[reason];
 }
 
 /** A new protected license fingerprint: 32 random bytes as 64 lowercase hexadecimal characters. */
@@ -55,9 +58,9 @@ export function hasCreatedLicenseData(value: unknown, customerId: string, projec
     typeof row.label === "string" && typeof row.created_at === "number" && Number.isSafeInteger(row.created_at) && row.created_at >= 0;
 }
 
+/** The operator's sentence for a refused license create; the code and request id stay under Technical details. */
 export function licenseCreateFailureMessage(failure: { code: string; requestId: string }): string {
-  const sentence = failure.code === "customer_inactive"
+  return failure.code === "customer_inactive"
     ? "The customer is suspended; reenable the customer before creating a license."
     : failure.code === "not_found" ? "This customer no longer exists; choose another customer." : "The license wasn't created.";
-  return `${sentence} Reference ${failure.requestId}.`;
 }

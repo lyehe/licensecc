@@ -1,6 +1,9 @@
 import React, { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import type { Dispatch, RefObject, SetStateAction } from "react";
+import { FeedbackText } from "./FeedbackText";
+import { codeFeedback } from "./messages";
 import { CONFIRM_MUTATION_UNKNOWN_MESSAGE, CONFIRM_REFRESH_FAILURE_MESSAGE, type ConfirmAction, type ConfirmActionFailure } from "./operatorActions";
+import type { OperatorFeedback } from "./operatorFeedback";
 import type { OperationGate } from "./operationGate";
 import { focusableElements, useFocusRestoration, type OperatorFocus, type PendingFocus } from "./operatorFocus";
 import { TypedConfirmationField, typedConfirmationMatches } from "./TypedConfirmationField";
@@ -20,7 +23,6 @@ export interface ConfirmDialogDependencies {
   gate: OperationGate;
   focus: OperatorFocus;
   notice: ActionNoticeControls;
-  setMessage: Dispatch<SetStateAction<string>>;
 }
 
 export interface ConfirmDialogControls {
@@ -34,7 +36,7 @@ export interface ConfirmDialogControls {
   dialog: React.ReactElement;
 }
 
-export function useConfirmDialog({ gate, focus, notice, setMessage }: ConfirmDialogDependencies): ConfirmDialogControls {
+export function useConfirmDialog({ gate, focus, notice }: ConfirmDialogDependencies): ConfirmDialogControls {
   const { busy, operationOwnerRef, confirmPendingRef, consequencePendingRef, unresolvedOperationRef, setOperationBusy } = gate;
   const { pendingRestoreFocusRef, pendingSuccessFocusRef, focusSoon, capturePendingFocus } = focus;
   const { actionNoticeRef, noticePendingRef, publishActionNotice } = notice;
@@ -44,7 +46,7 @@ export function useConfirmDialog({ gate, focus, notice, setMessage }: ConfirmDia
   const [typedConfirmationInput, setTypedConfirmationInput] = useState("");
   const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(null);
   const [confirmPending, setConfirmPending] = useState(false);
-  const [confirmError, setConfirmError] = useState<string | null>(null);
+  const [confirmError, setConfirmError] = useState<Pick<OperatorFeedback, "message" | "detail"> | null>(null);
   const [confirmUnknown, setConfirmUnknown] = useState(false);
   const [nativeDialogEnabled, setNativeDialogEnabled] = useState(supportsNativeDialog);
   const confirmId = useId().replace(/:/g, "-");
@@ -58,7 +60,7 @@ export function useConfirmDialog({ gate, focus, notice, setMessage }: ConfirmDia
   const typedConfirmationInputRef = useRef<HTMLInputElement | null>(null);
   const cancelButtonRef = useRef<HTMLButtonElement | null>(null);
   const confirmButtonRef = useRef<HTMLButtonElement | null>(null);
-  const errorRef = useRef<HTMLParagraphElement | null>(null);
+  const errorRef = useRef<HTMLDivElement | null>(null);
   const invokingElementRef = useRef<HTMLElement | null>(null);
   const invokingRowKeyRef = useRef<string | null>(null);
   const invokingSectionKeyRef = useRef<string | null>(null);
@@ -135,7 +137,8 @@ export function useConfirmDialog({ gate, focus, notice, setMessage }: ConfirmDia
       const outcome = await action.run({ idempotencyKey });
       if (outcome === undefined || !outcome.ok) {
         const unknown = outcome === undefined || outcome.unknown === true || outcome.retryable === false;
-        const message = outcome?.message ?? (unknown ? CONFIRM_MUTATION_UNKNOWN_MESSAGE : "action_failed");
+        const shown = outcome?.message !== undefined ? { message: outcome.message, detail: outcome.detail }
+          : unknown ? { message: CONFIRM_MUTATION_UNKNOWN_MESSAGE } : codeFeedback("action_failed");
         if (unknown) {
           const focusTarget: PendingFocus = {
             actionTarget: action.successFocusTarget,
@@ -146,13 +149,13 @@ export function useConfirmDialog({ gate, focus, notice, setMessage }: ConfirmDia
           const failure = outcome as ConfirmActionFailure | undefined;
           const reconciliation = failure?.reconciliation ?? action.reconciliation;
           unresolvedOperationRef.current = { idempotencyKey, focusTarget, reconciliation };
-          publishActionNotice({ message, manualRefresh: reconciliation, focusTarget, dismissible: false, unresolvedKey: idempotencyKey });
+          publishActionNotice({ message: shown.message, detail: shown.detail, manualRefresh: reconciliation, focusTarget, dismissible: false, unresolvedKey: idempotencyKey });
         } else {
           // A documented pre-mutation rejection concludes this attempt.  Keep
           // the modal editable, but do not reuse its old idempotency key.
           confirmAttemptKeyRef.current = null;
         }
-        setConfirmError(message);
+        setConfirmError(shown);
         setConfirmUnknown(unknown);
         setConfirmPending(false);
         confirmPendingRef.current = false;
@@ -174,7 +177,6 @@ export function useConfirmDialog({ gate, focus, notice, setMessage }: ConfirmDia
       confirmPendingRef.current = false;
       if (outcome.warning !== undefined || outcome.manualRefresh !== undefined) {
         const message = outcome.warning ?? CONFIRM_REFRESH_FAILURE_MESSAGE;
-        setMessage(message);
         publishActionNotice({ message, manualRefresh: outcome.manualRefresh, focusTarget: successFocusTarget });
       }
       setConfirmAction(null);
@@ -196,13 +198,13 @@ export function useConfirmDialog({ gate, focus, notice, setMessage }: ConfirmDia
       };
       unresolvedOperationRef.current = { idempotencyKey, focusTarget, reconciliation: action.reconciliation };
       publishActionNotice({ message: CONFIRM_MUTATION_UNKNOWN_MESSAGE, manualRefresh: action.reconciliation, focusTarget, dismissible: false, unresolvedKey: idempotencyKey });
-      setConfirmError(CONFIRM_MUTATION_UNKNOWN_MESSAGE);
+      setConfirmError({ message: CONFIRM_MUTATION_UNKNOWN_MESSAGE });
       setConfirmUnknown(true);
       setConfirmPending(false);
       confirmPendingRef.current = false;
       setOperationBusy(false);
     }
-  }, [confirmAction, currentReason, publishActionNotice, setMessage, setOperationBusy, typedConfirmationInput]);
+  }, [confirmAction, currentReason, publishActionNotice, setOperationBusy, typedConfirmationInput]);
 
   // The pending-focus pass must stay ahead of the dialog's own layout effects.
   useFocusRestoration(focus, confirmAction);
@@ -325,7 +327,7 @@ export function useConfirmDialog({ gate, focus, notice, setMessage }: ConfirmDia
       <p id={descriptionId}>{confirmAction.body}</p>
       {confirmAction.details !== undefined && <section className="modalDetails" aria-label="Action consequences">{confirmAction.details}</section>}
       {confirmPending && <p className="modalProgress" role="status" aria-live="polite">Working…</p>}
-      {confirmError !== null && <p ref={errorRef} id={errorId} className="modalError" role="alert" tabIndex={-1}>{confirmError}</p>}
+      {confirmError !== null && <div ref={errorRef} id={errorId} className="modalError" role="alert" tabIndex={-1}><FeedbackText feedback={confirmError} /></div>}
       {confirmAction.typedConfirmation !== undefined && (
         <TypedConfirmationField phrase={confirmAction.typedConfirmation} value={typedConfirmationInput} onChange={setTypedConfirmationInput} disabled={confirmPending} inputRef={typedConfirmationInputRef} />
       )}

@@ -230,3 +230,12 @@ pre, pre code { font-family: ui-monospace, Consolas, monospace; font-size: var(-
 
 .consoleShell.hasOperationNotice { padding-bottom: 272px; }
 .operatorNotice { top: auto; bottom: 16px; max-height: min(240px, 40%); overflow-y: auto; z-index: 40; }
+/* Operator feedback: the sentence first, its result code and request id under Technical details. */
+.feedbackText { overflow-wrap: anywhere; }
+.feedbackDetails { margin-top: 4px; font-size: var(--text-small); color: var(--muted); }
+.feedbackDetails summary { cursor: pointer; width: fit-content; }
+.feedbackDetails code { overflow-wrap: anywhere; }
+.operatorNotice .noticeMessage { flex: 1 1 260px; overflow-wrap: anywhere; }
+.fieldError { display: block; color: var(--danger); font-size: var(--text-small); }
+.formStatus { padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius); background: #1e1e1e; color: var(--muted); margin: 8px 0; }
+.formStatus[data-tone="error"] { background: #302020; color: var(--danger); border-color: #714848; }

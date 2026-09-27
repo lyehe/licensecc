@@ -61,13 +61,18 @@ function collectWorkerCodes() {
     }
     for (const match of source.matchAll(new RegExp(`\\b(?:conflictCode|notFoundCode|mutationFailedCode):\\s*"${CODE}"`, "g"))) add(match[1], origin);
     for (const match of source.matchAll(new RegExp(`\\bcode:\\s*"${CODE}"`, "g"))) add(match[1], origin);
-    for (const match of source.matchAll(new RegExp(`\\bcode\\s*===\\s*"${CODE}"`, "g"))) add(match[1], origin);
+    // A relayed success code is compared before it is passed on (not a `typeof code === "string"` check).
+    for (const match of source.matchAll(new RegExp(`(?<!typeof )\\bcode\\s*===\\s*"${CODE}"`, "g"))) add(match[1], origin);
     for (const match of source.matchAll(new RegExp(`if \\(message === "${CODE}"\\) \\{\\s*return envelope\\(\\s*\\w+\\s*,\\s*message\\b`, "g"))) add(match[1], origin);
     for (const match of source.matchAll(/\[((?:\s*"[a-z_]+",?)+)\s*\]\.includes\((?:message|error\.message)\)/g)) {
       for (const code of match[1].matchAll(/"([a-z_]+)"/g)) add(code[1], origin);
     }
+    // A relayed refusal table maps each code to the only HTTP status it may carry; a map of
+    // counts (such as orders by status) is data, not codes.
     for (const match of source.matchAll(/Record<string,\s*number>>?\s*=\s*\{([^}]*)\}/g)) {
-      for (const code of match[1].matchAll(/\b([a-z][a-z0-9_]*)\s*:/g)) add(code[1], origin);
+      const entries = [...match[1].matchAll(/\b([a-z][a-z0-9_]*)\s*:\s*(\d+)/g)];
+      if (entries.length === 0 || !entries.every((entry) => /^[1-5]\d\d$/.test(entry[2]))) continue;
+      for (const entry of entries) add(entry[1], origin);
     }
   }
   const shared = readFileSync(join(serviceRoot, "src/shared/api.ts"), "utf8");

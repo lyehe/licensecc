@@ -58,6 +58,8 @@ test("a retained unknown outcome keeps its notice, lock and Reconcile control ac
   api.behavior.abortTransition = true;
   await page.route("**/api/admin/**", api.route);
   await page.goto("/#/entitlements");
+  await page.getByRole("button", { name: "Export CSV", exact: true }).click();
+  await expect(page.locator(".activityMessage")).toContainText("Exported entitlements.csv.");
   const row = page.getByRole("region", { name: "Entitlement records", exact: true }).locator("tbody tr").first();
   await rowAction(row, "Disable");
   const dialog = page.getByRole("dialog");
@@ -69,7 +71,8 @@ test("a retained unknown outcome keeps its notice, lock and Reconcile control ac
   const notice = page.locator(".operatorNotice");
   await expect(notice).toContainText("Mutation outcome unknown; do not retry.");
   await expect(notice).toContainText("Other actions are unavailable until reconciliation completes.");
-  // The notice is the one surface for this outcome: the page banner does not repeat it.
+  // The notice is the one surface for this outcome: the page banner neither repeats it nor keeps
+  // the earlier export message beside it.
   await expect(page.locator(".activityMessage")).toHaveCount(0);
 
   await goTo(page, "Overview");
@@ -173,8 +176,8 @@ test("a device limit that is not a number is flagged beside the field and never 
   await create.getByRole("button", { name: "Create entitlement", exact: true }).click();
   await expectFieldError(createLimit, "Enter a whole number of devices from 1 to 1,000,000.");
   expect(api.requests.creates).toBe(0);
-  await create.getByRole("button", { name: "Cancel", exact: true }).click();
   page.once("dialog", (prompt) => prompt.accept());
+  await create.getByRole("button", { name: "Cancel", exact: true }).click();
 
   // The existing entitlement's own device limit form.
   const row = page.getByRole("region", { name: "Entitlement records", exact: true }).locator("tbody tr").first();

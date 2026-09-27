@@ -305,6 +305,31 @@ export function summarizeBatchResults(results: ReadonlyArray<BatchRowResult>): s
   return parts.join(", ");
 }
 
+const ACTION_NAMES: Readonly<Record<EntitlementAction, string>> = { disable: "Disable", reenable: "Reenable", revoke: "Revoke" };
+
+/** Why a row of a finished batch was not changed, in words; any other code reads as "not changed". */
+function batchOutcomeWords(code: string): string {
+  if (code === "revoked_entitlement_is_terminal") return "already revoked";
+  if (code === "invalid_entitlement_id") return "with an invalid ID";
+  if (code === "not_found") return "not found";
+  if (code === "mutation_failed") return "failed";
+  if (code === "stale_transition") return "changed meanwhile";
+  return "not changed";
+}
+
+/** The operator's sentence for a finished batch: how many rows changed and why the others did not. */
+export function batchResultSentence(action: EntitlementAction, results: ReadonlyArray<BatchRowResult>): string {
+  const counts = new Map<string, number>();
+  for (const row of results) {
+    if (!row.ok) counts.set(batchOutcomeWords(row.code), (counts.get(batchOutcomeWords(row.code)) ?? 0) + 1);
+  }
+  const parts = [`${results.filter((row) => row.ok).length} done`, ...[...counts].map(([words, count]) => `${count} ${words}`)];
+  return `${ACTION_NAMES[action]} finished: ${parts.join(", ")}.`;
+}
+
+/** A stale save of the entitlement editor: the entitlement was reloaded and the draft kept. */
+export const ENTITLEMENT_RELOADED_AFTER_STALE = "This license (entitlement) changed after you opened it; its current values were reloaded. Check your changes and save again.";
+
 export function releaseSeatsPath(id: string): string {
   return `/api/admin/entitlements/${encodeURIComponent(id)}/release-seats`;
 }

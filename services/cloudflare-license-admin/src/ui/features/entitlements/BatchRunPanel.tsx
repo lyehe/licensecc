@@ -66,7 +66,7 @@ export function BatchRunPanel({ store, runId, onDismiss }: { store: BatchRunStor
       {state.requestIds.length > 0 && <div><dt>Request IDs</dt><dd><code>{state.requestIds.join(", ")}</code></dd></div>}
       {stopped !== null && <div><dt>{stoppedLabel === "" ? "Idempotency key" : `${stoppedLabel}idempotency key`}</dt><dd><code>{stopped.chunk.idempotencyKey}</code></dd></div>}
       {stopped !== null && <div><dt>{stoppedLabel === "" ? "Entitlement IDs" : `${stoppedLabel}entitlement IDs`}</dt><dd><code>{stopped.chunk.ids.join(", ")}</code></dd></div>}
-      {stopped?.code !== undefined && <div><dt>Refusal</dt><dd><code>{stopped.code} ({stopped.requestId})</code></dd></div>}
+      {stopped?.code !== undefined && <div><dt>Refusal</dt><dd><code>{stopped.code} · {stopped.requestId}</code></dd></div>}
     </dl></details>}
     {onDismiss !== undefined && !state.running && stopped?.kind !== "unknown" && <button type="button" onClick={onDismiss}>Dismiss</button>}
   </section>;

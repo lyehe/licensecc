@@ -7,6 +7,7 @@ import { BatchRunPanel } from "./BatchRunPanel";
 import type { EntitlementBatch } from "./useEntitlementBatch";
 import { focusTargetInRow, type ConfirmActionOutcome, useOperatorControls } from "../../shared/controls";
 import { formatUtcDate } from "../../shared/format";
+import type { OperatorFeedback } from "../../shared/operatorFeedback";
 import { useMediaQuery } from "../../shared/useMediaQuery";
 import { focusWorkspaceTarget } from "../../shared/workspaceFocus";
 import { canEditEntitlement, canRunAction, disableEntitlementConfirm, ENTITLEMENT_DISABLE_REASON_PRESETS, filterAfterShowAll, isSingleEntitlementFilter, releaseSeatsConfirm, revokeEntitlementConfirm, revokeTypedConfirmation, type EntitlementAction, type EntitlementFilter } from "./workflow";
@@ -17,7 +18,7 @@ interface ListProps {
   filter: EntitlementFilter;
   onFilter: (filter: EntitlementFilter) => void;
   loading: boolean;
-  error: string | null;
+  error: OperatorFeedback | null;
   ready: boolean;
   busy: boolean;
   selectedIds: Set<string>;

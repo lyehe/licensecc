@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from "react";
 import type { Dispatch, RefObject, SetStateAction } from "react";
 import type { ConfirmActionRecovery } from "./operatorActions";
+import type { FeedbackDetail } from "./operatorFeedback";
 import type { OperationGate } from "./operationGate";
 import type { PendingFocus } from "./operatorFocus";
 
@@ -11,6 +12,7 @@ import type { PendingFocus } from "./operatorFocus";
 
 export interface ActionNotice {
   message: string;
+  detail?: FeedbackDetail;
   manualRefresh?: ConfirmActionRecovery;
   focusTarget: PendingFocus;
   generation: number;
@@ -33,15 +35,22 @@ export interface ActionNoticeControls {
   acknowledgeNotice: () => void;
 }
 
-export function useActionNotice({ operationOwnerRef, setOperationBusy }: OperationGate): ActionNoticeControls {
+/**
+ * `onPublish` runs whenever a notice is published: the notice is then the one surface for its
+ * outcome, so an earlier page message, which no longer describes the page, can be cleared.
+ */
+export function useActionNotice({ operationOwnerRef, setOperationBusy }: OperationGate, onPublish?: () => void): ActionNoticeControls {
   const [actionNotice, setActionNotice] = useState<ActionNotice | null>(null);
   const [noticePending, setNoticePending] = useState(false);
   const actionNoticeRef = useRef<ActionNotice | null>(null);
   const noticePendingRef = useRef(false);
   const noticeGenerationRef = useRef(0);
+  const onPublishRef = useRef(onPublish);
+  onPublishRef.current = onPublish;
   actionNoticeRef.current = actionNotice;
 
   const publishActionNotice = useCallback((notice: Omit<ActionNotice, "generation">): void => {
+    onPublishRef.current?.();
     const nextNotice = { ...notice, generation: noticeGenerationRef.current + 1 };
     noticeGenerationRef.current = nextNotice.generation;
     actionNoticeRef.current = nextNotice;

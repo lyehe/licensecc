@@ -1,5 +1,7 @@
 import { ENTITLEMENT_BATCH_MAX_IDS } from "../../../shared/api";
+import { describeCode, unknownResultText } from "../../shared/messages";
 import { hasBatchResultsData, mutationFailurePolicies, parseMutationResponse, type MutationPhase } from "../../shared/mutationGuards";
+import type { FeedbackDetail } from "../../shared/operatorFeedback";
 import { batchBody, type BatchRowResult, type EntitlementAction } from "./workflow";
 
 /*
@@ -207,8 +209,14 @@ export function batchStopMessage(state: BatchRunState): string | null {
   const stopped = state.stopped;
   if (stopped === null || stopped.kind === "unknown") return null;
   if (stopped.kind === "not_sent") return batchRunHeadline(state);
-  const refusal = `${stopped.code} (${stopped.requestId})`;
+  const refusal = describeCode(stopped.code ?? "")?.text ?? unknownResultText(stopped.requestId ?? null);
   return state.chunkCount <= 1 ? refusal : `${batchRunHeadline(state)} ${refusal}`;
+}
+
+/** The refusal behind a stopped run, for Technical details; a chunk that was never sent has none. */
+export function batchStopDetail(state: BatchRunState): FeedbackDetail | undefined {
+  const stopped = state.stopped;
+  return stopped?.kind === "failed" && stopped.code !== undefined ? { code: stopped.code, requestId: stopped.requestId ?? null } : undefined;
 }
 
 /** The notice control that replays the unknown chunk under its own key. */

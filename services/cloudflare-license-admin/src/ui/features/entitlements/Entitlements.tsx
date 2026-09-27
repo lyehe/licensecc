@@ -2,9 +2,11 @@ import React, { FormEvent, useCallback, useEffect, useMemo, useRef, useState } f
 
 import type { EntitlementDeviceRecord, EntitlementRecord, Policy } from "../../../shared/api";
 import type { DraftPolicy, NavigationIntent } from "../../app/types";
-import { api, apiFailureDetails, apiFailureMessage, parseExactApiSuccess } from "../../shared/api";
-import { confirmMutationUnknown, confirmSuccessWithRefreshFailure, ConfirmRefreshFailure, EXACT_READ_PROOF, type ConfirmActionOutcome, type ConfirmActionResolution, type ExactReadProof, useContextGeneration, useOperatorControls } from "../../shared/controls";
+import { api, apiFailureDetails, parseExactApiSuccess } from "../../shared/api";
+import { confirmMutationUnknown, confirmSuccessWithRefreshFailure, ConfirmRefreshFailure, EXACT_READ_PROOF, type ConfirmActionOutcome, type ConfirmActionResolution, type ExactReadProof, focusTargetInRow, useContextGeneration, useOperatorControls } from "../../shared/controls";
 import { useCoreRefresh } from "../../shared/coreRefresh";
+import { apiFailureFeedback, codeFeedback, failureFeedback, feedbackWith, refusalOutcome, validationCode } from "../../shared/messages";
+import type { OperatorFeedback } from "../../shared/operatorFeedback";
 import { hasDeviceTransitionData, hasEntitlementListData, hasEntitlementRecordData, hasEntitlementTransitionData, hasPolicyListData, hasReleaseSeatsData, mutationFailurePolicies, parseMutationResponse } from "../../shared/mutationGuards";
 import { downloadCsv, loadAllExactPages, loadMore } from "../../shared/pagination";
 import { useDebouncedValue } from "../../shared/useDebouncedValue";
@@ -23,6 +25,7 @@ import {
   deviceTransitionPath,
   editFormFromEntitlement,
   emptyEntitlementEditForm,
+  ENTITLEMENT_RELOADED_AFTER_STALE,
   emptyEntitlementForm,
   entitlementDetailPath,
   entitlementsPath,
@@ -55,8 +58,10 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
   const [createOpen, setCreateOpen] = useState(false);
   const [extendValidity, setExtendValidity] = useState(false);
   const [editBaseline, setEditBaseline] = useState("");
-  const [listRead, setListRead] = useState<{ context: string; error: string | null }>({ context: "", error: null });
-  const [policyRead, setPolicyRead] = useState<{ context: string; error: string | null }>({ context: "", error: null });
+  const [listRead, setListRead] = useState<{ context: string; error: OperatorFeedback | null }>({ context: "", error: null });
+  const [policyRead, setPolicyRead] = useState<{ context: string; error: OperatorFeedback | null }>({ context: "", error: null });
+  // A created entitlement opens as its focused row once the list shows it.
+  const [revealId, setRevealId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState(emptyEntitlementEditForm);
   const [activePolicies, setActivePolicies] = useState<Policy[]>([]);
@@ -91,7 +96,7 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
   const releaseDetailFence = useRequestFence(`${active ? "active" : "inactive"}\u0000${filterContextKey}\u0000release-detail`);
   const activePoliciesContext = `${active ? "active" : "inactive"}\u0000active-policies`;
   const activePoliciesFence = useRequestFence(activePoliciesContext);
-  const inspection = useEntitlementInspection(active, filterContextKey, setMessage);
+  const inspection = useEntitlementInspection(active, filterContextKey);
   const { deviceEntitlementId, deviceContextKey, deviceGeneration, isDeviceGenerationCurrent, currentDeviceGeneration, currentDeviceContext, currentDevicesRefreshRef } = inspection;
   // "Create policy…" parks the create draft: the guard stands down for that one departure, and the
   // draft stays in this mounted workspace until the operator comes back, with the new policy.
@@ -112,7 +117,7 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
   }, [active, draftPolicy, createOpen, onDraftPolicyUsed]);
   useEffect(() => {
     const editorOpen = createOpen || editingId !== null;
-    if (active && previousEditorOpen.current && !editorOpen) focusWorkspaceTarget();
+    if (active && previousEditorOpen.current && !editorOpen && revealId === null) focusWorkspaceTarget();
     previousEditorOpen.current = editorOpen;
   }, [active, createOpen, editingId]);
 
@@ -130,15 +135,15 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
         return EXACT_READ_PROOF;
       }
     } else {
-      setListRead({ context: filterContextKey, error: apiFailureMessage(response) });
+      // The list's own read notice reports this failure; the page banner does not repeat it.
+      setListRead({ context: filterContextKey, error: apiFailureFeedback(response) });
       if (strict) {
         const failure = apiFailureDetails(response);
         throw new ConfirmRefreshFailure(failure.code, failure.requestId);
       }
-      setMessage(apiFailureMessage(response));
     }
     return null;
-  }, [entitlementsFence, entitlementsUrl, filterContextKey, setMessage]);
+  }, [entitlementsFence, entitlementsUrl, filterContextKey]);
 
   useEffect(() => {
     return registerCoreRefresh(refresh);
@@ -157,9 +162,21 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
     setPolicyRead({ context: activePoliciesContext, error: null });
     const result = await loadAllExactPages<Policy>("/api/admin/policies?status=active", "policies_listed", hasPolicyListData, activePoliciesFence, (policy) => policy.id);
     if (result.kind === "success") setActivePolicies(result.items);
-    else if (result.kind === "failure") { setPolicyRead({ context: activePoliciesContext, error: result.message }); setMessage(result.message); }
-  }, [activePoliciesContext, activePoliciesFence, setMessage]);
+    else if (result.kind === "failure") setPolicyRead({ context: activePoliciesContext, error: result.feedback });
+  }, [activePoliciesContext, activePoliciesFence]);
   useEffect(() => { if (active) void refreshPolicies(); }, [active, refreshPolicies]);
+
+  useEffect(() => {
+    if (revealId === null || !ready) return;
+    setRevealId(null);
+    if (!entitlements.some((item) => item.id === revealId)) {
+      // Not in this list (another filter or page): show it on its own, as a search result is.
+      setFilter({ project: "", feature: "", status: "", id: revealId });
+      return;
+    }
+    const target = focusTargetInRow(`entitlement:${revealId}`, []);
+    focusWorkspaceTarget(typeof target === "function" ? target() : target);
+  }, [revealId, ready, entitlements]);
 
   useEffect(() => {
     if (navigationIntent?.tab !== "entitlements") return;
@@ -186,7 +203,7 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
   async function submitCreate(event: FormEvent): Promise<void> {
     event.preventDefault();
     if (form.policy_id !== "" && (!activePoliciesFence.canLoadMore() || !activePolicies.some((policy) => policy.id === form.policy_id))) {
-      setMessage("policy_not_available");
+      setFeedback(codeFeedback("policy_not_available"));
       return;
     }
     const contextGeneration = filterGeneration;
@@ -197,7 +214,7 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
     try {
       body = form.policy_id !== "" ? normalizeCreateFromPolicy(form) : normalizeEntitlementForm(form);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "invalid_form");
+      setFeedback(codeFeedback(validationCode(error)));
       return;
     }
     const expectedStatus = body.status ?? "active";
@@ -214,15 +231,18 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
       }, mutationFailurePolicies.entitlementCreate, phase),
       onApplied: async (parsed) => {
         if (!isCurrent()) return;
-        setMessage(`${parsed.code} (${parsed.requestId})`);
-        if (isFormGenerationCurrent(capturedFormGeneration)) setForm(emptyEntitlementForm);
+        setFeedback(codeFeedback(parsed.code, parsed.requestId));
+        // The new entitlement opens as its own row in the list (also after a reconciled replay).
+        if (!isFormGenerationCurrent(capturedFormGeneration)) return;
+        setCreateOpen(false);
+        setForm(emptyEntitlementForm);
+        setRevealId(parsed.data.id);
       },
       refresh: async () => await refreshCore(true),
       onUnapplied: (parsed) => {
         if (!isCurrent()) return;
         const refusal = protectedCreateFailureMessage(parsed);
-        if (refusal === null) setMessage(`${parsed.code} (${parsed.requestId})`);
-        else setFeedback({ tone: "error", message: refusal });
+        setFeedback(refusal === null ? failureFeedback(parsed.code, parsed.requestId) : feedbackWith(refusal, parsed.code, parsed.requestId));
       },
       isCurrent,
     });
@@ -257,7 +277,7 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
     try {
       body = normalizeEntitlementPatch(editForm, item);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "invalid_patch");
+      setFeedback(codeFeedback(validationCode(error)));
       return;
     }
     const requestBody = JSON.stringify({ ...body, expected_customer_id: item.customer_id, expected_revocation_seq: item.revocation_seq });
@@ -271,14 +291,17 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
       }, mutationFailurePolicies.entitlementPatch, phase),
       onApplied: async (parsed) => {
         if (!isCurrent()) return;
-        setMessage(`${parsed.code} (${parsed.requestId})`);
+        setFeedback(codeFeedback(parsed.code, parsed.requestId));
         cancelEdit();
       },
       refresh: async () => await refreshCore(true),
       onUnapplied: (parsed) => {
-        if (isCurrent()) {
-        setMessage(`${parsed.code} (${parsed.requestId})`);
-        }
+        if (!isCurrent()) return;
+        if (parsed.code !== "stale_transition") { setFeedback(failureFeedback(parsed.code, parsed.requestId)); return; }
+        // A stale expectation wrote nothing: reload the entitlement so the next save carries its
+        // current state, and keep the operator's draft.
+        void refreshCore();
+        setFeedback(feedbackWith(ENTITLEMENT_RELOADED_AFTER_STALE, parsed.code, parsed.requestId));
       },
       isCurrent,
     });
@@ -332,15 +355,12 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
         return null;
       }
     }, "consequence");
-    if (mutation === undefined) return { ok: false, message: "mutation_busy", retryable: true };
+    if (mutation === undefined) return refusalOutcome("mutation_busy", null);
     if (mutation === null) return confirmMutationUnknown(reconciliation);
     const parsed = parseMutationResponse(mutation, expectedCode, dataGuard, mutationFailurePolicies.entitlementTransition[action], "initial");
     if (parsed.kind === "invalid") return confirmMutationUnknown(reconciliation);
-    if (parsed.kind === "failure") {
-      setMessage(`${parsed.code} (${parsed.requestId})`);
-      return { ok: false, message: `${parsed.code} (${parsed.requestId})`, retryable: true };
-    }
-    setMessage(`${parsed.code} (${parsed.requestId})`);
+    if (parsed.kind === "failure") return refusalOutcome(parsed.code, parsed.requestId);
+    setFeedback(codeFeedback(parsed.code, parsed.requestId));
     setReason("");
     try {
       return (await refreshCore(true)) === EXACT_READ_PROOF
@@ -368,7 +388,7 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
       const failure = apiFailureDetails(response);
       throw new ConfirmRefreshFailure(parsed === null ? failure.code : "invalid_target_identity", parsed === null ? failure.requestId : parsed.requestId);
     }
-    setMessage(parsed === null ? apiFailureMessage(response) : "invalid_api_response (target_identity)");
+    setFeedback(parsed === null ? apiFailureFeedback(response) : codeFeedback("invalid_target_identity", parsed.requestId));
     return null;
   }
 
@@ -420,18 +440,14 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
     };
     const reconciliation = { label: "Reconcile status", run: replay, isCurrent, settlesRetainedAttempt: true, postSuccessRefresh };
     const mutation = await runMutation(postRelease, "consequence");
-    if (mutation === undefined) return { ok: false, message: "mutation_busy", retryable: true };
+    if (mutation === undefined) return refusalOutcome("mutation_busy", null);
     if (mutation === null) return confirmMutationUnknown(reconciliation);
     const parsed = parseMutationResponse(mutation, expectedCode, hasReleaseSeatsData, mutationFailurePolicies.releaseSeats, "initial");
     if (parsed.kind === "invalid") return confirmMutationUnknown(reconciliation);
-    if (parsed.kind === "failure") {
-      const message = `${parsed.code} (${parsed.requestId})`;
-      setMessage(message);
-      return { ok: false, message, retryable: true };
-    }
+    if (parsed.kind === "failure") return refusalOutcome(parsed.code, parsed.requestId);
     expectedEvidence = parsed.data;
     const count = parsed.data.released;
-    setMessage(`released ${count} seat${count === 1 ? "" : "s"} (${parsed.requestId})`);
+    setFeedback(feedbackWith(`Released ${count} seat${count === 1 ? "" : "s"}.`, parsed.code, parsed.requestId, "success"));
     setReason("");
     // The release response deliberately has no entitlement identity. Replaying
     // the immutable request with the same key binds that outcome to this
@@ -453,7 +469,7 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
   }
 
   async function deviceTransition(device: EntitlementDeviceRecord, action: DeviceAction, idempotencyKey: string = crypto.randomUUID()): Promise<ConfirmActionOutcome> {
-    if (deviceEntitlementId === null) return { ok: false, message: "device_entitlement_not_selected" };
+    if (deviceEntitlementId === null) return refusalOutcome("device_entitlement_not_selected", null);
     const entitlementId = deviceEntitlementId;
     const contextGeneration = deviceGeneration;
     let reconciliationGeneration = contextGeneration;
@@ -506,15 +522,12 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
         return null;
       }
     }, "consequence");
-    if (mutation === undefined) return { ok: false, message: "mutation_busy", retryable: true };
+    if (mutation === undefined) return refusalOutcome("mutation_busy", null);
     if (mutation === null) return confirmMutationUnknown(reconciliation);
     const parsed = parseMutationResponse(mutation, expectedCode, dataGuard, mutationFailurePolicies.deviceTransition[action], "initial");
     if (parsed.kind === "invalid") return confirmMutationUnknown(reconciliation);
-    if (parsed.kind === "failure") {
-      setMessage(`${parsed.code} (${parsed.requestId})`);
-      return { ok: false, message: `${parsed.code} (${parsed.requestId})`, retryable: true };
-    }
-    setMessage(`${parsed.code} (${parsed.requestId})`);
+    if (parsed.kind === "failure") return refusalOutcome(parsed.code, parsed.requestId);
+    setFeedback(codeFeedback(parsed.code, parsed.requestId));
     if (action !== "reenable") setReason("");
     try {
       return (await currentDevicesRefreshRef.current()) === EXACT_READ_PROOF
@@ -555,7 +568,7 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
   }
 
   const batch = useEntitlementBatch({
-    selectedIds: selectedVisibleIds, setSelectedIds, runMutation, refreshCore, currentReason, setMessage, setFeedback, setReason,
+    selectedIds: selectedVisibleIds, setSelectedIds, runMutation, refreshCore, currentReason, setFeedback, setReason,
     recoveryContext: () => {
       let generation = filterGeneration;
       return { isCurrent: () => isFilterGenerationCurrent(generation), capture: () => { if (currentFilterContext() === filterContextKey) generation = currentFilterGeneration(); } };
@@ -573,7 +586,7 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
       {editingId !== null && <ReadNotice loading={!ready && listError === null} error={listError} hasData={visibleEntitlements.length > 0} label="entitlements" onRetry={() => void refresh()} />}
       {createOpen || editingItem ? <EntitlementEditor key={createOpen ? "create" : editingId} form={createOpen ? form : editForm} item={createOpen ? undefined : editingItem} extendValidity={extendValidity} busy={busy} locked={operationLocked || (!createOpen && (!ready || editingItem?.status === "revoked"))} lockMessage={operationLocked ? undefined : editingItem?.status === "revoked" ? "Revocation is permanent. This entitlement can no longer be edited." : "Refresh entitlements successfully before changing or saving this draft."} policies={activePoliciesFence.isSettled() ? activePolicies : []} policiesReady={activePoliciesFence.canLoadMore()} policiesError={policyError} onRetryPolicies={() => void refreshPolicies()} onCreatePolicy={createOpen && onCreatePolicy !== undefined ? () => setPolicyDetour("leaving") : undefined} onChange={(patch) => createOpen ? setForm((previous) => ({ ...previous, ...patch })) : setEditForm((previous) => ({ ...previous, ...patch }))} onSubmit={createOpen ? submitCreate : (event) => submitPatch(event, editingItem!)} onCancel={closeEditor} /> : <div className="emptyState"><p>{ready ? "This entitlement is no longer in the current list. Return to the list to select a current record." : "Waiting for the current entitlement record."}</p><button type="button" disabled={busy} onClick={closeEditor}>Back to entitlements</button></div>}
     </> : <>
-      <EntitlementList scoped={scopedGrant !== undefined} items={visibleEntitlements} filter={filter} onFilter={setFilter} loading={!ready && listError === null} error={listError} ready={ready} busy={busy} selectedIds={selectedIds} selectedCount={selectedCount} allSelected={allSelected} onSelect={toggleSelected} onSelectAll={toggleSelectAll} onClearSelection={() => setSelectedIds(new Set())} onCreate={() => { requestLeave(() => { cancelEdit(); setForm({ ...emptyEntitlementForm, project:filter.project || emptyEntitlementForm.project, feature:filter.feature || emptyEntitlementForm.feature, customer_id:filter.customer_id || "" }); setCreateOpen(true); }); }} onEdit={beginEdit} onRetry={() => void refresh()} onExport={() => void downloadCsv(entitlementsUrl, "entitlements.csv", runMutation, setMessage)} onLoadMore={visibleEntitlementsCursor === null ? null : () => void loadMore(entitlementsUrl, visibleEntitlementsCursor, visibleEntitlements, setEntitlements, setEntitlementsCursor, setMessage, hasEntitlementListData, "entitlements_listed", entitlementsFence, (entitlement) => entitlement.id)} onTransition={transition} onReleaseSeats={releaseSeats} batch={batch} bulkConfirmBody={bulkConfirmBody} isCurrent={() => isFilterGenerationCurrent(filterGeneration)} deviceEntitlementId={deviceEntitlementId} meterEntitlementId={inspection.meterEntitlementId} onDevices={inspection.toggleDevices} onMeter={inspection.toggleMeter} onHistory={(item) => navigate({ tab: "events", filter: { entitlement_id: item.id } })} />
+      <EntitlementList scoped={scopedGrant !== undefined} items={visibleEntitlements} filter={filter} onFilter={setFilter} loading={!ready && listError === null} error={listError} ready={ready} busy={busy} selectedIds={selectedIds} selectedCount={selectedCount} allSelected={allSelected} onSelect={toggleSelected} onSelectAll={toggleSelectAll} onClearSelection={() => setSelectedIds(new Set())} onCreate={() => { requestLeave(() => { cancelEdit(); setForm({ ...emptyEntitlementForm, project:filter.project || emptyEntitlementForm.project, feature:filter.feature || emptyEntitlementForm.feature, customer_id:filter.customer_id || "" }); setCreateOpen(true); }); }} onEdit={beginEdit} onRetry={() => void refresh()} onExport={() => void downloadCsv(entitlementsUrl, "entitlements.csv", runMutation, setFeedback)} onLoadMore={visibleEntitlementsCursor === null ? null : () => void loadMore(entitlementsUrl, visibleEntitlementsCursor, visibleEntitlements, setEntitlements, setEntitlementsCursor, setFeedback, hasEntitlementListData, "entitlements_listed", entitlementsFence, (entitlement) => entitlement.id)} onTransition={transition} onReleaseSeats={releaseSeats} batch={batch} bulkConfirmBody={bulkConfirmBody} isCurrent={() => isFilterGenerationCurrent(filterGeneration)} deviceEntitlementId={deviceEntitlementId} meterEntitlementId={inspection.meterEntitlementId} onDevices={inspection.toggleDevices} onMeter={inspection.toggleMeter} onHistory={(item) => navigate({ tab: "events", filter: { entitlement_id: item.id } })} />
       <EntitlementInspectors inspection={inspection} busy={busy} onDeviceTransition={deviceTransition} />
     </>}
   </section>;

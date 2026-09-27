@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import type { AdminRoute, AdminTab, CatalogView, CustomerAccessRoute, CustomerAccessView, CustomerSection, ManagedGrant, NavigationIntent, NavigationTarget } from "./types";
 import { hashForRoute, managesGrant, parseAdminHash, routeForTab, routeForTarget, targetForRoute, withoutManagedGrant } from "./navigationState";
 import { useOperatorControls } from "../shared/controls";
+import { NO_FEEDBACK } from "../shared/operatorFeedback";
 import { focusWorkspaceTarget, usableFocusTarget } from "../shared/workspaceFocus";
 
 interface NavigationGuard {
@@ -41,6 +42,8 @@ interface NavigationContextValue {
   navigationNotice: string | null;
   navigationIntent: NavigationIntent | null;
   navigationVersion: number;
+  /** Advances only when navigation lands on a different route; page-local status lines clear on it. */
+  routeVersion: number;
   onNavigationHandled: (intent: NavigationIntent) => void;
   navigate: (target: NavigationTarget) => boolean;
   navigateTab: (tab: AdminTab) => boolean;
@@ -91,6 +94,7 @@ export function AdminNavigationProvider({ children }: { children: ReactNode }): 
   const [navigationNotice, setNavigationNotice] = useState<string | null>(initial.notice);
   const [navigationIntent, setNavigationIntent] = useState<NavigationIntent | null>({ ...targetForRoute(initial.route), id: 1 });
   const [navigationVersion, setNavigationVersion] = useState(0);
+  const [routeVersion, setRouteVersion] = useState(0);
   const nextKey = useRef(1);
   const intentId = useRef(1);
   const session = useRef(crypto.randomUUID());
@@ -100,7 +104,7 @@ export function AdminNavigationProvider({ children }: { children: ReactNode }): 
   const pendingFocus = useRef<NavigationEntry | "heading" | null>(null);
   const restoringKey = useRef<number | null>(null);
   const seenBrowserEntry = useRef("");
-  const { modalActive } = useOperatorControls();
+  const { modalActive, setFeedback } = useOperatorControls();
   const modalActiveRef = useRef(modalActive);
   modalActiveRef.current = modalActive;
 
@@ -140,6 +144,12 @@ export function AdminNavigationProvider({ children }: { children: ReactNode }): 
   }, []);
 
   const applyEntry = useCallback((next: NavigationEntry, notice: string | null, restore: boolean): void => {
+    // A page message belongs to the page that showed it. The operator notice is not one: a retained
+    // outcome keeps its notice, lock and recovery control wherever the operator goes.
+    if (hashForRoute(next.route) !== hashForRoute(entry.current.route)) {
+      setFeedback(NO_FEEDBACK);
+      setRouteVersion((version) => version + 1);
+    }
     entry.current = next;
     entries.current.set(next.key, next);
     // Bound the in-memory map (and the elements its saved focus holds); a dropped entry is resolved
@@ -152,7 +162,7 @@ export function AdminNavigationProvider({ children }: { children: ReactNode }): 
     setNavigationIntent(next.target === null ? null : { ...next.target, id: intentId.current });
     pendingFocus.current = restore ? next : "heading";
     setNavigationVersion((version) => version + 1);
-  }, []);
+  }, [setFeedback]);
 
   const transition = useCallback((nextRoute: AdminRoute, target: NavigationTarget | null = null, grant: ManagedGrant | null = null): boolean => {
     const same = hashForRoute(nextRoute) === hashForRoute(entry.current.route);
@@ -345,7 +355,7 @@ export function AdminNavigationProvider({ children }: { children: ReactNode }): 
     route, selectedCustomerId: route.tab === "customers" ? route.customerId : null, customerSection: route.tab === "customers" ? route.section : "overview",
     customerAccess, managedGrant: customerAccess?.manage === true ? managedGrant : null,
     catalogView: route.tab === "plans" ? route.view : "plans", catalogPlan: route.tab === "plans" ? route.plan ?? null : null,
-    navigationNotice, navigationIntent, navigationVersion, onNavigationHandled, navigate, navigateTab, rememberFilters, openCustomer, showCustomerList, setCustomerSection,
+    navigationNotice, navigationIntent, navigationVersion, routeVersion, onNavigationHandled, navigate, navigateTab, rememberFilters, openCustomer, showCustomerList, setCustomerSection,
     setCustomerAccess, openManagedGrant, closeManagedGrant, setCatalogView, setCatalogPlan, resolveMissingDrillDown, requestLeave, registerGuard,
   }}>{children}</NavigationContext.Provider>;
 }

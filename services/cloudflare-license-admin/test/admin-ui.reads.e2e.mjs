@@ -1135,7 +1135,9 @@ test("admin UI keeps an exact ordinary success in GET-only recovery after a 5xx 
   await form.getByRole("button", { name: "Create endpoint" }).click();
   await expect.poll(() => api.requests.webhookCreateAttempts.length).toBe(1);
   await expect(page.locator(".operatorNotice")).toContainText("Action succeeded; status refresh failed");
-  await expect(form.getByRole("button", { name: "Create endpoint" })).toBeDisabled();
+  // The known write opened its endpoint; the editor stays locked until the status read succeeds.
+  await expect(form.getByLabel("URL (required)")).toHaveValue("https://hooks.example.test/exact-refresh");
+  await expect(form.getByRole("button", { name: "Save changes" })).toBeDisabled();
   await page.getByRole("button", { name: "Refresh status" }).click();
   await expect(page.locator(".operatorNotice")).toHaveCount(0);
   expect(api.requests.webhookCreateAttempts).toHaveLength(1);

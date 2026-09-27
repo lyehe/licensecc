@@ -2,9 +2,12 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 
 import { useAdminNavigation } from "../../app/navigation";
 import type { NavigationIntent } from "../../app/types";
-import { api, apiFailureMessage, parseExactApiSuccess } from "../../shared/api";
+import { api, parseExactApiSuccess } from "../../shared/api";
 import { useContextGeneration, useOperatorControls } from "../../shared/controls";
+import { TechnicalDetails } from "../../shared/FeedbackText";
 import { formatEpoch, shortHash } from "../../shared/format";
+import { apiFailureFeedback } from "../../shared/messages";
+import type { OperatorFeedback } from "../../shared/operatorFeedback";
 import { hasLicenseListData } from "../../shared/mutationGuards";
 import { loadMore } from "../../shared/pagination";
 import { useDebouncedValue } from "../../shared/useDebouncedValue";
@@ -28,9 +31,9 @@ export function Licenses({ active, navigationIntent, onNavigationHandled }: {
   const [licensesSnapshot, setLicenses] = useState<LicenseListItem[]>([]);
   const [licenseFilter, setLicenseFilter] = useState<LicenseListFilter>({ project: "", customer_id: "", q: "" });
   const [licensesCursorSnapshot, setLicensesCursor] = useState<string | null>(null);
-  const [listFailure, setListFailure] = useState<string | null>(null);
+  const [listFailure, setListFailure] = useState<OperatorFeedback | null>(null);
   const { navigate, openCustomer, rememberFilters } = useAdminNavigation();
-  const { busy: requestBusy, operationLocked, setMessage } = useOperatorControls();
+  const { busy: requestBusy, operationLocked, setFeedback } = useOperatorControls();
   const busy = requestBusy || operationLocked;
   const licensesUrl = useMemo(() => licensesPath(licenseFilter), [licenseFilter]);
   // The filter alone drives reloads; active only gates whether one may fire, so leaving and
@@ -56,9 +59,7 @@ export function Licenses({ active, navigationIntent, onNavigationHandled }: {
       }
       return;
     }
-    const failure = apiFailureMessage(response);
-    setListFailure(failure);
-    setMessage(failure);
+    setListFailure(apiFailureFeedback(response));
   }
 
   useEffect(() => {
@@ -100,13 +101,13 @@ export function Licenses({ active, navigationIntent, onNavigationHandled }: {
         <button type="button" disabled={licenseFilter.project === "" && licenseFilter.customer_id === "" && licenseFilter.q === ""} onClick={() => setLicenseFilter({ project: "", customer_id: "", q: "" })}>Clear filters</button>
       </div>
       {loading && <p className="readState" role="status">Loading licenses…</p>}
-      {listFailure !== null && <div className="readState error" role="alert"><p>Could not load licenses: {listFailure}</p><button type="button" onClick={() => void refreshLicenses()}>Retry</button></div>}
+      {listFailure !== null && <div className="readState error" role="alert"><p>Could not load licenses. {listFailure.message}</p><button type="button" onClick={() => void refreshLicenses()}>Retry</button><TechnicalDetails detail={listFailure.detail} /></div>}
       {licenses.length === 0 && licensesFence.isSettled() && <div className="emptyState"><h3>No licenses found</h3><p>Try clearing or changing the filters.</p></div>}
       {licenses.length > 0 && <>
         <div className="desktopRecords tableScroll" aria-busy={loading || updating}><table><thead><tr><th>License</th><th>Customer</th><th>Project</th><th>Label</th><th>Created</th><th>Related records</th></tr></thead><tbody>{licenses.map((item) => <tr key={item.id}><td><code>{item.id}</code></td><td>{item.customer_id === null ? "—" : <button type="button" onClick={() => openCustomer(item.customer_id!)}>{shortHash(item.customer_id)}</button>}</td><td>{item.project}</td><td>{item.label || "—"}</td><td>{formatEpoch(item.created_at)}</td><td><button type="button" onClick={() => navigate({ tab: "entitlements", filter: { license_id: item.id, customer_id: item.customer_id ?? "", project: "", feature: "", status: "" } })}>View entitlements</button></td></tr>)}</tbody></table></div>
         <div className="recordCards" aria-busy={loading || updating}>{licenses.map((item) => <article className="recordCard" key={item.id}><h3>{item.label || item.id}</h3><code>{item.id}</code><p>Project: {item.project}</p><p>Created {formatEpoch(item.created_at)}</p><div className="actions">{item.customer_id !== null && <button type="button" onClick={() => openCustomer(item.customer_id!)}>Open customer</button>}<button type="button" onClick={() => navigate({ tab: "entitlements", filter: { license_id: item.id, customer_id: item.customer_id ?? "", project: "", feature: "", status: "" } })}>View entitlements</button></div></article>)}</div>
       </>}
-      {licensesFence.isSettled() && <div className="tableFooter"><span className="muted">{licenses.length} shown</span>{licensesCursor !== null && <button type="button" disabled={busy} onClick={() => void loadMore(licensesUrl, licensesCursor, licenses, setLicenses, setLicensesCursor, setMessage, hasLicenseListData, "licenses_listed", licensesFence, (license) => license.id)}>Load more</button>}</div>}
+      {licensesFence.isSettled() && <div className="tableFooter"><span className="muted">{licenses.length} shown</span>{licensesCursor !== null && <button type="button" disabled={busy} onClick={() => void loadMore(licensesUrl, licensesCursor, licenses, setLicenses, setLicensesCursor, setFeedback, hasLicenseListData, "licenses_listed", licensesFence, (license) => license.id)}>Load more</button>}</div>}
     </section>
   );
 }

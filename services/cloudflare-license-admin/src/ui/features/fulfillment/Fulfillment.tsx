@@ -3,10 +3,12 @@ import React, { useEffect, useMemo, useState } from "react";
 import type { NavigationIntent } from "../../app/types";
 import { useAdminNavigation } from "../../app/navigation";
 import { ReadNotice } from "../../shared/ReadNotice";
-import { api, apiFailureMessage, parseExactApiSuccess } from "../../shared/api";
+import { api, parseExactApiSuccess } from "../../shared/api";
 import { BarSparkChart } from "../../shared/charts";
 import { useOperatorControls } from "../../shared/controls";
 import { formatEpoch } from "../../shared/format";
+import { apiFailureFeedback, codeFeedback } from "../../shared/messages";
+import type { OperatorFeedback } from "../../shared/operatorFeedback";
 import { hasOrdersListData } from "../../shared/mutationGuards";
 import { isRetryableAppendFailure, pageAppendError, withCursor } from "../../shared/pagination";
 import { useRequestFence } from "../../shared/requestFence";
@@ -50,11 +52,11 @@ export function Fulfillment({ active, navigationIntent, onNavigationHandled }: {
   onNavigationHandled: (intent: NavigationIntent) => void;
 }): React.ReactElement | null {
   const [retryRevision, setRetryRevision] = useState(0);
-  const [readState, setReadState] = useState<{ key: string; loading: boolean; error: string | null }>({ key: "", loading: true, error: null });
+  const [readState, setReadState] = useState<{ key: string; loading: boolean; error: OperatorFeedback | null }>({ key: "", loading: true, error: null });
   const [ordersSnapshot, setOrders] = useState<OrdersResponse | null>(null);
   const [orderFilter, setOrderFilter] = useState<OrderListFilter>({ status: "", subscription_id: "" });
   const { rememberFilters } = useAdminNavigation();
-  const { busy: requestBusy, operationLocked, setMessage } = useOperatorControls();
+  const { busy: requestBusy, operationLocked, setFeedback } = useOperatorControls();
   const busy = requestBusy || operationLocked;
   const { timeseries, timeseriesRange, setTimeseriesRange, timeseriesLoading, timeseriesError, retryTimeseries } = useUsageTimeseries(active);
   const ordersUrl = useMemo(() => ordersPath(orderFilter), [orderFilter]);
@@ -83,9 +85,9 @@ export function Fulfillment({ active, navigationIntent, onNavigationHandled }: {
       if (parsed !== null) {
         if (ordersFence.settle(ticket, parsed.data.next_cursor ?? null)) setOrders(parsed.data);
       }
-      else { setReadState({ key: ordersUrl, loading: false, error: apiFailureMessage(response) }); setMessage(apiFailureMessage(response)); }
+      else setReadState({ key: ordersUrl, loading: false, error: apiFailureFeedback(response) });
     })();
-  }, [active, ordersFence, ordersUrl, retryRevision, setMessage]);
+  }, [active, ordersFence, ordersUrl, retryRevision]);
 
   async function loadMoreOrders(): Promise<void> {
     const settledOrders = ordersFence.canLoadMore() ? ordersSnapshot : null;
@@ -104,11 +106,11 @@ export function Fulfillment({ active, navigationIntent, onNavigationHandled }: {
         const nextCursor = parsed.data.next_cursor ?? null;
         const appendError = pageAppendError(baseItems, parsed.data.items, (item) => item.event_id);
         if (appendError !== null) {
-          setMessage(`invalid_api_response (${appendError})`);
+          setFeedback(codeFeedback(appendError));
           setOrders((previous) => ordersFence.isLoadMoreCurrent(ticket) && previous !== null && previous.next_cursor === cursor ? { ...previous, next_cursor: null } : previous);
           ordersFence.retireLoadMore(ticket);
         } else if (!ordersFence.acceptsNextCursor(ticket, nextCursor)) {
-          setMessage("invalid_api_response (repeated_cursor)");
+          setFeedback(codeFeedback("repeated_cursor"));
           setOrders((previous) => ordersFence.isLoadMoreCurrent(ticket) && previous !== null && previous.next_cursor === cursor ? { ...previous, next_cursor: null } : previous);
           ordersFence.retireLoadMore(ticket);
         } else {
@@ -117,7 +119,7 @@ export function Fulfillment({ active, navigationIntent, onNavigationHandled }: {
           ordersFence.finishLoadMore(ticket, true, nextCursor);
         }
       } else {
-        setMessage(apiFailureMessage(response));
+        setFeedback(apiFailureFeedback(response));
         if (!isRetryableAppendFailure(response)) {
           setOrders((previous) => ordersFence.isLoadMoreCurrent(ticket) && previous !== null && previous.next_cursor === cursor ? { ...previous, next_cursor: null } : previous);
           ordersFence.retireLoadMore(ticket);

@@ -1,5 +1,6 @@
 import type { WebhookEndpoint, WebhookEndpointInput, WebhookEndpointPatch } from "../../../shared/api";
 import { WEBHOOK_EVENT_TYPES } from "@licensecc/cloudflare-runtime/webhooks/event_types";
+import { fieldForCode } from "../../shared/fieldErrors";
 
 export interface WebhookFilter {
   status: string;
@@ -212,25 +213,40 @@ function normalizeWebhookScope(value: string, label: string): string {
     return "";
   }
   if (trimmed.length > MAX_WEBHOOK_SCOPE_SIZE || trimmed.includes(",") || hasControlChars(trimmed)) {
-    throw new Error(`${label}_invalid`);
+    throw new Error(`${label}_must_be_a_single_value`);
   }
   return trimmed;
 }
 
+const WEBHOOK_FIELD_CODES: Readonly<Record<string, keyof WebhookFormState>> = {
+  url_must_be_a_single_https_url: "url",
+  url_must_be_https: "url",
+  invalid_url: "url",
+  description_invalid: "description",
+  event_types_invalid: "event_types",
+  event_types_token_has_whitespace: "event_types",
+  invalid_event_types: "event_types",
+};
+
+/** The webhook editor field a validation or refusal code belongs to; null keeps it with the whole form. */
+export function webhookFieldForCode(code: string): keyof WebhookFormState | null {
+  return fieldForCode(code, ["scope_project", "scope_customer_id"], WEBHOOK_FIELD_CODES) as keyof WebhookFormState | null;
+}
+
 /**
- * Human copy for a 400 invalid_event_types response (the checkboxes prevent an operator from
- * picking an unknown token, so this is defense-in-depth -- e.g. an out-of-date tab). Shows the
- * server's own `data.allowed` list rather than the raw code, per the same rule that keeps a
- * snake_case code out of customer-facing text.
+ * The sentence for a 400 invalid_event_types response (the checkboxes prevent an operator from
+ * picking an unknown token, so this is defense-in-depth -- e.g. an out-of-date tab), or null when
+ * the response names no allowed list. Shows the server's own `data.allowed` list; the code and
+ * request id stay under Technical details.
  */
-export function webhookEventTypesErrorMessage(data: unknown, requestId: string): string {
+export function webhookEventTypesErrorMessage(data: unknown): string | null {
   const allowed = data !== null && typeof data === "object" ? (data as Record<string, unknown>).allowed : null;
   if (allowed === null || typeof allowed !== "object") {
-    return `invalid_event_types (${requestId})`;
+    return null;
   }
   const groups = allowed as Record<string, unknown>;
   const parts = (["entitlement", "customer", "order"] as const)
     .filter((source) => Array.isArray(groups[source]))
     .map((source) => `${WEBHOOK_EVENT_SOURCE_LABELS[source]}: ${(groups[source] as unknown[]).join(", ")}`);
-  return `One or more event types aren't recognized. Allowed event types — ${parts.join(" · ")}. Reference ${requestId}.`;
+  return `One or more event types aren't recognized. Allowed event types — ${parts.join(" · ")}.`;
 }

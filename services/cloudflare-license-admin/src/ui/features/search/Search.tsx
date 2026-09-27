@@ -3,14 +3,17 @@ import type { FormEvent } from "react";
 
 import type { NavigationTarget } from "../../app/types";
 import { hashForTarget } from "../../app/navigationState";
-import { api, apiFailureMessage, parseExactApiSuccess } from "../../shared/api";
+import { api, parseExactApiSuccess } from "../../shared/api";
 import { useOperatorControls } from "../../shared/controls";
+import { FeedbackText } from "../../shared/FeedbackText";
+import { apiFailureFeedback } from "../../shared/messages";
+import type { OperatorFeedback } from "../../shared/operatorFeedback";
 import { hasSearchData } from "../../shared/mutationGuards";
 import { useRequestFence } from "../../shared/requestFence";
 import { focusWorkspaceTarget } from "../../shared/workspaceFocus";
 import { navigationForResult, searchPath, type SearchResult } from "./workflow";
 
-type SearchState = { kind: "idle" } | { kind: "loading" } | { kind: "error"; message: string } | { kind: "ready" };
+type SearchState = { kind: "idle" } | { kind: "loading" } | { kind: "error"; feedback: OperatorFeedback } | { kind: "ready" };
 
 export function Search({ onNavigate, onOpen, closeSignal, hiddenByMenu }: {
   onNavigate: (target: NavigationTarget) => boolean;
@@ -56,7 +59,7 @@ export function Search({ onNavigate, onOpen, closeSignal, hiddenByMenu }: {
     if (parsed !== null && searchFence.settle(ticket)) {
       setSearchResults(parsed.data.results);
       setState({ kind: "ready" });
-    } else setState({ kind: "error", message: apiFailureMessage(response) });
+    } else setState({ kind: "error", feedback: apiFailureFeedback(response) });
   }
 
   const searchResults = searchFence.isSettled() ? searchResultsSnapshot : [];
@@ -80,7 +83,7 @@ export function Search({ onNavigate, onOpen, closeSignal, hiddenByMenu }: {
           <p className="muted">Search text stays in this session and is not included in workspace links.</p>
         </form>
         {state.kind === "loading" && <p role="status">Searching records…</p>}
-        {state.kind === "error" && <div className="searchError" role="alert"><p>Search could not be completed. Try searching again.</p><details><summary>Technical details</summary><p>{state.message}</p></details></div>}
+        {state.kind === "error" && <div className="searchError" role="alert"><p>Search could not be completed. Try searching again.</p><FeedbackText feedback={state.feedback} /></div>}
         {state.kind === "ready" && <section className="searchResults" aria-label="Search results">
           <h3 role="status">{searchResults.length} result{searchResults.length === 1 ? "" : "s"}</h3>
           {searchResults.length === 0 ? <p className="muted searchEmpty">No matches. Try another name or identifier.</p> : (["customer", "license", "entitlement", "order"] as const)

@@ -43,7 +43,7 @@ test("admin UI renders Workstream F charts, expiring panel, validity indicators,
   expect(api.requests.releaseSeats[0].reason).toBe("dead machine");
   expect(api.requests.releaseSeats[1].idempotencyKey).toBe(api.requests.releaseSeats[0].idempotencyKey);
   expect(api.requests.releaseSeats[1].rawBody).toBe(api.requests.releaseSeats[0].rawBody);
-  await expect(page.getByText(/released 2 seats/)).toBeVisible();
+  await expect(page.getByText("Released 2 seats.")).toBeVisible();
 
   // REPORTS TAB: the inline-SVG charts render (aria-labelled), plus the expiring-soon panel rows.
   if (await page.getByRole("button", { name: "Activity", exact: true }).getAttribute("aria-expanded") === "false") await page.getByRole("button", { name: "Activity", exact: true }).click();
@@ -375,7 +375,7 @@ test("admin UI typed failures keep consequence dialogs open and restore focus", 
   const retryableKey = api.requests.transitions[0].idempotencyKey;
   await expect(dialog).toBeVisible();
   await expect(dialog).toHaveAttribute("aria-busy", "false");
-  await expect(dialog.locator(".modalError")).toContainText("reason_required");
+  await expect(dialog.locator(".modalError")).toContainText("Enter a reason.");
   await expect(dialog.locator(".modalError")).toBeFocused();
   expect(await page.evaluate(() => document.activeElement === document.body)).toBe(false);
   await dialog.getByRole("button", { name: "Confirm" }).click();

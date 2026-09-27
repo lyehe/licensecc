@@ -1,4 +1,5 @@
 import type { ExpiryStrategy, Policy, PolicyInput, PolicyPatch, PolicyType, TrialExpirationBasis } from "../../../shared/api";
+import { fieldForCode } from "../../shared/fieldErrors";
 
 export interface PolicyFilter {
   project: string;
@@ -136,6 +137,19 @@ export function normalizePolicyPatch(form: PolicyFormState): PolicyPatch {
 }
 
 const MAX_POLICY_DURATION_SECONDS = 3_153_600_000;
+
+const POLICY_NUMBER_FIELDS = ["valid_from_offset_sec", "duration_sec", "assertion_ttl_seconds", "pool_size", "max_active_devices", "max_borrow_sec", "meter_quota", "meter_period_sec", "trial_duration_sec"] as const;
+const POLICY_FIELD_CODES: Readonly<Record<string, keyof PolicyFormState>> = {
+  policy_name_conflict: "name",
+  floating_pool_size_must_be_at_least_1: "pool_size",
+  node_locked_pool_size_must_be_0: "pool_size",
+  notes_must_be_at_most_1000_chars: "notes",
+};
+
+/** The policy editor field a validation or refusal code belongs to; null keeps it with the whole form. */
+export function policyFieldForCode(code: string): keyof PolicyFormState | null {
+  return fieldForCode(code, POLICY_NUMBER_FIELDS, POLICY_FIELD_CODES) as keyof PolicyFormState | null;
+}
 
 function parseBoundedInteger(value: number, label: string, min: number, max: number): number {
   const parsed = Number(value);

@@ -106,7 +106,7 @@ repository-owned third-party `src/library/ini/` sources are excluded.
 | `services/cloudflare-license-admin/src/worker/openapi/components.ts` | 1,266 | Admin contract components; API-contract ownership stays with the admin deployable. |
 | `services/cloudflare-licensing-backend/src/fulfillment/order_ingest.mjs` | 1,147 | Backend order-ingest bounded context; persistence and exactly-once tests stay backend-owned. |
 | `services/cloudflare-licensing-backend/src/routes/verify.ts` | 933 | Backend verification route and abuse controls; it is not a shared package concern. |
-| `services/cloudflare-license-admin/src/ui/features/catalog/Catalog.tsx` | 729 | Catalog list/mutation coordinator; consequence-heavy import/projection workflows and presentation stay in sibling catalog modules. |
+| `services/cloudflare-license-admin/src/ui/features/catalog/Catalog.tsx` | 731 | Catalog list/mutation coordinator; consequence-heavy import/projection workflows and presentation stay in sibling catalog modules. |
 | `services/cloudflare-customer-portal/src/ui/features/devices/DevicesFeature.tsx` | 378 | Portal device/floating-seat workflow; portal-local state and consequences remain feature-owned. |
 | `services/cloudflare-d1-backup/src/core.ts` | 506 | D1 export/R2 backup orchestration; backup remains independently deployable. |
 
@@ -116,11 +116,11 @@ Composition roots remain intentionally small. Current counts are:
 | --- | ---: | ---: |
 | Backend `src/index.ts` / `src/app.ts` | 4 | 108 |
 | Admin Worker `src/worker/index.ts` / `src/worker/app.ts` | 1 | 56 |
-| Admin UI `src/ui/main.tsx` / `src/ui/app/App.tsx` | 6 | 100 |
+| Admin UI `src/ui/main.tsx` / `src/ui/app/App.tsx` | 6 | 101 |
 | Portal Worker `src/worker/index.ts` / `src/worker/app.ts` | 2 | 84 |
 | Portal UI `src/ui/main.tsx` / `src/ui/app/App.tsx` | 6 | 317 |
 
-Current production-source totals are 22,517 lines for license-admin, 8,889 lines for licensing-backend, 8,360 lines for customer-portal, and 1,348 lines for D1-backup. These counts include tracked and non-ignored, untracked
+Current production-source totals are 23,232 lines for license-admin, 8,889 lines for licensing-backend, 8,360 lines for customer-portal, and 1,348 lines for D1-backup. These counts include tracked and non-ignored, untracked
 TypeScript, TSX, JavaScript, and MJS under each service's `src` tree. They are
 evidence for responsibility review, not a reason
 to move code without a behavioral or ownership boundary.

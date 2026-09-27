@@ -5,6 +5,7 @@ import type {
   CatalogImportManifest,
   CatalogImportPreviewResponse,
 } from "../../../shared/api";
+import { useAdminNavigation } from "../../app/navigation";
 import { api } from "../../shared/api";
 import {
   confirmMutationUnknown,
@@ -18,6 +19,8 @@ import {
   useContextGeneration,
   useOperatorControls,
 } from "../../shared/controls";
+import { type FormFeedback, useFormFeedback } from "../../shared/fieldErrors";
+import { codeFeedback, failureFeedback, refusalOutcome } from "../../shared/messages";
 import {
   hasCatalogImportApplyData,
   hasCatalogImportPreviewData,
@@ -33,6 +36,7 @@ import {
   catalogImportPreviewMatchesLocalInput,
 } from "./workflow";
 import { CatalogImportConsequenceDetails } from "./CatalogDetails";
+import { CATALOG_IMPORT_FORM, catalogImportFieldForCode } from "./fieldErrors";
 
 interface CatalogImportPreviewBinding {
   digest: string;
@@ -42,7 +46,7 @@ interface CatalogImportPreviewBinding {
 
 type CatalogImportControls = Pick<
   ReturnType<typeof useOperatorControls>,
-  "requestConfirm" | "runMutation" | "setMessage"
+  "requestConfirm" | "runMutation" | "setFeedback"
 >;
 
 interface CatalogImportWorkflowOptions extends CatalogImportControls {
@@ -57,6 +61,8 @@ export interface CatalogImportWorkflow {
   text: string;
   previewBinding: CatalogImportPreviewBinding | null;
   preview: CatalogImportPreviewResponse | CatalogImportApplyResult | null;
+  /** The import form's inline error and status line. */
+  feedback: FormFeedback;
   invalidate: (clearResult?: boolean) => void;
   updateText: (value: string) => void;
   previewImport: () => Promise<void>;
@@ -70,9 +76,12 @@ export function useCatalogImportWorkflow({
   refreshCurrentCatalog,
   requestConfirm,
   runMutation,
-  setMessage,
+  setFeedback,
   onApplied,
 }: CatalogImportWorkflowOptions): CatalogImportWorkflow {
+  const { routeVersion } = useAdminNavigation();
+  const feedback = useFormFeedback(CATALOG_IMPORT_FORM, routeVersion);
+  const showCode = (code: string, requestId: string | null = null): void => { feedback.show(code, requestId, catalogImportFieldForCode); };
   const [text, setText] = useState("");
   const [previewBinding, setPreviewBinding] = useState<CatalogImportPreviewBinding | null>(null);
   const previewBindingRef = useRef<CatalogImportPreviewBinding | null>(null);
@@ -113,7 +122,7 @@ export function useCatalogImportWorkflow({
       snapshot = catalogImportInputSnapshot(manifest);
       digest = await catalogImportInputDigest(manifest);
     } catch {
-      if (isCurrent()) setMessage("invalid_catalog_import_manifest");
+      if (isCurrent()) showCode("invalid_catalog_import_manifest");
       return;
     }
     if (!isCurrent()) return;
@@ -129,23 +138,22 @@ export function useCatalogImportWorkflow({
       if (parsed.kind === "success") {
         if (!catalogImportPreviewMatchesLocalInput(parsed.data, digest, snapshot)) {
           invalidate();
-          setMessage("catalog_import_manifest_digest_mismatch");
+          showCode("catalog_import_manifest_digest_mismatch");
           return;
         }
         const binding: CatalogImportPreviewBinding = { digest, snapshot, preview: parsed.data };
         previewBindingRef.current = binding;
         setPreviewBinding(binding);
         setApplyResult(null);
-        setMessage(`${parsed.code} (${parsed.requestId})`);
+        feedback.clear();
+        setFeedback(codeFeedback(parsed.code, parsed.requestId));
         return;
       }
       if (parsed.kind === "failure") {
-        setMessage(parsed.code === "catalog_import_too_large"
-          ? "catalog_import_too_large — narrow the manifest and preview again"
-          : `${parsed.code} (${parsed.requestId})`);
+        showCode(parsed.code, parsed.requestId);
         return;
       }
-      setMessage("invalid_mutation_response");
+      feedback.setStatus(failureFeedback("invalid_mutation_response"));
     });
   }
 
@@ -169,7 +177,7 @@ export function useCatalogImportWorkflow({
       binding.snapshot,
     );
     if (!bindingIsUsable(binding, revision) || !bindingMatchesLocalInput) {
-      return { ok: false, message: "preview_required", retryable: true };
+      return refusalOutcome("preview_required", null);
     }
     const body = JSON.stringify(catalogImportApplyBody(binding.preview.preview_id));
     const refreshStatus = async (): Promise<ExactReadProof | null> => await refreshCurrentCatalog();
@@ -192,7 +200,7 @@ export function useCatalogImportWorkflow({
       }
       if (mayPublish) {
         setApplyResult(parsed.data);
-        setMessage(`${parsed.code} (${parsed.requestId})`);
+        setFeedback(codeFeedback(parsed.code, parsed.requestId));
       }
       if (!mayPublish) return "applied";
       try {
@@ -259,12 +267,9 @@ export function useCatalogImportWorkflow({
         "claimed_catalog_import_preview",
         "catalog_import_too_large",
       ].includes(parsed.code);
+      // Each of those codes says to preview again; the confirmation shows the refusal.
       if (previewMustBeReplaced) invalidate();
-      const message = previewMustBeReplaced
-        ? `${parsed.code} — preview again`
-        : `${parsed.code} (${parsed.requestId})`;
-      setMessage(message);
-      return { ok: false, message, retryable: true };
+      return refusalOutcome(parsed.code, parsed.requestId);
     }
     return await applyKnown(parsed, importGeneration) === "applied"
       ? { ok: true }
@@ -274,7 +279,7 @@ export function useCatalogImportWorkflow({
   function requestApply(): void {
     const binding = previewBinding;
     if (binding === null) {
-      setMessage("preview_required");
+      showCode("preview_required");
       return;
     }
     const revision = revisionRef.current;
@@ -295,6 +300,7 @@ export function useCatalogImportWorkflow({
     text,
     previewBinding,
     preview: previewBinding?.preview ?? applyResult,
+    feedback,
     invalidate,
     updateText,
     previewImport,

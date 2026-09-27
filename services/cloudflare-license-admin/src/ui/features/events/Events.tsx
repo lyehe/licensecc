@@ -3,9 +3,11 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { NavigationIntent } from "../../app/types";
 import { useAdminNavigation } from "../../app/navigation";
 import { ReadNotice } from "../../shared/ReadNotice";
-import { api, apiFailureDetails, apiFailureMessage, parseExactApiSuccess } from "../../shared/api";
+import { api, apiFailureDetails, parseExactApiSuccess } from "../../shared/api";
 import { ConfirmRefreshFailure, EXACT_READ_PROOF, type ExactReadProof, useContextGeneration, useOperatorControls } from "../../shared/controls";
 import { useCoreRefresh } from "../../shared/coreRefresh";
+import { apiFailureFeedback } from "../../shared/messages";
+import type { OperatorFeedback } from "../../shared/operatorFeedback";
 import { formatEpoch, shortHash } from "../../shared/format";
 import { downloadCsv } from "../../shared/pagination";
 import { hasEventListData } from "../../shared/mutationGuards";
@@ -37,10 +39,10 @@ export function Events({ active, navigationIntent, onNavigationHandled }: {
   const [cursor, setCursor] = useState<string | null>(null);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [filter, setFilter] = useState<EventFilter>(emptyEventFilter);
-  const [readError, setReadError] = useState<string | null>(null);
+  const [readError, setReadError] = useState<OperatorFeedback | null>(null);
   const [loading, setLoading] = useState(true);
   const { rememberFilters } = useAdminNavigation();
-  const { busy: requestBusy, operationLocked, runMutation, setMessage } = useOperatorControls();
+  const { busy: requestBusy, operationLocked, runMutation, setFeedback } = useOperatorControls();
   const busy = requestBusy || operationLocked;
   const { registerCoreRefresh } = useCoreRefresh();
   const filterUrl = useMemo(() => eventsPath(filter), [filter]);
@@ -68,15 +70,14 @@ export function Events({ active, navigationIntent, onNavigationHandled }: {
         return EXACT_READ_PROOF;
       }
     } else if (strict) {
-      setReadError(apiFailureMessage(response));
+      setReadError(apiFailureFeedback(response));
       const failure = apiFailureDetails(response);
       throw new ConfirmRefreshFailure(failure.code, failure.requestId);
     } else {
-      setReadError(apiFailureMessage(response));
-      setMessage(apiFailureMessage(response));
+      setReadError(apiFailureFeedback(response));
     }
     return null;
-  }, [eventsFence, filter, setMessage]);
+  }, [eventsFence, filter]);
 
   useEffect(() => {
     return registerCoreRefresh(() => load(null));
@@ -123,7 +124,7 @@ export function Events({ active, navigationIntent, onNavigationHandled }: {
           <label>Until<input aria-label="Filter events until" type="date" min="1970-01-01" value={filter.until} onChange={(event) => setFilter({ ...filter, until: event.target.value })} /></label>
         </div></details>
         <button type="button" disabled={!filtered} onClick={() => setFilter(emptyEventFilter)}>Clear filters</button>
-        <button type="button" disabled={busy || operationLocked} onClick={() => void downloadCsv(eventsPath(filter), "events.csv", runMutation, setMessage)}>Export CSV</button>
+        <button type="button" disabled={busy || operationLocked} onClick={() => void downloadCsv(eventsPath(filter), "events.csv", runMutation, setFeedback)}>Export CSV</button>
       </div>
       <div className="tableScroll" role="region" aria-label="Audit event records" aria-busy={loading} tabIndex={0}><table>
         <thead><tr><th>Time</th><th>Event</th><th>Project</th><th>Feature</th><th>Reason</th><th>Actor</th><th>Details</th></tr></thead>

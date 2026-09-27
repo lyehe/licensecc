@@ -12,6 +12,7 @@ import {
   type KeyedMutationAttempt,
   type KeyedMutationParseResult,
 } from "./operatorActions";
+import { codeFeedback, failureFeedback } from "./messages";
 import type { OperatorFeedback } from "./operatorFeedback";
 import type { OperationGate } from "./operationGate";
 import { resolvePendingFocus, type OperatorFocus } from "./operatorFocus";
@@ -22,7 +23,8 @@ import { currentContextStableFocusTarget } from "./workspaceFocus";
  * Keyed and idempotent mutations: each request keeps its idempotency key until
  * its outcome is known, an unknown outcome is retained as an unresolved
  * operation, and notice recovery reconciles it by replaying the same key or
- * running a strict status read.
+ * running a strict status read. While a notice is published it is the one
+ * surface for its outcome; the page banner reports only what settles it.
  */
 
 export interface KeyedMutationDependencies {
@@ -31,7 +33,6 @@ export interface KeyedMutationDependencies {
   notice: ActionNoticeControls;
   /** The open confirmation; a recovery never moves focus out from under it. */
   confirmActionRef: RefObject<ConfirmAction | null>;
-  setMessage: Dispatch<SetStateAction<string>>;
   setFeedback: Dispatch<SetStateAction<OperatorFeedback>>;
 }
 
@@ -43,7 +44,7 @@ export interface KeyedMutationControls {
   runNoticeRecovery: () => Promise<void>;
 }
 
-export function useKeyedMutation({ gate, focus, notice: noticeControls, confirmActionRef, setMessage, setFeedback }: KeyedMutationDependencies): KeyedMutationControls {
+export function useKeyedMutation({ gate, focus, notice: noticeControls, confirmActionRef, setFeedback }: KeyedMutationDependencies): KeyedMutationControls {
   const { busyRef, operationBusyRef, operationOwnerRef, confirmPendingRef, consequencePendingRef, unresolvedOperationRef, setBusy, setOperationBusy } = gate;
   // useFocusRestoration (called inside useConfirmDialog) is what actually reads and resolves these
   // focus refs, including pendingShellFocusRef; this hook only ever writes them.
@@ -99,7 +100,6 @@ export function useKeyedMutation({ gate, focus, notice: noticeControls, confirmA
       const message = CONFIRM_REFRESH_FAILURE_MESSAGE;
       pendingRestoreFocusRef.current = focusTarget;
       setFocusGeneration((generation) => generation + 1);
-      setMessage(message);
       publishActionNotice({
         message,
         manualRefresh: strictRefresh,
@@ -118,10 +118,8 @@ export function useKeyedMutation({ gate, focus, notice: noticeControls, confirmA
       } catch {
         // The write is known to have applied.  Its original immutable request
         // is no longer a recovery action: only a strict GET may resolve the
-        // stale view, and it must never issue another POST.
-        if (action.isCurrent?.() !== false) {
-          setMessage(CONFIRM_REFRESH_FAILURE_MESSAGE);
-        }
+        // stale view, and it must never issue another POST. The caller's
+        // refresh notice reports it.
         return "refresh_failed";
       }
     };
@@ -156,7 +154,6 @@ export function useKeyedMutation({ gate, focus, notice: noticeControls, confirmA
       unresolvedOperationRef.current = { idempotencyKey: attempt.idempotencyKey, focusTarget, reconciliation, request: attempt };
       pendingRestoreFocusRef.current = focusTarget;
       setFocusGeneration((generation) => generation + 1);
-      setFeedback({ tone: "error", message: CONFIRM_MUTATION_UNKNOWN_MESSAGE });
       publishActionNotice({
         message: CONFIRM_MUTATION_UNKNOWN_MESSAGE,
         manualRefresh: reconciliation,
@@ -186,7 +183,7 @@ export function useKeyedMutation({ gate, focus, notice: noticeControls, confirmA
         if (action.onUnapplied !== undefined) {
           action.onUnapplied(parsed);
         } else if (action.isCurrent?.() !== false) {
-          setFeedback({ tone: "error", message: `${parsed.code} (${parsed.requestId})` });
+          setFeedback(failureFeedback(parsed.code, parsed.requestId));
         }
         return;
       }
@@ -198,7 +195,7 @@ export function useKeyedMutation({ gate, focus, notice: noticeControls, confirmA
       }
       setOperationBusy(false);
     }
-  }, [capturePendingFocus, publishActionNotice, runMutation, setFeedback, setMessage, setOperationBusy]);
+  }, [capturePendingFocus, publishActionNotice, runMutation, setFeedback, setOperationBusy]);
   const runConsequenceAction = useCallback(async (action: ConsequenceAction): Promise<void> => {
     if (operationOwnerRef.current !== null || confirmPendingRef.current || consequencePendingRef.current || noticePendingRef.current || unresolvedOperationRef.current !== null || actionNoticeRef.current !== null) {
       return;
@@ -215,15 +212,15 @@ export function useKeyedMutation({ gate, focus, notice: noticeControls, confirmA
         return;
       }
       if (!outcome.ok) {
-        const message = outcome.message ?? (outcome.unknown === true ? CONFIRM_MUTATION_UNKNOWN_MESSAGE : "action_failed");
+        const failure = outcome.message !== undefined ? { message: outcome.message, detail: outcome.detail }
+          : outcome.unknown === true ? { message: CONFIRM_MUTATION_UNKNOWN_MESSAGE } : codeFeedback("action_failed");
         const unknown = outcome.unknown === true || outcome.retryable === false;
         if (unknown) {
           unresolvedOperationRef.current = { idempotencyKey, focusTarget, reconciliation: outcome.reconciliation ?? action.reconciliation };
         }
         pendingRestoreFocusRef.current = focusTarget;
         setFocusGeneration((generation) => generation + 1);
-        setFeedback({ tone: "error", message });
-        publishActionNotice({ message, manualRefresh: unknown ? outcome.reconciliation ?? action.reconciliation : undefined, focusTarget, dismissible: !unknown, unresolvedKey: unknown ? idempotencyKey : undefined });
+        publishActionNotice({ message: failure.message, detail: failure.detail, manualRefresh: unknown ? outcome.reconciliation ?? action.reconciliation : undefined, focusTarget, dismissible: !unknown, unresolvedKey: unknown ? idempotencyKey : undefined });
         return;
       }
       const current = action.isCurrent?.() !== false;
@@ -231,7 +228,6 @@ export function useKeyedMutation({ gate, focus, notice: noticeControls, confirmA
       pendingSuccessFocusRef.current = focusAllowed ? focusTarget : null;
       if (outcome.warning !== undefined || outcome.manualRefresh !== undefined) {
         const message = outcome.warning ?? CONFIRM_REFRESH_FAILURE_MESSAGE;
-        setMessage(message);
         publishActionNotice({ message, manualRefresh: outcome.manualRefresh, focusTarget });
       }
       setFocusGeneration((generation) => generation + 1);
@@ -240,7 +236,6 @@ export function useKeyedMutation({ gate, focus, notice: noticeControls, confirmA
       unresolvedOperationRef.current = { idempotencyKey, focusTarget, reconciliation: action.reconciliation };
       pendingRestoreFocusRef.current = focusTarget;
       setFocusGeneration((generation) => generation + 1);
-      setMessage(message);
       publishActionNotice({ message, manualRefresh: action.reconciliation, focusTarget, unresolvedKey: idempotencyKey });
     } finally {
       consequencePendingRef.current = false;
@@ -252,7 +247,7 @@ export function useKeyedMutation({ gate, focus, notice: noticeControls, confirmA
       // saved focus target must remain usable for accessible focus restoration.
       setOperationBusy(false);
     }
-  }, [capturePendingFocus, publishActionNotice, setFeedback, setMessage, setOperationBusy]);
+  }, [capturePendingFocus, publishActionNotice, setOperationBusy]);
 
   const runNoticeRecovery = useCallback(async (): Promise<void> => {
     const notice = actionNoticeRef.current;
@@ -299,10 +294,8 @@ export function useKeyedMutation({ gate, focus, notice: noticeControls, confirmA
         }
         unresolvedOperationRef.current = null;
         operationOwnerRef.current = null;
-        const message = CONFIRM_REFRESH_FAILURE_MESSAGE;
-        setMessage(message);
         publishActionNotice({
-          message,
+          message: CONFIRM_REFRESH_FAILURE_MESSAGE,
           manualRefresh: recovery.postSuccessRefresh,
           focusTarget,
           dismissible: false,
@@ -322,7 +315,6 @@ export function useKeyedMutation({ gate, focus, notice: noticeControls, confirmA
           pendingRestoreFocusRef.current = focusTarget;
           setFocusGeneration((current) => current + 1);
         }
-        setMessage(CONFIRM_REFRESH_FAILURE_MESSAGE);
         restoreNoticeFocus();
         return;
       }
@@ -332,7 +324,6 @@ export function useKeyedMutation({ gate, focus, notice: noticeControls, confirmA
           setFocusGeneration((current) => current + 1);
         }
         const message = CONFIRM_MUTATION_UNKNOWN_MESSAGE;
-        setMessage(message);
         const currentNotice = actionNoticeRef.current;
         if (currentNotice?.generation === generation && currentNotice.message !== message) {
           replaceActionNotice({ ...currentNotice, message });
@@ -381,7 +372,7 @@ export function useKeyedMutation({ gate, focus, notice: noticeControls, confirmA
           pendingRestoreFocusRef.current = focusTarget;
           setFocusGeneration((current) => current + 1);
         }
-        setFeedback({ tone: "error", message: "status_refresh_failed" });
+        setFeedback(codeFeedback("status_refresh_failed"));
         restoreNoticeFocus();
       }
     } finally {
@@ -396,7 +387,7 @@ export function useKeyedMutation({ gate, focus, notice: noticeControls, confirmA
         });
       }
     }
-  }, [clearActionNotice, focusSoon, publishActionNotice, replaceActionNotice, setFeedback, setMessage, setOperationBusy]);
+  }, [clearActionNotice, focusSoon, publishActionNotice, replaceActionNotice, setFeedback, setOperationBusy]);
 
   return { runMutation, runKeyedMutation, runConsequenceAction, runNoticeRecovery };
 }

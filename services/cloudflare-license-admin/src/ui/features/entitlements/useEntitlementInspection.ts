@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import type { EntitlementDeviceRecord } from "../../../shared/api";
-import { api, apiFailureDetails, apiFailureMessage, parseExactApiSuccess } from "../../shared/api";
+import { api, apiFailureDetails, parseExactApiSuccess } from "../../shared/api";
 import { ConfirmRefreshFailure, EXACT_READ_PROOF, type ExactReadProof, useContextGeneration } from "../../shared/controls";
+import { apiFailureFeedback } from "../../shared/messages";
+import type { OperatorFeedback } from "../../shared/operatorFeedback";
 import { hasDeviceListData, hasMeterStatusData } from "../../shared/mutationGuards";
 import { useRequestFence } from "../../shared/requestFence";
 import { entitlementDevicesPath, entitlementMeterPath } from "./workflow";
@@ -15,10 +17,13 @@ export interface MeterStatus {
   server_time: number;
 }
 
-interface ReadState { context: string; loading: boolean; error: string | null }
+interface ReadState { context: string; loading: boolean; error: OperatorFeedback | null }
 
-/** Owns read snapshots only; consequence ownership and same-key recovery stay in the controller. */
-export function useEntitlementInspection(active: boolean, filterContextKey: string, setMessage: (message: string) => void) {
+/**
+ * Owns read snapshots only; consequence ownership and same-key recovery stay in the controller. A
+ * failed read is reported by the inspector's own read notice.
+ */
+export function useEntitlementInspection(active: boolean, filterContextKey: string) {
   const [deviceEntitlementId, setDeviceEntitlementId] = useState<string | null>(null);
   const [devices, setDevices] = useState<EntitlementDeviceRecord[]>([]);
   const [meterEntitlementId, setMeterEntitlementId] = useState<string | null>(null);
@@ -44,12 +49,11 @@ export function useEntitlementInspection(active: boolean, filterContextKey: stri
       setDeviceRead({ context: deviceContextKey, loading: false, error: null });
       return EXACT_READ_PROOF;
     }
-    setDeviceRead({ context: deviceContextKey, loading: false, error: apiFailureMessage(response) });
+    setDeviceRead({ context: deviceContextKey, loading: false, error: apiFailureFeedback(response) });
     if (strict) {
       const failure = apiFailureDetails(response);
       throw new ConfirmRefreshFailure(failure.code, failure.requestId);
     }
-    setMessage(apiFailureMessage(response));
     return null;
   }
 
@@ -74,8 +78,7 @@ export function useEntitlementInspection(active: boolean, filterContextKey: stri
       setMeterStatus(parsed.data);
       setMeterRead({ context: meterContextKey, loading: false, error: null });
     } else {
-      setMeterRead({ context: meterContextKey, loading: false, error: apiFailureMessage(response) });
-      setMessage(apiFailureMessage(response));
+      setMeterRead({ context: meterContextKey, loading: false, error: apiFailureFeedback(response) });
     }
   }
 

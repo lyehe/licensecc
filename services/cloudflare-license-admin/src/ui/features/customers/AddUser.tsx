@@ -1,6 +1,9 @@
 import React, { useEffect, useRef, useState } from "react";
 import { api, parseExactApiSuccess } from "../../shared/api";
 import { EXACT_READ_PROOF, useOperatorControls } from "../../shared/controls";
+import { FormStatus } from "../../shared/FeedbackText";
+import { failureFeedback, feedbackWith } from "../../shared/messages";
+import type { OperatorFeedback } from "../../shared/operatorFeedback";
 import { hasCustomerDetailData, parseMutationResponse, type MutationFailurePolicy } from "../../shared/mutationGuards";
 import { useNavigationGuard } from "../../app/navigation";
 
@@ -17,7 +20,7 @@ export function AddUser({ onCancel, onOpen }: { onCancel(): void; onOpen(id: str
   const [mode, setMode] = useState<Mode>("invite");
   const [name, setName] = useState(""); const [email, setEmail] = useState(""); const [password, setPassword] = useState("");
   const [created, setCreated] = useState<CreatedUser | null>(null);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<OperatorFeedback | null>(null);
   const mounted = useRef(true); const saved = useRef<CreatedUser | null>(null); const submittedMode = useRef<Mode>("invite");
   const { busy, operationLocked, runKeyedMutation } = useOperatorControls();
   const locked = busy || operationLocked;
@@ -27,8 +30,8 @@ export function AddUser({ onCancel, onOpen }: { onCancel(): void; onOpen(id: str
   // discarding the form -- rather than letting it linger, hidden, in component state.
   function selectMode(next: Mode): void { setMode(next); if (next === "invite") setPassword(""); }
   async function submit(event: React.FormEvent): Promise<void> {
-    event.preventDefault(); setError("");
-    if (mode === "set-password" && ([...password].length < 15 || [...password].length > 128 || new TextEncoder().encode(password).length > 512)) { setError("Use a password between 15 and 128 characters."); return; }
+    event.preventDefault(); setError(null);
+    if (mode === "set-password" && ([...password].length < 15 || [...password].length > 128 || new TextEncoder().encode(password).length > 512)) { setError({ tone: "error", message: "Use a password between 15 and 128 characters." }); return; }
     const input: { name: string; email: string; password?: string } = { name: name.trim(), email: email.trim().toLowerCase() };
     if (mode === "set-password") input.password = password;
     submittedMode.current = mode;
@@ -41,7 +44,7 @@ export function AddUser({ onCancel, onOpen }: { onCancel(): void; onOpen(id: str
         return typeof row.id === "string" && row.id.startsWith("cust_") && row.name === input.name && row.login_email === input.email && row.status === "active";
       }, failures, phase),
       onApplied: result => { saved.current = result.data; setPassword(""); },
-      onUnapplied: result => { setPassword(""); setError(result.code === "email_in_use" ? "This email already belongs to an account. No user was added." : `Could not add user: ${result.code}`); },
+      onUnapplied: result => { setPassword(""); setError(result.code === "email_in_use" ? feedbackWith("This email already belongs to an account. No user was added.", result.code, result.requestId) : failureFeedback(result.code, result.requestId)); },
       refresh: async () => {
         const user = saved.current; if (!user || !mounted.current) return null;
         const response = await api(`/api/admin/customers/${encodeURIComponent(user.id)}`);
@@ -71,7 +74,7 @@ export function AddUser({ onCancel, onOpen }: { onCancel(): void; onOpen(id: str
             <label>Initial password<input type="password" required autoComplete="new-password" aria-describedby="new-user-password-hint" value={password} onChange={event => setPassword(event.target.value)} /></label>
             <p id="new-user-password-hint">15–128 characters. The login email remains unverified.</p>
           </>}
-        {error && <p role="alert">{error}</p>}
+        <FormStatus feedback={error} />
         <div className="actions"><button className="primary" type="submit">Add user</button><button type="button" onClick={() => requestLeave(onCancel)}>Cancel</button></div>
       </fieldset>
     </form>

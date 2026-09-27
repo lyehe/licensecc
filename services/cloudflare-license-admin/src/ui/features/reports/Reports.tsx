@@ -3,7 +3,9 @@ import React, { useEffect, useState } from "react";
 import type { NavigationTarget } from "../../app/types";
 import type { ExpiringEntitlement } from "../../../shared/api";
 import { ReadNotice } from "../../shared/ReadNotice";
-import { api, apiFailureMessage, parseExactApiSuccess } from "../../shared/api";
+import { api, parseExactApiSuccess } from "../../shared/api";
+import { apiFailureFeedback, codeFeedback } from "../../shared/messages";
+import type { OperatorFeedback } from "../../shared/operatorFeedback";
 import { DenialRateChart, LineAreaChart } from "../../shared/charts";
 import { useOperatorControls } from "../../shared/controls";
 import { formatUtcDate, shortHash } from "../../shared/format";
@@ -31,14 +33,14 @@ interface ExpiringData {
 
 export function Reports({ active, onNavigate }: { active: boolean; onNavigate: (target: NavigationTarget) => void }): React.ReactElement | null {
   const [retryRevision, setRetryRevision] = useState(0);
-  const [reportError, setReportError] = useState<string | null>(null);
+  const [reportError, setReportError] = useState<OperatorFeedback | null>(null);
   const [reportLoading, setReportLoading] = useState(true);
-  const [expiringRead, setExpiringRead] = useState<{ days: number; loading: boolean; error: string | null }>({ days: 30, loading: true, error: null });
+  const [expiringRead, setExpiringRead] = useState<{ days: number; loading: boolean; error: OperatorFeedback | null }>({ days: 30, loading: true, error: null });
   const [reportSnapshot, setReport] = useState<Report | null>(null);
   const [expiringWithinDays, setExpiringWithinDays] = useState(30);
   const [expiringSnapshot, setExpiring] = useState<ExpiringEntitlement[]>([]);
   const [expiringCursorSnapshot, setExpiringCursor] = useState<string | null>(null);
-  const { busy: requestBusy, operationLocked, setMessage } = useOperatorControls();
+  const { busy: requestBusy, operationLocked, setFeedback } = useOperatorControls();
   const busy = requestBusy || operationLocked;
   const { timeseries, timeseriesRange, setTimeseriesRange, timeseriesLoading, timeseriesError, retryTimeseries } = useUsageTimeseries(active);
   const reportFence = useRequestFence(active ? "report:active" : "report:inactive");
@@ -56,9 +58,9 @@ export function Reports({ active, onNavigate }: { active: boolean; onNavigate: (
       if (parsed !== null) {
         if (reportFence.settle(ticket)) setReport(parsed.data);
       }
-      else { setReportError(apiFailureMessage(response)); setMessage(apiFailureMessage(response)); }
+      else setReportError(apiFailureFeedback(response));
     })();
-  }, [active, reportFence, retryRevision, setMessage]);
+  }, [active, reportFence, retryRevision]);
 
   async function refreshExpiring(): Promise<void> {
     const ticket = expiringFence.begin();
@@ -73,8 +75,7 @@ export function Reports({ active, onNavigate }: { active: boolean; onNavigate: (
         setExpiringCursor(parsed.data.next_cursor ?? null);
       }
     } else {
-      setExpiringRead({ days: expiringWithinDays, loading: false, error: apiFailureMessage(response) });
-      setMessage(apiFailureMessage(response));
+      setExpiringRead({ days: expiringWithinDays, loading: false, error: apiFailureFeedback(response) });
     }
   }
 
@@ -96,11 +97,11 @@ export function Reports({ active, onNavigate }: { active: boolean; onNavigate: (
         const nextCursor = parsed.data.next_cursor ?? null;
         const appendError = pageAppendError(expiringSnapshot, parsed.data.items, (item) => `${item.project}\u0000${item.feature}\u0000${item.license_fingerprint}`);
         if (appendError !== null) {
-          setMessage(`invalid_api_response (${appendError})`);
+          setFeedback(codeFeedback(appendError));
           setExpiringCursor((previous) => expiringFence.isLoadMoreCurrent(ticket) && previous === cursor ? null : previous);
           expiringFence.retireLoadMore(ticket);
         } else if (!expiringFence.acceptsNextCursor(ticket, nextCursor)) {
-          setMessage("invalid_api_response (repeated_cursor)");
+          setFeedback(codeFeedback("repeated_cursor"));
           setExpiringCursor((previous) => expiringFence.isLoadMoreCurrent(ticket) && previous === cursor ? null : previous);
           expiringFence.retireLoadMore(ticket);
         } else {
@@ -110,7 +111,7 @@ export function Reports({ active, onNavigate }: { active: boolean; onNavigate: (
           expiringFence.finishLoadMore(ticket, true, nextCursor);
         }
       } else {
-        setMessage(apiFailureMessage(response));
+        setFeedback(apiFailureFeedback(response));
         if (!isRetryableAppendFailure(response)) {
           setExpiringCursor((previous) => expiringFence.isLoadMoreCurrent(ticket) && previous === cursor ? null : previous);
           expiringFence.retireLoadMore(ticket);

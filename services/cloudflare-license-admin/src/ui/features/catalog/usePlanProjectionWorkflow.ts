@@ -7,18 +7,22 @@ import type {
   PlanProjectionInput,
   PlanProjectionPreviewResponse,
 } from "../../../shared/api";
+import { useAdminNavigation } from "../../app/navigation";
 import { api } from "../../shared/api";
 import {
   EXACT_READ_PROOF,
   type ExactReadProof,
   useOperatorControls,
 } from "../../shared/controls";
+import { type FormFeedback, useFormFeedback } from "../../shared/fieldErrors";
+import { codeFeedback, failureFeedback, validationCode } from "../../shared/messages";
 import {
   hasPlanProjectionApplyData,
   hasPlanProjectionPreviewEvidence,
   mutationFailurePolicies,
   parseMutationResponse,
 } from "../../shared/mutationGuards";
+import { PLAN_PROJECTION_FORM, planProjectionFieldForCode } from "./fieldErrors";
 import { planProjectionBindingIsUsable } from "./planProjectionBinding";
 import {
   emptyPlanProjectionForm,
@@ -38,7 +42,7 @@ export interface PlanProjectionPreviewBinding {
 
 type PlanProjectionControls = Pick<
   ReturnType<typeof useOperatorControls>,
-  "runKeyedMutation" | "runMutation" | "setMessage" | "requestConfirm" | "modalActive"
+  "runKeyedMutation" | "runMutation" | "setFeedback" | "requestConfirm" | "modalActive"
 >;
 
 interface PlanProjectionWorkflowOptions extends PlanProjectionControls {
@@ -51,6 +55,8 @@ export interface PlanProjectionWorkflow {
   form: PlanProjectionFormState;
   previewBinding: PlanProjectionPreviewBinding | null;
   preview: PlanProjectionPreviewResponse | PlanProjectionApplyResult | null;
+  /** The projection form's inline errors and status line. */
+  feedback: FormFeedback;
   invalidate: () => void;
   updateForm: (updater: (current: PlanProjectionFormState) => PlanProjectionFormState) => void;
   submitPreview: (event: FormEvent) => Promise<void>;
@@ -63,11 +69,14 @@ export function usePlanProjectionWorkflow({
   refreshCore,
   runKeyedMutation,
   runMutation,
-  setMessage,
+  setFeedback,
   requestConfirm,
   modalActive,
   onApplied,
 }: PlanProjectionWorkflowOptions): PlanProjectionWorkflow {
+  const { routeVersion } = useAdminNavigation();
+  const feedback = useFormFeedback(PLAN_PROJECTION_FORM, routeVersion);
+  const showCode = (code: string, requestId: string | null = null): void => { feedback.show(code, requestId, planProjectionFieldForCode); };
   const [form, setForm] = useState(emptyPlanProjectionForm);
   const [previewBinding, setPreviewBinding] = useState<PlanProjectionPreviewBinding | null>(null);
   const [applyResult, setApplyResult] = useState<PlanProjectionApplyResult | null>(null);
@@ -99,7 +108,7 @@ export function usePlanProjectionWorkflow({
       if (planProjectionBindingIsUsable(confirmed.binding, confirmed.revision, previewBindingRef.current, revisionRef.current)) {
         void applyFromPreview(confirmed.binding, confirmed.revision);
       } else {
-        setMessage("plan_projection_preview_required — preview again");
+        showCode("plan_projection_preview_required");
       }
     }
     modalWasActiveRef.current = modalActive;
@@ -127,7 +136,7 @@ export function usePlanProjectionWorkflow({
       try {
         body = normalizePlanProjectionForm(form);
       } catch (error) {
-        setMessage(error instanceof Error ? error.message : "invalid_plan_projection");
+        showCode(validationCode(error));
         setPreviewBinding(null);
         setApplyResult(null);
         return;
@@ -137,12 +146,13 @@ export function usePlanProjectionWorkflow({
         digest = await planProjectionInputDigest(body);
       } catch (error) {
         if (revision !== revisionRef.current) return;
-        setMessage(error instanceof Error ? error.message : "plan_projection_digest_failed");
+        feedback.setStatus(failureFeedback("plan_projection_digest_failed"));
         setPreviewBinding(null);
         setApplyResult(null);
         return;
       }
       if (revision !== revisionRef.current) return;
+      feedback.clear();
       setPreviewBinding(null);
       setApplyResult(null);
       const result = await api<PlanProjectionPreviewResponse>(planProjectionPreviewPath(), {
@@ -158,19 +168,19 @@ export function usePlanProjectionWorkflow({
         "initial",
       );
       if (parsed.kind === "success") {
-        setMessage(`${parsed.code} (${parsed.requestId})`);
+        setFeedback(codeFeedback(parsed.code, parsed.requestId));
         setPreviewBinding({ input: body, digest, preview: parsed.data });
       } else if (parsed.kind === "failure") {
-        setMessage(`${parsed.code} (${parsed.requestId})`);
+        showCode(parsed.code, parsed.requestId);
       } else {
-        setMessage("invalid_mutation_response");
+        feedback.setStatus(failureFeedback("invalid_mutation_response"));
       }
     });
   }
 
   async function applyFromPreview(binding: PlanProjectionPreviewBinding, revision: number): Promise<void> {
     if (binding.preview.blocked.length > 0 || !planProjectionBindingIsUsable(binding, revision, previewBindingRef.current, revisionRef.current)) {
-      setMessage("plan_projection_preview_required");
+      showCode("plan_projection_preview_required");
       return;
     }
     const body: PlanProjectionApplyInput = planProjectionApplyBody(binding.preview.preview_id);
@@ -203,16 +213,13 @@ export function usePlanProjectionWorkflow({
           "projection_preview_grant_expired",
           "license_fingerprint_conflict",
           "plan_projection_blocked",
-        ].includes(parsed.code)) {
-          invalidate();
-          setMessage(`${parsed.code} — preview again`);
-          return;
-        }
-        setMessage(`${parsed.code} (${parsed.requestId})`);
+        ].includes(parsed.code)) invalidate();
+        // Each of those codes says to preview again; every refusal shows in the projection form.
+        showCode(parsed.code, parsed.requestId);
       },
       onApplied: async (parsed) => {
         if (!isCurrent()) return;
-        setMessage(`${parsed.code} (${parsed.requestId})`);
+        setFeedback(codeFeedback(parsed.code, parsed.requestId));
         appliedResult = parsed.data;
         // A still-current binding proves the form is exactly what the server applied.
         onApplied();
@@ -236,7 +243,7 @@ export function usePlanProjectionWorkflow({
   function requestApply(): void {
     const binding = previewBinding;
     if (binding === null) {
-      setMessage("plan_projection_preview_required");
+      showCode("plan_projection_preview_required");
       return;
     }
     const revision = revisionRef.current;
@@ -262,6 +269,7 @@ export function usePlanProjectionWorkflow({
     form,
     previewBinding,
     preview: previewBinding?.preview ?? applyResult,
+    feedback,
     invalidate,
     updateForm,
     submitPreview,

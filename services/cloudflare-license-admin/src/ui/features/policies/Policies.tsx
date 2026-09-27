@@ -1,17 +1,23 @@
 import React, { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
-import { useNavigationGuard } from "../../app/navigation";
+import { useAdminNavigation, useNavigationGuard } from "../../app/navigation";
 import type { DraftPolicy, PolicyDraftRequest } from "../../app/types";
 import { StatusActions } from "../../shared/ActionMenu";
 import { ReadNotice } from "../../shared/ReadNotice";
 import type { Policy } from "../../../shared/api";
-import { api, apiFailureDetails, apiFailureMessage, parseExactApiSuccess } from "../../shared/api";
+import { api, apiFailureDetails, parseExactApiSuccess } from "../../shared/api";
 import { confirmMutationUnknown, confirmSuccessWithRefreshFailure, ConfirmRefreshFailure, EXACT_READ_PROOF, focusTargetInRow, type ConfirmActionContext, type ConfirmActionOutcome, type ConfirmActionResolution, type ExactReadProof, useContextGeneration, useOperatorControls } from "../../shared/controls";
+import { FormStatus } from "../../shared/FeedbackText";
+import { FieldError, fieldProps, useFormFeedback } from "../../shared/fieldErrors";
+import { apiFailureFeedback, codeFeedback, refusalOutcome, validationCode } from "../../shared/messages";
+import type { OperatorFeedback } from "../../shared/operatorFeedback";
 import { loadMore } from "../../shared/pagination";
 import { hasPolicyData, hasPolicyListData, hasPolicyTransitionData, mutationFailurePolicies, parseMutationResponse } from "../../shared/mutationGuards";
 import { useDebouncedValue } from "../../shared/useDebouncedValue";
 import { useRequestFence } from "../../shared/requestFence";
-import { canRunPolicyAction, disablePolicyConfirm, emptyPolicyForm, normalizePolicyForm, normalizePolicyPatch, policiesPath, policyFormFromPolicy, policyPath, policyTransitionPath, PolicyFilter, PolicyFormState } from "./workflow";
+import { canRunPolicyAction, disablePolicyConfirm, emptyPolicyForm, normalizePolicyForm, normalizePolicyPatch, policiesPath, policyFieldForCode, policyFormFromPolicy, policyPath, policyTransitionPath, PolicyFilter, PolicyFormState } from "./workflow";
+
+const POLICY_FORM = "policy-editor";
 
 /**
  * `draftRequest` is set when an entitlement draft chose "Create policy…": the create form opens for
@@ -25,12 +31,14 @@ export function Policies({ active, draftRequest = null, onReturnToDraft }: { act
   const [editorOpen, setEditorOpen] = useState(false);
   // The policy being edited, or null for a new policy. Its identity is shown but never sent.
   const [editing, setEditing] = useState<Policy | null>(null);
-  const [readState, setReadState] = useState<{ key: string; loading: boolean; error: string | null }>({ key: "", loading: true, error: null });
+  const [readState, setReadState] = useState<{ key: string; loading: boolean; error: OperatorFeedback | null }>({ key: "", loading: true, error: null });
   const [policyForm, setPolicyForm] = useState<PolicyFormState>(emptyPolicyForm);
   const [baseline, setBaseline] = useState(() => JSON.stringify(emptyPolicyForm));
   const [returning, setReturning] = useState<{ created: DraftPolicy | null } | null>(null);
-  const { busy: requestBusy, operationLocked, currentReason, requestConfirm, runConsequenceAction, runKeyedMutation, runMutation, setMessage, setReason } = useOperatorControls();
+  const { busy: requestBusy, operationLocked, currentReason, requestConfirm, runConsequenceAction, runKeyedMutation, runMutation, setFeedback, setReason } = useOperatorControls();
   const busy = requestBusy || operationLocked;
+  const { routeVersion } = useAdminNavigation();
+  const formFeedback = useFormFeedback(POLICY_FORM, routeVersion);
   const { requestLeave } = useNavigationGuard({ when: active && editorOpen && JSON.stringify(policyForm) !== baseline, onDiscard: () => closeEditor() });
   const policiesUrl = useMemo(() => policiesPath(policyFilter), [policyFilter]);
   // The filter alone reloads the list; active only gates whether a reload may fire, so leaving and
@@ -48,6 +56,7 @@ export function Policies({ active, draftRequest = null, onReturnToDraft }: { act
   const currentPoliciesRefreshRef = useRef<() => Promise<ExactReadProof | null>>(() => Promise.resolve(null));
 
   function openEditor(next: PolicyFormState, target: Policy | null): void {
+    formFeedback.clear();
     setEditing(target);
     setPolicyForm(next);
     setBaseline(JSON.stringify(next));
@@ -55,6 +64,7 @@ export function Policies({ active, draftRequest = null, onReturnToDraft }: { act
   }
 
   function closeEditor(): void {
+    formFeedback.clear();
     setEditorOpen(false);
     setEditing(null);
     setPolicyForm(emptyPolicyForm);
@@ -92,12 +102,11 @@ export function Policies({ active, draftRequest = null, onReturnToDraft }: { act
         return EXACT_READ_PROOF;
       }
     } else if (strict) {
-      setReadState({ key: filterContextKey, loading: false, error: apiFailureMessage(response) });
+      setReadState({ key: filterContextKey, loading: false, error: apiFailureFeedback(response) });
       const failure = apiFailureDetails(response);
       throw new ConfirmRefreshFailure(failure.code, failure.requestId);
     } else {
-      setReadState({ key: filterContextKey, loading: false, error: apiFailureMessage(response) });
-      setMessage(apiFailureMessage(response));
+      setReadState({ key: filterContextKey, loading: false, error: apiFailureFeedback(response) });
     }
     return null;
   }
@@ -110,7 +119,14 @@ export function Policies({ active, draftRequest = null, onReturnToDraft }: { act
     void refreshPolicies(false, () => isFilterGenerationCurrent(policiesReloadGeneration));
   }, [active, policiesReloadGeneration, isFilterGenerationCurrent]);
 
+  /** One field edited: its inline error, which described the old value, goes with it. */
+  function update(field: keyof PolicyFormState, patch: Partial<PolicyFormState>): void {
+    formFeedback.clearField(field);
+    setPolicyForm((current) => ({ ...current, ...patch }));
+  }
+
   function setPolicyType(type: Policy["type"]): void {
+    formFeedback.clearField("pool_size");
     setPolicyForm((current) => ({
       ...current,
       type,
@@ -130,11 +146,12 @@ export function Policies({ active, draftRequest = null, onReturnToDraft }: { act
     try {
       body = normalizePolicyForm(policyForm);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "invalid_form");
+      formFeedback.show(validationCode(error), null, policyFieldForCode);
       return;
     }
+    formFeedback.clear();
     const requestBody = JSON.stringify(body);
-    const outcome: { created: DraftPolicy | null } = { created: null };
+    const outcome: { created: Policy | null } = { created: null };
     await runKeyedMutation({
       request: { method: "POST", path: "/api/admin/policies", body: requestBody },
       send: (attempt) => api<Policy>(attempt.path, { method: attempt.method, headers: { "idempotency-key": attempt.idempotencyKey }, body: attempt.body }),
@@ -145,23 +162,24 @@ export function Policies({ active, draftRequest = null, onReturnToDraft }: { act
       }, mutationFailurePolicies.policyCreate, phase),
       onApplied: async (parsed) => {
         if (!isCurrent()) return;
-        // Only a create the operator still owns hands its policy back to the draft.
-        outcome.created = { id: parsed.data.id, project: parsed.data.project };
-        setMessage(`${parsed.code} (${parsed.requestId})`);
-        if (isPolicyFormGenerationCurrent(formGeneration)) setPolicyForm(emptyPolicyForm);
+        // Only a create the operator still owns opens its policy, or hands it back to the draft. The
+        // editor opens as soon as the write is known, which also covers a reconciled replay.
+        outcome.created = parsed.data;
+        setFeedback(codeFeedback(parsed.code, parsed.requestId));
+        if (draftRequest === null && isPolicyFormGenerationCurrent(formGeneration)) openEditor(policyFormFromPolicy(parsed.data), parsed.data);
       },
       refresh: async () => await currentPoliciesRefreshRef.current(),
       onUnapplied: (parsed) => {
-        if (isCurrent()) {
-        setMessage(`${parsed.code} (${parsed.requestId})`);
-        }
+        if (isCurrent()) formFeedback.show(parsed.code, parsed.requestId, policyFieldForCode);
       },
       isCurrent,
     });
-    // A policy made for an entitlement draft goes straight back to that draft, chosen.
-    if (outcome.created !== null && draftRequest !== null) {
+    // A policy made for an entitlement draft goes straight back to that draft, chosen, once its
+    // status read has settled on this page.
+    const created = outcome.created;
+    if (created !== null && draftRequest !== null) {
       closeEditor();
-      setReturning({ created: outcome.created });
+      setReturning({ created: { id: created.id, project: created.project } });
     }
   }
 
@@ -174,9 +192,10 @@ export function Policies({ active, draftRequest = null, onReturnToDraft }: { act
     try {
       body = normalizePolicyPatch(policyForm);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "invalid_form");
+      formFeedback.show(validationCode(error), null, policyFieldForCode);
       return;
     }
+    formFeedback.clear();
     await runKeyedMutation({
       request: { method: "PATCH", path: policyPath(policy.id), body: JSON.stringify(body) },
       send: (attempt) => api<Policy>(attempt.path, { method: attempt.method, headers: { "idempotency-key": attempt.idempotencyKey }, body: attempt.body }),
@@ -187,12 +206,12 @@ export function Policies({ active, draftRequest = null, onReturnToDraft }: { act
       }, mutationFailurePolicies.policyPatch, phase),
       onApplied: async (parsed) => {
         if (!isCurrent()) return;
-        setMessage(`${parsed.code} (${parsed.requestId})`);
+        setFeedback(codeFeedback(parsed.code, parsed.requestId));
         closeEditor();
       },
       refresh: async () => await currentPoliciesRefreshRef.current(),
       onUnapplied: (parsed) => {
-        if (isCurrent()) setMessage(`${parsed.code} (${parsed.requestId})`);
+        if (isCurrent()) formFeedback.show(parsed.code, parsed.requestId, policyFieldForCode);
       },
       isCurrent,
     });
@@ -250,15 +269,12 @@ export function Policies({ active, draftRequest = null, onReturnToDraft }: { act
         return null;
       }
     }, "consequence");
-    if (mutation === undefined) return { ok: false, message: "mutation_busy", retryable: true };
+    if (mutation === undefined) return refusalOutcome("mutation_busy", null);
     if (mutation === null) return confirmMutationUnknown(reconciliation);
     const parsed = parseMutationResponse(mutation, expectedCode, dataGuard, mutationFailurePolicies.policyTransition[action], "initial");
     if (parsed.kind === "invalid") return confirmMutationUnknown(reconciliation);
-    if (parsed.kind === "failure") {
-      setMessage(`${parsed.code} (${parsed.requestId})`);
-      return { ok: false, message: `${parsed.code} (${parsed.requestId})`, retryable: true };
-    }
-    setMessage(`${parsed.code} (${parsed.requestId})`);
+    if (parsed.kind === "failure") return refusalOutcome(parsed.code, parsed.requestId);
+    setFeedback(codeFeedback(parsed.code, parsed.requestId));
     setReason("");
     try {
       return (await currentPoliciesRefreshRef.current()) === EXACT_READ_PROOF
@@ -276,6 +292,8 @@ export function Policies({ active, draftRequest = null, onReturnToDraft }: { act
 
   if (!active) return null;
   const editorTitle = editing === null ? "New policy" : "Edit policy";
+  const field = (name: keyof PolicyFormState, label: string) => fieldProps(POLICY_FORM, formFeedback.errors, name, label);
+  const error = (name: keyof PolicyFormState) => <FieldError form={POLICY_FORM} field={name} errors={formFeedback.errors} />;
   return (
     <section className="listPage">
       <div className="listHeader"><button className="primary" type="button" disabled={busy} onClick={() => { if (!editorOpen || editing !== null) requestLeave(() => openEditor(emptyPolicyForm, null)); }}>New policy</button></div>
@@ -283,22 +301,23 @@ export function Policies({ active, draftRequest = null, onReturnToDraft }: { act
         <h2>{editorTitle}</h2>
         {draftRequest !== null && editing === null && <div className="readState"><p>This policy is for your entitlement draft for {draftRequest.project}. Creating it returns you to the draft with the policy chosen.</p><button type="button" disabled={busy} onClick={backToDraft}>Back to entitlement draft</button></div>}
         {editing !== null && <p className="muted">Edits apply to entitlements stamped from now on. Entitlements already stamped from this policy keep their copy. Project, name, and type can't be changed.</p>}
-        <form aria-label={editorTitle} onSubmit={(event) => void (editing === null ? submitPolicyCreate(event) : submitPolicyPatch(event, editing))}><fieldset disabled={operationLocked}>
+        <form id={POLICY_FORM} aria-label={editorTitle} onSubmit={(event) => void (editing === null ? submitPolicyCreate(event) : submitPolicyPatch(event, editing))}><fieldset disabled={operationLocked}>
           <label>Project<input readOnly={editing !== null} value={policyForm.project} onChange={(event) => setPolicyForm({ ...policyForm, project: event.target.value })} /></label>
-          <label>Name (required)<input required readOnly={editing !== null} value={policyForm.name} onChange={(event) => setPolicyForm({ ...policyForm, name: event.target.value })} /></label>
+          <label>Name (required)<input required readOnly={editing !== null} {...field("name", "Name (required)")} value={policyForm.name} onChange={(event) => update("name", { name: event.target.value })} />{error("name")}</label>
           <label>Type<select aria-label="Type" disabled={editing !== null} value={policyForm.type} onChange={(event) => setPolicyType(event.target.value as Policy["type"])}><option value="trial">Trial</option><option value="node_locked">Device-locked</option><option value="floating">Floating</option><option value="subscription">Subscription</option></select></label>
-          <label>Duration (sec)<input type="number" value={policyForm.duration_sec} onChange={(event) => setPolicyForm({ ...policyForm, duration_sec: event.target.value })} /></label>
-          {policyForm.type === "floating" && <><label>Floating pool size<input type="number" value={policyForm.pool_size} onChange={(event) => setPolicyForm({ ...policyForm, pool_size: Number(event.target.value) })} /></label><label>Max borrow (sec)<input type="number" value={policyForm.max_borrow_sec} onChange={(event) => setPolicyForm({ ...policyForm, max_borrow_sec: Number(event.target.value) })} /></label></>}
-          {policyForm.type !== "floating" && <label>Device limit<input type="number" value={policyForm.max_active_devices} onChange={(event) => setPolicyForm({ ...policyForm, max_active_devices: Number(event.target.value) })} /></label>}
+          <label>Duration (sec)<input type="number" {...field("duration_sec", "Duration (sec)")} value={policyForm.duration_sec} onChange={(event) => update("duration_sec", { duration_sec: event.target.value })} />{error("duration_sec")}</label>
+          {policyForm.type === "floating" && <><label>Floating pool size<input type="number" {...field("pool_size", "Floating pool size")} value={policyForm.pool_size} onChange={(event) => update("pool_size", { pool_size: Number(event.target.value) })} />{error("pool_size")}</label><label>Max borrow (sec)<input type="number" {...field("max_borrow_sec", "Max borrow (sec)")} value={policyForm.max_borrow_sec} onChange={(event) => update("max_borrow_sec", { max_borrow_sec: Number(event.target.value) })} />{error("max_borrow_sec")}</label></>}
+          {policyForm.type !== "floating" && <label>Device limit<input type="number" {...field("max_active_devices", "Device limit")} value={policyForm.max_active_devices} onChange={(event) => update("max_active_devices", { max_active_devices: Number(event.target.value) })} />{error("max_active_devices")}</label>}
           <label>Expiry strategy<select value={policyForm.expiry_strategy} onChange={(event) => setPolicyForm({ ...policyForm, expiry_strategy: event.target.value as Policy["expiry_strategy"] })}><option value="fixed_window">Fixed dates</option><option value="non_expiring">No expiry</option></select></label>
-          {policyForm.type === "trial" && <fieldset className="trialPanel"><legend>Trial</legend><label>Expiration basis<select value={policyForm.trial_expiration_basis} onChange={(event) => setPolicyForm({ ...policyForm, trial_expiration_basis: event.target.value as Policy["trial_expiration_basis"] })}><option value="from_issue">When issued</option><option value="from_first_activation">On first activation</option><option value="from_first_use">On first use</option></select></label><label>Trial duration (sec)<input type="number" value={policyForm.trial_duration_sec} onChange={(event) => setPolicyForm({ ...policyForm, trial_duration_sec: Number(event.target.value) })} /></label><label className="checkboxRow"><input type="checkbox" checked={policyForm.trial_one_per_device} onChange={(event) => setPolicyForm({ ...policyForm, trial_one_per_device: event.target.checked })} />One trial per device</label><label className="checkboxRow"><input type="checkbox" checked={policyForm.trial_require_device_proof} onChange={(event) => setPolicyForm({ ...policyForm, trial_require_device_proof: event.target.checked })} />Require device proof</label></fieldset>}
+          {policyForm.type === "trial" && <fieldset className="trialPanel"><legend>Trial</legend><label>Expiration basis<select value={policyForm.trial_expiration_basis} onChange={(event) => setPolicyForm({ ...policyForm, trial_expiration_basis: event.target.value as Policy["trial_expiration_basis"] })}><option value="from_issue">When issued</option><option value="from_first_activation">On first activation</option><option value="from_first_use">On first use</option></select></label><label>Trial duration (sec)<input type="number" {...field("trial_duration_sec", "Trial duration (sec)")} value={policyForm.trial_duration_sec} onChange={(event) => update("trial_duration_sec", { trial_duration_sec: Number(event.target.value) })} />{error("trial_duration_sec")}</label><label className="checkboxRow"><input type="checkbox" checked={policyForm.trial_one_per_device} onChange={(event) => setPolicyForm({ ...policyForm, trial_one_per_device: event.target.checked })} />One trial per device</label><label className="checkboxRow"><input type="checkbox" checked={policyForm.trial_require_device_proof} onChange={(event) => setPolicyForm({ ...policyForm, trial_require_device_proof: event.target.checked })} />Require device proof</label></fieldset>}
           <details className="advancedSettings"><summary>Advanced settings</summary>
-          <label>Valid from offset (sec)<input type="number" value={policyForm.valid_from_offset_sec} onChange={(event) => setPolicyForm({ ...policyForm, valid_from_offset_sec: event.target.value })} /></label>
-          <label>Assertion TTL (seconds)<input type="number" value={policyForm.assertion_ttl_seconds} onChange={(event) => setPolicyForm({ ...policyForm, assertion_ttl_seconds: Number(event.target.value) })} /></label>
-          <label>Meter quota (0 = off)<input type="number" value={policyForm.meter_quota} onChange={(event) => setPolicyForm({ ...policyForm, meter_quota: Number(event.target.value) })} /></label>
-          <label>Meter period (sec)<input type="number" value={policyForm.meter_period_sec} onChange={(event) => setPolicyForm({ ...policyForm, meter_period_sec: Number(event.target.value) })} /></label>
+          <label>Valid from offset (sec)<input type="number" {...field("valid_from_offset_sec", "Valid from offset (sec)")} value={policyForm.valid_from_offset_sec} onChange={(event) => update("valid_from_offset_sec", { valid_from_offset_sec: event.target.value })} />{error("valid_from_offset_sec")}</label>
+          <label>Assertion TTL (seconds)<input type="number" {...field("assertion_ttl_seconds", "Assertion TTL (seconds)")} value={policyForm.assertion_ttl_seconds} onChange={(event) => update("assertion_ttl_seconds", { assertion_ttl_seconds: Number(event.target.value) })} />{error("assertion_ttl_seconds")}</label>
+          <label>Meter quota (0 = off)<input type="number" {...field("meter_quota", "Meter quota (0 = off)")} value={policyForm.meter_quota} onChange={(event) => update("meter_quota", { meter_quota: Number(event.target.value) })} />{error("meter_quota")}</label>
+          <label>Meter period (sec)<input type="number" {...field("meter_period_sec", "Meter period (sec)")} value={policyForm.meter_period_sec} onChange={(event) => update("meter_period_sec", { meter_period_sec: Number(event.target.value) })} />{error("meter_period_sec")}</label>
           </details>
-          <label>Notes<textarea value={policyForm.notes} onChange={(event) => setPolicyForm({ ...policyForm, notes: event.target.value })} /></label>
+          <label>Notes<textarea {...field("notes", "Notes")} value={policyForm.notes} onChange={(event) => update("notes", { notes: event.target.value })} />{error("notes")}</label>
+          <FormStatus feedback={formFeedback.status} />
           <button disabled={busy || operationLocked} type="submit">{editing === null ? "Create policy" : "Save changes"}</button>
         </fieldset></form>
         <button type="button" disabled={busy} onClick={() => requestLeave(closeEditor)}>Close editor</button>
@@ -308,7 +327,7 @@ export function Policies({ active, draftRequest = null, onReturnToDraft }: { act
         <div className="filters"><label>Project<input placeholder="project" value={policyFilter.project} onChange={(event) => setPolicyFilter({ ...policyFilter, project: event.target.value })} /></label><label>Policy type<select value={policyFilter.type} onChange={(event) => setPolicyFilter({ ...policyFilter, type: event.target.value })}><option value="">all types</option><option value="trial">Trial</option><option value="node_locked">Device-locked</option><option value="floating">Floating</option><option value="subscription">Subscription</option></select></label><label>Status<select value={policyFilter.status} onChange={(event) => setPolicyFilter({ ...policyFilter, status: event.target.value })}><option value="">all</option><option value="active">active</option><option value="disabled">disabled</option></select></label><button type="button" onClick={() => setPolicyFilter({ project: "", type: "", status: "" })}>Clear filters</button></div>
         <div className="tableScroll" role="region" aria-label="Policy records" tabIndex={0} aria-busy={policiesLoading}><table><thead><tr><th>Name</th><th>Project</th><th>Type</th><th>Details</th><th>Status</th><th>Actions</th></tr></thead><tbody>{visiblePolicies.map((policy) => <tr key={policy.id} data-focus-row={`policy:${policy.id}`}><td>{policy.name}</td><td>{policy.project}</td><td>{policy.type}</td><td><div className="details"><span>TTL {policy.assertion_ttl_seconds}s</span><span>Expiry {policy.expiry_strategy}</span><span>Offset {policy.valid_from_offset_sec ?? "-"} / Duration {policy.duration_sec ?? "-"}</span><span>Pool {policy.pool_size} / Max devices {policy.max_active_devices} / Borrow {policy.max_borrow_sec}s</span>{policy.meter_quota > 0 && <span>Meter quota {policy.meter_quota} / {policy.meter_period_sec}s</span>}{policy.type === "trial" && <span>Trial {policy.trial_expiration_basis} {policy.trial_duration_sec}s {policy.trial_one_per_device === 1 ? "one-per-device" : ""} {policy.trial_require_device_proof === 1 ? "proof-required" : ""}</span>}{policy.notes !== "" && <span>Notes {policy.notes}</span>}</div></td><td><span className={`status ${policy.status}`}>{policy.status}</span></td><td className="actions"><button type="button" disabled={busy || operationLocked || !policiesFence.canLoadMore()} onClick={() => requestLeave(() => openEditor(policyFormFromPolicy(policy), policy))}>Edit</button><StatusActions status={policy.status}><button className="danger" disabled={busy || operationLocked || !policiesFence.canLoadMore() || !canRunPolicyAction(policy.status, "disable")} onClick={() => requestConfirm({ title: "Disable policy", body: disablePolicyConfirm(policy), requiresReason: true, run: ({ idempotencyKey }: ConfirmActionContext) => policyTransition(policy, "disable", idempotencyKey), successFocusTarget: focusTargetInRow(`policy:${policy.id}`, ['button[data-focus-action="reenable"]', ".status"]), isCurrent: () => isFilterGenerationCurrent(filterGeneration) })}>Disable</button><button data-focus-action="reenable" disabled={busy || operationLocked || !policiesFence.canLoadMore() || !canRunPolicyAction(policy.status, "reenable")} onClick={() => void runConsequenceAction({ run: ({ idempotencyKey }: ConfirmActionContext) => policyTransition(policy, "reenable", idempotencyKey), successFocusTarget: focusTargetInRow(`policy:${policy.id}`, ['button[data-focus-action="reenable"]', ".status"]), isCurrent: () => isFilterGenerationCurrent(filterGeneration) })}>Reenable</button></StatusActions></td></tr>)}</tbody></table></div>
         {policiesFence.isSettled() && visiblePolicies.length === 0 && <p className="emptyState">No policies match this view.</p>}
-        <div className="tableFooter"><span className="muted">{policiesFence.isSettled() ? `${visiblePolicies.length} shown` : ""}</span>{visiblePoliciesCursor !== null && <button type="button" disabled={busy || operationLocked} onClick={() => void loadMore(policiesUrl, visiblePoliciesCursor, visiblePolicies, setPolicies, setPoliciesCursor, setMessage, hasPolicyListData, "policies_listed", policiesFence, (policy) => policy.id)}>Load more</button>}</div>
+        <div className="tableFooter"><span className="muted">{policiesFence.isSettled() ? `${visiblePolicies.length} shown` : ""}</span>{visiblePoliciesCursor !== null && <button type="button" disabled={busy || operationLocked} onClick={() => void loadMore(policiesUrl, visiblePoliciesCursor, visiblePolicies, setPolicies, setPoliciesCursor, setFeedback, hasPolicyListData, "policies_listed", policiesFence, (policy) => policy.id)}>Load more</button>}</div>
       </section>
     </section>
   );

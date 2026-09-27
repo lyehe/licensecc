@@ -11,10 +11,11 @@ import {
   type ConfirmFocusTarget,
   type ExactReadProof,
 } from "../../shared/controls";
+import { feedbackWith, refusalOutcome } from "../../shared/messages";
 import type { OperatorFeedback } from "../../shared/operatorFeedback";
 import { BatchRunPanel, createBatchRunStore, type BatchRunStore } from "./BatchRunPanel";
-import { batchPlanText, batchReconcileLabel, batchRefreshFailureMessage, batchStopMessage, classifyBatchChunk, planBatchChunks, runBatchChunks, settleReconciledChunk, type BatchChunk, type BatchRunState } from "./batchRunner";
-import { batchPath, summarizeBatchResults, type EntitlementAction } from "./workflow";
+import { batchPlanText, batchReconcileLabel, batchRefreshFailureMessage, batchStopDetail, batchStopMessage, classifyBatchChunk, planBatchChunks, runBatchChunks, settleReconciledChunk, type BatchChunk, type BatchRunState } from "./batchRunner";
+import { batchPath, batchResultSentence, type EntitlementAction } from "./workflow";
 
 /** The list context a later reconcile must still match, captured as the single-row transitions do. */
 export interface BatchRecoveryContext {
@@ -29,7 +30,6 @@ export interface EntitlementBatchOptions {
   runMutation: <T>(work: () => Promise<T>, owner?: "consequence" | "recovery") => Promise<T | undefined>;
   refreshCore: (strict?: boolean) => Promise<ExactReadProof | null>;
   currentReason: () => string;
-  setMessage: Dispatch<SetStateAction<string>>;
   setFeedback: Dispatch<SetStateAction<OperatorFeedback>>;
   setReason: Dispatch<SetStateAction<string>>;
   recoveryContext: () => BatchRecoveryContext;
@@ -53,7 +53,7 @@ const focusTarget: ConfirmFocusTarget = () => document.querySelector<HTMLElement
  */
 export function useEntitlementBatch(options: EntitlementBatchOptions): EntitlementBatch {
   const [store] = useState(createBatchRunStore);
-  const { selectedIds, setSelectedIds, runMutation, refreshCore, currentReason, setMessage, setFeedback, setReason, recoveryContext } = options;
+  const { selectedIds, setSelectedIds, runMutation, refreshCore, currentReason, setFeedback, setReason, recoveryContext } = options;
   const deselect = (ids: readonly string[]): void => setSelectedIds((previous) => {
     const next = new Set(previous);
     for (const id of ids) next.delete(id);
@@ -72,7 +72,7 @@ export function useEntitlementBatch(options: EntitlementBatchOptions): Entitleme
       }
     }, owner);
     const run = async ({ idempotencyKey }: ConfirmActionContext): Promise<ConfirmActionOutcome> => {
-      if (ids.length === 0) return { ok: false, message: "no_entitlements_selected" };
+      if (ids.length === 0) return refusalOutcome("no_entitlements_selected", null);
       const { isCurrent, capture } = recoveryContext();
       const refreshStatus = async (): Promise<ExactReadProof | null> => {
         capture();
@@ -104,14 +104,16 @@ export function useEntitlementBatch(options: EntitlementBatchOptions): Entitleme
         return confirmMutationUnknown({ label: batchReconcileLabel(finished), run: replay, isCurrent, settlesRetainedAttempt: true, postSuccessRefresh });
       }
       const stopMessage = batchStopMessage(finished);
+      const stopDetail = batchStopDetail(finished);
       if (stopMessage !== null) {
-        setFeedback({ tone: "error", message: stopMessage });
         // Nothing was applied, exactly as when a single request is refused: the
-        // confirmation stays open to correct and retry, under a fresh key.
-        if (finished.done === 0) return { ok: false, message: stopMessage, retryable: true };
+        // confirmation stays open to correct and retry, under a fresh key, and
+        // shows the refusal itself. After partial progress the page reports it.
+        if (finished.done === 0) return { ok: false, message: stopMessage, detail: stopDetail, retryable: true };
+        setFeedback(stopDetail === undefined ? { tone: "error", message: stopMessage } : feedbackWith(stopMessage, stopDetail.code, stopDetail.requestId));
       } else {
-        const reference = finished.requestIds.length === 1 ? finished.requestIds[0] : `${finished.requestIds.length} requests`;
-        setMessage(`${action}: ${summarizeBatchResults(finished.results)} (${reference})`);
+        // Every request id stays in the run panel's Technical details.
+        setFeedback(feedbackWith(batchResultSentence(action, finished.results), "batch_done", finished.requestIds.length === 1 ? finished.requestIds[0] : null, "success"));
       }
       setReason("");
       // After partial progress a definite refusal is a known outcome, as a success

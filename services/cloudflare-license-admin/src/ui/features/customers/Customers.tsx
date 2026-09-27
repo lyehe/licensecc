@@ -5,9 +5,12 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 
 import { useAdminNavigation } from "../../app/navigation";
 import type { CustomerSection, NavigationIntent } from "../../app/types";
-import { api, apiFailureDetails, apiFailureMessage, parseExactApiSuccess } from "../../shared/api";
+import { api, apiFailureDetails, parseExactApiSuccess } from "../../shared/api";
 import { confirmMutationUnknown, confirmSuccessWithRefreshFailure, ConfirmRefreshFailure, EXACT_READ_PROOF, focusTargetInRow, type ConfirmActionContext, type ConfirmActionOutcome, type ConfirmActionResolution, type ExactReadProof, useContextGeneration, useOperatorControls } from "../../shared/controls";
+import { TechnicalDetails } from "../../shared/FeedbackText";
 import { formatEpoch, formatUtcDate, shortHash } from "../../shared/format";
+import { apiFailureFeedback, codeFeedback, refusalOutcome } from "../../shared/messages";
+import type { OperatorFeedback } from "../../shared/operatorFeedback";
 import { hasCustomerDetailData, hasCustomerListData, hasCustomerTransitionData, mutationFailurePolicies, parseMutationResponse } from "../../shared/mutationGuards";
 import { downloadCsv, loadMore } from "../../shared/pagination";
 import { useRequestFence } from "../../shared/requestFence";
@@ -101,10 +104,10 @@ export function Customers({ active, navigationIntent, onNavigationHandled }: {
   const [customerFilter, setCustomerFilter] = useState<CustomerListFilter>({ status: "", q: "" });
   const [customersCursorSnapshot, setCustomersCursor] = useState<string | null>(null);
   const [customerDetailSnapshot, setCustomerDetail] = useState<CustomerDetail | null>(null);
-  const [listFailure, setListFailure] = useState<string | null>(null);
-  const [detailFailure, setDetailFailure] = useState<"failed" | "not-found" | null>(null);
+  const [listFailure, setListFailure] = useState<OperatorFeedback | null>(null);
+  const [detailFailure, setDetailFailure] = useState<{ kind: "failed" | "not-found"; feedback: OperatorFeedback } | null>(null);
   const { selectedCustomerId, customerSection, openCustomer, showCustomerList, setCustomerSection, navigate, rememberFilters } = useAdminNavigation();
-  const { busy: requestBusy, operationLocked, currentReason, requestConfirm, runConsequenceAction, runMutation, setMessage, setReason } = useOperatorControls();
+  const { busy: requestBusy, operationLocked, currentReason, requestConfirm, runConsequenceAction, runMutation, setFeedback, setReason } = useOperatorControls();
   const busy = requestBusy || operationLocked;
   const customersUrl = useMemo(() => customersPath(customerFilter), [customerFilter]);
   const filterContextKey = `${active ? "active" : "inactive"}\u0000${customerFilter.status}\u0000${customerFilter.q}`;
@@ -132,8 +135,8 @@ export function Customers({ active, navigationIntent, onNavigationHandled }: {
       throw new ConfirmRefreshFailure(failure.code, failure.requestId);
     } else {
       setCustomerDetail(null);
-      setDetailFailure(apiFailureDetails(response).code === "not_found" ? "not-found" : "failed");
-      setMessage(apiFailureMessage(response));
+      const failure = apiFailureFeedback(response);
+      setDetailFailure({ kind: failure.detail?.code === "not_found" ? "not-found" : "failed", feedback: failure });
     }
     return null;
   }
@@ -155,8 +158,7 @@ export function Customers({ active, navigationIntent, onNavigationHandled }: {
       const failure = apiFailureDetails(response);
       throw new ConfirmRefreshFailure(failure.code, failure.requestId);
     } else {
-      setListFailure(apiFailureMessage(response));
-      setMessage(apiFailureMessage(response));
+      setListFailure(apiFailureFeedback(response));
     }
     return null;
   }
@@ -214,7 +216,7 @@ export function Customers({ active, navigationIntent, onNavigationHandled }: {
   }
 
   async function customerTransition(action: "disable" | "reenable", idempotencyKey: string = crypto.randomUUID()): Promise<ConfirmActionOutcome> {
-    if (selectedCustomerId === null) return { ok: false, message: "customer_not_selected" };
+    if (selectedCustomerId === null) return refusalOutcome("customer_not_selected", null);
     const id = selectedCustomerId;
     const contextGeneration = customerGeneration;
     let reconciliationGeneration = contextGeneration;
@@ -267,15 +269,12 @@ export function Customers({ active, navigationIntent, onNavigationHandled }: {
         return null;
       }
     }, "consequence");
-    if (mutation === undefined) return { ok: false, message: "mutation_busy", retryable: true };
+    if (mutation === undefined) return refusalOutcome("mutation_busy", null);
     if (mutation === null) return confirmMutationUnknown(reconciliation);
     const parsed = parseMutationResponse(mutation, expectedCode, dataGuard, mutationFailurePolicies.customerTransition[action], "initial");
     if (parsed.kind === "invalid") return confirmMutationUnknown(reconciliation);
-    if (parsed.kind === "failure") {
-      setMessage(`${parsed.code} (${parsed.requestId})`);
-      return { ok: false, message: `${parsed.code} (${parsed.requestId})`, retryable: true };
-    }
-    setMessage(`${parsed.code} (${parsed.requestId})`);
+    if (parsed.kind === "failure") return refusalOutcome(parsed.code, parsed.requestId);
+    setFeedback(codeFeedback(parsed.code, parsed.requestId));
     setReason("");
     try {
       return (await refreshStatus()) === EXACT_READ_PROOF
@@ -307,8 +306,8 @@ export function Customers({ active, navigationIntent, onNavigationHandled }: {
         <button className="backLink" type="button" onClick={returnToList}><span aria-hidden="true">←</span>Back to customers</button>
         <header className="detailHeader customerHeader" data-focus-row={customerDetail === null ? undefined : `customer:${customerDetail.customer.id}`}>
           {detailLoading && <p className="readState" role="status">Loading customer…</p>}
-          {detailFailure === "not-found" && <div className="readState error" role="alert"><p>Customer not found.</p><button type="button" onClick={returnToList}>Return to customers</button></div>}
-          {detailFailure === "failed" && <div className="readState error" role="alert"><p>Could not load this customer.</p><button type="button" onClick={() => void loadCustomerDetail(selectedCustomerId)}>Retry</button></div>}
+          {detailFailure?.kind === "not-found" && <div className="readState error" role="alert"><p>Customer not found.</p><button type="button" onClick={returnToList}>Return to customers</button><TechnicalDetails detail={detailFailure.feedback.detail} /></div>}
+          {detailFailure?.kind === "failed" && <div className="readState error" role="alert"><p>Could not load this customer. {detailFailure.feedback.message}</p><button type="button" onClick={() => void loadCustomerDetail(selectedCustomerId)}>Retry</button><TechnicalDetails detail={detailFailure.feedback.detail} /></div>}
           {customerDetail !== null && <>
             <div className="customerIdentity">
               <div className="customerTitle"><h2 id="customer-detail-title">{customerDisplayName(customerDetail.customer)}</h2><span className={`status ${customerDetail.customer.status}`}>{customerDetail.customer.status === "disabled" ? "suspended" : customerDetail.customer.status}</span></div>
@@ -357,16 +356,16 @@ export function Customers({ active, navigationIntent, onNavigationHandled }: {
         <label>Status<select value={customerFilter.status} onChange={(event) => setCustomerFilter({ ...customerFilter, status: event.target.value })}><option value="">All statuses</option><option value="active">Active</option><option value="disabled">Suspended</option></select></label>
         <label>Search customers<input placeholder="Name, email, or customer ID" value={customerFilter.q} onChange={(event) => setCustomerFilter({ ...customerFilter, q: event.target.value })} /></label>
         <button type="button" disabled={customerFilter.status === "" && customerFilter.q === ""} onClick={() => setCustomerFilter({ status: "", q: "" })}>Clear filters</button>
-        <button type="button" disabled={busy} onClick={() => void downloadCsv(customersUrl, "customers.csv", runMutation, setMessage)}>Export CSV</button>
+        <button type="button" disabled={busy} onClick={() => void downloadCsv(customersUrl, "customers.csv", runMutation, setFeedback)}>Export CSV</button>
       </div>
       {listLoading && <p className="readState" role="status">Loading customers…</p>}
-      {listFailure !== null && <div className="readState error" role="alert"><p>Could not load customers: {listFailure}</p><button type="button" onClick={() => void refreshCustomers()}>Retry</button></div>}
+      {listFailure !== null && <div className="readState error" role="alert"><p>Could not load customers. {listFailure.message}</p><button type="button" onClick={() => void refreshCustomers()}>Retry</button><TechnicalDetails detail={listFailure.detail} /></div>}
       {customers.length === 0 && customersFence.isSettled() && <div className="emptyState"><h3>No customers found</h3><p>Try clearing or changing the filters.</p></div>}
       {customers.length > 0 && <>
         <div className="desktopRecords tableScroll"><table><thead><tr><th>Customer</th><th>Status</th><th>Access</th><th>Updated</th><th><span className="srOnly">Open</span></th></tr></thead><tbody>{customers.map((item) => <tr key={item.id} data-focus-row={`customer:${item.id}`}><td><strong>{customerDisplayName(item)}</strong><br /><span className="muted">{item.login_email ? `Login: ${item.login_email}` : item.email || "No email recorded"}</span>{customerDisplayName(item) !== item.id && <div><code>{item.id}</code></div>}</td><td><span className={`status ${item.status}`}>{item.status === "disabled" ? "suspended" : item.status}</span></td><td>{item.active_entitlement_count} active / {item.entitlement_count} total</td><td>{formatEpoch(item.updated_at)}</td><td><button data-navigation-focus id={`customer-open-${item.id}`} type="button" disabled={busy} onClick={() => selectCustomer(item.id)}>Open</button></td></tr>)}</tbody></table></div>
         <div className="recordCards">{customers.map((item) => <article className="recordCard" data-focus-row={`customer:${item.id}`} key={item.id}><h3>{customerDisplayName(item)}</h3><p>{item.login_email ? `Login: ${item.login_email}` : item.email || item.id}</p><code>{item.id}</code><p><span className={`status ${item.status}`}>{item.status === "disabled" ? "suspended" : item.status}</span> {item.active_entitlement_count} active / {item.entitlement_count} total access</p><button data-navigation-focus id={`customer-open-card-${item.id}`} type="button" disabled={busy} onClick={() => selectCustomer(item.id)}>Open details</button></article>)}</div>
       </>}
-      {customersFence.isSettled() && <div className="tableFooter"><span className="muted">{customers.length} shown</span>{customersCursor !== null && <button type="button" disabled={busy} onClick={() => void loadMore(customersUrl, customersCursor, customers, setCustomers, setCustomersCursor, setMessage, hasCustomerListData, "customers_listed", customersFence, (customer) => customer.id)}>Load more</button>}</div>}
+      {customersFence.isSettled() && <div className="tableFooter"><span className="muted">{customers.length} shown</span>{customersCursor !== null && <button type="button" disabled={busy} onClick={() => void loadMore(customersUrl, customersCursor, customers, setCustomers, setCustomersCursor, setFeedback, hasCustomerListData, "customers_listed", customersFence, (customer) => customer.id)}>Load more</button>}</div>}
     </section>
   );
 }

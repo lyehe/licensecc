@@ -57,6 +57,9 @@ test("protected creation requires ownership and preserves mode and key through r
   expect(attempts[1]).toEqual(attempts[0]);
   expect(attempts[0].body.enforcement_mode).toBe("device_bound_v1");
   await expect(page.getByRole("status").filter({ hasText: "Status reconciled." })).toBeVisible();
+  // The reconciled create opens its record: the form closes, and a new one starts over as legacy.
+  await expect(form).toHaveCount(0);
+  await page.getByRole("button", { name: "New entitlement", exact: true }).click();
   await expect(form.getByLabel("Protection", { exact: true })).toHaveValue("legacy");
 });
 
@@ -249,7 +252,7 @@ test("admin UI runs bulk transitions, global search deep-link, and CSV export", 
   await page.getByRole("button", { name: "Export CSV" }).click();
   await expect.poll(() => api.requests.csvExports.length).toBeGreaterThan(0);
   expect(api.requests.csvExports.at(-1)).toBe("/api/admin/customers");
-  await expect(page.getByText(/exported customers\.csv/)).toBeVisible();
+  await expect(page.getByText("Exported customers.csv.")).toBeVisible();
 });
 
 test("admin UI retains the server-owned four-entitlement batch limit", async ({ page }) => {
@@ -608,7 +611,7 @@ test("admin UI previews and applies a license plan projection", async ({ page })
   const applyButton = form.getByRole("button", { name: "Apply" });
   await expect(applyButton).toBeEnabled();
   await expect(page.getByText(/Server preview ppv_ui_/)).toBeVisible();
-  await page.getByText("Technical details", { exact: true }).click();
+  await page.locator("fieldset").getByText("Technical details", { exact: true }).click();
   await expect(page.getByText(/Local form digest [0-9a-f]{64}/)).toBeVisible();
 
   // Any projection-form edit invalidates the bound preview until the operator previews again.

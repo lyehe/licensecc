@@ -310,7 +310,7 @@ test("admin UI surfaces catalog-import capability failures exactly and recovers 
   await preview();
   api.catalogImportState.claimAsOtherOperator(api.catalogImportState.latestPreviewId());
   let dialog = await attempt();
-  await expect(dialog.locator(".modalError")).toContainText("stale_catalog_import_preview — preview again");
+  await expect(dialog.locator(".modalError")).toContainText("This import preview is out of date. Preview the import again.");
   await expect(page.getByRole("row", { name: /Capability capability/ })).toHaveCount(0);
   await dialog.getByRole("button", { name: "Cancel" }).click();
   await expect(form.getByRole("button", { name: "Apply import" })).toBeDisabled();
@@ -318,19 +318,19 @@ test("admin UI surfaces catalog-import capability failures exactly and recovers 
   await preview();
   api.catalogImportState.expire(api.catalogImportState.latestPreviewId());
   dialog = await attempt();
-  await expect(dialog.locator(".modalError")).toContainText("expired_catalog_import_preview — preview again");
+  await expect(dialog.locator(".modalError")).toContainText("This import preview expired. Preview the import again.");
   await dialog.getByRole("button", { name: "Cancel" }).click();
 
   await preview();
   api.catalogImportState.claim(api.catalogImportState.latestPreviewId());
   dialog = await attempt();
-  await expect(dialog.locator(".modalError")).toContainText("claimed_catalog_import_preview — preview again");
+  await expect(dialog.locator(".modalError")).toContainText("This import preview was already used. Preview the import again.");
   await dialog.getByRole("button", { name: "Cancel" }).click();
 
   await preview();
   api.behavior.catalogImportApplyErrors.push("catalog_import_too_large");
   dialog = await attempt();
-  await expect(dialog.locator(".modalError")).toContainText("catalog_import_too_large — preview again");
+  await expect(dialog.locator(".modalError")).toContainText("This import is too large to apply at once. Narrow the manifest and preview it again.");
   await dialog.getByRole("button", { name: "Cancel" }).click();
 
   await preview();
