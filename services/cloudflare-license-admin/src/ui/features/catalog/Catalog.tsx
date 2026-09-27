@@ -10,7 +10,7 @@ import type {
 import { api, apiFailureDetails, apiFailureMessage, parseExactApiSuccess } from "../../shared/api";
 import { confirmMutationUnknown, confirmSuccessWithRefreshFailure, ConfirmRefreshFailure, EXACT_READ_PROOF, type ConfirmActionOutcome, type ConfirmActionResolution, type ExactReadProof, useContextGeneration, useOperatorControls } from "../../shared/controls";
 import { useCoreRefresh } from "../../shared/coreRefresh";
-import { loadAllExactPages, loadMore } from "../../shared/pagination";
+import { loadAllExactPages, loadMore, type LoadMoreOutcome } from "../../shared/pagination";
 import { hasCatalogFeatureData, hasCatalogFeatureListData, hasCatalogFeatureTransitionData, hasCatalogPlanData, hasCatalogPlanFeatureData, hasCatalogPlanFeatureListData, hasCatalogPlanFeatureTransitionData, hasCatalogPlanListData, hasCatalogPlanTransitionData, hasPolicyListData, mutationFailurePolicies, parseMutationResponse } from "../../shared/mutationGuards";
 import { useRequestFence } from "../../shared/requestFence";
 import { ReadNotice } from "../../shared/ReadNotice";
@@ -656,7 +656,7 @@ export function Catalog({ active }: { active: boolean }): React.ReactElement | n
   const catalogFeaturesCursor = catalogFeaturesFence.canLoadMore() ? catalogFeaturesCursorSnapshot : null;
   const catalogPlans = catalogPlansSettled ? catalogPlansSnapshot : [];
   const catalogPlansCursor = catalogPlansFence.canLoadMore() ? catalogPlansCursorSnapshot : null;
-  const loadMorePlans = (): void => { if (catalogPlansCursor !== null) void loadMore(catalogPlansUrl, catalogPlansCursor, catalogPlans, setCatalogPlans, setCatalogPlansCursor, setMessage, hasCatalogPlanListData, "catalog_plans_listed", catalogPlansFence, (plan) => plan.id); };
+  const loadMorePlans = (): Promise<LoadMoreOutcome> => loadMore(catalogPlansUrl, catalogPlansCursor, catalogPlans, setCatalogPlans, setCatalogPlansCursor, setMessage, hasCatalogPlanListData, "catalog_plans_listed", catalogPlansFence, (plan) => plan.id);
   const catalogPlanFeatures = catalogPlanFeaturesSettled ? catalogPlanFeaturesSnapshot : [];
   const visibleCatalogFeatures = catalogFeatures;
   const visibleCatalogPlans = catalogPlans;
@@ -680,7 +680,10 @@ export function Catalog({ active }: { active: boolean }): React.ReactElement | n
     { run: catalogFeatureTransition, isCurrent: () => isCatalogFeatureGenerationCurrent(catalogFeatureGeneration) },
     { run: catalogPlanFeatureTransition, isCurrent: () => isCatalogPlanFeatureGenerationCurrent(catalogPlanFeatureGeneration) },
   );
-  useCatalogPlanRoute({ planId: workspace.task === "planDetail" ? workspace.planId : null, plans: catalogPlansFence.canLoadMore() && planRead.error === null ? catalogPlansSnapshot : null, hasMore: catalogPlansCursor !== null, selectedId: selectedCatalogPlanId, select: selectCatalogPlan, loadMore: loadMorePlans });
+  const planRoute = useCatalogPlanRoute({
+    planId: workspace.task === "planDetail" ? workspace.planId : null, plans: catalogPlansFence.canLoadMore() && planRead.error === null ? catalogPlansSnapshot : null, listFailed: planRead.error !== null, cursor: catalogPlansCursor, filter: catalogPlanFilter,
+    selectedId: selectedCatalogPlanId, select: selectCatalogPlan, clearFilter: () => setCatalogPlanFilter({ project: "", status: "" }), loadMore: loadMorePlans, reloadList: () => void refreshCatalogPlans(),
+  });
   if (!active) return null;
   const selectedCatalogPlan = visibleCatalogPlans.find((plan) => plan.id === settledSelectedCatalogPlanId && plan.id === workspace.planId) ?? null;
 
@@ -702,9 +705,9 @@ export function Catalog({ active }: { active: boolean }): React.ReactElement | n
           {workspace.task === "planFeatureEditor" && <CatalogPlanFeatureEditor form={catalogPlanFeatureForm} busy={busy} plansSettled={catalogPlansFence.canLoadMore() && planRead.error === null} activePoliciesSettled={activePoliciesSettled} selectedPlanId={settledSelectedCatalogPlanId} plans={visibleCatalogPlans} features={visibleCatalogFeatures} policies={visibleActivePolicies} onChange={setCatalogPlanFeatureForm} onSelectPlan={selectCatalogPlan} onClearPlan={() => { setSelectedCatalogPlanId(""); invalidatePlanProjectionPreview(); }} onSubmit={(event) => void submitCatalogPlanFeatureCreate(event)} />}
           {workspace.task === "projection" && <><PlanProjectionEditor form={planForm} previewBinding={planPreviewBinding} busy={busy} onUpdate={updatePlanProjectionForm} onSubmit={(event) => void submitPlanPreview(event)} onApply={requestPlanProjectionApply} /><PlanProjectionResults preview={planPreview} binding={planPreviewBinding} /></>}
         </fieldset>
-        {workspace.task === "planDetail" && (selectedCatalogPlan === null ? <><h2>{planRead.error === null ? "Loading plan…" : "Plan unavailable"}</h2>{planRead.error !== null && <p>The plans list could not be read. Retry, or return to Plans.</p>}<ReadNotice {...planRead} hasData={false} onRetry={() => void refreshCatalogPlans()} label="plans" /></> : <>
+        {workspace.task === "planDetail" && (selectedCatalogPlan === null ? <><h2>{planRoute.unavailable ? "Plan unavailable" : "Loading plan…"}</h2>{planRoute.unavailable && <div className="readState error" role="alert"><p>Could not load this plan.</p><button type="button" onClick={planRoute.retry}>Retry</button></div>}</> : <>
           <div className="detailHeader"><div><h2>{selectedCatalogPlan.name || selectedCatalogPlan.plan_key}</h2><p>{selectedCatalogPlan.project} / {selectedCatalogPlan.plan_key} · Version {selectedCatalogPlan.version}</p></div><span className={`status ${selectedCatalogPlan.status}`}>{selectedCatalogPlan.status}</span></div>
-          <p>{selectedCatalogPlan.description || "No description provided."}</p>
+          {planRoute.notice !== null && <p className="readState" role="status">{planRoute.notice}</p>}<p>{selectedCatalogPlan.description || "No description provided."}</p>
           <div className="pageActions"><button type="button" className="primary" disabled={busy} onClick={() => { const form = { ...emptyCatalogPlanFeatureForm, project: selectedCatalogPlan.project }; workspace.open("planFeatureEditor", () => setCatalogPlanFeatureForm(form), JSON.stringify(form)); }}>Add feature</button><button type="button" disabled={busy} onClick={() => prepareProjection(selectedCatalogPlan)}>Apply plan</button><button type="button" disabled={busy} onClick={() => beginCatalogPlanEdit(selectedCatalogPlan)}>Edit plan</button></div>
           <details><summary>Technical details</summary><code>{selectedCatalogPlan.id}</code></details>
           <ReadNotice {...planFeaturesRead} hasData={catalogPlanFeatures.length > 0} onRetry={() => void refreshCatalogPlanFeatures()} label="plan features" />

@@ -72,23 +72,41 @@ export function useCatalogWorkspace(options: CatalogWorkspaceOptions): {
     },
   });
 
-  // Every route step (catalog view, plan detail, Back or Forward) closes an open editor.
+  // Every route step (catalog view, plan detail, Back or Forward) closes an open editor, but not
+  // under an in-flight save: the step applies once the save settles, and a draft the save did not
+  // take (it failed) stays open rather than being discarded unasked.
+  const routeKey = `${options.view}\u0000${catalogPlan ?? ""}`;
+  const closedFor = useRef(routeKey);
   useEffect(() => {
+    if (closedFor.current === routeKey || options.busy || options.operationLocked) return;
+    closedFor.current = routeKey;
+    if (dirtyNow()) return;
     latest.current.invalidate();
     showEditor(null);
     setRevision((value) => value + 1);
-  }, [options.view, catalogPlan]);
+  }, [routeKey, options.busy, options.operationLocked]);
   const shownPlan = useRef(planId);
+  // The plan an in-page "Back to plans" just left, whose row takes focus as browser Back gives it.
+  const returnToRow = useRef<string | null>(null);
   useLayoutEffect(() => {
-    // Leaving a plan detail is a history step, so the navigation provider owns focus and scroll.
-    const leftPlan = shownPlan.current !== null && planId === null;
+    const left = shownPlan.current;
     shownPlan.current = planId;
-    if (!options.active || leftPlan) return;
+    const rowPlan = returnToRow.current;
+    returnToRow.current = null;
+    // Leaving a plan detail through browser history is the navigation provider's to restore.
+    if (!options.active || (left !== null && planId === null && rowPlan !== left)) return;
     const currentView = options.view;
     const focusAtSchedule = document.activeElement;
     const frame = window.requestAnimationFrame(() => {
       if (!latest.current.active || latest.current.view !== currentView) return;
       if (document.activeElement !== focusAtSchedule && document.activeElement instanceof HTMLElement && usableFocusTarget(document.activeElement)) return;
+      const row = rowPlan === null ? undefined : [...document.querySelectorAll<HTMLElement>("[data-focus-row]")].find((candidate) => candidate.dataset.focusRow === `catalog-plan:${rowPlan}` && usableFocusTarget(candidate));
+      const rowAction = row?.querySelector<HTMLElement>("button:not([disabled])") ?? null;
+      if (rowAction !== null) {
+        focusWorkspaceTarget(rowAction);
+        rowAction.scrollIntoView({ block: "nearest" });
+        return;
+      }
       focusWorkspaceTarget(document.querySelector<HTMLElement>(task === null ? '[data-focus-section="catalog-list"] h3' : '[data-focus-section="catalog-task"] h2'));
     });
     return () => window.cancelAnimationFrame(frame);
@@ -114,7 +132,7 @@ export function useCatalogWorkspace(options: CatalogWorkspaceOptions): {
       showEditor(null);
       setRevision((value) => value + 1);
       // Closing a plan detail, or an editor opened on one, returns to the plans list.
-      if (planId !== null) setCatalogPlan(null);
+      if (planId !== null && setCatalogPlan(null)) returnToRow.current = planId;
     });
   }
   function finish(completed: CatalogTask): void {

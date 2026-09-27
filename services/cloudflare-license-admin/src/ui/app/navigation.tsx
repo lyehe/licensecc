@@ -50,14 +50,21 @@ interface NavigationContextValue {
   setCatalogView: (view: CatalogView) => boolean;
   /** Opens a plan's detail (or the plans list, for null) on the catalog Plans view. */
   setCatalogPlan: (planId: string | null) => boolean;
-  /** A deep-linked app or plan that does not exist: replace this entry with its list, once, and say why. */
-  resolveMissingDrillDown: (kind: "app" | "plan", id: string) => void;
+  /**
+   * A deep-linked app or plan that does not exist: replace this entry with its list, once, and say
+   * why. It acts only while the current entry still names exactly that customer's app or that plan.
+   */
+  resolveMissingDrillDown: (missing: MissingDrillDown) => void;
   requestLeave: (action: () => void) => boolean;
   registerGuard: (read: () => NavigationGuard) => () => void;
 }
 
+type MissingDrillDown = { kind: "app"; customerId: string; app: string } | { kind: "plan"; planId: string };
+
 const NavigationContext = createContext<NavigationContextValue | null>(null);
 const historyKey = "licenseccAdminNavigation";
+/** In-memory entries this far from the current one are dropped; the browser keeps their addresses. */
+const retainedEntries = 50;
 const unrecognizedNotice = "This workspace address is not recognized. Overview is shown.";
 const reopenManagedNotice = "Reopen Manage access from the list.";
 const missingNotice = { app: "That app was not found for this customer. All apps are shown.", plan: "That plan was not found. The plans list is shown." };
@@ -129,6 +136,9 @@ export function AdminNavigationProvider({ children }: { children: ReactNode }): 
   const applyEntry = useCallback((next: NavigationEntry, notice: string | null, restore: boolean): void => {
     entry.current = next;
     entries.current.set(next.key, next);
+    // Bound the in-memory map (and the elements its saved focus holds); a dropped entry is resolved
+    // again from its address if the operator ever travels that far.
+    for (const [key, value] of entries.current) if (Math.abs(value.index - next.index) > retainedEntries) entries.current.delete(key);
     intentId.current += 1;
     setRoute(next.route);
     setManagedGrant(next.grant);
@@ -163,6 +173,8 @@ export function AdminNavigationProvider({ children }: { children: ReactNode }): 
     const changed = (): void => {
       const marker = window.history.state?.[historyKey] as { session?: string; key?: number; index?: number } | undefined;
       const known = marker?.session === session.current && marker.key !== undefined ? entries.current.get(marker.key) : undefined;
+      // A same-session entry whose memory was dropped still knows its place in this history.
+      const index = known?.index ?? (marker?.session === session.current && typeof marker.index === "number" ? marker.index : undefined);
       const observed = `${known?.key ?? "external"}:${window.location.hash}`;
       if (observed === seenBrowserEntry.current) return;
       seenBrowserEntry.current = observed;
@@ -175,7 +187,7 @@ export function AdminNavigationProvider({ children }: { children: ReactNode }): 
       const sameKnownRoute = known !== undefined && hashForRoute(known.route) === hashForRoute(address.parsed.route);
       if (!allowLeave()) {
         restoringKey.current = entry.current.key;
-        const distance = known === undefined ? -1 : entry.current.index - known.index;
+        const distance = index === undefined ? -1 : entry.current.index - index;
         if (distance === 0) {
           writeHistory(entry.current, true);
           restoringKey.current = null;
@@ -184,7 +196,7 @@ export function AdminNavigationProvider({ children }: { children: ReactNode }): 
       }
       savePosition();
       const next: NavigationEntry = sameKnownRoute ? known : {
-        index: known?.index ?? entry.current.index + 1,
+        index: index ?? entry.current.index + 1,
         key: ++nextKey.current,
         route: address.route,
         target: targetForRoute(address.route),
@@ -276,12 +288,12 @@ export function AdminNavigationProvider({ children }: { children: ReactNode }): 
     const filter = current.tab === "plans" ? current.filter : {};
     return transition(planId === null ? { tab: "plans", view: "plans", filter } : { tab: "plans", view: "plans", filter, plan: planId });
   }, [transition]);
-  const resolveMissingDrillDown = useCallback((kind: "app" | "plan", id: string): void => {
+  const resolveMissingDrillDown = useCallback((missing: MissingDrillDown): void => {
     const current = entry.current;
     const { route: at } = current;
-    const parent: AdminRoute | null = kind === "app" && at.tab === "customers" && at.customerId !== null && at.access?.app === id
+    const parent: AdminRoute | null = missing.kind === "app" && at.tab === "customers" && at.customerId === missing.customerId && at.access?.app === missing.app
       ? { tab: "customers", customerId: at.customerId, section: at.section, filter: at.filter }
-      : kind === "plan" && at.tab === "plans" && at.plan === id ? { tab: "plans", view: at.view, filter: at.filter } : null;
+      : missing.kind === "plan" && at.tab === "plans" && at.plan === missing.planId ? { tab: "plans", view: at.view, filter: at.filter } : null;
     if (parent === null) return;
     // Resolution, not navigation: one replaceState and no guard, focus move, or new entry.
     const next: NavigationEntry = { ...current, route: parent, grant: null };
@@ -290,7 +302,7 @@ export function AdminNavigationProvider({ children }: { children: ReactNode }): 
     writeHistory(next, true);
     setRoute(parent);
     setManagedGrant(null);
-    setNavigationNotice(missingNotice[kind]);
+    setNavigationNotice(missingNotice[missing.kind]);
   }, [writeHistory]);
   const onNavigationHandled = useCallback((intent: NavigationIntent): void => setNavigationIntent((current) => current?.id === intent.id ? null : current), []);
   const requestLeave = useCallback((action: () => void): boolean => {

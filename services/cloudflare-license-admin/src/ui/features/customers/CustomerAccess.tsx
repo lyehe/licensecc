@@ -72,7 +72,8 @@ function useAppPresence(root: string, project: string | null, onMissing: (app: s
     if (project === null) return;
     let current = true;
     void (async () => {
-      const response = await api<Page>(`${root}/access?${new URLSearchParams({ project })}`);
+      // One record answers "any grants left?" without repeating the grants list read.
+      const response = await api<Page>(`${root}/access?${new URLSearchParams({ project, limit: "1" })}`);
       const parsed = parseExactApiSuccess<Page>(response, "entitlements_listed", (data) => isRow(data) && Array.isArray(data.items) && (data.next_cursor === null || typeof data.next_cursor === "string"));
       // A failed read proves nothing; only a successful empty first page means the app is gone.
       if (current && parsed !== null && parsed.data.items.length === 0 && parsed.data.next_cursor === null) onMissing(project);
@@ -88,7 +89,7 @@ export function CustomerAccess({ customerId }: { customerId: string }): React.Re
   const view = customerAccess?.view ?? "grants";
   const managed = useMemo<EntitlementFilter | null>(() => managedGrant !== null && managedGrant.customer_id === customerId ? { ...managedGrant, status: "" } : null, [managedGrant, customerId]);
   const root = `/api/admin/customers/${encodeURIComponent(customerId)}`;
-  useAppPresence(root, project, (app) => resolveMissingDrillDown("app", app));
+  useAppPresence(root, project, (app) => resolveMissingDrillDown({ kind: "app", customerId, app }));
   const url = project === null ? `${root}/apps` : `${root}/${view === "grants" ? "access" : "resources"}?${new URLSearchParams({ project, ...(view === "grants" ? {} : { kind: view }) })}`;
   if (managed) return <Entitlements key={managed.id} active navigationIntent={null} onNavigationHandled={() => undefined} scopedGrant={managed} onExit={closeManagedGrant} />;
   return <section>

@@ -36,6 +36,13 @@ export function isRetryableAppendFailure(response: unknown): boolean {
   return status === 0 || (typeof status === "number" && Number.isInteger(status) && status >= 500 && status < 600);
 }
 
+/**
+ * What one append did: "applied" published a page, "failed" read nothing usable (a retryable
+ * failure keeps the cursor, a terminal one retires it), and "skipped" sent nothing or was
+ * superseded by a newer page-one read of the same list.
+ */
+export type LoadMoreOutcome = "applied" | "failed" | "skipped";
+
 export async function loadMore<T>(
   url: string,
   cursor: string | null,
@@ -47,19 +54,19 @@ export async function loadMore<T>(
   expectedCode: string,
   fence: RequestFence,
   identity: (item: T) => string,
-): Promise<void> {
+): Promise<LoadMoreOutcome> {
   if (cursor === null) {
-    return;
+    return "skipped";
   }
   const ticket = fence.beginLoadMore(cursor);
   if (ticket === null) {
-    return;
+    return "skipped";
   }
   let applied = false;
   try {
     const response = await api<{ items: T[]; next_cursor: string | null }>(withCursor(url, cursor));
     if (!fence.isLoadMoreCurrent(ticket)) {
-      return;
+      return "skipped";
     }
     const parsed = parseExactApiSuccess<{ items: T[]; next_cursor: string | null }>(response, expectedCode, dataGuard);
     if (parsed !== null) {
@@ -69,23 +76,26 @@ export async function loadMore<T>(
         setMessage("invalid_api_response (duplicate_page_item)");
         setCursor((previous) => fence.isLoadMoreCurrent(ticket) && previous === cursor ? null : previous);
         fence.retireLoadMore(ticket);
-      } else if (!fence.acceptsNextCursor(ticket, nextCursor)) {
+        return "failed";
+      }
+      if (!fence.acceptsNextCursor(ticket, nextCursor)) {
         setMessage("invalid_api_response (repeated_cursor)");
         setCursor((previous) => fence.isLoadMoreCurrent(ticket) && previous === cursor ? null : previous);
         fence.retireLoadMore(ticket);
-      } else {
-        setItems((previous) => fence.isLoadMoreCurrent(ticket) ? [...previous, ...parsed.data.items] : previous);
-        setCursor((previous) => fence.isLoadMoreCurrent(ticket) && previous === cursor ? nextCursor : previous);
-        applied = true;
-        fence.finishLoadMore(ticket, true, nextCursor);
+        return "failed";
       }
-    } else {
-      setMessage(apiFailureMessage(response));
-      if (!isRetryableAppendFailure(response)) {
-        setCursor((previous) => fence.isLoadMoreCurrent(ticket) && previous === cursor ? null : previous);
-        fence.retireLoadMore(ticket);
-      }
+      setItems((previous) => fence.isLoadMoreCurrent(ticket) ? [...previous, ...parsed.data.items] : previous);
+      setCursor((previous) => fence.isLoadMoreCurrent(ticket) && previous === cursor ? nextCursor : previous);
+      applied = true;
+      fence.finishLoadMore(ticket, true, nextCursor);
+      return "applied";
     }
+    setMessage(apiFailureMessage(response));
+    if (!isRetryableAppendFailure(response)) {
+      setCursor((previous) => fence.isLoadMoreCurrent(ticket) && previous === cursor ? null : previous);
+      fence.retireLoadMore(ticket);
+    }
+    return "failed";
   } finally {
     if (!applied) fence.finishLoadMore(ticket, false);
   }
