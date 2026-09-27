@@ -6,6 +6,7 @@ import { ReadNotice } from "../../shared/ReadNotice";
 import { api, apiFailureDetails, parseExactApiSuccess } from "../../shared/api";
 import { ConfirmRefreshFailure, EXACT_READ_PROOF, type ExactReadProof, useContextGeneration, useOperatorControls } from "../../shared/controls";
 import { useCoreRefresh } from "../../shared/coreRefresh";
+import { hasActiveFilter } from "../../shared/filters";
 import { apiFailureFeedback } from "../../shared/messages";
 import type { OperatorFeedback } from "../../shared/operatorFeedback";
 import { formatEpoch, shortHash } from "../../shared/format";
@@ -103,7 +104,7 @@ export function Events({ active, navigationIntent, onNavigationHandled }: {
   }, [active, filterReloadGeneration, isRawFilterGenerationCurrent, load]);
 
   const events = eventsSnapshot;
-  const filtered = Object.values(filter).some((value) => value !== undefined && value !== "");
+  const filtered = hasActiveFilter(filter);
 
   if (!active) {
     return null;

@@ -526,7 +526,8 @@ test("admin UI fences ordinary device and meter reads across an ABA selection", 
     await expect(page.getByText("License (entitlement) created.")).toBeVisible();
   }
 
-  const rows = page.getByRole("region", { name: "Entitlement records", exact: true }).locator("tbody tr");
+  // Excludes the inline inspector's own <tr>, which sits between two entitlement rows once open.
+  const rows = page.getByRole("region", { name: "Entitlement records", exact: true }).locator("tbody tr[data-focus-row]");
   const devicePane = page.getByRole("region", { name: "Registered devices" });
   api.behavior.deferReads.add("devices:ent-1");
   await clickAction(rows.nth(0).getByRole("button", { name: "Devices", exact: true, includeHidden: true }).first());

@@ -118,6 +118,14 @@ export interface ConfirmAction {
   successFocusTarget?: ConfirmFocusTarget;
   isCurrent?: () => boolean;
   reconciliation?: ConfirmActionRecovery;
+  /**
+   * Keeps the dialog from marking itself `aria-busy` while this action runs. Some assistive
+   * technology suppresses a live region's announcements inside an `aria-busy="true"` subtree; an
+   * action whose `details` keep announcing progress while it runs (a multi-chunk batch's "Chunk k
+   * of m") sets this so those announcements are not silently dropped. Ordinary actions, whose
+   * `details` (if any) do not change while pending, leave this unset and keep the busy state.
+   */
+  keepDialogLive?: boolean;
 }
 
 export interface ConsequenceAction {

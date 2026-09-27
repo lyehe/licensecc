@@ -372,7 +372,7 @@ export function useConfirmDialog({ gate, focus, notice }: ConfirmDialogDependenc
           aria-modal="true"
           aria-labelledby={titleId}
           aria-describedby={confirmError === null ? descriptionId : `${descriptionId} ${errorId}`}
-          aria-busy={confirmPending}
+          aria-busy={confirmPending && !confirmAction.keepDialogLive}
           tabIndex={-1}
           onClick={(event) => {
             if (event.target === event.currentTarget) {
@@ -389,7 +389,7 @@ export function useConfirmDialog({ gate, focus, notice }: ConfirmDialogDependenc
       )}
       {confirmAction !== null && !nativeDialogEnabled && (
         <div ref={fallbackOverlayRef} className="modalOverlay" role="presentation" onClick={dismissConfirm}>
-          <div ref={fallbackDialogRef} className="modal danger" role="dialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={confirmError === null ? descriptionId : `${descriptionId} ${errorId}`} aria-busy={confirmPending} tabIndex={-1} onClick={(event) => event.stopPropagation()}>
+          <div ref={fallbackDialogRef} className="modal danger" role="dialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={confirmError === null ? descriptionId : `${descriptionId} ${errorId}`} aria-busy={confirmPending && !confirmAction.keepDialogLive} tabIndex={-1} onClick={(event) => event.stopPropagation()}>
             {modalContent}
           </div>
         </div>

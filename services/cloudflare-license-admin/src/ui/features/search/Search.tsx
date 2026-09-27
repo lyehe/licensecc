@@ -11,7 +11,7 @@ import type { OperatorFeedback } from "../../shared/operatorFeedback";
 import { hasSearchData } from "../../shared/mutationGuards";
 import { useRequestFence } from "../../shared/requestFence";
 import { focusWorkspaceTarget } from "../../shared/workspaceFocus";
-import { navigationForResult, searchPath, type SearchResult } from "./workflow";
+import { navigationForResult, searchPath, SEARCH_RESULTS_PER_TYPE_LIMIT, type SearchResult } from "./workflow";
 
 type SearchState = { kind: "idle" } | { kind: "loading" } | { kind: "error"; feedback: OperatorFeedback } | { kind: "ready" };
 
@@ -63,6 +63,9 @@ export function Search({ onNavigate, onOpen, closeSignal, hiddenByMenu }: {
   }
 
   const searchResults = searchFence.isSettled() ? searchResultsSnapshot : [];
+  const resultsAtTypeLimit = (["customer", "license", "entitlement", "order"] as const).some(
+    (type) => searchResults.filter((result) => result.type === type).length >= SEARCH_RESULTS_PER_TYPE_LIMIT,
+  );
   return (
     <div className={`globalSearch${open ? " isOpen" : ""}`} onKeyDown={(event) => {
       if (event.key === "Escape" && open) {
@@ -86,6 +89,7 @@ export function Search({ onNavigate, onOpen, closeSignal, hiddenByMenu }: {
         {state.kind === "error" && <div className="searchError" role="alert"><p>Search could not be completed. Try searching again.</p><FeedbackText feedback={state.feedback} /></div>}
         {state.kind === "ready" && <section className="searchResults" aria-label="Search results">
           <h3 role="status">{searchResults.length} result{searchResults.length === 1 ? "" : "s"}</h3>
+          {resultsAtTypeLimit && <p className="muted searchLimitNote">Showing first 10 per type</p>}
           {searchResults.length === 0 ? <p className="muted searchEmpty">No matches. Try another name or identifier.</p> : (["customer", "license", "entitlement", "order"] as const)
             .filter((type) => searchResults.some((result) => result.type === type))
             .map((type) => <div className="searchGroup" key={type}>

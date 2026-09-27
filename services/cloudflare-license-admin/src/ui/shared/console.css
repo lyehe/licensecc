@@ -195,6 +195,24 @@ pre, pre code { font-family: ui-monospace, Consolas, monospace; font-size: var(-
 .emptyState { padding: 32px 16px; text-align: center; color: var(--muted); }
 .skipLink { position: fixed; top: -100px; left: 16px; background: var(--surface); padding: 12px; z-index: 100; }
 .skipLink:focus { top: 12px; }
+.chartAxes { display: flex; flex-wrap: wrap; gap: 2px 16px; font-size: var(--text-small); }
+.chartAxes p { margin: 0; }
+.searchLimitNote { margin: 0 0 8px; }
+.inspectorRow td { padding: 0; }
+.inspectorRow .inspectorPanel, .inspectorCard { padding: 16px; border-top: 1px solid var(--border); background: #1a1a1a; }
+.inspectorCard { border-radius: 6px; margin-top: -4px; }
+/* Compact density: below this width the roomier spacing elsewhere in the app stays; at and above
+   it, a taller viewport can show more of a list's rows without scrolling the page, so row padding,
+   the "Technical details" disclosure line and the list's own header spacing all tighten. Nothing
+   about content or controls changes, only their vertical rhythm. */
+@media (min-width: 1280px) {
+  .desktopRecords th, .desktopRecords td { padding: 3px 12px; line-height: 1.15; }
+  .desktopRecords details > summary { font-size: var(--text-small); line-height: 1.15; }
+  .tablePane { padding: 8px 20px; }
+  .tablePane > .listHeader { margin-bottom: 8px; }
+  .filters, .filterBar { margin-bottom: 8px; }
+  .pageHeading { margin-bottom: 8px; }
+}
 @media (max-width: 1023px) {
   .consoleShell { display: block; }
   .sidebar { display: none; position: static; height: auto; max-height: calc(100dvh - 56px); }

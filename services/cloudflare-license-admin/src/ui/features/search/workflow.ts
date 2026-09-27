@@ -2,6 +2,11 @@ import type { NavigationTarget } from "../../app/types";
 
 export type SearchResultType = "customer" | "license" | "entitlement" | "order";
 
+// The server caps each result type at this many rows per search. The UI cannot see whether a type
+// was truncated directly, so it infers "at the limit" from a type's result count reaching this
+// number -- kept here, not imported from the Worker, since UI code never imports Worker files.
+export const SEARCH_RESULTS_PER_TYPE_LIMIT = 10;
+
 export interface SearchResult {
   type: SearchResultType;
   id: string;
