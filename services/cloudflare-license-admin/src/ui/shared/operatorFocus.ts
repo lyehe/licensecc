@@ -1,7 +1,7 @@
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import type { Dispatch, RefObject, SetStateAction } from "react";
 import type { ConfirmAction, ConfirmFocusTarget } from "./operatorActions";
-import { equivalentRowAction, currentContextStableFocusTarget, usableFocusTarget } from "./workspaceFocus";
+import { equivalentRowAction, currentContextStableFocusTarget, reopenAncestorDisclosure, usableFocusTarget } from "./workspaceFocus";
 
 /*
  * Focus capture and restoration shared by the confirmation dialog, the action
@@ -107,8 +107,7 @@ export function focusTargetInRow(rowKey: string, selectors: readonly string[]): 
       // choice already closed (see ActionMenu); reopen that disclosure before ruling it out, the
       // same way equivalentRowAction does for a same-key row swap.
       if (candidate !== null && !candidate.hasAttribute("disabled") && candidate.getAttribute("aria-disabled") !== "true") {
-        const disclosure = candidate.closest("details");
-        if (disclosure !== null && !disclosure.open) disclosure.open = true;
+        reopenAncestorDisclosure(candidate);
       }
       if (usableFocusTarget(candidate)) {
         return candidate;

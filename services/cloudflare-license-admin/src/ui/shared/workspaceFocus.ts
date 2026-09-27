@@ -1,17 +1,47 @@
+/**
+ * Closed <details> content is unpainted and unfocusable at the browser level, whatever author
+ * `display` rules apply to it -- a "More actions" menu's own `.actions { display: grid }` styling,
+ * for example, still leaves `getComputedStyle` reporting "grid" for a button inside a closed menu,
+ * and `.focus()` on it silently does nothing. Computed style and layout geometry cannot be trusted
+ * here, so this walks every ancestor <details>, not just the nearest one: a closed outer disclosure
+ * around an open inner one still makes its content unreachable. An element is exempt from a given
+ * ancestor's closed state only while it sits inside that same ancestor's own <summary>.
+ */
+function hasUnreachableClosedAncestor(element: HTMLElement): boolean {
+  let node: HTMLElement | null = element;
+  while (node !== null) {
+    const disclosure: HTMLDetailsElement | null = node.closest("details");
+    if (disclosure === null) return false;
+    if (!disclosure.open) {
+      const summary = disclosure.querySelector(":scope > summary");
+      if (summary === null || !summary.contains(element)) return true;
+    }
+    node = disclosure.parentElement;
+  }
+  return false;
+}
+
 export function usableFocusTarget(element: HTMLElement | null): boolean {
   if (element === null || element === document.body || !element.isConnected || element.hasAttribute("disabled") || element.getAttribute("aria-disabled") === "true") return false;
   if (element.closest("[hidden], [inert], [aria-hidden='true']") !== null || element.getClientRects().length === 0) return false;
-  // A closed <details>' own content stays unfocusable at the browser level no matter what an
-  // author stylesheet declares for it (for example a "More actions" menu's own `.actions { display:
-  // grid }` styling one of these buttons still leaves it laid out, so this cannot be read off computed
-  // style or layout geometry alone) -- everything but its <summary> is out of reach until reopened.
-  const disclosure = element.closest("details");
-  if (disclosure !== null && !disclosure.open) {
-    const summary = disclosure.querySelector(":scope > summary");
-    if (summary === null || !summary.contains(element)) return false;
-  }
+  if (hasUnreachableClosedAncestor(element)) return false;
   const style = window.getComputedStyle(element);
   return style.visibility !== "hidden" && style.display !== "none";
+}
+
+/**
+ * Reopens every closed <details> ancestor of `candidate` so it can become focusable again after an
+ * action closed the disclosure around it (see ActionMenu). Every ancestor is reopened, not just the
+ * nearest, to match what usableFocusTarget checks above.
+ */
+export function reopenAncestorDisclosure(candidate: HTMLElement): void {
+  let node: HTMLElement | null = candidate;
+  while (node !== null) {
+    const disclosure: HTMLDetailsElement | null = node.closest("details");
+    if (disclosure === null) return;
+    if (!disclosure.open) disclosure.open = true;
+    node = disclosure.parentElement;
+  }
 }
 
 /** The current heading survives closed mobile navigation and stale recovery. */
@@ -35,7 +65,6 @@ export function equivalentRowAction(row: HTMLElement, invoking: HTMLElement | nu
   if (!action) return null;
   const candidate = Array.from(row.querySelectorAll<HTMLElement>("[data-focus-action]")).find((item) => item.getAttribute("data-focus-action") === action);
   if (!candidate || candidate.hasAttribute("disabled") || candidate.getAttribute("aria-disabled") === "true") return null;
-  const disclosure = candidate.closest("details");
-  if (disclosure) disclosure.open = true;
+  reopenAncestorDisclosure(candidate);
   return usableFocusTarget(candidate) ? candidate : null;
 }

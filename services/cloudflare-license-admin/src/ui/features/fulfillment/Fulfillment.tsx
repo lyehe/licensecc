@@ -167,7 +167,7 @@ export function Fulfillment({ active, navigationIntent, onNavigationHandled }: {
           <h3>Fulfillment events over time</h3>
           <div className="rangeSelector" role="group" aria-label="Fulfillment spark range">
             <span className="muted">Window</span>
-            {TIMESERIES_RANGE_DAYS.map((days) => <button key={days} type="button" className={timeseriesRange === days ? "active" : ""} onClick={() => setTimeseriesRange(days)}>last {days}d</button>)}
+            {TIMESERIES_RANGE_DAYS.map((days) => <button key={days} type="button" aria-pressed={timeseriesRange === days} className={timeseriesRange === days ? "active" : ""} onClick={() => setTimeseriesRange(days)}>last {days}d</button>)}
           </div>
         </div>
         <BarSparkChart values={(timeseries?.buckets ?? []).map((bucket) => bucket.fulfillment_events)} label={`Fulfillment (order) events over the last ${timeseriesRange} days`} />

@@ -293,6 +293,14 @@ button.danger:hover:not(:disabled) {
   padding: 4px 10px;
 }
 
+/* The selected window/horizon reads as selected by more than color: a stronger border, a soft
+   fill and bold text together, so the state survives grayscale or a color-vision difference. */
+.rangeSelector button.active, .rangeSelector button[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  font-weight: var(--weight-strong);
+}
+
 .chartPanels {
   display: grid;
   gap: 14px;
