@@ -554,3 +554,127 @@ test("an unreadable list page while a plan resolves shows Plan unavailable, neve
   await task.getByRole("button", { name: "Retry", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Plan page-two", exact: true })).toBeVisible();
 });
+
+/** Two earlier entries, then a plan detail, then a reload: every earlier entry now comes from another session. */
+async function reloadOnPlanDetail(page, plan) {
+  await page.goto("/#/customers");
+  await page.goto("/#/overview");
+  await page.goto("/#/plans");
+  await page.getByRole("row", { name: /Plan confirm/ }).getByRole("button", { name: "View plan", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Plan confirm", exact: true })).toBeVisible();
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Plan confirm", exact: true })).toBeVisible();
+  await expect.poll(currentHash(page)).toBe(`#/plans?plan=${plan.id}`);
+}
+
+async function expectAppAndAddress(page, hash, heading) {
+  await expect.poll(currentHash(page)).toBe(hash);
+  await expect(page.locator("[data-workspace-heading]")).toHaveText(heading);
+}
+
+async function leaveForOverview(page) {
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Overview", exact: true }).click();
+}
+
+test("a refused Back into an entry from before a reload keeps the address on the current plan", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  const plan = api.seed.catalogPlan();
+  await page.route("**/api/admin/**", api.route);
+  let answer = "dismiss";
+  const prompts = [];
+  page.on("dialog", (dialog) => {
+    prompts.push(dialog.message());
+    void dialog[answer]();
+  });
+  await reloadOnPlanDetail(page, plan);
+  await page.getByRole("button", { name: "Edit plan", exact: true }).click();
+  const name = page.getByRole("form", { name: "Catalog plan" }).getByLabel("Name");
+  await name.fill("Draft after reload");
+
+  await page.goBack();
+  await expect.poll(() => prompts.length).toBe(1);
+  await expectAppAndAddress(page, `#/plans?plan=${plan.id}`, "Plans & features");
+  await expect(name).toHaveValue("Draft after reload");
+
+  // History still drives the app: an accepted leave, then Back, keep address and page together.
+  answer = "accept";
+  await leaveForOverview(page);
+  await expectAppAndAddress(page, "#/overview", "Overview");
+  await page.goBack();
+  await expectAppAndAddress(page, `#/plans?plan=${plan.id}`, "Plans & features");
+  await expect(page.getByRole("heading", { name: "Plan confirm", exact: true })).toBeVisible();
+  await page.goBack();
+  await expectAppAndAddress(page, "#/overview", "Overview");
+  expect(prompts).toHaveLength(2);
+});
+
+test("a Back refused during a plan save after a reload keeps the address, and history works once it settles", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  const plan = api.seed.catalogPlan();
+  await page.route("**/api/admin/**", api.route);
+  await reloadOnPlanDetail(page, plan);
+  await page.getByRole("button", { name: "Edit plan", exact: true }).click();
+  const form = page.getByRole("form", { name: "Catalog plan" });
+  await form.getByLabel("Name").fill("Saved after reload");
+  api.behavior.deferMutations.add("catalog-plan-patch");
+  await form.getByRole("button", { name: "Update plan" }).click();
+  await expect.poll(() => api.behavior.releaseMutations.has("catalog-plan-patch")).toBe(true);
+
+  await page.goBack();
+  await expectAppAndAddress(page, `#/plans?plan=${plan.id}`, "Plans & features");
+  await expect(form.getByLabel("Name")).toHaveValue("Saved after reload");
+
+  api.behavior.releaseMutations.get("catalog-plan-patch")();
+  await expect(page.getByText(/catalog_plan_patched/)).toBeVisible();
+  await leaveForOverview(page);
+  await expectAppAndAddress(page, "#/overview", "Overview");
+  await page.goBack();
+  await expectAppAndAddress(page, `#/plans?plan=${plan.id}`, "Plans & features");
+  await expect(page.getByRole("heading", { name: "Saved after reload", exact: true })).toBeVisible();
+});
+
+test("a refused Forward after Back into an entry from before a reload keeps the address on the current page", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  const plan = api.seed.catalogPlan();
+  await page.route("**/api/admin/**", api.route);
+  let answer = "dismiss";
+  const prompts = [];
+  page.on("dialog", (dialog) => {
+    prompts.push(dialog.message());
+    void dialog[answer]();
+  });
+  await reloadOnPlanDetail(page, plan);
+  await page.goBack();
+  await expectAppAndAddress(page, "#/plans", "Plans & features");
+  await page.getByRole("button", { name: "New plan", exact: true }).click();
+  const name = page.getByRole("form", { name: "Catalog plan" }).getByLabel("Name");
+  await name.fill("Draft before Forward");
+
+  await page.goForward();
+  await expect.poll(() => prompts.length).toBe(1);
+  await expectAppAndAddress(page, "#/plans", "Plans & features");
+  await expect(name).toHaveValue("Draft before Forward");
+
+  answer = "accept";
+  await leaveForOverview(page);
+  await expectAppAndAddress(page, "#/overview", "Overview");
+  await page.goBack();
+  await expectAppAndAddress(page, "#/plans", "Plans & features");
+  expect(prompts).toHaveLength(2);
+});
+
+test("Back after a reload with nothing unsaved still walks the earlier entries", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  const plan = api.seed.catalogPlan();
+  await page.route("**/api/admin/**", api.route);
+  await reloadOnPlanDetail(page, plan);
+  await page.goBack();
+  await expectAppAndAddress(page, "#/plans", "Plans & features");
+  await expect(page.getByRole("row", { name: /Plan confirm/ }).getByRole("button", { name: "View plan", exact: true })).toBeVisible();
+  await page.goBack();
+  await expectAppAndAddress(page, "#/overview", "Overview");
+  await page.goBack();
+  await expectAppAndAddress(page, "#/customers", "Customers");
+  await page.goForward();
+  await expectAppAndAddress(page, "#/overview", "Overview");
+});
