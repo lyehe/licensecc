@@ -23,8 +23,13 @@ export type BatchChunkOutcome =
   | { kind: "failed"; code: string; requestId: string }
   | { kind: "unknown" };
 
+/**
+ * Where a run stopped. "failed" is a definite refusal (its code and request id
+ * are the Worker's); "not_sent" means the operation gate refused the send, so
+ * no request left the browser and the chunk's rows count as not attempted.
+ */
 export interface BatchStop {
-  readonly kind: "unknown" | "failed";
+  readonly kind: "unknown" | "failed" | "not_sent";
   readonly chunk: BatchChunk;
   readonly code?: string;
   readonly requestId?: string;
@@ -96,8 +101,8 @@ export function initialBatchRunState(action: EntitlementAction, chunks: readonly
 /**
  * Send the chunks one at a time and stop at the first that is not done. After
  * the stop nothing further is sent. `send` resolving `undefined` means the
- * operation gate refused the request, so it was never sent: that stops the run
- * as a definite failure rather than an unknown outcome.
+ * operation gate refused the request, so it was never sent: the run stops as
+ * "not sent", its rows stay not attempted, and there is no request id to show.
  */
 export async function runBatchChunks(
   action: EntitlementAction,
@@ -110,9 +115,12 @@ export async function runBatchChunks(
     state = { ...state, current: chunk.index };
     onProgress(state);
     const response = await send(chunk);
-    const outcome: BatchChunkOutcome = response === undefined
-      ? { kind: "failed", code: "mutation_busy", requestId: "not_sent" }
-      : classifyBatchChunk(response, action, chunk.ids, "initial");
+    if (response === undefined) {
+      state = { ...state, running: false, stopped: { kind: "not_sent", chunk } };
+      onProgress(state);
+      return state;
+    }
+    const outcome = classifyBatchChunk(response, action, chunk.ids, "initial");
     const notAttempted = state.notAttempted - chunk.ids.length;
     if (outcome.kind === "done") {
       state = { ...state, done: state.done + chunk.ids.length, notAttempted, results: [...state.results, ...outcome.results], requestIds: [...state.requestIds, outcome.requestId] };
@@ -163,8 +171,14 @@ export function batchCountItems(state: BatchRunState): string[] {
   return items;
 }
 
+/*
+ * Copy. A run of one chunk is a single request and keeps the single-request
+ * wording ("Reconcile status", a plain "code (request id)" refusal). A longer
+ * run is spoken of in chunks, each sent as one request.
+ */
+
 export function batchProgressText(state: Pick<BatchRunState, "current" | "chunkCount">): string {
-  return `Chunk ${state.current} of ${state.chunkCount}`;
+  return state.chunkCount <= 1 ? "Sending one request" : `Chunk ${state.current} of ${state.chunkCount}`;
 }
 
 const ACTION_LABELS: Record<EntitlementAction, string> = { disable: "Disable", reenable: "Reenable", revoke: "Revoke" };
@@ -172,12 +186,15 @@ const ACTION_LABELS: Record<EntitlementAction, string> = { disable: "Disable", r
 export function batchRunHeadline(state: BatchRunState): string {
   const label = ACTION_LABELS[state.action];
   if (state.running) return batchProgressText(state);
+  const single = state.chunkCount <= 1;
   const stopped = state.stopped;
   if (stopped !== null) {
+    if (single) return stopped.kind === "unknown" ? `${label}: the outcome is unknown.` : stopped.kind === "failed" ? `${label} was refused.` : `${label} was not sent.`;
     const where = `${label} stopped at chunk ${stopped.chunk.index} of ${state.chunkCount}`;
-    return stopped.kind === "unknown" ? `${where}: its outcome is unknown.` : `${where}: the request was refused.`;
+    return stopped.kind === "unknown" ? `${where}: its outcome is unknown.` : stopped.kind === "failed" ? `${where}: the request was refused.` : `${where}: it was not sent.`;
   }
   if (state.reconciled !== null) {
+    if (single) return `${label} finished; the request is now reconciled.`;
     return state.notAttempted > 0
       ? `${label} stopped at chunk ${state.reconciled} of ${state.chunkCount}; chunk ${state.reconciled} is now reconciled.`
       : `${label} finished; chunk ${state.reconciled} is now reconciled.`;
@@ -185,9 +202,40 @@ export function batchRunHeadline(state: BatchRunState): string {
   return `${label} finished.`;
 }
 
-/** The plan the operator confirms: how many requests, and that the run stops at the first one that does not succeed. */
+/** The message for a run that stopped on a refusal or an unsent chunk; null otherwise. */
+export function batchStopMessage(state: BatchRunState): string | null {
+  const stopped = state.stopped;
+  if (stopped === null || stopped.kind === "unknown") return null;
+  if (stopped.kind === "not_sent") return batchRunHeadline(state);
+  const refusal = `${stopped.code} (${stopped.requestId})`;
+  return state.chunkCount <= 1 ? refusal : `${batchRunHeadline(state)} ${refusal}`;
+}
+
+/** The notice control that replays the unknown chunk under its own key. */
+export function batchReconcileLabel(state: BatchRunState): string {
+  const stopped = state.stopped;
+  return state.chunkCount <= 1 || stopped === null ? "Reconcile status" : `Reconcile chunk ${stopped.chunk.index}`;
+}
+
+/**
+ * Where the reconcile control lives: in the operator notice at the bottom of
+ * the page, which cannot be reached while the confirmation is still open.
+ */
+export function batchReconcileGuidance(state: BatchRunState, where: "dialog" | "page"): string | null {
+  if (state.stopped?.kind !== "unknown") return null;
+  const control = `“${batchReconcileLabel(state)}” in the notice at the bottom of the page`;
+  const lead = where === "dialog" ? `Close this dialog, then use ${control}.` : `Use ${control}.`;
+  return `${lead} It replays that exact request under its original key; other actions stay unavailable until it is reconciled.`;
+}
+
+/** A stopped run whose status read then failed: say both, never that the action succeeded. */
+export function batchRefreshFailureMessage(state: BatchRunState): string {
+  return `${batchRunHeadline(state)} Status refresh failed.`;
+}
+
+/** The plan the operator confirms: how many chunks, and that the run stops at the first one that does not succeed. */
 export function batchPlanText(count: number): string {
-  const requests = Math.ceil(count / ENTITLEMENT_BATCH_MAX_IDS);
-  if (requests <= 1) return "Sent as one request.";
-  return `Sent as ${requests} requests of up to ${ENTITLEMENT_BATCH_MAX_IDS}, one at a time. The run stops at the first request that does not succeed, and nothing after it is sent.`;
+  const chunks = Math.ceil(count / ENTITLEMENT_BATCH_MAX_IDS);
+  if (chunks <= 1) return "Sent as one request.";
+  return `Sent as ${chunks} chunks of up to ${ENTITLEMENT_BATCH_MAX_IDS} entitlements, one request each, one chunk at a time. The run stops at the first chunk that does not succeed, and nothing after it is sent.`;
 }

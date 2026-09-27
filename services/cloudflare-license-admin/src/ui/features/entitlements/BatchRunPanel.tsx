@@ -1,5 +1,5 @@
 import React, { useSyncExternalStore } from "react";
-import { batchCountItems, batchRunHeadline, type BatchRunState } from "./batchRunner";
+import { batchCountItems, batchReconcileGuidance, batchRunHeadline, type BatchRunState } from "./batchRunner";
 import { summarizeBatchResults } from "./workflow";
 
 export interface BatchRunEntry {
@@ -51,18 +51,21 @@ export function BatchRunPanel({ store, runId, onDismiss }: { store: BatchRunStor
   const { state } = entry;
   const stopped = state.stopped;
   const keptSelected = !state.running && (stopped !== null || state.notAttempted > 0);
+  const guidance = batchReconcileGuidance(state, runId === undefined ? "page" : "dialog");
+  // A one-request run has no chunk to name; its details read as a single request's.
+  const stoppedLabel = stopped === null || state.chunkCount <= 1 ? "" : `Chunk ${stopped.chunk.index} `;
   return <section className="batchRun" aria-label="Batch run" tabIndex={-1}>
     <div role="status" aria-live="polite" aria-atomic="true">
       <p><strong>{batchRunHeadline(state)}</strong></p>
       <ul className="batchCounts">{batchCountItems(state).map((item) => <li key={item}>{item}</li>)}</ul>
     </div>
-    {stopped?.kind === "unknown" && <p>Use “Reconcile chunk {stopped.chunk.index}” to replay that exact request under its original key. Other actions stay unavailable until it is reconciled.</p>}
+    {guidance !== null && <p>{guidance}</p>}
     {keptSelected && <p className="muted">Entitlements that are not done stay selected.</p>}
     {(state.requestIds.length > 0 || stopped !== null) && <details><summary>Technical details</summary><dl className="recordMeta">
       {state.results.some((row) => !row.ok) && <div><dt>Per-row results</dt><dd>{summarizeBatchResults(state.results)}</dd></div>}
       {state.requestIds.length > 0 && <div><dt>Request IDs</dt><dd><code>{state.requestIds.join(", ")}</code></dd></div>}
-      {stopped !== null && <div><dt>Chunk {stopped.chunk.index} idempotency key</dt><dd><code>{stopped.chunk.idempotencyKey}</code></dd></div>}
-      {stopped !== null && <div><dt>Chunk {stopped.chunk.index} entitlement IDs</dt><dd><code>{stopped.chunk.ids.join(", ")}</code></dd></div>}
+      {stopped !== null && <div><dt>{stoppedLabel === "" ? "Idempotency key" : `${stoppedLabel}idempotency key`}</dt><dd><code>{stopped.chunk.idempotencyKey}</code></dd></div>}
+      {stopped !== null && <div><dt>{stoppedLabel === "" ? "Entitlement IDs" : `${stoppedLabel}entitlement IDs`}</dt><dd><code>{stopped.chunk.ids.join(", ")}</code></dd></div>}
       {stopped?.code !== undefined && <div><dt>Refusal</dt><dd><code>{stopped.code} ({stopped.requestId})</code></dd></div>}
     </dl></details>}
     {onDismiss !== undefined && !state.running && stopped?.kind !== "unknown" && <button type="button" onClick={onDismiss}>Dismiss</button>}

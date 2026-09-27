@@ -13,7 +13,7 @@ import {
 } from "../../shared/controls";
 import type { OperatorFeedback } from "../../shared/operatorFeedback";
 import { BatchRunPanel, createBatchRunStore, type BatchRunStore } from "./BatchRunPanel";
-import { batchPlanText, batchRunHeadline, classifyBatchChunk, planBatchChunks, runBatchChunks, settleReconciledChunk, type BatchChunk, type BatchRunState } from "./batchRunner";
+import { batchPlanText, batchReconcileLabel, batchRefreshFailureMessage, batchStopMessage, classifyBatchChunk, planBatchChunks, runBatchChunks, settleReconciledChunk, type BatchChunk, type BatchRunState } from "./batchRunner";
 import { batchPath, summarizeBatchResults, type EntitlementAction } from "./workflow";
 
 /** The list context a later reconcile must still match, captured as the single-row transitions do. */
@@ -101,14 +101,14 @@ export function useEntitlementBatch(options: EntitlementBatchOptions): Entitleme
           try { await refreshCore(true); } catch { /* the reconcile refreshes again */ }
         }
         const postSuccessRefresh = confirmSuccessWithRefreshFailure(refreshStatus, isCurrent).manualRefresh;
-        return confirmMutationUnknown({ label: `Reconcile chunk ${stopped.chunk.index}`, run: replay, isCurrent, settlesRetainedAttempt: true, postSuccessRefresh });
+        return confirmMutationUnknown({ label: batchReconcileLabel(finished), run: replay, isCurrent, settlesRetainedAttempt: true, postSuccessRefresh });
       }
-      if (stopped !== null) {
-        const message = `${batchRunHeadline(finished)} ${stopped.code} (${stopped.requestId})`;
-        setFeedback({ tone: "error", message });
+      const stopMessage = batchStopMessage(finished);
+      if (stopMessage !== null) {
+        setFeedback({ tone: "error", message: stopMessage });
         // Nothing was applied, exactly as when a single request is refused: the
         // confirmation stays open to correct and retry, under a fresh key.
-        if (finished.done === 0) return { ok: false, message, retryable: true };
+        if (finished.done === 0) return { ok: false, message: stopMessage, retryable: true };
       } else {
         const reference = finished.requestIds.length === 1 ? finished.requestIds[0] : `${finished.requestIds.length} requests`;
         setMessage(`${action}: ${summarizeBatchResults(finished.results)} (${reference})`);
@@ -116,10 +116,15 @@ export function useEntitlementBatch(options: EntitlementBatchOptions): Entitleme
       setReason("");
       // After partial progress a definite refusal is a known outcome, as a success
       // is: nothing is retained, so the confirmation closes on the panel's counts.
+      // If the status read then fails, its notice must still say the run stopped.
+      const refreshFailed = (): ConfirmActionOutcome => {
+        const recovery = confirmSuccessWithRefreshFailure(refreshStatus, isCurrent);
+        return stopMessage === null ? recovery : { ...recovery, warning: batchRefreshFailureMessage(finished) };
+      };
       try {
-        return (await refreshCore(true)) === EXACT_READ_PROOF ? { ok: true } : confirmSuccessWithRefreshFailure(refreshStatus, isCurrent);
+        return (await refreshCore(true)) === EXACT_READ_PROOF ? { ok: true } : refreshFailed();
       } catch {
-        return confirmSuccessWithRefreshFailure(refreshStatus, isCurrent);
+        return refreshFailed();
       }
     };
     const details = <><p>{batchPlanText(ids.length)}</p><BatchRunPanel store={store} runId={runId} /></>;
