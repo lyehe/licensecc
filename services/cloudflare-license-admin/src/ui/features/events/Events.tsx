@@ -125,7 +125,7 @@ export function Events({ active, navigationIntent, onNavigationHandled }: {
         <button type="button" disabled={!filtered} onClick={() => setFilter(emptyEventFilter)}>Clear filters</button>
         <button type="button" disabled={busy || operationLocked} onClick={() => void downloadCsv(eventsPath(filter), "events.csv", runMutation, setMessage)}>Export CSV</button>
       </div>
-      <div className="tableScroll" role="region" aria-label="Audit event records" tabIndex={0}><table>
+      <div className="tableScroll" role="region" aria-label="Audit event records" aria-busy={loading} tabIndex={0}><table>
         <thead><tr><th>Time</th><th>Event</th><th>Project</th><th>Feature</th><th>Reason</th><th>Actor</th><th>Details</th></tr></thead>
         <tbody>
           {events.map((item) => (

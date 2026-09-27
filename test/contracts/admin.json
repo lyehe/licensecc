@@ -14947,7 +14947,6 @@
               "name": "cursor",
               "required": false,
               "schema": {
-                "default": "0",
                 "pattern": "^[0-9]+:[0-9]+$",
                 "type": "string"
               }

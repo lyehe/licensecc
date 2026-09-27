@@ -448,6 +448,34 @@ test("admin UI keeps license rows visible with aria-busy during a filter reload 
   await expect(page.locator(".desktopRecords")).toHaveAttribute("aria-busy", "false");
 });
 
+test("admin UI marks the events table busy during a filtered reload, then clears it", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  await page.route("**/api/admin/**", api.route);
+  await page.goto("/");
+  if (await page.getByRole("button", { name: "Activity", exact: true }).getAttribute("aria-expanded") === "false") await page.getByRole("button", { name: "Activity", exact: true }).click();
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Events", exact: true }).click();
+  await expect.poll(() => api.requests.eventsReads.length).toBeGreaterThan(0);
+  const region = page.getByRole("region", { name: "Audit event records", exact: true });
+  await expect(region).toHaveAttribute("aria-busy", "false");
+
+  let releaseFilteredRead;
+  let filteredReadStarted = false;
+  const filteredRead = new Promise((resolve) => { releaseFilteredRead = resolve; });
+  await page.route("**/api/admin/events?**", async (route) => {
+    filteredReadStarted = true;
+    await filteredRead;
+    await route.fallback();
+  });
+  await page.getByLabel("Filter events by project", { exact: true }).fill("no-such-project");
+  await expect.poll(() => filteredReadStarted).toBe(true);
+  // The reload is in flight (debounced 300ms, then the intercepted request holds), so the region
+  // is marked busy until the response settles.
+  await expect(region).toHaveAttribute("aria-busy", "true");
+
+  releaseFilteredRead();
+  await expect(region).toHaveAttribute("aria-busy", "false");
+});
+
 test("admin UI debounces policy and webhook filter reloads to one request each", async ({ page }) => {
   const api = makeAdminApiFixture();
   await page.route("**/api/admin/**", api.route);

@@ -202,7 +202,7 @@ export const entitlementPaths: LabeledPathFragment = {
           required: false,
           allowEmptyValue: true,
           description: "Opaque keyset page token from a previous page's next_cursor (\"created_at:id\"); omit for the first page. Malformed values return 400 invalid_request.",
-          schema: { type: "string", default: "0", pattern: "^[0-9]+:[0-9]+$" },
+          schema: { type: "string", pattern: "^[0-9]+:[0-9]+$" },
         },
         formatCsvParam,
       ],
