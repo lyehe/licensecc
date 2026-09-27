@@ -2,6 +2,15 @@ import { expect, test } from "@playwright/test";
 
 import { makeAdminApiFixture } from "./admin-ui.fixture.mjs";
 
+async function clickAction(button) {
+  await button.waitFor({ state: "attached" });
+  const disclosure = button.locator("xpath=ancestor::details[1]");
+  if (await disclosure.count() && await disclosure.getAttribute("open") === null) {
+    await disclosure.locator(":scope > summary").click();
+  }
+  await button.click();
+}
+
 test("direct customer section URLs survive intent consumption and refresh", async ({ page }) => {
   const api = makeAdminApiFixture();
   await page.route("**/api/admin/**", api.route);
@@ -193,6 +202,44 @@ test("the Licenses 'View entitlements' button scopes the list by license_id with
   await page.getByRole("button", { name: "Show all", exact: true }).click();
   await expect(page.getByText(`License ${licenseId}`, { exact: false })).toHaveCount(0);
   await expect(page.locator(".desktopRecords tbody tr")).toHaveCount(2);
+});
+
+test("an entitlement's 'History' item opens Events filtered to exactly that entitlement, session-only", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  const alpha = api.seed.entitlement({ project: "DEFAULT", feature: "alpha", license_fingerprint: "1".repeat(64) });
+  api.seed.entitlement({ project: "DEFAULT", feature: "beta", license_fingerprint: "2".repeat(64) });
+  await page.route("**/api/admin/**", api.route);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto("/#/entitlements");
+
+  async function disableWithReason(feature, reason) {
+    const row = page.locator(".desktopRecords tbody tr").filter({ hasText: feature });
+    await clickAction(row.getByRole("button", { name: "Disable", exact: true, includeHidden: true }));
+    await page.getByRole("dialog").getByLabel(/Reason/).fill(reason);
+    await page.getByRole("dialog").getByRole("button", { name: "Confirm" }).click();
+    await expect(row.locator(".status.disabled")).toHaveText("suspended");
+  }
+  await disableWithReason("alpha", "alpha note");
+  await disableWithReason("beta", "beta note");
+
+  const alphaRow = page.locator(".desktopRecords tbody tr").filter({ hasText: "alpha" });
+  await clickAction(alphaRow.getByRole("button", { name: "History", exact: true, includeHidden: true }));
+
+  await expect(page.locator(".sidebar nav a[aria-current=page]")).toHaveText("Events");
+  await expect(page.getByText("Showing events for 1 entitlement", { exact: false })).toBeVisible();
+  const eventRows = page.locator('[aria-label="Audit event records"] tbody tr');
+  await expect(eventRows).toHaveCount(1);
+  await expect(eventRows.getByRole("cell", { name: "alpha note" })).toBeVisible();
+  // entitlement_id is session-only (like the entitlements id/customer_id filters): it never
+  // reaches the URL, and neither does the fingerprint or opaque id it would otherwise encode.
+  expect(page.url()).not.toContain(alpha.license_fingerprint);
+  expect(page.url()).not.toContain(alpha.id);
+  expect(new URL(page.url()).hash).toBe("#/events");
+
+  await page.getByRole("button", { name: "Show all", exact: true }).click();
+  await expect(eventRows).toHaveCount(2);
+  await expect(eventRows.getByRole("cell", { name: "beta note" })).toBeVisible();
+  expect(new URL(page.url()).hash).toBe("#/events");
 });
 
 test("mobile customer Back restores the visible card action and list scroll", async ({ page }) => {

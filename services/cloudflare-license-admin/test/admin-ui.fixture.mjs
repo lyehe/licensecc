@@ -151,6 +151,8 @@ export function makeAdminApiFixture() {
     // A number here pages the entitlements list for real (offset cursor), so Load More can be
     // exercised across a genuine tab switch instead of the fixed single-cursor release-seat page.
     entitlementsPageSize: null,
+    // A number here pages the events list for real (keyset cursor), so Next page can be exercised.
+    eventsPageSize: null,
     deliveryPagination: false,
     ordersPagination: false,
     expiringPagination: false,
@@ -971,7 +973,38 @@ export function makeAdminApiFixture() {
     }
     if (method === "GET" && path === "/api/admin/events") {
       requests.eventsReads.push(true);
-      return fulfill(200, makeEnvelope("events_listed", { items: events.map((item) => ({ ...item })) }));
+      // Mirrors the real worker's filters + keyset cursor closely enough for e2e purposes: exact
+      // match on project/feature/event_type/actor, entitlement_id decoded to project/feature/
+      // license_fingerprint, since/until bound created_at, and "<created_at>:<id>" pages forward
+      // (the `events` array is already newest-first, matching ORDER BY created_at DESC, id DESC).
+      let matches = events;
+      for (const [param, field] of [["project", "project"], ["feature", "feature"], ["event_type", "event_type"], ["actor", "actor"]]) {
+        const value = url.searchParams.get(param);
+        if (value) matches = matches.filter((item) => item[field] === value);
+      }
+      // The real worker decodes entitlement_id to a project/feature/license_fingerprint triple;
+      // this fixture's rows carry an opaque "ent-N" id instead (see findById), so it resolves the
+      // SAME triple by looking the row up directly rather than reimplementing that encoding here.
+      const entitlementIdParam = url.searchParams.get("entitlement_id");
+      if (entitlementIdParam) {
+        const target = findById(entitlementIdParam);
+        matches = target === undefined ? [] : matches.filter((item) =>
+          item.project === target.project && item.feature === target.feature && item.license_fingerprint === target.license_fingerprint);
+      }
+      const since = url.searchParams.get("since");
+      if (since) matches = matches.filter((item) => item.created_at >= Number(since));
+      const until = url.searchParams.get("until");
+      if (until) matches = matches.filter((item) => item.created_at <= Number(until));
+      const cursor = url.searchParams.get("cursor");
+      if (cursor) {
+        const [afterCreatedAt, afterId] = cursor.split(":").map(Number);
+        matches = matches.filter((item) => item.created_at < afterCreatedAt || (item.created_at === afterCreatedAt && item.id < afterId));
+      }
+      const pageSize = behavior.eventsPageSize ?? matches.length;
+      const page = matches.slice(0, pageSize);
+      const last = page.at(-1);
+      const nextCursor = page.length < matches.length && last !== undefined ? `${last.created_at}:${last.id}` : null;
+      return fulfill(200, makeEnvelope("events_listed", { items: page.map((item) => ({ ...item })), next_cursor: nextCursor }));
     }
     const entitlementDetailMatch = /^\/api\/admin\/entitlements\/([^/]+)$/.exec(path);
     if (method === "GET" && entitlementDetailMatch !== null) {

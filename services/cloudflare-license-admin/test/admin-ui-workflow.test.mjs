@@ -1,5 +1,6 @@
 // Thin manifest: workflow contracts live beside the operator feature that owns them.
 import "./admin-ui-workflow/entitlements.test.mjs";
+import "./admin-ui-workflow/events.test.mjs";
 import "./admin-ui-workflow/protected-onboarding.test.mjs";
 import "./admin-ui-workflow/device-limit.test.mjs";
 import "./admin-ui-workflow/catalog.test.mjs";

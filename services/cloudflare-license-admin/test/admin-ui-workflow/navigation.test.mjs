@@ -60,6 +60,23 @@ test("a deep-linked entitlement id and its customer_id are session-only; the URL
   assert.deepEqual(navigation.parseAdminHash("#/entitlements?license_id=lic_1&id=x&customer_id=y").route.filter, { license_id: "lic_1" });
 });
 
+test("a 'History' deep-linked entitlement_id on the events tab is session-only; the URL never carries the fingerprint it encodes", async () => {
+  const navigation = await loadWorkflowModule("app/navigationState.ts");
+  const fingerprint = "a".repeat(64);
+  const id = entitlementId("DEFAULT", "pro", fingerprint);
+  const target = { tab: "events", filter: { entitlement_id: id, project: "", feature: "", event_type: "", actor: "", since: "", until: "" } };
+  const hash = navigation.hashForTarget(target);
+  assert.equal(hash, "#/events");
+  assert.ok(!hash.includes(fingerprint), "entitlement_id encodes the fingerprint; it must never reach the URL");
+  assert.ok(!hash.includes("entitlement_id="));
+  // The ordinary browsing filters are normal URL filters and survive a refresh.
+  assert.equal(
+    navigation.hashForTarget({ tab: "events", filter: { project: "DEFAULT", feature: "", event_type: "disable", actor: "", since: "", until: "" } }),
+    "#/events?project=DEFAULT&event_type=disable",
+  );
+  assert.deepEqual(navigation.parseAdminHash("#/events?project=DEFAULT&entitlement_id=x").route.filter, { project: "DEFAULT" });
+});
+
 test("admin catalog URLs expose only the supported Plans, Features, and Import views", async () => {
   const navigation = await loadWorkflowModule("app/navigationState.ts");
   for (const view of ["plans", "features", "import"]) {

@@ -172,11 +172,17 @@ test("admin UI completes entitlement lifecycle and blocks duplicate create submi
 
   if (await page.getByRole("button", { name: "Activity", exact: true }).getAttribute("aria-expanded") === "false") await page.getByRole("button", { name: "Activity", exact: true }).click();
   await page.getByRole("link", { name: "Events" }).click();
+  // Reason and Actor are dedicated columns: the disable/revoke reasons typed above, and who did
+  // it, are both visible without expanding anything.
+  const eventRows = page.locator('[aria-label="Audit event records"] tbody tr');
   for (const eventType of ["create", "update", "disable", "reenable", "revoke"]) {
-    await expect(page.getByText(eventType, { exact: true })).toBeVisible();
+    await expect(eventRows.getByRole("cell", { name: eventType, exact: true })).toBeVisible();
   }
+  await expect(eventRows.filter({ hasText: "disable" }).getByRole("cell", { name: "operator pause" })).toBeVisible();
+  await expect(eventRows.filter({ hasText: "revoke" }).getByRole("cell", { name: "chargeback" })).toBeVisible();
+  await expect(eventRows.first().getByRole("cell", { name: "admin@example.com" })).toBeVisible();
   await page.getByText("Event details", { exact: true }).first().click();
-  await expect(page.getByText("admin@example.com (access)", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("access", { exact: true }).first()).toBeVisible();
 
   const pageText = await page.locator("body").innerText();
   expect(pageText).not.toContain("PRIVATE KEY");
