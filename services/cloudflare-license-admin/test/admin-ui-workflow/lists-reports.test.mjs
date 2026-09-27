@@ -39,6 +39,22 @@ test("admin UI workflow formats validity dates as a fixed UTC day, independent o
   assert.equal(format.formatUtcDate(1798729200), "2026-12-31 15:00 UTC");
   // 2026-12-31T23:59:00Z: one minute before the next UTC midnight.
   assert.equal(format.formatUtcDate(1798761540), "2026-12-31 23:59 UTC");
+  // Single-digit hour and single-digit minute both pad to two digits.
+  assert.equal(format.formatUtcDate(1798693380), "2026-12-31 05:03 UTC");
+  assert.equal(format.formatUtcDate(1798675500), "2026-12-31 00:05 UTC");
+  // An ordinary pre-1970 epoch still formats as a plain UTC date.
+  assert.equal(format.formatUtcDate(-86400), "1969-12-31 UTC");
+});
+
+test("admin UI workflow never throws formatting a validity date, even for non-finite or out-of-range epochs", async () => {
+  const format = await loadWorkflowModule("shared/format.ts");
+  assert.equal(format.formatUtcDate(Number.NaN), "Invalid date");
+  assert.equal(format.formatUtcDate(Number.POSITIVE_INFINITY), "Invalid date");
+  assert.equal(format.formatUtcDate(Number.NEGATIVE_INFINITY), "Invalid date");
+  // A malicious or malformed API value (for example the Worker's nullableEpoch has no upper bound)
+  // must render honestly, never throw and blank the page: it truly IS after the JS Date maximum.
+  assert.equal(format.formatUtcDate(9007199254740991), "after 275760-09-13 UTC");
+  assert.equal(format.formatUtcDate(-9007199254740991), "before -271821-04-20 UTC");
 });
 
 test("admin UI workflow formats validity dates identically across host time zones", async () => {

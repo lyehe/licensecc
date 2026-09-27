@@ -51,3 +51,17 @@ test("the reports expiring-soon deadline renders in UTC in a non-UTC browser tim
   // Fixture default (within_days=30) seeds a "pro-30" row with valid_until 1_760_500_000 = 2025-10-15T03:46:40Z.
   await expect(expiring).toContainText("2025-10-15 03:46 UTC");
 });
+
+test("an out-of-range validity date renders honestly instead of blanking the page", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  // Number.MAX_SAFE_INTEGER seconds: a value the admin UI's own read guard accepts (it allows any
+  // safe integer), but that is far beyond the JS Date range once formatted as a validity date.
+  api.seed.entitlement({ project: "DEFAULT", feature: "far-future-expiry", valid_until: 9007199254740991 });
+  await page.route("**/api/admin/**", api.route);
+  await page.goto("/#/entitlements");
+
+  const row = page.locator(".desktopRecords tbody tr").filter({ hasText: "far-future-expiry" });
+  await expect(row).toContainText("after 275760-09-13 UTC");
+  // The rest of the page must stay usable: no render threw and blanked the workspace.
+  await expect(page.getByRole("button", { name: "New entitlement", exact: true })).toBeVisible();
+});
