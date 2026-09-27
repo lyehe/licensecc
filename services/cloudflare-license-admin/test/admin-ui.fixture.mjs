@@ -40,9 +40,11 @@ export function makeAdminApiFixture() {
     catalogPlanPatches: [],
     catalogPlanTransitions: [],
     catalogPlanExports: [],
+    catalogPlanReads: [],
     catalogPlanFeatures: [],
     catalogPlanFeatureTransitions: [],
     catalogImports: [],
+    customerWorkspaceReads: [],
     policyCreates: [],
     policyPatches: [],
     webhookCreates: [],
@@ -134,6 +136,8 @@ export function makeAdminApiFixture() {
     catalogPlanDuplicatePage: false,
     catalogPlanCursorCycle: false,
     catalogPlanAppendResponses: [],
+    // Queued raw responses for GET /catalog/plans/{id}, served before the fixture's own answer.
+    catalogPlanReadResponses: [],
     deliveryRepeatCursor: false,
     deliveryDuplicatePage: false,
     deliveryCursorCycle: false,
@@ -909,6 +913,7 @@ export function makeAdminApiFixture() {
       if (!detail) return fulfill(404, makeEnvelope("not_found", undefined, false));
       const owned = entitlements.filter(item => item.customer_id === customerId && (!url.searchParams.has("project") || item.project === url.searchParams.get("project")));
       const view = workspaceMatch[2];
+      requests.customerWorkspaceReads.push(`${view}${url.search}`);
       const items = view === "access" ? owned.map(publicRecord) : view === "resources" ? [] : [...new Set(owned.map(item => item.project))].sort().map(project => {
         const grants = owned.filter(item => item.project === project);
         const expiries = grants.map(item => item.valid_until).filter(value => value !== null);
@@ -1520,6 +1525,20 @@ export function makeAdminApiFixture() {
       }));
     }
     const catalogPlanDetailMatch = /^\/api\/admin\/catalog\/plans\/([^/]+)$/.exec(path);
+    if (method === "GET" && catalogPlanDetailMatch !== null) {
+      const id = decodeURIComponent(catalogPlanDetailMatch[1]);
+      requests.catalogPlanReads.push(id);
+      await deferRead(`catalog-plan:${id}`);
+      if (behavior.catalogPlanReadResponses.length > 0) {
+        const response = behavior.catalogPlanReadResponses.shift();
+        return fulfill(response.status ?? 200, fixtureResponseBody(response));
+      }
+      const row = catalogPlans.find((item) => item.id === id);
+      if (row === undefined) {
+        return fulfill(404, { ok: false, code: "catalog_plan_not_found", request_id: "ui-e2e-plan-read-missing" });
+      }
+      return fulfill(200, makeEnvelope("catalog_plan", { ...row }));
+    }
     if (method === "PATCH" && catalogPlanDetailMatch !== null) {
       const id = decodeURIComponent(catalogPlanDetailMatch[1]);
       const body = await jsonBody(request);

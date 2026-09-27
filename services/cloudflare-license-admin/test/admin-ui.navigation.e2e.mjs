@@ -282,6 +282,8 @@ test("a customer's app and record view are history entries that survive reload",
   await page.locator(".recordCard").filter({ hasText: "CAD" }).getByRole("button", { name: "View app", exact: true }).click();
   await expect(recordView("Access grants")).toHaveAttribute("aria-current", "page");
   await expect.poll(currentHash(page)).toBe(`${accessHash}&app=CAD`);
+  // The app's existence check reads one record; it does not repeat the grants list read.
+  await expect.poll(() => api.requests.customerWorkspaceReads.filter((read) => read.startsWith("access")).sort()).toEqual(["access?project=CAD", "access?project=CAD&limit=1"]);
   await recordView("Activated devices").click();
   await expect(recordView("Activated devices")).toHaveAttribute("aria-current", "page");
   await expect.poll(currentHash(page)).toBe(`${accessHash}&app=CAD&view=nodes`);
@@ -426,6 +428,13 @@ test("catalog plan detail is a history entry that survives reload", async ({ pag
   await viewPlan.click();
   await expect(detail).toBeVisible();
   await expect.poll(currentHash(page)).toBe(`#/plans?plan=${plan.id}`);
+  // The in-page "Back to plans" returns focus to the plan's own row, as browser Back does.
+  await page.getByRole("button", { name: "Back to plans", exact: true }).click();
+  await expect(detail).toHaveCount(0);
+  await expect.poll(currentHash(page)).toBe("#/plans");
+  await expect(viewPlan).toBeFocused();
+  await viewPlan.click();
+  await expect(detail).toBeVisible();
   await page.goBack();
   await expect(detail).toHaveCount(0);
   await expect.poll(currentHash(page)).toBe("#/plans");
@@ -456,4 +465,92 @@ test("a deep link to a plan that does not exist shows the plans list with a not-
   await expect(page.getByRole("row", { name: /Plan confirm/ }).getByRole("button", { name: "View plan", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Plan unavailable", exact: true })).toHaveCount(0);
   await expect.poll(currentHash(page)).toBe("#/plans");
+  // Only the plan's own read may declare it missing.
+  expect(api.requests.catalogPlanReads).toEqual(["plan_retired"]);
+});
+
+test("a plan the list filters hide still opens from history, clearing the filters with a notice", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  const plan = api.seed.catalogPlan();
+  await page.route("**/api/admin/**", api.route);
+  await page.goto("/#/plans");
+  const plansPane = page.locator('[data-focus-section="catalog-list"]');
+  const viewPlan = page.getByRole("row", { name: /Plan confirm/ }).getByRole("button", { name: "View plan", exact: true });
+  const detail = page.getByRole("heading", { name: "Plan confirm", exact: true });
+  const cleared = page.getByText("Plan filters were cleared to show this plan.", { exact: true });
+  const hideWith = [
+    async () => plansPane.getByLabel("Plan status").selectOption("disabled"),
+    async () => plansPane.getByPlaceholder("project").fill("OTHER"),
+  ];
+  for (const hide of hideWith) {
+    await viewPlan.click();
+    await expect(detail).toBeVisible();
+    await page.goBack();
+    await expect(viewPlan).toBeVisible();
+    await hide();
+    await expect(plansPane.locator("tbody tr")).toHaveCount(0);
+
+    await page.goForward();
+    await expect(detail).toBeVisible();
+    await expect(cleared).toBeVisible();
+    await expect(page.getByText("That plan was not found. The plans list is shown.", { exact: true })).toHaveCount(0);
+    await expect.poll(currentHash(page)).toBe(`#/plans?plan=${plan.id}`);
+    await page.goBack();
+    await expect(plansPane.getByLabel("Plan status")).toHaveValue("");
+    await expect(plansPane.getByPlaceholder("project")).toHaveValue("");
+    await expect(viewPlan).toBeVisible();
+    await expect(cleared).toHaveCount(0);
+  }
+});
+
+test("a plan that cannot be read while it resolves shows Plan unavailable until Retry succeeds", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  api.seed.catalogPlan("plan_page_one", "DEFAULT", "page-one");
+  const target = api.seed.catalogPlan("plan_page_two", "DEFAULT", "page-two");
+  api.behavior.catalogPlanPagination = true;
+  // The plan's own read fails first; once it answers, the list page that holds the plan fails.
+  api.behavior.catalogPlanReadResponses.push({ status: 503, body: null });
+  api.behavior.catalogPlanAppendResponses.push({ status: 503, body: null });
+  await page.route("**/api/admin/**", api.route);
+  const task = page.locator('[data-focus-section="catalog-task"]');
+  const unavailable = task.getByRole("heading", { name: "Plan unavailable", exact: true });
+  const loading = task.getByRole("heading", { name: "Loading plan…", exact: true });
+  const detail = page.getByRole("heading", { name: "Plan page-two", exact: true });
+
+  await page.goto(`/#/plans?plan=${target.id}`);
+  await expect(unavailable).toBeVisible();
+  await expect(loading).toHaveCount(0);
+  await expect.poll(currentHash(page)).toBe(`#/plans?plan=${target.id}`);
+
+  await task.getByRole("button", { name: "Retry", exact: true }).click();
+  await expect.poll(() => api.behavior.catalogPlanAppendResponses.length).toBe(0);
+  await expect(unavailable).toBeVisible();
+  await expect(loading).toHaveCount(0);
+  await expect(page.getByText("That plan was not found. The plans list is shown.", { exact: true })).toHaveCount(0);
+  await expect.poll(currentHash(page)).toBe(`#/plans?plan=${target.id}`);
+
+  await task.getByRole("button", { name: "Retry", exact: true }).click();
+  await expect(detail).toBeVisible();
+  await expect(unavailable).toHaveCount(0);
+});
+
+test("an unreadable list page while a plan resolves shows Plan unavailable, never not found", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  api.seed.catalogPlan("plan_page_one", "DEFAULT", "page-one");
+  const target = api.seed.catalogPlan("plan_page_two", "DEFAULT", "page-two");
+  api.behavior.catalogPlanPagination = true;
+  // A malformed 200 retires the cursor: the append can never succeed as issued.
+  api.behavior.catalogPlanAppendResponses.push({ status: 200, body: null });
+  await page.route("**/api/admin/**", api.route);
+  const task = page.locator('[data-focus-section="catalog-task"]');
+  const unavailable = task.getByRole("heading", { name: "Plan unavailable", exact: true });
+
+  await page.goto(`/#/plans?plan=${target.id}`);
+  await expect(unavailable).toBeVisible();
+  await expect(task.getByRole("heading", { name: "Loading plan…", exact: true })).toHaveCount(0);
+  await expect(page.getByText("That plan was not found. The plans list is shown.", { exact: true })).toHaveCount(0);
+  await expect.poll(currentHash(page)).toBe(`#/plans?plan=${target.id}`);
+
+  await task.getByRole("button", { name: "Retry", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Plan page-two", exact: true })).toBeVisible();
 });

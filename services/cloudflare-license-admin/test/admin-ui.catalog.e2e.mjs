@@ -570,3 +570,27 @@ test("an unsaved catalog draft still asks before a link or Back discards it", as
   await expect(name).toHaveValue("Unsaved plan name");
   await expect.poll(() => new URL(page.url()).hash).toBe(`#/plans?plan=${plan.id}`);
 });
+
+test("a plan save in flight keeps its editor through Back and closes it once the save settles", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  api.seed.catalogPlan();
+  await page.route("**/api/admin/**", api.route);
+  const prompts = recordLeavePrompts(page);
+  await page.goto("/#/plans");
+  await page.getByRole("row", { name: /Plan confirm/ }).getByRole("button", { name: "View plan", exact: true }).click();
+  await page.getByRole("button", { name: "Edit plan", exact: true }).click();
+  const form = page.getByRole("form", { name: "Catalog plan" });
+  await form.getByLabel("Name").fill("Renamed plan");
+  api.behavior.deferMutations.add("catalog-plan-patch");
+  await form.getByRole("button", { name: "Update plan" }).click();
+  await expect.poll(() => api.behavior.releaseMutations.has("catalog-plan-patch")).toBe(true);
+
+  await page.goBack();
+  await expect.poll(() => new URL(page.url()).hash).toBe("#/plans");
+  await expect(form).toBeVisible();
+  api.behavior.releaseMutations.get("catalog-plan-patch")();
+  await expect(page.getByText(/catalog_plan_patched/)).toBeVisible();
+  await expect(form).toHaveCount(0);
+  await expect(page.getByRole("row", { name: /Renamed plan/ })).toBeVisible();
+  expect(prompts).toEqual([]);
+});
