@@ -2,6 +2,8 @@ import { accessCounts } from "./access-counts.js";
 import { envelope, json } from "../../responses.js";
 import type { TimeseriesBucket, ExpiringEntitlement } from "../../../shared/api";
 import { verifyAuditChain } from "@licensecc/cloudflare-runtime/d1/audit_digest";
+import { boundTrialDeadlineSql } from "@licensecc/cloudflare-runtime/device/bound_trial";
+import { legacyTrialDeadlineSql } from "@licensecc/cloudflare-runtime/lease/trial_store";
 import { entitlementId } from "@licensecc/licensing-domain/entitlements/contracts";
 import type { Env } from "../../env.js";
 import { envFlag } from "../../support.js";
@@ -162,16 +164,20 @@ export async function auditVerify(env: Env, requestIdValue: string): Promise<Res
   }
 }
 
-// A grant's effective deadline is normally its stamped valid_until. An activation-basis trial
-// (from_first_activation/from_first_use) that has already been activated instead deadlines at
-// trial_started_at + trial_duration_sec, since valid_until is never stamped for that basis; one not
-// yet activated has no known deadline yet and is excluded, same as a non-expiring grant.
-const EFFECTIVE_UNTIL_EXPRESSION = `CASE
-             WHEN e.is_trial = 1 AND e.trial_expiration_basis IN ('from_first_activation', 'from_first_use')
-                  AND e.trial_started_at IS NOT NULL AND e.trial_duration_sec > 0
-             THEN e.trial_started_at + e.trial_duration_sec
-             ELSE e.valid_until
-           END`;
+// A grant's effective deadline is normally its stamped valid_until. A trial's clock can end earlier
+// (or, for an activation-basis trial with no valid_until at all, be the ONLY deadline it has); its
+// enforcing rule's own SQL twin computes that clock exactly as the lease/consent path enforces it,
+// clamped to valid_until with the same min(coalesce(valid_until, MAX), trial deadline) discipline the
+// portal's self-service entitlement list uses (never a hand-rolled copy of that clamp). An unstarted
+// activation-basis trial has no known deadline yet (NULL, since coalesce/min both stay NULL) and is
+// excluded, same as a non-expiring grant.
+const EFFECTIVE_UNTIL_EXPRESSION = `CASE WHEN e.is_trial <> 1 THEN e.valid_until ELSE min(coalesce(e.valid_until, 9007199254740991),
+             CASE WHEN e.enforcement_mode = 'device_bound_v1' THEN ${boundTrialDeadlineSql("e", "NULL")} ELSE ${legacyTrialDeadlineSql("e")} END) END`;
+
+// The SELECT list shared by both branches below (kept identical so the UNION ALL output shape and
+// the effective-deadline computation cannot drift between them).
+const EXPIRING_COLUMNS = `e.project AS project, e.feature AS feature, e.license_fingerprint AS license_fingerprint,
+                e.customer_id AS customer_id, c.name AS customer_name, ${EFFECTIVE_UNTIL_EXPRESSION} AS effective_until`;
 
 export async function reportExpiring(request: Request, env: Env, requestIdValue: string): Promise<Response> {
   const url = new URL(request.url);
@@ -186,19 +192,32 @@ export async function reportExpiring(request: Request, env: Env, requestIdValue:
     return envelope(requestIdValue, "invalid_request", undefined, 400);
   }
   const { limit, cursor } = pagination;
+  // Two branches instead of one full scan of every active row: (a) is the common case and keeps the
+  // pre-existing range seek on idx_entitlements_valid_until (forced with INDEXED BY so an unanalyzed
+  // planner cannot fall back to scanning every active row); it covers every non-trial grant, plus any
+  // trial whose own valid_until (not its trial clock) already lands in the window. (b) is the rare
+  // case: an active trial whose CLOCK lands in the window despite valid_until being NULL or outside
+  // it (an activation-basis trial commonly has no valid_until at all). The two WHERE clauses are
+  // mutually exclusive by construction, so UNION ALL cannot duplicate a row.
   const rows = await env.DB.prepare(
     `SELECT project, feature, license_fingerprint, customer_id, customer_name, effective_until
        FROM (
-         SELECT e.project AS project, e.feature AS feature, e.license_fingerprint AS license_fingerprint,
-                e.customer_id AS customer_id, c.name AS customer_name, ${EFFECTIVE_UNTIL_EXPRESSION} AS effective_until
+         SELECT ${EXPIRING_COLUMNS}
+           FROM entitlements e INDEXED BY idx_entitlements_valid_until
+           LEFT JOIN customers c ON c.id = e.customer_id
+          WHERE e.status = 'active' AND e.valid_until IS NOT NULL AND e.valid_until > ? AND e.valid_until <= ?
+         UNION ALL
+         SELECT ${EXPIRING_COLUMNS}
            FROM entitlements e
            LEFT JOIN customers c ON c.id = e.customer_id
-          WHERE e.status = 'active'
+          WHERE e.status = 'active' AND e.is_trial = 1
+            AND (e.valid_until IS NULL OR e.valid_until <= ? OR e.valid_until > ?)
        )
       WHERE effective_until IS NOT NULL AND effective_until > ? AND effective_until <= ?
       ORDER BY effective_until ASC, project, feature, license_fingerprint
       LIMIT ? OFFSET ?`,
-  ).bind(now, horizon, limit + 1, cursor).all<{ project: string; feature: string; license_fingerprint: string; customer_id: string | null; customer_name: string | null; effective_until: number }>();
+  ).bind(now, horizon, now, horizon, now, horizon, limit + 1, cursor)
+    .all<{ project: string; feature: string; license_fingerprint: string; customer_id: string | null; customer_name: string | null; effective_until: number }>();
   const items: ExpiringEntitlement[] = rows.results.slice(0, limit).map((row) => ({
     id: entitlementId(row.project, row.feature, row.license_fingerprint),
     project: row.project,

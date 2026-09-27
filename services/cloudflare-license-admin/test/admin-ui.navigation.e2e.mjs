@@ -143,6 +143,58 @@ test("a global search entitlement result lands on exactly that row with no finge
   expect(new URL(page.url()).hash).toBe("#/entitlements");
 });
 
+test("reloading a deep-linked single-entitlement view drops the session-only id and shows the full list", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  const fingerprint = "9".repeat(64);
+  const target = api.seed.entitlement({ project: "DEFAULT", feature: "pro", license_fingerprint: fingerprint, customer_id: "cus_acme" });
+  api.seed.entitlement({ project: "DEFAULT", feature: "pro", license_fingerprint: "1".repeat(64) });
+  await page.route("**/api/admin/**", api.route);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Search", exact: true }).click();
+  await page.getByRole("searchbox", { name: "Global search" }).fill(fingerprint);
+  await page.getByRole("button", { name: "Search records", exact: true }).click();
+  await page.getByRole("link", { name: new RegExp(target.id) }).click();
+  await expect(page.getByText("Showing 1 entitlement", { exact: false })).toBeVisible();
+  await expect(page.locator(".desktopRecords tbody tr")).toHaveCount(1);
+
+  // id is session-only (never in the URL/hash), so a reload has nothing to restore it from: the
+  // banner is gone and the full, unfiltered list shows instead of the single deep-linked row.
+  await page.reload();
+  await expect(page.locator(".sidebar nav a[aria-current=page]")).toHaveText("License access");
+  await expect(page.getByText("Showing 1 entitlement", { exact: false })).toHaveCount(0);
+  await expect(page.locator(".desktopRecords tbody tr")).toHaveCount(2);
+  expect(new URL(page.url()).hash).toBe("#/entitlements");
+});
+
+test("the Licenses 'View entitlements' button scopes the list by license_id with a visible, removable indicator", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  const licenseId = "lic_seat_pack";
+  api.behavior.licenseRows = [{ id: licenseId, customer_id: "cus_acme", project: "DEFAULT", label: "Seat pack", created_at: 1_760_000_000, updated_at: 1_760_000_000 }];
+  api.seed.entitlement({ project: "DEFAULT", feature: "pro", license_fingerprint: "7".repeat(64), customer_id: "cus_acme", license_id: licenseId });
+  api.seed.entitlement({ project: "DEFAULT", feature: "other", license_fingerprint: "8".repeat(64), customer_id: "cus_acme", license_id: null });
+  await page.route("**/api/admin/**", api.route);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto("/#/licenses");
+
+  await page.getByRole("button", { name: "View entitlements", exact: true }).click();
+
+  await expect(page.locator(".sidebar nav a[aria-current=page]")).toHaveText("License access");
+  await expect(page.getByText(`License ${licenseId}`, { exact: false })).toBeVisible();
+  await expect(page.locator(".desktopRecords tbody tr")).toHaveCount(1);
+  expect(new URL(page.url()).hash).toBe("#/entitlements?license_id=lic_seat_pack");
+
+  // license_id is an ordinary browsing filter (unlike id/customer_id): it survives a reload.
+  await page.reload();
+  await expect(page.getByText(`License ${licenseId}`, { exact: false })).toBeVisible();
+  await expect(page.locator(".desktopRecords tbody tr")).toHaveCount(1);
+
+  await page.getByRole("button", { name: "Show all", exact: true }).click();
+  await expect(page.getByText(`License ${licenseId}`, { exact: false })).toHaveCount(0);
+  await expect(page.locator(".desktopRecords tbody tr")).toHaveCount(2);
+});
+
 test("mobile customer Back restores the visible card action and list scroll", async ({ page }) => {
   const api = makeAdminApiFixture();
   api.seed.customers(20);
