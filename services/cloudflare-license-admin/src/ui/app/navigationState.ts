@@ -1,7 +1,8 @@
-import type { AdminRoute, AdminTab, CatalogView, CustomerSection, NavigationTarget } from "./types";
+import type { AdminRoute, AdminTab, CatalogView, CustomerAccessView, CustomerSection, NavigationTarget } from "./types";
 
 const tabs: readonly AdminTab[] = ["overview", "entitlements", "policies", "plans", "webhooks", "events", "customers", "licenses", "fulfillment", "reports"];
 const customerSections: readonly CustomerSection[] = ["overview", "access", "licenses", "tokens", "orders", "history"];
+const customerAccessViews: readonly CustomerAccessView[] = ["grants", "nodes", "sessions"];
 const catalogViews: readonly CatalogView[] = ["plans", "features", "import"];
 const filterKeys: Partial<Record<AdminTab, readonly string[]>> = {
   customers: ["status"],
@@ -70,9 +71,31 @@ export function hashForRoute(route: AdminRoute): string {
   if (route.tab === "customers" && route.customerId !== null) {
     path += `/${encodeURIComponent(route.customerId)}`;
     if (route.section !== "overview") params.set("section", route.section);
+    // An app drill-down is addressable only on the access section, so nothing else is ever written.
+    if (route.section === "access" && route.access !== undefined) {
+      params.set("app", route.access.app);
+      if (route.access.view !== "grants") params.set("view", route.access.view);
+      // Manage access writes a marker only: the grant (whose id encodes the license fingerprint)
+      // stays in the in-memory history entry, like the entitlement id filters above.
+      else if (route.access.manage) params.set("manage", "1");
+    }
   }
-  if (route.tab === "plans" && route.view !== "plans") params.set("view", route.view);
+  if (route.tab === "plans") {
+    if (route.view !== "plans") params.set("view", route.view);
+    // Plan ids are non-secret catalog keys; a plan detail exists only on the Plans view.
+    else if (route.plan !== undefined) params.set("plan", route.plan);
+  }
   return `${path}${params.size === 0 ? "" : `?${params.toString()}`}`;
+}
+
+/** Whether a route is a Manage access entry, whose grant exists only in memory. */
+export function managesGrant(route: AdminRoute): boolean {
+  return route.tab === "customers" && route.access?.manage === true;
+}
+
+/** The app's access grants beneath a Manage access entry; any other route is returned unchanged. */
+export function withoutManagedGrant(route: AdminRoute): AdminRoute {
+  return route.tab === "customers" && route.access?.manage === true ? { ...route, access: { ...route.access, manage: false } } : route;
 }
 
 export function hashForTarget(target: NavigationTarget): string {
@@ -105,12 +128,25 @@ export function parseAdminHash(hash: string): ParsedAdminRoute {
     }
     const section = params.get("section") ?? "overview";
     if (!customerSections.includes(section as CustomerSection) || (customerId === null && section !== "overview")) return fallback();
-    return { route: { tab, customerId, section: section as CustomerSection, filter }, invalid: false };
+    const route = { tab, customerId, section: section as CustomerSection, filter };
+    const app = params.get("app");
+    const view = params.get("view");
+    const manage = params.get("manage");
+    // A record view or the Manage access marker without an app has no meaning.
+    if (app === null) return view === null && manage === null ? { route, invalid: false } : fallback();
+    const accessView = view ?? "grants";
+    if (section !== "access" || !validValue(app) || !customerAccessViews.includes(accessView as CustomerAccessView)) return fallback();
+    // Manage access is opened only from an app's access grants.
+    if (manage !== null && (manage !== "1" || accessView !== "grants")) return fallback();
+    return { route: { ...route, access: { app, view: accessView as CustomerAccessView, manage: manage !== null } }, invalid: false };
   }
   if (tab === "plans") {
     const view = params.get("view") ?? "plans";
     if (!catalogViews.includes(view as CatalogView)) return fallback();
-    return { route: { tab, view: view as CatalogView, filter }, invalid: false };
+    const plan = params.get("plan");
+    if (plan === null) return { route: { tab, view: view as CatalogView, filter }, invalid: false };
+    if (view !== "plans" || !validValue(plan)) return fallback();
+    return { route: { tab, view, filter, plan }, invalid: false };
   }
   return { route: { tab, filter }, invalid: false };
 }

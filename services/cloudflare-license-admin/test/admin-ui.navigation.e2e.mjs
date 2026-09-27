@@ -405,11 +405,18 @@ test("catalog plan detail is a history entry that survives reload", async ({ pag
   await viewPlan.click();
   await expect(detail).toBeVisible();
   await expect.poll(currentHash(page)).toBe(`#/plans?plan=${plan.id}`);
+  await page.goBack();
+  await expect(detail).toHaveCount(0);
+  await expect.poll(currentHash(page)).toBe("#/plans");
+  // Back within the session restores focus to the plan's own row, not the list heading.
+  await expect(viewPlan).toBeFocused();
+  await page.goForward();
+  await expect(detail).toBeVisible();
+
   await page.reload();
   await expect(detail).toBeVisible();
   await expect(page.getByRole("button", { name: "Add feature", exact: true })).toBeVisible();
   await expect.poll(currentHash(page)).toBe(`#/plans?plan=${plan.id}`);
-
   await page.goBack();
   await expect(viewPlan).toBeVisible();
   await expect(detail).toHaveCount(0);

@@ -1,11 +1,12 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
-import { useNavigationGuard } from "../../app/navigation";
+import { useAdminNavigation, useNavigationGuard } from "../../app/navigation";
 import type { CatalogView } from "../../app/types";
 import { focusWorkspaceTarget, usableFocusTarget } from "../../shared/workspaceFocus";
 
 export type CatalogTask = "planDetail" | "featureEditor" | "planEditor" | "planFeatureEditor" | "projection";
-type DraftTask = Exclude<CatalogTask, "planDetail"> | "import";
+type EditorTask = Exclude<CatalogTask, "planDetail">;
+type DraftTask = EditorTask | "import";
 
 interface CatalogWorkspaceOptions {
   active: boolean;
@@ -13,52 +14,76 @@ interface CatalogWorkspaceOptions {
   busy: boolean;
   operationLocked: boolean;
   snapshots: Record<DraftTask, string>;
-  importApplied: boolean;
-  projectionApplied: boolean;
   onDiscard: (task: DraftTask) => void;
   invalidate: () => void;
 }
 
-/** Local editor visibility never owns a request, preview capability, or recovery. */
+function draftTask(view: CatalogView, editor: EditorTask | null): DraftTask | null {
+  return view === "import" ? "import" : editor;
+}
+
+/**
+ * Local editor visibility never owns a request, preview capability, or recovery. The plan detail is
+ * a history entry (`#/plans?plan=…`); editors overlay it and stay session-only.
+ */
 export function useCatalogWorkspace(options: CatalogWorkspaceOptions): {
   task: CatalogTask | null;
+  planId: string | null;
   revision: number;
-  open: (task: CatalogTask, setup?: () => void, baseline?: string) => void;
+  open: (task: EditorTask, setup?: () => void, baseline?: string) => void;
+  openPlan: (planId: string, setup: () => void) => void;
   close: () => void;
   finish: (task: CatalogTask) => void;
   markClean: (task: DraftTask, snapshot: string) => void;
+  markApplied: (task: "import" | "projection") => void;
 } {
-  const [task, setTask] = useState<CatalogTask | null>(null);
+  const { catalogPlan, setCatalogPlan } = useAdminNavigation();
+  const [editor, setEditor] = useState<EditorTask | null>(null);
+  // Mirrors `editor` synchronously, so a leave check later in the same event sees a closed editor.
+  const editorRef = useRef<EditorTask | null>(null);
   const [revision, setRevision] = useState(0);
   const latest = useRef(options);
   latest.current = options;
   const baselines = useRef({ ...options.snapshots, import: "" });
-  const draft = options.view === "import" ? "import" : task === "planDetail" ? null : task;
-  const dirty = draft !== null && options.snapshots[draft] !== baselines.current[draft];
+  const planId = options.view === "plans" ? catalogPlan : null;
+  const task: CatalogTask | null = editor ?? (planId !== null ? "planDetail" : null);
+  const draft = draftTask(options.view, editor);
+
+  function showEditor(next: EditorTask | null): void {
+    editorRef.current = next;
+    setEditor(next);
+  }
+  // Evaluated when the operator leaves, against the latest snapshots and baselines, so an apply
+  // that reset its baseline a moment ago never prompts from a stale render.
+  function dirtyNow(): boolean {
+    const { active, busy, operationLocked, view, snapshots } = latest.current;
+    const current = draftTask(view, editorRef.current);
+    return active && !busy && !operationLocked && current !== null && snapshots[current] !== baselines.current[current];
+  }
   const { requestLeave } = useNavigationGuard({
-    when: options.active && !options.busy && !options.operationLocked && dirty,
+    when: dirtyNow,
     message: "Discard this unsaved catalog task? Choose Cancel to keep editing.",
     onDiscard: () => {
-      if (draft !== null) options.onDiscard(draft);
-      options.invalidate();
-      setTask(null);
+      const current = draftTask(latest.current.view, editorRef.current);
+      if (current !== null) latest.current.onDiscard(current);
+      latest.current.invalidate();
+      showEditor(null);
       setRevision((value) => value + 1);
     },
   });
 
+  // Every route step (catalog view, plan detail, Back or Forward) closes an open editor.
   useEffect(() => {
     latest.current.invalidate();
-    setTask(null);
+    showEditor(null);
     setRevision((value) => value + 1);
-  }, [options.view]);
-  useEffect(() => {
-    if (options.importApplied) baselines.current.import = latest.current.snapshots.import;
-  }, [options.importApplied]);
-  useEffect(() => {
-    if (options.projectionApplied) baselines.current.projection = latest.current.snapshots.projection;
-  }, [options.projectionApplied]);
+  }, [options.view, catalogPlan]);
+  const shownPlan = useRef(planId);
   useLayoutEffect(() => {
-    if (!options.active) return;
+    // Leaving a plan detail is a history step, so the navigation provider owns focus and scroll.
+    const leftPlan = shownPlan.current !== null && planId === null;
+    shownPlan.current = planId;
+    if (!options.active || leftPlan) return;
     const currentView = options.view;
     const focusAtSchedule = document.activeElement;
     const frame = window.requestAnimationFrame(() => {
@@ -69,26 +94,42 @@ export function useCatalogWorkspace(options: CatalogWorkspaceOptions): {
     return () => window.cancelAnimationFrame(frame);
   }, [options.active, options.view, task]);
 
-  function open(next: CatalogTask, setup: () => void = () => undefined, baseline?: string): void {
+  function open(next: EditorTask, setup: () => void = () => undefined, baseline?: string): void {
     requestLeave(() => {
       options.invalidate();
       setup();
-      if (next !== "planDetail") baselines.current[next] = baseline ?? options.snapshots[next];
-      setTask(next);
+      baselines.current[next] = baseline ?? options.snapshots[next];
+      showEditor(next);
       setRevision((value) => value + 1);
     });
+  }
+  function openPlan(id: string, setup: () => void): void {
+    if (setCatalogPlan(id)) setup();
   }
   function close(): void {
     if (options.busy || options.operationLocked) return;
     requestLeave(() => {
       if (draft !== null) options.onDiscard(draft);
       options.invalidate();
-      setTask(null);
+      showEditor(null);
       setRevision((value) => value + 1);
+      // Closing a plan detail, or an editor opened on one, returns to the plans list.
+      if (planId !== null) setCatalogPlan(null);
     });
   }
   function finish(completed: CatalogTask): void {
-    setTask((current) => current === completed ? null : current);
+    if (editorRef.current === completed) showEditor(null);
   }
-  return { task, revision, open, close, finish, markClean: (kind, snapshot) => { baselines.current[kind] = snapshot; } };
+  return {
+    task,
+    planId,
+    revision,
+    open,
+    openPlan,
+    close,
+    finish,
+    markClean: (kind, snapshot) => { baselines.current[kind] = snapshot; },
+    // Runs in the apply-success path itself, so a navigation right after Apply sees a clean draft.
+    markApplied: (kind) => { baselines.current[kind] = latest.current.snapshots[kind]; },
+  };
 }

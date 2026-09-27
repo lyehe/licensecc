@@ -12,11 +12,33 @@ export type AdminTab =
 
 export type CustomerSection = "overview" | "access" | "licenses" | "tokens" | "orders" | "history";
 export type CatalogView = "plans" | "features" | "import";
+export type CustomerAccessView = "grants" | "nodes" | "sessions";
+
+/**
+ * A customer's drill-down into one app's records. `manage` marks the Manage access entry: the
+ * address carries only that marker, while the grant it opened stays in the in-memory history entry.
+ */
+export interface CustomerAccessRoute {
+  app: string;
+  view: CustomerAccessView;
+  manage: boolean;
+}
 
 export type AdminRoute =
-  | { tab: "customers"; customerId: string | null; section: CustomerSection; filter: Record<string, string> }
-  | { tab: "plans"; view: CatalogView; filter: Record<string, string> }
+  | { tab: "customers"; customerId: string | null; section: CustomerSection; filter: Record<string, string>; access?: CustomerAccessRoute }
+  | { tab: "plans"; view: CatalogView; filter: Record<string, string>; plan?: string }
   | { tab: Exclude<AdminTab, "customers" | "plans">; filter: Record<string, string> };
+
+/**
+ * The grant "Manage access" opened. Its id encodes the license fingerprint, so it lives only in the
+ * in-memory history entry and never reaches the URL or history.state.
+ */
+export interface ManagedGrant {
+  readonly project: string;
+  readonly feature: string;
+  readonly id: string;
+  readonly customer_id: string;
+}
 
 export interface NavigationIntent {
   id: number;

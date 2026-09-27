@@ -49,6 +49,8 @@ interface CatalogImportWorkflowOptions extends CatalogImportControls {
   active: boolean;
   invalidatePlanProjection: () => void;
   refreshCurrentCatalog: () => Promise<ExactReadProof | null>;
+  /** The server applied the current manifest's preview: the text is no longer an unsaved draft. */
+  onApplied: () => void;
 }
 
 export interface CatalogImportWorkflow {
@@ -69,6 +71,7 @@ export function useCatalogImportWorkflow({
   requestConfirm,
   runMutation,
   setMessage,
+  onApplied,
 }: CatalogImportWorkflowOptions): CatalogImportWorkflow {
   const [text, setText] = useState("");
   const [previewBinding, setPreviewBinding] = useState<CatalogImportPreviewBinding | null>(null);
@@ -182,6 +185,8 @@ export function useCatalogImportWorkflow({
       const ownsBinding = bindingIsUsable(binding, revision);
       const mayPublish = ownsBinding && activeRef.current && isGenerationCurrent(publicationGeneration);
       if (ownsBinding) {
+        // An owned binding proves the manifest text is exactly what the server applied.
+        onApplied();
         invalidate();
         invalidatePlanProjection();
       }

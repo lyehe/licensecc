@@ -43,6 +43,8 @@ type PlanProjectionControls = Pick<
 
 interface PlanProjectionWorkflowOptions extends PlanProjectionControls {
   refreshCore: (strict?: boolean, isCurrent?: () => boolean) => Promise<ExactReadProof | null>;
+  /** The server applied the current form's preview: the form is no longer an unsaved draft. */
+  onApplied: () => void;
 }
 
 export interface PlanProjectionWorkflow {
@@ -64,6 +66,7 @@ export function usePlanProjectionWorkflow({
   setMessage,
   requestConfirm,
   modalActive,
+  onApplied,
 }: PlanProjectionWorkflowOptions): PlanProjectionWorkflow {
   const [form, setForm] = useState(emptyPlanProjectionForm);
   const [previewBinding, setPreviewBinding] = useState<PlanProjectionPreviewBinding | null>(null);
@@ -211,6 +214,8 @@ export function usePlanProjectionWorkflow({
         if (!isCurrent()) return;
         setMessage(`${parsed.code} (${parsed.requestId})`);
         appliedResult = parsed.data;
+        // A still-current binding proves the form is exactly what the server applied.
+        onApplied();
       },
       refresh: async (): Promise<ExactReadProof | null> => {
         // A retained replay may settle after the editor has been hidden. The

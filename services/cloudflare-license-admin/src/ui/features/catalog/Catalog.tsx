@@ -42,6 +42,7 @@ import { CatalogFeaturesTable, CatalogPlanFeaturesTable, CatalogPlansTable, Plan
 import { useCatalogImportWorkflow } from "./useCatalogImportWorkflow";
 import { usePlanProjectionWorkflow } from "./usePlanProjectionWorkflow";
 import { useCatalogWorkspace } from "./useCatalogWorkspace";
+import { useCatalogPlanRoute } from "./useCatalogPlanRoute";
 import { useCatalogReadState } from "./useCatalogReadState";
 import { useCatalogConsequences } from "./useCatalogConsequences";
 import { useCatalogExport } from "./useCatalogExport";
@@ -73,7 +74,7 @@ export function Catalog({ active }: { active: boolean }): React.ReactElement | n
   const currentCatalogPlansRefreshRef = useRef<() => Promise<ExactReadProof | null>>(() => Promise.resolve(null));
   const currentCatalogPlanFeaturesRefreshRef = useRef<() => Promise<ExactReadProof | null>>(() => Promise.resolve(null));
   const currentCatalogImportRefreshRef = useRef<() => Promise<ExactReadProof | null>>(() => Promise.resolve(null));
-  const planProjection = usePlanProjectionWorkflow({ refreshCore, runKeyedMutation, runMutation, setMessage, requestConfirm, modalActive });
+  const planProjection = usePlanProjectionWorkflow({ refreshCore, runKeyedMutation, runMutation, setMessage, requestConfirm, modalActive, onApplied: () => workspace.markApplied("projection") });
   const catalogImport = useCatalogImportWorkflow({
     active: active && catalogView === "import",
     invalidatePlanProjection: planProjection.invalidate,
@@ -81,6 +82,7 @@ export function Catalog({ active }: { active: boolean }): React.ReactElement | n
     requestConfirm,
     runMutation,
     setMessage,
+    onApplied: () => workspace.markApplied("import"),
   });
   const invalidatePlanProjectionPreview = planProjection.invalidate;
   const invalidateCatalogImportPreview = catalogImport.invalidate;
@@ -89,8 +91,6 @@ export function Catalog({ active }: { active: boolean }): React.ReactElement | n
   const workspace = useCatalogWorkspace({
     active, view: catalogView, busy: requestBusy, operationLocked,
     snapshots: { featureEditor: JSON.stringify(catalogFeatureForm), planEditor: JSON.stringify(catalogPlanForm), planFeatureEditor: JSON.stringify(catalogPlanFeatureForm), projection: JSON.stringify(planProjection.form), import: catalogImport.text },
-    importApplied: catalogImport.preview !== null && catalogImport.previewBinding === null,
-    projectionApplied: planProjection.preview !== null && planProjection.previewBinding === null,
     invalidate: () => { invalidatePlanProjectionPreview(); invalidateCatalogImportPreview(); },
     onDiscard: (task) => {
       if (task === "featureEditor") cancelCatalogFeatureEdit();
@@ -656,6 +656,7 @@ export function Catalog({ active }: { active: boolean }): React.ReactElement | n
   const catalogFeaturesCursor = catalogFeaturesFence.canLoadMore() ? catalogFeaturesCursorSnapshot : null;
   const catalogPlans = catalogPlansSettled ? catalogPlansSnapshot : [];
   const catalogPlansCursor = catalogPlansFence.canLoadMore() ? catalogPlansCursorSnapshot : null;
+  const loadMorePlans = (): void => { if (catalogPlansCursor !== null) void loadMore(catalogPlansUrl, catalogPlansCursor, catalogPlans, setCatalogPlans, setCatalogPlansCursor, setMessage, hasCatalogPlanListData, "catalog_plans_listed", catalogPlansFence, (plan) => plan.id); };
   const catalogPlanFeatures = catalogPlanFeaturesSettled ? catalogPlanFeaturesSnapshot : [];
   const visibleCatalogFeatures = catalogFeatures;
   const visibleCatalogPlans = catalogPlans;
@@ -679,8 +680,9 @@ export function Catalog({ active }: { active: boolean }): React.ReactElement | n
     { run: catalogFeatureTransition, isCurrent: () => isCatalogFeatureGenerationCurrent(catalogFeatureGeneration) },
     { run: catalogPlanFeatureTransition, isCurrent: () => isCatalogPlanFeatureGenerationCurrent(catalogPlanFeatureGeneration) },
   );
+  useCatalogPlanRoute({ planId: workspace.task === "planDetail" ? workspace.planId : null, plans: catalogPlansFence.canLoadMore() && planRead.error === null ? catalogPlansSnapshot : null, hasMore: catalogPlansCursor !== null, selectedId: selectedCatalogPlanId, select: selectCatalogPlan, loadMore: loadMorePlans });
   if (!active) return null;
-  const selectedCatalogPlan = visibleCatalogPlans.find((plan) => plan.id === settledSelectedCatalogPlanId) ?? null;
+  const selectedCatalogPlan = visibleCatalogPlans.find((plan) => plan.id === settledSelectedCatalogPlanId && plan.id === workspace.planId) ?? null;
 
   function prepareProjection(plan: CatalogPlan | null = null): void {
     const form = plan === null ? { ...emptyPlanProjectionForm } : { ...emptyPlanProjectionForm, project: plan.project, plan_id: plan.id, plan_key: plan.plan_key };
@@ -700,7 +702,7 @@ export function Catalog({ active }: { active: boolean }): React.ReactElement | n
           {workspace.task === "planFeatureEditor" && <CatalogPlanFeatureEditor form={catalogPlanFeatureForm} busy={busy} plansSettled={catalogPlansFence.canLoadMore() && planRead.error === null} activePoliciesSettled={activePoliciesSettled} selectedPlanId={settledSelectedCatalogPlanId} plans={visibleCatalogPlans} features={visibleCatalogFeatures} policies={visibleActivePolicies} onChange={setCatalogPlanFeatureForm} onSelectPlan={selectCatalogPlan} onClearPlan={() => { setSelectedCatalogPlanId(""); invalidatePlanProjectionPreview(); }} onSubmit={(event) => void submitCatalogPlanFeatureCreate(event)} />}
           {workspace.task === "projection" && <><PlanProjectionEditor form={planForm} previewBinding={planPreviewBinding} busy={busy} onUpdate={updatePlanProjectionForm} onSubmit={(event) => void submitPlanPreview(event)} onApply={requestPlanProjectionApply} /><PlanProjectionResults preview={planPreview} binding={planPreviewBinding} /></>}
         </fieldset>
-        {workspace.task === "planDetail" && (selectedCatalogPlan === null ? <><h2>Plan unavailable</h2><p>The selected plan is not in the current settled list. Return to Plans and select an available record.</p><ReadNotice {...planRead} hasData={false} onRetry={() => void refreshCatalogPlans()} label="plans" /></> : <>
+        {workspace.task === "planDetail" && (selectedCatalogPlan === null ? <><h2>{planRead.error === null ? "Loading plan…" : "Plan unavailable"}</h2>{planRead.error !== null && <p>The plans list could not be read. Retry, or return to Plans.</p>}<ReadNotice {...planRead} hasData={false} onRetry={() => void refreshCatalogPlans()} label="plans" /></> : <>
           <div className="detailHeader"><div><h2>{selectedCatalogPlan.name || selectedCatalogPlan.plan_key}</h2><p>{selectedCatalogPlan.project} / {selectedCatalogPlan.plan_key} · Version {selectedCatalogPlan.version}</p></div><span className={`status ${selectedCatalogPlan.status}`}>{selectedCatalogPlan.status}</span></div>
           <p>{selectedCatalogPlan.description || "No description provided."}</p>
           <div className="pageActions"><button type="button" className="primary" disabled={busy} onClick={() => { const form = { ...emptyCatalogPlanFeatureForm, project: selectedCatalogPlan.project }; workspace.open("planFeatureEditor", () => setCatalogPlanFeatureForm(form), JSON.stringify(form)); }}>Add feature</button><button type="button" disabled={busy} onClick={() => prepareProjection(selectedCatalogPlan)}>Apply plan</button><button type="button" disabled={busy} onClick={() => beginCatalogPlanEdit(selectedCatalogPlan)}>Edit plan</button></div>
@@ -711,7 +713,7 @@ export function Catalog({ active }: { active: boolean }): React.ReactElement | n
       </section> : catalogView === "plans" ? <>
         <div className="listHeader"><div className="pageActions"><button type="button" disabled={busy} onClick={() => prepareProjection()}>Apply plan</button><button type="button" className="primary" disabled={busy} onClick={() => workspace.open("planEditor", cancelCatalogPlanEdit, JSON.stringify(emptyCatalogPlanForm))}>New plan</button></div></div>
         <section className="tablePane" data-focus-section="catalog-list"><ReadNotice {...planRead} hasData={catalogPlans.length > 0} onRetry={() => void refreshCatalogPlans()} label="plans" />
-          <CatalogPlansTable plans={catalogPlans} selectedPlanId={selectedCatalogPlanId} filter={catalogPlanFilter} loaded={catalogPlansSettled} hasMore={catalogPlansCursor !== null} actionsDisabled={busy || planRead.loading || planRead.error !== null} canDisable={(plan) => canRunCatalogAction(plan.status, "disable")} canReenable={(plan) => canRunCatalogAction(plan.status, "reenable")} onFilter={setCatalogPlanFilter} onSelect={(plan) => workspace.open("planDetail", () => selectCatalogPlan(plan))} onEdit={beginCatalogPlanEdit} onExport={(plan) => void exportCatalogPlan(plan)} onDisable={requestPlanDisable} onReenable={runPlanReenable} onLoadMore={() => { if (catalogPlansCursor !== null) void loadMore(catalogPlansUrl, catalogPlansCursor, catalogPlans, setCatalogPlans, setCatalogPlansCursor, setMessage, hasCatalogPlanListData, "catalog_plans_listed", catalogPlansFence, (plan) => plan.id); }} />
+          <CatalogPlansTable plans={catalogPlans} selectedPlanId={selectedCatalogPlanId} filter={catalogPlanFilter} loaded={catalogPlansSettled} hasMore={catalogPlansCursor !== null} actionsDisabled={busy || planRead.loading || planRead.error !== null} canDisable={(plan) => canRunCatalogAction(plan.status, "disable")} canReenable={(plan) => canRunCatalogAction(plan.status, "reenable")} onFilter={setCatalogPlanFilter} onSelect={(plan) => workspace.openPlan(plan.id, () => selectCatalogPlan(plan))} onEdit={beginCatalogPlanEdit} onExport={(plan) => void exportCatalogPlan(plan)} onDisable={requestPlanDisable} onReenable={runPlanReenable} onLoadMore={loadMorePlans} />
         </section>
       </> : <>
         <div className="listHeader"><button type="button" className="primary" disabled={busy} onClick={() => workspace.open("featureEditor", cancelCatalogFeatureEdit, JSON.stringify(emptyCatalogFeatureForm))}>New feature</button></div>

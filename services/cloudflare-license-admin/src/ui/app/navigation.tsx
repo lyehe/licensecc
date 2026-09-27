@@ -1,13 +1,14 @@
 import React, { createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
-import type { AdminRoute, AdminTab, CatalogView, CustomerSection, NavigationIntent, NavigationTarget } from "./types";
-import { hashForRoute, parseAdminHash, routeForTab, routeForTarget, targetForRoute } from "./navigationState";
+import type { AdminRoute, AdminTab, CatalogView, CustomerAccessRoute, CustomerAccessView, CustomerSection, ManagedGrant, NavigationIntent, NavigationTarget } from "./types";
+import { hashForRoute, managesGrant, parseAdminHash, routeForTab, routeForTarget, targetForRoute, withoutManagedGrant } from "./navigationState";
 import { useOperatorControls } from "../shared/controls";
 import { focusWorkspaceTarget, usableFocusTarget } from "../shared/workspaceFocus";
 
 interface NavigationGuard {
-  when: boolean;
+  /** A function is evaluated when the operator tries to leave, so it reads current state rather than the last render's. */
+  when: boolean | (() => boolean);
   message?: string;
   onDiscard: () => void;
 }
@@ -20,13 +21,18 @@ interface NavigationEntry {
   scrollY: number;
   focus: HTMLElement | null;
   focusRow: string | null;
+  /** Set exactly when the route is a Manage access entry; held only in this in-memory map. */
+  grant: ManagedGrant | null;
 }
 
 interface NavigationContextValue {
   route: AdminRoute;
   selectedCustomerId: string | null;
   customerSection: CustomerSection;
+  customerAccess: CustomerAccessRoute | null;
+  managedGrant: ManagedGrant | null;
   catalogView: CatalogView;
+  catalogPlan: string | null;
   navigationNotice: string | null;
   navigationIntent: NavigationIntent | null;
   navigationVersion: number;
@@ -37,24 +43,46 @@ interface NavigationContextValue {
   openCustomer: (id: string, section?: CustomerSection) => boolean;
   showCustomerList: () => void;
   setCustomerSection: (section: CustomerSection) => boolean;
+  /** Opens one app's records (or all apps, for null) on the selected customer's access section. */
+  setCustomerAccess: (access: { app: string; view: CustomerAccessView } | null) => boolean;
+  openManagedGrant: (grant: ManagedGrant) => boolean;
+  closeManagedGrant: () => boolean;
   setCatalogView: (view: CatalogView) => boolean;
+  /** Opens a plan's detail (or the plans list, for null) on the catalog Plans view. */
+  setCatalogPlan: (planId: string | null) => boolean;
+  /** A deep-linked app or plan that does not exist: replace this entry with its list, once, and say why. */
+  resolveMissingDrillDown: (kind: "app" | "plan", id: string) => void;
   requestLeave: (action: () => void) => boolean;
   registerGuard: (read: () => NavigationGuard) => () => void;
 }
 
 const NavigationContext = createContext<NavigationContextValue | null>(null);
 const historyKey = "licenseccAdminNavigation";
+const unrecognizedNotice = "This workspace address is not recognized. Overview is shown.";
+const reopenManagedNotice = "Reopen Manage access from the list.";
+const missingNotice = { app: "That app was not found for this customer. All apps are shown.", plan: "That plan was not found. The plans list is shown." };
+
+function guardActive(guard: NavigationGuard): boolean {
+  return typeof guard.when === "function" ? guard.when() : guard.when;
+}
+
+/** A Manage access grant lives only in memory, so an address that names one without it reopens the app's access grants. */
+function resolveAddress(hash: string): { parsed: ReturnType<typeof parseAdminHash>; route: AdminRoute; notice: string | null } {
+  const parsed = parseAdminHash(hash);
+  return { parsed, route: withoutManagedGrant(parsed.route), notice: parsed.invalid ? unrecognizedNotice : managesGrant(parsed.route) ? reopenManagedNotice : null };
+}
 
 export function AdminNavigationProvider({ children }: { children: ReactNode }): React.ReactElement {
-  const [initial] = useState(() => parseAdminHash(window.location.hash));
+  const [initial] = useState(() => resolveAddress(window.location.hash));
   const [route, setRoute] = useState(initial.route);
-  const [navigationNotice, setNavigationNotice] = useState<string | null>(initial.invalid ? "This workspace address is not recognized. Overview is shown." : null);
+  const [managedGrant, setManagedGrant] = useState<ManagedGrant | null>(null);
+  const [navigationNotice, setNavigationNotice] = useState<string | null>(initial.notice);
   const [navigationIntent, setNavigationIntent] = useState<NavigationIntent | null>({ ...targetForRoute(initial.route), id: 1 });
   const [navigationVersion, setNavigationVersion] = useState(0);
   const nextKey = useRef(1);
   const intentId = useRef(1);
   const session = useRef(crypto.randomUUID());
-  const entry = useRef<NavigationEntry>({ index: 0, key: 1, route: initial.route, target: targetForRoute(initial.route), scrollY: 0, focus: null, focusRow: null });
+  const entry = useRef<NavigationEntry>({ index: 0, key: 1, route: initial.route, target: targetForRoute(initial.route), scrollY: 0, focus: null, focusRow: null, grant: null });
   const entries = useRef(new Map<number, NavigationEntry>());
   const guards = useRef(new Set<() => NavigationGuard>());
   const pendingFocus = useRef<NavigationEntry | "heading" | null>(null);
@@ -85,7 +113,7 @@ export function AdminNavigationProvider({ children }: { children: ReactNode }): 
 
   const allowLeave = useCallback((): boolean => {
     if (modalActiveRef.current) return false;
-    const dirty = [...guards.current].map((read) => read()).filter((guard) => guard.when);
+    const dirty = [...guards.current].map((read) => read()).filter(guardActive);
     if (dirty.length === 0) return true;
     const message = dirty[0].message ?? "Discard your unsaved changes? Choose Cancel to keep editing.";
     if (!window.confirm(message)) return false;
@@ -98,13 +126,14 @@ export function AdminNavigationProvider({ children }: { children: ReactNode }): 
     entries.current.set(next.key, next);
     intentId.current += 1;
     setRoute(next.route);
+    setManagedGrant(next.grant);
     setNavigationNotice(notice);
     setNavigationIntent(next.target === null ? null : { ...next.target, id: intentId.current });
     pendingFocus.current = restore ? next : "heading";
     setNavigationVersion((version) => version + 1);
   }, []);
 
-  const transition = useCallback((nextRoute: AdminRoute, target: NavigationTarget | null = null): boolean => {
+  const transition = useCallback((nextRoute: AdminRoute, target: NavigationTarget | null = null, grant: ManagedGrant | null = null): boolean => {
     const same = hashForRoute(nextRoute) === hashForRoute(entry.current.route);
     if (same && target === null) {
       pendingFocus.current = "heading";
@@ -113,7 +142,7 @@ export function AdminNavigationProvider({ children }: { children: ReactNode }): 
     }
     if (!allowLeave()) return false;
     savePosition();
-    const next: NavigationEntry = { index: entry.current.index + 1, key: ++nextKey.current, route: nextRoute, target, scrollY: 0, focus: null, focusRow: null };
+    const next: NavigationEntry = { index: entry.current.index + 1, key: ++nextKey.current, route: nextRoute, target, scrollY: 0, focus: null, focusRow: null, grant };
     // A new branch discards only our in-memory forward navigation entries.
     for (const [key, value] of entries.current) if (value.index >= next.index) entries.current.delete(key);
     writeHistory(next, false);
@@ -136,8 +165,9 @@ export function AdminNavigationProvider({ children }: { children: ReactNode }): 
         if (known?.key === restoringKey.current) restoringKey.current = null;
         return;
       }
-      const parsed = parseAdminHash(window.location.hash);
-      const sameKnownRoute = known !== undefined && hashForRoute(known.route) === hashForRoute(parsed.route);
+      const address = resolveAddress(window.location.hash);
+      // A known entry restores with its in-memory grant; any other Manage access address has lost it.
+      const sameKnownRoute = known !== undefined && hashForRoute(known.route) === hashForRoute(address.parsed.route);
       if (!allowLeave()) {
         restoringKey.current = entry.current.key;
         const distance = known === undefined ? -1 : entry.current.index - known.index;
@@ -151,17 +181,18 @@ export function AdminNavigationProvider({ children }: { children: ReactNode }): 
       const next: NavigationEntry = sameKnownRoute ? known : {
         index: known?.index ?? entry.current.index + 1,
         key: ++nextKey.current,
-        route: parsed.route,
-        target: targetForRoute(parsed.route),
+        route: address.route,
+        target: targetForRoute(address.route),
         scrollY: 0,
         focus: null,
         focusRow: null,
+        grant: null,
       };
       writeHistory(next, true);
-      applyEntry(next, parsed.invalid ? "This workspace address is not recognized. Overview is shown." : null, sameKnownRoute);
+      applyEntry(next, sameKnownRoute && !address.parsed.invalid ? null : address.notice, sameKnownRoute);
     };
     const beforeUnload = (event: BeforeUnloadEvent): void => {
-      if (![...guards.current].some((read) => read().when)) return;
+      if (![...guards.current].some((read) => guardActive(read()))) return;
       event.preventDefault();
       event.returnValue = "";
     };
@@ -220,9 +251,42 @@ export function AdminNavigationProvider({ children }: { children: ReactNode }): 
   }, [transition]);
   const setCustomerSection = useCallback((section: CustomerSection): boolean => {
     const current = entry.current.route;
-    return current.tab === "customers" && current.customerId !== null ? transition({ ...current, section }) : false;
+    return current.tab === "customers" && current.customerId !== null ? transition({ tab: "customers", customerId: current.customerId, section, filter: current.filter }) : false;
   }, [transition]);
+  const setCustomerAccess = useCallback((access: { app: string; view: CustomerAccessView } | null): boolean => {
+    const current = entry.current.route;
+    if (current.tab !== "customers" || current.customerId === null) return false;
+    const section = { tab: "customers" as const, customerId: current.customerId, section: "access" as const, filter: current.filter };
+    return transition(access === null ? section : { ...section, access: { ...access, manage: false } });
+  }, [transition]);
+  const openManagedGrant = useCallback((grant: ManagedGrant): boolean => {
+    const current = entry.current.route;
+    if (current.tab !== "customers" || current.access === undefined || current.customerId !== grant.customer_id || current.access.app !== grant.project) return false;
+    return transition({ ...current, section: "access", access: { app: grant.project, view: "grants", manage: true } }, null, grant);
+  }, [transition]);
+  const closeManagedGrant = useCallback((): boolean => transition(withoutManagedGrant(entry.current.route)), [transition]);
   const setCatalogView = useCallback((view: CatalogView): boolean => transition({ tab: "plans", view, filter: {} }), [transition]);
+  const setCatalogPlan = useCallback((planId: string | null): boolean => {
+    const current = entry.current.route;
+    const filter = current.tab === "plans" ? current.filter : {};
+    return transition(planId === null ? { tab: "plans", view: "plans", filter } : { tab: "plans", view: "plans", filter, plan: planId });
+  }, [transition]);
+  const resolveMissingDrillDown = useCallback((kind: "app" | "plan", id: string): void => {
+    const current = entry.current;
+    const { route: at } = current;
+    const parent: AdminRoute | null = kind === "app" && at.tab === "customers" && at.customerId !== null && at.access?.app === id
+      ? { tab: "customers", customerId: at.customerId, section: at.section, filter: at.filter }
+      : kind === "plan" && at.tab === "plans" && at.plan === id ? { tab: "plans", view: at.view, filter: at.filter } : null;
+    if (parent === null) return;
+    // Resolution, not navigation: one replaceState and no guard, focus move, or new entry.
+    const next: NavigationEntry = { ...current, route: parent, grant: null };
+    entry.current = next;
+    entries.current.set(next.key, next);
+    writeHistory(next, true);
+    setRoute(parent);
+    setManagedGrant(null);
+    setNavigationNotice(missingNotice[kind]);
+  }, [writeHistory]);
   const onNavigationHandled = useCallback((intent: NavigationIntent): void => setNavigationIntent((current) => current?.id === intent.id ? null : current), []);
   const requestLeave = useCallback((action: () => void): boolean => {
     if (!allowLeave()) return false;
@@ -234,7 +298,14 @@ export function AdminNavigationProvider({ children }: { children: ReactNode }): 
     return () => { guards.current.delete(read); };
   }, []);
 
-  return <NavigationContext.Provider value={{ route, selectedCustomerId: route.tab === "customers" ? route.customerId : null, customerSection: route.tab === "customers" ? route.section : "overview", catalogView: route.tab === "plans" ? route.view : "plans", navigationNotice, navigationIntent, navigationVersion, onNavigationHandled, navigate, navigateTab, rememberFilters, openCustomer, showCustomerList, setCustomerSection, setCatalogView, requestLeave, registerGuard }}>{children}</NavigationContext.Provider>;
+  const customerAccess = route.tab === "customers" && route.section === "access" ? route.access ?? null : null;
+  return <NavigationContext.Provider value={{
+    route, selectedCustomerId: route.tab === "customers" ? route.customerId : null, customerSection: route.tab === "customers" ? route.section : "overview",
+    customerAccess, managedGrant: customerAccess?.manage === true ? managedGrant : null,
+    catalogView: route.tab === "plans" ? route.view : "plans", catalogPlan: route.tab === "plans" ? route.plan ?? null : null,
+    navigationNotice, navigationIntent, navigationVersion, onNavigationHandled, navigate, navigateTab, rememberFilters, openCustomer, showCustomerList, setCustomerSection,
+    setCustomerAccess, openManagedGrant, closeManagedGrant, setCatalogView, setCatalogPlan, resolveMissingDrillDown, requestLeave, registerGuard,
+  }}>{children}</NavigationContext.Provider>;
 }
 
 export function useAdminNavigation(): NavigationContextValue {
