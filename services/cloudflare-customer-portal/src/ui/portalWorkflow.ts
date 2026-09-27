@@ -96,10 +96,15 @@ export const DEVICE_KEY_HELP_COPY =
 
 export const DEVICE_RELEASE_ACTION_LABEL = "Release";
 
-// Shown in the confirm before a device release. It MUST state the consequence: the freed slot and the
-// re-activation the application on that device will have to perform.
+// D4: the native <dialog> confirm's own title, naming the device (Device ID, app and feature appear
+// beside it in the dialog body); the consequence copy below stays a separate sentence underneath.
+export const DEVICE_RELEASE_CONFIRM_TITLE = "Release this device?";
+
+// Shown in the confirm before a device release, under the dialog's own title (DEVICE_RELEASE_CONFIRM_
+// TITLE above). It MUST state the consequence: the freed slot and the re-activation the application on
+// that device will have to perform.
 export const DEVICE_RELEASE_CONFIRM_COPY =
-  "Release this device? This frees one device slot; the application on that device will need to activate again.";
+  "This frees one device slot; the application on that device will need to activate again.";
 
 // Floating-seat release is also destructive: it ends the current checkout and makes that seat
 // available to another customer/device. The dialog supplies the exact seat/device/license context

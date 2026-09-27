@@ -6,7 +6,6 @@ import { PasswordAction, capturePasswordAction } from "../features/auth/Password
 import { ProvidersScope } from "../features/auth/ProviderSignIn";
 import { usePortalData } from "../features/data/usePortalData";
 import { DEVICES_REFRESH_ACTION_LABEL, DEVICES_REFRESH_FAILURE_CODE, DevicesFeature, useDevicesController } from "../features/devices/DevicesFeature";
-import { SeatReleaseDialog } from "../features/devices/BrowserSeats";
 import { useLicenseDownloads } from "../features/downloads/DownloadsFeature";
 import { AppsFeature } from "../features/apps/AppsFeature";
 import { AccountFeature } from "../features/account/AccountFeature";
@@ -53,6 +52,13 @@ function PortalShell(): React.ReactElement {
     setMessage,
   });
 
+  // D3 fix round (carried, Minor): derived once instead of OR-ing `signingOut` into `busy` by hand at
+  // each JSX site below -- a new busy-gated control just uses one of these two and cannot forget
+  // signingOut. controlsBusyStale additionally folds in `stale` for the few controls (the device
+  // controller, and AppsFeature) that also disable while portal data is known out of date.
+  const controlsBusy = busy || signingOut;
+  const controlsBusyStale = controlsBusy || stale;
+
   // Fix round 2 (Important): a visit generation per owning page ("nodes" for seats/legacy devices,
   // "apps" for downloads), bumped whenever that page is entered OR left. Refs, not state -- bumping
   // one must never itself cause a render, and the controllers below need to read the CURRENT value
@@ -77,7 +83,7 @@ function PortalShell(): React.ReactElement {
   // page-level line, so setMessage is no longer passed through here.
   const downloads = useLicenseDownloads({ runOnce, visitGenerationRef: appsVisitGenerationRef });
   const deviceController = useDevicesController({
-    busy: busy || stale || signingOut,
+    busy: controlsBusyStale,
     busyRef,
     customer: auth.customerId ?? "",
     devices,
@@ -273,9 +279,16 @@ function PortalShell(): React.ReactElement {
   if (typeof enrollment === "string" || (enrollment && auth.phase === "authed")) return <ConsentFeature key={typeof enrollment==="string"?enrollment:`${enrollment.handle}:${enrollment.createdAt}`} entry={enrollment} customerId={auth.customerId??""} email={auth.email} onDone={finishEnrollment} onSignOut={logout} onSessionExpired={auth.retrySession} feedback={<StatusLine message={message} fallback="" />} />;
   if (auth.phase !== "authed") return <AuthFeature auth={auth} busy={busy} message={message} connecting={enrollment!==null} />;
 
+  // D4: a modally-invoked native <dialog> does not reliably remove the rest of the page from the
+  // accessibility tree or from focus/click reach in every engine -- verified directly: a plain
+  // <dialog showModal()> next to a sibling button left that button still findable by role and still
+  // clickable via a dispatched click, even though real Tab/keyboard focus could not reach it. `main`
+  // keeps being made inert by hand, exactly as it already was for the seat-release dialog before D4,
+  // now covering the device-release dialog too -- both are the confirmations this still applies to.
+  const mainInert = deviceController.pendingSeatRelease !== null || deviceController.pendingDeviceRelease !== null;
+
   return (
-    <>
-    <main aria-hidden={deviceController.pendingSeatRelease !== null ? "true" : undefined} inert={deviceController.pendingSeatRelease !== null ? true : undefined}>
+    <main aria-hidden={mainInert ? "true" : undefined} inert={mainInert ? true : undefined}>
       <a className="skipLink" href="#content" onClick={(event) => { event.preventDefault(); document.getElementById("content")?.focus(); }}>Skip to content</a>
       <header className="topbar">
         <div className="headerInner">
@@ -284,23 +297,21 @@ function PortalShell(): React.ReactElement {
           {(["apps", "nodes", "account"] as const).map((page) => <a key={page} ref={location.page === page ? activeTabButtonRef : undefined} href={`#/${page}`} aria-current={location.page === page ? "page" : undefined}>{page === "nodes" ? "Devices" : page[0].toUpperCase() + page.slice(1)}</a>)}
         </nav>
         {auth.email !== null && <p className="signedInAs">Signed in as {auth.email}</p>}
-        <div className="signOutControl"><button disabled={busy || signingOut} onClick={() => void logout()}>{signingOut ? "Signing out…" : "Sign out"}</button>{location.page==="account" && <p>Your apps and devices stay connected.</p>}</div>
+        <div className="signOutControl"><button disabled={controlsBusy} onClick={() => void logout()}>{signingOut ? "Signing out…" : "Sign out"}</button>{location.page==="account" && <p>Your apps and devices stay connected.</p>}</div>
         </div>
       </header>
       <div id="content" className="workspaceContent" tabIndex={-1}>
-        {stale && readState === "ready" && <div className="readNotice"><p>Displayed data may be out of date. Refresh before making another change.</p>{message?.code !== DEVICES_REFRESH_FAILURE_CODE && <button disabled={busy || signingOut} onClick={() => void refreshPortalData()}>Refresh account</button>}</div>}
+        {stale && readState === "ready" && <div className="readNotice"><p>Displayed data may be out of date. Refresh before making another change.</p>{message?.code !== DEVICES_REFRESH_FAILURE_CODE && <button disabled={controlsBusy} onClick={() => void refreshPortalData()}>Refresh account</button>}</div>}
         <div className="feedback">
           <StatusLine message={message} fallback="" />
           {message?.code === DEVICES_REFRESH_FAILURE_CODE && (
-            <button disabled={busy || signingOut} onClick={() => void refreshPortalData()}>{DEVICES_REFRESH_ACTION_LABEL}</button>
+            <button disabled={controlsBusy} onClick={() => void refreshPortalData()}>{DEVICES_REFRESH_ACTION_LABEL}</button>
           )}
         </div>
-        {location.page === "nodes" && <DevicesFeature key={auth.customerId} controller={deviceController} customer={auth.customerId??""} busy={busy || signingOut} runOnce={runOnce} onSessionExpired={auth.retrySession} project={location.project} accountDataState={readState} onRetryAccountData={refreshPortalData} />}
+        {location.page === "nodes" && <DevicesFeature key={auth.customerId} controller={deviceController} customer={auth.customerId??""} busy={controlsBusy} runOnce={runOnce} onSessionExpired={auth.retrySession} project={location.project} accountDataState={readState} onRetryAccountData={refreshPortalData} />}
         {location.page === "account" && <AccountFeature customerId={auth.customerId} />}
-        {location.page === "apps" && (readState !== "ready" ? <section className="emptyState"><h2>{readState === "loading" ? "Loading your account…" : "Account data unavailable"}</h2><p>{readState === "loading" ? "Fetching your licenses and devices." : "We could not refresh your account. Retry to see current access."}</p>{readState === "error" && <button disabled={busy || signingOut} onClick={() => void refreshPortalData()}>Retry</button>}</section> : <AppsFeature entitlements={entitlements} usage={usage} usageAvailable={usageAvailable} retry={refreshPortalData} downloads={downloads} busy={busy || stale || signingOut} project={location.project} email={auth.email} />)}
+        {location.page === "apps" && (readState !== "ready" ? <section className="emptyState"><h2>{readState === "loading" ? "Loading your account…" : "Account data unavailable"}</h2><p>{readState === "loading" ? "Fetching your licenses and devices." : "We could not refresh your account. Retry to see current access."}</p>{readState === "error" && <button disabled={controlsBusy} onClick={() => void refreshPortalData()}>Retry</button>}</section> : <AppsFeature entitlements={entitlements} usage={usage} usageAvailable={usageAvailable} retry={refreshPortalData} downloads={downloads} busy={controlsBusyStale} project={location.project} email={auth.email} />)}
       </div>
     </main>
-    <SeatReleaseDialog controller={deviceController} />
-    </>
   );
 }

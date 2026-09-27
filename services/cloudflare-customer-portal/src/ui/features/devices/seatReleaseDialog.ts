@@ -1,14 +1,21 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { FLOATING_SEAT_RELEASE_NETWORK_ERROR_COPY, FLOATING_SEAT_RELEASE_REFRESH_FAILED_CODE, type SeatSession } from "../../portalWorkflow";
 import { localMessage } from "../../shared/api";
+import { useNativeDialogFocus } from "./nativeDialog";
 import type { EntitlementRow, SeatActionResult, SeatOperation, StatusMessage } from "../../types";
 
 // D3 fix round 1 (Important 3, hotspot budget): the floating-seat release confirm dialog's state,
 // mutation and focus management, split out of DevicesFeature.tsx's useDevicesController. This is a
-// cohesive, self-contained flow (open/confirm/dismiss plus the dialog's own focus trap and
-// return-focus restoration) that only reaches into the parent hook via the options below -- never any
-// other DevicesFeature.tsx state. No behaviour change: useDevicesController calls this hook and
-// spreads its return value into the exact same DevicesController shape it always returned.
+// cohesive, self-contained flow that only reaches into the parent hook via the options below -- never
+// any other DevicesFeature.tsx state. No behaviour change beyond D4 (below): useDevicesController calls
+// this hook and spreads its return value into the exact same DevicesController shape it always
+// returned.
+//
+// D4: replaced the manual overlay/div modal (its own focus trap and a return-to-trigger-button focus
+// restoration) with the native <dialog> pattern from nativeDialog.ts/ProtectedNodes.tsx. A native modal
+// dialog traps Tab itself (the rest of the document becomes inert), so the manual keydown handler is
+// gone; every close -- Cancel, Escape, a successful release, or an ordinary (non-network) failure --
+// now returns focus to the "Browser seats" heading instead of the seat's own buttons, per decision.
 export interface PendingSeatRelease {
   item: EntitlementRow;
   session: SeatSession;
@@ -20,16 +27,16 @@ interface SeatReleaseDialogOptions {
   seatAction(item: EntitlementRow, operation: SeatOperation): Promise<SeatActionResult>;
   setSeatMessage(entitlementId: string, message: StatusMessage | null): void;
   setMessage: React.Dispatch<React.SetStateAction<StatusMessage | null>>;
-  // Untyped by name (not a shared PendingSeatFocus import) to avoid a cross-file type dependency back
-  // onto DevicesFeature.tsx -- the shape is small and stable, and this is the only place it is used.
-  setPendingSeatFocus(focus: { seatId: string; after: "start" | "release" } | null): void;
+  // The "Browser seats" section heading (BrowserSeats.tsx, DevicesFeature's panelHeadingRef) that
+  // focus returns to on every close, matching ProtectedNodes' own heading-focus pattern.
+  headingRef: React.RefObject<HTMLElement | null>;
 }
 
 export interface SeatReleaseDialogState {
   pendingSeatRelease: PendingSeatRelease | null;
   seatReleaseError: string | null;
   seatReleaseOutcomeUnknown: boolean;
-  seatReleaseDialogRef: React.RefObject<HTMLDivElement | null>;
+  seatReleaseDialogRef: React.RefObject<HTMLDialogElement | null>;
   requestSeatRelease(item: EntitlementRow): void;
   dismissSeatRelease(): void;
   confirmSeatRelease(): Promise<void>;
@@ -40,13 +47,11 @@ export interface SeatReleaseDialogState {
 }
 
 export function useSeatReleaseDialog(options: SeatReleaseDialogOptions): SeatReleaseDialogState {
-  const { busyRef, seatSessions, seatAction, setSeatMessage, setMessage, setPendingSeatFocus } = options;
+  const { busyRef, seatSessions, seatAction, setSeatMessage, setMessage, headingRef } = options;
   const [pendingSeatRelease, setPendingSeatRelease] = useState<PendingSeatRelease | null>(null);
   const [seatReleaseError, setSeatReleaseError] = useState<string | null>(null);
   const [seatReleaseOutcomeUnknown, setSeatReleaseOutcomeUnknown] = useState(false);
-  const seatReleaseDialogRef = useRef<HTMLDivElement>(null);
-  const seatReleaseReturnFocusRef = useRef<HTMLElement | null>(null);
-  const seatReleaseDeferredFocusRef = useRef<HTMLElement | null>(null);
+  const seatReleaseDialogRef = useNativeDialogFocus(pendingSeatRelease !== null, headingRef);
   const seatReleaseConfirmingRef = useRef(false);
 
   function requestSeatRelease(item: EntitlementRow): void {
@@ -56,7 +61,6 @@ export function useSeatReleaseDialog(options: SeatReleaseDialogOptions): SeatRel
       setSeatMessage(item.id, localMessage("seat_not_checked_out", false));
       return;
     }
-    seatReleaseReturnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setSeatReleaseError(null);
     setSeatReleaseOutcomeUnknown(false);
     setPendingSeatRelease({ item, session });
@@ -67,25 +71,27 @@ export function useSeatReleaseDialog(options: SeatReleaseDialogOptions): SeatRel
     setSeatReleaseError(null);
     setSeatReleaseOutcomeUnknown(false);
     setPendingSeatRelease(null);
-    seatReleaseDeferredFocusRef.current = seatReleaseReturnFocusRef.current;
-    seatReleaseReturnFocusRef.current = null;
   }
 
   async function confirmSeatRelease(): Promise<void> {
     const pending = pendingSeatRelease;
     if (pending === null || seatReleaseConfirmingRef.current || busyRef.current) return;
-    const returnFocus = seatReleaseReturnFocusRef.current;
     seatReleaseConfirmingRef.current = true;
     setSeatReleaseError(null);
+    // Keep focus inside the dialog while the request is in flight: Confirm is about to become disabled
+    // (aria-busy), which would otherwise drop focus to <body>.
     seatReleaseDialogRef.current?.focus();
-    let closeDialog = false;
     try {
       const outcome = await seatAction(pending.item, "release");
+      // Carried from D2 (fix-round-2 re-review, observation 1): these two setters run after an await,
+      // with no visitGenerationRef guard. That is safe because the native <dialog> this hook opened
+      // (showModal()) makes the rest of the document inert for as long as pendingSeatRelease is set --
+      // exactly like the inert `main` this replaces -- so the customer cannot navigate away from
+      // Devices while a release is pending, the same guarantee the other visit-generation guards exist
+      // to substitute for.
       if (outcome.succeeded) {
-        setPendingSeatFocus({ seatId: pending.item.id, after: "release" });
         if (outcome.refreshFailed) setMessage(localMessage(FLOATING_SEAT_RELEASE_REFRESH_FAILED_CODE, false));
         setPendingSeatRelease(null);
-        closeDialog = true;
       } else if (outcome.networkFailure) {
         // api() no longer throws for a dropped connection (task C2) -- it reports network_unavailable
         // like any other failure code. A release specifically cannot treat that as an ordinary
@@ -96,9 +102,7 @@ export function useSeatReleaseDialog(options: SeatReleaseDialogOptions): SeatRel
         setSeatReleaseOutcomeUnknown(true);
         seatReleaseDialogRef.current?.focus();
       } else {
-        seatReleaseDeferredFocusRef.current = returnFocus;
         setPendingSeatRelease(null);
-        closeDialog = true;
       }
     } catch {
       // Defensive: nothing on this path is expected to throw anymore (api() itself no longer does),
@@ -109,55 +113,8 @@ export function useSeatReleaseDialog(options: SeatReleaseDialogOptions): SeatRel
       seatReleaseDialogRef.current?.focus();
     } finally {
       seatReleaseConfirmingRef.current = false;
-      if (closeDialog) seatReleaseReturnFocusRef.current = null;
     }
   }
-
-  useEffect(() => {
-    if (pendingSeatRelease === null) return;
-    const dialog = seatReleaseDialogRef.current;
-    if (dialog === null) return;
-    const selector = "button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled])";
-    const focusable = (): HTMLElement[] => Array.from(dialog.querySelectorAll<HTMLElement>(selector));
-    focusable()[0]?.focus();
-    const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === "Escape" && !seatReleaseConfirmingRef.current) {
-        event.preventDefault();
-        dismissSeatRelease();
-        return;
-      }
-      if (event.key !== "Tab") return;
-      const controls = focusable();
-      if (controls.length === 0) {
-        event.preventDefault();
-        dialog.focus();
-        return;
-      }
-      const first = controls[0];
-      const last = controls[controls.length - 1];
-      if (!dialog.contains(document.activeElement)) {
-        event.preventDefault();
-        (event.shiftKey ? last : first).focus();
-      } else if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [pendingSeatRelease]);
-
-  useEffect(() => {
-    if (pendingSeatRelease !== null) return;
-    const deferredFocus = seatReleaseDeferredFocusRef.current;
-    if (deferredFocus !== null) {
-      seatReleaseDeferredFocusRef.current = null;
-      deferredFocus.focus();
-    }
-  }, [pendingSeatRelease]);
 
   function resetForClear(): void {
     setPendingSeatRelease(null);

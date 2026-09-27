@@ -510,83 +510,6 @@ code {
 .consentCard .consentReference summary { padding:4px 0; min-height:44px; }
 .consentCard>.button { display:inline-block; margin-top:20px; }
 
-.modalOverlay {
-  align-items:flex-start;
-  background:#000a;
-  display:flex;
-  inset:0;
-  justify-content:center;
-  overflow-x:hidden;
-  overflow-y:auto;
-  padding:16px;
-  position:fixed;
-  z-index:50
-}
-
-.modal {
-  background:var(--surface);
-  border:1px solid #747474;
-  border-radius:6px;
-  box-shadow:0 12px 40px #0006;
-  max-width:480px;
-  max-height:calc(100dvh - 32px);
-  margin:auto;
-  overflow-x:hidden;
-  overflow-y:auto;
-  padding:24px;
-  width:100%
-}
-
-.modal h2 {
-  margin-bottom:12px
-}
-
-.modal p {
-  margin:0 0 16px
-}
-
-.modal .modalProgress {
-  color:#9bc49b
-}
-
-.modal .modalError {
-  color:#db9292
-}
-
-.modal .actions {
-  justify-content:flex-end;
-  margin-top:24px
-}
-
-.modal button.danger {
-  color:#db9292
-}
-
-.releaseContext {
-  background:#1a1a1a;
-  border:1px solid var(--border);
-  border-radius:4px;
-  display:grid;
-  gap:12px;
-  margin:0;
-  padding:16px
-}
-
-.releaseContext div {
-  display:grid;
-  gap:8px;
-  grid-template-columns:120px minmax(0,1fr)
-}
-
-.releaseContext dt {
-  color:var(--muted)
-}
-
-.releaseContext dd {
-  margin:0;
-  overflow-wrap:anywhere
-}
-
 .skipLink {
   position:absolute;
   top:-80px;
@@ -657,10 +580,6 @@ code {
   td .status {
     justify-self:start
   }
-  .releaseContext div {
-    grid-template-columns:1fr;
-    gap:4px
-  }
 }
 
 @media(max-width:639px) {
@@ -710,11 +629,14 @@ code {
 .protectedNodes { margin-bottom: 32px; }
 .protectedNodes .sectionHeading { display: flex; align-items: start; justify-content: space-between; gap: 20px; flex-wrap: wrap; margin-bottom: 16px; }
 .protectedNodes td small { display: block; margin-top: 4px; font-size: inherit; color: var(--muted); overflow-wrap: anywhere; }
-.retirementDialog { width: min(560px, calc(100% - 32px)); max-height: calc(100vh - 48px); overflow: auto; box-sizing: border-box; padding: 24px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface, white); color: inherit; }
-.retirementDialog::backdrop { background: rgb(15 23 42 / 35%); }
-.retirementDialog p { margin-top: 12px; }
+.retirementDialog, .confirmDialog { width: min(560px, calc(100% - 32px)); max-height: calc(100vh - 48px); overflow: auto; box-sizing: border-box; padding: 24px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface, white); color: inherit; }
+.retirementDialog::backdrop, .confirmDialog::backdrop { background: rgb(15 23 42 / 35%); }
+.retirementDialog p, .confirmDialog p { margin-top: 12px; }
 .retirementIdentity { display: block; color: var(--muted); overflow-wrap: anywhere; }
-.retirementDialog .dialogActions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 12px; margin-top: 24px; }
+.retirementDialog .dialogActions, .confirmDialog .dialogActions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 12px; margin-top: 24px; }
+/* D4: the legacy-release and floating-seat-release confirms share this dialog styling with
+   ProtectedNodes' own retirement confirm -- one visual treatment for the one native <dialog> pattern. */
+.confirmDialog button.danger { color: #db9292; }
 
 .referenceDetails { margin-top:8px; color:var(--muted); font-size:14px; }
 .referenceDetails summary { cursor:pointer; width:fit-content; padding:4px 0; }

@@ -5,7 +5,6 @@ import {
   FLOATING_SEAT_RELEASE_CONFIRM_TITLE,
   formatTimestamp,
   licenseDisplayStatus,
-  shortHash,
 } from "../../portalWorkflow";
 import { ActionResult } from "../../shared/ActionResult";
 import { useLicenseClock } from "../../shared/useLicenseClock";
@@ -93,44 +92,41 @@ export function BrowserSeats({ controller, query, project }: {
             tabIndex={-1}
           >Browser seats</h3>
           {seatGridContent}
+          <SeatReleaseDialog controller={controller} />
         </section>
       ) : (
-        <details className="browserSessions"><summary ref={(element) => { controller.browserSessionsSummaryRef.current = element; }}>Browser seats</summary>{seatGridContent}</details>
+        <details className="browserSessions"><summary>Browser seats</summary>{seatGridContent}</details>
       )}
     </div>
   );
 }
 
-export function SeatReleaseDialog({ controller }: { controller: DevicesController }): React.ReactElement | null {
+// D4: the native <dialog> pattern from nativeDialog.ts/ProtectedNodes.tsx (showModal()/close(), Escape
+// via onCancel, focus returned to the "Browser seats" heading on close). Still portaled to
+// document.body, same as the manual overlay it replaces -- App.tsx keeps `main` inert by hand while
+// this dialog (or the device-release one) is pending (decision 4: a modal <dialog> alone does not
+// reliably remove sibling content from the accessibility tree), and this dialog must therefore render
+// OUTSIDE `main`'s subtree, or `main`'s own inert would swallow the dialog along with everything else.
+function SeatReleaseDialog({ controller }: { controller: DevicesController }): React.ReactElement {
   const pending = controller.pendingSeatRelease;
-  if (pending === null) return null;
   return createPortal((
-    <div className="modalOverlay" role="presentation">
-      <div
-        ref={controller.seatReleaseDialogRef}
-        className="modal danger"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="floatingSeatReleaseTitle"
-        aria-describedby="floatingSeatReleaseDescription"
-        aria-busy={controller.busy}
-        tabIndex={-1}
-      >
-        <h2 id="floatingSeatReleaseTitle">{FLOATING_SEAT_RELEASE_CONFIRM_TITLE}</h2>
-        <p id="floatingSeatReleaseDescription">{FLOATING_SEAT_RELEASE_CONFIRM_COPY}</p>
-        {controller.busy && <p className="modalProgress" role="status" aria-live="polite">Releasing…</p>}
-        {controller.seatReleaseError !== null && <p className="modalError" role="alert">{controller.seatReleaseError}</p>}
-        <dl className="releaseContext">
-          <div><dt>License</dt><dd>{pending.item.project} / {pending.item.feature}</dd></div>
-          <div><dt>License fingerprint</dt><dd><code>{pending.item.license_fingerprint ? shortHash(pending.item.license_fingerprint) : "-"}</code></dd></div>
-          <div><dt>Seat</dt><dd><code>{pending.session.seat_id}</code></dd></div>
-          <div><dt>This browser</dt><dd><code>{pending.session.client_instance_id}</code></dd></div>
-        </dl>
-        <div className="actions">
-          <button type="button" disabled={controller.busy} onClick={controller.dismissSeatRelease}>Cancel</button>
-          <button type="button" className="danger" disabled={controller.busy || controller.seatReleaseOutcomeUnknown} onClick={() => void controller.confirmSeatRelease()}>Confirm release</button>
-        </div>
+    <dialog
+      ref={controller.seatReleaseDialogRef}
+      className="confirmDialog"
+      aria-labelledby="floatingSeatReleaseTitle"
+      aria-busy={controller.busy}
+      tabIndex={-1}
+      onCancel={(event) => { event.preventDefault(); controller.dismissSeatRelease(); }}
+    >
+      <h2 id="floatingSeatReleaseTitle">{FLOATING_SEAT_RELEASE_CONFIRM_TITLE}</h2>
+      <p>{pending?.item.project} · {pending?.item.feature}<span className="retirementIdentity"><span>This browser</span>: <code>{pending?.session.client_instance_id}</code></span></p>
+      <p>{FLOATING_SEAT_RELEASE_CONFIRM_COPY}</p>
+      {controller.busy && <p role="status" aria-live="polite">Releasing…</p>}
+      {controller.seatReleaseError !== null && <p role="alert">{controller.seatReleaseError}</p>}
+      <div className="dialogActions">
+        <button type="button" disabled={controller.busy} onClick={controller.dismissSeatRelease}>Cancel</button>
+        <button type="button" className="danger" disabled={controller.busy || controller.seatReleaseOutcomeUnknown} onClick={() => void controller.confirmSeatRelease()}>Confirm release</button>
       </div>
-    </div>
+    </dialog>
   ), document.body);
 }

@@ -4,10 +4,9 @@ import { ProtectedNodes } from "./ProtectedNodes";
 import { BrowserSeats } from "./BrowserSeats";
 import { discardLegacyStoredSeats, randomHex, readStoredSeats, runSeatSignOutReleases, seatPath, writeStoredSeats } from "./seatStorage";
 import { type PendingSeatRelease, useSeatReleaseDialog } from "./seatReleaseDialog";
+import { useDeviceReleaseDialog } from "./deviceReleaseDialog";
 
 import {
-  DEVICE_RELEASE_CONFIRM_COPY,
-  deviceReleasePath,
   FLOATING_SEAT_RELEASE_REFRESH_FAILED_CODE,
   hydrateSeatSessions,
   PORTAL_STATUS_REFRESH_ACTION_LABEL,
@@ -35,17 +34,17 @@ interface DeviceFeatureOptions {
   runOnce(work: () => Promise<void>): Promise<void>;
   setMessage: React.Dispatch<React.SetStateAction<StatusMessage | null>>;
   // Fix round 2 (Important): bumped by App.tsx whenever the Devices page is entered or left. A ref,
-  // read (never written) here, so seatAction()/releaseDevice() can compare "the generation when this
-  // action started" against "the generation now" once their response arrives, and drop a result that
-  // arrives after the customer has moved on -- see App.tsx's own comment for the full race.
+  // read (never written) here, so seatAction()/confirmDeviceRelease() can compare "the generation when
+  // this action started" against "the generation now" once their response arrives, and drop a result
+  // that arrives after the customer has moved on -- see App.tsx's own comment for the full race.
   visitGenerationRef: React.RefObject<number>;
 }
 
-// Focus to move once a seat action's re-render lands: after "start" the seat's session is present,
-// after "release" it is gone (and the release dialog has closed).
+// Focus to move once a seat "start" action's re-render lands (the seat's session is now present). D4:
+// releasing a seat no longer uses this mechanism -- the native seat-release dialog always returns
+// focus to the "Browser seats" heading on close instead (seatReleaseDialog.ts).
 interface PendingSeatFocus {
   seatId: string;
-  after: "start" | "release";
 }
 
 export interface DevicesController {
@@ -55,24 +54,29 @@ export interface DevicesController {
   pendingSeatRelease: PendingSeatRelease | null;
   seatReleaseError: string | null;
   seatReleaseOutcomeUnknown: boolean;
+  // D4: the legacy-device-release confirmation's own pending target (parallels pendingSeatRelease).
+  pendingDeviceRelease: DeviceRow | null;
   seatSessions: Record<string, SeatSession>;
   // D2: "show each result next to the control that produced it" -- each seat card's own
   // role="status" line (keyed by entitlement id) and each legacy device row's own (keyed by
-  // device_key_id), populated by seatAction()/releaseDevice() below instead of the page-level
+  // device_key_id), populated by seatAction()/confirmDeviceRelease() below instead of the page-level
   // setMessage. The page-level line stays reserved for refresh/account-level results.
   seatMessages: Record<string, StatusMessage | null>;
   deviceMessages: Record<string, StatusMessage | null>;
-  seatReleaseDialogRef: React.RefObject<HTMLDivElement | null>;
+  seatReleaseDialogRef: React.RefObject<HTMLDialogElement | null>;
+  deviceReleaseDialogRef: React.RefObject<HTMLDialogElement | null>;
+  deviceRegistrationsHeadingRef: React.RefObject<HTMLHeadingElement | null>;
   seatStartButtonRefs: React.RefObject<Record<string, HTMLButtonElement | null>>;
   seatReleaseButtonRefs: React.RefObject<Record<string, HTMLButtonElement | null>>;
   seatCardRefs: React.RefObject<Record<string, HTMLDivElement | null>>;
-  browserSessionsSummaryRef: React.RefObject<HTMLElement | null>;
   panelHeadingRef: React.RefObject<HTMLElement | null>;
   seatAction(item: EntitlementRow, operation: SeatOperation): Promise<SeatActionResult>;
   requestSeatRelease(item: EntitlementRow): void;
   dismissSeatRelease(): void;
   confirmSeatRelease(): Promise<void>;
-  releaseDevice(item: DeviceRow): Promise<void>;
+  requestDeviceRelease(item: DeviceRow): void;
+  dismissDeviceRelease(): void;
+  confirmDeviceRelease(): Promise<void>;
   // D3: sign-out's best-effort seat release (App.tsx's logout(), before the actual sign-out request).
   releaseSeatsOnSignOut(): Promise<{ released: number; failed: number }>;
   clear(): void;
@@ -112,7 +116,6 @@ export function useDevicesController(options: DeviceFeatureOptions): DevicesCont
   const seatStartButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const seatReleaseButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const seatCardRefs = useRef<Record<string, HTMLDivElement | null>>({});
-  const browserSessionsSummaryRef = useRef<HTMLElement | null>(null);
   const panelHeadingRef = useRef<HTMLElement | null>(null);
 
   // D3 (decision 4) / fix round 1 (Critical): re-hydrate on the initial sign-in, a later customer
@@ -212,7 +215,7 @@ export function useDevicesController(options: DeviceFeatureOptions): DevicesCont
       // Set after runOnce settles (busy has cleared) so the seat's Release button is enabled, and
       // thus focusable, by the time the start-focus effect below runs; a checkout whose follow-up
       // refresh throws still moves focus onto the seat.
-      if (checkedOut) setPendingSeatFocus({ seatId: item.id, after: "start" });
+      if (checkedOut) setPendingSeatFocus({ seatId: item.id });
     });
     return { succeeded, refreshFailed, networkFailure };
   }
@@ -220,39 +223,28 @@ export function useDevicesController(options: DeviceFeatureOptions): DevicesCont
   // D3 fix round 1 (Important 3, hotspot budget): the release confirm dialog's own state, mutation and
   // focus management now live in seatReleaseDialog.ts -- see its own header comment. No behaviour
   // change: this hook still owns seatSessions/seatAction/setMessage, which the dialog flow reaches
-  // through these options, and setPendingSeatFocus, which it uses to hand focus back here on release.
+  // through these options. D4: focus-on-close now goes straight to panelHeadingRef (passed in as
+  // headingRef) via the native dialog pattern, so setPendingSeatFocus is no longer threaded into it.
   const seatReleaseDialog = useSeatReleaseDialog({
     busyRef,
     seatSessions,
     seatAction,
     setSeatMessage,
     setMessage,
-    setPendingSeatFocus,
+    headingRef: panelHeadingRef,
   });
 
   useEffect(() => {
     if (pendingSeatFocus === null) return;
-    const { seatId, after } = pendingSeatFocus;
-    const hasSession = seatSessions[seatId] !== undefined;
-    if (after === "start") {
-      if (!hasSession) return;
-      // Starting a floating seat flips hasBrowserSession and remounts the seat grid (<details> ->
-      // <section>), so the just-clicked Start seat button is unmounted and focus would otherwise
-      // drop to <body>. Land it on the seat's own Release button or card, falling back to the
-      // panel's now-visible heading.
-      focusFirstAvailable(seatReleaseButtonRefs.current[seatId], seatCardRefs.current[seatId], panelHeadingRef.current);
-    } else {
-      if (hasSession || seatReleaseDialog.pendingSeatRelease !== null) return;
-      // Releasing the last live browser session used to always collapse the panel into a closed
-      // <details>; since D2 the panel now also stays open for a seat with a fresh local result to
-      // show (its own release/checkout copy), which is normally the case right after a release, so
-      // the re-enabled Start seat button usually takes focus directly. The <summary> fallback still
-      // covers the case where the panel really has collapsed (e.g. after a later page reload) and
-      // neither the start button nor the card can take focus.
-      focusFirstAvailable(seatStartButtonRefs.current[seatId], seatCardRefs.current[seatId], browserSessionsSummaryRef.current);
-    }
+    const { seatId } = pendingSeatFocus;
+    if (seatSessions[seatId] === undefined) return;
+    // Starting a floating seat flips hasBrowserSession and remounts the seat grid (<details> ->
+    // <section>), so the just-clicked Start seat button is unmounted and focus would otherwise
+    // drop to <body>. Land it on the seat's own Release button or card, falling back to the
+    // panel's now-visible heading.
+    focusFirstAvailable(seatReleaseButtonRefs.current[seatId], seatCardRefs.current[seatId], panelHeadingRef.current);
     setPendingSeatFocus(null);
-  }, [entitlements, pendingSeatFocus, seatReleaseDialog.pendingSeatRelease, seatSessions]);
+  }, [pendingSeatFocus, seatSessions]);
 
   // D2: this device row's own role="status" line, keyed by device_key_id (a device row has no more
   // stable id than that -- the same key DeviceRegistrations already keys its buttons by).
@@ -260,19 +252,14 @@ export function useDevicesController(options: DeviceFeatureOptions): DevicesCont
     setDeviceMessages((current) => ({ ...current, [deviceKeyId]: deviceMessage }));
   }
 
-  async function releaseDevice(item: DeviceRow): Promise<void> {
-    if (!window.confirm(DEVICE_RELEASE_CONFIRM_COPY)) return;
-    // Fix round 2 (Important): same guard as seatAction() above -- see its comment.
-    const startGeneration = visitGenerationRef.current;
-    await runOnce(async () => {
-      const result = await api<Record<string, unknown>>(deviceReleasePath(), {
-        method: "POST",
-        body: JSON.stringify({ device_key_id: item.device_key_id }),
-      });
-      if (visitGenerationRef.current === startGeneration) setDeviceMessage(item.device_key_id, resultMessage(result));
-      if (result.ok) await refreshData();
-    });
-  }
+  // D4: the legacy-release confirmation, replacing window.confirm with the same native <dialog>
+  // pattern as the seat release above -- see deviceReleaseDialog.ts's own header comment.
+  const deviceReleaseDialog = useDeviceReleaseDialog({
+    visitGenerationRef,
+    runOnce,
+    refreshData,
+    setDeviceMessage,
+  });
 
   // D3: sign-out's best-effort seat release, called BEFORE the actual sign-out request. A released
   // seat is removed from seatSessions (and storage, via setSeatSessions above) like a manual release;
@@ -294,6 +281,7 @@ export function useDevicesController(options: DeviceFeatureOptions): DevicesCont
   function clear(): void {
     setSeatSessionsRaw({});
     seatReleaseDialog.resetForClear();
+    deviceReleaseDialog.resetForClear();
     setPendingSeatFocus(null);
     setSeatMessages({});
     setDeviceMessages({});
@@ -314,20 +302,24 @@ export function useDevicesController(options: DeviceFeatureOptions): DevicesCont
     pendingSeatRelease: seatReleaseDialog.pendingSeatRelease,
     seatReleaseError: seatReleaseDialog.seatReleaseError,
     seatReleaseOutcomeUnknown: seatReleaseDialog.seatReleaseOutcomeUnknown,
+    pendingDeviceRelease: deviceReleaseDialog.pendingDeviceRelease,
     seatSessions,
     seatMessages,
     deviceMessages,
     seatReleaseDialogRef: seatReleaseDialog.seatReleaseDialogRef,
+    deviceReleaseDialogRef: deviceReleaseDialog.deviceReleaseDialogRef,
+    deviceRegistrationsHeadingRef: deviceReleaseDialog.deviceRegistrationsHeadingRef,
     seatStartButtonRefs,
     seatReleaseButtonRefs,
     seatCardRefs,
-    browserSessionsSummaryRef,
     panelHeadingRef,
     seatAction,
     requestSeatRelease: seatReleaseDialog.requestSeatRelease,
     dismissSeatRelease: seatReleaseDialog.dismissSeatRelease,
     confirmSeatRelease: seatReleaseDialog.confirmSeatRelease,
-    releaseDevice,
+    requestDeviceRelease: deviceReleaseDialog.requestDeviceRelease,
+    dismissDeviceRelease: deviceReleaseDialog.dismissDeviceRelease,
+    confirmDeviceRelease: deviceReleaseDialog.confirmDeviceRelease,
     releaseSeatsOnSignOut,
     clear,
     clearMessages,
@@ -377,7 +369,7 @@ export function DevicesFeature({
         </section>
       ) : (
         <>
-          {controller.devices.length > 0 && <DeviceRegistrations devices={controller.devices} busy={controller.busy} releaseDevice={controller.releaseDevice} messages={controller.deviceMessages} query={query} project={project} />}
+          {controller.devices.length > 0 && <DeviceRegistrations controller={controller} query={query} project={project} />}
           <BrowserSeats controller={controller} query={query} project={project} />
         </>
       )}
