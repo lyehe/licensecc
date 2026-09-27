@@ -448,9 +448,9 @@ test("admin UI opens a confirm dialog before a plan projection Apply that would 
     lastPreviewBody = route.request().postDataJSON();
     return route.fulfill({ contentType: "application/json", body: JSON.stringify(makeEnvelope("license_plan_projection_previewed", buildPreview(lastPreviewBody))) });
   });
-  let applyCount = 0;
+  const applyRequests = [];
   await page.route("**/api/admin/license-plans/apply", async (route) => {
-    applyCount += 1;
+    applyRequests.push(route.request().postDataJSON());
     const preview = buildPreview(lastPreviewBody);
     return route.fulfill({ contentType: "application/json", body: JSON.stringify(makeEnvelope("license_plan_projection_applied", { ...preview, applied: { created: [], updated: [], disabled: [], assignment: null } })) });
   });
@@ -468,18 +468,28 @@ test("admin UI opens a confirm dialog before a plan projection Apply that would 
   const applyButton = projectionForm.getByRole("button", { name: "Apply" });
   await expect(applyButton).toBeEnabled();
 
-  // Cancelling the warning sends no apply request.
+  // Cancelling the warning sends no apply request, and Apply is immediately usable again.
   await applyButton.click();
   const dialog = page.getByRole("dialog");
-  await expect(dialog).toContainText("This will disable 1 grant.");
+  await expect(dialog).toContainText("This will disable 1 entitlement.");
   await dialog.getByRole("button", { name: "Cancel" }).click();
   await expect(dialog).toHaveCount(0);
-  expect(applyCount).toBe(0);
+  expect(applyRequests).toHaveLength(0);
+  await expect(applyButton).toBeEnabled();
 
-  // Confirming runs the exact same Apply the ungated path would have sent.
+  // Escape is an equivalent dismissal: it also sends nothing and leaves Apply usable.
   await applyButton.click();
   await expect(page.getByRole("dialog")).toBeVisible();
-  await page.getByRole("dialog").getByRole("button", { name: "Confirm" }).click();
-  await expect.poll(() => applyCount).toBe(1);
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  expect(applyRequests).toHaveLength(0);
+  await expect(applyButton).toBeEnabled();
+
+  // Confirming runs the exact same Apply the ungated path would have sent: only the preview id.
+  await applyButton.click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await page.getByRole("dialog").getByRole("button", { name: "Apply" }).click();
+  await expect.poll(() => applyRequests.length).toBe(1);
+  expect(applyRequests[0]).toEqual({ preview_id: previewId });
   await expect(page.getByRole("dialog")).toHaveCount(0);
 });

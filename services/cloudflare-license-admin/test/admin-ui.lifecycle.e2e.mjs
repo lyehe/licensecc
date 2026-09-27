@@ -159,12 +159,12 @@ test("admin UI completes entitlement lifecycle and blocks duplicate create submi
   await clickAction(entitlementActions.getByRole("button", { name: "Reenable", includeHidden: true }));
   await expect(entitlementActions.locator(".status.active")).toHaveText("active");
 
-  // Revoke is irreversible -> it now opens a typed-confirm modal; the action fires only on Confirm.
+  // Revoke is irreversible -> it now opens a typed-confirm modal; the action fires only on the renamed button.
   await clickAction(entitlementActions.getByRole("button", { name: "Revoke", includeHidden: true }));
   await expect(page.getByRole("dialog")).toBeVisible();
   await expect(page.locator(".status.revoked")).toHaveCount(0); // not revoked until confirmed
   await page.getByRole("dialog").getByLabel(/Reason/).fill("chargeback");
-  const revokeConfirm = page.getByRole("dialog").getByRole("button", { name: "Confirm" });
+  const revokeConfirm = page.getByRole("dialog").getByRole("button", { name: "Revoke", exact: true });
   await expect(revokeConfirm).toBeDisabled();
   // A reason alone is not enough for a terminal action: the operator must also type the exact phrase.
   await page.getByRole("dialog").getByLabel("Type REVOKE 1 to confirm").fill("REVOKE 1");
@@ -302,7 +302,7 @@ test("admin UI gates a batch revoke behind an exact typed REVOKE phrase", async 
   await expect(page.locator(".bulkBar")).toContainText("4 selected");
   await clickAction(page.locator(".bulkBar").getByRole("button", { name: "Revoke selected", includeHidden: true }));
   const dialog = page.getByRole("dialog");
-  const confirm = dialog.getByRole("button", { name: "Confirm" });
+  const confirm = dialog.getByRole("button", { name: "Revoke", exact: true });
   await dialog.getByLabel(/Reason/).fill("mass revoke test");
   const typed = dialog.getByLabel("Type REVOKE 4 to confirm");
   await expect(confirm).toBeDisabled();

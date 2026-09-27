@@ -96,12 +96,12 @@ test("admin UI keeps destructive operator actions consequence-led, reason-gated,
   api.seed.catalogFeature();
   await page.route("**/api/admin/**", api.route);
 
-  async function assertConfirmation(button, consequence, dismissWithEscape = false, typedPhrase = null) {
+  async function assertConfirmation(button, consequence, dismissWithEscape = false, typedPhrase = null, confirmLabel = "Confirm") {
     await clickAction(button);
     const dialog = page.getByRole("dialog");
     await expect(dialog).toBeVisible();
     await expect(dialog).toContainText(consequence);
-    const confirm = dialog.getByRole("button", { name: "Confirm" });
+    const confirm = dialog.getByRole("button", { name: confirmLabel, exact: true });
     await expect(confirm).toBeDisabled();
     await dialog.getByLabel("Reason (required)").fill("operator review");
     if (typedPhrase !== null) {
@@ -130,7 +130,7 @@ test("admin UI keeps destructive operator actions consequence-led, reason-gated,
 
   const entitlementRow = page.locator(".tablePane table tbody tr").first();
   await assertConfirmation(entitlementRow.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first(), "Verification and downloads stop until it is re-enabled", true);
-  await assertConfirmation(entitlementRow.getByRole("button", { name: "Revoke", exact: true, includeHidden: true }).first(), "TERMINAL and cannot be undone", false, "REVOKE 1");
+  await assertConfirmation(entitlementRow.getByRole("button", { name: "Revoke", exact: true, includeHidden: true }).first(), "TERMINAL and cannot be undone", false, "REVOKE 1", "Revoke");
   await assertConfirmation(entitlementRow.getByRole("button", { name: "Release seats", exact: true, includeHidden: true }).first(), "dead/unreachable machine");
   expect(api.requests.transitions).toHaveLength(0);
   expect(api.requests.releaseSeats).toHaveLength(0);
@@ -139,7 +139,7 @@ test("admin UI keeps destructive operator actions consequence-led, reason-gated,
   const devicePane = page.locator('[aria-label="Registered devices"]');
   await expect(devicePane).toBeVisible();
   await assertConfirmation(devicePane.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first(), "refused on its next online check");
-  await assertConfirmation(devicePane.getByRole("button", { name: "Revoke", exact: true, includeHidden: true }).first(), "TERMINAL");
+  await assertConfirmation(devicePane.getByRole("button", { name: "Revoke", exact: true, includeHidden: true }).first(), "TERMINAL", false, "REVOKE 1", "Revoke");
   expect(api.requests.deviceTransitions).toHaveLength(0);
 
   await page.getByRole("link", { name: "Customers", exact: true }).click();
@@ -189,10 +189,13 @@ test("admin UI entitlement disable reason presets fill the field and leave it ed
   const dialog = page.getByRole("dialog");
   const reason = dialog.getByLabel("Reason (required)");
 
-  await dialog.getByRole("button", { name: "Fraud review", exact: true }).click();
+  const presets = dialog.getByRole("group", { name: "Common reasons" });
+  await presets.getByRole("button", { name: "Fraud review", exact: true }).click();
   await expect(reason).toHaveValue("Fraud review");
-  // A preset only fills the field; it stays an ordinary, editable text input.
+  // A preset only fills the field; it stays an ordinary, editable text input, and focus moves to
+  // it so the filled value is announced.
   await expect(reason).toBeEditable();
+  await expect(reason).toBeFocused();
   await reason.fill("Fraud review, escalated to trust & safety");
   await expect(reason).toHaveValue("Fraud review, escalated to trust & safety");
   await dialog.getByRole("button", { name: "Payment failed", exact: true }).click();

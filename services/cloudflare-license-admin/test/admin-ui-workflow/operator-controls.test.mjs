@@ -16,11 +16,12 @@ const HOOK_MODULES = [
   "shared/useConfirmDialog.tsx",
   "shared/useKeyedMutation.ts",
   "shared/operatorActions.ts",
+  "shared/TypedConfirmationField.tsx",
 ];
 
 async function loadHooks() {
-  const [gate, focus, notice, dialog, keyed, actions] = await loadWorkflowModules(HOOK_MODULES);
-  return { ...gate, ...focus, ...notice, ...dialog, ...keyed, ...actions };
+  const [gate, focus, notice, dialog, keyed, actions, typedConfirmation] = await loadWorkflowModules(HOOK_MODULES);
+  return { ...gate, ...focus, ...notice, ...dialog, ...keyed, ...actions, ...typedConfirmation };
 }
 
 function renderHooks(useHooks) {
@@ -363,12 +364,23 @@ test("useConfirmDialog gates a renamed Confirm behind an exact typed phrase and 
   await withBrowserGlobals(async () => {
     const rendered = renderDialog();
     // The typed phrase gets its own labelled field, so a screen reader announces exactly what to type.
-    assert.match(rendered.markup, /Type REVOKE 4 to confirm<input/u);
+    assert.match(rendered.markup, /Type REVOKE 4 to confirm<input[^>]*autoComplete="off"[^>]*spellCheck="false"/u);
     // The button is renamed and stays really disabled (the `disabled` attribute, not just styling)
     // on a fresh open, before either the reason or the exact typed phrase is supplied.
     assert.match(rendered.markup, /<button type="button" class="danger" disabled="">Revoke<\/button>/u);
-    // Reason presets are plain, keyboard-reachable buttons; they never disable the reason field.
-    assert.match(rendered.markup, /<div class="reasonPresets"><button type="button">Payment failed<\/button><button type="button">Customer request<\/button><button type="button">Fraud review<\/button><\/div>/u);
+    // Reason presets are a labelled group of plain, keyboard-reachable buttons; they never disable
+    // the reason field.
+    assert.match(rendered.markup, /<div class="reasonPresets" role="group" aria-label="Common reasons"><button type="button">Payment failed<\/button><button type="button">Customer request<\/button><button type="button">Fraud review<\/button><\/div>/u);
     assert.doesNotMatch(rendered.markup, /Reason \(required\)<input[^>]*disabled=""/u);
   });
+});
+
+test("typedConfirmationMatches trims both ends and stays case-sensitive", async () => {
+  const hooks = await loadHooks();
+  assert.equal(hooks.typedConfirmationMatches("REVOKE 4", "REVOKE 4"), true);
+  assert.equal(hooks.typedConfirmationMatches(" REVOKE 4 ", "REVOKE 4"), true);
+  assert.equal(hooks.typedConfirmationMatches("\tREVOKE 4\n", "REVOKE 4"), true);
+  assert.equal(hooks.typedConfirmationMatches("revoke 4", "REVOKE 4"), false);
+  assert.equal(hooks.typedConfirmationMatches("REVOKE 3", "REVOKE 4"), false);
+  assert.equal(hooks.typedConfirmationMatches("", "REVOKE 4"), false);
 });

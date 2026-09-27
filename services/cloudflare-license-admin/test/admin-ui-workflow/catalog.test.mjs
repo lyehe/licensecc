@@ -379,3 +379,17 @@ test("admin UI workflow preserves catalog-import target tuples and typed delta v
   assert.equal(workflow.catalogImportEffectValueLabel("null"), '"null"');
   assert.equal(workflow.catalogImportEffectValueLabel("unset"), '"unset"');
 });
+
+test("admin UI workflow freezes a confirmed plan projection binding against the live one, not a stray self-comparison", async () => {
+  const binding = await loadWorkflowModule("features/catalog/planProjectionBinding.ts");
+  const bindingA = { input: {}, digest: "a", preview: {} };
+  const bindingB = { input: {}, digest: "b", preview: {} };
+  // The exact confirmed binding, at the exact confirmed revision, is usable.
+  assert.equal(binding.planProjectionBindingIsUsable(bindingA, 1, bindingA, 1), true);
+  // A different revision (the form changed and bumped it) makes it stale, even with the same binding.
+  assert.equal(binding.planProjectionBindingIsUsable(bindingA, 1, bindingA, 2), false);
+  // A different binding object at the same revision (a fresh preview replaced it) is also stale.
+  assert.equal(binding.planProjectionBindingIsUsable(bindingA, 1, bindingB, 1), false);
+  // No live binding at all (invalidated) is stale.
+  assert.equal(binding.planProjectionBindingIsUsable(bindingA, 1, null, 1), false);
+});

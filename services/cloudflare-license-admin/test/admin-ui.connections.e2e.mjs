@@ -23,6 +23,64 @@ test("admin connections retire with explicit hold, exact request and audit histo
   await region(page).getByText('History',{exact:true}).click();await expect(region(page)).toContainText('operator:access:operator-one');
 });
 
+test("admin connections reach and operate the typed Disconnect field using only the keyboard",async({page})=>{
+  const f=fixture();await open(page,f);
+  await region(page).getByRole('button',{name:'Disconnect',exact:true}).click();
+  const dialog=page.getByRole('dialog');await expect(dialog).toBeVisible();
+  const input=dialog.getByLabel('Type DISCONNECT to confirm');
+  const cancelButton=dialog.getByRole('button',{name:'Cancel',exact:true});
+  const commitButton=dialog.getByRole('button',{name:'Disconnect',exact:true});
+  // Start from Cancel (a `.focus()` call, not a `.fill()`) and reach the field going backwards --
+  // the exact direction the reported trap could never leave (Shift+Tab stayed on Cancel forever).
+  await cancelButton.focus();
+  await expect(cancelButton).toBeFocused();
+  await page.keyboard.press('Shift+Tab');
+  await expect(input).toBeFocused();
+  await expect(commitButton).toBeDisabled();
+  await page.keyboard.type('DISCONNECT');
+  await expect(commitButton).toBeEnabled();
+  await page.keyboard.press('Tab');
+  await expect(commitButton).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(dialog).not.toBeVisible();
+  expect(f.posts).toHaveLength(1);
+  expect(JSON.parse(f.posts[0].body)).toEqual({expected_revision:0});
+});
+
+test("admin connections clear the typed Disconnect field synchronously on open, including a resumed request",async({page})=>{
+  const f=fixture();f.behavior.drop=true;await open(page,f);
+  await region(page).getByRole('button',{name:'Disconnect',exact:true}).click();
+  let dialog=page.getByRole('dialog');
+  await dialog.getByLabel('Type DISCONNECT to confirm').fill('DISCONNECT');
+  await expect(dialog.getByRole('button',{name:'Disconnect',exact:true})).toBeEnabled();
+  await dialog.getByRole('button',{name:'Cancel',exact:true}).click();
+  await expect(dialog).not.toBeVisible();
+
+  // Reopening the same pending request must never show the previous "DISCONNECT" value or an
+  // enabled commit button, not even for one render. Read the field back with plain one-shot
+  // locator reads (never a retrying `expect(locator)`, which could let a later correction settle
+  // in before this looks) as soon as the dialog reports itself visible.
+  await region(page).getByRole('button',{name:'Disconnect',exact:true}).click();
+  dialog=page.getByRole('dialog');await expect(dialog).toBeVisible();
+  const reopenedInput=dialog.getByLabel('Type DISCONNECT to confirm');
+  const reopenedCommit=dialog.getByRole('button',{name:'Disconnect',exact:true});
+  const [reopenedValue,reopenedDisabled]=await Promise.all([reopenedInput.inputValue(),reopenedCommit.isDisabled()]);
+  expect({value:reopenedValue,disabled:reopenedDisabled}).toEqual({value:'',disabled:true});
+
+  // Cover resume(): send (the fixture drops the response), close, then resume the saved request.
+  await dialog.getByLabel('Type DISCONNECT to confirm').fill('DISCONNECT');
+  await dialog.getByRole('button',{name:'Disconnect',exact:true}).click();
+  await expect(dialog).toContainText('result is not confirmed');
+  await dialog.getByRole('button',{name:'Close',exact:true}).click();
+  await expect(dialog).not.toBeVisible();
+  await region(page).getByRole('button',{name:'Review saved request'}).click();
+  dialog=page.getByRole('dialog');await expect(dialog).toBeVisible();
+  const resumedInput=dialog.getByLabel('Type DISCONNECT to confirm');
+  const resumedCommit=dialog.getByRole('button',{name:'Retry same request',exact:true});
+  const [resumedValue,resumedDisabled]=await Promise.all([resumedInput.inputValue(),resumedCommit.isDisabled()]);
+  expect({value:resumedValue,disabled:resumedDisabled}).toEqual({value:'',disabled:true});
+});
+
 test("admin connections recover a lost response after reload using the original operator and key",async({page})=>{
   const f=fixture();f.behavior.drop=true;await open(page,f);
   await region(page).getByRole('button',{name:'Disconnect',exact:true}).click();
@@ -65,7 +123,8 @@ test("admin connections retain stale rows and block changes after malformed refr
 test("admin connections keep recovery available when legacy customer detail fails",async({page})=>{
   const f=fixture();f.behavior.detailFailure=true;await open(page,f);await expect(region(page)).toContainText('Design workstation');
   await region(page).getByRole('button',{name:'Disconnect',exact:true}).click();await expect(page.getByRole('dialog')).toContainText(f.row.binding_id);
-  await expect(page.getByRole('dialog').getByRole('button',{name:'Cancel',exact:true})).toBeFocused();
+  // Initial focus goes to the typed field, matching the shared confirm dialog's own initial focus.
+  await expect(page.getByRole('dialog').getByLabel('Type DISCONNECT to confirm')).toBeFocused();
 });
 
 test("admin connections invalidate parent actions when audit reveals another operator",async({page})=>{
