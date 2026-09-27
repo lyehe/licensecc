@@ -11,6 +11,27 @@ async function clickAction(button) {
   await button.click();
 }
 
+test("navigation groups start expanded and a collapse persists across a reload", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  await page.route("**/api/admin/**", api.route);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto("/");
+
+  const nav = page.getByRole("navigation", { name: "Main navigation" });
+  for (const group of ["Configuration", "Activity", "Related records"]) {
+    await expect(nav.getByRole("button", { name: group, exact: true })).toHaveAttribute("aria-expanded", "true");
+  }
+
+  await nav.getByRole("button", { name: "Configuration", exact: true }).click();
+  await expect(nav.getByRole("button", { name: "Configuration", exact: true })).toHaveAttribute("aria-expanded", "false");
+  await expect(nav.getByRole("link", { name: "Policies", exact: true })).toBeHidden();
+
+  await page.reload();
+  await expect(nav.getByRole("button", { name: "Configuration", exact: true })).toHaveAttribute("aria-expanded", "false");
+  // A group the operator never touched keeps the default.
+  await expect(nav.getByRole("button", { name: "Activity", exact: true })).toHaveAttribute("aria-expanded", "true");
+});
+
 test("direct customer section URLs survive intent consumption and refresh", async ({ page }) => {
   const api = makeAdminApiFixture();
   await page.route("**/api/admin/**", api.route);

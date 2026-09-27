@@ -1142,3 +1142,24 @@ test("admin UI keeps an exact ordinary success in GET-only recovery after a 5xx 
   await expect(page.locator(".operatorNotice")).toHaveCount(0);
   expect(api.requests.webhookCreateAttempts).toHaveLength(1);
 });
+
+test("a whitespace-only entitlement filter counts as unfiltered for the empty state", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  await page.route("**/api/admin/**", api.route);
+  await page.goto("/#/entitlements");
+
+  const unfilteredEmptyState = page.getByText("No entitlements yet. Create an entitlement to grant access.", { exact: true });
+  const filteredEmptyState = page.getByText("No entitlements match these filters.", { exact: true });
+  const clearFilters = page.getByRole("button", { name: "Clear filters", exact: true });
+
+  await expect(unfilteredEmptyState).toBeVisible();
+  await expect(clearFilters).toBeDisabled();
+
+  await page.getByLabel("Filter by project").fill("   ");
+  await expect(unfilteredEmptyState).toBeVisible();
+  await expect(clearFilters).toBeDisabled();
+
+  await page.getByLabel("Filter by project").fill("acme");
+  await expect(filteredEmptyState).toBeVisible();
+  await expect(clearFilters).toBeEnabled();
+});

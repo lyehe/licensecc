@@ -1446,3 +1446,86 @@ test("admin UI discards stale device recovery after filter supersession while ac
   await expect(devices.locator(".desktopRecords code").first()).toContainText("sha256:bbbbbbbb");
   expect(await page.evaluate(() => document.activeElement === document.body)).toBe(false);
 });
+
+test("the device inspector renders under its row, takes focus, and returns focus to Devices on close", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  api.seed.entitlement();
+  await page.route("**/api/admin/**", api.route);
+  await page.goto("/#/entitlements");
+
+  const row = page.locator(".desktopRecords tbody tr").first();
+  const devicesButton = row.getByRole("button", { name: "Devices", exact: true, includeHidden: true }).first();
+  await clickAction(devicesButton);
+
+  const heading = page.getByRole("heading", { name: "Devices", exact: true });
+  await expect(heading).toBeInViewport();
+  await expect(heading).toBeFocused();
+  const devicesPane = page.getByRole("region", { name: "Registered devices" });
+  await expect(devicesPane).toBeVisible();
+  // The panel sits in the row immediately after the one that opened it, inside the same table.
+  expect(await row.evaluate((node) => node.nextElementSibling?.querySelector('[aria-label="Registered devices"]') !== null)).toBe(true);
+
+  await page.getByRole("button", { name: "Close devices", exact: true }).click();
+  await expect(devicesPane).toHaveCount(0);
+  await expect(devicesButton).toBeFocused();
+});
+
+test("'More actions' closes after choosing an action, including one that opens a dialog", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  api.seed.entitlement();
+  await page.route("**/api/admin/**", api.route);
+  await page.goto("/#/entitlements");
+
+  const row = page.locator(".desktopRecords tbody tr").first();
+  const menu = row.locator("details.contextActions");
+
+  // A non-dialog action (Meter opens an inline panel, not a modal) closes the menu on its own.
+  await clickAction(row.getByRole("button", { name: "Meter", exact: true, includeHidden: true }).first());
+  await expect(page.getByRole("region", { name: "Metering status" })).toBeVisible();
+  expect(await menu.evaluate((node) => node.hasAttribute("open"))).toBe(false);
+  await page.getByRole("button", { name: "Close metering", exact: true }).click();
+
+  // A dialog-opening action closes the menu too; focus goes to the dialog, not back to the menu.
+  await clickAction(row.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first());
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toBeVisible();
+  expect(await menu.evaluate((node) => node.hasAttribute("open"))).toBe(false);
+  await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+});
+
+test("report range buttons expose their selection through aria-pressed", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  await page.route("**/api/admin/**", api.route);
+  await page.goto("/#/reports");
+
+  const window7d = page.locator(".chartPanels .rangeSelector").getByRole("button", { name: "last 7d" });
+  const window30d = page.locator(".chartPanels .rangeSelector").getByRole("button", { name: "last 30d" });
+  await expect(window7d).toHaveAttribute("aria-pressed", "true");
+  await expect(window30d).toHaveAttribute("aria-pressed", "false");
+  await window30d.click();
+  await expect(window30d).toHaveAttribute("aria-pressed", "true");
+  await expect(window7d).toHaveAttribute("aria-pressed", "false");
+
+  const horizon30 = page.locator(".expiringHead .rangeSelector").getByRole("button", { name: "30d", exact: true });
+  const horizon7 = page.locator(".expiringHead .rangeSelector").getByRole("button", { name: "7d", exact: true });
+  await expect(horizon30).toHaveAttribute("aria-pressed", "true");
+  await expect(horizon7).toHaveAttribute("aria-pressed", "false");
+  await horizon7.click();
+  await expect(horizon7).toHaveAttribute("aria-pressed", "true");
+  await expect(horizon30).toHaveAttribute("aria-pressed", "false");
+});
+
+test("report charts show axis labels with units and UTC bucket dates", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  await page.route("**/api/admin/**", api.route);
+  await page.goto("/#/reports");
+
+  const usageCard = page.locator(".chartCard").filter({ has: page.getByRole("heading", { name: "Checkouts vs denials" }) });
+  await expect(usageCard.locator(".chartAxisY")).toContainText("checkouts");
+  await expect(usageCard.locator(".chartAxisY")).toContainText("denials");
+  await expect(usageCard.locator(".chartAxisX")).toContainText("UTC");
+
+  const denialCard = page.locator(".chartCard").filter({ has: page.getByRole("heading", { name: "Denial-rate trend" }) });
+  await expect(denialCard.locator(".chartAxisY")).toContainText("denial rate");
+  await expect(denialCard.locator(".chartAxisX")).toContainText("UTC");
+});

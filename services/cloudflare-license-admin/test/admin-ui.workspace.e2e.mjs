@@ -192,10 +192,51 @@ test("workspace navigation uses the mobile menu and desktop links", async ({ pag
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.goto("/");
   const desktopNavigation = page.getByRole("navigation", { name: "Main navigation" });
-  await expect(desktopNavigation.getByRole("button", { name: "Activity", exact: true })).toHaveAttribute("aria-expanded", "false");
+  // Nav groups start expanded; the click below is a no-op unless something upstream collapsed it.
+  await expect(desktopNavigation.getByRole("button", { name: "Activity", exact: true })).toHaveAttribute("aria-expanded", "true");
   if (await page.getByRole("button", { name: "Activity", exact: true }).getAttribute("aria-expanded") === "false") await page.getByRole("button", { name: "Activity", exact: true }).click();
   await desktopNavigation.getByRole("link", { name: "Reports", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Reports", exact: true })).toBeVisible();
+});
+
+test("entitlements keep at least ten rows fully visible at 1440x900", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  api.seed.entitlements(12);
+  await page.route("**/api/admin/**", api.route);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/#/entitlements");
+
+  const rows = page.locator(".desktopRecords tbody tr[data-focus-row]");
+  await expect(rows).toHaveCount(12);
+  const fullyVisibleRows = await page.evaluate(() => {
+    const viewportHeight = window.innerHeight;
+    return Array.from(document.querySelectorAll(".desktopRecords tbody tr[data-focus-row]")).filter((row) => {
+      const rect = row.getBoundingClientRect();
+      return rect.top >= 0 && rect.bottom <= viewportHeight;
+    }).length;
+  });
+  expect(fullyVisibleRows).toBeGreaterThanOrEqual(10);
+});
+
+test("global search shows a per-type limit note only when a type reaches ten results", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  api.seed.customers(Array.from({ length: 10 }, (_unused, index) => ({ name: `Widget Customer ${index + 1}` })));
+  api.seed.customer({ name: "Solo customer" });
+  await page.route("**/api/admin/**", api.route);
+  await page.goto("/");
+
+  await page.getByRole("button", { name: /search/i }).click();
+  const searchInput = page.getByRole("searchbox", { name: "Global search" });
+  const searchSurface = page.getByRole("region", { name: "Search workspace" });
+
+  await searchInput.fill("Widget");
+  await page.getByRole("button", { name: "Search records", exact: true }).click();
+  await expect(searchSurface).toContainText("Showing first 10 per type");
+
+  await searchInput.fill("Solo");
+  await page.getByRole("button", { name: "Search records", exact: true }).click();
+  await expect(searchSurface).toContainText("Solo customer");
+  await expect(searchSurface.getByText("Showing first 10 per type", { exact: true })).toHaveCount(0);
 });
 
 test("global search opens, submits records, escapes, and keeps private queries out of the URL", async ({ page }) => {

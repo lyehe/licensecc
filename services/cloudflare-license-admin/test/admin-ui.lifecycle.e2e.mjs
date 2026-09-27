@@ -358,9 +358,12 @@ test("admin UI disables twenty loaded entitlements with one confirmation, one re
   await dialog.getByLabel(/Reason/).fill("contract ended");
   await dialog.getByRole("button", { name: "Confirm" }).click();
 
-  // While chunk 2 is in flight the open dialog reports it in a live region.
+  // While chunk 2 is in flight the open dialog reports it in a live region. The dialog itself must
+  // not be aria-busy during the run, or assistive technology can suppress that live announcement.
   await expect.poll(() => keys.length).toBe(2);
   await expect(dialog.locator(".batchRun [aria-live=polite]")).toContainText("Chunk 2 of 5");
+  expect(await dialog.evaluate((node) => node.getAttribute("aria-busy"))).not.toBe("true");
+  expect(await dialog.locator(".batchRun [aria-live=polite]").evaluate((node) => node.closest('[aria-busy="true"]'))).toBeNull();
   releaseSecond();
 
   await expect.poll(() => api.requests.batches.length).toBe(5);
