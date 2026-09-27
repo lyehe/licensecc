@@ -162,6 +162,8 @@ export function AdminNavigationProvider({ children }: { children: ReactNode }): 
       return true;
     }
     if (!allowLeave()) return false;
+    // A new entry supersedes any restore still waiting to land, so history handling never stays off.
+    restoringKey.current = null;
     savePosition();
     const next: NavigationEntry = { index: entry.current.index + 1, key: ++nextKey.current, route: nextRoute, target, scrollY: 0, focus: null, focusRow: null, grant };
     // A new branch discards only our in-memory forward navigation entries.
@@ -179,8 +181,10 @@ export function AdminNavigationProvider({ children }: { children: ReactNode }): 
     const changed = (): void => {
       const marker = window.history.state?.[historyKey] as { session?: string; key?: number; index?: number } | undefined;
       const known = marker?.session === session.current && marker.key !== undefined ? entries.current.get(marker.key) : undefined;
-      // A same-session entry whose memory was dropped still knows its place in this history.
+      // A same-session entry whose memory was dropped still knows its place in this history. An
+      // entry from another session (before a reload) or a typed address has no comparable place.
       const index = known?.index ?? (marker?.session === session.current && typeof marker.index === "number" ? marker.index : undefined);
+      const foreign = typeof marker?.session === "string" && marker.session !== session.current;
       const observed = `${known?.key ?? "external"}:${window.location.hash}`;
       if (observed === seenBrowserEntry.current) return;
       seenBrowserEntry.current = observed;
@@ -193,7 +197,9 @@ export function AdminNavigationProvider({ children }: { children: ReactNode }): 
       const sameKnownRoute = known !== undefined && hashForRoute(known.route) === hashForRoute(address.parsed.route);
       if (!allowLeave()) {
         restoringKey.current = entry.current.key;
-        const distance = index === undefined ? -1 : entry.current.index - index;
+        // Without a comparable place there is no direction to undo, so the entry the browser
+        // landed on is rewritten to the current page instead of guessing a step back or forward.
+        const distance = index === undefined ? 0 : entry.current.index - index;
         if (distance === 0) {
           writeHistory(entry.current, true);
           restoringKey.current = null;
@@ -201,8 +207,15 @@ export function AdminNavigationProvider({ children }: { children: ReactNode }): 
         return;
       }
       savePosition();
+      if (foreign) {
+        // Where an entry from before a reload sits among this session's entries is unknown, so
+        // adopting it starts a new session: later steps compare exactly again, and entries from
+        // before this point are resolved from their addresses, as after a reload.
+        session.current = crypto.randomUUID();
+        entries.current.clear();
+      }
       const next: NavigationEntry = sameKnownRoute ? known : {
-        index: index ?? entry.current.index + 1,
+        index: foreign ? 0 : index ?? entry.current.index + 1,
         key: ++nextKey.current,
         route: address.route,
         target: targetForRoute(address.route),
