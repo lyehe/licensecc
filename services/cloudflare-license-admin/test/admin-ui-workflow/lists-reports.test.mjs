@@ -57,6 +57,19 @@ test("admin UI workflow never throws formatting a validity date, even for non-fi
   assert.equal(format.formatUtcDate(-9007199254740991), "before -271821-04-20 UTC");
 });
 
+test("admin UI workflow keeps the full day for extended (5+ digit or negative) representable years", async () => {
+  const format = await loadWorkflowModule("shared/format.ts");
+  // Exactly the representable maximum/minimum: still inside the normal (non-"after"/"before") path,
+  // so it must format its real day, not silently truncate it (toISOString's extended year form is
+  // longer than "YYYY-MM-DD", so a naive first-10-characters slice drops the day here).
+  assert.equal(format.formatUtcDate(8.64e12), "+275760-09-13 UTC");
+  assert.equal(format.formatUtcDate(-8.64e12), "-271821-04-20 UTC");
+  // An ordinary 5-digit extended year well inside the range.
+  assert.equal(format.formatUtcDate(316516204800), "+012000-01-01 UTC");
+  // One millisecond past the representable maximum: still reports "after", not a truncated date.
+  assert.equal(format.formatUtcDate(8.64e12 + 0.001), "after 275760-09-13 UTC");
+});
+
 test("admin UI workflow formats validity dates identically across host time zones", async () => {
   const originalTz = process.env.TZ;
   try {
