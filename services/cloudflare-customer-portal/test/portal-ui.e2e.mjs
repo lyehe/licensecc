@@ -4,6 +4,7 @@ import "./portal-ui.nodes.e2e.mjs";
 import "./portal-ui.network-failures.e2e.mjs";
 import "./portal-ui.session-expired.e2e.mjs";
 import "./portal-ui.license-lifecycle.e2e.mjs";
+import "./portal-ui.devices-search.e2e.mjs";
 
 function makeEnvelope(code, data) {
   makeEnvelope.nextRequestId += 1;
@@ -760,7 +761,7 @@ test("customer portal signs in with an 8-digit code and walks every screen witho
   // --- My devices/seats: floating seat checkout/heartbeat/release ---
   await page.getByRole("link", { name: "Devices", exact: true }).click();
   await expect(page).toHaveTitle("Devices · Licensecc");
-  await page.getByText("Browser sessions", {exact:true}).click();
+  await page.getByText("Browser seats", {exact:true}).click();
   const seatCard = page.locator(".seatCard").filter({ hasText: "pro" }).first();
   await expect(seatCard.getByRole("button", { name: "Start seat" })).toBeEnabled();
   await expect(seatCard.getByRole("button", { name: "Renew seat" })).toBeDisabled();
@@ -940,7 +941,7 @@ test("customer portal signs in with an 8-digit code and walks every screen witho
   // Human text, not the raw code (C1): Technical details stay collapsed.
   await expect(page.getByText("Seat released.", { exact: true })).toBeVisible();
   await expect(page.getByText("release_ok", { exact: false })).not.toBeVisible();
-  const browserSessionsSummary = page.getByText("Browser sessions", { exact: true });
+  const browserSessionsSummary = page.getByText("Browser seats", { exact: true });
   await expect(browserSessionsSummary).toBeFocused();
   expect(await page.evaluate(() => document.activeElement?.tagName)).not.toBe("BODY");
   await browserSessionsSummary.click();
@@ -1115,7 +1116,7 @@ test("session and account-read failures do not masquerade as an empty account", 
   await expect(page.getByRole("link", { name: "View licenses for DEFAULT" })).toBeVisible();
 });
 
-test("usage failure stays local and removing a filtered registration keeps the selected app truthful", async ({ page }) => {
+test("usage failure stays local and removing a searched registration keeps the filter truthful", async ({ page }) => {
   const api = makePortalApiFixture();
   api.controls.rejectUsage = true;
   api.entitlements.push({ ...api.entitlements[1], id: "second_app", project: "SECOND_APP" });
@@ -1131,13 +1132,14 @@ test("usage failure stays local and removing a filtered registration keeps the s
   await page.getByText("Activity",{exact:true}).click();
   await expect(page.getByText("87", { exact: true })).toBeVisible();
   await page.getByRole("link", { name: "Devices", exact: true }).click();
-  await page.getByRole("combobox", { name: "App", exact: true }).selectOption("DEFAULT");
+  // D1: one page-level search box (matching name, ID or app) replaces the registrations-only App
+  // select; typing the app name filters the same way the old dropdown did.
+  await page.getByRole("searchbox", { name: "Find a device" }).fill("DEFAULT");
   page.once("dialog", (dialog) => dialog.accept());
   await page.locator(".registrations").getByRole("button", { name: "Release", exact: true }).click();
   await expect(page.getByRole("heading", { name: "No matching devices" })).toBeVisible();
-  await expect(page.getByRole("combobox", { name: "App", exact: true })).toHaveValue("DEFAULT");
-  await expect(page.getByRole("option", { name: "DEFAULT", exact: true })).toHaveCount(1);
-  await page.getByRole("combobox", { name: "App", exact: true }).selectOption("");
+  await expect(page.getByRole("searchbox", { name: "Find a device" })).toHaveValue("DEFAULT");
+  await page.getByRole("searchbox", { name: "Find a device" }).fill("");
   await expect(page.getByText("second-node", { exact: true })).toBeVisible();
 });
 

@@ -181,7 +181,7 @@ test("an aborted seat-start call shows the network message and leaves the seat s
   await page.goto("/");
   await signInThroughCode(page);
   await page.getByRole("link", { name: "Devices", exact: true }).click();
-  await page.getByText("Browser sessions", { exact: true }).click();
+  await page.getByText("Browser seats", { exact: true }).click();
   const seatCard = page.locator(".seatCard").filter({ hasText: "pro" }).first();
   await expect(seatCard.getByRole("button", { name: "Start seat" })).toBeEnabled();
   await seatCard.getByRole("button", { name: "Start seat" }).click();

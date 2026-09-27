@@ -117,7 +117,7 @@ test("an expired session after a seat action returns to sign-in with the session
   await page.goto("/");
   await signInThroughCode(page);
   await page.getByRole("link", { name: "Devices", exact: true }).click();
-  await page.getByText("Browser sessions", { exact: true }).click();
+  await page.getByText("Browser seats", { exact: true }).click();
   const seatCard = page.locator(".seatCard").filter({ hasText: "pro" }).first();
   await expect(seatCard.getByRole("button", { name: "Start seat" })).toBeEnabled();
   await seatCard.getByRole("button", { name: "Start seat" }).click();
@@ -334,7 +334,7 @@ test("a customer switch after a session-ending 401 never shows the previous cust
   // cache is populated), then renews it -- the renewal 401s and ends the session.
   await page.getByRole("link", { name: "Devices", exact: true }).click();
   await expect(page.getByText("device-alpha-001", { exact: true })).toBeVisible();
-  await page.getByText("Browser sessions", { exact: true }).click();
+  await page.getByText("Browser seats", { exact: true }).click();
   const seatCardA = page.locator(".seatCard").filter({ hasText: "widget" }).first();
   await seatCardA.getByRole("button", { name: "Start seat" }).click();
   await expect(seatCardA.getByRole("button", { name: "Renew seat" })).toBeEnabled();
