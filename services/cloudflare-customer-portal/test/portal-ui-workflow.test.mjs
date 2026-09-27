@@ -336,6 +336,17 @@ test("portal UI workflow maps the session-ended copy verbatim (C3)", async () =>
   );
 });
 
+// D3: sign-out's best-effort seat release. StatusLine (api.tsx) special-cases this code to interpolate
+// the released/failed counts via seatsReleasedMessage() instead of this static string -- this is only
+// the fallback for the (never expected in practice) case where the message carries no params, and it
+// must still be non-null coverage per C1, and never leak the raw code itself.
+test("portal UI workflow maps the seats-released-on-signout fallback copy, never the raw code (D3)", async () => {
+  const workflow = await loadWorkflowModule();
+  const copy = workflow.describeResultCode("seats_released_on_signout");
+  assert.equal(typeof copy, "string");
+  assert.doesNotMatch(copy, /seats_released_on_signout/);
+});
+
 test("portal UI workflow builds filtered usage paths", async () => {
   const workflow = await loadWorkflowModule();
   assert.equal(workflow.usagePath(), "/api/portal/usage");

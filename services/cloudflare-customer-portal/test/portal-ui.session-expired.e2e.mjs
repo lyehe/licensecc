@@ -364,5 +364,14 @@ test("a customer switch after a session-ending 401 never shows the previous cust
   await expect(page.getByText("device-beta-002", { exact: true })).toBeVisible();
   await expect(page.getByText("device-alpha-001", { exact: false })).toHaveCount(0);
 
+  // D3 (carried from C3, decision 7): B's own floating entitlement renders the Browser seats section,
+  // but it must start COLLAPSED -- never pre-expanded as though it already held A's live seat. A
+  // pre-expanded panel uses an <h3 role="heading">; the collapsed <details> uses a plain <summary>.
+  await expect(page.getByRole("heading", { name: "Browser seats" })).toHaveCount(0);
+  await page.getByText("Browser seats", { exact: true }).click();
+  const seatCardB = page.locator(".seatCard").filter({ hasText: "gadget" }).first();
+  await expect(seatCardB.getByRole("button", { name: "Start seat" })).toBeEnabled();
+  await expect(seatCardB.getByRole("button", { name: "Release seat" })).toBeDisabled();
+
   expect(pageErrors).toEqual([]);
 });

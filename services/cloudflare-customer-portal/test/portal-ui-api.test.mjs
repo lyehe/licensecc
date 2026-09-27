@@ -144,3 +144,31 @@ test("api() ignores a non-numeric retry-after header rather than surfacing NaN",
   const result = await api.api("/portal/v1/auth/request", { method: "POST" });
   assert.equal(result.retryAfter, undefined);
 });
+
+// D3: localMessage's third argument threads dynamic interpolation values onto StatusMessage.params --
+// omitted entirely (not just undefined) when no params are given, so an ordinary local message stays
+// exactly the same shape it always has.
+test("localMessage omits params when none are given, and carries them through when given", async () => {
+  const api = await loadApiModule();
+  const plain = api.localMessage("seat_not_checked_out", false);
+  assert.deepEqual(plain, { code: "seat_not_checked_out", request_id: "", ok: false });
+  assert.equal(Object.hasOwn(plain, "params"), false);
+  const withParams = api.localMessage("seats_released_on_signout", true, { released: 2, failed: 1 });
+  assert.deepEqual(withParams, { code: "seats_released_on_signout", request_id: "", ok: true, params: { released: 2, failed: 1 } });
+});
+
+// D3 (decision 3): sign-out's best-effort seat release. "Released {n} browser seat(s)" is shown only
+// when at least one seat actually released; the failure sentence is additive and appears even when
+// nothing released (every attempt failed). Nothing is shown when both counts are zero.
+test("seatsReleasedMessage composes the sign-in screen's release summary", async () => {
+  const api = await loadApiModule();
+  assert.equal(api.seatsReleasedMessage(0, 0), "");
+  assert.equal(api.seatsReleasedMessage(1, 0), "Released 1 browser seat.");
+  assert.equal(api.seatsReleasedMessage(3, 0), "Released 3 browser seats.");
+  assert.equal(api.seatsReleasedMessage(0, 1), "1 seat couldn't be released; they'll be listed after you sign in again.");
+  assert.equal(api.seatsReleasedMessage(0, 2), "2 seats couldn't be released; they'll be listed after you sign in again.");
+  assert.equal(
+    api.seatsReleasedMessage(2, 1),
+    "Released 2 browser seats. 1 seat couldn't be released; they'll be listed after you sign in again.",
+  );
+});

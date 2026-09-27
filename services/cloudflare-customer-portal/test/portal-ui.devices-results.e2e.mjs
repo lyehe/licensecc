@@ -29,8 +29,13 @@ function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function setup(page, { entitlements, support, checkoutResponse, checkoutDelayMs, downloadDelayMs } = {}) {
-  let authed = false;
+// D3: `customers` maps an OTP code to its own { customerId, entitlements } account, so a test can sign
+// in as more than one customer on the SAME browser (e.g. an explicit sign-out, then a different
+// customer's sign-in). The single-account tests below never pass it -- they keep signing in as
+// VALID_CODE / "cus_results" exactly as before.
+function setup(page, { entitlements, support, checkoutResponse, checkoutDelayMs, downloadDelayMs, releaseResponse, customers } = {}) {
+  const accounts = customers ?? { [VALID_CODE]: { customerId: "cus_results", entitlements: entitlements ?? [] } };
+  let authedCode = null;
   const requests = { checkouts: 0, releases: 0, downloads: 0 };
   const handler = async (route) => {
     const request = route.request();
@@ -43,28 +48,36 @@ function setup(page, { entitlements, support, checkoutResponse, checkoutDelayMs,
     if (method === "POST" && path === "/portal/v1/auth/request") return fulfill(200, envelope("otp_requested"));
     if (method === "POST" && path === "/portal/v1/auth/verify") {
       const body = jsonBody(request);
-      if (body.code !== VALID_CODE) return fulfill(401, { ok: false, code: "invalid_otp", request_id: "devices-results-bad" });
-      authed = true;
-      return fulfill(200, envelope("signed_in", { customer_id: "cus_results" }));
+      const account = accounts[body.code];
+      if (!account) return fulfill(401, { ok: false, code: "invalid_otp", request_id: "devices-results-bad" });
+      authedCode = body.code;
+      return fulfill(200, envelope("signed_in", { customer_id: account.customerId }));
+    }
+    // D3: sign-out itself. Every fixture here now accepts it so decision 5's sign-out tests can share
+    // this same setup() as the checkout/release tests above.
+    if (method === "POST" && path === "/portal/v1/auth/logout") {
+      if (authedCode === null) return fulfill(401, { ok: false, code: "unauthorized", request_id: "devices-results-401" });
+      authedCode = null;
+      return fulfill(200, envelope("logged_out"));
     }
     if (method === "GET" && path === "/api/portal/me") {
-      if (!authed) return fulfill(401, { ok: false, code: "unauthorized", request_id: "devices-results-401" });
-      return fulfill(200, envelope("me", { customer_id: "cus_results", email: null }));
+      if (authedCode === null) return fulfill(401, { ok: false, code: "unauthorized", request_id: "devices-results-401" });
+      return fulfill(200, envelope("me", { customer_id: accounts[authedCode].customerId, email: null }));
     }
     if (method === "GET" && path === "/api/portal/entitlements") {
-      if (!authed) return fulfill(401, { ok: false, code: "unauthorized", request_id: "devices-results-401" });
-      return fulfill(200, envelope("entitlements", { items: entitlements.map((item) => ({ ...item })) }));
+      if (authedCode === null) return fulfill(401, { ok: false, code: "unauthorized", request_id: "devices-results-401" });
+      return fulfill(200, envelope("entitlements", { items: accounts[authedCode].entitlements.map((item) => ({ ...item })) }));
     }
     if (method === "GET" && path === "/api/portal/devices") {
-      if (!authed) return fulfill(401, { ok: false, code: "unauthorized", request_id: "devices-results-401" });
+      if (authedCode === null) return fulfill(401, { ok: false, code: "unauthorized", request_id: "devices-results-401" });
       return fulfill(200, envelope("devices", { items: [] }));
     }
     if (method === "GET" && path === "/api/portal/usage") {
-      if (!authed) return fulfill(401, { ok: false, code: "unauthorized", request_id: "devices-results-401" });
+      if (authedCode === null) return fulfill(401, { ok: false, code: "unauthorized", request_id: "devices-results-401" });
       return fulfill(200, envelope("usage", { items: [] }));
     }
     if (method === "GET" && path === "/api/portal/device-bindings") {
-      return fulfill(200, envelope("device_bindings", { customer_id: "cus_results", items: [], has_more: false, next_cursor: null }));
+      return fulfill(200, envelope("device_bindings", { customer_id: authedCode === null ? null : accounts[authedCode].customerId, items: [], has_more: false, next_cursor: null }));
     }
     if (method === "POST" && path === "/api/portal/checkout") {
       requests.checkouts += 1;
@@ -79,6 +92,10 @@ function setup(page, { entitlements, support, checkoutResponse, checkoutDelayMs,
     if (method === "POST" && path === "/api/portal/release") {
       requests.releases += 1;
       const body = jsonBody(request);
+      if (releaseResponse) {
+        const response = releaseResponse(body, requests.releases);
+        if (response) return fulfill(response.status ?? 200, response.body);
+      }
       return fulfill(200, envelope("release_ok", { seat_id: body.seat_id }));
     }
     if (method === "POST" && path === "/api/portal/download") {
@@ -129,8 +146,8 @@ test("seat start, seat release and a license download each show their own result
   await expect(alphaExpiry).toBeInViewport();
 
   // Start a second seat so releasing the first below does not leave zero live sessions -- unrelated
-  // to what this test is checking, and D3 (a later task) covers what happens once the LAST seat is
-  // released at sign-out.
+  // to what this test is checking; the sign-out tests further down cover what happens once seats are
+  // released at sign-out (D3).
   await betaCard.getByRole("button", { name: "Start seat" }).click();
   await expect(betaCard.getByRole("status")).toContainText("Seat started.");
 
@@ -339,4 +356,114 @@ test("a delayed download response that arrives after leaving Apps does not show 
   await page.getByRole("link", { name: "View licenses for DEFAULT" }).click();
   await page.locator("tr").filter({ has: page.getByLabel("Device key for DEFAULT solo") }).getByText("Activate and download", { exact: true }).click();
   await expect(page.locator(".licenseDownload").getByRole("status")).toHaveCount(0);
+});
+
+// D3: "Signing out doesn't orphan browser seats." Sign-out releases every seat this browser holds,
+// best-effort, before the actual sign-out request, and the sign-in screen says how many.
+test("signing out with a live seat releases it and the sign-in screen shows the release count", async ({ page }) => {
+  const requests = setup(page, { entitlements: [ENT_ALPHA] });
+  await signIn(page);
+  await page.getByRole("link", { name: "Devices", exact: true }).click();
+  await page.getByText("Browser seats", { exact: true }).click();
+  const alphaCard = page.locator(".seatCard").filter({ hasText: "alpha" });
+  await alphaCard.getByRole("button", { name: "Start seat" }).click();
+  await expect(alphaCard.getByRole("status")).toContainText("Seat started.");
+
+  await page.getByRole("button", { name: "Sign out" }).click();
+  await expect.poll(() => requests.releases).toBe(1);
+  await expect(page.getByRole("button", { name: "Send code" })).toBeVisible();
+  await expect(page.getByText("Released 1 browser seat.", { exact: true })).toBeVisible();
+  // The released seat is gone from this customer's storage, not just the in-memory session.
+  await expect.poll(() => page.evaluate(() => window.localStorage.getItem("licensecc.portal.seats.v1:cus_results"))).toBe("{}");
+});
+
+// D3 (decision 5): a seat whose release fails at sign-out stays stored under the customer id, is
+// listed again after the next sign-in, and can still be released once the server accepts it.
+test("a seat whose release fails at sign-out is listed again after signing in and can be released", async ({ page }) => {
+  let releaseAttempts = 0;
+  const requests = setup(page, {
+    entitlements: [ENT_ALPHA],
+    // Fail only the FIRST release attempt (sign-out); a later manual release succeeds normally.
+    releaseResponse: () => {
+      releaseAttempts += 1;
+      if (releaseAttempts > 1) return null;
+      return { status: 503, body: { ok: false, code: "verification_error", request_id: "devices-results-signout-fail" } };
+    },
+  });
+  await signIn(page);
+  await page.getByRole("link", { name: "Devices", exact: true }).click();
+  await page.getByText("Browser seats", { exact: true }).click();
+  const alphaCard = page.locator(".seatCard").filter({ hasText: "alpha" });
+  await alphaCard.getByRole("button", { name: "Start seat" }).click();
+  await expect(alphaCard.getByRole("status")).toContainText("Seat started.");
+
+  await page.getByRole("button", { name: "Sign out" }).click();
+  await expect.poll(() => requests.releases).toBe(1);
+  await expect(page.getByRole("button", { name: "Send code" })).toBeVisible();
+  await expect(page.getByText("1 seat couldn't be released; they'll be listed after you sign in again.", { exact: true })).toBeVisible();
+  // The failed seat stays under this customer's key -- never silently dropped.
+  const storedAfterFailedSignOut = await page.evaluate(() => window.localStorage.getItem("licensecc.portal.seats.v1:cus_results"));
+  expect(storedAfterFailedSignOut).toContain("ent_alpha");
+
+  // Sign back in as the SAME customer: the failed seat is listed under Browser seats again, pre-
+  // expanded (a live/failed seat makes the panel a <section>, never the collapsed <details>).
+  await signIn(page);
+  await page.getByRole("link", { name: "Devices", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Browser seats" })).toBeVisible();
+  const alphaCardAgain = page.locator(".seatCard").filter({ hasText: "alpha" });
+  await expect(alphaCardAgain.getByRole("button", { name: "Start seat" })).toBeDisabled();
+  await expect(alphaCardAgain.getByRole("button", { name: "Release seat" })).toBeEnabled();
+
+  // And releasing it now works (the server accepts this second attempt).
+  await alphaCardAgain.getByRole("button", { name: "Release seat" }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Confirm release" }).click();
+  await expect(alphaCardAgain.getByRole("status")).toContainText("Seat released.");
+  await expect.poll(() => requests.releases).toBe(2);
+});
+
+// D3 (decision 5): a different customer signing in on the same browser, after an explicit sign-out,
+// never sees the first customer's (even failed/unreleased) browser seats.
+test("a different customer signing in after an explicit sign-out never sees the first customer's browser seats", async ({ page }) => {
+  const CODE_B = "19283746";
+  const ENT_A = { ...ENT_ALPHA, id: "ent_switch_a", project: "ALPHACORP", feature: "widget" };
+  const ENT_B = { ...ENT_ALPHA, id: "ent_switch_b", project: "BETAWORKS", feature: "gadget" };
+  const requests = setup(page, {
+    customers: {
+      [VALID_CODE]: { customerId: "cus_signout_a", entitlements: [ENT_A] },
+      [CODE_B]: { customerId: "cus_signout_b", entitlements: [ENT_B] },
+    },
+    // Every release fails, so A's seat stays stored under A's customer key through the sign-out.
+    releaseResponse: () => ({ status: 503, body: { ok: false, code: "verification_error", request_id: "devices-results-signout-b" } }),
+  });
+  await signIn(page);
+  await page.getByRole("link", { name: "Devices", exact: true }).click();
+  await page.getByText("Browser seats", { exact: true }).click();
+  const widgetCard = page.locator(".seatCard").filter({ hasText: "widget" });
+  await widgetCard.getByRole("button", { name: "Start seat" }).click();
+  await expect(widgetCard.getByRole("status")).toContainText("Seat started.");
+
+  await page.getByRole("button", { name: "Sign out" }).click();
+  await expect.poll(() => requests.releases).toBe(1);
+  await expect(page.getByRole("button", { name: "Send code" })).toBeVisible();
+
+  // Sign in as a DIFFERENT customer: their own floating entitlement renders the section, but
+  // collapsed -- never pre-expanded with A's leftover seat, and A's project name is nowhere on screen.
+  await page.getByLabel("Email").fill("bob@example.com");
+  await page.getByRole("button", { name: "Send code" }).click();
+  await page.getByLabel("8-digit code").fill(CODE_B);
+  await page.getByRole("button", { name: "Verify", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Apps", exact: true })).toBeVisible();
+  await page.getByRole("link", { name: "Devices", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Browser seats" })).toHaveCount(0);
+  await page.getByText("Browser seats", { exact: true }).click();
+  const gadgetCard = page.locator(".seatCard").filter({ hasText: "gadget" });
+  await expect(gadgetCard.getByRole("button", { name: "Start seat" })).toBeEnabled();
+  await expect(gadgetCard.getByRole("button", { name: "Release seat" })).toBeDisabled();
+  await expect(page.getByText("widget", { exact: false })).toHaveCount(0);
+
+  // B's own storage key holds nothing; A's failed seat remains only under A's key.
+  const storedForB = await page.evaluate(() => window.localStorage.getItem("licensecc.portal.seats.v1:cus_signout_b"));
+  expect(storedForB).toBeNull();
+  const storedForA = await page.evaluate(() => window.localStorage.getItem("licensecc.portal.seats.v1:cus_signout_a"));
+  expect(storedForA).toContain("ent_switch_a");
 });

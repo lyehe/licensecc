@@ -788,7 +788,8 @@ test("customer portal signs in with an 8-digit code and walks every screen witho
   const heartbeat = api.requests.seatActions.at(-1);
   expect(heartbeat).toMatchObject({ op: "heartbeat", body: { entitlement_id: "ent_floating", seat_id: "seat-e2e" } });
   expect(heartbeat.body.client_instance_id).toBe(checkout.body.client_instance_id);
-  const storedSeatSessionBeforeReleaseConfirm = await page.evaluate(() => window.localStorage.getItem("licensecc.portal.seats.v1"));
+  // D3: seats persist per customer id ("cus_self" throughout this fixture), not under one shared key.
+  const storedSeatSessionBeforeReleaseConfirm = await page.evaluate(() => window.localStorage.getItem("licensecc.portal.seats.v1:cus_self"));
 
   // Release is destructive: opening the confirmation must not send a request or change the live
   // session. The dialog names the exact license, seat, and device plus the availability impact.
@@ -857,7 +858,7 @@ test("customer portal signs in with an 8-digit code and walks every screen witho
   await cancelRelease.click();
   await expect(releaseDialog).toHaveCount(0);
   await expect.poll(() => api.requests.releases).toBe(0);
-  await expect.poll(() => page.evaluate(() => window.localStorage.getItem("licensecc.portal.seats.v1"))).toBe(storedSeatSessionBeforeReleaseConfirm);
+  await expect.poll(() => page.evaluate(() => window.localStorage.getItem("licensecc.portal.seats.v1:cus_self"))).toBe(storedSeatSessionBeforeReleaseConfirm);
   await expect(seatCard.getByRole("button", { name: "Renew seat" })).toBeEnabled();
   await expect(seatCard.getByRole("button", { name: "Release seat" })).toBeEnabled();
   await expect(seatCard.getByRole("button", { name: "Release seat" })).toBeFocused();
@@ -869,7 +870,7 @@ test("customer portal signs in with an 8-digit code and walks every screen witho
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await expect.poll(() => api.requests.releases).toBe(0);
-  await expect.poll(() => page.evaluate(() => window.localStorage.getItem("licensecc.portal.seats.v1"))).toBe(storedSeatSessionBeforeReleaseConfirm);
+  await expect.poll(() => page.evaluate(() => window.localStorage.getItem("licensecc.portal.seats.v1:cus_self"))).toBe(storedSeatSessionBeforeReleaseConfirm);
   await expect(seatCard.getByRole("button", { name: "Release seat" })).toBeEnabled();
   await expect(seatCard.getByRole("button", { name: "Release seat" })).toBeFocused();
 
@@ -899,7 +900,7 @@ test("customer portal signs in with an 8-digit code and walks every screen witho
   await expect(page.getByText("verification_error", { exact: false })).not.toBeVisible();
   await expect(seatCard.getByRole("button", { name: "Release seat" })).toBeEnabled();
   await expect(seatCard.getByRole("button", { name: "Release seat" })).toBeFocused();
-  await expect.poll(() => page.evaluate(() => window.localStorage.getItem("licensecc.portal.seats.v1"))).toBe(storedSeatSessionBeforeReleaseConfirm);
+  await expect.poll(() => page.evaluate(() => window.localStorage.getItem("licensecc.portal.seats.v1:cus_self"))).toBe(storedSeatSessionBeforeReleaseConfirm);
 
   // A rejected fetch keeps the context/modal present with an explicit failure, then Escape closes
   // it through the normal policy path and restores the original Release trigger.
@@ -918,7 +919,7 @@ test("customer portal signs in with an 8-digit code and walks every screen witho
   await page.keyboard.press("Escape");
   await expect(networkErrorDialog).toHaveCount(0);
   await expect(seatCard.getByRole("button", { name: "Release seat" })).toBeFocused();
-  await expect.poll(() => page.evaluate(() => window.localStorage.getItem("licensecc.portal.seats.v1"))).toBe(storedSeatSessionBeforeReleaseConfirm);
+  await expect.poll(() => page.evaluate(() => window.localStorage.getItem("licensecc.portal.seats.v1:cus_self"))).toBe(storedSeatSessionBeforeReleaseConfirm);
 
   // Only the explicit confirmation sends the original request, and a double click remains one
   // release while the existing busy guard is active. Releasing the last live seat used to always
@@ -957,7 +958,7 @@ test("customer portal signs in with an 8-digit code and walks every screen witho
   await expect(seatCard.getByRole("button", { name: "Start seat" })).toBeDisabled();
   await expect(seatCard.getByRole("button", { name: "Renew seat" })).toBeEnabled();
   const refreshFailureReleaseCount = api.requests.releases;
-  const refreshFailureStoredSession = await page.evaluate(() => window.localStorage.getItem("licensecc.portal.seats.v1"));
+  const refreshFailureStoredSession = await page.evaluate(() => window.localStorage.getItem("licensecc.portal.seats.v1:cus_self"));
   expect(refreshFailureStoredSession).not.toBeNull();
   api.controls.rejectRefreshes = 3;
   await seatCard.getByRole("button", { name: "Release seat" }).click();
@@ -970,7 +971,7 @@ test("customer portal signs in with an 8-digit code and walks every screen witho
   // contain the collapsed Technical-details <details>); role + class alone identify it either way.
   await expect(page.locator('.feedback [role="status"]')).toContainText(/released; status refresh failed/i);
   await expect(page.getByRole("button", { name: "Refresh status" })).toBeVisible();
-  await expect.poll(() => page.evaluate(() => window.localStorage.getItem("licensecc.portal.seats.v1"))).toBe("{}");
+  await expect.poll(() => page.evaluate(() => window.localStorage.getItem("licensecc.portal.seats.v1:cus_self"))).toBe("{}");
   // This release also leaves no browser session, but the panel stays expanded (this seat's own
   // "Seat released." result is showing); the failed refresh keeps the whole page busy/stale, so
   // neither the (disabled) Start seat button nor the panel heading can take focus and it falls back
