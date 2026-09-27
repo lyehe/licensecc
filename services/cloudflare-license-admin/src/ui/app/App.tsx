@@ -88,7 +88,7 @@ function ConsoleShell(): React.ReactElement {
           <Policies active={activeTab === "policies"} draftRequest={policyRequest} onReturnToDraft={returnToDraft} />
           <Catalog active={activeTab === "plans"} />
           <Webhooks active={activeTab === "webhooks"} />
-          <Events active={activeTab === "events"} />
+          <Events active={activeTab === "events"} navigationIntent={navigationIntent} onNavigationHandled={onNavigationHandled} />
           <Customers active={activeTab === "customers"} navigationIntent={navigationIntent} onNavigationHandled={onNavigationHandled} />
           <Licenses active={activeTab === "licenses"} navigationIntent={navigationIntent} onNavigationHandled={onNavigationHandled} />
           <Fulfillment active={activeTab === "fulfillment"} navigationIntent={navigationIntent} onNavigationHandled={onNavigationHandled} />

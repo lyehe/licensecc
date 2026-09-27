@@ -754,7 +754,7 @@ export function hasPlanProjectionApplyData(value: unknown): boolean {
 
 export function hasEventListData(value: unknown): boolean {
   const data = record(value);
-  return data !== null && Array.isArray(data.items) && data.items.every((item) => {
+  return data !== null && cursorField(data) && Array.isArray(data.items) && data.items.every((item) => {
     const row = record(item);
     return row !== null && nonNegativeIntegerField(row, "id") && enumField(row, "event_type", ["create", "update", "disable", "reenable", "revoke", "revoked-override", "upsert"] as const) && stringField(row, "project") && stringField(row, "feature") && stringField(row, "license_fingerprint") && enumField(row, "status", ENTITLEMENT_STATUSES) && nonNegativeIntegerField(row, "revocation_seq") && stringField(row, "actor") && stringField(row, "actor_type") && stringField(row, "source") && stringField(row, "request_id") && typeof row.reason === "string" && typeof row.detail === "string" && nonNegativeIntegerField(row, "created_at");
   });

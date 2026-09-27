@@ -1070,10 +1070,11 @@ export const openApiComponents: LabeledComponentFragment = {
               properties: {
                 id: { type: "integer" }, project: { type: "string" }, feature: { type: "string" }, license_fingerprint: { type: "string" },
                 event_type: { type: "string" }, status: { type: "string" }, revocation_seq: { type: "integer" }, actor: { type: "string" }, actor_type: { type: "string" },
-                source: { type: "string" }, request_id: { type: "string" }, reason: { type: ["string", "null"] }, created_at: { type: "integer" },
+                source: { type: "string" }, request_id: { type: "string" }, reason: { type: ["string", "null"] }, detail: { type: "string" }, created_at: { type: "integer" },
               },
             },
           },
+          next_cursor: { type: ["string", "null"], description: "Opaque keyset page token; pass back as `cursor` for the next page. null on the last page." },
         },
       }],
       ["BatchTransitionInput", {

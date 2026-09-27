@@ -242,11 +242,6 @@ button.danger:hover:not(:disabled) {
   width: auto;
 }
 
-.eventsToolbar {
-  grid-template-columns: max-content;
-  justify-content: flex-end;
-}
-
 @media (max-width: 920px) {
   .globalSearch {
     max-width: none;

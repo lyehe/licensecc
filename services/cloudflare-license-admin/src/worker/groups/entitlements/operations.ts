@@ -28,7 +28,7 @@ import { parseJsonBody, safeNotes } from "../../request.js";
 import { safeString } from "@licensecc/cloudflare-runtime/http/kit";
 import { MAX_FEATURE_SIZE, MAX_PROJECT_SIZE, boundedInt, nullableEpoch, nullableSafeString, validateEntitlementPatch } from "./validation.js";
 import { clientIp } from "../../support.js";
-import { CSV_ROW_CAP, LIMIT_ONLY_PAGINATION_OPTIONS, boundedCursor, csvResponse, wantsCsv } from "../../query.js";
+import { CSV_ROW_CAP, boundedCursor, boundedEventsCursor, csvResponse, encodeEventsCursor, epochQueryParam, wantsCsv } from "../../query.js";
 
 const HEX_64 = /^[0-9a-fA-F]{64}$/;
 
@@ -87,7 +87,32 @@ export async function listEntitlements(request: Request, env: Env, requestIdValu
 
 export async function listEvents(request: Request, env: Env, requestIdValue: string): Promise<Response> {
   const url = new URL(request.url);
-  const pagination = boundedCursor(url, LIMIT_ONLY_PAGINATION_OPTIONS);
+  // project/feature/event_type/actor are exact-match filters, validated the same (presence-only)
+  // way listEntitlements validates its own project/feature/status/customer_id/license_id filters:
+  // an unrecognized event_type or actor simply matches zero rows rather than 400ing, exactly like
+  // an unrecognized status does today.
+  const filters: string[] = [];
+  const values: unknown[] = [];
+  for (const [query, column] of [["project", "project"], ["feature", "feature"], ["event_type", "event_type"], ["actor", "actor"]] as const) {
+    const value = url.searchParams.get(query);
+    if (value !== null && value !== "") {
+      filters.push(`${column} = ?`);
+      values.push(value);
+    }
+  }
+  const entitlementIdParam = url.searchParams.get("entitlement_id");
+  if (entitlementIdParam) {
+    const decoded = decodeEntitlementId(entitlementIdParam);
+    if (decoded === null) return envelope(requestIdValue, "invalid_request", undefined, 400);
+    filters.push("project = ? AND feature = ? AND license_fingerprint = ?");
+    values.push(decoded.project, decoded.feature, decoded.license_fingerprint);
+  }
+  const since = epochQueryParam(url, "since");
+  const until = epochQueryParam(url, "until");
+  if (since === null || until === null) return envelope(requestIdValue, "invalid_request", undefined, 400);
+  if (since !== undefined) { filters.push("created_at >= ?"); values.push(since); }
+  if (until !== undefined) { filters.push("created_at <= ?"); values.push(until); }
+  const pagination = boundedEventsCursor(url);
   if (pagination === null) {
     return envelope(requestIdValue, "invalid_request", undefined, 400);
   }
@@ -95,22 +120,36 @@ export async function listEvents(request: Request, env: Env, requestIdValue: str
   // device revoke/disable writes on an event_type='update' row (audit R6.5); surface it so the console
   // + CSV distinguish a device revocation from a plain entitlement edit.
   const eventColumns = "id, project, feature, license_fingerprint, event_type, status, revocation_seq, actor, actor_type, source, request_id, reason, detail, created_at";
+  const where = filters.length === 0 ? "" : `WHERE ${filters.join(" AND ")}`;
   if (wantsCsv(url)) {
-    // CSV export: same ORDER BY, bounded by the CSV cap (the `limit` page size does not apply).
+    // CSV export: SAME filters, but bounded by the CSV cap instead of a page cursor.
     const csvRows = await env.DB.prepare(
-      `SELECT ${eventColumns} FROM entitlement_events ORDER BY created_at DESC, id DESC LIMIT ?`,
-    ).bind(CSV_ROW_CAP).all<Record<string, unknown>>();
+      `SELECT ${eventColumns} FROM entitlement_events ${where} ORDER BY created_at DESC, id DESC LIMIT ?`,
+    ).bind(...values, CSV_ROW_CAP).all<Record<string, unknown>>();
     return csvResponse(
       "events.csv",
       ["id", "project", "feature", "license_fingerprint", "event_type", "status", "revocation_seq", "actor", "actor_type", "source", "request_id", "reason", "detail", "created_at"],
       csvRows.results,
     );
   }
-  const { limit } = pagination;
+  const { limit, cursor } = pagination;
+  const pageFilters = [...filters];
+  const pageValues = [...values];
+  if (cursor !== null) {
+    // Keyset, not an offset: anchored to the last row's own (created_at, id) identity, so a page
+    // boundary landing on several equal created_at values neither skips nor repeats a row.
+    pageFilters.push("(created_at < ? OR (created_at = ? AND id < ?))");
+    pageValues.push(cursor.createdAt, cursor.createdAt, cursor.id);
+  }
+  const pageWhere = pageFilters.length === 0 ? "" : `WHERE ${pageFilters.join(" AND ")}`;
+  pageValues.push(limit + 1);
   const rows = await env.DB.prepare(
-    `SELECT ${eventColumns} FROM entitlement_events ORDER BY created_at DESC, id DESC LIMIT ?`,
-  ).bind(limit).all();
-  return envelope(requestIdValue, "events_listed", { items: rows.results });
+    `SELECT ${eventColumns} FROM entitlement_events ${pageWhere} ORDER BY created_at DESC, id DESC LIMIT ?`,
+  ).bind(...pageValues).all<{ id: number; created_at: number }>();
+  const items = rows.results.slice(0, limit);
+  const last = items.at(-1);
+  const nextCursor = rows.results.length > limit && last !== undefined ? encodeEventsCursor(last.created_at, last.id) : null;
+  return envelope(requestIdValue, "events_listed", { items, next_cursor: nextCursor });
 }
 
 export async function createFromPolicy(request: Request, env: Env, ctx: MutationContext, body: unknown, requestIdValue: string): Promise<Response> {

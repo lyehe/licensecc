@@ -2192,6 +2192,9 @@
                   "created_at": {
                     "type": "integer"
                   },
+                  "detail": {
+                    "type": "string"
+                  },
                   "event_type": {
                     "type": "string"
                   },
@@ -2229,6 +2232,13 @@
                 "type": "object"
               },
               "type": "array"
+            },
+            "next_cursor": {
+              "description": "Opaque keyset page token; pass back as `cursor` for the next page. null on the last page.",
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           "type": "object"
@@ -14844,6 +14854,80 @@
           "operationId": "listEvents",
           "parameters": [
             {
+              "description": "Exact-match project filter.",
+              "in": "query",
+              "name": "project",
+              "required": false,
+              "schema": {
+                "type": "string"
+              }
+            },
+            {
+              "description": "Exact-match feature filter.",
+              "in": "query",
+              "name": "feature",
+              "required": false,
+              "schema": {
+                "type": "string"
+              }
+            },
+            {
+              "description": "Exact canonical entitlement ID; scopes to that one entitlement's events.",
+              "in": "query",
+              "name": "entitlement_id",
+              "required": false,
+              "schema": {
+                "type": "string"
+              }
+            },
+            {
+              "description": "Exact-match event type filter.",
+              "in": "query",
+              "name": "event_type",
+              "required": false,
+              "schema": {
+                "enum": [
+                  "create",
+                  "update",
+                  "disable",
+                  "reenable",
+                  "revoke",
+                  "upsert",
+                  "revoked-override"
+                ],
+                "type": "string"
+              }
+            },
+            {
+              "description": "Exact-match actor filter.",
+              "in": "query",
+              "name": "actor",
+              "required": false,
+              "schema": {
+                "type": "string"
+              }
+            },
+            {
+              "description": "Only events at or after this epoch-second timestamp.",
+              "in": "query",
+              "name": "since",
+              "required": false,
+              "schema": {
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            {
+              "description": "Only events at or before this epoch-second timestamp.",
+              "in": "query",
+              "name": "until",
+              "required": false,
+              "schema": {
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            {
               "allowEmptyValue": true,
               "description": "Page size (default 50 when omitted or empty; explicit values must be safe integers from 1 through 100; malformed values return 400 invalid_request).",
               "in": "query",
@@ -14854,6 +14938,18 @@
                 "maximum": 100,
                 "minimum": 1,
                 "type": "integer"
+              }
+            },
+            {
+              "allowEmptyValue": true,
+              "description": "Opaque keyset page token from a previous page's next_cursor (\"created_at:id\"); omit for the first page. Malformed values return 400 invalid_request.",
+              "in": "query",
+              "name": "cursor",
+              "required": false,
+              "schema": {
+                "default": "0",
+                "pattern": "^[0-9]+:[0-9]+$",
+                "type": "string"
               }
             },
             {
@@ -14896,7 +14992,7 @@
                   }
                 }
               },
-              "description": "Audit-event list (JSON), or a CSV attachment when ?format=csv."
+              "description": "Audit-event page (JSON), or a CSV attachment when ?format=csv (same filters, no cursor)."
             },
             "400": {
               "content": {
@@ -14915,7 +15011,7 @@
                   }
                 }
               },
-              "description": "Invalid limit query parameter (omitted or empty values use documented defaults; explicit values must be safe integers within the documented bounds)."
+              "description": "Invalid limit or cursor query parameter (omitted or empty values use documented defaults; explicit values must be safe integers within the documented bounds)."
             },
             "401": {
               "content": {
@@ -14978,7 +15074,7 @@
               "devBearer": []
             }
           ],
-          "summary": "List entitlement audit events (most recent first)",
+          "summary": "List entitlement audit events (most recent first), optionally filtered",
           "tags": [
             "admin:entitlements"
           ]

@@ -12,6 +12,10 @@ const filterKeys: Partial<Record<AdminTab, readonly string[]>> = {
   entitlements: ["project", "feature", "status", "license_id"],
   licenses: ["project", "customer_id"],
   fulfillment: ["status", "subscription_id"],
+  // entitlement_id is deliberately absent: a "History" deep link from an entitlement row sets it to
+  // pin one exact record's events, but (like the entitlements id filter) it encodes the license
+  // fingerprint, so it must stay session-only and never reach the URL.
+  events: ["project", "feature", "event_type", "actor", "since", "until"],
 };
 const statuses: Partial<Record<AdminTab, readonly string[]>> = {
   customers: ["active", "disabled"],

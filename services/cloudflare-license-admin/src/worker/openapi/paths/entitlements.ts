@@ -3,7 +3,7 @@ import {
   ENTITLEMENT_BATCH_MAX_IDS,
   ENTITLEMENT_BATCH_TOO_LARGE_CODE,
 } from "../../../shared/api.js";
-import { LIMIT_ONLY_PAGINATION_OPTIONS } from "../../query.js";
+import { DEFAULT_PAGINATION_OPTIONS } from "../../query.js";
 import {
   ADMIN_AUTH_ERRORS,
   ADMIN_MUTATION_AUTH_ERRORS,
@@ -184,16 +184,31 @@ export const entitlementPaths: LabeledPathFragment = {
     ["/api/admin/events", {
     get: {
       tags: ["admin:entitlements"],
-      summary: "List entitlement audit events (most recent first)",
+      summary: "List entitlement audit events (most recent first), optionally filtered",
       operationId: "listEvents",
       security: ADMIN_SECURITY,
       parameters: [
-        ...limitCursorParams(LIMIT_ONLY_PAGINATION_OPTIONS),
+        { name: "project", in: "query", required: false, description: "Exact-match project filter.", schema: { type: "string" } },
+        { name: "feature", in: "query", required: false, description: "Exact-match feature filter.", schema: { type: "string" } },
+        { name: "entitlement_id", in: "query", required: false, description: "Exact canonical entitlement ID; scopes to that one entitlement's events.", schema: { type: "string" } },
+        { name: "event_type", in: "query", required: false, description: "Exact-match event type filter.", schema: { type: "string", enum: ["create", "update", "disable", "reenable", "revoke", "upsert", "revoked-override"] } },
+        { name: "actor", in: "query", required: false, description: "Exact-match actor filter.", schema: { type: "string" } },
+        { name: "since", in: "query", required: false, description: "Only events at or after this epoch-second timestamp.", schema: { type: "integer", minimum: 0 } },
+        { name: "until", in: "query", required: false, description: "Only events at or before this epoch-second timestamp.", schema: { type: "integer", minimum: 0 } },
+        ...limitCursorParams({ ...DEFAULT_PAGINATION_OPTIONS, includeCursor: false }),
+        {
+          name: "cursor",
+          in: "query",
+          required: false,
+          allowEmptyValue: true,
+          description: "Opaque keyset page token from a previous page's next_cursor (\"created_at:id\"); omit for the first page. Malformed values return 400 invalid_request.",
+          schema: { type: "string", default: "0", pattern: "^[0-9]+:[0-9]+$" },
+        },
         formatCsvParam,
       ],
       responses: {
-        "200": okResponse("Audit-event list (JSON), or a CSV attachment when ?format=csv.", "#/components/schemas/EventsListData", "events_listed"),
-        "400": invalidPaginationResponse(LIMIT_ONLY_PAGINATION_OPTIONS),
+        "200": okResponse("Audit-event page (JSON), or a CSV attachment when ?format=csv (same filters, no cursor).", "#/components/schemas/EventsListData", "events_listed"),
+        "400": invalidPaginationResponse(DEFAULT_PAGINATION_OPTIONS),
         ...ADMIN_AUTH_ERRORS,
       },
     },

@@ -38,6 +38,7 @@ interface ListProps {
   meterEntitlementId: string | null;
   onDevices: (id: string) => void;
   onMeter: (id: string) => void;
+  onHistory: (item: EntitlementRecord) => void;
 }
 
 export function EntitlementValidity({ item }: { item: EntitlementRecord }): React.ReactElement {
@@ -73,7 +74,8 @@ export function EntitlementList(props: ListProps): React.ReactElement {
   }, [filter.id, ready, items]);
   function actions(item: EntitlementRecord): React.ReactElement {
     const focus = focusTargetInRow(`entitlement:${item.id}`, ['button[data-focus-action="reenable"]', ".status"]);
-    return <div className="actions"><button disabled={locked || !canEditEntitlement(item.status)} onClick={() => props.onEdit(item)}>Edit</button>{(!props.scoped || canEditEntitlement(item.status)) && <ActionMenu label="More actions">
+    return <div className="actions"><button disabled={locked || !canEditEntitlement(item.status)} onClick={() => props.onEdit(item)}>Edit</button><ActionMenu label="More actions">
+      <button disabled={busy} onClick={() => props.onHistory(item)}>History</button>
       {canEditEntitlement(item.status) && <button disabled={locked} onClick={() => props.onEdit(item, true)}>Extend validity</button>}
       {canRunAction(item.status, "disable") && <button data-focus-action="disable" className="danger" disabled={locked} onClick={() => requestConfirm({ title: "Disable entitlement", body: disableEntitlementConfirm(item), requiresReason: true, run: ({ idempotencyKey }) => onTransition(item, "disable", idempotencyKey), successFocusTarget: focus, isCurrent })}>Disable</button>}
       {canRunAction(item.status, "reenable") && <button data-focus-action="reenable" disabled={locked} onClick={() => void runConsequenceAction({ run: ({ idempotencyKey }) => onTransition(item, "reenable", idempotencyKey), successFocusTarget: focus, isCurrent })}>Reenable</button>}
@@ -81,7 +83,7 @@ export function EntitlementList(props: ListProps): React.ReactElement {
       {!props.scoped && <>{item.license_mode==="floating" && item.status==="active" && <button className="danger" disabled={locked} onClick={() => requestConfirm({ title: "Release seats", body: releaseSeatsConfirm(item), requiresReason: true, run: ({ idempotencyKey }) => onReleaseSeats(item, idempotencyKey), successFocusTarget: focus, isCurrent })}>Release seats</button>}
       <button disabled={busy} aria-expanded={props.deviceEntitlementId === item.id} onClick={() => props.onDevices(item.id)}>Devices</button>
       <button disabled={busy} aria-expanded={props.meterEntitlementId === item.id} onClick={() => props.onMeter(item.id)}>Meter</button></>}
-    </ActionMenu>}</div>;
+    </ActionMenu></div>;
   }
   function selection(item: EntitlementRecord): React.ReactElement | null {
     if (props.scoped) return null;
