@@ -21,12 +21,39 @@ test("admin UI workflow builds filtered license and order API paths", async () =
   assert.equal(fulfillment.ordersPath({ status: "rejected", subscription_id: "" }), "/api/admin/orders?status=rejected");
 });
 
-test("admin UI workflow formats epoch timestamps", async () => {
+test("admin UI workflow formats event timestamps in local time with a zone label", async () => {
   const format = await loadWorkflowModule("shared/format.ts");
   assert.equal(format.formatEpoch(null), "-");
   assert.equal(format.formatEpoch(undefined), "-");
-  assert.equal(format.formatEpoch(1710000000), new Date(1710000000 * 1000).toLocaleString());
-  assert.equal(format.formatEpoch(0), new Date(0).toLocaleString());
+  assert.equal(format.formatEpoch(1710000000), new Date(1710000000 * 1000).toLocaleString(undefined, { timeZoneName: "short" }));
+  assert.equal(format.formatEpoch(0), new Date(0).toLocaleString(undefined, { timeZoneName: "short" }));
+});
+
+test("admin UI workflow formats validity dates as a fixed UTC day, independent of the host time zone", async () => {
+  const format = await loadWorkflowModule("shared/format.ts");
+  assert.equal(format.formatUtcDate(null), "-");
+  assert.equal(format.formatUtcDate(undefined), "-");
+  // 2026-12-31T00:00:00Z: exactly UTC midnight -> no time shown.
+  assert.equal(format.formatUtcDate(1798675200), "2026-12-31 UTC");
+  // 2026-12-31T15:00:00Z: a computed deadline off midnight must keep its time, not hide it.
+  assert.equal(format.formatUtcDate(1798729200), "2026-12-31 15:00 UTC");
+  // 2026-12-31T23:59:00Z: one minute before the next UTC midnight.
+  assert.equal(format.formatUtcDate(1798761540), "2026-12-31 23:59 UTC");
+});
+
+test("admin UI workflow formats validity dates identically across host time zones", async () => {
+  const originalTz = process.env.TZ;
+  try {
+    process.env.TZ = "America/New_York";
+    const newYork = await loadWorkflowModule("shared/format.ts");
+    process.env.TZ = "Pacific/Kiritimati";
+    const kiritimati = await loadWorkflowModule("shared/format.ts");
+    for (const epoch of [1798675200, 1798729200, 1798761540]) {
+      assert.equal(newYork.formatUtcDate(epoch), kiritimati.formatUtcDate(epoch));
+    }
+  } finally {
+    if (originalTz === undefined) delete process.env.TZ; else process.env.TZ = originalTz;
+  }
 });
 
 test("withCursor appends a cursor param respecting an existing query string", async () => {

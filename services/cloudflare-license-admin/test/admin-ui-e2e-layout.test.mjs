@@ -9,6 +9,7 @@ const expectedSpecs = [
   "admin-ui.catalog.e2e.mjs",
   "admin-ui.connections.e2e.mjs",
   "admin-ui.consequences.e2e.mjs",
+  "admin-ui.datedisplay.e2e.mjs",
   "admin-ui.lifecycle.e2e.mjs",
   "admin-ui.navigation.e2e.mjs",
   "admin-ui.onboarding.e2e.mjs",
@@ -31,7 +32,7 @@ test("admin browser coverage stays partitioned by operator concern", () => {
     assert.ok(localTitles.length > 0, `${path} must own browser scenarios`);
     titles.push(...localTitles);
   }
-  assert.equal(titles.length, 135);
+  assert.equal(titles.length, 137);
   assert.equal(new Set(titles).size, titles.length, "browser scenario titles must be unique");
 
   const fixture = readFileSync(join(directory, "admin-ui.fixture.mjs"), "utf8");
