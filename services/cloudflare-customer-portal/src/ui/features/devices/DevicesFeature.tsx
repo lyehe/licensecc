@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { DeviceRegistrations } from "./DeviceRegistrations";
 import { ProtectedNodes } from "./ProtectedNodes";
 import { BrowserSeats } from "./BrowserSeats";
-import { randomHex, readStoredSeats, seatPath, writeStoredSeats } from "./seatStorage";
+import { discardLegacyStoredSeats, randomHex, readStoredSeats, runSeatSignOutReleases, seatPath, writeStoredSeats } from "./seatStorage";
 
 import {
   DEVICE_RELEASE_CONFIRM_COPY,
@@ -23,6 +23,8 @@ export const DEVICES_REFRESH_ACTION_LABEL = PORTAL_STATUS_REFRESH_ACTION_LABEL;
 interface DeviceFeatureOptions {
   busy: boolean;
   busyRef: React.RefObject<boolean>;
+  // D3: the signed-in customer id. Seats persist keyed by this id, re-hydrated on every change.
+  customer: string;
   devices: DeviceRow[];
   entitlements: EntitlementRow[];
   refreshData(): Promise<boolean>;
@@ -72,6 +74,8 @@ export interface DevicesController {
   dismissSeatRelease(): void;
   confirmSeatRelease(): Promise<void>;
   releaseDevice(item: DeviceRow): Promise<void>;
+  // D3: sign-out's best-effort seat release (App.tsx's logout(), before the actual sign-out request).
+  releaseSeatsOnSignOut(): Promise<{ released: number; failed: number }>;
   clear(): void;
   // Fix round 1 (Important): seatMessages/deviceMessages live here, one level above DevicesFeature,
   // so they otherwise outlive a visit to the Devices page (DevicesFeature only renders while
@@ -98,10 +102,11 @@ function focusFirstAvailable(
 }
 
 export function useDevicesController(options: DeviceFeatureOptions): DevicesController {
-  const { busy, busyRef, devices, entitlements, refreshData, runOnce, setMessage, visitGenerationRef } = options;
-  const [seatSessions, setSeatSessionsRaw] = useState<Record<string, SeatSession>>(
-    () => hydrateSeatSessions(readStoredSeats(), Math.floor(Date.now() / 1000)),
-  );
+  const { busy, busyRef, customer, devices, entitlements, refreshData, runOnce, setMessage, visitGenerationRef } = options;
+  // D3: seeded empty rather than hydrated eagerly -- `customer` is not yet known at PortalShell's very
+  // first render (auth starts as "loading"), so hydration happens in the effect below, keyed to the
+  // customer id once a sign-in actually resolves.
+  const [seatSessions, setSeatSessionsRaw] = useState<Record<string, SeatSession>>({});
   const [pendingSeatRelease, setPendingSeatRelease] = useState<PendingSeatRelease | null>(null);
   const [seatReleaseError, setSeatReleaseError] = useState<string | null>(null);
   const [seatReleaseOutcomeUnknown, setSeatReleaseOutcomeUnknown] = useState(false);
@@ -118,12 +123,21 @@ export function useDevicesController(options: DeviceFeatureOptions): DevicesCont
   const browserSessionsSummaryRef = useRef<HTMLElement | null>(null);
   const panelHeadingRef = useRef<HTMLElement | null>(null);
 
+  // D3 (decision 4): re-hydrate whenever the signed-in customer changes -- the initial sign-in and any
+  // later switch alike. Never fires on an unrelated re-render (the dependency is the id itself), so it
+  // cannot clobber this SAME customer's live seatSessions mid-visit.
+  useEffect(() => {
+    if (customer === "") return;
+    discardLegacyStoredSeats();
+    setSeatSessionsRaw(hydrateSeatSessions(readStoredSeats(customer), Math.floor(Date.now() / 1000)));
+  }, [customer]);
+
   function setSeatSessions(update: React.SetStateAction<Record<string, SeatSession>>): void {
     setSeatSessionsRaw((current) => {
       const next = typeof update === "function"
         ? update(current)
         : update;
-      writeStoredSeats(serializeSeatSessions(next));
+      if (customer !== "") writeStoredSeats(customer, serializeSeatSessions(next));
       return next;
     });
   }
@@ -363,8 +377,25 @@ export function useDevicesController(options: DeviceFeatureOptions): DevicesCont
     });
   }
 
+  // D3: sign-out's best-effort seat release, called BEFORE the actual sign-out request. A released
+  // seat is removed from seatSessions (and storage, via setSeatSessions above) like a manual release;
+  // a failed one is left in place so it survives clear() below and is offered again after re-sign-in.
+  async function releaseSeatsOnSignOut(): Promise<{ released: number; failed: number }> {
+    const { released, failed } = await runSeatSignOutReleases(seatSessions);
+    if (released.length > 0) {
+      setSeatSessions((current) => {
+        const next = { ...current };
+        for (const entitlementId of released) delete next[entitlementId];
+        return next;
+      });
+    }
+    return { released: released.length, failed: failed.length };
+  }
+
+  // Fix round 1 (CRITICAL) / D3: resets in-memory state only, never storage -- releaseSeatsOnSignOut()
+  // may have just written a failed release there, which must survive this call (decision 2).
   function clear(): void {
-    setSeatSessions({});
+    setSeatSessionsRaw({});
     setPendingSeatRelease(null);
     setSeatReleaseError(null);
     setSeatReleaseOutcomeUnknown(false);
@@ -402,6 +433,7 @@ export function useDevicesController(options: DeviceFeatureOptions): DevicesCont
     dismissSeatRelease,
     confirmSeatRelease,
     releaseDevice,
+    releaseSeatsOnSignOut,
     clear,
     clearMessages,
   };

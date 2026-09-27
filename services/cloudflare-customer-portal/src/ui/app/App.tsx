@@ -72,6 +72,7 @@ function PortalShell(): React.ReactElement {
   const deviceController = useDevicesController({
     busy: busy || stale,
     busyRef,
+    customer: auth.customerId ?? "",
     devices,
     entitlements,
     refreshData,
@@ -93,6 +94,11 @@ function PortalShell(): React.ReactElement {
     clearPortalData();
     deviceController.clear();
     downloads.clear();
+    // D3 (carried from D2, fix round 2 observation 2): a session-ended clear is exactly the kind of
+    // "customer has moved on" event the visit generation guards against -- bump both so a response
+    // still in flight under the ending session can never write a local result after the next sign-in.
+    devicesVisitGenerationRef.current += 1;
+    appsVisitGenerationRef.current += 1;
   };
 
   // Task C3: a mid-session 401 (the server's `unauthorized` code, never a credential failure) must
@@ -206,15 +212,37 @@ function PortalShell(): React.ReactElement {
     if (document.contains(target) && !target.hasAttribute("disabled")) target.focus();
   }, [busy, message]);
 
+  // D3: guards against a double-click firing the seat-release-then-sign-out sequence twice -- `busy`
+  // (the shared runOnce/busyRef) stays false for as long as releaseSeatsOnSignOut() below is running,
+  // since it runs BEFORE auth.logout's own runOnce call, so the Sign out button is not yet disabled.
+  const signingOutRef = useRef(false);
+
   async function logout(): Promise<void> {
-    await auth.logout(() => {
-      clearPortalData();
-      deviceController.clear();
-      downloads.clear();
-      clearEnrollment();setEnrollment(null);
-      window.history.replaceState(null,"","/#/apps");
-      window.dispatchEvent(new HashChangeEvent("hashchange"));
-    });
+    if (signingOutRef.current) return;
+    signingOutRef.current = true;
+    try {
+      // Decision 2: best-effort release EVERY stored seat for this customer before the sign-out
+      // request itself, bounded so sign-out can never hang on it (see runSeatSignOutReleases).
+      const seatOutcome = await deviceController.releaseSeatsOnSignOut();
+      const loggedOut = await auth.logout(() => {
+        clearPortalData();
+        deviceController.clear();
+        downloads.clear();
+        clearEnrollment();setEnrollment(null);
+        // D3 (carried from D2, fix round 2 observation 2): see clearAllPortalStateRef's identical bump.
+        devicesVisitGenerationRef.current += 1;
+        appsVisitGenerationRef.current += 1;
+        window.history.replaceState(null,"","/#/apps");
+        window.dispatchEvent(new HashChangeEvent("hashchange"));
+      });
+      // Only once sign-out actually completed: auth.logout already set "logout_failed" on the authed
+      // screen for a failed attempt, which this must not clobber with a seat summary meant for sign-in.
+      if (loggedOut && (seatOutcome.released > 0 || seatOutcome.failed > 0)) {
+        setMessage(localMessage("seats_released_on_signout", true, { released: seatOutcome.released, failed: seatOutcome.failed }));
+      }
+    } finally {
+      signingOutRef.current = false;
+    }
   }
 
   function finishEnrollment():void {

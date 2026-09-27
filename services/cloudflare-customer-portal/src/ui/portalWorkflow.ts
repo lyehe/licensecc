@@ -221,6 +221,13 @@ const RESULT_CODE_COPY: Record<string, string> = {
   // just the one request whose response happened to carry the code (task C3).
   session_ended: "Your session ended. Sign in again.",
   [FLOATING_SEAT_RELEASE_REFRESH_FAILED_CODE]: FLOATING_SEAT_RELEASE_REFRESH_ERROR_COPY,
+  // D3: sign-out's best-effort seat release. The real customer-facing sentence needs the released/
+  // failed COUNTS interpolated (singular "seat" vs plural, and whether a second sentence about
+  // failures applies at all), which a static string here cannot express -- StatusLine (api.tsx)
+  // special-cases this code via its own seatsReleasedMessage(), exactly like rate_limited's retryAfter
+  // just above. This entry is only the fallback for the (never expected in practice) case where the
+  // message carries no params.
+  seats_released_on_signout: "Browser seats were released.",
 
   // ---- Seat-action success (self-service.ts apiAction's default `${operation}_ok`) ----------------
   checkout_ok: "Seat started.",

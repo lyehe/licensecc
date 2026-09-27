@@ -60,4 +60,8 @@ export interface StatusMessage {
   // The `retry-after` header seconds, when the response carried one (task C6); StatusLine uses it to
   // build "Too many attempts. Try again in {n} minutes." for a rate_limited code.
   retryAfter?: number;
+  // D3: dynamic values a code's copy needs to interpolate at render time -- e.g. sign-out's released/
+  // failed browser-seat counts. StatusLine (api.tsx) is the only reader, exactly like retryAfter above;
+  // RESULT_CODE_COPY itself stays static strings.
+  params?: Record<string, number>;
 }

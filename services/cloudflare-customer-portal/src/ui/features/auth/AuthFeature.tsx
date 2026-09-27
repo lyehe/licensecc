@@ -49,7 +49,10 @@ export interface PortalAuth {
   submitVerify(event: React.FormEvent): Promise<void>;
   resendCode(): Promise<void>;
   useDifferentEmail(): void;
-  logout(afterLogout: () => void): Promise<void>;
+  // D3: returns whether sign-out actually completed, so a caller (App.tsx's logout()) can tell a real
+  // sign-out apart from a failed attempt that leaves the customer signed in -- e.g. to decide whether
+  // overriding the "You're signed out." message with a seat-release summary is even appropriate.
+  logout(afterLogout: () => void): Promise<boolean>;
 }
 
 export function usePortalAuth({ setMessage, runOnce }: AuthOptions): PortalAuth {
@@ -143,7 +146,8 @@ export function usePortalAuth({ setMessage, runOnce }: AuthOptions): PortalAuth 
     setMessage(null);
   }
 
-  async function logout(afterLogout: () => void): Promise<void> {
+  async function logout(afterLogout: () => void): Promise<boolean> {
+    let succeeded = false;
     await runOnce(async () => {
       const result = await api(logoutPath(), { method: "POST", body: "{}" });
       if (!result.ok) {
@@ -160,7 +164,9 @@ export function usePortalAuth({ setMessage, runOnce }: AuthOptions): PortalAuth 
       setLoginEmail("");
       setCode("");
       setPhase("request");
+      succeeded = true;
     });
+    return succeeded;
   }
 
   return {
