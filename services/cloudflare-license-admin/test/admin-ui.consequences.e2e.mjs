@@ -1513,6 +1513,38 @@ test("report range buttons expose their selection through aria-pressed", async (
   await horizon7.click();
   await expect(horizon7).toHaveAttribute("aria-pressed", "true");
   await expect(horizon30).toHaveAttribute("aria-pressed", "false");
+
+  // Reset the shared look-back (Reports and Fulfillment share one operator-selected window) before
+  // checking Fulfillment's own range group.
+  await window7d.click();
+  await page.goto("/#/fulfillment");
+  await page.getByText("Activity summary and trends", { exact: true }).click();
+  const spark7d = page.locator(".fulfillmentSpark .rangeSelector").getByRole("button", { name: "last 7d" });
+  const spark30d = page.locator(".fulfillmentSpark .rangeSelector").getByRole("button", { name: "last 30d" });
+  await expect(spark7d).toHaveAttribute("aria-pressed", "true");
+  await expect(spark30d).toHaveAttribute("aria-pressed", "false");
+  await spark30d.click();
+  await expect(spark30d).toHaveAttribute("aria-pressed", "true");
+  await expect(spark7d).toHaveAttribute("aria-pressed", "false");
+});
+
+test("the selected range button is visibly distinct from an unselected one, not by color alone", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  await page.route("**/api/admin/**", api.route);
+  await page.goto("/#/reports");
+
+  const selected = page.locator(".chartPanels .rangeSelector").getByRole("button", { name: "last 7d" });
+  const unselected = page.locator(".chartPanels .rangeSelector").getByRole("button", { name: "last 30d" });
+  await expect(selected).toHaveAttribute("aria-pressed", "true");
+  await expect(unselected).toHaveAttribute("aria-pressed", "false");
+  const readStyle = (locator) => locator.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { borderColor: style.borderColor, backgroundColor: style.backgroundColor, fontWeight: style.fontWeight };
+  });
+  const [selectedStyle, unselectedStyle] = await Promise.all([readStyle(selected), readStyle(unselected)]);
+  expect(selectedStyle).not.toEqual(unselectedStyle);
+  // Not by color alone: at least one non-color cue (font weight or border) must also differ.
+  expect(selectedStyle.fontWeight !== unselectedStyle.fontWeight || selectedStyle.borderColor !== unselectedStyle.borderColor).toBe(true);
 });
 
 test("report charts show axis labels with units and UTC bucket dates", async ({ page }) => {

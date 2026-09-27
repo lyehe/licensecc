@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import { loadWorkflowModule } from "./helpers.mjs";
@@ -115,4 +116,17 @@ test("admin UI workflow maps each search-result type to its deep-link navigation
     workflow.navigationForResult({ type: "license", id: "lic_x", label: "z" }),
     { tab: "entitlements", filter: { license_id: "lic_x", project: "", feature: "", status: "" } },
   );
+});
+
+// The UI cannot import the Worker's constant (UI code never imports Worker implementation files),
+// so the two per-type search caps are declared separately and must be read back and compared here;
+// this test is what keeps them from silently drifting apart.
+test("the UI's per-type search limit agrees with the Worker's", () => {
+  const uiSource = readFileSync(new URL("../../src/ui/features/search/workflow.ts", import.meta.url), "utf8");
+  const workerSource = readFileSync(new URL("../../src/worker/query.ts", import.meta.url), "utf8");
+  const uiMatch = uiSource.match(/SEARCH_RESULTS_PER_TYPE_LIMIT\s*=\s*(\d+)/);
+  const workerMatch = workerSource.match(/SEARCH_PER_TYPE_LIMIT\s*=\s*(\d+)/);
+  assert.ok(uiMatch, "features/search/workflow.ts must declare a parseable SEARCH_RESULTS_PER_TYPE_LIMIT");
+  assert.ok(workerMatch, "worker/query.ts must declare a parseable SEARCH_PER_TYPE_LIMIT");
+  assert.equal(uiMatch[1], workerMatch[1], "the UI's search limit note fires at a different count than the Worker actually caps at");
 });
