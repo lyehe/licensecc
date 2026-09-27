@@ -44,7 +44,9 @@ export function formatUtcDate(value: number | null | undefined): string {
     return "before -271821-04-20 UTC";
   }
   const date = new Date(epochMs);
-  const isoDate = date.toISOString().slice(0, 10);
+  // Not a fixed-width slice: toISOString() uses a longer extended form for a year outside 0000-9999
+  // (for example "+275760-09-13T...Z"), and slicing the first 10 characters would drop its day.
+  const isoDate = date.toISOString().split("T")[0];
   const hours = date.getUTCHours();
   const minutes = date.getUTCMinutes();
   const seconds = date.getUTCSeconds();
