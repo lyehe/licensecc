@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useState } from "react";
 
+import { TechnicalDetails } from "./FeedbackText";
 import { describeCode, failureFeedback, ruleCodeField, unknownResultText } from "./messages";
-import type { OperatorFeedback } from "./operatorFeedback";
+import type { FeedbackDetail, OperatorFeedback } from "./operatorFeedback";
 
 /*
  * Inline validation: a code that belongs to one field shows beside that field, which names it
@@ -55,21 +56,27 @@ function focusField(form: string, field: string): void {
 
 export interface FormFeedback {
   errors: FieldErrors;
+  /** The refusal behind a field's error, when a server request produced it. */
+  details: Readonly<Record<string, FeedbackDetail>>;
   status: OperatorFeedback | null;
   /** Show a code beside its field (and focus it) or as the form's status; returns the field, if any. */
   show: (code: string, requestId: string | null, fieldFor: (code: string) => string | null) => string | null;
-  /** Mark fields directly, such as number inputs the browser could not read. */
-  showFields: (errors: FieldErrors) => void;
+  /** Mark fields directly with a workflow's own sentence, keeping the refusal behind it if any. */
+  showFields: (errors: FieldErrors, detail?: FeedbackDetail) => void;
   setStatus: (status: OperatorFeedback | null) => void;
   clearField: (field: string) => void;
   clear: () => void;
 }
 
-/** One form's inline errors and status line. The status clears whenever `resetKey` changes. */
+/**
+ * One form's inline errors and status line. Both clear whenever `resetKey` changes: an error
+ * describes the values it was shown for, not whatever the form holds next.
+ */
 export function useFormFeedback(form: string, resetKey: unknown): FormFeedback {
   const [errors, setErrors] = useState<FieldErrors>({});
+  const [details, setDetails] = useState<Readonly<Record<string, FeedbackDetail>>>({});
   const [status, setStatus] = useState<OperatorFeedback | null>(null);
-  useEffect(() => { setStatus(null); }, [resetKey]);
+  useEffect(() => { setErrors({}); setDetails({}); setStatus(null); }, [resetKey]);
   const show = useCallback((code: string, requestId: string | null, fieldFor: (code: string) => string | null): string | null => {
     // A field the form does not show right now (such as a device-locked policy's seat pool) cannot
     // carry the error; the form's status line does instead.
@@ -77,28 +84,42 @@ export function useFormFeedback(form: string, resetKey: unknown): FormFeedback {
     const field = mapped !== null && fieldElement(form, mapped) !== null ? mapped : null;
     if (field === null) {
       setErrors({});
+      setDetails({});
       setStatus(failureFeedback(code, requestId));
       return null;
     }
     setErrors({ [field]: describeCode(code)?.text ?? unknownResultText(requestId) });
+    // Only a server refusal has a request to name; a local rule's code needs no Technical details.
+    setDetails(requestId === null ? {} : { [field]: { code, requestId } });
     setStatus(null);
     focusField(form, field);
     return field;
   }, [form]);
-  const showFields = useCallback((next: FieldErrors): void => {
+  const showFields = useCallback((next: FieldErrors, detail?: FeedbackDetail): void => {
     setErrors(next);
+    setDetails(detail === undefined ? {} : Object.fromEntries(Object.keys(next).map((field) => [field, detail])));
     setStatus(null);
     const first = Object.keys(next)[0];
     if (first !== undefined) focusField(form, first);
   }, [form]);
   const clearField = useCallback((field: string): void => {
-    setErrors((current) => {
+    const without = <T,>(current: Readonly<Record<string, T>>): Readonly<Record<string, T>> => {
       if (!Object.hasOwn(current, field)) return current;
       const next = { ...current };
       delete next[field];
       return next;
-    });
+    };
+    setErrors(without);
+    setDetails(without);
   }, []);
-  const clear = useCallback((): void => { setErrors({}); setStatus(null); }, []);
-  return { errors, status, show, showFields, setStatus, clearField, clear };
+  const clear = useCallback((): void => { setErrors({}); setDetails({}); setStatus(null); }, []);
+  return { errors, details, status, show, showFields, setStatus, clearField, clear };
+}
+
+/**
+ * The refusal behind a field's error, under Technical details. It follows the field's label as its
+ * own grid item, since a disclosure cannot sit inside a label; the input names only the error.
+ */
+export function FieldDetails({ field, feedback }: { field: string; feedback: FormFeedback }): React.ReactElement | null {
+  return <TechnicalDetails detail={feedback.details[field]} />;
 }

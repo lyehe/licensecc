@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 
+import { OUTCOME_UNKNOWN_TEXT, STATUS_NOT_REFRESHED_TEXT } from "./messages";
 import type { FeedbackDetail } from "./operatorFeedback";
 
 /*
@@ -47,6 +48,8 @@ export type ConfirmActionResolution = "applied" | "unapplied" | "indeterminate" 
 export interface ConfirmActionSuccess {
   ok: true;
   warning?: string;
+  /** The result code behind `warning`, if any, for Technical details. */
+  detail?: FeedbackDetail;
   manualRefresh?: ConfirmActionRecovery;
 }
 
@@ -67,15 +70,16 @@ export class ConfirmRefreshFailure extends Error {
   readonly requestId: string;
 
   constructor(code: string, requestId: string) {
-    super(`${code} (${requestId})`);
+    // The code and request id are fields for handling; the message never reads as a code.
+    super("The status read after a change failed.");
     this.name = "ConfirmRefreshFailure";
     this.code = code;
     this.requestId = requestId;
   }
 }
 
-export const CONFIRM_REFRESH_FAILURE_MESSAGE = "Action succeeded; status refresh failed";
-export const CONFIRM_MUTATION_UNKNOWN_MESSAGE = "Mutation outcome unknown; do not retry.";
+export const CONFIRM_REFRESH_FAILURE_MESSAGE = STATUS_NOT_REFRESHED_TEXT;
+export const CONFIRM_MUTATION_UNKNOWN_MESSAGE = OUTCOME_UNKNOWN_TEXT;
 
 export function confirmMutationUnknown(reconciliation: ConfirmActionRecovery): ConfirmActionFailure {
   return { ok: false, message: CONFIRM_MUTATION_UNKNOWN_MESSAGE, retryable: false, unknown: true, reconciliation };

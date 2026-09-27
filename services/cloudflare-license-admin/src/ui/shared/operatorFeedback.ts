@@ -5,6 +5,8 @@ import type { Dispatch, SetStateAction } from "react";
 export interface FeedbackDetail {
   code: string;
   requestId: string | null;
+  /** The HTTP status of a response that carried no envelope, such as a file download. */
+  httpStatus?: number;
 }
 
 export interface OperatorFeedback {

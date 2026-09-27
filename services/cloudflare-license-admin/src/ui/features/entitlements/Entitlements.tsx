@@ -25,6 +25,7 @@ import {
   deviceTransitionPath,
   editFormFromEntitlement,
   emptyEntitlementEditForm,
+  ENTITLEMENT_NOT_RELOADED_AFTER_STALE,
   ENTITLEMENT_RELOADED_AFTER_STALE,
   emptyEntitlementForm,
   entitlementDetailPath,
@@ -60,8 +61,9 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
   const [editBaseline, setEditBaseline] = useState("");
   const [listRead, setListRead] = useState<{ context: string; error: OperatorFeedback | null }>({ context: "", error: null });
   const [policyRead, setPolicyRead] = useState<{ context: string; error: OperatorFeedback | null }>({ context: "", error: null });
-  // A created entitlement opens as its focused row once the list shows it.
-  const [revealId, setRevealId] = useState<string | null>(null);
+  // A created entitlement opens as its focused row once the list shows it, but only in the list view
+  // it was created from: a later filter the operator chose is never replaced by it.
+  const [reveal, setReveal] = useState<{ id: string; context: string; shown: EntitlementRecord[] } | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState(emptyEntitlementEditForm);
   const [activePolicies, setActivePolicies] = useState<Policy[]>([]);
@@ -117,7 +119,7 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
   }, [active, draftPolicy, createOpen, onDraftPolicyUsed]);
   useEffect(() => {
     const editorOpen = createOpen || editingId !== null;
-    if (active && previousEditorOpen.current && !editorOpen && revealId === null) focusWorkspaceTarget();
+    if (active && previousEditorOpen.current && !editorOpen && reveal === null) focusWorkspaceTarget();
     previousEditorOpen.current = editorOpen;
   }, [active, createOpen, editingId]);
 
@@ -167,16 +169,18 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
   useEffect(() => { if (active) void refreshPolicies(); }, [active, refreshPolicies]);
 
   useEffect(() => {
-    if (revealId === null || !ready) return;
-    setRevealId(null);
-    if (!entitlements.some((item) => item.id === revealId)) {
+    // It waits for a list read newer than the one on screen when the create settled.
+    if (reveal === null || (reveal.context === filterContextKey && (!ready || entitlements === reveal.shown))) return;
+    setReveal(null);
+    if (reveal.context !== filterContextKey) return;
+    if (!entitlements.some((item) => item.id === reveal.id)) {
       // Not in this list (another filter or page): show it on its own, as a search result is.
-      setFilter({ project: "", feature: "", status: "", id: revealId });
+      setFilter({ project: "", feature: "", status: "", id: reveal.id });
       return;
     }
-    const target = focusTargetInRow(`entitlement:${revealId}`, []);
+    const target = focusTargetInRow(`entitlement:${reveal.id}`, []);
     focusWorkspaceTarget(typeof target === "function" ? target() : target);
-  }, [revealId, ready, entitlements]);
+  }, [reveal, ready, entitlements, filterContextKey]);
 
   useEffect(() => {
     if (navigationIntent?.tab !== "entitlements") return;
@@ -236,7 +240,7 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
         if (!isFormGenerationCurrent(capturedFormGeneration)) return;
         setCreateOpen(false);
         setForm(emptyEntitlementForm);
-        setRevealId(parsed.data.id);
+        setReveal({ id: parsed.data.id, context: filterContextKey, shown: entitlements });
       },
       refresh: async () => await refreshCore(true),
       onUnapplied: (parsed) => {
@@ -299,9 +303,9 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
         if (!isCurrent()) return;
         if (parsed.code !== "stale_transition") { setFeedback(failureFeedback(parsed.code, parsed.requestId)); return; }
         // A stale expectation wrote nothing: reload the entitlement so the next save carries its
-        // current state, and keep the operator's draft.
-        void refreshCore();
-        setFeedback(feedbackWith(ENTITLEMENT_RELOADED_AFTER_STALE, parsed.code, parsed.requestId));
+        // current state, keep the operator's draft, and say it was reloaded only once it was.
+        const settle = (reloaded: boolean): void => { if (isListCurrent()) setFeedback(feedbackWith(reloaded ? ENTITLEMENT_RELOADED_AFTER_STALE : ENTITLEMENT_NOT_RELOADED_AFTER_STALE, parsed.code, parsed.requestId)); };
+        void refreshCore().then((proof) => settle(proof === EXACT_READ_PROOF), () => settle(false));
       },
       isCurrent,
     });

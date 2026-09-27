@@ -329,6 +329,8 @@ export function batchResultSentence(action: EntitlementAction, results: Readonly
 
 /** A stale save of the entitlement editor: the entitlement was reloaded and the draft kept. */
 export const ENTITLEMENT_RELOADED_AFTER_STALE = "This license (entitlement) changed after you opened it; its current values were reloaded. Check your changes and save again.";
+/** A stale save whose reload then failed: nothing was reloaded, so the draft still meets old values. */
+export const ENTITLEMENT_NOT_RELOADED_AFTER_STALE = "This license (entitlement) changed after you opened it, and its current values could not be reloaded. Reload the list before you save again.";
 
 export function releaseSeatsPath(id: string): string {
   return `/api/admin/entitlements/${encodeURIComponent(id)}/release-seats`;

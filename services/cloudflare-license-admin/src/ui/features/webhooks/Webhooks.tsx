@@ -7,7 +7,7 @@ import type { WebhookDelivery, WebhookEndpoint } from "../../../shared/api";
 import { api, apiFailureDetails, parseExactApiSuccess } from "../../shared/api";
 import { confirmMutationUnknown, confirmSuccessWithRefreshFailure, ConfirmRefreshFailure, EXACT_READ_PROOF, focusTargetInRow, type ConfirmActionContext, type ConfirmActionOutcome, type ConfirmActionResolution, type ExactReadProof, useContextGeneration, useOperatorControls } from "../../shared/controls";
 import { FormStatus } from "../../shared/FeedbackText";
-import { FieldError, fieldErrorId, fieldProps, useFormFeedback } from "../../shared/fieldErrors";
+import { FieldDetails, FieldError, fieldErrorId, fieldProps, useFormFeedback } from "../../shared/fieldErrors";
 import { formatEpoch, shortHash } from "../../shared/format";
 import { apiFailureFeedback, codeFeedback, failureFeedback, refusalOutcome, validationCode } from "../../shared/messages";
 import type { OperatorFeedback } from "../../shared/operatorFeedback";
@@ -68,8 +68,10 @@ export function Webhooks({ active }: { active: boolean }): React.ReactElement | 
   // reader; the reader itself remains fenced to that current filter snapshot.
   const currentWebhooksRefreshRef = useRef<() => Promise<ExactReadProof | null>>(() => Promise.resolve(null));
   const currentDeliveriesRefreshRef = useRef<() => Promise<ExactReadProof | null>>(() => Promise.resolve(null));
-  // A test result describes the endpoint list it was sent from: another filter or page drops it.
-  useEffect(() => { setTestResult(null); }, [filterContextKey, routeVersion]);
+  // A test result describes the endpoint list it was sent from: another filter or page drops it, and a
+  // result that arrives after such a change is not shown at all.
+  const { generation: testGeneration, isCurrent: isTestGenerationCurrent } = useContextGeneration(`${filterContextKey}\u0000${routeVersion}`);
+  useEffect(() => { setTestResult(null); }, [testGeneration]);
 
   function openEditor(next: WebhookFormState, target: WebhookEndpoint | null): void {
     formFeedback.clear();
@@ -192,7 +194,7 @@ export function Webhooks({ active }: { active: boolean }): React.ReactElement | 
   function showRefusal(parsed: { code: string; requestId: string; data?: unknown }): void {
     const eventTypes = parsed.code === "invalid_event_types" ? webhookEventTypesErrorMessage(parsed.data) : null;
     if (eventTypes === null) formFeedback.show(parsed.code, parsed.requestId, webhookFieldForCode);
-    else formFeedback.showFields({ event_types: eventTypes });
+    else formFeedback.showFields({ event_types: eventTypes }, { code: parsed.code, requestId: parsed.requestId });
   }
 
   async function submitWebhookCreate(event: FormEvent): Promise<void> {
@@ -339,8 +341,9 @@ export function Webhooks({ active }: { active: boolean }): React.ReactElement | 
   // the receiver's status class. It holds the operation gate while in flight but needs no
   // idempotency key; the backend allows one test per endpoint per minute.
   async function sendTestEvent(endpoint: WebhookEndpoint): Promise<void> {
+    const generation = testGeneration;
     const response = await runMutation(() => api<unknown>(webhookTestPath(endpoint.id), { method: "POST", body: "{}" }));
-    if (response === undefined) return;
+    if (response === undefined || !isTestGenerationCurrent(generation)) return;
     setTestResult((previous) => ({ ...webhookTestOutcome(response), url: endpoint.url, key: (previous?.key ?? 0) + 1 }));
   }
 
@@ -386,6 +389,7 @@ export function Webhooks({ active }: { active: boolean }): React.ReactElement | 
   const legacyEventTypes = unknownWebhookEventTypes(webhookForm.event_types);
   const field = (name: keyof WebhookFormState, label: string) => fieldProps(WEBHOOK_FORM, formFeedback.errors, name, label);
   const error = (name: keyof WebhookFormState) => <FieldError form={WEBHOOK_FORM} field={name} errors={formFeedback.errors} />;
+  const details = (name: keyof WebhookFormState) => <FieldDetails field={name} feedback={formFeedback} />;
   const update = (name: keyof WebhookFormState, value: string): void => { formFeedback.clearField(name); setWebhookForm((current) => ({ ...current, [name]: value })); };
   const eventTypesInvalid = Object.hasOwn(formFeedback.errors, "event_types");
   return (
@@ -394,7 +398,7 @@ export function Webhooks({ active }: { active: boolean }): React.ReactElement | 
       {editorOpen && <aside className="editorLayout">
         <h2>{editorTitle}</h2>
         <form id={WEBHOOK_FORM} aria-label={editorTitle} onSubmit={(event) => void (editing === null ? submitWebhookCreate(event) : submitWebhookPatch(event, editing))}><fieldset disabled={operationLocked}>
-          <label>URL (required)<input required type="url" placeholder="https://hooks.example.com/lcc" {...field("url", "URL (required)")} value={webhookForm.url} onChange={(event) => update("url", event.target.value)} />{error("url")}</label>
+          <label>URL (required)<input required type="url" placeholder="https://hooks.example.com/lcc" {...field("url", "URL (required)")} value={webhookForm.url} onChange={(event) => update("url", event.target.value)} />{error("url")}</label>{details("url")}
           <div className="eventTypesGroup" role="group" aria-label="Event types" data-field="event_types" tabIndex={-1} aria-invalid={eventTypesInvalid || undefined} aria-describedby={eventTypesInvalid ? fieldErrorId(WEBHOOK_FORM, "event_types") : undefined}>
             <p className="muted">Event types (blank = all)</p>
             {WEBHOOK_EVENT_TYPE_GROUPS.map((group) => <fieldset className="trialPanel" key={group.source}>
@@ -412,10 +416,10 @@ export function Webhooks({ active }: { active: boolean }): React.ReactElement | 
             <p className="muted">"disable" and "reenable" match both entitlement and customer events — checking either box selects the same filter for both sources.</p>
             {legacyEventTypes.length > 0 && <p className="muted" role="note">Legacy event types not in the current list: {legacyEventTypes.join(", ")}. Changing event types will remove them.</p>}
             {error("event_types")}
-          </div>
-          <label>Description<input {...field("description", "Description")} value={webhookForm.description} onChange={(event) => update("description", event.target.value)} />{error("description")}</label>
-          <label>Scope: project (blank = all)<input placeholder="DEFAULT" {...field("scope_project", "Scope: project (blank = all)")} value={webhookForm.scope_project} onChange={(event) => update("scope_project", event.target.value)} />{error("scope_project")}</label>
-          <label>Scope: customer id (blank = all)<input placeholder="cus_..." {...field("scope_customer_id", "Scope: customer id (blank = all)")} value={webhookForm.scope_customer_id} onChange={(event) => update("scope_customer_id", event.target.value)} />{error("scope_customer_id")}</label>
+          </div>{details("event_types")}
+          <label>Description<input {...field("description", "Description")} value={webhookForm.description} onChange={(event) => update("description", event.target.value)} />{error("description")}</label>{details("description")}
+          <label>Scope: project (blank = all)<input placeholder="DEFAULT" {...field("scope_project", "Scope: project (blank = all)")} value={webhookForm.scope_project} onChange={(event) => update("scope_project", event.target.value)} />{error("scope_project")}</label>{details("scope_project")}
+          <label>Scope: customer id (blank = all)<input placeholder="cus_..." {...field("scope_customer_id", "Scope: customer id (blank = all)")} value={webhookForm.scope_customer_id} onChange={(event) => update("scope_customer_id", event.target.value)} />{error("scope_customer_id")}</label>{details("scope_customer_id")}
           <p className="muted">Set at most one scope dimension. A scoped endpoint receives only matching events; blank = every event.</p>
           <FormStatus feedback={formFeedback.status} />
           <button disabled={busy || operationLocked} type="submit">{editing === null ? "Create endpoint" : "Save changes"}</button>

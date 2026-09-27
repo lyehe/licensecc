@@ -19,6 +19,11 @@ const failed = (text: string): CodeCopy => ({ text, tone: "error" });
 const done = (text: string): CodeCopy => ({ text, tone: "success" });
 
 const REFRESH_AND_RETRY = "Refresh and try again.";
+
+/** A write whose outcome is unknown: it is retained, and only reconciling it may settle it. */
+export const OUTCOME_UNKNOWN_TEXT = "The outcome of this change is unknown. Don't repeat it; reconcile its status first.";
+/** A write known to have applied whose status read then failed. */
+export const STATUS_NOT_REFRESHED_TEXT = "The change was saved, but its status could not be refreshed.";
 const RELOAD_AND_RETRY = "Reload the page and try again.";
 
 export const RESULT_CODE_COPY: Readonly<Record<string, CodeCopy>> = {
@@ -55,7 +60,8 @@ export const RESULT_CODE_COPY: Readonly<Record<string, CodeCopy>> = {
   entitlement_synced: done("Entitlement synced."),
   entitlement_batch_too_large: failed("Too many entitlements for one request. Select fewer and try again."),
   batch_done: done("Batch finished."),
-  stale_transition: failed("This license (entitlement) changed after you opened it. Reload it and try again."),
+  // Emitted for an entitlement and for an activated device, so it names neither.
+  stale_transition: failed("This record changed after you loaded it. Reload it and try again."),
   revoked_entitlement_is_terminal: failed("Revocation is permanent; this license (entitlement) can no longer change."),
   invalid_entitlement_id: failed("That entitlement ID is not valid."),
   enforcement_mode_conflict: failed("A license (entitlement) for this project, feature and fingerprint already uses a different protection."),
@@ -136,7 +142,8 @@ export const RESULT_CODE_COPY: Readonly<Record<string, CodeCopy>> = {
   claimed_catalog_import_preview: failed("This import preview was already used. Preview the import again."),
   catalog_import_too_large: failed("This import is too large to apply at once. Narrow the manifest and preview it again."),
   preview_required: failed("Preview first, then apply the reviewed result."),
-  invalid_plan_config: failed("A plan feature names a policy from another project. Fix the plan's policies and try again."),
+  // Emitted for a plan feature whose project differs from its plan's, and for a policy of another project.
+  invalid_plan_config: failed("A plan feature's project or policy doesn't match the plan's project. Fix the plan's features and try again."),
   unknown_addon: failed("One of the add-ons is not offered by this plan."),
   plan_not_found: failed("That plan was not found. Check the plan key or plan ID."),
   plan_disabled: failed("That plan is disabled. Reenable it or choose another plan."),
@@ -244,13 +251,17 @@ export function feedbackWith(message: string, code: string, requestId: string | 
   return { tone, message, detail: detailFor(code, requestId) };
 }
 
-/** Feedback for a response that was not the expected success, including a malformed or lost one. */
+/**
+ * Feedback for a response that was not the expected success, including a malformed or lost one. A
+ * success envelope that failed its checks is unreadable: its own success code never reads as the
+ * failure, though its request id still identifies the response.
+ */
 export function apiFailureFeedback(value: unknown): OperatorFeedback {
   if (value !== null && typeof value === "object" && !Array.isArray(value)) {
-    const { code, request_id: requestId } = value as Record<string, unknown>;
-    if (typeof code === "string" && code.trim() !== "") {
-      return failureFeedback(code, typeof requestId === "string" ? requestId : null);
-    }
+    const { ok, code, request_id: requestId } = value as Record<string, unknown>;
+    const reference = typeof requestId === "string" ? requestId : null;
+    if (ok === true) return failureFeedback("invalid_api_response", reference);
+    if (typeof code === "string" && code.trim() !== "") return failureFeedback(code, reference);
   }
   return failureFeedback("invalid_api_response");
 }

@@ -107,6 +107,8 @@ export function Catalog({ active }: { active: boolean }): React.ReactElement | n
       else if (task === "import") catalogImport.updateText("");
     },
   });
+  // Every editor open, discard and route step advances the task revision; no inline error outlives the values it was shown for.
+  useEffect(() => { for (const form of [featureFeedback, planFeedback, rowFeedback, planProjection.feedback, catalogImport.feedback]) form.clear(); }, [workspace.revision]);
 
   const catalogFeaturesUrl = useMemo(() => catalogFeaturesPath(catalogFeatureFilter), [catalogFeatureFilter]);
   const catalogPlansUrl = useMemo(() => catalogPlansPath(catalogPlanFilter), [catalogPlanFilter]);

@@ -177,7 +177,7 @@ export function useConfirmDialog({ gate, focus, notice }: ConfirmDialogDependenc
       confirmPendingRef.current = false;
       if (outcome.warning !== undefined || outcome.manualRefresh !== undefined) {
         const message = outcome.warning ?? CONFIRM_REFRESH_FAILURE_MESSAGE;
-        publishActionNotice({ message, manualRefresh: outcome.manualRefresh, focusTarget: successFocusTarget });
+        publishActionNotice({ message, detail: outcome.detail, manualRefresh: outcome.manualRefresh, focusTarget: successFocusTarget });
       }
       setConfirmAction(null);
       setReason("");

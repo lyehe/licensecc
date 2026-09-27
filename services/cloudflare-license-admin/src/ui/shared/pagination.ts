@@ -194,7 +194,7 @@ export async function downloadCsv(
     try {
       const response = await fetch(csvExportPath(listUrl));
       if (!response.ok) {
-        setFeedback(codeFeedback("csv_export_failed"));
+        setFeedback({ ...codeFeedback("csv_export_failed"), detail: { code: "csv_export_failed", requestId: null, httpStatus: response.status } });
         return;
       }
       const blob = await response.blob();

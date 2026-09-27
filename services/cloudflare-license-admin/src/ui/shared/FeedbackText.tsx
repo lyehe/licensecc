@@ -3,7 +3,7 @@ import React from "react";
 import type { FeedbackDetail, OperatorFeedback } from "./operatorFeedback";
 
 export function feedbackDetailText(detail: FeedbackDetail): string {
-  return detail.requestId === null ? detail.code : `${detail.code} · ${detail.requestId}`;
+  return [detail.code, detail.requestId, detail.httpStatus === undefined ? null : `HTTP ${detail.httpStatus}`].filter((part) => part !== null).join(" · ");
 }
 
 /** The result code and request id behind a message, collapsed under "Technical details". */

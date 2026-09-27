@@ -112,8 +112,10 @@ export function useEntitlementBatch(options: EntitlementBatchOptions): Entitleme
         if (finished.done === 0) return { ok: false, message: stopMessage, detail: stopDetail, retryable: true };
         setFeedback(stopDetail === undefined ? { tone: "error", message: stopMessage } : feedbackWith(stopMessage, stopDetail.code, stopDetail.requestId));
       } else {
-        // Every request id stays in the run panel's Technical details.
-        setFeedback(feedbackWith(batchResultSentence(action, finished.results), "batch_done", finished.requestIds.length === 1 ? finished.requestIds[0] : null, "success"));
+        // Every request id stays in the run panel's Technical details. A row that did not change is
+        // not a success, so the sentence is only neutral then.
+        const tone = finished.results.some((row) => !row.ok) ? "info" : "success";
+        setFeedback(feedbackWith(batchResultSentence(action, finished.results), "batch_done", finished.requestIds.length === 1 ? finished.requestIds[0] : null, tone));
       }
       setReason("");
       // After partial progress a definite refusal is a known outcome, as a success
@@ -121,7 +123,7 @@ export function useEntitlementBatch(options: EntitlementBatchOptions): Entitleme
       // If the status read then fails, its notice must still say the run stopped.
       const refreshFailed = (): ConfirmActionOutcome => {
         const recovery = confirmSuccessWithRefreshFailure(refreshStatus, isCurrent);
-        return stopMessage === null ? recovery : { ...recovery, warning: batchRefreshFailureMessage(finished) };
+        return stopMessage === null ? recovery : { ...recovery, warning: batchRefreshFailureMessage(finished), detail: stopDetail };
       };
       try {
         return (await refreshCore(true)) === EXACT_READ_PROOF ? { ok: true } : refreshFailed();

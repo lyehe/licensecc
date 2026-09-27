@@ -30,9 +30,6 @@ interface EditorProps {
 export function EntitlementEditor({ form, item, extendValidity = false, busy, locked, lockMessage, policies, policiesReady, policiesError, onRetryPolicies, onCreatePolicy, onChange, onSubmit, onCancel }: EditorProps): React.ReactElement {
   const editorRef = useRef<HTMLElement>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
-  // A device limit the number field could not read (such as "5e") reads as blank, which would
-  // quietly create the default limit; it is refused beside the field instead.
-  const [unreadableLimit, setUnreadableLimit] = useState(false);
   const isCreate = "license_fingerprint" in form;
   const title = isCreate ? "New entitlement" : "Edit entitlement";
   const inheritsDates = isCreate && form.policy_id !== "";
@@ -46,7 +43,11 @@ export function EntitlementEditor({ form, item, extendValidity = false, busy, lo
 
   function submit(event: FormEvent): void {
     const next = entitlementFormErrors(form, item);
-    if (isCreate && !inheritsDates && unreadableLimit) next.max_active_devices = DEVICE_LIMIT_RULE;
+    // A device limit the number field could not read (such as "5e") reads as blank, which would
+    // quietly create the default limit; it is refused beside the field instead. The field is read
+    // now, since clearing such text changes no value and so fires no change event.
+    const limitInput = (event.currentTarget as HTMLFormElement).elements.namedItem("max_active_devices");
+    if (isCreate && !inheritsDates && limitInput instanceof HTMLInputElement && limitInput.validity.badInput) next.max_active_devices = DEVICE_LIMIT_RULE;
     setErrors(next);
     if (Object.keys(next).length > 0) {
       event.preventDefault();
@@ -83,7 +84,7 @@ export function EntitlementEditor({ form, item, extendValidity = false, busy, lo
         <div className="wide"><ReadNotice loading={!policiesReady && policiesError === null} error={policiesError} hasData={policies.length > 0} label="active policies" onRetry={onRetryPolicies} /><label>Policy (optional)<select aria-label="Policy (optional)" disabled={!policiesReady} value={form.policy_id} onChange={(event) => change("policy_id", event.target.value)}><option value="">No policy · use fields below</option>{projectPolicies.map((policy) => <option key={policy.id} value={policy.id}>{policyOptionLabel(policy)}</option>)}</select></label>{onCreatePolicy && !locked && !busy && <p><a href="#/policies" onClick={(event) => { event.preventDefault(); onCreatePolicy(); }}>Create policy…</a> <span className="muted">Opens the policy form for {form.project || "this project"}; this draft is kept and gets the new policy.</span></p>}{inheritsDates && <p className="muted">Blank validity dates inherit this policy’s defaults. The default assertion TTL value also inherits the policy lifetime.</p>}</div>
         {inheritsDates
           ? <label>{policyLimitLabel}<input aria-label={policyLimitLabel} name="max_active_devices" readOnly value={grant?.count ?? ""} /><span className="muted">{grant?.label === "Seats" ? "The policy sets a floating pool of seats." : "The policy sets the device limit."}</span></label>
-          : <label>Device limit<input aria-label="Device limit" name="max_active_devices" type="number" min={1} max={MAX_DEVICE_LIMIT} step={1} placeholder="1" value={form.max_active_devices} aria-invalid={!!errors.max_active_devices} aria-describedby={describedBy("max_active_devices")} onChange={(event) => { setUnreadableLimit(event.target.validity.badInput); change("max_active_devices", event.target.value === "" ? "" : Number(event.target.value)); }} />{errorFor("max_active_devices")}<span className="muted">Blank: a new license (entitlement) gets 1; an existing one keeps its limit.</span></label>}
+          : <label>Device limit<input aria-label="Device limit" name="max_active_devices" type="number" min={1} max={MAX_DEVICE_LIMIT} step={1} placeholder="1" value={form.max_active_devices} aria-invalid={!!errors.max_active_devices} aria-describedby={describedBy("max_active_devices")} onChange={(event) => change("max_active_devices", event.target.value === "" ? "" : Number(event.target.value))} />{errorFor("max_active_devices")}<span className="muted">Blank: a new license (entitlement) gets 1; an existing one keeps its limit.</span></label>}
       </>}
       {!isCreate && <p className="wide muted">Project, feature, and fingerprint identify this entitlement and cannot be edited. {extendValidity ? "Update Valid until to extend access." : "Save changes updates the existing entitlement."}</p>}
       <label>Valid from<input aria-label="Valid from" name="valid_from" type="date" min="1970-01-01" value={form.valid_from} aria-invalid={!!errors.valid_from} aria-describedby={`entitlement-date-rules${errors.valid_from ? " entitlement-valid_from-error" : ""}`} onChange={(event) => change("valid_from", event.target.value)} /><span className="muted">{inheritsDates ? "Blank: use policy start." : "Blank: Starts immediately."}</span>{errorFor("valid_from")}</label>

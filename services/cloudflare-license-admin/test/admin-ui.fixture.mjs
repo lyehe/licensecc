@@ -18,14 +18,15 @@ const KNOWN_RESULT_CODES = (() => {
 
 /**
  * No visible text outside a <details> disclosure may read as a raw result code: neither the old
- * `code (request_id)` shape nor a bare snake_case code on its own line. Form controls are skipped,
- * since an option or a typed value is data, not a message.
+ * `code (request_id)` shape nor a bare snake_case code on its own line. Form controls are hidden
+ * for the scan too, since an option or a typed value is data, not a message (a label's text would
+ * otherwise include its select's chosen option).
  */
 export async function expectNoRawResultCodes(page) {
   if (page.isClosed()) return;
   const offenders = await page.evaluate((known) => {
     const codes = new Set(known);
-    const hidden = [...document.querySelectorAll("details")].map((details) => [details, details.style.display]);
+    const hidden = [...document.querySelectorAll("details, select, textarea, datalist")].map((element) => [element, element.style.display]);
     for (const [details] of hidden) details.style.display = "none";
     try {
       const found = new Set();

@@ -236,9 +236,12 @@ export function batchReconcileGuidance(state: BatchRunState, where: "dialog" | "
   return `${lead} It replays that exact request under its original key; other actions stay unavailable until it is reconciled.`;
 }
 
-/** A stopped run whose status read then failed: say both, never that the action succeeded. */
+/**
+ * A stopped run whose status read then failed: say why it stopped and that the read failed, never
+ * that the action succeeded. The notice carrying this replaces the stop's page message.
+ */
 export function batchRefreshFailureMessage(state: BatchRunState): string {
-  return `${batchRunHeadline(state)} Status refresh failed.`;
+  return `${batchStopMessage(state) ?? batchRunHeadline(state)} The status could not be refreshed.`;
 }
 
 /** The plan the operator confirms: how many chunks, and that the run stops at the first one that does not succeed. */

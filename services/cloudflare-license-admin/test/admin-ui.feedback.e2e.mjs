@@ -255,6 +255,8 @@ test("creating a record opens it: policy, webhook, plan, feature and entitlement
   const created = page.locator("[data-focus-row]").filter({ hasText: "opened" });
   await expect(created).toHaveCount(1);
   await expect.poll(() => page.evaluate(() => document.activeElement?.closest("[data-focus-row]")?.textContent ?? "")).toContain("opened");
+  // The list it was created from includes it, so it is focused there rather than shown on its own.
+  await expect(page.getByText("Showing 1 entitlement")).toHaveCount(0);
 });
 
 test("a stale save of the entitlement editor explains itself and reloads the entitlement", async ({ page }) => {

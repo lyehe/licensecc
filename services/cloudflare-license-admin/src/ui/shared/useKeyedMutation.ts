@@ -228,7 +228,7 @@ export function useKeyedMutation({ gate, focus, notice: noticeControls, confirmA
       pendingSuccessFocusRef.current = focusAllowed ? focusTarget : null;
       if (outcome.warning !== undefined || outcome.manualRefresh !== undefined) {
         const message = outcome.warning ?? CONFIRM_REFRESH_FAILURE_MESSAGE;
-        publishActionNotice({ message, manualRefresh: outcome.manualRefresh, focusTarget });
+        publishActionNotice({ message, detail: outcome.detail, manualRefresh: outcome.manualRefresh, focusTarget });
       }
       setFocusGeneration((generation) => generation + 1);
     } catch {
