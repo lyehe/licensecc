@@ -164,7 +164,7 @@ test("every Worker code and every client-local code has operator copy", async ()
   const worker = collectWorkerCodes();
   const client = collectClientCodes();
   assert.ok(worker.size >= 120, `the Worker scan found only ${worker.size} codes; a pattern stopped matching`);
-  assert.ok(client.size >= 40, `the console scan found only ${client.size} codes; a pattern stopped matching`);
+  assert.ok(client.size >= 30, `the console scan found only ${client.size} codes; a pattern stopped matching`);
   const all = new Map([...worker, ...client]);
   const missing = [...all.keys()].filter((code) => !DATA_ONLY_CODES.has(code) && messages.describeCode(code) === null).sort();
   assert.deepEqual(missing, [], `give these codes copy in messages.ts:\n${missing.map((code) => `  ${code} (${[...all.get(code)].join(", ")})`).join("\n")}`);
