@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { contrastRatio, parseRgb } from "./e2e-contrast.mjs";
 import "./portal-ui.consent.e2e.mjs";
 import "./portal-ui.nodes.e2e.mjs";
 import "./portal-ui.network-failures.e2e.mjs";
@@ -1056,6 +1057,65 @@ test("a null account email never renders a dangling \"Signed in as\" or the lite
   expect(bodyText).not.toContain("null");
 });
 
+// D5: `button.primary`'s hover state must keep the text/background pair readable, not just visually
+// distinct -- WCAG's contrast ratio, computed here from the pair's actual computed styles rather than
+// trusted by inspection. Exercises the shared `button.primary:hover:not(:disabled)` rule across three
+// independent components (AuthFeature's own two primary buttons, and PasswordAction's) so a fix to the
+// one shared CSS rule is verified in more than one place.
+test("hovering a primary button keeps at least a 4.5:1 contrast between its text and its background", async ({ page }) => {
+  async function hoverContrast(locator) {
+    await locator.hover();
+    const [color, background] = await locator.evaluate((element) => {
+      const style = getComputedStyle(element);
+      return [style.color, style.backgroundColor];
+    });
+    return contrastRatio(parseRgb(color), parseRgb(background));
+  }
+
+  await page.route("**/api/portal/me", (route) => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" } }));
+  await page.route("**/portal/v1/auth/providers", (route) => route.fulfill({ json: makeEnvelope("auth_providers", { google: false, github: false, email: true, password: true }) }));
+  await page.goto("/");
+
+  // PasswordSignIn's own primary button (password login, the default when a password provider exists).
+  expect(await hoverContrast(page.getByRole("button", { name: "Sign in", exact: true }))).toBeGreaterThanOrEqual(4.5);
+
+  // AuthFeature's own primary button, the email-code request form's "Send code".
+  if (!await page.locator(".otherSignIn").evaluate((element) => element.open)) await page.getByText("Other sign-in options", { exact: true }).click();
+  await page.getByRole("button", { name: "Use an email code instead" }).click();
+  expect(await hoverContrast(page.getByRole("button", { name: "Send code", exact: true }))).toBeGreaterThanOrEqual(4.5);
+
+  // PasswordAction's own primary button (choosing a password from an emailed link).
+  await page.goto(`/password-action#token=${"c".repeat(43)}`);
+  expect(await hoverContrast(page.getByRole("button", { name: "Save password and sign in", exact: true }))).toBeGreaterThanOrEqual(4.5);
+});
+
+// D5 / decision 2: Sign out right-aligns inside `.headerInner`, and `.signedInAs` (A4) must stay
+// visible without overlapping it, at desktop width and at 390px alike.
+test("Sign out's right edge aligns with the header's content box at desktop and phone width", async ({ page }) => {
+  const api = makePortalApiFixture();
+  api.controls.email = "user@example.com";
+  await signIn(page, api);
+  await expect(page.getByRole("heading", { name: "Apps", exact: true })).toBeVisible();
+
+  async function edgeGap() {
+    return page.evaluate(() => {
+      const header = document.querySelector(".headerInner");
+      const signOut = document.querySelector(".signOutControl");
+      const contentRight = header.getBoundingClientRect().right - parseFloat(getComputedStyle(header).paddingRight);
+      return Math.abs(contentRight - signOut.getBoundingClientRect().right);
+    });
+  }
+
+  await page.setViewportSize({ width: 1280, height: 900 });
+  expect(await edgeGap()).toBeLessThanOrEqual(2);
+  await expect(page.locator("header").getByText("Signed in as user@example.com", { exact: true })).toBeVisible();
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await edgeGap()).toBeLessThanOrEqual(2);
+  await expect(page.locator("header").getByText("Signed in as user@example.com", { exact: true })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+});
+
 test("a long account email wraps in the header instead of causing horizontal scroll at phone width", async ({ page }) => {
   const longEmail = "a-very-long-customer-email-address-for-overflow-testing-1234567890@example-subdomain.long-domain-name-example.com";
   const api = makePortalApiFixture();
@@ -1156,6 +1216,9 @@ test("usage failure stays local and removing a searched registration keeps the f
   await expect(deviceReleaseDialog).toContainText("pro");
   await deviceReleaseDialog.getByRole("button", { name: "Confirm release" }).click();
   await expect(deviceReleaseDialog).toHaveCount(0);
+  // D4 review (carried, Minor 2): a SUCCESSFUL Confirm returns focus to the section heading too, not
+  // only Cancel/Escape (already covered by the legacy-release test below).
+  await expect(page.getByRole("heading", { name: "Activated devices (older app versions)" })).toBeFocused();
   await expect(page.getByRole("heading", { name: "No matching devices" })).toBeVisible();
   await expect(page.getByRole("searchbox", { name: "Find a device" })).toHaveValue("DEFAULT");
   await page.getByRole("searchbox", { name: "Find a device" }).fill("");

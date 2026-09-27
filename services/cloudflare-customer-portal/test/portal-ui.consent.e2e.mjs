@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { entitlementId } from "@licensecc/licensing-domain/entitlements/contracts";
+import { contrastRatio, parseRgb } from "./e2e-contrast.mjs";
 
 const handle = "E".repeat(42) + "A";
 const storageKey = "licensecc.enrollment.v1";
@@ -18,6 +19,17 @@ const inspection = (overrides = {}) => ({
 async function approve(page){
   await page.getByRole("checkbox",{name:"This code matches my app",exact:true}).check();
   await page.getByRole("button",{name:"Approve",exact:true}).click();
+}
+
+// D5 carried (B3, decision 7): both consent capacity messages must meet the same contrast rule the
+// primary-button hover check does, computed the same way -- from the element's own computed color
+// against its card's actual background, not by inspection.
+async function colorAndContrast(locator) {
+  const [color, background] = await locator.evaluate((element) => {
+    const card = element.closest(".authCard");
+    return [getComputedStyle(element).color, getComputedStyle(card).backgroundColor];
+  });
+  return { color, contrast: contrastRatio(parseRgb(color), parseRgb(background)) };
 }
 
 async function fixture(page, { signedIn = true, inspect, approve, deny, logout, support, email = null } = {}) {
@@ -590,11 +602,18 @@ test("consent: a device already connected to a full license leaves Approve enabl
   ]}))})});
   await page.goto(entry);
   await page.getByRole("checkbox",{name:"This code matches my app",exact:true}).check();
-  await expect(page.getByText("This device is already connected to this license.",{exact:true})).toBeVisible();
+  const connectedMessage=page.getByText("This device is already connected to this license.",{exact:true});
+  await expect(connectedMessage).toBeVisible();
+  await expect(connectedMessage).toHaveClass("consentConnected");
   await expect(page.getByText("All 2 device slots are in use",{exact:false})).toHaveCount(0);
   await expect(page.getByRole("button",{name:"Check again",exact:true})).toHaveCount(0);
   await expect(page.getByRole("button",{name:"Approve",exact:true})).toBeEnabled();
   await expect(page.getByText("Uses one device slot when your app finishes connecting.",{exact:true})).toHaveCount(0);
+  // D5 carried (B3, decision 7): not left at the default muted paragraph colour, and meets the
+  // contrast rule against its card's actual background.
+  const connected=await colorAndContrast(connectedMessage);
+  expect(connected.color).toBe("rgb(232, 232, 232)");
+  expect(connected.contrast).toBeGreaterThanOrEqual(4.5);
 });
 
 test("consent: a device limit of 1 uses singular copy when full",async({page})=>{
@@ -604,8 +623,14 @@ test("consent: a device limit of 1 uses singular copy when full",async({page})=>
   await page.goto(entry);
   await expect(page.getByText("1 of 1 device in use",{exact:true})).toBeVisible();
   await page.getByRole("checkbox",{name:"This code matches my app",exact:true}).check();
-  await expect(page.getByText("This license's only device slot is in use. Disconnect a device under Devices, then check again.",{exact:true})).toBeVisible();
+  const capacityMessage=page.getByText("This license's only device slot is in use. Disconnect a device under Devices, then check again.",{exact:true});
+  await expect(capacityMessage).toBeVisible();
   await expect(page.getByRole("button",{name:"Approve",exact:true})).toBeDisabled();
+  // D5 carried (B3, decision 7): the full-license message gets clear (error/attention) emphasis,
+  // reusing the same error colour `.statusline.error` uses, and meets the contrast rule.
+  const capacity=await colorAndContrast(capacityMessage);
+  expect(capacity.color).toBe("rgb(219, 146, 146)");
+  expect(capacity.contrast).toBeGreaterThanOrEqual(4.5);
 });
 
 test("consent: a slot that frees after this request expires warns before the free time",async({page})=>{

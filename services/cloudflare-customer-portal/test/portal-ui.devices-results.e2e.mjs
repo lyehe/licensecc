@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { contrastRatio, parseRgb } from "./e2e-contrast.mjs";
 
 // D2: "show each result next to the control that produced it, and make seat state visible." Each
 // seat card and device row that has its own action now gets its own role="status" line, populated
@@ -135,7 +136,18 @@ test("seat start, seat release and a license download each show their own result
   const betaCard = page.locator(".seatCard").filter({ hasText: "beta" });
 
   // Before checkout: the pool sentence, not a bare "pool 2".
-  await expect(alphaCard).toContainText("Uses 1 of 2 shared seats until released or it expires.");
+  const seatStateBefore = alphaCard.getByText("Uses 1 of 2 shared seats until released or it expires.", { exact: true });
+  await expect(seatStateBefore).toBeVisible();
+  // D5 carried (D2, decision 8): live seat state has its own class, not `.muted` -- it must not be
+  // dimmed like secondary copy, and must meet the same contrast rule the hover check does.
+  await expect(seatStateBefore).toHaveClass("seatState");
+  await expect(seatStateBefore).not.toHaveClass("muted");
+  const [seatStateColor, seatCardBackground] = await seatStateBefore.evaluate((element) => {
+    const card = element.closest(".seatCard");
+    return [getComputedStyle(element).color, getComputedStyle(card).backgroundColor];
+  });
+  expect(seatStateColor).toBe("rgb(232, 232, 232)");
+  expect(contrastRatio(parseRgb(seatStateColor), parseRgb(seatCardBackground))).toBeGreaterThanOrEqual(4.5);
 
   // Start seat A: its own local result line shows the result, in the viewport, with the expiry.
   await alphaCard.getByRole("button", { name: "Start seat" }).click();
@@ -145,6 +157,7 @@ test("seat start, seat release and a license download each show their own result
   const alphaExpiry = alphaCard.getByText(/Active until/);
   await expect(alphaExpiry).toBeVisible();
   await expect(alphaExpiry).toBeInViewport();
+  await expect(alphaExpiry).toHaveClass("seatState");
 
   // Start a second seat so releasing the first below does not leave zero live sessions -- unrelated
   // to what this test is checking; the sign-out tests further down cover what happens once seats are
