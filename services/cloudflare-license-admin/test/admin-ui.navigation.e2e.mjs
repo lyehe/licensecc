@@ -336,6 +336,27 @@ test("Back from Manage access returns to the app's access grants and Forward reo
   await expect(page.getByText("Reopen Manage access from the list.", { exact: true })).toHaveCount(0);
 });
 
+test("leaving Manage access with an unsaved edit asks once, then returns to the app's access grants", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  const { customer } = seedCustomerApps(api);
+  await page.route("**/api/admin/**", api.route);
+  const prompts = [];
+  page.on("dialog", (dialog) => {
+    prompts.push(dialog.message());
+    void dialog.accept();
+  });
+  const appHash = `#/customers/${customer.id}?section=access&app=CAD`;
+  await page.goto(`/${appHash}`);
+  await page.getByRole("button", { name: "Manage access", exact: true }).click();
+  await page.locator(".desktopRecords tbody tr").getByRole("button", { name: "Edit", exact: true }).click();
+  await page.getByRole("form", { name: "Edit entitlement" }).getByLabel("Notes").fill("unsaved note");
+
+  await page.getByRole("button", { name: "Back to app", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Manage access", exact: true })).toBeVisible();
+  await expect.poll(currentHash(page)).toBe(appHash);
+  expect(prompts).toEqual([expect.stringMatching(/Discard your unsaved changes/)]);
+});
+
 test("reloading or entering a Manage access address shows the app's access grants with a reopen notice", async ({ page }) => {
   const api = makeAdminApiFixture();
   const { customer } = seedCustomerApps(api);
