@@ -213,7 +213,7 @@ test("admin UI runs bulk transitions, global search deep-link, and CSV export", 
   await expect(page.locator("tbody input[type=checkbox]")).toHaveCount(2);
 
   // BULK: select all loaded rows -> the bulk bar appears -> Disable -> typed-confirm (reason) -> Confirm.
-  await page.getByLabel("Select all loaded rows").check();
+  await page.getByLabel(/^Select all \d+ loaded$/).check();
   await expect(page.locator(".bulkBar")).toContainText("2 selected");
   await clickAction(page.locator(".bulkBar").getByRole("button", { name: "Disable", includeHidden: true }));
   await expect(page.getByRole("dialog")).toBeVisible();
@@ -265,17 +265,74 @@ test("admin UI retains the server-owned four-entitlement batch limit", async ({ 
   await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
   const rowChecks = page.locator("tbody input[type=checkbox]");
   await expect(rowChecks).toHaveCount(5);
-  await page.getByLabel("Select all loaded rows").check();
-  await expect(page.locator(".bulkBar")).toContainText("4 selected (maximum 4 per batch)");
-  await expect(page.getByText("Select up to 4 entitlements per batch.", { exact: true })).toBeVisible();
-  await expect(rowChecks.nth(4)).toBeDisabled();
+  // Selection is no longer capped: the fifth row is selectable, and the run splits it off into
+  // its own request, so no single request ever carries more than the Worker's four ids.
+  await page.getByLabel("Select all 5 loaded", { exact: true }).check();
+  await expect(page.locator(".bulkBar")).toContainText("5 selected");
+  await expect(page.locator(".bulkBar")).toContainText("2 requests of up to 4");
+  await expect(rowChecks.nth(4)).toBeEnabled();
   await clickAction(page.locator(".bulkBar").getByRole("button", { name: "Disable", includeHidden: true }));
   const dialog = page.getByRole("dialog");
   await dialog.getByLabel(/Reason/).fill("four-row free tier proof");
   await dialog.getByRole("button", { name: "Confirm" }).click();
-  await expect.poll(() => api.requests.batches.length).toBe(1);
-  expect(api.requests.batches[0].ids).toHaveLength(4);
-  expect(api.requests.batches[0].ids).not.toContain("ent-5");
+  await expect.poll(() => api.requests.batches.length).toBe(2);
+  expect(api.requests.batches.map((batch) => batch.ids)).toEqual([["ent-1", "ent-2", "ent-3", "ent-4"], ["ent-5"]]);
+});
+
+test("admin UI disables twenty loaded entitlements with one confirmation, one reason and five keyed requests", async ({ page }) => {
+  // Count every modal the page opens, so "one confirmation" is a fact, not an absence of a later check.
+  await page.addInitScript(() => {
+    window.__dialogOpens = 0;
+    const showModal = HTMLDialogElement.prototype.showModal;
+    HTMLDialogElement.prototype.showModal = function countedShowModal() {
+      window.__dialogOpens += 1;
+      return showModal.call(this);
+    };
+  });
+  const api = makeAdminApiFixture();
+  api.seed.entitlements(20);
+  const keys = [];
+  let releaseSecond = () => {};
+  const secondHeld = new Promise((resolve) => { releaseSecond = resolve; });
+  await page.route("**/api/admin/**", api.route);
+  await page.route("**/api/admin/entitlements/batch", async (route) => {
+    keys.push(route.request().headers()["idempotency-key"]);
+    if (keys.length === 2) await secondHeld;
+    return route.fallback();
+  });
+  await page.goto("/");
+  await page.getByRole("link", { name: "License access", exact: true }).click();
+  await expect(page.locator("tbody input[type=checkbox]")).toHaveCount(20);
+
+  await page.getByLabel("Select all 20 loaded", { exact: true }).check();
+  await expect(page.locator(".bulkBar")).toContainText("20 selected");
+  await expect(page.locator(".bulkBar")).toContainText("5 requests of up to 4");
+  await clickAction(page.locator(".bulkBar").getByRole("button", { name: "Disable", includeHidden: true }));
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toContainText("5 requests of up to 4");
+  await dialog.getByLabel(/Reason/).fill("contract ended");
+  await dialog.getByRole("button", { name: "Confirm" }).click();
+
+  // While chunk 2 is in flight the open dialog reports it in a live region.
+  await expect.poll(() => keys.length).toBe(2);
+  await expect(dialog.locator(".batchRun [aria-live=polite]")).toContainText("Chunk 2 of 5");
+  releaseSecond();
+
+  await expect.poll(() => api.requests.batches.length).toBe(5);
+  await expect(dialog).toHaveCount(0);
+  expect(api.requests.batches.map((batch) => batch.ids)).toEqual(
+    Array.from({ length: 5 }, (_unused, chunk) => Array.from({ length: 4 }, (_item, row) => `ent-${chunk * 4 + row + 1}`)),
+  );
+  for (const batch of api.requests.batches) expect(batch).toMatchObject({ action: "disable", reason: "contract ended" });
+  expect(keys).toHaveLength(5);
+  expect(new Set(keys).size).toBe(5);
+  expect(await page.evaluate(() => window.__dialogOpens)).toBe(1);
+
+  const panel = page.locator(".tablePane .batchRun");
+  await expect(panel.getByRole("listitem")).toHaveText(["20 done"]);
+  await expect(panel).toContainText("Disable finished");
+  await expect(page.locator(".desktopRecords .status.disabled")).toHaveCount(20);
+  await expect(page.locator(".bulkBar")).toHaveCount(0);
 });
 
 test("admin UI previews and applies a license plan projection", async ({ page }) => {

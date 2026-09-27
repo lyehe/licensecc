@@ -638,7 +638,7 @@ test("admin UI rejects duplicate batch result identities as unknown", async ({ p
   }
   await createEntitlement("batch-one", "a".repeat(64));
   await createEntitlement("batch-two", "b".repeat(64));
-  await page.getByLabel("Select all loaded rows").check();
+  await page.getByLabel(/^Select all \d+ loaded$/).check();
   await clickAction(page.locator(".bulkBar").getByRole("button", { name: "Disable", includeHidden: true }).first());
   const dialog = page.getByRole("dialog");
   await dialog.getByLabel(/Reason/).fill("operator review");
@@ -679,7 +679,7 @@ test("admin UI rejects substituted batch result identities as unknown", async ({
   }
   await createEntitlement("batch-one", "a".repeat(64));
   await createEntitlement("batch-two", "b".repeat(64));
-  await page.getByLabel("Select all loaded rows").check();
+  await page.getByLabel(/^Select all \d+ loaded$/).check();
   await clickAction(page.locator(".bulkBar").getByRole("button", { name: "Disable", includeHidden: true }).first());
   const dialog = page.getByRole("dialog");
   await dialog.getByLabel(/Reason/).fill("operator review");
@@ -721,7 +721,7 @@ test("admin UI reports a known partial batch outcome when every row identity and
     await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
     await expect(page.locator(".tablePane table tbody tr")).toHaveCount(index + 1);
   }
-  await page.getByLabel("Select all loaded rows").check();
+  await page.getByLabel(/^Select all \d+ loaded$/).check();
   await clickAction(page.locator(".bulkBar").getByRole("button", { name: "Disable", includeHidden: true }).first());
   const dialog = page.getByRole("dialog");
   await dialog.getByLabel(/Reason/).fill("operator review");
@@ -759,7 +759,7 @@ test("admin UI rejects an unknown per-row batch failure code as ambiguous", asyn
     await expect(page.getByText(/entitlement_saved/)).toBeVisible();
   }
   await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
-  await page.getByLabel("Select all loaded rows").check();
+  await page.getByLabel(/^Select all \d+ loaded$/).check();
   await clickAction(page.locator(".bulkBar").getByRole("button", { name: "Disable", includeHidden: true }).first());
   const dialog = page.getByRole("dialog");
   await dialog.getByLabel(/Reason/).fill("operator review");
@@ -796,7 +796,7 @@ test("admin UI rejects reordered batch proof rows as an unknown outcome", async 
     await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
     await expect(page.locator(".tablePane table tbody tr")).toHaveCount(index + 1);
   }
-  await page.getByLabel("Select all loaded rows").check();
+  await page.getByLabel(/^Select all \d+ loaded$/).check();
   await clickAction(page.locator(".bulkBar").getByRole("button", { name: "Disable", includeHidden: true }).first());
   const dialog = page.getByRole("dialog");
   await dialog.getByLabel(/Reason/).fill("operator review");
@@ -817,6 +817,83 @@ test("admin UI rejects reordered batch proof rows as an unknown outcome", async 
   expect(api.requests.batches[0].ids).toEqual(["ent-1", "ent-2"]);
   await expect(dialog.locator(".modalError")).toContainText("Mutation outcome unknown; do not retry.");
   await expect(dialog.getByRole("button", { name: "Confirm" })).toBeDisabled();
+});
+
+/** Seeds twenty active rows and records every batch POST (its key and body) before the fixture answers it. */
+async function openTwentyRowBatch(page, respond) {
+  const api = makeAdminApiFixture();
+  api.seed.entitlements(20);
+  const attempts = [];
+  await page.route("**/api/admin/**", api.route);
+  await page.route("**/api/admin/entitlements/batch", async (route) => {
+    const request = route.request();
+    attempts.push({ key: request.headers()["idempotency-key"], body: request.postDataJSON() });
+    const scripted = respond(attempts.length);
+    if (scripted === undefined) return route.fallback();
+    return route.fulfill({ status: scripted.status, contentType: "application/json", body: JSON.stringify(scripted.body) });
+  });
+  await page.goto("/");
+  await page.getByRole("link", { name: "License access", exact: true }).click();
+  await expect(page.locator("tbody input[type=checkbox]")).toHaveCount(20);
+  await page.getByLabel("Select all 20 loaded", { exact: true }).check();
+  await clickAction(page.locator(".bulkBar").getByRole("button", { name: "Disable", includeHidden: true }).first());
+  const dialog = page.getByRole("dialog");
+  await dialog.getByLabel(/Reason/).fill("operator review");
+  await dialog.getByRole("button", { name: "Confirm" }).click();
+  return { api, attempts, dialog };
+}
+
+const chunkIds = (chunk) => Array.from({ length: 4 }, (_unused, row) => `ent-${(chunk - 1) * 4 + row + 1}`);
+
+test("admin UI stops a twenty-row batch at a 500 on chunk 3 and reconciles that chunk with its own key", async ({ page }) => {
+  const { attempts, dialog } = await openTwentyRowBatch(page, (attempt) => attempt === 3
+    ? { status: 500, body: { ok: false, code: "internal_error", request_id: "ui-e2e-batch-chunk-three" } }
+    : undefined);
+
+  await expect.poll(() => attempts.length).toBe(3);
+  await expect(dialog.locator(".modalError")).toContainText("Mutation outcome unknown; do not retry.");
+  await expect(dialog.getByRole("button", { name: "Confirm" })).toBeDisabled();
+  await expect(dialog.locator(".batchRun").getByRole("listitem")).toHaveText(["8 done", "4 outcome unknown", "8 not attempted"]);
+  // The run stopped: chunks 4 and 5 are never sent.
+  await page.waitForTimeout(400);
+  expect(attempts.map((attempt) => attempt.body.ids)).toEqual([chunkIds(1), chunkIds(2), chunkIds(3)]);
+  expect(new Set(attempts.map((attempt) => attempt.key)).size).toBe(3);
+
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  const panel = page.locator(".tablePane .batchRun");
+  await expect(panel.getByRole("listitem")).toHaveText(["8 done", "4 outcome unknown", "8 not attempted"]);
+  await expect(panel).toContainText(attempts[2].key);
+  await expect(page.locator(".desktopRecords .status.disabled")).toHaveCount(8);
+
+  // Reconcile replays chunk 3's exact request under chunk 3's own key, and sends nothing else.
+  await page.getByRole("button", { name: "Reconcile chunk 3", exact: true }).click();
+  await expect.poll(() => attempts.length).toBe(4);
+  expect(attempts[3]).toEqual(attempts[2]);
+  await expect(panel.getByRole("listitem")).toHaveText(["12 done", "8 not attempted"]);
+  await expect(page.getByRole("button", { name: "Reconcile chunk 3", exact: true })).toHaveCount(0);
+  await expect(page.locator(".desktopRecords .status.disabled")).toHaveCount(12);
+  await page.waitForTimeout(400);
+  expect(attempts).toHaveLength(4);
+  // The eight rows that were never sent stay selected for a deliberate follow-up run.
+  await expect(page.locator(".bulkBar")).toContainText("8 selected");
+});
+
+test("admin UI reports a refused chunk 2 as failed, not unknown, and sends nothing after it", async ({ page }) => {
+  const { attempts, dialog } = await openTwentyRowBatch(page, (attempt) => attempt === 2
+    ? { status: 409, body: { ok: false, code: "idempotency_request_conflict", request_id: "ui-e2e-batch-chunk-two" } }
+    : undefined);
+
+  await expect.poll(() => attempts.length).toBe(2);
+  // A definite refusal is a known outcome: nothing is retained, so the dialog closes on the counts.
+  await expect(dialog).toHaveCount(0);
+  const panel = page.locator(".tablePane .batchRun");
+  await expect(panel.getByRole("listitem")).toHaveText(["4 done", "4 failed", "12 not attempted"]);
+  await expect(panel).not.toContainText("unknown");
+  await expect(page.getByRole("button", { name: /^Reconcile/ })).toHaveCount(0);
+  await page.waitForTimeout(400);
+  expect(attempts.map((attempt) => attempt.body.ids)).toEqual([chunkIds(1), chunkIds(2)]);
+  await expect(page.locator(".desktopRecords .status.disabled")).toHaveCount(4);
+  await expect(page.locator(".bulkBar")).toContainText("16 selected");
 });
 
 test("admin UI rejects duplicate release-seat identities as unknown", async ({ page }) => {
