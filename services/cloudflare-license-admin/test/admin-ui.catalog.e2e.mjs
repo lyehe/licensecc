@@ -456,6 +456,7 @@ test("admin UI opens a confirm dialog before a plan projection Apply that would 
   });
 
   await page.goto("/");
+  if (await page.getByRole("button", { name: "Configuration", exact: true }).getAttribute("aria-expanded") === "false") await page.getByRole("button", { name: "Configuration", exact: true }).click();
   await page.getByRole("link", { name: "Plans & features" }).click();
   await openProjectionTask(page);
   const projectionForm = page.getByRole("form", { name: "Plan projection" });

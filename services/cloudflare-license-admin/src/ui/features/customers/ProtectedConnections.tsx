@@ -40,6 +40,7 @@ export function ProtectedConnections({customer,active=true}:{customer:string;act
   const [stopped,setStopped]=useState(false),[reviewed,setReviewed]=useState<Connection|null|undefined>(undefined),[reviewReady,setReviewReady]=useState(false);
   const [dialogError,setDialogError]=useState('');
   const [confirmed,setConfirmed]=useState(false);
+  const [typedConfirm,setTypedConfirm]=useState('');
   const live=useRef(true),reading=useRef(false),sendingRef=useRef(false),dialog=useRef<HTMLDialogElement>(null),heading=useRef<HTMLHeadingElement>(null),cancel=useRef<HTMLButtonElement>(null);
   const pending=saved && saved!=='invalid'?saved:draft;
   const pendingRef=useRef(pending);pendingRef.current=pending;
@@ -48,6 +49,8 @@ export function ProtectedConnections({customer,active=true}:{customer:string;act
   useEffect(()=>{live.current=true;void load();return()=>{live.current=false;};},[]);
   useEffect(()=>{if(!active && !saved){reviewGeneration.current++;setOpen(false);setDraft(null);}},[active,saved]);
   useEffect(()=>{if(open && !dialog.current?.open){dialog.current?.showModal();cancel.current?.focus();}else if(!open && dialog.current?.open){dialog.current.close();heading.current?.focus();}},[open,active,saved]);
+  // The typed confirmation is cleared every time the dialog opens, including a re-open for the same pending request.
+  useEffect(()=>{if(open)setTypedConfirm('');},[open]);
   async function load(cursor=''):Promise<boolean>{
     if(reading.current)return false;reading.current=true;setLoading(true);setError('');
     try{const result=await readConnections(customer,cursor);if(!live.current)return false;
@@ -122,7 +125,7 @@ export function ProtectedConnections({customer,active=true}:{customer:string;act
       <p>Last verified {formatEpoch(row.last_proof_at)}</p>
       <details><summary>Connection details</summary><p>Connection ID: {row.binding_id}</p><p>License: {row.license_fingerprint}</p></details>
       <ConnectionHistory customer={customer} binding={row.binding_id} expected={contextIdentity(page)} onContextChanged={()=>{setStale(true);setError('Operator or customer access changed. Refresh connections before making changes.');}} />
-      {row.state==='active' && mayRetire && <button disabled={locked || loading || stale || !!saved} onClick={()=>start(row)}>Disconnect</button>}
+      {row.state==='active' && mayRetire && <button className="danger" disabled={locked || loading || stale || !!saved} onClick={()=>start(row)}>Disconnect</button>}
     </article>)}</div>
     {page?.next_cursor && <button disabled={loading || stale || sending} onClick={()=>void load(page.next_cursor!)}>Load more connections</button>}
     <dialog ref={dialog} tabIndex={-1} className="connectionDialog" aria-labelledby="connection-dialog-title" onKeyDown={retainDialogFocus} onCancel={event=>{event.preventDefault();close();}}>
@@ -135,8 +138,9 @@ export function ProtectedConnections({customer,active=true}:{customer:string;act
       {pending && page && (!sameOperator || !mayRetire) && <p role="alert">Your operator or customer access has changed. Review the connection before clearing this saved request.</p>}
       {dialogError && <p role="alert">{dialogError}</p>}
       {reviewReady && <p role="status">{pending ? reviewed ? `Current connection: ${reviewed.state==='active'?'Connected':reviewed.state==='retiring'?'Disconnecting':'Disconnected'}. Reserved until ${formatEpoch(reviewed.hold_until)}.`:'This binding is unavailable in the current customer context.':'Current customer connections have been refreshed.'} Clearing the saved request does not cancel or undo a disconnection.</p>}
+      {pending && !reviewReady && <label className="typedConfirmation">Type DISCONNECT to confirm<input value={typedConfirm} disabled={sending} onChange={event=>setTypedConfirm(event.target.value)} /></label>}
       <div className="actions">
-        {pending && !reviewReady && <button className="primary" disabled={locked || loading || stale || stopped || !mayRetire || !sameOperator} onClick={()=>void send()}>{sending?'Checking…':saved?'Retry same request':'Disconnect'}</button>}
+        {pending && !reviewReady && <button className="danger" disabled={locked || loading || stale || stopped || !mayRetire || !sameOperator || typedConfirm.trim()!=='DISCONNECT'} onClick={()=>void send()}>{sending?'Checking…':saved?'Retry same request':'Disconnect'}</button>}
         {allowReview && <button disabled={sending || loading} onClick={()=>void review()}>Review current connection</button>}
         {allowReview && reviewReady && <button disabled={sending || loading} onClick={clearReviewed}>Clear reviewed request</button>}
         <button ref={cancel} disabled={sending} onClick={close}>{saved?'Close':'Cancel'}</button>

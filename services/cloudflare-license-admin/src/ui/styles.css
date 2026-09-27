@@ -158,7 +158,8 @@ button.danger:hover:not(:disabled) {
   max-width: 100%;
 }
 
-.modal .reason input {
+.modal .reason input,
+.modal .typedConfirmation input {
   min-width: 0;
 }
 
@@ -538,6 +539,7 @@ button.danger:hover:not(:disabled) {
 .connectionDialog { width: min(560px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); box-sizing: border-box; padding: 24px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); color: var(--ink); font: inherit; overflow: auto; overflow-wrap: anywhere; }
 .connectionDialog::backdrop { background: rgb(15 23 42 / 40%); }
 .connectionDialog p + p { margin-top: 12px; }
+.connectionDialog .typedConfirmation input { min-width: 0; }
 .connectionDialog .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 20px; }
 
 .navDisclosure { width:100%; text-align:left; border:0; background:none; color:var(--muted); min-height:44px; margin-top:12px; }

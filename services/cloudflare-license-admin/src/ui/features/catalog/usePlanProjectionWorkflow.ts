@@ -1,5 +1,5 @@
 import type { FormEvent } from "react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type {
   PlanProjectionApplyInput,
@@ -37,7 +37,7 @@ export interface PlanProjectionPreviewBinding {
 
 type PlanProjectionControls = Pick<
   ReturnType<typeof useOperatorControls>,
-  "runKeyedMutation" | "runMutation" | "setMessage"
+  "runKeyedMutation" | "runMutation" | "setMessage" | "requestConfirm" | "modalActive"
 >;
 
 interface PlanProjectionWorkflowOptions extends PlanProjectionControls {
@@ -51,7 +51,8 @@ export interface PlanProjectionWorkflow {
   invalidate: () => void;
   updateForm: (updater: (current: PlanProjectionFormState) => PlanProjectionFormState) => void;
   submitPreview: (event: FormEvent) => Promise<void>;
-  applyFromPreview: () => Promise<void>;
+  /** Applies the bound preview, warning first when it would disable any grant. */
+  requestApply: () => void;
 }
 
 /** Owns projection form revisioning, preview binding, and keyed apply recovery. */
@@ -60,11 +61,25 @@ export function usePlanProjectionWorkflow({
   runKeyedMutation,
   runMutation,
   setMessage,
+  requestConfirm,
+  modalActive,
 }: PlanProjectionWorkflowOptions): PlanProjectionWorkflow {
   const [form, setForm] = useState(emptyPlanProjectionForm);
   const [previewBinding, setPreviewBinding] = useState<PlanProjectionPreviewBinding | null>(null);
   const [applyResult, setApplyResult] = useState<PlanProjectionApplyResult | null>(null);
   const revisionRef = useRef(0);
+  // Confirming the disable warning below only closes that dialog; the actual apply is deferred
+  // until the shared modal has fully released the operation gate, then run exactly as it is when
+  // nothing needs confirming.
+  const pendingApplyRef = useRef(false);
+  const modalWasActiveRef = useRef(false);
+  useEffect(() => {
+    if (modalWasActiveRef.current && !modalActive && pendingApplyRef.current) {
+      pendingApplyRef.current = false;
+      void applyFromPreview();
+    }
+    modalWasActiveRef.current = modalActive;
+  }, [modalActive]);
 
   function invalidate(): void {
     revisionRef.current += 1;
@@ -192,6 +207,30 @@ export function usePlanProjectionWorkflow({
     });
   }
 
+  function requestApply(): void {
+    const binding = previewBinding;
+    if (binding === null) {
+      setMessage("plan_projection_preview_required");
+      return;
+    }
+    const disableCount = binding.preview.summary.disable;
+    if (disableCount === 0) {
+      void applyFromPreview();
+      return;
+    }
+    const revision = revisionRef.current;
+    requestConfirm({
+      title: "Apply plan projection",
+      body: `This will disable ${disableCount} grant${disableCount === 1 ? "" : "s"}.`,
+      requiresReason: false,
+      run: async () => {
+        pendingApplyRef.current = true;
+        return { ok: true };
+      },
+      isCurrent: () => revision === revisionRef.current,
+    });
+  }
+
   return {
     form,
     previewBinding,
@@ -199,6 +238,6 @@ export function usePlanProjectionWorkflow({
     invalidate,
     updateForm,
     submitPreview,
-    applyFromPreview,
+    requestApply,
   };
 }

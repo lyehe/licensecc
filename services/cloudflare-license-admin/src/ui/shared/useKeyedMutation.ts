@@ -45,6 +45,8 @@ export interface KeyedMutationControls {
 
 export function useKeyedMutation({ gate, focus, notice: noticeControls, confirmActionRef, setMessage, setFeedback }: KeyedMutationDependencies): KeyedMutationControls {
   const { busyRef, operationBusyRef, operationOwnerRef, confirmPendingRef, consequencePendingRef, unresolvedOperationRef, setBusy, setOperationBusy } = gate;
+  // useFocusRestoration (called inside useConfirmDialog) is what actually reads and resolves these
+  // focus refs, including pendingShellFocusRef; this hook only ever writes them.
   const { pendingRestoreFocusRef, pendingSuccessFocusRef, pendingShellFocusRef, setFocusGeneration, focusSoon, capturePendingFocus } = focus;
   const { actionNoticeRef, noticePendingRef, setNoticePending, publishActionNotice, replaceActionNotice, clearActionNotice } = noticeControls;
 

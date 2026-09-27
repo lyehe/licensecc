@@ -240,14 +240,30 @@ test("admin UI consequence dialogs contain focus, isolate the background, and re
   const reason = dialog.getByLabel("Reason (required)");
   const confirm = dialog.getByRole("button", { name: "Confirm" });
   const cancel = dialog.getByRole("button", { name: "Cancel" });
+  const paymentFailedPreset = dialog.getByRole("button", { name: "Payment failed", exact: true });
+  const customerRequestPreset = dialog.getByRole("button", { name: "Customer request", exact: true });
+  const fraudReviewPreset = dialog.getByRole("button", { name: "Fraud review", exact: true });
   await expect(reason).toBeFocused();
   await reason.fill("operator review");
+  // The disable reason presets sit in the tab order between the reason field and the actions.
+  await page.keyboard.press("Tab");
+  await expect(paymentFailedPreset).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(customerRequestPreset).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(fraudReviewPreset).toBeFocused();
   await page.keyboard.press("Tab");
   await expect(cancel).toBeFocused();
   await page.keyboard.press("Tab");
   await expect(confirm).toBeFocused();
   await page.keyboard.press("Shift+Tab");
   await expect(cancel).toBeFocused();
+  await page.keyboard.press("Shift+Tab");
+  await expect(fraudReviewPreset).toBeFocused();
+  await page.keyboard.press("Shift+Tab");
+  await expect(customerRequestPreset).toBeFocused();
+  await page.keyboard.press("Shift+Tab");
+  await expect(paymentFailedPreset).toBeFocused();
   await page.keyboard.press("Shift+Tab");
   await expect(reason).toBeFocused();
 

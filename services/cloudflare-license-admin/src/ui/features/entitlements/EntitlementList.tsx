@@ -9,7 +9,7 @@ import { focusTargetInRow, type ConfirmActionOutcome, useOperatorControls } from
 import { formatEpoch } from "../../shared/format";
 import { useMediaQuery } from "../../shared/useMediaQuery";
 import { focusWorkspaceTarget } from "../../shared/workspaceFocus";
-import { canEditEntitlement, canRunAction, disableEntitlementConfirm, filterAfterShowAll, isSingleEntitlementFilter, releaseSeatsConfirm, revokeEntitlementConfirm, type EntitlementAction, type EntitlementFilter } from "./workflow";
+import { canEditEntitlement, canRunAction, disableEntitlementConfirm, ENTITLEMENT_DISABLE_REASON_PRESETS, filterAfterShowAll, isSingleEntitlementFilter, releaseSeatsConfirm, revokeEntitlementConfirm, revokeTypedConfirmation, type EntitlementAction, type EntitlementFilter } from "./workflow";
 
 interface ListProps {
   scoped?: boolean;
@@ -79,9 +79,9 @@ export function EntitlementList(props: ListProps): React.ReactElement {
     return <div className="actions"><button disabled={locked || !canEditEntitlement(item.status)} onClick={() => props.onEdit(item)}>Edit</button><ActionMenu label="More actions">
       <button disabled={busy} onClick={() => props.onHistory(item)}>History</button>
       {canEditEntitlement(item.status) && <button disabled={locked} onClick={() => props.onEdit(item, true)}>Extend validity</button>}
-      {canRunAction(item.status, "disable") && <button data-focus-action="disable" className="danger" disabled={locked} onClick={() => requestConfirm({ title: "Disable entitlement", body: disableEntitlementConfirm(item), requiresReason: true, run: ({ idempotencyKey }) => onTransition(item, "disable", idempotencyKey), successFocusTarget: focus, isCurrent })}>Disable</button>}
+      {canRunAction(item.status, "disable") && <button data-focus-action="disable" className="danger" disabled={locked} onClick={() => requestConfirm({ title: "Disable entitlement", body: disableEntitlementConfirm(item), requiresReason: true, reasonPresets: [...ENTITLEMENT_DISABLE_REASON_PRESETS], run: ({ idempotencyKey }) => onTransition(item, "disable", idempotencyKey), successFocusTarget: focus, isCurrent })}>Disable</button>}
       {canRunAction(item.status, "reenable") && <button data-focus-action="reenable" disabled={locked} onClick={() => void runConsequenceAction({ run: ({ idempotencyKey }) => onTransition(item, "reenable", idempotencyKey), successFocusTarget: focus, isCurrent })}>Reenable</button>}
-      {canRunAction(item.status, "revoke") && <button className="danger" disabled={locked} onClick={() => requestConfirm({ title: "Revoke entitlement", body: revokeEntitlementConfirm(item), requiresReason: true, run: ({ idempotencyKey }) => onTransition(item, "revoke", idempotencyKey), successFocusTarget: focus, isCurrent })}>Revoke</button>}
+      {canRunAction(item.status, "revoke") && <button className="danger" disabled={locked} onClick={() => requestConfirm({ title: "Revoke entitlement", body: revokeEntitlementConfirm(item), requiresReason: true, typedConfirmation: revokeTypedConfirmation(1), run: ({ idempotencyKey }) => onTransition(item, "revoke", idempotencyKey), successFocusTarget: focus, isCurrent })}>Revoke</button>}
       {!props.scoped && <>{item.license_mode==="floating" && item.status==="active" && <button className="danger" disabled={locked} onClick={() => requestConfirm({ title: "Release seats", body: releaseSeatsConfirm(item), requiresReason: true, run: ({ idempotencyKey }) => onReleaseSeats(item, idempotencyKey), successFocusTarget: focus, isCurrent })}>Release seats</button>}
       <button disabled={busy} aria-expanded={props.deviceEntitlementId === item.id} onClick={() => props.onDevices(item.id)}>Devices</button>
       <button disabled={busy} aria-expanded={props.meterEntitlementId === item.id} onClick={() => props.onMeter(item.id)}>Meter</button></>}
@@ -95,7 +95,16 @@ export function EntitlementList(props: ListProps): React.ReactElement {
   const chunkCount = Math.ceil(selectedCount / ENTITLEMENT_BATCH_MAX_IDS);
   function confirmBatch(action: "disable" | "revoke", title: string): void {
     const { run, details } = props.batch.begin(action);
-    requestConfirm({ title, body: props.bulkConfirmBody(action), details, requiresReason: true, run, successFocusTarget: props.batch.focusTarget, isCurrent });
+    requestConfirm({
+      title,
+      body: props.bulkConfirmBody(action),
+      details,
+      requiresReason: true,
+      ...(action === "revoke" ? { typedConfirmation: revokeTypedConfirmation(selectedCount) } : { reasonPresets: [...ENTITLEMENT_DISABLE_REASON_PRESETS] }),
+      run,
+      successFocusTarget: props.batch.focusTarget,
+      isCurrent,
+    });
   }
   const capacity = (item: EntitlementRecord): React.ReactElement => <><div>{item.license_mode?.replaceAll("_", " ") || "Default mode"}</div><span className="muted">{item.license_mode === "floating" ? <>Pool {item.pool_size}</> : <>Device limit {item.max_active_devices}</>}</span></>;
   return <section className="tablePane" data-focus-section="entitlements" aria-label="Entitlement list">

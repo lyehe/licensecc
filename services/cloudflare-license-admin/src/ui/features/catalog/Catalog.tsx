@@ -63,7 +63,7 @@ export function Catalog({ active }: { active: boolean }): React.ReactElement | n
   const [catalogPlanFeatureForm, setCatalogPlanFeatureForm] = useState(emptyCatalogPlanFeatureForm);
   const [activePolicies, setActivePolicies] = useState<Policy[]>([]);
   const { catalogView, setCatalogView } = useAdminNavigation();
-  const { busy: requestBusy, operationLocked, currentReason, requestConfirm, runKeyedMutation, runMutation, setMessage, setReason } = useOperatorControls();
+  const { busy: requestBusy, operationLocked, modalActive, currentReason, requestConfirm, runKeyedMutation, runMutation, setMessage, setReason } = useOperatorControls();
   const busy = requestBusy || operationLocked;
   const { refreshCore } = useCoreRefresh();
   // Strict recovery reads the currently rendered catalog context, not the
@@ -73,7 +73,7 @@ export function Catalog({ active }: { active: boolean }): React.ReactElement | n
   const currentCatalogPlansRefreshRef = useRef<() => Promise<ExactReadProof | null>>(() => Promise.resolve(null));
   const currentCatalogPlanFeaturesRefreshRef = useRef<() => Promise<ExactReadProof | null>>(() => Promise.resolve(null));
   const currentCatalogImportRefreshRef = useRef<() => Promise<ExactReadProof | null>>(() => Promise.resolve(null));
-  const planProjection = usePlanProjectionWorkflow({ refreshCore, runKeyedMutation, runMutation, setMessage });
+  const planProjection = usePlanProjectionWorkflow({ refreshCore, runKeyedMutation, runMutation, setMessage, requestConfirm, modalActive });
   const catalogImport = useCatalogImportWorkflow({
     active: active && catalogView === "import",
     invalidatePlanProjection: planProjection.invalidate,
@@ -667,7 +667,7 @@ export function Catalog({ active }: { active: boolean }): React.ReactElement | n
   const planPreviewBinding = planProjection.previewBinding;
   const planPreview = planProjection.preview;
   const submitPlanPreview = planProjection.submitPreview;
-  const applyPlanProjectionFromPreview = planProjection.applyFromPreview;
+  const requestPlanProjectionApply = planProjection.requestApply;
   const catalogImportText = catalogImport.text;
   const catalogImportPreviewBinding = catalogImport.previewBinding;
   const catalogImportPreview = catalogImport.preview;
@@ -698,7 +698,7 @@ export function Catalog({ active }: { active: boolean }): React.ReactElement | n
           {workspace.task === "featureEditor" && <CatalogFeatureEditor form={catalogFeatureForm} editingId={editingCatalogFeatureId} busy={busy} actionable={catalogFeatureEditActionable} onChange={setCatalogFeatureForm} onSubmit={(event) => void submitCatalogFeatureCreate(event)} onCancel={workspace.close} />}
           {workspace.task === "planEditor" && <CatalogPlanEditor form={catalogPlanForm} editingId={editingCatalogPlanId} busy={busy} actionable={catalogPlanEditActionable} onChange={setCatalogPlanForm} onSubmit={(event) => void submitCatalogPlanCreate(event)} onCancel={workspace.close} />}
           {workspace.task === "planFeatureEditor" && <CatalogPlanFeatureEditor form={catalogPlanFeatureForm} busy={busy} plansSettled={catalogPlansFence.canLoadMore() && planRead.error === null} activePoliciesSettled={activePoliciesSettled} selectedPlanId={settledSelectedCatalogPlanId} plans={visibleCatalogPlans} features={visibleCatalogFeatures} policies={visibleActivePolicies} onChange={setCatalogPlanFeatureForm} onSelectPlan={selectCatalogPlan} onClearPlan={() => { setSelectedCatalogPlanId(""); invalidatePlanProjectionPreview(); }} onSubmit={(event) => void submitCatalogPlanFeatureCreate(event)} />}
-          {workspace.task === "projection" && <><PlanProjectionEditor form={planForm} previewBinding={planPreviewBinding} busy={busy} onUpdate={updatePlanProjectionForm} onSubmit={(event) => void submitPlanPreview(event)} onApply={() => void applyPlanProjectionFromPreview()} /><PlanProjectionResults preview={planPreview} binding={planPreviewBinding} /></>}
+          {workspace.task === "projection" && <><PlanProjectionEditor form={planForm} previewBinding={planPreviewBinding} busy={busy} onUpdate={updatePlanProjectionForm} onSubmit={(event) => void submitPlanPreview(event)} onApply={requestPlanProjectionApply} /><PlanProjectionResults preview={planPreview} binding={planPreviewBinding} /></>}
         </fieldset>
         {workspace.task === "planDetail" && (selectedCatalogPlan === null ? <><h2>Plan unavailable</h2><p>The selected plan is not in the current settled list. Return to Plans and select an available record.</p><ReadNotice {...planRead} hasData={false} onRetry={() => void refreshCatalogPlans()} label="plans" /></> : <>
           <div className="detailHeader"><div><h2>{selectedCatalogPlan.name || selectedCatalogPlan.plan_key}</h2><p>{selectedCatalogPlan.project} / {selectedCatalogPlan.plan_key} · Version {selectedCatalogPlan.version}</p></div><span className={`status ${selectedCatalogPlan.status}`}>{selectedCatalogPlan.status}</span></div>

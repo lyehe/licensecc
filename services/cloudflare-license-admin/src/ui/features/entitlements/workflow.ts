@@ -263,6 +263,14 @@ export function disableEntitlementConfirm(item: { project: string; feature: stri
   return `Disable the entitlement for ${item.project} / ${item.feature} (fingerprint ${shortHash(item.license_fingerprint)}). Verification and downloads stop until it is re-enabled.`;
 }
 
+/** Common reasons an operator disables a license; presets fill the reason field and leave it editable. */
+export const ENTITLEMENT_DISABLE_REASON_PRESETS: readonly string[] = ["Payment failed", "Customer request", "Fraud review"];
+
+/** The exact phrase an operator must type to confirm revoking `count` entitlement(s). */
+export function revokeTypedConfirmation(count: number): string {
+  return `REVOKE ${count}`;
+}
+
 export function batchPath(): string {
   return "/api/admin/entitlements/batch";
 }

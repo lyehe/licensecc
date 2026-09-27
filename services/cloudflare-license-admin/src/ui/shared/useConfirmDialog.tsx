@@ -40,6 +40,7 @@ export function useConfirmDialog({ gate, focus, notice, setMessage }: ConfirmDia
   const [reason, setReason] = useState("");
   const reasonRef = useRef("");
   reasonRef.current = reason;
+  const [typedConfirmationInput, setTypedConfirmationInput] = useState("");
   const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(null);
   const [confirmPending, setConfirmPending] = useState(false);
   const [confirmError, setConfirmError] = useState<string | null>(null);
@@ -53,6 +54,7 @@ export function useConfirmDialog({ gate, focus, notice, setMessage }: ConfirmDia
   const fallbackOverlayRef = useRef<HTMLDivElement | null>(null);
   const fallbackDialogRef = useRef<HTMLDivElement | null>(null);
   const reasonInputRef = useRef<HTMLInputElement | null>(null);
+  const typedConfirmationInputRef = useRef<HTMLInputElement | null>(null);
   const cancelButtonRef = useRef<HTMLButtonElement | null>(null);
   const confirmButtonRef = useRef<HTMLButtonElement | null>(null);
   const errorRef = useRef<HTMLParagraphElement | null>(null);
@@ -84,6 +86,7 @@ export function useConfirmDialog({ gate, focus, notice, setMessage }: ConfirmDia
     setConfirmUnknown(false);
     setConfirmAction(null);
     setReason("");
+    setTypedConfirmationInput("");
     if (!keepConsequenceOwner && operationOwnerRef.current === "consequence") {
       operationOwnerRef.current = null;
       setOperationBusy(false);
@@ -104,12 +107,17 @@ export function useConfirmDialog({ gate, focus, notice, setMessage }: ConfirmDia
     setConfirmError(null);
     setConfirmUnknown(false);
     setReason("");
+    setTypedConfirmationInput("");
     operationOwnerRef.current = "consequence";
     setConfirmAction(action);
   }, [capturePendingFocus]);
   const confirmProceed = useCallback(async (): Promise<void> => {
     const action = confirmAction;
-    if (action === null || (action.requiresReason && currentReason().trim() === "")) {
+    if (
+      action === null ||
+      (action.requiresReason && currentReason().trim() === "") ||
+      (action.typedConfirmation !== undefined && typedConfirmationInput.trim() !== action.typedConfirmation)
+    ) {
       return;
     }
     if (confirmPendingRef.current) {
@@ -170,6 +178,7 @@ export function useConfirmDialog({ gate, focus, notice, setMessage }: ConfirmDia
       }
       setConfirmAction(null);
       setReason("");
+      setTypedConfirmationInput("");
       const hasManualRefresh = (actionNoticeRef.current as ActionNotice | null)?.manualRefresh !== undefined;
       if (operationOwnerRef.current === "consequence" && !hasManualRefresh) {
         operationOwnerRef.current = null;
@@ -192,7 +201,7 @@ export function useConfirmDialog({ gate, focus, notice, setMessage }: ConfirmDia
       confirmPendingRef.current = false;
       setOperationBusy(false);
     }
-  }, [confirmAction, currentReason, publishActionNotice, setMessage, setOperationBusy]);
+  }, [confirmAction, currentReason, publishActionNotice, setMessage, setOperationBusy, typedConfirmationInput]);
 
   // The pending-focus pass must stay ahead of the dialog's own layout effects.
   useFocusRestoration(focus, confirmAction);
@@ -248,7 +257,9 @@ export function useConfirmDialog({ gate, focus, notice, setMessage }: ConfirmDia
       element.setAttribute("aria-hidden", "true");
     }
 
-    const initialFocus = confirmAction.requiresReason ? reasonInputRef.current : cancelButtonRef.current;
+    const initialFocus = confirmAction.typedConfirmation !== undefined
+      ? typedConfirmationInputRef.current
+      : confirmAction.requiresReason ? reasonInputRef.current : cancelButtonRef.current;
     focusSoon(initialFocus ?? dialog);
 
     return () => {
@@ -314,19 +325,27 @@ export function useConfirmDialog({ gate, focus, notice, setMessage }: ConfirmDia
       {confirmAction.details !== undefined && <section className="modalDetails" aria-label="Action consequences">{confirmAction.details}</section>}
       {confirmPending && <p className="modalProgress" role="status" aria-live="polite">Working…</p>}
       {confirmError !== null && <p ref={errorRef} id={errorId} className="modalError" role="alert" tabIndex={-1}>{confirmError}</p>}
+      {confirmAction.typedConfirmation !== undefined && (
+        <label className="typedConfirmation">{`Type ${confirmAction.typedConfirmation} to confirm`}<input ref={typedConfirmationInputRef} autoFocus disabled={confirmPending} value={typedConfirmationInput} onChange={(event) => setTypedConfirmationInput(event.target.value)} /></label>
+      )}
       {confirmAction.requiresReason && (
-        <label className="reason">Reason (required)<input ref={reasonInputRef} autoFocus disabled={confirmPending} value={reason} onChange={(event) => setReason(event.target.value)} /></label>
+        <label className="reason">Reason (required)<input ref={reasonInputRef} autoFocus={confirmAction.typedConfirmation === undefined} disabled={confirmPending} value={reason} onChange={(event) => setReason(event.target.value)} /></label>
+      )}
+      {confirmAction.reasonPresets !== undefined && confirmAction.reasonPresets.length > 0 && (
+        <div className="reasonPresets">{confirmAction.reasonPresets.map((preset) => (
+          <button key={preset} type="button" disabled={confirmPending} onClick={() => setReason(preset)}>{preset}</button>
+        ))}</div>
       )}
       <div className="actions">
-        <button ref={cancelButtonRef} type="button" autoFocus={!confirmAction.requiresReason} disabled={confirmPending} onClick={dismissConfirm}>Cancel</button>
+        <button ref={cancelButtonRef} type="button" autoFocus={confirmAction.typedConfirmation === undefined && !confirmAction.requiresReason} disabled={confirmPending} onClick={dismissConfirm}>Cancel</button>
         <button
           ref={confirmButtonRef}
           type="button"
           className="danger"
-          disabled={!confirmPending && (confirmUnknown || busy || (confirmAction.requiresReason && reason.trim() === ""))}
+          disabled={!confirmPending && (confirmUnknown || busy || (confirmAction.requiresReason && reason.trim() === "") || (confirmAction.typedConfirmation !== undefined && typedConfirmationInput.trim() !== confirmAction.typedConfirmation))}
           aria-disabled={confirmPending ? "true" : undefined}
           onClick={() => void confirmProceed()}
-        >Confirm</button>
+        >{confirmAction.confirmLabel ?? "Confirm"}</button>
       </div>
     </div>
   );

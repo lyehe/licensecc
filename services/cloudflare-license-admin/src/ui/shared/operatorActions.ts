@@ -96,6 +96,16 @@ export interface ConfirmAction {
   /** Optional server-derived consequence content rendered inside the shared dialog. */
   details?: ReactNode;
   requiresReason: boolean;
+  /** Overrides the default "Confirm" button label. */
+  confirmLabel?: string;
+  /**
+   * When set, the dialog renders a labelled text input and keeps Confirm
+   * disabled until the typed value exactly matches this phrase (case-sensitive,
+   * ends trimmed). The field is cleared every time the dialog opens.
+   */
+  typedConfirmation?: string;
+  /** Buttons that fill the reason field with a fixed value; the field stays editable afterwards. */
+  reasonPresets?: string[];
   run: (context: ConfirmActionContext) => Promise<ConfirmActionOutcome>;
   successFocusTarget?: ConfirmFocusTarget;
   isCurrent?: () => boolean;
