@@ -3,11 +3,11 @@ import { DeviceRegistrations } from "./DeviceRegistrations";
 import { ProtectedNodes } from "./ProtectedNodes";
 import { BrowserSeats } from "./BrowserSeats";
 import { discardLegacyStoredSeats, randomHex, readStoredSeats, runSeatSignOutReleases, seatPath, writeStoredSeats } from "./seatStorage";
+import { type PendingSeatRelease, useSeatReleaseDialog } from "./seatReleaseDialog";
 
 import {
   DEVICE_RELEASE_CONFIRM_COPY,
   deviceReleasePath,
-  FLOATING_SEAT_RELEASE_NETWORK_ERROR_COPY,
   FLOATING_SEAT_RELEASE_REFRESH_FAILED_CODE,
   hydrateSeatSessions,
   PORTAL_STATUS_REFRESH_ACTION_LABEL,
@@ -25,6 +25,10 @@ interface DeviceFeatureOptions {
   busyRef: React.RefObject<boolean>;
   // D3: the signed-in customer id. Seats persist keyed by this id, re-hydrated on every change.
   customer: string;
+  // D3 fix round 1 (Critical): a reactive session epoch (auth.sessionEpoch), bumped on every confirmed
+  // sign-in -- including a re-sign-in as this SAME customer after a session-ending 401, when `customer`
+  // itself never changes. Part of the hydrate effect's dependency array below alongside `customer`.
+  sessionEpoch: number;
   devices: DeviceRow[];
   entitlements: EntitlementRow[];
   refreshData(): Promise<boolean>;
@@ -35,11 +39,6 @@ interface DeviceFeatureOptions {
   // action started" against "the generation now" once their response arrives, and drop a result that
   // arrives after the customer has moved on -- see App.tsx's own comment for the full race.
   visitGenerationRef: React.RefObject<number>;
-}
-
-interface PendingSeatRelease {
-  item: EntitlementRow;
-  session: SeatSession;
 }
 
 // Focus to move once a seat action's re-render lands: after "start" the seat's session is present,
@@ -102,35 +101,30 @@ function focusFirstAvailable(
 }
 
 export function useDevicesController(options: DeviceFeatureOptions): DevicesController {
-  const { busy, busyRef, customer, devices, entitlements, refreshData, runOnce, setMessage, visitGenerationRef } = options;
+  const { busy, busyRef, customer, devices, entitlements, refreshData, runOnce, sessionEpoch, setMessage, visitGenerationRef } = options;
   // D3: seeded empty rather than hydrated eagerly -- `customer` is not yet known at PortalShell's very
   // first render (auth starts as "loading"), so hydration happens in the effect below, keyed to the
   // customer id once a sign-in actually resolves.
   const [seatSessions, setSeatSessionsRaw] = useState<Record<string, SeatSession>>({});
-  const [pendingSeatRelease, setPendingSeatRelease] = useState<PendingSeatRelease | null>(null);
-  const [seatReleaseError, setSeatReleaseError] = useState<string | null>(null);
-  const [seatReleaseOutcomeUnknown, setSeatReleaseOutcomeUnknown] = useState(false);
   const [pendingSeatFocus, setPendingSeatFocus] = useState<PendingSeatFocus | null>(null);
   const [seatMessages, setSeatMessages] = useState<Record<string, StatusMessage | null>>({});
   const [deviceMessages, setDeviceMessages] = useState<Record<string, StatusMessage | null>>({});
-  const seatReleaseDialogRef = useRef<HTMLDivElement>(null);
-  const seatReleaseReturnFocusRef = useRef<HTMLElement | null>(null);
-  const seatReleaseDeferredFocusRef = useRef<HTMLElement | null>(null);
-  const seatReleaseConfirmingRef = useRef(false);
   const seatStartButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const seatReleaseButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const seatCardRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const browserSessionsSummaryRef = useRef<HTMLElement | null>(null);
   const panelHeadingRef = useRef<HTMLElement | null>(null);
 
-  // D3 (decision 4): re-hydrate whenever the signed-in customer changes -- the initial sign-in and any
-  // later switch alike. Never fires on an unrelated re-render (the dependency is the id itself), so it
-  // cannot clobber this SAME customer's live seatSessions mid-visit.
+  // D3 (decision 4) / fix round 1 (Critical): re-hydrate on the initial sign-in, a later customer
+  // switch, OR a re-sign-in as the SAME customer after a session-ending 401 -- the third case is why
+  // sessionEpoch is a dependency too: a session-ending 401 never nulls `customer` (only an explicit
+  // sign-out does), so re-signing in as the same customer changes sessionEpoch but not `customer`, and
+  // without it this effect would never re-run, leaving a still-server-held seat unlisted.
   useEffect(() => {
     if (customer === "") return;
     discardLegacyStoredSeats();
     setSeatSessionsRaw(hydrateSeatSessions(readStoredSeats(customer), Math.floor(Date.now() / 1000)));
-  }, [customer]);
+  }, [customer, sessionEpoch]);
 
   function setSeatSessions(update: React.SetStateAction<Record<string, SeatSession>>): void {
     setSeatSessionsRaw((current) => {
@@ -223,115 +217,18 @@ export function useDevicesController(options: DeviceFeatureOptions): DevicesCont
     return { succeeded, refreshFailed, networkFailure };
   }
 
-  function requestSeatRelease(item: EntitlementRow): void {
-    if (busyRef.current) return;
-    const session = seatSessions[item.id];
-    if (session === undefined) {
-      setSeatMessage(item.id, localMessage("seat_not_checked_out", false));
-      return;
-    }
-    seatReleaseReturnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    setSeatReleaseError(null);
-    setSeatReleaseOutcomeUnknown(false);
-    setPendingSeatRelease({ item, session });
-  }
-
-  function dismissSeatRelease(): void {
-    if (seatReleaseConfirmingRef.current) return;
-    setSeatReleaseError(null);
-    setSeatReleaseOutcomeUnknown(false);
-    setPendingSeatRelease(null);
-    seatReleaseDeferredFocusRef.current = seatReleaseReturnFocusRef.current;
-    seatReleaseReturnFocusRef.current = null;
-  }
-
-  async function confirmSeatRelease(): Promise<void> {
-    const pending = pendingSeatRelease;
-    if (pending === null || seatReleaseConfirmingRef.current || busyRef.current) return;
-    const returnFocus = seatReleaseReturnFocusRef.current;
-    seatReleaseConfirmingRef.current = true;
-    setSeatReleaseError(null);
-    seatReleaseDialogRef.current?.focus();
-    let closeDialog = false;
-    try {
-      const outcome = await seatAction(pending.item, "release");
-      if (outcome.succeeded) {
-        setPendingSeatFocus({ seatId: pending.item.id, after: "release" });
-        if (outcome.refreshFailed) setMessage(localMessage(FLOATING_SEAT_RELEASE_REFRESH_FAILED_CODE, false));
-        setPendingSeatRelease(null);
-        closeDialog = true;
-      } else if (outcome.networkFailure) {
-        // api() no longer throws for a dropped connection (task C2) -- it reports network_unavailable
-        // like any other failure code. A release specifically cannot treat that as an ordinary
-        // failure: whether the server released the seat before the connection dropped is unknown, so
-        // this stays open with the same "outcome is unknown" guidance a thrown exception used to
-        // produce here, rather than silently closing as if the release had simply been refused.
-        setSeatReleaseError(FLOATING_SEAT_RELEASE_NETWORK_ERROR_COPY);
-        setSeatReleaseOutcomeUnknown(true);
-        seatReleaseDialogRef.current?.focus();
-      } else {
-        seatReleaseDeferredFocusRef.current = returnFocus;
-        setPendingSeatRelease(null);
-        closeDialog = true;
-      }
-    } catch {
-      // Defensive: nothing on this path is expected to throw anymore (api() itself no longer does),
-      // but if something truly unexpected does, treat it exactly like the network-failure branch
-      // above -- the outcome is equally unknown either way.
-      setSeatReleaseError(FLOATING_SEAT_RELEASE_NETWORK_ERROR_COPY);
-      setSeatReleaseOutcomeUnknown(true);
-      seatReleaseDialogRef.current?.focus();
-    } finally {
-      seatReleaseConfirmingRef.current = false;
-      if (closeDialog) seatReleaseReturnFocusRef.current = null;
-    }
-  }
-
-  useEffect(() => {
-    if (pendingSeatRelease === null) return;
-    const dialog = seatReleaseDialogRef.current;
-    if (dialog === null) return;
-    const selector = "button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled])";
-    const focusable = (): HTMLElement[] => Array.from(dialog.querySelectorAll<HTMLElement>(selector));
-    focusable()[0]?.focus();
-    const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === "Escape" && !seatReleaseConfirmingRef.current) {
-        event.preventDefault();
-        dismissSeatRelease();
-        return;
-      }
-      if (event.key !== "Tab") return;
-      const controls = focusable();
-      if (controls.length === 0) {
-        event.preventDefault();
-        dialog.focus();
-        return;
-      }
-      const first = controls[0];
-      const last = controls[controls.length - 1];
-      if (!dialog.contains(document.activeElement)) {
-        event.preventDefault();
-        (event.shiftKey ? last : first).focus();
-      } else if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [pendingSeatRelease]);
-
-  useEffect(() => {
-    if (pendingSeatRelease !== null) return;
-    const deferredFocus = seatReleaseDeferredFocusRef.current;
-    if (deferredFocus !== null) {
-      seatReleaseDeferredFocusRef.current = null;
-      deferredFocus.focus();
-    }
-  }, [pendingSeatRelease]);
+  // D3 fix round 1 (Important 3, hotspot budget): the release confirm dialog's own state, mutation and
+  // focus management now live in seatReleaseDialog.ts -- see its own header comment. No behaviour
+  // change: this hook still owns seatSessions/seatAction/setMessage, which the dialog flow reaches
+  // through these options, and setPendingSeatFocus, which it uses to hand focus back here on release.
+  const seatReleaseDialog = useSeatReleaseDialog({
+    busyRef,
+    seatSessions,
+    seatAction,
+    setSeatMessage,
+    setMessage,
+    setPendingSeatFocus,
+  });
 
   useEffect(() => {
     if (pendingSeatFocus === null) return;
@@ -345,7 +242,7 @@ export function useDevicesController(options: DeviceFeatureOptions): DevicesCont
       // panel's now-visible heading.
       focusFirstAvailable(seatReleaseButtonRefs.current[seatId], seatCardRefs.current[seatId], panelHeadingRef.current);
     } else {
-      if (hasSession || pendingSeatRelease !== null) return;
+      if (hasSession || seatReleaseDialog.pendingSeatRelease !== null) return;
       // Releasing the last live browser session used to always collapse the panel into a closed
       // <details>; since D2 the panel now also stays open for a seat with a fresh local result to
       // show (its own release/checkout copy), which is normally the case right after a release, so
@@ -355,7 +252,7 @@ export function useDevicesController(options: DeviceFeatureOptions): DevicesCont
       focusFirstAvailable(seatStartButtonRefs.current[seatId], seatCardRefs.current[seatId], browserSessionsSummaryRef.current);
     }
     setPendingSeatFocus(null);
-  }, [entitlements, pendingSeatFocus, pendingSeatRelease, seatSessions]);
+  }, [entitlements, pendingSeatFocus, seatReleaseDialog.pendingSeatRelease, seatSessions]);
 
   // D2: this device row's own role="status" line, keyed by device_key_id (a device row has no more
   // stable id than that -- the same key DeviceRegistrations already keys its buttons by).
@@ -396,9 +293,7 @@ export function useDevicesController(options: DeviceFeatureOptions): DevicesCont
   // may have just written a failed release there, which must survive this call (decision 2).
   function clear(): void {
     setSeatSessionsRaw({});
-    setPendingSeatRelease(null);
-    setSeatReleaseError(null);
-    setSeatReleaseOutcomeUnknown(false);
+    seatReleaseDialog.resetForClear();
     setPendingSeatFocus(null);
     setSeatMessages({});
     setDeviceMessages({});
@@ -416,22 +311,22 @@ export function useDevicesController(options: DeviceFeatureOptions): DevicesCont
     busy,
     devices,
     entitlements,
-    pendingSeatRelease,
-    seatReleaseError,
-    seatReleaseOutcomeUnknown,
+    pendingSeatRelease: seatReleaseDialog.pendingSeatRelease,
+    seatReleaseError: seatReleaseDialog.seatReleaseError,
+    seatReleaseOutcomeUnknown: seatReleaseDialog.seatReleaseOutcomeUnknown,
     seatSessions,
     seatMessages,
     deviceMessages,
-    seatReleaseDialogRef,
+    seatReleaseDialogRef: seatReleaseDialog.seatReleaseDialogRef,
     seatStartButtonRefs,
     seatReleaseButtonRefs,
     seatCardRefs,
     browserSessionsSummaryRef,
     panelHeadingRef,
     seatAction,
-    requestSeatRelease,
-    dismissSeatRelease,
-    confirmSeatRelease,
+    requestSeatRelease: seatReleaseDialog.requestSeatRelease,
+    dismissSeatRelease: seatReleaseDialog.dismissSeatRelease,
+    confirmSeatRelease: seatReleaseDialog.confirmSeatRelease,
     releaseDevice,
     releaseSeatsOnSignOut,
     clear,

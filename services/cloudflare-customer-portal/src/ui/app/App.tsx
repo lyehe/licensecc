@@ -39,6 +39,13 @@ function PortalShell(): React.ReactElement {
   const [message, setMessage] = useState<StatusMessage | null>(null);
   const { busy, busyRef, runOnce } = useSingleFlight();
   const auth = usePortalAuth({ setMessage, runOnce });
+  // D3 fix round 1 (Important 2): real render state (not just signingOutRef's synchronous re-entrancy
+  // guard below) so the Sign out button and every other busy-gated control visibly disable for the
+  // whole ~5s seat-release window -- BEFORE auth.logout's own runOnce (the shared busy flag) even
+  // starts. Kept separate from `busy` rather than nested inside runOnce, because auth.logout() calls
+  // that SAME runOnce internally; wrapping logout() in it too would make that nested call a no-op
+  // (runOnce's busyRef guard is shared across the whole app, not per-caller).
+  const [signingOut, setSigningOut] = useState(false);
 
   const location = usePortalLocation();
   const { entitlements, devices, usage, usageAvailable, readState, stale, refreshData, clear: clearPortalData } = usePortalData({
@@ -70,13 +77,14 @@ function PortalShell(): React.ReactElement {
   // page-level line, so setMessage is no longer passed through here.
   const downloads = useLicenseDownloads({ runOnce, visitGenerationRef: appsVisitGenerationRef });
   const deviceController = useDevicesController({
-    busy: busy || stale,
+    busy: busy || stale || signingOut,
     busyRef,
     customer: auth.customerId ?? "",
     devices,
     entitlements,
     refreshData,
     runOnce,
+    sessionEpoch: auth.sessionEpoch,
     setMessage,
     visitGenerationRef: devicesVisitGenerationRef,
   });
@@ -212,18 +220,20 @@ function PortalShell(): React.ReactElement {
     if (document.contains(target) && !target.hasAttribute("disabled")) target.focus();
   }, [busy, message]);
 
-  // D3: guards against a double-click firing the seat-release-then-sign-out sequence twice -- `busy`
-  // (the shared runOnce/busyRef) stays false for as long as releaseSeatsOnSignOut() below is running,
-  // since it runs BEFORE auth.logout's own runOnce call, so the Sign out button is not yet disabled.
+  // D3: signingOutRef is the SYNCHRONOUS re-entrancy guard (a ref updates immediately, unlike state,
+  // so a double-click before the first render commits still sees it set); `signingOut` state (above)
+  // drives the visible disabled/label change.
   const signingOutRef = useRef(false);
 
   async function logout(): Promise<void> {
     if (signingOutRef.current) return;
     signingOutRef.current = true;
+    setSigningOut(true);
     try {
       // Decision 2: best-effort release EVERY stored seat for this customer before the sign-out
       // request itself, bounded so sign-out can never hang on it (see runSeatSignOutReleases).
       const seatOutcome = await deviceController.releaseSeatsOnSignOut();
+      const seatsTouched = seatOutcome.released > 0 || seatOutcome.failed > 0;
       const loggedOut = await auth.logout(() => {
         clearPortalData();
         deviceController.clear();
@@ -235,13 +245,19 @@ function PortalShell(): React.ReactElement {
         window.history.replaceState(null,"","/#/apps");
         window.dispatchEvent(new HashChangeEvent("hashchange"));
       });
-      // Only once sign-out actually completed: auth.logout already set "logout_failed" on the authed
-      // screen for a failed attempt, which this must not clobber with a seat summary meant for sign-in.
-      if (loggedOut && (seatOutcome.released > 0 || seatOutcome.failed > 0)) {
-        setMessage(localMessage("seats_released_on_signout", true, { released: seatOutcome.released, failed: seatOutcome.failed }));
+      if (loggedOut) {
+        // Sign-out actually completed: show the release summary on the now-visible sign-in screen.
+        if (seatsTouched) setMessage(localMessage("seats_released_on_signout", true, { released: seatOutcome.released, failed: seatOutcome.failed }));
+      } else if (seatsTouched) {
+        // D3 fix round 1 (Minor 5): the release POSTs are independent of the sign-out POST -- they
+        // already happened for real even though sign-out itself failed -- so replace auth.logout's own
+        // plain "logout_failed" message (no params) with one carrying the same params, which StatusLine
+        // appends after the logout_failed sentence (see api.tsx).
+        setMessage(localMessage("logout_failed", false, { released: seatOutcome.released, failed: seatOutcome.failed }));
       }
     } finally {
       signingOutRef.current = false;
+      setSigningOut(false);
     }
   }
 
@@ -268,20 +284,20 @@ function PortalShell(): React.ReactElement {
           {(["apps", "nodes", "account"] as const).map((page) => <a key={page} ref={location.page === page ? activeTabButtonRef : undefined} href={`#/${page}`} aria-current={location.page === page ? "page" : undefined}>{page === "nodes" ? "Devices" : page[0].toUpperCase() + page.slice(1)}</a>)}
         </nav>
         {auth.email !== null && <p className="signedInAs">Signed in as {auth.email}</p>}
-        <div className="signOutControl"><button disabled={busy} onClick={() => void logout()}>Sign out</button>{location.page==="account" && <p>Your apps and devices stay connected.</p>}</div>
+        <div className="signOutControl"><button disabled={busy || signingOut} onClick={() => void logout()}>{signingOut ? "Signing out…" : "Sign out"}</button>{location.page==="account" && <p>Your apps and devices stay connected.</p>}</div>
         </div>
       </header>
       <div id="content" className="workspaceContent" tabIndex={-1}>
-        {stale && readState === "ready" && <div className="readNotice"><p>Displayed data may be out of date. Refresh before making another change.</p>{message?.code !== DEVICES_REFRESH_FAILURE_CODE && <button disabled={busy} onClick={() => void refreshPortalData()}>Refresh account</button>}</div>}
+        {stale && readState === "ready" && <div className="readNotice"><p>Displayed data may be out of date. Refresh before making another change.</p>{message?.code !== DEVICES_REFRESH_FAILURE_CODE && <button disabled={busy || signingOut} onClick={() => void refreshPortalData()}>Refresh account</button>}</div>}
         <div className="feedback">
           <StatusLine message={message} fallback="" />
           {message?.code === DEVICES_REFRESH_FAILURE_CODE && (
-            <button disabled={busy} onClick={() => void refreshPortalData()}>{DEVICES_REFRESH_ACTION_LABEL}</button>
+            <button disabled={busy || signingOut} onClick={() => void refreshPortalData()}>{DEVICES_REFRESH_ACTION_LABEL}</button>
           )}
         </div>
-        {location.page === "nodes" && <DevicesFeature key={auth.customerId} controller={deviceController} customer={auth.customerId??""} busy={busy} runOnce={runOnce} onSessionExpired={auth.retrySession} project={location.project} accountDataState={readState} onRetryAccountData={refreshPortalData} />}
+        {location.page === "nodes" && <DevicesFeature key={auth.customerId} controller={deviceController} customer={auth.customerId??""} busy={busy || signingOut} runOnce={runOnce} onSessionExpired={auth.retrySession} project={location.project} accountDataState={readState} onRetryAccountData={refreshPortalData} />}
         {location.page === "account" && <AccountFeature customerId={auth.customerId} />}
-        {location.page === "apps" && (readState !== "ready" ? <section className="emptyState"><h2>{readState === "loading" ? "Loading your account…" : "Account data unavailable"}</h2><p>{readState === "loading" ? "Fetching your licenses and devices." : "We could not refresh your account. Retry to see current access."}</p>{readState === "error" && <button disabled={busy} onClick={() => void refreshPortalData()}>Retry</button>}</section> : <AppsFeature entitlements={entitlements} usage={usage} usageAvailable={usageAvailable} retry={refreshPortalData} downloads={downloads} busy={busy || stale} project={location.project} email={auth.email} />)}
+        {location.page === "apps" && (readState !== "ready" ? <section className="emptyState"><h2>{readState === "loading" ? "Loading your account…" : "Account data unavailable"}</h2><p>{readState === "loading" ? "Fetching your licenses and devices." : "We could not refresh your account. Retry to see current access."}</p>{readState === "error" && <button disabled={busy || signingOut} onClick={() => void refreshPortalData()}>Retry</button>}</section> : <AppsFeature entitlements={entitlements} usage={usage} usageAvailable={usageAvailable} retry={refreshPortalData} downloads={downloads} busy={busy || stale || signingOut} project={location.project} email={auth.email} />)}
       </div>
     </main>
     <SeatReleaseDialog controller={deviceController} />

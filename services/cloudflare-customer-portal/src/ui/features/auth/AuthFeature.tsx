@@ -12,7 +12,7 @@ import {
   normalizeEmail,
   OTP_EXPIRY_COPY,
 } from "../../portalWorkflow";
-import { api, beginNewSession, localMessage, resultMessage, StatusLine } from "../../shared/api";
+import { api, beginNewSession, currentSessionEpoch, localMessage, resultMessage, StatusLine } from "../../shared/api";
 import { SupportContact } from "../../shared/SupportContact";
 import type { PortalMe, StatusMessage } from "../../types";
 
@@ -40,6 +40,12 @@ export interface PortalAuth {
   // below, the sign-in form's OWN draft value.
   email: string | null;
   retrySession(): Promise<boolean>;
+  // D3 fix round 1 (Critical): a REACTIVE mirror of api.tsx's module-level session epoch, bumped on
+  // every confirmed loadMe success -- including a re-sign-in as the SAME customer after a session-
+  // ending 401, when customerId itself does not change. useDevicesController depends on this (alongside
+  // customer) to re-hydrate stored seats even when the customer id alone gives no signal that a new
+  // session began.
+  sessionEpoch: number;
   phase: AuthPhase;
   loginEmail: string;
   code: string;
@@ -61,6 +67,7 @@ export function usePortalAuth({ setMessage, runOnce }: AuthOptions): PortalAuth 
   const [email, setEmail] = useState<string | null>(null);
   const [code, setCode] = useState("");
   const [customerId, setCustomerId] = useState<string | null>(null);
+  const [sessionEpoch, setSessionEpoch] = useState(0);
 
   const loadMe = useCallback(async (): Promise<boolean> => {
     setPhase("loading");
@@ -73,6 +80,9 @@ export function usePortalAuth({ setMessage, runOnce }: AuthOptions): PortalAuth 
         // A confirmed session, new or reconfirmed. Bumps the epoch so a straggler response from a
         // request sent under an OLDER session can never bounce this one back to sign-in (fix round 1).
         beginNewSession();
+        // D3 fix round 1 (Critical): mirror the epoch into state too -- customerId alone does not
+        // change when the SAME customer signs back in after a session-ending 401, but this always does.
+        setSessionEpoch(currentSessionEpoch());
         setCustomerId(result.data.customer_id);
         setEmail(result.data.email ?? null);
         setMessage(null);
@@ -173,6 +183,7 @@ export function usePortalAuth({ setMessage, runOnce }: AuthOptions): PortalAuth 
     customerId,
     email,
     retrySession: loadMe,
+    sessionEpoch,
     phase,
     loginEmail,
     code,

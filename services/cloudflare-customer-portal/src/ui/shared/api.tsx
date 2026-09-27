@@ -125,11 +125,17 @@ export function StatusLine({ message, fallback }: { message: StatusMessage | nul
   // specific call (the auth 429s in the header rollout); every other rate_limited (e.g. self-service's
   // own 429, which never carries the header) keeps the existing generic RESULT_CODE_COPY text.
   // seats_released_on_signout (D3) gets the same treatment for the released/failed counts App.tsx's
-  // logout() attaches as params -- see seatsReleasedMessage above.
+  // logout() attaches as params -- see seatsReleasedMessage above. D3 fix round 1 (Minor 5): a FAILED
+  // sign-out (logout_failed) that still released seats first -- the release POSTs are independent of
+  // the sign-out POST -- carries those same params too, so the customer is told both facts instead of
+  // "logout_failed" implying nothing happened; describeResultCode's plain logout_failed sentence is
+  // reused verbatim (never duplicated here) with the seat summary appended.
   const human = message.code === "rate_limited" && typeof message.retryAfter === "number"
     ? rateLimitMessage(message.retryAfter)
     : message.code === "seats_released_on_signout" && message.params !== undefined
     ? seatsReleasedMessage(message.params.released ?? 0, message.params.failed ?? 0)
+    : message.code === "logout_failed" && message.params !== undefined
+    ? `${describeResultCode("logout_failed")} ${seatsReleasedMessage(message.params.released ?? 0, message.params.failed ?? 0)}`.trim()
     : describeResultCode(message.code) ?? describeUnknownResult(message.request_id);
   const detail = formatMessageDetail(message);
   return (

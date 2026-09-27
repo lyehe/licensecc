@@ -62,6 +62,8 @@ export function discardLegacyStoredSeats(): void {
 // slow or unreachable server. A seat that does not confirm success within that budget, or whose
 // request fails outright, is reported "failed"; the caller (DevicesController) leaves it in
 // seatSessions/storage so it is offered again after the next sign-in rather than silently dropped.
+// A request that loses the race is never aborted, so a very late server-side success can still be
+// recorded here as "failed" -- it self-heals on the next manual release attempt.
 export async function runSeatSignOutReleases(
   seatSessions: Record<string, SeatSession>,
   timeoutMs = 5000,
