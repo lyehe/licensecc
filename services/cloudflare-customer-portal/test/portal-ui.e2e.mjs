@@ -5,6 +5,7 @@ import "./portal-ui.network-failures.e2e.mjs";
 import "./portal-ui.session-expired.e2e.mjs";
 import "./portal-ui.license-lifecycle.e2e.mjs";
 import "./portal-ui.devices-search.e2e.mjs";
+import "./portal-ui.devices-results.e2e.mjs";
 
 function makeEnvelope(code, data) {
   makeEnvelope.nextRequestId += 1;
@@ -920,10 +921,10 @@ test("customer portal signs in with an 8-digit code and walks every screen witho
   await expect.poll(() => page.evaluate(() => window.localStorage.getItem("licensecc.portal.seats.v1"))).toBe(storedSeatSessionBeforeReleaseConfirm);
 
   // Only the explicit confirmation sends the original request, and a double click remains one
-  // release while the existing busy guard is active. Releasing the last live seat leaves no
-  // browser session, so the panel reverts to its plain collapsible <details> and the now-hidden
-  // seat card/button can no longer take focus; the app falls back to focusing the panel's own
-  // <summary> instead of leaving focus on <body>.
+  // release while the existing busy guard is active. Releasing the last live seat used to always
+  // collapse the panel into a plain <details>; since D2 it instead shows this seat's own result
+  // (its role="status" line) and stays expanded so that result is visible without reopening
+  // anything, and the now-re-enabled Start seat button takes focus directly.
   await seatCard.getByRole("button", { name: "Release seat" }).click();
   const confirmReleaseDialog = page.getByRole("dialog");
   await expect(confirmReleaseDialog).toBeVisible();
@@ -938,13 +939,12 @@ test("customer portal signs in with an 8-digit code and walks every screen witho
     seat_id: "seat-e2e",
   });
   expect(release.body.client_instance_id).toBe(checkout.body.client_instance_id);
-  // Human text, not the raw code (C1): Technical details stay collapsed.
-  await expect(page.getByText("Seat released.", { exact: true })).toBeVisible();
+  // Human text, not the raw code (C1): Technical details stay collapsed. D2: this is the SEAT's own
+  // local result line now, not the page-level one.
+  await expect(seatCard.getByRole("status")).toContainText("Seat released.");
   await expect(page.getByText("release_ok", { exact: false })).not.toBeVisible();
-  const browserSessionsSummary = page.getByText("Browser seats", { exact: true });
-  await expect(browserSessionsSummary).toBeFocused();
+  await expect(seatCard.getByRole("button", { name: "Start seat" })).toBeFocused();
   expect(await page.evaluate(() => document.activeElement?.tagName)).not.toBe("BODY");
-  await browserSessionsSummary.click();
   await expect(seatCard.getByRole("button", { name: "Start seat" })).toBeEnabled();
   await expect(seatCard.getByRole("button", { name: "Renew seat" })).toBeDisabled();
   await expect(seatCard.getByRole("button", { name: "Release seat" })).toBeDisabled();
@@ -971,12 +971,12 @@ test("customer portal signs in with an 8-digit code and walks every screen witho
   await expect(page.locator('.feedback [role="status"]')).toContainText(/released; status refresh failed/i);
   await expect(page.getByRole("button", { name: "Refresh status" })).toBeVisible();
   await expect.poll(() => page.evaluate(() => window.localStorage.getItem("licensecc.portal.seats.v1"))).toBe("{}");
-  // This release also leaves no browser session, collapsing the panel again; focus again lands on
-  // the summary rather than <body>, since neither the (disabled) Start seat button nor the hidden
-  // seat card can take it.
-  await expect(browserSessionsSummary).toBeFocused();
+  // This release also leaves no browser session, but the panel stays expanded (this seat's own
+  // "Seat released." result is showing); the failed refresh keeps the whole page busy/stale, so
+  // neither the (disabled) Start seat button nor the panel heading can take focus and it falls back
+  // to the seat card itself rather than <body>.
+  await expect(seatCard).toBeFocused();
   expect(await page.evaluate(() => document.activeElement?.tagName)).not.toBe("BODY");
-  await browserSessionsSummary.click();
   await expect(seatCard.getByRole("button", { name: "Start seat" })).toBeDisabled();
 
   await page.getByRole("button", { name: "Refresh status" }).click();

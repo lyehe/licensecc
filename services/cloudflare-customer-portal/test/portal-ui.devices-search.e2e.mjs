@@ -49,6 +49,31 @@ test('devices: searching a Device ID filters the activated devices',async({page}
   await expect(page.locator('.registrations tr').filter({hasText:'legacy-beta-002'})).toHaveCount(0);
 });
 
+// D1 carryover (review, Minor 1): a search/app filter that empties the LOADED page must still say
+// more devices may be waiting on later pages, rather than implying "No matching devices" is final.
+test('devices: a search that empties the loaded page still hints that more devices may exist',async({page})=>{
+  const ids=Array.from({length:100},(_,i)=>{
+    const buffer=Buffer.alloc(16);
+    buffer.writeUInt32BE(i+1,12);
+    return buffer.toString('base64url');
+  }).sort();
+  const items=ids.map((id,i)=>({binding_id:id,project:'DEFAULT',feature:'pro',revision:0,hold_until:now+3600,state:'active',label:`Device ${i}`,last_proof_at:now-30,created_at:now-3600,server_time:now}));
+  await page.route('**/api/portal/**', async route => {
+    const url=new URL(route.request().url());
+    if(url.pathname.endsWith('/me'))return route.fulfill({json:envelope('me',{customer_id:'A'})});
+    if(url.pathname.endsWith('/device-bindings'))return route.fulfill({json:envelope('device_bindings',{customer_id:'A',items,has_more:true,next_cursor:ids[ids.length-1]})});
+    if(url.pathname.endsWith('/entitlements'))return route.fulfill({json:envelope('entitlements',{items:[]})});
+    if(url.pathname.endsWith('/devices'))return route.fulfill({json:envelope('devices',{items:[]})});
+    if(url.pathname.endsWith('/usage'))return route.fulfill({json:envelope('usage',{items:[]})});
+    return route.fulfill({json:envelope('ok',{items:[]})});
+  });
+  await page.goto('/#/nodes');
+  await expect(page.locator('.protectedNodes tbody tr')).toHaveCount(100);
+  await page.getByRole('searchbox',{name:'Find a device'}).fill('no-such-device-anywhere');
+  await expect(page.getByRole('heading',{name:'No matching devices'})).toBeVisible();
+  await expect(page.getByText('Showing matches from loaded devices.')).toBeVisible();
+});
+
 test('devices: "View devices" from an app filters to that app, and Show all apps clears it',async({page})=>{
   await setup(page);
   await page.goto('/#/apps');

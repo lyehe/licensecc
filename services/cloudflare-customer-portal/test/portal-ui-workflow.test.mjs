@@ -103,10 +103,10 @@ test("portal UI workflow exposes empty-state copy for every tab", async () => {
 
 test("portal UI workflow maps raw result codes to human-readable copy", async () => {
   const workflow = await loadWorkflowModule();
-  assert.equal(
-    workflow.describeResultCode("pool_exhausted"),
-    "All seats are in use — release one or ask your administrator.",
-  );
+  // pool_exhausted is deliberately absent from this pure string map (D2): its copy links out via
+  // <SupportContact/>, a React node, so it is mapped instead in ui/shared/ActionResult.tsx -- see the
+  // dedicated coverage test below, which checks that file directly.
+  assert.equal(workflow.describeResultCode("pool_exhausted"), null);
   assert.equal(
     workflow.describeResultCode("device_limit_exceeded"),
     "This license's device limit is reached — release a device under Devices.",
@@ -264,14 +264,36 @@ test("portal UI workflow gives every StatusLine-reachable result code human copy
     "bootstrap_otp", // POST /portal/v1/admin/bootstrap-otp: operator break-glass payload; the customer SPA has no caller for this route at all, so it never reaches setMessage
   ]);
 
-  const allCodes = new Set([...routeCodes, ...manifestCodes, ...localCodes, ...seatAckCodes]);
-  const uncovered = [...allCodes].filter((code) => !DATA_ONLY_CODES.has(code) && workflow.describeResultCode(code) === null);
-  assert.deepEqual(uncovered, [], `every StatusLine-reachable code needs RESULT_CODE_COPY copy; missing: ${uncovered.join(", ")}`);
+  // ---- 6) codes covered by a React node (ui/shared/ActionResult.tsx) instead of RESULT_CODE_COPY --
+  // pool_exhausted's copy links out through <SupportContact/> (D2), which cannot live in this pure
+  // string map, so it is excluded here the same way DATA_ONLY_CODES is -- but verified against the
+  // node file's actual source, not just blindly excluded, so a future removal there would still fail.
+  const NODE_ONLY_CODES = new Set(["pool_exhausted"]);
+  const actionResultSource = readFileSync(new URL("../src/ui/shared/ActionResult.tsx", import.meta.url), "utf8");
+  for (const code of NODE_ONLY_CODES) {
+    const keyRe = new RegExp(`\\b${code}:\\s*<>`);
+    assert.match(
+      actionResultSource,
+      keyRe,
+      `ActionResult.tsx must map "${code}" to a React node -- update NODE_ONLY_CODES if it moved elsewhere`,
+    );
+  }
+  assert.match(
+    actionResultSource,
+    /<SupportContact\s*\/>/,
+    "ActionResult.tsx's pool_exhausted copy must link out through <SupportContact/>",
+  );
 
-  // Every DATA_ONLY_CODES entry must actually be one of the collected codes, or the exclusion is dead
-  // (and may be hiding a code that should really be covered).
-  const deadExclusions = [...DATA_ONLY_CODES].filter((code) => !allCodes.has(code));
-  assert.deepEqual(deadExclusions, [], `DATA_ONLY_CODES entries never collected -- remove them: ${deadExclusions.join(", ")}`);
+  const allCodes = new Set([...routeCodes, ...manifestCodes, ...localCodes, ...seatAckCodes]);
+  const uncovered = [...allCodes].filter(
+    (code) => !DATA_ONLY_CODES.has(code) && !NODE_ONLY_CODES.has(code) && workflow.describeResultCode(code) === null,
+  );
+  assert.deepEqual(uncovered, [], `every StatusLine-reachable code needs RESULT_CODE_COPY (or NODE_ONLY_CODES) copy; missing: ${uncovered.join(", ")}`);
+
+  // Every DATA_ONLY_CODES/NODE_ONLY_CODES entry must actually be one of the collected codes, or the
+  // exclusion is dead (and may be hiding a code that should really be covered).
+  const deadExclusions = [...DATA_ONLY_CODES, ...NODE_ONLY_CODES].filter((code) => !allCodes.has(code));
+  assert.deepEqual(deadExclusions, [], `DATA_ONLY_CODES/NODE_ONLY_CODES entries never collected -- remove them: ${deadExclusions.join(", ")}`);
 
   // The verbatim success copy pinned by the brief.
   assert.equal(workflow.describeResultCode("otp_requested"), "Check your email for a sign-in code.");
