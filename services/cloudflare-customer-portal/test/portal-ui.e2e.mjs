@@ -42,6 +42,9 @@ test("registration verifies email before choosing a password and opens an empty 
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.getByRole("button", { name: "Send verification link", exact: true }).click();
   await expect(page.getByRole("alert")).toContainText("Check your email");
+  // D5 (decision 1): this is a confirmation, not an error -- it must NOT use the error colour, unlike
+  // the two failures below.
+  await expect(page.getByRole("alert")).toHaveCSS("color", "rgb(155, 196, 155)");
   expect(submissions).toEqual([{ email: "new@example.com" }]);
   const token = "a".repeat(43);
   await page.goto(`/password-action#token=${token}`);
@@ -52,6 +55,8 @@ test("registration verifies email before choosing a password and opens an empty 
   await page.getByLabel("Confirm password", { exact: true }).fill("A different testing passphrase");
   await page.getByRole("button", { name: "Save password and sign in" }).click();
   await expect(page.getByRole("alert")).toHaveText("Passwords do not match.");
+  // D5 (decision 1): an actual auth error uses the same error colour `.statusline.error` uses.
+  await expect(page.getByRole("alert")).toHaveCSS("color", "rgb(219, 146, 146)");
   expect(submissions).toHaveLength(1);
   await page.getByLabel("Confirm password", { exact: true }).fill("A long testing passphrase 1!");
   await page.getByRole("button", { name: "Save password and sign in" }).click();
@@ -72,6 +77,8 @@ test("password login errors clear the secret and explain recovery", async ({ pag
   await page.getByLabel("Password", { exact: true }).fill("A wrong testing passphrase");
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await expect(page.getByRole("alert")).toHaveText("Email or password is incorrect.");
+  // D5 (decision 1): reuses the existing error colour token rather than a new literal.
+  await expect(page.getByRole("alert")).toHaveCSS("color", "rgb(219, 146, 146)");
   await expect(page.getByLabel("Password", { exact: true })).toHaveValue("");
   await page.getByText("Forgot your password?", { exact: true }).click();
   // R20 (carried from A5): reworded to drop "verified" -- an admin-invited account with an
@@ -83,6 +90,8 @@ test("password login errors clear the secret and explain recovery", async ({ pag
   });
   await page.getByRole("button", { name: "Send reset link" }).click();
   await expect(page.getByRole("alert")).toContainText("Check your email");
+  // D5 (decision 1): a confirmation, not an error -- unaffected by the error-colour fix above.
+  await expect(page.getByRole("alert")).toHaveCSS("color", "rgb(155, 196, 155)");
 });
 
 test("a suspended account's correct password is told so, with the configured support contact", async ({ page }) => {
@@ -116,6 +125,9 @@ test("expired password link shows recovery guidance and reloading cannot retain 
   await page.getByLabel("Confirm password", { exact: true }).fill("A replacement passphrase 2!");
   await page.getByRole("button", { name: "Save password and sign in" }).click();
   await expect(page.getByRole("alert")).toContainText("expired or was already used");
+  // D5 (decision 1): a server-reported failure (not the local validation error above) also gets the
+  // error colour.
+  await expect(page.getByRole("alert")).toHaveCSS("color", "rgb(219, 146, 146)");
   await expect(page.getByRole("alert").getByRole("link", { name: "Request a new link" })).toBeVisible();
   await expect(page.getByLabel("New password", { exact: true })).toHaveValue("");
   expect(page.url()).not.toContain(token);
