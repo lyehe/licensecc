@@ -1,16 +1,24 @@
 import React,{useEffect,useRef,useState} from 'react';
 import { useOperatorControls } from '../../shared/controls';
 import { formatEpoch, shortHash } from '../../shared/format';
+import { focusableElements } from '../../shared/operatorFocus';
+import { TypedConfirmationField, typedConfirmationMatches } from '../../shared/TypedConfirmationField';
 import { shortDeviceKeyId } from '../entitlements/workflow';
 import { clearPending,createPending,operatorKey,readConnections,readHistory,restorePending,retireConnection,savePending,type BindingEvent,type Connection,type Context,type Page,type Pending } from './connectionWorkflow';
 const contextIdentity=(value:Context)=>JSON.stringify([value.customer.id,value.customer.status,value.operator.actor_type,value.operator.subject,value.operator.role]);
+const DISCONNECT_PHRASE='DISCONNECT';
+// Every truly focusable element (buttons AND the typed-confirmation input), not just enabled
+// buttons -- an input-less trap once left the field unreachable by keyboard entirely.
 function retainDialogFocus(event:React.KeyboardEvent<HTMLDialogElement>):void {
   if(event.key!=='Tab')return;
-  const buttons=Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('button:not([disabled])'));
-  const first=buttons[0],last=buttons.at(-1);
-  if(!first){event.preventDefault();event.currentTarget.focus();}
-  else if(event.shiftKey && document.activeElement===first){event.preventDefault();last?.focus();}
-  else if(!event.shiftKey && document.activeElement===last){event.preventDefault();first.focus();}
+  const focusable=focusableElements(event.currentTarget);
+  event.preventDefault();
+  if(focusable.length===0){event.currentTarget.focus();return;}
+  const activeElement=document.activeElement;
+  const currentIndex=activeElement instanceof HTMLElement?focusable.indexOf(activeElement):-1;
+  if(currentIndex<0){(event.shiftKey?focusable[focusable.length-1]:focusable[0]).focus();}
+  else if(event.shiftKey){focusable[(currentIndex-1+focusable.length)%focusable.length].focus();}
+  else{focusable[(currentIndex+1)%focusable.length].focus();}
 }
 
 function ConnectionHistory({customer,binding,expected,onContextChanged}:{customer:string;binding:string;expected:string;onContextChanged():void}):React.ReactElement {
@@ -41,16 +49,15 @@ export function ProtectedConnections({customer,active=true}:{customer:string;act
   const [dialogError,setDialogError]=useState('');
   const [confirmed,setConfirmed]=useState(false);
   const [typedConfirm,setTypedConfirm]=useState('');
-  const live=useRef(true),reading=useRef(false),sendingRef=useRef(false),dialog=useRef<HTMLDialogElement>(null),heading=useRef<HTMLHeadingElement>(null),cancel=useRef<HTMLButtonElement>(null);
+  const live=useRef(true),reading=useRef(false),sendingRef=useRef(false),dialog=useRef<HTMLDialogElement>(null),heading=useRef<HTMLHeadingElement>(null),cancel=useRef<HTMLButtonElement>(null),typedConfirmInput=useRef<HTMLInputElement>(null);
   const pending=saved && saved!=='invalid'?saved:draft;
   const pendingRef=useRef(pending);pendingRef.current=pending;
   const reviewGeneration=useRef(0);
   const locked=controls.busy || controls.operationLocked || controls.modalActive || sending;
   useEffect(()=>{live.current=true;void load();return()=>{live.current=false;};},[]);
   useEffect(()=>{if(!active && !saved){reviewGeneration.current++;setOpen(false);setDraft(null);}},[active,saved]);
-  useEffect(()=>{if(open && !dialog.current?.open){dialog.current?.showModal();cancel.current?.focus();}else if(!open && dialog.current?.open){dialog.current.close();heading.current?.focus();}},[open,active,saved]);
-  // The typed confirmation is cleared every time the dialog opens, including a re-open for the same pending request.
-  useEffect(()=>{if(open)setTypedConfirm('');},[open]);
+  // Initial focus goes to the typed field whenever this open shows it, matching the shared dialog.
+  useEffect(()=>{if(open && !dialog.current?.open){dialog.current?.showModal();(pending && !reviewReady?typedConfirmInput.current:cancel.current)?.focus();}else if(!open && dialog.current?.open){dialog.current.close();heading.current?.focus();}},[open,active,saved]);
   async function load(cursor=''):Promise<boolean>{
     if(reading.current)return false;reading.current=true;setLoading(true);setError('');
     try{const result=await readConnections(customer,cursor);if(!live.current)return false;
@@ -60,14 +67,16 @@ export function ProtectedConnections({customer,active=true}:{customer:string;act
       setPage(old=>cursor && old?{...result.data,items:[...old.items,...result.data.items]}:result.data);setStale(false);return true;
     }finally{reading.current=false;if(live.current)setLoading(false);}
   }
+  // The typed field is cleared here, synchronously with the same state update that opens or closes
+  // the dialog -- never in a separate effect, which would let one render show a stale value.
   function start(row:Connection):void{
     if(locked || loading || stale || saved || !page || page.operator.role!=='admin' || page.customer.status!=='active')return;
-    reviewGeneration.current++;setDraft(createPending(customer,row,page.operator));setDialogError('');setStopped(false);setConfirmed(false);setReviewReady(false);setReviewed(undefined);setOpen(true);
+    reviewGeneration.current++;setDraft(createPending(customer,row,page.operator));setDialogError('');setStopped(false);setConfirmed(false);setReviewReady(false);setReviewed(undefined);setTypedConfirm('');setOpen(true);
   }
-  function resume():void{if(locked)return;reviewGeneration.current++;setDraft(null);setDialogError('');setReviewReady(false);setReviewed(undefined);setOpen(true);}
-  function close():void{if(sendingRef.current)return;reviewGeneration.current++;setOpen(false);setDraft(null);}
+  function resume():void{if(locked)return;reviewGeneration.current++;setDraft(null);setDialogError('');setReviewReady(false);setReviewed(undefined);setTypedConfirm('');setOpen(true);}
+  function close():void{if(sendingRef.current)return;reviewGeneration.current++;setOpen(false);setDraft(null);setTypedConfirm('');}
   async function send():Promise<void>{
-    if(!pending || locked || sendingRef.current || reading.current || stopped || !page || stale || page.operator.role!=='admin' || page.customer.status!=='active' || operatorKey(page.operator)!==operatorKey(pending.operator))return;
+    if(!pending || locked || sendingRef.current || reading.current || stopped || !page || stale || page.operator.role!=='admin' || page.customer.status!=='active' || operatorKey(page.operator)!==operatorKey(pending.operator) || !typedConfirmationMatches(typedConfirm,DISCONNECT_PHRASE))return;
     const intent=pending;
     await controls.runMutation(async()=>{
       sendingRef.current=true;setSending(true);setDialogError('');
@@ -138,9 +147,9 @@ export function ProtectedConnections({customer,active=true}:{customer:string;act
       {pending && page && (!sameOperator || !mayRetire) && <p role="alert">Your operator or customer access has changed. Review the connection before clearing this saved request.</p>}
       {dialogError && <p role="alert">{dialogError}</p>}
       {reviewReady && <p role="status">{pending ? reviewed ? `Current connection: ${reviewed.state==='active'?'Connected':reviewed.state==='retiring'?'Disconnecting':'Disconnected'}. Reserved until ${formatEpoch(reviewed.hold_until)}.`:'This binding is unavailable in the current customer context.':'Current customer connections have been refreshed.'} Clearing the saved request does not cancel or undo a disconnection.</p>}
-      {pending && !reviewReady && <label className="typedConfirmation">Type DISCONNECT to confirm<input value={typedConfirm} disabled={sending} onChange={event=>setTypedConfirm(event.target.value)} /></label>}
+      {pending && !reviewReady && <TypedConfirmationField phrase={DISCONNECT_PHRASE} value={typedConfirm} onChange={setTypedConfirm} disabled={sending} inputRef={typedConfirmInput} />}
       <div className="actions">
-        {pending && !reviewReady && <button className="danger" disabled={locked || loading || stale || stopped || !mayRetire || !sameOperator || typedConfirm.trim()!=='DISCONNECT'} onClick={()=>void send()}>{sending?'Checking…':saved?'Retry same request':'Disconnect'}</button>}
+        {pending && !reviewReady && <button className="danger" disabled={locked || loading || stale || stopped || !mayRetire || !sameOperator || !typedConfirmationMatches(typedConfirm,DISCONNECT_PHRASE)} onClick={()=>void send()}>{sending?'Checking…':saved?'Retry same request':'Disconnect'}</button>}
         {allowReview && <button disabled={sending || loading} onClick={()=>void review()}>Review current connection</button>}
         {allowReview && reviewReady && <button disabled={sending || loading} onClick={clearReviewed}>Clear reviewed request</button>}
         <button ref={cancel} disabled={sending} onClick={close}>{saved?'Close':'Cancel'}</button>

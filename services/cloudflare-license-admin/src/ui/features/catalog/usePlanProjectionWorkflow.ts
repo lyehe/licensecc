@@ -19,6 +19,7 @@ import {
   mutationFailurePolicies,
   parseMutationResponse,
 } from "../../shared/mutationGuards";
+import { planProjectionBindingIsUsable } from "./planProjectionBinding";
 import {
   emptyPlanProjectionForm,
   normalizePlanProjectionForm,
@@ -51,7 +52,7 @@ export interface PlanProjectionWorkflow {
   invalidate: () => void;
   updateForm: (updater: (current: PlanProjectionFormState) => PlanProjectionFormState) => void;
   submitPreview: (event: FormEvent) => Promise<void>;
-  /** Applies the bound preview, warning first when it would disable any grant. */
+  /** Applies the bound preview, warning first when it would disable any entitlement. */
   requestApply: () => void;
 }
 
@@ -68,27 +69,49 @@ export function usePlanProjectionWorkflow({
   const [previewBinding, setPreviewBinding] = useState<PlanProjectionPreviewBinding | null>(null);
   const [applyResult, setApplyResult] = useState<PlanProjectionApplyResult | null>(null);
   const revisionRef = useRef(0);
-  // Confirming the disable warning below only closes that dialog; the actual apply is deferred
-  // until the shared modal has fully released the operation gate, then run exactly as it is when
-  // nothing needs confirming.
-  const pendingApplyRef = useRef(false);
+  // Mirrors `previewBinding` for synchronous reads from the deferred-apply effect below, the same
+  // way catalog import's `previewBindingRef` backs its own `bindingIsUsable`.
+  const previewBindingRef = useRef<PlanProjectionPreviewBinding | null>(null);
+  previewBindingRef.current = previewBinding;
+
+  interface ConfirmedApply {
+    binding: PlanProjectionPreviewBinding;
+    revision: number;
+  }
+  // Confirming the disable warning below freezes exactly which preview was confirmed; the actual
+  // apply is deferred until the shared modal has fully released the operation gate (`runKeyedMutation`
+  // refuses to start while the confirm dialog still owns it), then runs against that frozen binding,
+  // exactly as it would have run directly when nothing needed confirming.
+  const pendingApplyRef = useRef<ConfirmedApply | null>(null);
   const modalWasActiveRef = useRef(false);
   useEffect(() => {
-    if (modalWasActiveRef.current && !modalActive && pendingApplyRef.current) {
-      pendingApplyRef.current = false;
-      void applyFromPreview();
+    // Between the dialog releasing the operation gate (this render) and this effect claiming it
+    // (the next task), the console is briefly unlocked. If a catalog mutation elsewhere invalidates
+    // or replaces the confirmed preview in that gap, `planProjectionBindingIsUsable` below catches
+    // it: the confirmed apply is dropped with a message, never duplicated and never sent against a
+    // preview the operator no longer sees on screen.
+    if (modalWasActiveRef.current && !modalActive && pendingApplyRef.current !== null) {
+      const confirmed = pendingApplyRef.current;
+      pendingApplyRef.current = null;
+      if (planProjectionBindingIsUsable(confirmed.binding, confirmed.revision, previewBindingRef.current, revisionRef.current)) {
+        void applyFromPreview(confirmed.binding, confirmed.revision);
+      } else {
+        setMessage("plan_projection_preview_required — preview again");
+      }
     }
     modalWasActiveRef.current = modalActive;
   }, [modalActive]);
 
   function invalidate(): void {
     revisionRef.current += 1;
+    pendingApplyRef.current = null;
     setPreviewBinding(null);
     setApplyResult(null);
   }
 
   function updateForm(updater: (current: PlanProjectionFormState) => PlanProjectionFormState): void {
     revisionRef.current += 1;
+    pendingApplyRef.current = null;
     setForm(updater);
     setPreviewBinding(null);
   }
@@ -142,16 +165,14 @@ export function usePlanProjectionWorkflow({
     });
   }
 
-  async function applyFromPreview(): Promise<void> {
-    const binding = previewBinding;
-    const revision = revisionRef.current;
-    if (binding === null || binding.preview.blocked.length > 0 || revision !== revisionRef.current) {
+  async function applyFromPreview(binding: PlanProjectionPreviewBinding, revision: number): Promise<void> {
+    if (binding.preview.blocked.length > 0 || !planProjectionBindingIsUsable(binding, revision, previewBindingRef.current, revisionRef.current)) {
       setMessage("plan_projection_preview_required");
       return;
     }
     const body: PlanProjectionApplyInput = planProjectionApplyBody(binding.preview.preview_id);
     const requestBody = JSON.stringify(body);
-    const isCurrent = (): boolean => revision === revisionRef.current;
+    const isCurrent = (): boolean => planProjectionBindingIsUsable(binding, revision, previewBindingRef.current, revisionRef.current);
     let appliedResult: PlanProjectionApplyResult | null = null;
     await runKeyedMutation<PlanProjectionApplyResult>({
       request: { method: "POST", path: planProjectionApplyPath(), body: requestBody },
@@ -213,21 +234,22 @@ export function usePlanProjectionWorkflow({
       setMessage("plan_projection_preview_required");
       return;
     }
+    const revision = revisionRef.current;
     const disableCount = binding.preview.summary.disable;
     if (disableCount === 0) {
-      void applyFromPreview();
+      void applyFromPreview(binding, revision);
       return;
     }
-    const revision = revisionRef.current;
     requestConfirm({
       title: "Apply plan projection",
-      body: `This will disable ${disableCount} grant${disableCount === 1 ? "" : "s"}.`,
+      body: `This will disable ${disableCount} entitlement${disableCount === 1 ? "" : "s"}.`,
       requiresReason: false,
+      confirmLabel: "Apply",
       run: async () => {
-        pendingApplyRef.current = true;
+        pendingApplyRef.current = { binding, revision };
         return { ok: true };
       },
-      isCurrent: () => revision === revisionRef.current,
+      isCurrent: () => planProjectionBindingIsUsable(binding, revision, previewBindingRef.current, revisionRef.current),
     });
   }
 

@@ -105,7 +105,7 @@ export interface ConfirmAction {
    */
   typedConfirmation?: string;
   /** Buttons that fill the reason field with a fixed value; the field stays editable afterwards. */
-  reasonPresets?: string[];
+  reasonPresets?: readonly string[];
   run: (context: ConfirmActionContext) => Promise<ConfirmActionOutcome>;
   successFocusTarget?: ConfirmFocusTarget;
   isCurrent?: () => boolean;
