@@ -1,6 +1,6 @@
-import { expect, test } from "@playwright/test";
+import { expect } from "@playwright/test";
 
-import { makeAdminApiFixture, makeEnvelope } from "./admin-ui.fixture.mjs";
+import { makeAdminApiFixture, makeEnvelope, test } from "./admin-ui.fixture.mjs";
 
 // These scenarios deliberately leave unsent drafts; custom consequence dialogs
 // remain under each test's explicit control.
@@ -256,7 +256,7 @@ test("admin UI keeps 5xx null and scalar append cursors retryable", async ({ pag
   await expect(plansPane.locator("tbody tr")).toHaveCount(1);
   await plansMore.click();
   await expect(plansPane.locator("tbody tr")).toHaveCount(1);
-  await expect(page.getByText("invalid_api_response (missing_request_id)")).toBeVisible();
+  await expect(page.getByText("The server's response could not be read. Check your connection and try again.")).toBeVisible();
   await expect(plansMore).toBeVisible();
   await plansMore.click();
   await expect(plansPane.locator("tbody tr")).toHaveCount(2);
@@ -286,8 +286,7 @@ test("admin UI keeps a batch selection and its row visible through a filter relo
   await createForm.getByLabel("Feature").fill("float");
   await createForm.getByLabel("License fingerprint").fill("a".repeat(64));
   await createForm.getByRole("button", { name: "Create entitlement" }).click();
-  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
-  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
+  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
   const region = page.getByRole("region", { name: "Entitlement records", exact: true });
   const row = region.locator("tbody tr").first();
   const selectRow = row.getByLabel("Select selection-context/float");
@@ -400,8 +399,7 @@ test("admin UI entitlement list renders exactly one of table rows or cards at an
   await createForm.getByLabel("Feature").fill("float");
   await createForm.getByLabel("License fingerprint").fill("b".repeat(64));
   await createForm.getByRole("button", { name: "Create entitlement" }).click();
-  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
-  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
+  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
 
   await expect(page.locator(".tablePane table tbody tr")).toHaveCount(1);
   await expect(page.locator(".tablePane .recordCards .recordCard")).toHaveCount(0);
@@ -520,14 +518,14 @@ test("admin UI fences ordinary device and meter reads across an ABA selection", 
   await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "License access", exact: true }).click();
   const createForm = await newEntitlementForm(page);
   for (const [project, fingerprint] of [["fence-device-one", "a"], ["fence-device-two", "b"]]) {
+    if (!await createForm.isVisible()) await page.getByRole("button", { name: "New entitlement", exact: true }).click();
     await createForm.getByLabel("Project").fill(project);
     await createForm.getByLabel("Feature").fill("float");
     await createForm.getByLabel("License fingerprint").fill(fingerprint.repeat(64));
     await createForm.getByRole("button", { name: "Create entitlement" }).click();
-    await expect(page.getByText(/entitlement_saved/)).toBeVisible();
+    await expect(page.getByText("License (entitlement) created.")).toBeVisible();
   }
 
-  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
   const rows = page.getByRole("region", { name: "Entitlement records", exact: true }).locator("tbody tr");
   const devicePane = page.getByRole("region", { name: "Registered devices" });
   api.behavior.deferReads.add("devices:ent-1");
@@ -615,9 +613,8 @@ test("admin UI treats accepted mutation plus aborted refresh as success with man
   await createForm.getByLabel("Feature").fill("float");
   await createForm.getByLabel("License fingerprint").fill("a".repeat(64));
   await createForm.getByRole("button", { name: "Create entitlement" }).click();
-  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
-  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
-  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
+  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
+  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
 
   const row = page.getByRole("region", { name: "Entitlement records", exact: true }).locator("tbody tr").first();
   const trigger = row.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first();
@@ -651,9 +648,8 @@ test("admin UI treats malformed post-success refresh as success with manual reco
   await createForm.getByLabel("Feature").fill("float");
   await createForm.getByLabel("License fingerprint").fill("b".repeat(64));
   await createForm.getByRole("button", { name: "Create entitlement" }).click();
-  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
-  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
-  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
+  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
+  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
 
   const row = page.getByRole("region", { name: "Entitlement records", exact: true }).locator("tbody tr").first();
   const trigger = row.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first();
@@ -686,8 +682,7 @@ for (const refreshFailure of ["truncated", "wrong-enum"]) {
     await createForm.getByLabel("Feature").fill("float");
     await createForm.getByLabel("License fingerprint").fill((refreshFailure === "truncated" ? "a" : "b").repeat(64));
     await createForm.getByRole("button", { name: "Create entitlement" }).click();
-    await expect(page.getByText(/entitlement_saved/)).toBeVisible();
-    await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
+    await expect(page.getByText("License (entitlement) created.")).toBeVisible();
 
     const row = page.getByRole("region", { name: "Entitlement records", exact: true }).locator("tbody tr").first();
     await clickAction(row.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first());
@@ -741,9 +736,8 @@ test("admin UI rejects a non-2xx refresh carrying an ok response", async ({ page
   await createForm.getByLabel("Feature").fill("float");
   await createForm.getByLabel("License fingerprint").fill("e".repeat(64));
   await createForm.getByRole("button", { name: "Create entitlement" }).click();
-  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
-  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
-  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
+  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
+  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
 
   const row = page.getByRole("region", { name: "Entitlement records", exact: true }).locator("tbody tr").first();
   await clickAction(row.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first());
@@ -769,9 +763,8 @@ test("admin UI keeps the success warning after a parsed refresh error and clears
   await createForm.getByLabel("Feature").fill("float");
   await createForm.getByLabel("License fingerprint").fill("c".repeat(64));
   await createForm.getByRole("button", { name: "Create entitlement" }).click();
-  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
-  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
-  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
+  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
+  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
 
   const row = page.getByRole("region", { name: "Entitlement records", exact: true }).locator("tbody tr").first();
   const trigger = row.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first();
@@ -810,9 +803,8 @@ test("admin UI treats missing refresh data as success with manual recovery", asy
   await createForm.getByLabel("Feature").fill("float");
   await createForm.getByLabel("License fingerprint").fill("d".repeat(64));
   await createForm.getByRole("button", { name: "Create entitlement" }).click();
-  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
-  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
-  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
+  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
+  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
 
   const row = page.getByRole("region", { name: "Entitlement records", exact: true }).locator("tbody tr").first();
   const trigger = row.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first();
@@ -845,9 +837,8 @@ test("admin UI falls back to a stable section when a successful row disappears",
   await createForm.getByLabel("Feature").fill("float");
   await createForm.getByLabel("License fingerprint").fill("f".repeat(64));
   await createForm.getByRole("button", { name: "Create entitlement" }).click();
-  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
-  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
-  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
+  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
+  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
 
   const trigger = page.locator(".tablePane table tbody tr").first().getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first();
   await clickAction(trigger);
@@ -883,7 +874,7 @@ test("admin UI discards stale create/import follow-ups after filter, selection, 
   await expect.poll(() => api.behavior.completedMutations.has("webhook-create")).toBe(true);
   await expect(webhookForm.getByLabel("URL")).toHaveValue("https://hooks.example.test/new-draft");
   await expect(page.locator(".tablePane table tbody tr")).toHaveCount(0);
-  await expect(page.getByText(/webhook_created/)).toHaveCount(0);
+  await expect(page.getByText("Webhook endpoint created.")).toHaveCount(0);
 
   // The policy editor follows the same contract independently of webhooks.
   if (await page.getByRole("button", { name: "Configuration", exact: true }).getAttribute("aria-expanded") === "false") await page.getByRole("button", { name: "Configuration", exact: true }).click();
@@ -902,7 +893,7 @@ test("admin UI discards stale create/import follow-ups after filter, selection, 
   await expect.poll(() => api.behavior.completedMutations.has("policy-create")).toBe(true);
   await expect(policyForm.getByLabel("Name")).toHaveValue("replacement policy draft");
   await expect(page.locator(".tablePane table tbody tr")).toHaveCount(0);
-  await expect(page.getByText(/policy_created/)).toHaveCount(0);
+  await expect(page.getByText("Policy created.")).toHaveCount(0);
 
   if (await page.getByRole("button", { name: "Configuration", exact: true }).getAttribute("aria-expanded") === "false") await page.getByRole("button", { name: "Configuration", exact: true }).click();
   await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Plans & features", exact: true }).click();
@@ -922,7 +913,7 @@ test("admin UI discards stale create/import follow-ups after filter, selection, 
   api.behavior.releaseMutations.get("catalog-feature-create")();
   await expect.poll(() => api.behavior.completedMutations.has("catalog-feature-create")).toBe(true);
   await expect(featureForm.getByLabel("Name", { exact: true })).toHaveValue("Feature draft after save");
-  await expect(page.getByText(/catalog_feature_created/)).toHaveCount(0);
+  await expect(page.getByText("Feature created.")).toHaveCount(0);
   await page.getByRole("button", { name: "Back to features" }).click();
   const featurePane = page.getByRole("heading", { name: "Catalog features" }).locator("..");
   await featurePane.getByLabel("Feature status").selectOption("disabled");
@@ -949,7 +940,7 @@ test("admin UI discards stale create/import follow-ups after filter, selection, 
   api.behavior.releaseMutations.get("catalog-plan-create")();
   await expect.poll(() => api.behavior.completedMutations.has("catalog-plan-create")).toBe(true);
   await expect(planForm.getByLabel("Name", { exact: true })).toHaveValue("Plan draft after save");
-  await expect(page.getByText(/catalog_plan_created/)).toHaveCount(0);
+  await expect(page.getByText("Plan created.")).toHaveCount(0);
   await page.getByRole("button", { name: "Back to plans" }).click();
   const planPane = page.getByRole("heading", { name: "Catalog plans" }).locator("..");
   await planPane.getByLabel("Plan status").selectOption("disabled");
@@ -974,7 +965,7 @@ test("admin UI discards stale create/import follow-ups after filter, selection, 
   api.behavior.releaseMutations.get("catalog-feature-patch")();
   await expect.poll(() => api.behavior.completedMutations.has("catalog-feature-patch")).toBe(true);
   await expect(featureForm.getByLabel("Name", { exact: true })).toHaveValue("Feature patch draft");
-  await expect(page.getByText(/catalog_feature_patched/)).toHaveCount(0);
+  await expect(page.getByText("Feature changes saved.")).toHaveCount(0);
   await page.getByRole("button", { name: "Back to features" }).click();
   await featurePane.getByLabel("Feature status").selectOption("disabled");
   await expect(featurePane.locator("tbody tr")).toHaveCount(0);
@@ -993,7 +984,7 @@ test("admin UI discards stale create/import follow-ups after filter, selection, 
   api.behavior.releaseMutations.get("catalog-plan-patch")();
   await expect.poll(() => api.behavior.completedMutations.has("catalog-plan-patch")).toBe(true);
   await expect(planForm.getByLabel("Name", { exact: true })).toHaveValue("Plan patch draft");
-  await expect(page.getByText(/catalog_plan_patched/)).toHaveCount(0);
+  await expect(page.getByText("Plan changes saved.")).toHaveCount(0);
   await page.getByRole("button", { name: "Back to plans" }).click();
   await planPane.getByLabel("Plan status").selectOption("disabled");
   await expect(planPane.locator("tbody tr")).toHaveCount(0);
@@ -1024,7 +1015,7 @@ test("admin UI discards stale create/import follow-ups after filter, selection, 
   await expect(planFeatureForm.getByLabel("Feature key")).toHaveValue("attachedfeat");
   await expect(planFeatureForm.getByLabel("Selected plan")).toHaveValue("");
   await expect(planFeatureForm.getByRole("button", { name: "Save plan feature" })).toBeDisabled();
-  await expect(page.getByText(/catalog_plan_feature_saved/)).toHaveCount(0);
+  await expect(page.getByText("Plan feature saved.")).toHaveCount(0);
 
   // A replacement manifest cannot retain a late preview's capability.
   await catalogViews.getByRole("link", { name: "Import", exact: true }).click();
@@ -1047,7 +1038,7 @@ test("admin UI discards stale create/import follow-ups after filter, selection, 
   await expect(importForm.getByLabel("Manifest JSON")).toHaveValue(replacementManifest);
   await expect(importForm.getByRole("button", { name: "Apply import" })).toBeDisabled();
   await expect(page.getByText("Imported old")).toHaveCount(0);
-  await expect(page.getByText(/catalog_import_previewed/)).toHaveCount(0);
+  await expect(page.getByText("Import preview ready. Review it before you apply it.")).toHaveCount(0);
 });
 
 test("admin UI discards a stale webhook redrive follow-up after delivery-filter supersession", async ({ page }) => {
@@ -1083,7 +1074,7 @@ test("admin UI discards a stale webhook redrive follow-up after delivery-filter 
   api.behavior.releaseMutations.get("webhook-redrive")();
   await expect.poll(() => api.behavior.completedMutations.has("webhook-redrive")).toBe(true);
   await expect(deliveries.locator("tbody tr")).toHaveCount(0);
-  await expect(page.getByText(/webhook_delivery_redriven/)).toHaveCount(0);
+  await expect(page.getByText("Delivery queued for another attempt.")).toHaveCount(0);
 });
 
 test("admin UI retains an ambiguous keyed ordinary mutation and replays its immutable request", async ({ page }) => {

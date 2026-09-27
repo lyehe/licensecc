@@ -216,11 +216,11 @@ test("a single-request run keeps the single-request copy; a multi-chunk run name
   assert.doesNotMatch(runner.batchRunHeadline(unknownSingle), /chunk/i);
 
   const refusedSingle = await runner.runBatchChunks("disable", plan(three), async () => refusal(409, "idempotency_request_conflict", "ui-unit-single"), () => {});
-  assert.equal(runner.batchStopMessage(refusedSingle), "idempotency_request_conflict (ui-unit-single)");
+  assert.equal(runner.batchStopMessage(refusedSingle), "This request key was already used for a different change. Reload the page and try again.");
   assert.equal(runner.batchRunHeadline(refusedSingle), "Disable was refused.");
 
   const refusedMulti = await runner.runBatchChunks("disable", plan(twenty), async (chunk) => chunk.index === 2 ? refusal(409, "idempotency_request_conflict", "ui-unit-multi") : batchDone(chunk.ids), () => {});
-  assert.equal(runner.batchStopMessage(refusedMulti), "Disable stopped at chunk 2 of 5: the request was refused. idempotency_request_conflict (ui-unit-multi)");
+  assert.equal(runner.batchStopMessage(refusedMulti), "Disable stopped at chunk 2 of 5: the request was refused. This request key was already used for a different change. Reload the page and try again.");
 
   const { state: unknownMulti } = await runWithUnknownAt(runner, twenty, 3);
   assert.equal(runner.batchReconcileLabel(unknownMulti), "Reconcile chunk 3");

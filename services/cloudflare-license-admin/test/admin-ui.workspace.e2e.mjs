@@ -1,6 +1,6 @@
-import { expect, test } from "@playwright/test";
+import { expect } from "@playwright/test";
 
-import { makeAdminApiFixture, makeEnvelope } from "./admin-ui.fixture.mjs";
+import { makeAdminApiFixture, makeEnvelope, test } from "./admin-ui.fixture.mjs";
 
 const enterpriseCustomerId = "cus_enterprise_northwind_global_licensing_operations_0001";
 const enterpriseCustomerName = "Northwind Global Infrastructure and Licensing Operations for Distributed Manufacturing";
@@ -108,7 +108,7 @@ test("customer app pages recover failed refreshes and manage only the selected o
   await page.goto(`/#/customers/${customer.id}?section=access`);
   await expect(page.getByRole("heading", { name: "CAD", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Refresh", exact: true }).click();
-  await expect(page.getByRole("alert")).toContainText("unavailable");
+  await expect(page.getByRole("alert")).toContainText("Something went wrong. Reference retry-test.");
   await page.getByRole("button", { name: "Retry", exact: true }).click();
   await expect(page.getByRole("alert")).toHaveCount(0);
   await page.getByRole("button", { name: "View app", exact: true }).click();

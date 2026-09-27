@@ -1,6 +1,56 @@
-import { expect, test } from "@playwright/test";
+import { expect, test as base } from "@playwright/test";
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { catalogImportManifestSnapshot } from "@licensecc/licensing-domain/catalog/import_preview";
+
+/**
+ * Every result code a scenario could leak: the codes the console has copy for and the codes this
+ * fixture answers with. A visible line that is exactly one of them is a code shown as text.
+ */
+const KNOWN_RESULT_CODES = (() => {
+  const codes = new Set();
+  const messages = readFileSync(new URL("../src/ui/shared/messages.ts", import.meta.url), "utf8");
+  for (const match of messages.matchAll(/^ {2}([a-z][a-z0-9_]*): (?:failed|done)\(/gm)) codes.add(match[1]);
+  const fixture = readFileSync(new URL(import.meta.url), "utf8");
+  for (const match of fixture.matchAll(/(?:makeEnvelope\(|code: )"([a-z][a-z0-9_]*)"/g)) codes.add(match[1]);
+  return [...codes].filter((code) => code.includes("_"));
+})();
+
+/**
+ * No visible text outside a <details> disclosure may read as a raw result code: neither the old
+ * `code (request_id)` shape nor a bare snake_case code on its own line. Form controls are skipped,
+ * since an option or a typed value is data, not a message.
+ */
+export async function expectNoRawResultCodes(page) {
+  if (page.isClosed()) return;
+  const offenders = await page.evaluate((known) => {
+    const codes = new Set(known);
+    const hidden = [...document.querySelectorAll("details")].map((details) => [details, details.style.display]);
+    for (const [details] of hidden) details.style.display = "none";
+    try {
+      const found = new Set();
+      for (const element of document.body.querySelectorAll("*")) {
+        if (element.closest("details, script, style, template, select, option, textarea, datalist")) continue;
+        if (!(element instanceof HTMLElement) || !element.checkVisibility()) continue;
+        for (const line of element.innerText.split("\n").map((text) => text.trim()).filter(Boolean)) {
+          if (/^[a-z_]+ \(/.test(line) || codes.has(line)) found.add(line);
+        }
+      }
+      return [...found];
+    } finally {
+      for (const [details, display] of hidden) details.style.display = display;
+    }
+  }, KNOWN_RESULT_CODES);
+  expect(offenders, "a result code is shown outside Technical details").toEqual([]);
+}
+
+/** Every admin browser scenario ends with the raw-code check above. */
+export const test = base.extend({
+  page: async ({ page }, use) => {
+    await use(page);
+    await expectNoRawResultCodes(page);
+  },
+});
 
 export function makeEnvelope(code, data) {
   makeEnvelope.nextRequestId += 1;

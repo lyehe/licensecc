@@ -78,7 +78,7 @@ test("admin UI workflow normalizes the webhook create form (mirrors the Worker v
   );
   assert.throws(
     () => workflow.normalizeWebhookForm({ ...workflow.emptyWebhookForm, url: "https://x.example.com", scope_project: "a\nb" }),
-    /scope_project_invalid/,
+    /scope_project_must_be_a_single_value/,
   );
   assert.throws(
     () => workflow.normalizeWebhookForm({ ...workflow.emptyWebhookForm, url: "https://x.example.com", event_types: "a,\nb" }),
@@ -168,4 +168,37 @@ test("an unknown code, malformed success or lost response never shows a raw code
   const lost = testEvent.webhookTestOutcome(uiEnvelope(0, {}));
   assert.equal(lost.sentence, "The test event could not be sent. Try again shortly.");
   assert.equal(lost.requestId, "missing_request_id");
+});
+
+test("each webhook validation code names the field it belongs to, and whole-form codes name none", async () => {
+  const [workflow, messages] = await Promise.all([loadWorkflowModule("features/webhooks/workflow.ts"), loadWorkflowModule("shared/messages.ts")]);
+  const codeFor = (patch) => {
+    try {
+      workflow.normalizeWebhookForm({ ...workflow.emptyWebhookForm, url: "https://hooks.example.com/lcc", ...patch });
+    } catch (error) {
+      return error.message;
+    }
+    assert.fail(`${JSON.stringify(patch)} should be refused`);
+  };
+  const cases = [
+    [{ url: "http://hooks.example.com/lcc" }, "url", "The URL must start with https://."],
+    [{ url: "https://a b.example.com" }, "url", "Enter a single https:// URL without spaces."],
+    [{ description: "a\nb" }, "description", "Use one line of at most 500 characters."],
+    [{ scope_project: "a,b" }, "scope_project", "Enter one value of at most 128 characters, without commas or line breaks."],
+    [{ scope_customer_id: "a\nb" }, "scope_customer_id", "Enter one value of at most 128 characters, without commas or line breaks."],
+    [{ event_types: "a b" }, "event_types", "An event type can't contain spaces."],
+    [{ event_types: "a,\nb" }, "event_types", "The event type list is too long or contains a line break."],
+  ];
+  for (const [patch, field, text] of cases) {
+    const code = codeFor(patch);
+    assert.equal(workflow.webhookFieldForCode(code), field, code);
+    assert.equal(messages.describeCode(code)?.text, text, code);
+  }
+  assert.equal(workflow.webhookFieldForCode("invalid_url"), "url");
+  assert.equal(workflow.webhookFieldForCode("invalid_event_types"), "event_types");
+  const both = codeFor({ scope_project: "DEFAULT", scope_customer_id: "cus_1" });
+  assert.equal(both, "scope_set_project_or_customer_not_both");
+  for (const code of [both, "invalid_request", "mutation_failed", "constructor", "definitely_not_a_code"]) {
+    assert.equal(workflow.webhookFieldForCode(code), null, code);
+  }
 });

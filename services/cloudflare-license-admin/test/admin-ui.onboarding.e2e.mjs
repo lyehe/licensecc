@@ -1,6 +1,6 @@
-import { expect, test } from "@playwright/test";
+import { expect } from "@playwright/test";
 
-import { makeAdminApiFixture, makeEnvelope } from "./admin-ui.fixture.mjs";
+import { makeAdminApiFixture, makeEnvelope, test } from "./admin-ui.fixture.mjs";
 
 // B1: an operator brings a protected application's customer online without SQL -- Add user,
 // create that customer's license for the app's project, then grant protected access. This is the
@@ -56,7 +56,7 @@ test("an operator onboards a protected application from Add user to a protected 
   await expect(relationship(form, "License")).toBeFocused();
   await expect(createLicense).toHaveCount(0);
   await form.getByRole("button", { name: "Create entitlement", exact: true }).click();
-  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
+  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
 
   expect(writes.customers).toEqual([{ name: "Onboarded customer", email: "onboarded@example.test" }]);
   expect(writes.licenses).toHaveLength(1);
@@ -88,10 +88,12 @@ test("a refused protected grant names the broken rule in words, never as a code"
 
   await form.getByRole("button", { name: "Create entitlement", exact: true }).click();
   const alert = page.getByRole("alert");
-  await expect(alert).toHaveText("The customer is suspended or no longer exists; reenable the customer or choose an active one. Reference req-1.");
+  await expect(alert.locator(".feedbackText")).toHaveText("The customer is suspended or no longer exists; reenable the customer or choose an active one.");
+  await expect(alert.locator(".feedbackDetails code")).toHaveText("protected_creation_conflict · req-1");
   await form.getByRole("button", { name: "Create entitlement", exact: true }).click();
-  await expect(alert).toHaveText("This protected license (entitlement) can't be created with these settings. Reference req-2.");
-  await expect(page.getByText(/protected_creation_conflict|customer_inactive|rule_this_console_predates/)).toHaveCount(0);
+  await expect(alert.locator(".feedbackText")).toHaveText("This protected license (entitlement) can't be created with these settings.");
+  await expect(alert.locator(".feedbackDetails code")).toHaveText("protected_creation_conflict · req-2");
+  await expect(page.getByText(/protected_creation_conflict|customer_inactive|rule_this_console_predates/)).toBeHidden();
   await expect(form.getByLabel("Protection", { exact: true })).toHaveValue("device_bound_v1");
 });
 
@@ -193,7 +195,7 @@ test("a create without a policy sends its device limit, and a chosen policy show
   await expect(inherited).toHaveAttribute("readonly", "");
   await expect(own).toHaveCount(0);
   await form.getByRole("button", { name: "Create entitlement", exact: true }).click();
-  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
+  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
   expect(writes).toHaveLength(1);
   expect(writes[0]).toMatchObject({ policy_id: "pol_pro", project: "APP", feature: "PRO" });
   expect(Object.hasOwn(writes[0], "max_active_devices")).toBe(false);

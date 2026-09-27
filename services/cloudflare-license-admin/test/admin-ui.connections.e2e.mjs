@@ -1,5 +1,5 @@
-import { expect,test } from '@playwright/test';
-import { makeProtectedConnectionsFixture as fixture } from './admin-ui.fixture.mjs';
+import { expect } from '@playwright/test';
+import { makeProtectedConnectionsFixture as fixture, test } from './admin-ui.fixture.mjs';
 
 async function open(page,f){await page.route('**/api/admin/**',f.route);await page.goto('/');await expect(page.getByRole('button',{name:'Search',exact:true})).toBeVisible();if(await page.getByRole('button',{name:'Menu',exact:true}).isVisible())await page.getByRole('button',{name:'Menu',exact:true}).click();await page.getByRole('navigation',{name:'Main navigation'}).getByRole('link',{name:'Customers',exact:true}).click();await expect(page.getByRole('region',{name:'Customers',exact:true})).toContainText('Acme Corp');if(await page.locator('#customer-open-cus_acme').isVisible())await page.locator('#customer-open-cus_acme').click();else await page.getByRole('article').filter({has:page.getByRole('heading',{name:'Acme Corp',exact:true})}).getByRole('button',{name:'Open details'}).click();await expect(page.getByRole('heading',{name:'Protected connections',exact:true})).toBeVisible();}
 const region=page=>page.getByRole('region',{name:'Protected connections'});

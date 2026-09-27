@@ -1,6 +1,6 @@
-import { expect, test } from "@playwright/test";
+import { expect } from "@playwright/test";
 
-import { makeAdminApiFixture, makeEnvelope } from "./admin-ui.fixture.mjs";
+import { makeAdminApiFixture, makeEnvelope, test } from "./admin-ui.fixture.mjs";
 
 for (const mode of [undefined, "legacy"]) {
   test(`protected creation does not accept a ${mode ?? "missing"} response mode`, async ({ page }) => {
@@ -116,9 +116,8 @@ test("admin UI completes entitlement lifecycle and blocks duplicate create submi
     form.requestSubmit();
   });
 
-  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
+  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
   await expect.poll(() => api.requests.creates).toBe(1);
-  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
   const createdRow = page.locator(".desktopRecords tbody tr").filter({ hasText: "cus_e2e" });
   await createdRow.getByText("Technical details", { exact: true }).click();
   await expect(createdRow).toContainText("120 seconds");
@@ -135,7 +134,7 @@ test("admin UI completes entitlement lifecycle and blocks duplicate create submi
   await editForm.getByLabel("Notes").fill("");
   await editForm.getByRole("button", { name: "Save changes" }).click();
 
-  await expect(page.getByText(/entitlement_patched/)).toBeVisible();
+  await expect(page.getByText("Entitlement changes saved.")).toBeVisible();
   await expect.poll(() => api.requests.patches.length).toBe(1);
   expect(api.requests.patches[0]).toMatchObject({
     assertion_ttl_seconds: 900,
@@ -210,11 +209,10 @@ test("admin UI runs bulk transitions, global search deep-link, and CSV export", 
     await createForm.getByLabel("Feature").fill(feature);
     await createForm.getByLabel("License fingerprint").fill(fingerprint);
     await createForm.getByRole("button", { name: "Create entitlement" }).click();
-    await expect(page.getByText(/entitlement_saved/)).toBeVisible();
+    await expect(page.getByText("License (entitlement) created.")).toBeVisible();
   }
   await createEntitlement("pro", "a".repeat(64));
   await createEntitlement("ent", "b".repeat(64));
-  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
   await expect(page.locator("tbody input[type=checkbox]")).toHaveCount(2);
 
   // BULK: select all loaded rows -> the bulk bar appears -> Disable -> typed-confirm (reason) -> Confirm.
@@ -229,7 +227,7 @@ test("admin UI runs bulk transitions, global search deep-link, and CSV export", 
   expect(api.requests.batches[0]).toMatchObject({ action: "disable", reason: "quarterly audit" });
   expect(api.requests.batches[0].ids).toHaveLength(2);
   // The per-row roll-up renders in the status line, and the rows refreshed to disabled.
-  await expect(page.getByText(/disable: 2 ok/)).toBeVisible();
+  await expect(page.getByText("Disable finished: 2 done.")).toBeVisible();
   await expect(page.locator(".desktopRecords .status.disabled")).toHaveCount(2);
   // Selection cleared after the batch (the bulk bar is gone).
   await expect(page.locator(".bulkBar")).toHaveCount(0);
@@ -262,12 +260,12 @@ test("admin UI retains the server-owned four-entitlement batch limit", async ({ 
   if (!await page.locator("section.editorLayout form").isVisible()) await page.getByRole("button", { name: "New entitlement", exact: true }).click();
   const createForm = page.locator("section.editorLayout form");
   for (const [index, fingerprint] of ["a", "b", "c", "d", "e"].entries()) {
+    if (!await createForm.isVisible()) await page.getByRole("button", { name: "New entitlement", exact: true }).click();
     await createForm.getByLabel("Feature").fill(`batch-${index}`);
     await createForm.getByLabel("License fingerprint").fill(fingerprint.repeat(64));
     await createForm.getByRole("button", { name: "Create entitlement" }).click();
     await expect.poll(() => api.requests.creates).toBe(index + 1);
   }
-  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
   const rowChecks = page.locator("tbody input[type=checkbox]");
   await expect(rowChecks).toHaveCount(5);
   // Selection is no longer capped: the fifth row is selectable, and the run splits it off into
@@ -292,12 +290,12 @@ test("admin UI gates a batch revoke behind an exact typed REVOKE phrase", async 
   if (!await page.locator("section.editorLayout form").isVisible()) await page.getByRole("button", { name: "New entitlement", exact: true }).click();
   const createForm = page.locator("section.editorLayout form");
   for (const [index, fingerprint] of ["a", "b", "c", "d"].entries()) {
+    if (!await createForm.isVisible()) await page.getByRole("button", { name: "New entitlement", exact: true }).click();
     await createForm.getByLabel("Feature").fill(`revoke-batch-${index}`);
     await createForm.getByLabel("License fingerprint").fill(fingerprint.repeat(64));
     await createForm.getByRole("button", { name: "Create entitlement" }).click();
     await expect.poll(() => api.requests.creates).toBe(index + 1);
   }
-  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
   await page.getByLabel("Select all 4 loaded", { exact: true }).check();
   await expect(page.locator(".bulkBar")).toContainText("4 selected");
   await clickAction(page.locator(".bulkBar").getByRole("button", { name: "Revoke selected", includeHidden: true }));
@@ -402,7 +400,7 @@ test("admin UI previews and applies a license plan projection", async ({ page })
   await featureForm.getByLabel("Name").fill("Core");
   await featureForm.getByRole("button", { name: "Create feature" }).click();
   await expect.poll(() => api.requests.catalogFeatures.length).toBe(1);
-  await expect(page.getByText(/catalog_feature_created/)).toBeVisible();
+  await expect(page.getByText("Feature created.")).toBeVisible();
   featureForm = await openCatalogEditor(page, "Features", "New feature", "Catalog feature");
   await featureForm.getByLabel("Feature key").fill("team");
   await featureForm.getByLabel("Name").fill("Team Seats");
@@ -414,7 +412,7 @@ test("admin UI previews and applies a license plan projection", async ({ page })
   await catalogPlanForm.getByLabel("Name").fill("Pro");
   await catalogPlanForm.getByRole("button", { name: "Create plan" }).click();
   await expect.poll(() => api.requests.catalogPlans.length).toBe(1);
-  await expect(page.getByText(/catalog_plan_created/)).toBeVisible();
+  await expect(page.getByText("Plan created.")).toBeVisible();
   await page.getByRole("button", { name: "Back to plans", exact: true }).click();
 
   await page.getByRole("row", { name: /Pro pro/ }).getByRole("button", { name: "View plan", exact: true }).click();
@@ -424,7 +422,10 @@ test("admin UI previews and applies a license plan projection", async ({ page })
   await planFeatureForm.getByLabel("Policy", { exact: true }).selectOption("pol_node");
   await planFeatureForm.getByRole("button", { name: "Save plan feature" }).click();
   await expect.poll(() => api.requests.catalogPlanFeatures.length).toBe(1);
-  await expect(page.getByText(/catalog_plan_feature_saved/)).toBeVisible();
+  await expect(page.getByText("Plan feature saved.")).toBeVisible();
+  // Saving a row opens it in its plan; adding another starts again from the plan.
+  await expect(page.getByRole("row", { name: /core/ })).toBeVisible();
+  await page.getByRole("button", { name: "Add feature", exact: true }).click();
 
   await planFeatureForm.getByLabel("Feature key").fill("team");
   await planFeatureForm.getByLabel("Inclusion").selectOption("addon");
@@ -457,7 +458,7 @@ test("admin UI previews and applies a license plan projection", async ({ page })
   await featureForm.getByRole("button", { name: "Update feature" }).click();
   await expect.poll(() => api.requests.catalogFeaturePatches.length).toBe(1);
   expect(api.requests.catalogFeaturePatches[0]).toMatchObject({ id: "feat_core", name: "Core Runtime", category: "" });
-  await expect(page.getByText(/catalog_feature_patched/)).toBeVisible();
+  await expect(page.getByText("Feature changes saved.")).toBeVisible();
   await page.getByRole("button", { name: "Back to features", exact: true }).click();
 
   const featureRow = page.getByRole("row", { name: /Core Runtime core/ });
@@ -466,7 +467,7 @@ test("admin UI previews and applies a license plan projection", async ({ page })
   await page.getByRole("button", { name: "Confirm" }).click();
   await expect.poll(() => api.requests.catalogFeatureTransitions.length).toBe(1);
   expect(api.requests.catalogFeatureTransitions[0]).toMatchObject({ id: "feat_core", action: "disable", reason: "catalog lifecycle test" });
-  await expect(page.getByText(/catalog_feature_disabled/)).toBeVisible();
+  await expect(page.getByText("Feature disabled.")).toBeVisible();
   await clickAction(featureRow.getByRole("button", { name: "Reenable", includeHidden: true }));
   await expect.poll(() => api.requests.catalogFeatureTransitions.length).toBe(2);
   expect(api.requests.catalogFeatureTransitions[1]).toMatchObject({ id: "feat_core", action: "reenable" });
@@ -478,7 +479,7 @@ test("admin UI previews and applies a license plan projection", async ({ page })
   await catalogPlanForm.getByRole("button", { name: "Update plan" }).click();
   await expect.poll(() => api.requests.catalogPlanPatches.length).toBe(1);
   expect(api.requests.catalogPlanPatches[0]).toMatchObject({ id: "plan_pro", name: "Pro Annual", description: "Annual plan" });
-  await expect(page.getByText(/catalog_plan_patched/)).toBeVisible();
+  await expect(page.getByText("Plan changes saved.")).toBeVisible();
   await page.getByRole("button", { name: "Back to plans", exact: true }).click();
 
   await page.getByRole("row", { name: /Pro Annual pro/ }).getByRole("button", { name: "View plan", exact: true }).click();
@@ -511,7 +512,7 @@ test("admin UI previews and applies a license plan projection", async ({ page })
   await importForm.getByRole("button", { name: "Preview import" }).click();
   await expect.poll(() => api.requests.catalogImports.length).toBe(1);
   expect(api.requests.catalogImports[0]).toMatchObject({ dry_run: true, body: { format_version: 1, features: [], plans: [] } });
-  await expect(page.getByText(/catalog_import_previewed/)).toBeVisible();
+  await expect(page.getByText("Import preview ready. Review it before you apply it.")).toBeVisible();
 
   const importedManifest = {
     format_version: 1,
@@ -557,7 +558,7 @@ test("admin UI previews and applies a license plan projection", async ({ page })
   expect(api.requests.catalogImports[2]).toMatchObject({ dry_run: false, body: { preview_id: expect.stringMatching(/^civ_ui_/) } });
   expect(api.requests.catalogImports[2].idempotency_key).toMatch(/^[0-9a-f-]{36}$/);
   expect(Object.keys(api.requests.catalogImports[2].body)).toEqual(["preview_id"]);
-  await expect(page.getByText(/catalog_import_applied/)).toBeVisible();
+  await expect(page.getByText("Catalog import applied.")).toBeVisible();
   await openCatalogView(page, "Plans");
   await expect(page.getByRole("row", { name: /Growth growth/ })).toBeVisible();
   await expect(page.getByRole("row", { name: /Analytics analytics/ })).toHaveCount(0);
@@ -598,7 +599,7 @@ test("admin UI previews and applies a license plan projection", async ({ page })
     support_until: 1783209600,
     addons: ["team_seats"],
   });
-  await expect(page.getByText(/license_plan_projection_previewed/)).toBeVisible();
+  await expect(page.getByText("Plan preview ready. Review it before you apply it.")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Create" })).toBeVisible();
   await expect(page.getByRole("cell", { name: "core", exact: true })).toBeVisible();
   await expect(page.getByRole("cell", { name: "team", exact: true })).toBeVisible();
@@ -742,7 +743,7 @@ test("admin UI previews and applies a license plan projection", async ({ page })
   expect(api.requests.planApplies[0]).toEqual({ preview_id: expect.stringMatching(/^ppv_ui_/) });
   await expect(applyButton).toBeDisabled();
   await expect(page.getByText(/Execution result; re-preview required before another Apply/)).toBeVisible();
-  await expect(page.getByText(/license_plan_projection_applied/)).toBeVisible();
+  await expect(page.getByText("Plan applied.")).toBeVisible();
 
   await page.getByRole("link", { name: "License access", exact: true }).click();
   await expect(page.getByRole("cell", { name: /DEFAULT\s+core/ })).toBeVisible();
@@ -771,7 +772,7 @@ test("an operator edits a policy's device limit without touching its identity", 
   await expect(editor.getByLabel("Device limit", { exact: true })).toHaveValue("3");
   await editor.getByLabel("Device limit", { exact: true }).fill("5");
   await editor.getByRole("button", { name: "Save changes", exact: true }).click();
-  await expect(page.getByText(/policy_patched/)).toBeVisible();
+  await expect(page.getByText("Policy changes saved.")).toBeVisible();
   expect(api.requests.policyPatches).toHaveLength(1);
   const [patch] = api.requests.policyPatches;
   expect(patch.id).toBe("pol_edit");
@@ -796,8 +797,11 @@ test("an operator sets a protected grant's device limit and is told how many dev
   await expect(limit).toHaveValue("5");
   await limit.fill("2");
   await limitForm.getByRole("button", { name: "Save device limit", exact: true }).click();
-  await expect(page.getByRole("alert")).toHaveText("3 devices are connected; disconnect one first. Reference ui-e2e-capacity-in-use.");
-  await expect(page.getByText(/capacity_in_use/)).toHaveCount(0);
+  const refusal = page.getByRole("alert").filter({ hasText: "3 devices are connected; disconnect one first." });
+  await expect(refusal).toBeVisible();
+  await expect(refusal.getByText("capacity_in_use · ui-e2e-capacity-in-use", { exact: true })).toBeHidden();
+  await refusal.getByText("Technical details", { exact: true }).click();
+  await expect(refusal.getByText("capacity_in_use · ui-e2e-capacity-in-use", { exact: true })).toBeVisible();
   await expect(limit).toHaveValue("2");
   await limit.fill("3");
   await limitForm.getByRole("button", { name: "Save device limit", exact: true }).click();

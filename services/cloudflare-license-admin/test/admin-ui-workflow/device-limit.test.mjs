@@ -49,23 +49,23 @@ test("policy options name what they grant and the project, and list only the dra
 
 test("a refused device limit names the connected devices in words, never its code", async () => {
   const limits = await loadWorkflowModule("features/entitlements/deviceLimit.ts");
-  assert.equal(limits.deviceLimitFailureMessage(failure("capacity_in_use", { devices_in_use: 3 }), 2), "3 devices are connected; disconnect one first. Reference req-3.");
+  assert.equal(limits.deviceLimitFailureMessage(failure("capacity_in_use", { devices_in_use: 3 }), 2), "3 devices are connected; disconnect one first.");
   // Saying "one" would send the operator back for a second refusal.
-  assert.equal(limits.deviceLimitFailureMessage(failure("capacity_in_use", { devices_in_use: 5 }), 2), "5 devices are connected; disconnect 3 first. Reference req-3.");
+  assert.equal(limits.deviceLimitFailureMessage(failure("capacity_in_use", { devices_in_use: 5 }), 2), "5 devices are connected; disconnect 3 first.");
   // The count is read after the refusal; if devices disconnected meanwhile, nothing needs to go.
   for (const [connected, requested] of [[2, 2], [0, 1], [1, 3]]) {
     assert.equal(limits.deviceLimitFailureMessage(failure("capacity_in_use", { devices_in_use: connected }), requested),
-      "The connected devices changed while you were saving; try again. Reference req-3.", `${connected} for ${requested}`);
+      "The connected devices changed while you were saving; try again.", `${connected} for ${requested}`);
   }
   for (const data of [undefined, null, {}, { devices_in_use: -1 }, { devices_in_use: 2.5 }, { devices_in_use: "3" }]) {
     const message = limits.deviceLimitFailureMessage(failure("capacity_in_use", data), 2);
-    assert.match(message, /; disconnect one first\. Reference req-3\.$/, JSON.stringify(data));
+    assert.match(message, /; disconnect one first\.$/, JSON.stringify(data));
     assert.doesNotMatch(message, /capacity_in_use|undefined|NaN|null/);
   }
   assert.equal(limits.deviceLimitFailureMessage(failure("stale_transition"), 2),
-    "This license (entitlement) changed after you opened it; its current values were reloaded. Check the device limit and save again. Reference req-3.");
+    "This license (entitlement) changed after you opened it; its current values were reloaded. Check the device limit and save again.");
   assert.equal(limits.deviceLimitFailureMessage(failure("revoked_entitlement_is_terminal"), 2),
-    "Revocation is permanent; this license (entitlement) can no longer change. Reference req-3.");
+    "Revocation is permanent; this license (entitlement) can no longer change.");
   assert.equal(limits.deviceLimitFailureMessage(failure("invalid_request"), 2), null);
 });
 
@@ -113,10 +113,10 @@ test("the policy editor edits every patchable field and never the policy's ident
 test("a create refused for connected devices says which rule: the device limit, or a move to another customer", async () => {
   const onboarding = await loadWorkflowModule("features/entitlements/protectedCreate.ts");
   const say = (reason) => onboarding.protectedCreateFailureMessage({ code: "protected_creation_conflict", requestId: "req-5", data: { reason } });
-  assert.match(say("invalid_capacity"), /^The device limit must be 1 to 1,000,000 and can't drop below the devices already connected; raise the limit, choose another policy, or disconnect devices first\. Reference req-5\.$/);
+  assert.match(say("invalid_capacity"), /^The device limit must be 1 to 1,000,000 and can't drop below the devices already connected; raise the limit, choose another policy, or disconnect devices first\.$/);
   // Ruling R27: moving a grant with connected devices to another customer is a different rule; a
   // higher limit does not help there.
   const moved = say("devices_connected");
-  assert.equal(moved, "This license (entitlement) still has connected devices; disconnect them before moving it to another customer. Reference req-5.");
+  assert.equal(moved, "This license (entitlement) still has connected devices; disconnect them before moving it to another customer.");
   assert.doesNotMatch(moved, /raise the limit/);
 });

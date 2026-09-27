@@ -284,6 +284,30 @@ test("admin UI workflow summarizes per-row batch results into one operator line"
   assert.equal(workflow.summarizeBatchResults([]), "0 ok");
 });
 
+test("a finished batch reads as one sentence, with every per-row outcome in words and never a code", async () => {
+  const workflow = await loadWorkflowModule("features/entitlements/workflow.ts");
+  assert.equal(workflow.batchResultSentence("disable", [
+    { id: "a", ok: true, code: "entitlement_disabled" },
+    { id: "b", ok: true, code: "entitlement_disabled" },
+  ]), "Disable finished: 2 done.");
+  assert.equal(workflow.batchResultSentence("disable", [
+    { id: "a", ok: true, code: "entitlement_disabled" },
+    { id: "b", ok: false, code: "not_found" },
+  ]), "Disable finished: 1 done, 1 not found.");
+  const mixed = workflow.batchResultSentence("revoke", [
+    { id: "a", ok: false, code: "revoked_entitlement_is_terminal" },
+    { id: "b", ok: false, code: "revoked_entitlement_is_terminal" },
+    { id: "c", ok: false, code: "invalid_entitlement_id" },
+    { id: "d", ok: false, code: "mutation_failed" },
+    { id: "e", ok: false, code: "stale_transition" },
+    { id: "f", ok: false, code: "weird_code" },
+    { id: "g", ok: false, code: "constructor" },
+  ]);
+  assert.equal(mixed, "Revoke finished: 0 done, 2 already revoked, 1 with an invalid ID, 1 failed, 1 changed meanwhile, 2 not changed.");
+  assert.doesNotMatch(mixed, /\b[a-z]+_[a-z_]+\b/);
+  assert.equal(workflow.batchResultSentence("reenable", []), "Reenable finished: 0 done.");
+});
+
 test("force-release confirm copy echoes the exact target and warns it frees all live seats", async () => {
   const workflow = await loadWorkflowModule("features/entitlements/workflow.ts");
   const format = await loadWorkflowModule("shared/format.ts");

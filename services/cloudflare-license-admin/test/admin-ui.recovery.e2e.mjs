@@ -1,6 +1,6 @@
-import { expect, test } from "@playwright/test";
+import { expect } from "@playwright/test";
 
-import { makeAdminApiFixture, makeEnvelope } from "./admin-ui.fixture.mjs";
+import { makeAdminApiFixture, makeEnvelope, test } from "./admin-ui.fixture.mjs";
 
 // These scenarios deliberately leave unsent drafts; custom consequence dialogs
 // remain under each test's explicit control.
@@ -84,7 +84,7 @@ test("admin UI rejects repeated cursors and duplicate rows from shared and custo
   await expect(plansPane.locator("tbody tr")).toHaveCount(1);
   api.behavior.catalogPlanRepeatCursor = true;
   await plansPane.getByRole("button", { name: "Load more" }).click();
-  await expect(page.getByText("invalid_api_response (repeated_cursor)")).toBeVisible();
+  await expect(page.getByText("The list returned the same page again. Refresh the list.")).toBeVisible();
   await expect(plansPane.locator("tbody tr")).toHaveCount(1);
   await expect(plansPane.getByRole("button", { name: "Load more" })).toHaveCount(0);
 
@@ -97,7 +97,7 @@ test("admin UI rejects repeated cursors and duplicate rows from shared and custo
   await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Plans & features", exact: true }).click();
   await expect(plansPane.locator("tbody tr")).toHaveCount(1);
   await plansPane.getByRole("button", { name: "Load more" }).click();
-  await expect(page.getByText("invalid_api_response (duplicate_page_item)")).toBeVisible();
+  await expect(page.getByText("The next page repeated records already shown. Refresh the list.")).toBeVisible();
   await expect(plansPane.locator("tbody tr")).toHaveCount(1);
   await expect(plansPane.getByRole("button", { name: "Load more" })).toHaveCount(0);
 
@@ -109,7 +109,7 @@ test("admin UI rejects repeated cursors and duplicate rows from shared and custo
   await expect(deliveries.locator("tbody tr")).toHaveCount(1);
   api.behavior.deliveryDuplicatePage = true;
   await deliveries.getByRole("button", { name: "Load more" }).click();
-  await expect(page.getByText("invalid_api_response (duplicate_page_item)")).toBeVisible();
+  await expect(page.getByText("The next page repeated records already shown. Refresh the list.")).toBeVisible();
   await expect(deliveries.locator("tbody tr")).toHaveCount(1);
   await expect(deliveries.getByRole("button", { name: "Load more" })).toHaveCount(0);
 
@@ -121,7 +121,7 @@ test("admin UI rejects repeated cursors and duplicate rows from shared and custo
   await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Webhooks", exact: true }).click();
   await expect(deliveries.locator("tbody tr")).toHaveCount(1);
   await deliveries.getByRole("button", { name: "Load more" }).click();
-  await expect(page.getByText("invalid_api_response (repeated_cursor)")).toBeVisible();
+  await expect(page.getByText("The list returned the same page again. Refresh the list.")).toBeVisible();
   await expect(deliveries.locator("tbody tr")).toHaveCount(1);
 });
 
@@ -142,7 +142,7 @@ test("admin UI clears a definitive pre-mutation attempt so the next ordinary ret
   await form.getByLabel("URL").fill("https://hooks.example.test/new-key");
   await form.getByRole("button", { name: "Create endpoint" }).click();
   await expect.poll(() => api.requests.webhookCreateAttempts.length).toBe(1);
-  await expect(page.getByText(/missing_access_jwt/)).toBeVisible();
+  await expect(page.getByText("Your sign-in is missing or has expired. Sign in again.")).toBeVisible();
   await expect(page.locator(".operatorNotice")).toHaveCount(0);
   await expect(form.getByLabel("URL")).toBeEnabled();
 
@@ -165,8 +165,7 @@ test("admin UI keeps a same-key replay conflict indeterminate after a post-commi
   await createForm.getByLabel("Feature").fill("pro");
   await createForm.getByLabel("License fingerprint").fill("1".repeat(64));
   await createForm.getByRole("button", { name: "Create entitlement" }).click();
-  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
-  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
+  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
   const row = page.getByRole("region", { name: "Entitlement records", exact: true }).locator("tbody tr").first();
   await clickAction(row.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first());
   const dialog = page.getByRole("dialog");
@@ -210,8 +209,7 @@ test("admin UI reconciles release seats through the exact entitlement GET even w
   await createForm.getByLabel("Feature").fill("float");
   await createForm.getByLabel("License fingerprint").fill("2".repeat(64));
   await createForm.getByRole("button", { name: "Create entitlement" }).click();
-  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
-  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
+  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
   const row = page.getByRole("region", { name: "Entitlement records", exact: true }).locator("tbody tr").first();
   api.behavior.releaseSeatTargetOnSecondPage = true;
   await clickAction(row.getByRole("button", { name: "Release seats", exact: true, includeHidden: true }).first());
@@ -238,8 +236,7 @@ test("admin UI keeps a release-seat result unknown when same-key replay evidence
   await createForm.getByLabel("Feature").fill("float");
   await createForm.getByLabel("License fingerprint").fill("3".repeat(64));
   await createForm.getByRole("button", { name: "Create entitlement" }).click();
-  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
-  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
+  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
   const row = page.getByRole("region", { name: "Entitlement records", exact: true }).locator("tbody tr").first();
   await clickAction(row.getByRole("button", { name: "Release seats", exact: true, includeHidden: true }).first());
   const dialog = page.getByRole("dialog");
@@ -266,8 +263,7 @@ test("admin UI keeps an undocumented release-seat 4xx indeterminate", async ({ p
   await createForm.getByLabel("Feature").fill("float");
   await createForm.getByLabel("License fingerprint").fill("4".repeat(64));
   await createForm.getByRole("button", { name: "Create entitlement" }).click();
-  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
-  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
+  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
   const row = page.getByRole("region", { name: "Entitlement records", exact: true }).locator("tbody tr").first();
   await clickAction(row.getByRole("button", { name: "Release seats", exact: true, includeHidden: true }).first());
   const dialog = page.getByRole("dialog");
@@ -450,7 +446,7 @@ test("admin UI rejects A-to-B-to-A cursor cycles before shared or custom pagers 
   await plansPane.getByRole("button", { name: "Load more", exact: true }).click();
   await expect(plansPane.locator("tbody tr")).toHaveCount(2);
   await plansPane.getByRole("button", { name: "Load more", exact: true }).click();
-  await expect(page.getByText("invalid_api_response (repeated_cursor)")).toBeVisible();
+  await expect(page.getByText("The list returned the same page again. Refresh the list.")).toBeVisible();
   await expect(plansPane.locator("tbody tr")).toHaveCount(2);
   await expect(plansPane.getByRole("button", { name: "Load more", exact: true })).toHaveCount(0);
 
@@ -463,7 +459,7 @@ test("admin UI rejects A-to-B-to-A cursor cycles before shared or custom pagers 
   await deliveries.getByRole("button", { name: "Load more", exact: true }).click();
   await expect(deliveries.locator("tbody tr")).toHaveCount(2);
   await deliveries.getByRole("button", { name: "Load more", exact: true }).click();
-  await expect(page.getByText("invalid_api_response (repeated_cursor)")).toBeVisible();
+  await expect(page.getByText("The list returned the same page again. Refresh the list.")).toBeVisible();
   await expect(deliveries.locator("tbody tr")).toHaveCount(2);
   await expect(deliveries.getByRole("button", { name: "Load more", exact: true })).toHaveCount(0);
 });

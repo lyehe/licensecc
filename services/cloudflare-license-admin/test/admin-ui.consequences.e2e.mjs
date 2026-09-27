@@ -1,6 +1,6 @@
-import { expect, test } from "@playwright/test";
+import { expect } from "@playwright/test";
 
-import { makeAdminApiFixture, makeEnvelope } from "./admin-ui.fixture.mjs";
+import { makeAdminApiFixture, makeEnvelope, test } from "./admin-ui.fixture.mjs";
 
 async function revealAction(button) {
   await button.waitFor({ state: "attached" });
@@ -28,8 +28,7 @@ test("admin UI renders Workstream F charts, expiring panel, validity indicators,
   await createForm.getByLabel("Feature").fill("float");
   await createForm.getByLabel("License fingerprint").fill("a".repeat(64));
   await createForm.getByRole("button", { name: "Create entitlement" }).click();
-  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
-  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
+  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
 
   // Lifecycle and expiry are shown without implying that activation/device checks passed.
   await expect(page.locator(".desktopRecords .status.active")).toHaveText("active");
@@ -125,8 +124,7 @@ test("admin UI keeps destructive operator actions consequence-led, reason-gated,
   await createForm.getByLabel("Feature").fill("float");
   await createForm.getByLabel("License fingerprint").fill("f".repeat(64));
   await createForm.getByRole("button", { name: "Create entitlement" }).click();
-  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
-  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
+  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
 
   const entitlementRow = page.locator(".tablePane table tbody tr").first();
   await assertConfirmation(entitlementRow.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first(), "Verification and downloads stop until it is re-enabled", true);
@@ -181,8 +179,7 @@ test("admin UI entitlement disable reason presets fill the field and leave it ed
   await createForm.getByLabel("Feature").fill("float");
   await createForm.getByLabel("License fingerprint").fill("a".repeat(64));
   await createForm.getByRole("button", { name: "Create entitlement" }).click();
-  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
-  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
+  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
 
   const entitlementRow = page.locator(".tablePane table tbody tr").first();
   await clickAction(entitlementRow.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first());
@@ -221,8 +218,7 @@ test("admin UI consequence dialogs contain focus, isolate the background, and re
   await createForm.getByLabel("Feature").fill("float");
   await createForm.getByLabel("License fingerprint").fill("f".repeat(64));
   await createForm.getByRole("button", { name: "Create entitlement" }).click();
-  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
-  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
+  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
 
   const row = page.locator('[data-focus-row^="entitlement:"]:visible').first();
   const trigger = row.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first();
@@ -334,8 +330,7 @@ test("admin UI fallback consequence dialogs keep the background inert", async ({
   await createForm.getByLabel("Feature").fill("float");
   await createForm.getByLabel("License fingerprint").fill("f".repeat(64));
   await createForm.getByRole("button", { name: "Create entitlement" }).click();
-  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
-  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
+  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
 
   const trigger = page.locator(".tablePane table tbody tr").first().getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first();
   await revealAction(trigger);
@@ -362,8 +357,7 @@ test("admin UI typed failures keep consequence dialogs open and restore focus", 
   await createForm.getByLabel("Feature").fill("float");
   await createForm.getByLabel("License fingerprint").fill("f".repeat(64));
   await createForm.getByRole("button", { name: "Create entitlement" }).click();
-  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
-  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
+  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
 
   const trigger = page.locator(".tablePane table tbody tr").first().getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first();
   await revealAction(trigger);
@@ -450,8 +444,7 @@ test("admin UI direct re-enable replays an unknown mutation with the same key", 
   await createForm.getByLabel("Feature").fill("float");
   await createForm.getByLabel("License fingerprint").fill("e".repeat(64));
   await createForm.getByRole("button", { name: "Create entitlement" }).click();
-  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
-  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
+  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
 
   const row = page.locator(".tablePane table tbody tr").first();
   await clickAction(row.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first());
@@ -492,7 +485,7 @@ test("admin UI keeps a wrong-action reason_required rejection indeterminate", as
   await createForm.getByLabel("Feature").fill("float");
   await createForm.getByLabel("License fingerprint").fill("1".repeat(64));
   await createForm.getByRole("button", { name: "Create entitlement" }).click();
-  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
+  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
   const row = page.locator(".tablePane table tbody tr").first();
   await clickAction(row.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first());
   const dialog = page.getByRole("dialog");
@@ -529,8 +522,7 @@ test("admin UI keeps every same-key replay failure indeterminate until exact suc
   await createForm.getByLabel("Feature").fill("float");
   await createForm.getByLabel("License fingerprint").fill("e".repeat(64));
   await createForm.getByRole("button", { name: "Create entitlement" }).click();
-  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
-  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
+  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
 
   const row = page.locator(".tablePane table tbody tr").first();
   await clickAction(row.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first());
@@ -585,8 +577,7 @@ test("admin UI rejects a partial successful mutation envelope as unknown", async
   await createForm.getByLabel("Feature").fill("float");
   await createForm.getByLabel("License fingerprint").fill("f".repeat(64));
   await createForm.getByRole("button", { name: "Create entitlement" }).click();
-  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
-  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
+  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
 
   const trigger = page.locator(".tablePane table tbody tr").first().getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first();
   await clickAction(trigger);
@@ -623,8 +614,7 @@ test("admin UI rejects a non-2xx response carrying a successful mutation envelop
   await createForm.getByLabel("Feature").fill("float");
   await createForm.getByLabel("License fingerprint").fill("7".repeat(64));
   await createForm.getByRole("button", { name: "Create entitlement" }).click();
-  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
-  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
+  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
 
   const trigger = page.locator(".tablePane table tbody tr").first().getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first();
   await clickAction(trigger);
@@ -663,8 +653,7 @@ test("admin UI treats a well-formed 5xx rejection envelope as an unknown mutatio
   await createForm.getByLabel("Feature").fill("float");
   await createForm.getByLabel("License fingerprint").fill("5".repeat(64));
   await createForm.getByRole("button", { name: "Create entitlement" }).click();
-  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
-  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
+  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
 
   const trigger = page.locator(".tablePane table tbody tr").first().getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first();
   await clickAction(trigger);
@@ -691,8 +680,7 @@ test("admin UI rejects duplicate batch result identities as unknown", async ({ p
     await createForm.getByLabel("Feature").fill(feature);
     await createForm.getByLabel("License fingerprint").fill(fingerprint);
     await createForm.getByRole("button", { name: "Create entitlement" }).click();
-    await expect(page.getByText(/entitlement_saved/)).toBeVisible();
-    await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
+    await expect(page.getByText("License (entitlement) created.")).toBeVisible();
   }
   await createEntitlement("batch-one", "a".repeat(64));
   await createEntitlement("batch-two", "b".repeat(64));
@@ -737,8 +725,7 @@ test("admin UI rejects substituted batch result identities as unknown", async ({
     await createForm.getByLabel("Feature").fill(feature);
     await createForm.getByLabel("License fingerprint").fill(fingerprint);
     await createForm.getByRole("button", { name: "Create entitlement" }).click();
-    await expect(page.getByText(/entitlement_saved/)).toBeVisible();
-    await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
+    await expect(page.getByText("License (entitlement) created.")).toBeVisible();
   }
   await createEntitlement("batch-one", "a".repeat(64));
   await createEntitlement("batch-two", "b".repeat(64));
@@ -781,7 +768,6 @@ test("admin UI reports a known partial batch outcome when every row identity and
     await createForm.getByLabel("License fingerprint").fill(fingerprint.repeat(64));
     await createForm.getByRole("button", { name: "Create entitlement" }).click();
     await expect.poll(() => api.requests.creates).toBe(index + 1);
-    await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
     await expect(page.locator(".tablePane table tbody tr")).toHaveCount(index + 1);
   }
   await page.getByLabel(/^Select all \d+ loaded$/).check();
@@ -804,7 +790,7 @@ test("admin UI reports a known partial batch outcome when every row identity and
   await expect.poll(() => api.requests.batches.length).toBe(1);
   expect(api.requests.batches[0].ids).toEqual(["ent-1", "ent-2"]);
   await expect(dialog).toHaveCount(0);
-  await expect(page.getByText(/disable: 1 ok, 1 not-found/)).toBeVisible();
+  await expect(page.getByText("Disable finished: 1 done, 1 not found.")).toBeVisible();
 });
 
 test("admin UI rejects an unknown per-row batch failure code as ambiguous", async ({ page }) => {
@@ -819,9 +805,8 @@ test("admin UI rejects an unknown per-row batch failure code as ambiguous", asyn
     await createForm.getByLabel("Feature").fill(feature);
     await createForm.getByLabel("License fingerprint").fill(fingerprint.repeat(64));
     await createForm.getByRole("button", { name: "Create entitlement" }).click();
-    await expect(page.getByText(/entitlement_saved/)).toBeVisible();
+    await expect(page.getByText("License (entitlement) created.")).toBeVisible();
   }
-  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
   await page.getByLabel(/^Select all \d+ loaded$/).check();
   await clickAction(page.locator(".bulkBar").getByRole("button", { name: "Disable", includeHidden: true }).first());
   const dialog = page.getByRole("dialog");
@@ -856,7 +841,6 @@ test("admin UI rejects reordered batch proof rows as an unknown outcome", async 
     await createForm.getByLabel("License fingerprint").fill(fingerprint.repeat(64));
     await createForm.getByRole("button", { name: "Create entitlement" }).click();
     await expect.poll(() => api.requests.creates).toBe(index + 1);
-    await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
     await expect(page.locator(".tablePane table tbody tr")).toHaveCount(index + 1);
   }
   await page.getByLabel(/^Select all \d+ loaded$/).check();
@@ -1073,8 +1057,7 @@ test("admin UI rejects duplicate release-seat identities as unknown", async ({ p
   await createForm.getByLabel("Feature").fill("float");
   await createForm.getByLabel("License fingerprint").fill("1".repeat(64));
   await createForm.getByRole("button", { name: "Create entitlement" }).click();
-  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
-  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
+  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
 
   await clickAction(page.getByRole("button", { name: "Release seats", includeHidden: true }).first());
   const dialog = page.getByRole("dialog");
@@ -1105,8 +1088,7 @@ test("admin UI rejects a device transition that proves a different entitlement",
   await createForm.getByLabel("Feature").fill("float");
   await createForm.getByLabel("License fingerprint").fill("e".repeat(64));
   await createForm.getByRole("button", { name: "Create entitlement" }).click();
-  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
-  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
+  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
 
   const row = page.locator(".tablePane table tbody tr").first();
   await clickAction(row.getByRole("button", { name: "Devices", exact: true, includeHidden: true }).first());
@@ -1138,8 +1120,7 @@ test("admin UI gates ordinary mutations while consequence recovery is pending", 
   await createForm.getByLabel("Feature").fill("float");
   await createForm.getByLabel("License fingerprint").fill("0".repeat(64));
   await createForm.getByRole("button", { name: "Create entitlement" }).click();
-  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
-  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
+  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
 
   const row = page.locator(".tablePane table tbody tr").first();
   await clickAction(row.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first());
@@ -1177,8 +1158,7 @@ test("admin UI gates ordinary mutations through the post-success refresh", async
   await createForm.getByLabel("Feature").fill("float");
   await createForm.getByLabel("License fingerprint").fill("8".repeat(64));
   await createForm.getByRole("button", { name: "Create entitlement" }).click();
-  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
-  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
+  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
 
   const row = page.locator(".tablePane table tbody tr").first();
   await clickAction(row.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first());
@@ -1209,8 +1189,7 @@ test("admin UI direct re-enable treats a malformed mutation response as unknown"
   await createForm.getByLabel("Feature").fill("float");
   await createForm.getByLabel("License fingerprint").fill("7".repeat(64));
   await createForm.getByRole("button", { name: "Create entitlement" }).click();
-  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
-  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
+  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
 
   const row = page.locator(".tablePane table tbody tr").first();
   await clickAction(row.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first());
@@ -1240,8 +1219,7 @@ test("admin UI direct re-enable keeps parsed refresh recovery visible", async ({
   await createForm.getByLabel("Feature").fill("float");
   await createForm.getByLabel("License fingerprint").fill("6".repeat(64));
   await createForm.getByRole("button", { name: "Create entitlement" }).click();
-  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
-  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
+  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
 
   const row = page.locator(".tablePane table tbody tr").first();
   await clickAction(row.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first());
@@ -1274,8 +1252,7 @@ test("admin UI settles a same-key reconciliation across a stale filter context w
   await createForm.getByLabel("Feature").fill("float");
   await createForm.getByLabel("License fingerprint").fill("2".repeat(64));
   await createForm.getByRole("button", { name: "Create entitlement" }).click();
-  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
-  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
+  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
 
   const filter = page.locator('input[aria-label="Filter by project"]');
   await filter.fill("stale-unknown");
@@ -1324,8 +1301,7 @@ test("admin UI settles an ABA filter switch after an exact same-key replay", asy
   await createForm.getByLabel("Feature").fill("float");
   await createForm.getByLabel("License fingerprint").fill("9".repeat(64));
   await createForm.getByRole("button", { name: "Create entitlement" }).click();
-  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
-  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
+  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
 
   const filter = page.locator('input[aria-label="Filter by project"]');
   await filter.fill("aba-replay");
@@ -1377,8 +1353,7 @@ test("admin UI keeps unresolved recovery exclusive without stealing focus after 
   await createForm.getByLabel("Feature").fill("float");
   await createForm.getByLabel("License fingerprint").fill("8".repeat(64));
   await createForm.getByRole("button", { name: "Create entitlement" }).click();
-  await expect(page.getByText(/entitlement_saved/)).toBeVisible();
-  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
+  await expect(page.getByText("License (entitlement) created.")).toBeVisible();
 
   const row = page.locator(".tablePane table tbody tr").first();
   await clickAction(row.getByRole("button", { name: "Disable", exact: true, includeHidden: true }).first());
@@ -1426,9 +1401,8 @@ test("admin UI discards stale device recovery after filter supersession while ac
     await createForm.getByLabel("Feature").fill("float");
     await createForm.getByLabel("License fingerprint").fill(fingerprint.repeat(64));
     await createForm.getByRole("button", { name: "Create entitlement" }).click();
-    await expect(page.getByText(/entitlement_saved/)).toBeVisible();
+    await expect(page.getByText("License (entitlement) created.")).toBeVisible();
   }
-  await page.getByRole("button", { name: "Back to entitlements", exact: true }).click();
 
   await clickAction(page.locator(".desktopRecords").getByRole("button", { name: "Devices", exact: true, includeHidden: true }).nth(0));
   const devices = page.getByRole("region", { name: "Registered devices" });

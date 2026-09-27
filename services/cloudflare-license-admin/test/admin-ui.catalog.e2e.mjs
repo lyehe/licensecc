@@ -1,6 +1,6 @@
-import { expect, test } from "@playwright/test";
+import { expect } from "@playwright/test";
 
-import { makeAdminApiFixture, makeEnvelope } from "./admin-ui.fixture.mjs";
+import { makeAdminApiFixture, makeEnvelope, test } from "./admin-ui.fixture.mjs";
 
 async function openCatalogView(page, name) {
   const back = page.getByRole("button", { name: /^Back to (features|plans)$/ });
@@ -379,14 +379,14 @@ test("admin UI clears its bound preview for stale and fingerprint-conflict Apply
 
   api.projectionState.staleNextPlanApply = true;
   await applyButton.click();
-  await expect(page.getByText(/stale_projection_preview.*preview again/)).toBeVisible();
+  await expect(page.getByText("The license or catalog changed after this preview. Preview again before you apply.")).toBeVisible();
   await expect(applyButton).toBeDisabled();
   await projectionForm.getByRole("button", { name: "Preview" }).click();
   await expect(applyButton).toBeEnabled();
 
   api.projectionState.nextPlanApplyError = "license_fingerprint_conflict";
   await applyButton.click();
-  await expect(page.getByText(/license_fingerprint_conflict.*preview again/)).toBeVisible();
+  await expect(page.getByText("This license fingerprint conflicts with existing access. Preview again before you apply.")).toBeVisible();
   await expect(applyButton).toBeDisabled();
   // Both simulated 409s return before the fixture's entitlement/event/assignment
   // mutation path; the UI has only sent the server-bound preview_id.
@@ -523,7 +523,7 @@ test("an applied plan projection or catalog import leaves no unsaved-changes pro
   const applyProjection = projectionForm.getByRole("button", { name: "Apply" });
   await expect(applyProjection).toBeEnabled();
   await applyProjection.click();
-  await expect(page.getByText(/license_plan_projection_applied/)).toBeVisible();
+  await expect(page.getByText("Plan applied.")).toBeVisible();
   await leaveForOverview(page);
   await expect(heading).toHaveText("Overview");
   expect(api.requests.planApplies).toHaveLength(1);
@@ -540,7 +540,7 @@ test("an applied plan projection or catalog import leaves no unsaved-changes pro
   await expect.poll(() => api.requests.catalogImports.length).toBe(1);
   await importForm.getByRole("button", { name: "Apply import" }).click();
   await page.getByRole("dialog").getByRole("button", { name: "Confirm" }).click();
-  await expect(page.getByText(/catalog_import_applied/)).toBeVisible();
+  await expect(page.getByText("Catalog import applied.")).toBeVisible();
   await leaveForOverview(page);
   await expect(heading).toHaveText("Overview");
   expect(api.requests.catalogImports).toHaveLength(2);
@@ -613,7 +613,7 @@ test("a plan save in flight blocks leaving, and a save that fails keeps its draf
   expect(prompts).toEqual([]);
 
   releasePatch();
-  await expect(page.getByText(/invalid_request/)).toBeVisible();
+  await expect(page.getByText("The request was not accepted. Check the values and try again.")).toBeVisible();
   await expect(form.getByLabel("Name")).toHaveValue("Kept draft");
   // The draft the save did not take is still unsaved: leaving asks before discarding it.
   await leaveForOverview(page);
@@ -634,7 +634,7 @@ test("a plan save in flight blocks leaving until it succeeds, then navigation wo
 
   await expectLeaveRefused(page, plan, form, "Renamed plan");
   api.behavior.releaseMutations.get("catalog-plan-patch")();
-  await expect(page.getByText(/catalog_plan_patched/)).toBeVisible();
+  await expect(page.getByText("Plan changes saved.")).toBeVisible();
   await leaveForOverview(page);
   await expect(page.locator("[data-workspace-heading]")).toHaveText("Overview");
   await page.goBack();

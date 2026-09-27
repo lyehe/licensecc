@@ -189,7 +189,9 @@ test("useKeyedMutation retains an unknown outcome under its key and reconciles b
     assert.equal(retained.unresolvedKey, attempt.idempotencyKey);
     assert.equal(retained.dismissible, false);
     assert.equal(retained.manualRefresh.label, "Reconcile status");
-    assert.deepEqual(unknown.feedback.at(-1), { tone: "error", message: hooks.CONFIRM_MUTATION_UNKNOWN_MESSAGE });
+    // The retained notice is the one surface for the unknown outcome; the page banner stays quiet.
+    assert.deepEqual(unknown.feedback, []);
+    assert.deepEqual(unknown.messages, []);
 
     // 2. Nothing else may start while the outcome is unknown.
     await unknown.keyed.runKeyedMutation({ ...action, request: { method: "POST", path: "/api/admin/policies", body: "{}" } });
@@ -225,7 +227,7 @@ test("useKeyedMutation retains an unknown outcome under its key and reconciles b
     assert.equal(refreshNotice.manualRefresh.label, "Refresh status");
     assert.equal(refreshNotice.manualRefresh.settlesKnownSuccess, true);
     assert.equal(refreshNotice.unresolvedKey, undefined);
-    assert.deepEqual(knownWrite.messages, [hooks.CONFIRM_REFRESH_FAILURE_MESSAGE]);
+    assert.deepEqual(knownWrite.messages, [], "the refresh notice alone reports the unconfirmed write");
     proof = hooks.EXACT_READ_PROOF;
     await knownWrite.keyed.runNoticeRecovery();
     assert.equal(knownSent.length, 1, "refreshing a known write never replays it");
@@ -238,7 +240,15 @@ test("useKeyedMutation retains an unknown outcome under its key and reconciles b
     assert.equal(rejected.gate.unresolvedOperationRef.current, null);
     assert.equal(rejected.gate.operationOwnerRef.current, null);
     assert.equal(rejected.notice.actionNoticeRef.current, null);
-    assert.deepEqual(rejected.feedback, [{ tone: "error", message: "policy_exists (req-9)" }]);
+    // A code without copy never becomes the text: it reads as the reference fallback, code as detail.
+    assert.deepEqual(rejected.feedback, [{ tone: "error", message: "Something went wrong. Reference req-9.", detail: { code: "policy_exists", requestId: "req-9" } }]);
+    const refused = render();
+    await refused.keyed.runKeyedMutation({ ...action, send: async () => "rejected", parse: () => ({ kind: "failure", code: "policy_name_conflict", requestId: "req-10" }) });
+    assert.deepEqual(refused.feedback, [{
+      tone: "error",
+      message: "A policy with this name already exists in this project. Choose another name.",
+      detail: { code: "policy_name_conflict", requestId: "req-10" },
+    }]);
   });
 });
 

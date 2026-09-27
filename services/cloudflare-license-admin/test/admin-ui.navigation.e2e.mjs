@@ -1,6 +1,6 @@
-import { expect, test } from "@playwright/test";
+import { expect } from "@playwright/test";
 
-import { makeAdminApiFixture } from "./admin-ui.fixture.mjs";
+import { makeAdminApiFixture, test } from "./admin-ui.fixture.mjs";
 
 async function clickAction(button) {
   await button.waitFor({ state: "attached" });
@@ -625,7 +625,7 @@ test("a Back refused during a plan save after a reload keeps the address, and hi
   await expect(form.getByLabel("Name")).toHaveValue("Saved after reload");
 
   api.behavior.releaseMutations.get("catalog-plan-patch")();
-  await expect(page.getByText(/catalog_plan_patched/)).toBeVisible();
+  await expect(page.getByText("Plan changes saved.")).toBeVisible();
   await leaveForOverview(page);
   await expectAppAndAddress(page, "#/overview", "Overview");
   await page.goBack();

@@ -15,7 +15,7 @@ test("every protected-create reason reads as one actionable sentence, never its 
     assert.equal(typeof message, "string", reason);
     assert.ok(!message.includes(reason) && !message.includes("protected_creation_conflict"), `${reason}: ${message}`);
     assert.doesNotMatch(message, /\b[a-z]+_[a-z_]+\b/, `${reason} leaks a snake_case code: ${message}`);
-    assert.match(message, /Reference req-7\.$/, `${reason} names the request reference`);
+    assert.doesNotMatch(message, /req-7|Reference/, `${reason}: the reference belongs under Technical details`);
     sentences.add(message);
   }
   assert.equal(sentences.size, PROTECTED_CREATE_REASONS.length, "each reason has its own sentence");
@@ -69,7 +69,7 @@ test("create license targets one customer and accepts only that customer's new r
   for (const code of ["customer_inactive", "not_found", "invalid_request", "admin_role_required"]) {
     const message = onboarding.licenseCreateFailureMessage(failure(code));
     assert.ok(!message.includes(code), `${code}: ${message}`);
-    assert.match(message, /Reference req-7\.$/);
+    assert.doesNotMatch(message, /req-7|Reference/, `${code}: the reference belongs under Technical details`);
   }
 });
 

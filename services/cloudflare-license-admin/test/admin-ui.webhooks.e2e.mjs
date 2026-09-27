@@ -1,6 +1,6 @@
-import { expect, test } from "@playwright/test";
+import { expect } from "@playwright/test";
 
-import { makeAdminApiFixture } from "./admin-ui.fixture.mjs";
+import { makeAdminApiFixture, test } from "./admin-ui.fixture.mjs";
 
 // E4: webhook event types are validated (worker + domain/runtime unit tests cover invalid_event_
 // types), and webhooks can be edited. This e2e proves the operator-facing half: the create form's
@@ -28,7 +28,7 @@ test("an operator creates a webhook via grouped event-type checkboxes and then e
   await expect(createForm.getByText(/"disable" and "reenable" match both entitlement and customer events/)).toBeVisible();
 
   await createForm.getByRole("button", { name: "Create endpoint", exact: true }).click();
-  await expect(page.getByText(/webhook_created/)).toBeVisible();
+  await expect(page.getByText("Webhook endpoint created.")).toBeVisible();
 
   expect(api.requests.webhookCreates).toHaveLength(1);
   expect(api.requests.webhookCreates[0]).toMatchObject({
@@ -52,7 +52,7 @@ test("an operator creates a webhook via grouped event-type checkboxes and then e
   await editForm.getByLabel("Entitlement update", { exact: true }).check();
   await editForm.getByLabel("Order subscription.active", { exact: true }).uncheck();
   await editForm.getByRole("button", { name: "Save changes", exact: true }).click();
-  await expect(page.getByText(/webhook_patched/)).toBeVisible();
+  await expect(page.getByText("Webhook endpoint changes saved.")).toBeVisible();
 
   expect(api.requests.webhookPatches).toHaveLength(1);
   expect(api.requests.webhookPatches[0].id).toBe("wh_1");
@@ -81,7 +81,7 @@ test("editing only the URL of an endpoint with a legacy event type still succeed
 
   await editForm.getByLabel("URL", { exact: false }).fill("https://hooks.example.test/legacy-updated");
   await editForm.getByRole("button", { name: "Save changes", exact: true }).click();
-  await expect(page.getByText(/webhook_patched/)).toBeVisible();
+  await expect(page.getByText("Webhook endpoint changes saved.")).toBeVisible();
 
   expect(api.requests.webhookPatches).toHaveLength(1);
   // event_types was never touched, so the PATCH omits it -- the legacy value is never
@@ -126,4 +126,42 @@ test("Send test event shows the receiver's status class, with the request id und
   await expect(result).toContainText("The endpoint answered with a 2xx success.");
 
   expect(api.requests.webhookTests).toEqual(["wh_test", "wh_test", "wh_test"]);
+});
+
+// A test result describes the list it was sent from; a different filter is a different view.
+test("a Send test event result clears when the endpoint filter changes", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  api.seed.webhook("wh_test", "https://hooks.example.test/test");
+  await page.route("**/api/admin/**", api.route);
+  await page.goto("/#/webhooks");
+  const row = page.locator("tr").filter({ hasText: "https://hooks.example.test/test" });
+  await row.getByRole("button", { name: "Send test event", exact: true }).click();
+  const result = page.getByRole("status").filter({ hasText: "Test event to https://hooks.example.test/test" });
+  await expect(result).toContainText("The endpoint answered with a 2xx success.");
+
+  await page.getByLabel("Filter endpoints by status").selectOption("active");
+  await expect(result).toHaveCount(0);
+  await expect(row.getByRole("button", { name: "Send test event", exact: true })).toBeEnabled();
+});
+
+// Like its sibling row actions, Send test event waits until the endpoint list it belongs to has
+// settled, so it never tests a row the current filter is still replacing.
+test("Send test event waits while the endpoint list is reloading", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  api.seed.webhook("wh_test", "https://hooks.example.test/test");
+  await page.route("**/api/admin/**", api.route);
+  await page.goto("/#/webhooks");
+  const row = page.locator("tr").filter({ hasText: "https://hooks.example.test/test" });
+  const send = row.getByRole("button", { name: "Send test event", exact: true });
+  await expect(send).toBeEnabled();
+
+  api.behavior.deferReads.add("webhooks:active");
+  await page.getByLabel("Filter endpoints by status").selectOption("active");
+  await expect.poll(() => api.behavior.releaseReads.has("webhooks:active")).toBe(true);
+  await expect(send).toBeDisabled();
+  await expect(row.getByRole("button", { name: "Edit", exact: true })).toBeDisabled();
+
+  api.behavior.releaseReads.get("webhooks:active")();
+  await expect(send).toBeEnabled();
+  expect(api.requests.webhookTests).toEqual([]);
 });
