@@ -6,7 +6,7 @@ import type {
   EntitlementStatus,
   Policy,
 } from "../../../shared/api";
-import { ENTITLEMENT_BATCH_MAX_IDS, MAX_DEVICE_LIMIT } from "../../../shared/api";
+import { MAX_DEVICE_LIMIT } from "../../../shared/api";
 import { dateInputToEpoch, epochToDateInput } from "../../shared/dates";
 import { shortHash } from "../../shared/format";
 
@@ -265,15 +265,6 @@ export function disableEntitlementConfirm(item: { project: string; feature: stri
 
 export function batchPath(): string {
   return "/api/admin/entitlements/batch";
-}
-
-export const entitlementBatchSelectionNotice = `Select up to ${ENTITLEMENT_BATCH_MAX_IDS} entitlements per batch.`;
-
-// Keep the page-level selectors and the server contract aligned. This helper
-// preserves order so the visible first loaded rows are the rows selected by
-// the header checkbox; it is intentionally not a silent request truncator.
-export function boundedBatchSelection(ids: ReadonlyArray<string>): string[] {
-  return [...new Set(ids)].slice(0, ENTITLEMENT_BATCH_MAX_IDS);
 }
 
 export interface BatchRowResult {

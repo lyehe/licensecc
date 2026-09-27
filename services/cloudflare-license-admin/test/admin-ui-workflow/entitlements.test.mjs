@@ -241,12 +241,9 @@ test("admin UI workflow renders short device key ids and device confirm copy", a
 test("admin UI workflow builds the bulk transition path and body", async () => {
   const workflow = await loadWorkflowModule("features/entitlements/workflow.ts");
   assert.equal(workflow.batchPath(), "/api/admin/entitlements/batch");
-  assert.equal(workflow.entitlementBatchSelectionNotice, "Select up to 4 entitlements per batch.");
-  assert.deepEqual(
-    workflow.boundedBatchSelection(["a", "b", "c", "d", "e", "a"]),
-    ["a", "b", "c", "d"],
-    "the UI preserves first-loaded order and never silently selects a fifth row",
-  );
+  // Selection is no longer capped at four; the batch runner splits a larger run into chunks.
+  assert.equal(workflow.boundedBatchSelection, undefined);
+  assert.equal(workflow.entitlementBatchSelectionNotice, undefined);
   assert.deepEqual(workflow.batchBody("disable", ["a", "b"], "audit"), {
     action: "disable",
     reason: "audit",

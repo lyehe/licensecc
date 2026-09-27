@@ -3,7 +3,9 @@ import type { EntitlementRecord } from "../../../shared/api";
 import { ENTITLEMENT_BATCH_MAX_IDS } from "../../../shared/api";
 import { ActionMenu } from "../../shared/ActionMenu";
 import { ReadNotice } from "../../shared/ReadNotice";
-import { focusTargetInRow, focusTargetInSection, type ConfirmActionOutcome, useOperatorControls } from "../../shared/controls";
+import { BatchRunPanel } from "./BatchRunPanel";
+import type { EntitlementBatch } from "./useEntitlementBatch";
+import { focusTargetInRow, type ConfirmActionOutcome, useOperatorControls } from "../../shared/controls";
 import { formatEpoch } from "../../shared/format";
 import { useMediaQuery } from "../../shared/useMediaQuery";
 import { focusWorkspaceTarget } from "../../shared/workspaceFocus";
@@ -31,7 +33,7 @@ interface ListProps {
   onLoadMore: (() => void) | null;
   onTransition: (item: EntitlementRecord, action: EntitlementAction, key: string) => Promise<ConfirmActionOutcome>;
   onReleaseSeats: (item: EntitlementRecord, key: string) => Promise<ConfirmActionOutcome>;
-  onBatch: (action: EntitlementAction, key: string) => Promise<ConfirmActionOutcome>;
+  batch: EntitlementBatch;
   bulkConfirmBody: (action: EntitlementAction) => string;
   isCurrent: () => boolean;
   deviceEntitlementId: string | null;
@@ -87,7 +89,13 @@ export function EntitlementList(props: ListProps): React.ReactElement {
   }
   function selection(item: EntitlementRecord): React.ReactElement | null {
     if (props.scoped) return null;
-    return <input type="checkbox" aria-label={`Select ${item.project}/${item.feature}`} checked={props.selectedIds.has(item.id)} disabled={locked || (!props.selectedIds.has(item.id) && selectedCount >= ENTITLEMENT_BATCH_MAX_IDS)} onChange={() => props.onSelect(item.id)} />;
+    return <input type="checkbox" aria-label={`Select ${item.project}/${item.feature}`} checked={props.selectedIds.has(item.id)} disabled={locked} onChange={() => props.onSelect(item.id)} />;
+  }
+  // One confirmation and one reason cover the whole run, however many chunks it takes.
+  const chunkCount = Math.ceil(selectedCount / ENTITLEMENT_BATCH_MAX_IDS);
+  function confirmBatch(action: "disable" | "revoke", title: string): void {
+    const { run, details } = props.batch.begin(action);
+    requestConfirm({ title, body: props.bulkConfirmBody(action), details, requiresReason: true, run, successFocusTarget: props.batch.focusTarget, isCurrent });
   }
   const capacity = (item: EntitlementRecord): React.ReactElement => <><div>{item.license_mode?.replaceAll("_", " ") || "Default mode"}</div><span className="muted">{item.license_mode === "floating" ? <>Pool {item.pool_size}</> : <>Device limit {item.max_active_devices}</>}</span></>;
   return <section className="tablePane" data-focus-section="entitlements" aria-label="Entitlement list">
@@ -99,10 +107,11 @@ export function EntitlementList(props: ListProps): React.ReactElement {
     <p className="muted">CSV export: up to 10,000 filtered records.</p></>}
     <ReadNotice loading={props.loading} error={props.error} hasData={items.length > 0} label="entitlements" onRetry={props.onRetry} />
     {!ready && items.length > 0 && <p className="muted">Actions are unavailable until the current list read succeeds.</p>}
-    {selectedCount > 0 && <div className="bulkBar"><span>{selectedCount} selected (maximum {ENTITLEMENT_BATCH_MAX_IDS} per batch)</span><button type="button" disabled={locked} onClick={() => requestConfirm({ title: "Disable selected entitlements", body: props.bulkConfirmBody("disable"), requiresReason: true, run: ({ idempotencyKey }) => props.onBatch("disable", idempotencyKey), successFocusTarget: focusTargetInSection("entitlements"), isCurrent })}>Disable</button><button type="button" disabled={locked} onClick={() => void runConsequenceAction({ run: ({ idempotencyKey }) => props.onBatch("reenable", idempotencyKey), successFocusTarget: focusTargetInSection("entitlements"), isCurrent })}>Reenable</button><button type="button" className="danger" disabled={locked} onClick={() => requestConfirm({ title: "Revoke selected entitlements", body: props.bulkConfirmBody("revoke"), requiresReason: true, run: ({ idempotencyKey }) => props.onBatch("revoke", idempotencyKey), successFocusTarget: focusTargetInSection("entitlements"), isCurrent })}>Revoke selected</button><button type="button" disabled={busy} onClick={props.onClearSelection}>Clear</button></div>}
+    {!props.scoped && <BatchRunPanel store={props.batch.store} onDismiss={() => props.batch.store.set(null)} />}
+    {selectedCount > 0 && <div className="bulkBar"><span>{selectedCount} selected{chunkCount > 1 && <span className="muted"> · sent as {chunkCount} requests of up to {ENTITLEMENT_BATCH_MAX_IDS}</span>}</span><button type="button" disabled={locked} onClick={() => confirmBatch("disable", "Disable selected entitlements")}>Disable</button><button type="button" disabled={locked} onClick={() => void runConsequenceAction({ run: props.batch.begin("reenable").run, successFocusTarget: props.batch.focusTarget, isCurrent })}>Reenable</button><button type="button" className="danger" disabled={locked} onClick={() => confirmBatch("revoke", "Revoke selected entitlements")}>Revoke selected</button><button type="button" disabled={busy} onClick={props.onClearSelection}>Clear</button></div>}
     {narrow
       ? <div className="recordCards" aria-label="Entitlement summaries" aria-busy={props.loading}>{items.map((item) => <article className="recordCard" key={item.id} data-focus-row={`entitlement:${item.id}`}><div className="listHeader"><h3>{item.project} / {item.feature}</h3>{selection(item)}</div><code>{item.customer_id ?? item.id}</code><div><EntitlementValidity item={item} /></div><div>{capacity(item)}</div>{actions(item)}<EntitlementDetails item={item} /></article>)}</div>
-      : <div className="desktopRecords tableScroll" role="region" aria-label="Entitlement records" tabIndex={0} aria-busy={props.loading}><table><thead><tr><th className="checkCol">{!props.scoped && <input type="checkbox" aria-label={`Select all loaded rows (up to ${ENTITLEMENT_BATCH_MAX_IDS})`} disabled={locked} checked={props.allSelected} onChange={props.onSelectAll} />}</th><th>Project / feature</th><th>Customer or identifier</th><th>Status / validity</th><th>Capacity</th><th>Actions</th></tr></thead><tbody>{items.map((item) => <tr key={item.id} data-focus-row={`entitlement:${item.id}`}><td className="checkCol">{selection(item)}</td><td><strong>{item.project}</strong><div>{item.feature}</div><EntitlementDetails item={item} /></td><td><code>{item.customer_id ?? item.id}</code></td><td><EntitlementValidity item={item} /></td><td>{capacity(item)}</td><td>{actions(item)}</td></tr>)}</tbody></table></div>}
+      : <div className="desktopRecords tableScroll" role="region" aria-label="Entitlement records" tabIndex={0} aria-busy={props.loading}><table><thead><tr><th className="checkCol">{!props.scoped && <input type="checkbox" aria-label={`Select all ${items.length} loaded`} disabled={locked} checked={props.allSelected} onChange={props.onSelectAll} />}</th><th>Project / feature</th><th>Customer or identifier</th><th>Status / validity</th><th>Capacity</th><th>Actions</th></tr></thead><tbody>{items.map((item) => <tr key={item.id} data-focus-row={`entitlement:${item.id}`}><td className="checkCol">{selection(item)}</td><td><strong>{item.project}</strong><div>{item.feature}</div><EntitlementDetails item={item} /></td><td><code>{item.customer_id ?? item.id}</code></td><td><EntitlementValidity item={item} /></td><td>{capacity(item)}</td><td>{actions(item)}</td></tr>)}</tbody></table></div>}
     {ready && items.length === 0 && <div className="emptyState">{filtered ? "No entitlements match these filters." : "No entitlements yet. Create an entitlement to grant access."}</div>}
     <p className="muted">Lifecycle and date validity are shown; other access restrictions may still apply.</p>
     {ready && <div className="tableFooter"><span className="muted">{items.length} loaded</span>{props.onLoadMore && <button type="button" disabled={busy} onClick={props.onLoadMore}>Load more</button>}</div>}

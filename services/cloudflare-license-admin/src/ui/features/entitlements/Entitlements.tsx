@@ -1,12 +1,11 @@
 import React, { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { EntitlementDeviceRecord, EntitlementRecord, Policy } from "../../../shared/api";
-import { ENTITLEMENT_BATCH_MAX_IDS } from "../../../shared/api";
 import type { DraftPolicy, NavigationIntent } from "../../app/types";
 import { api, apiFailureDetails, apiFailureMessage, parseExactApiSuccess } from "../../shared/api";
 import { confirmMutationUnknown, confirmSuccessWithRefreshFailure, ConfirmRefreshFailure, EXACT_READ_PROOF, type ConfirmActionOutcome, type ConfirmActionResolution, type ExactReadProof, useContextGeneration, useOperatorControls } from "../../shared/controls";
 import { useCoreRefresh } from "../../shared/coreRefresh";
-import { hasBatchResultsData, hasDeviceTransitionData, hasEntitlementListData, hasEntitlementRecordData, hasEntitlementTransitionData, hasPolicyListData, hasReleaseSeatsData, mutationFailurePolicies, parseMutationResponse } from "../../shared/mutationGuards";
+import { hasDeviceTransitionData, hasEntitlementListData, hasEntitlementRecordData, hasEntitlementTransitionData, hasPolicyListData, hasReleaseSeatsData, mutationFailurePolicies, parseMutationResponse } from "../../shared/mutationGuards";
 import { downloadCsv, loadAllExactPages, loadMore } from "../../shared/pagination";
 import { useDebouncedValue } from "../../shared/useDebouncedValue";
 import { useRequestFence } from "../../shared/requestFence";
@@ -17,11 +16,9 @@ import { EntitlementEditor } from "./EntitlementEditor";
 import { EntitlementList } from "./EntitlementList";
 import { EntitlementInspectors } from "./EntitlementInspectors";
 import { protectedCreateFailureMessage } from "./protectedCreate";
+import { useEntitlementBatch } from "./useEntitlementBatch";
 import { useEntitlementInspection } from "./useEntitlementInspection";
 import {
-  batchBody,
-  batchPath,
-  boundedBatchSelection,
   DeviceAction,
   deviceTransitionPath,
   editFormFromEntitlement,
@@ -29,7 +26,6 @@ import {
   emptyEntitlementForm,
   entitlementDetailPath,
   entitlementsPath,
-  entitlementBatchSelectionNotice,
   EntitlementAction,
   EntitlementFilter,
   EntitlementFormState,
@@ -38,7 +34,6 @@ import {
   normalizeEntitlementPatch,
   patchPath,
   releaseSeatsPath,
-  summarizeBatchResults,
   transitionPath,
 } from "./workflow";
 
@@ -534,10 +529,7 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
     setSelectedIds((previous) => {
       const next = new Set(previous);
       if (next.has(id)) next.delete(id);
-      else if (next.size >= ENTITLEMENT_BATCH_MAX_IDS) {
-        setMessage(entitlementBatchSelectionNotice);
-        return previous;
-      } else next.add(id);
+      else next.add(id);
       return next;
     });
   }
@@ -548,15 +540,11 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
   const visibleEntitlementsCursor = ready ? entitlementsCursor : null;
   const selectedVisibleIds = visibleEntitlements.filter((item) => selectedIds.has(item.id)).map((item) => item.id);
   const selectedCount = selectedVisibleIds.length;
-  const selectableLoadedIds = boundedBatchSelection(visibleEntitlements.map((item) => item.id));
-  const allSelected = selectableLoadedIds.length > 0 && selectableLoadedIds.every((id) => selectedIds.has(id));
+  // "Select all {n} loaded" selects every loaded row; a run larger than the Worker's per-request
+  // cap is split into sequential chunks rather than capped here.
+  const allSelected = visibleEntitlements.length > 0 && selectedCount === visibleEntitlements.length;
   function toggleSelectAll(): void {
-    if (allSelected) {
-      setSelectedIds(new Set());
-      return;
-    }
-    if (visibleEntitlements.length > ENTITLEMENT_BATCH_MAX_IDS) setMessage(entitlementBatchSelectionNotice);
-    setSelectedIds(new Set(selectableLoadedIds));
+    setSelectedIds(allSelected ? new Set() : new Set(visibleEntitlements.map((item) => item.id)));
   }
 
   function bulkConfirmBody(action: EntitlementAction): string {
@@ -566,83 +554,13 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
     return `Disable ${noun}. Disabled entitlements stop verifying until re-enabled.`;
   }
 
-  async function runBatch(action: EntitlementAction, idempotencyKey: string = crypto.randomUUID()): Promise<ConfirmActionOutcome> {
-    const ids = selectedVisibleIds;
-    if (ids.length === 0) return { ok: false, message: "no_entitlements_selected" };
-    if (ids.length > ENTITLEMENT_BATCH_MAX_IDS) {
-      setMessage(entitlementBatchSelectionNotice);
-      return { ok: false, message: entitlementBatchSelectionNotice, retryable: true };
-    }
-    const contextGeneration = filterGeneration;
-    let reconciliationGeneration = contextGeneration;
-    const isCurrent = (): boolean => isFilterGenerationCurrent(reconciliationGeneration);
-    const captureRecoveryContext = (): void => {
-      if (currentFilterContext() === filterContextKey) {
-        reconciliationGeneration = currentFilterGeneration();
-      }
-    };
-    const expectedCode = `entitlement_${action}d`;
-    const body = JSON.stringify(batchBody(action, ids, currentReason()));
-    const dataGuard = (value: unknown): value is { results: Array<{ id: string; ok: boolean; code: string }> } => hasBatchResultsData(value, ids, expectedCode);
-    const refreshStatus = async (): Promise<ExactReadProof | null> => {
-      captureRecoveryContext();
-      return await refreshCore(true);
-    };
-    const postSuccessRefresh = confirmSuccessWithRefreshFailure(refreshStatus, isCurrent).manualRefresh;
-    const replay = async (): Promise<ConfirmActionResolution> => {
-      captureRecoveryContext();
-      const retry = await runMutation(async () => {
-        try {
-          return await api<unknown>(batchPath(), {
-            method: "POST",
-            headers: { "idempotency-key": idempotencyKey },
-            body,
-          });
-        } catch {
-          return null;
-        }
-      }, "recovery");
-      if (retry === undefined || retry === null) return "indeterminate";
-      const parsed = parseMutationResponse(retry, "batch_done", dataGuard, mutationFailurePolicies.entitlementBatch[action], "replay");
-      if (parsed.kind !== "success") return parsed.kind === "failure" ? "unapplied" : "indeterminate";
-      try {
-        return (await refreshStatus()) === EXACT_READ_PROOF ? "applied" : "refresh_failed";
-      } catch {
-        return "refresh_failed";
-      }
-    };
-    const reconciliation = { label: "Reconcile status", run: replay, isCurrent, settlesRetainedAttempt: true, postSuccessRefresh };
-    const mutation = await runMutation(async () => {
-      try {
-        return await api<{ results: Array<{ id: string; ok: boolean; code: string }> }>(batchPath(), {
-          method: "POST",
-          headers: { "idempotency-key": idempotencyKey },
-          body,
-        });
-      } catch {
-        return null;
-      }
-    }, "consequence");
-    if (mutation === undefined) return { ok: false, message: "mutation_busy", retryable: true };
-    if (mutation === null) return confirmMutationUnknown(reconciliation);
-    const parsed = parseMutationResponse(mutation, "batch_done", dataGuard, mutationFailurePolicies.entitlementBatch[action], "initial");
-    if (parsed.kind === "invalid") return confirmMutationUnknown(reconciliation);
-    if (parsed.kind === "failure") {
-      const message = `${parsed.code} (${parsed.requestId})`;
-      setMessage(message);
-      return { ok: false, message, retryable: true };
-    }
-    setMessage(`${action}: ${summarizeBatchResults(parsed.data.results)} (${parsed.requestId})`);
-    setReason("");
-    setSelectedIds(new Set());
-    try {
-      return (await refreshCore(true)) === EXACT_READ_PROOF
-        ? { ok: true }
-        : confirmSuccessWithRefreshFailure(refreshStatus, isCurrent);
-    } catch {
-      return confirmSuccessWithRefreshFailure(refreshStatus, isCurrent);
-    }
-  }
+  const batch = useEntitlementBatch({
+    selectedIds: selectedVisibleIds, setSelectedIds, runMutation, refreshCore, currentReason, setMessage, setFeedback, setReason,
+    recoveryContext: () => {
+      let generation = filterGeneration;
+      return { isCurrent: () => isFilterGenerationCurrent(generation), capture: () => { if (currentFilterContext() === filterContextKey) generation = currentFilterGeneration(); } };
+    },
+  });
 
   if (!active) return null;
   const listError = listRead.context === filterContextKey ? listRead.error : null;
@@ -655,7 +573,7 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
       {editingId !== null && <ReadNotice loading={!ready && listError === null} error={listError} hasData={visibleEntitlements.length > 0} label="entitlements" onRetry={() => void refresh()} />}
       {createOpen || editingItem ? <EntitlementEditor key={createOpen ? "create" : editingId} form={createOpen ? form : editForm} item={createOpen ? undefined : editingItem} extendValidity={extendValidity} busy={busy} locked={operationLocked || (!createOpen && (!ready || editingItem?.status === "revoked"))} lockMessage={operationLocked ? undefined : editingItem?.status === "revoked" ? "Revocation is permanent. This entitlement can no longer be edited." : "Refresh entitlements successfully before changing or saving this draft."} policies={activePoliciesFence.isSettled() ? activePolicies : []} policiesReady={activePoliciesFence.canLoadMore()} policiesError={policyError} onRetryPolicies={() => void refreshPolicies()} onCreatePolicy={createOpen && onCreatePolicy !== undefined ? () => setPolicyDetour("leaving") : undefined} onChange={(patch) => createOpen ? setForm((previous) => ({ ...previous, ...patch })) : setEditForm((previous) => ({ ...previous, ...patch }))} onSubmit={createOpen ? submitCreate : (event) => submitPatch(event, editingItem!)} onCancel={closeEditor} /> : <div className="emptyState"><p>{ready ? "This entitlement is no longer in the current list. Return to the list to select a current record." : "Waiting for the current entitlement record."}</p><button type="button" disabled={busy} onClick={closeEditor}>Back to entitlements</button></div>}
     </> : <>
-      <EntitlementList scoped={scopedGrant !== undefined} items={visibleEntitlements} filter={filter} onFilter={setFilter} loading={!ready && listError === null} error={listError} ready={ready} busy={busy} selectedIds={selectedIds} selectedCount={selectedCount} allSelected={allSelected} onSelect={toggleSelected} onSelectAll={toggleSelectAll} onClearSelection={() => setSelectedIds(new Set())} onCreate={() => { requestLeave(() => { cancelEdit(); setForm({ ...emptyEntitlementForm, project:filter.project || emptyEntitlementForm.project, feature:filter.feature || emptyEntitlementForm.feature, customer_id:filter.customer_id || "" }); setCreateOpen(true); }); }} onEdit={beginEdit} onRetry={() => void refresh()} onExport={() => void downloadCsv(entitlementsUrl, "entitlements.csv", runMutation, setMessage)} onLoadMore={visibleEntitlementsCursor === null ? null : () => void loadMore(entitlementsUrl, visibleEntitlementsCursor, visibleEntitlements, setEntitlements, setEntitlementsCursor, setMessage, hasEntitlementListData, "entitlements_listed", entitlementsFence, (entitlement) => entitlement.id)} onTransition={transition} onReleaseSeats={releaseSeats} onBatch={runBatch} bulkConfirmBody={bulkConfirmBody} isCurrent={() => isFilterGenerationCurrent(filterGeneration)} deviceEntitlementId={deviceEntitlementId} meterEntitlementId={inspection.meterEntitlementId} onDevices={inspection.toggleDevices} onMeter={inspection.toggleMeter} onHistory={(item) => navigate({ tab: "events", filter: { entitlement_id: item.id } })} />
+      <EntitlementList scoped={scopedGrant !== undefined} items={visibleEntitlements} filter={filter} onFilter={setFilter} loading={!ready && listError === null} error={listError} ready={ready} busy={busy} selectedIds={selectedIds} selectedCount={selectedCount} allSelected={allSelected} onSelect={toggleSelected} onSelectAll={toggleSelectAll} onClearSelection={() => setSelectedIds(new Set())} onCreate={() => { requestLeave(() => { cancelEdit(); setForm({ ...emptyEntitlementForm, project:filter.project || emptyEntitlementForm.project, feature:filter.feature || emptyEntitlementForm.feature, customer_id:filter.customer_id || "" }); setCreateOpen(true); }); }} onEdit={beginEdit} onRetry={() => void refresh()} onExport={() => void downloadCsv(entitlementsUrl, "entitlements.csv", runMutation, setMessage)} onLoadMore={visibleEntitlementsCursor === null ? null : () => void loadMore(entitlementsUrl, visibleEntitlementsCursor, visibleEntitlements, setEntitlements, setEntitlementsCursor, setMessage, hasEntitlementListData, "entitlements_listed", entitlementsFence, (entitlement) => entitlement.id)} onTransition={transition} onReleaseSeats={releaseSeats} batch={batch} bulkConfirmBody={bulkConfirmBody} isCurrent={() => isFilterGenerationCurrent(filterGeneration)} deviceEntitlementId={deviceEntitlementId} meterEntitlementId={inspection.meterEntitlementId} onDevices={inspection.toggleDevices} onMeter={inspection.toggleMeter} onHistory={(item) => navigate({ tab: "events", filter: { entitlement_id: item.id } })} />
       <EntitlementInspectors inspection={inspection} busy={busy} onDeviceTransition={deviceTransition} />
     </>}
   </section>;

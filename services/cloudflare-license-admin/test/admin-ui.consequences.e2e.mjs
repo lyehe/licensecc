@@ -896,6 +896,27 @@ test("admin UI reports a refused chunk 2 as failed, not unknown, and sends nothi
   await expect(page.locator(".bulkBar")).toContainText("16 selected");
 });
 
+test("admin UI keeps the confirmation open when chunk 1 is refused, and a retry reruns the plan under fresh keys", async ({ page }) => {
+  const { attempts, dialog } = await openTwentyRowBatch(page, (attempt) => attempt === 1
+    ? { status: 400, body: { ok: false, code: "reason_required", request_id: "ui-e2e-batch-chunk-one" } }
+    : undefined);
+
+  await expect.poll(() => attempts.length).toBe(1);
+  // Nothing was applied, so this reads as a single refused request always did: the dialog stays open to retry.
+  await expect(dialog.locator(".modalError")).toContainText("stopped at chunk 1 of 5");
+  await expect(dialog.locator(".batchRun").getByRole("listitem")).toHaveText(["0 done", "4 failed", "16 not attempted"]);
+  await expect(dialog.getByRole("button", { name: "Confirm" })).toBeEnabled();
+  await page.waitForTimeout(400);
+  expect(attempts).toHaveLength(1);
+
+  await dialog.getByRole("button", { name: "Confirm" }).click();
+  await expect.poll(() => attempts.length).toBe(6);
+  await expect(dialog).toHaveCount(0);
+  expect(attempts[1].body).toEqual(attempts[0].body);
+  expect(new Set(attempts.map((attempt) => attempt.key)).size).toBe(6);
+  await expect(page.locator(".tablePane .batchRun").getByRole("listitem")).toHaveText(["20 done"]);
+});
+
 test("admin UI rejects duplicate release-seat identities as unknown", async ({ page }) => {
   const api = makeAdminApiFixture();
   await page.route("**/api/admin/**", api.route);

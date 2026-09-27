@@ -230,6 +230,27 @@ button.danger:hover:not(:disabled) {
   margin-right: 4px;
 }
 
+/* A chunked batch run: "Chunk k of m" while sending, then done / unknown or failed / not attempted. */
+.batchRun {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin-bottom: 12px;
+  padding: 8px 12px;
+}
+
+.batchRun p {
+  margin: 4px 0;
+}
+
+.batchCounts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  list-style: none;
+  margin: 4px 0;
+  padding: 0;
+}
+
 /* The checkbox column (select-all header + per-row) is narrow and centered. */
 .checkCol {
   text-align: center;
