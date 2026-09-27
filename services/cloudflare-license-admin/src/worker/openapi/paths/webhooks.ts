@@ -14,8 +14,23 @@ import {
   limitCursorParams,
   okResponse,
   SYNC_SECURITY,
+  successResponse,
   transitionOkResponse,
 } from "../components.js";
+import { WEBHOOK_TEST_STATUS_CLASSES } from "@licensecc/cloudflare-runtime/webhooks/webhook_endpoint";
+
+const webhookTestResult = {
+  type: "object",
+  additionalProperties: false,
+  required: ["status_class"],
+  properties: {
+    status_class: {
+      type: "string",
+      enum: [...WEBHOOK_TEST_STATUS_CLASSES],
+      description: "The class of the receiver's HTTP status (redirects are never followed), or network_error when it could not be reached or did not answer within 5 seconds. Nothing else from the receiver is returned.",
+    },
+  },
+};
 
 export const webhookPaths: LabeledPathFragment = {
   label: "webhooks",
@@ -172,6 +187,34 @@ export const webhookPaths: LabeledPathFragment = {
         "409": errorResponse("Endpoint is not in the expected prior status (concurrent change).", "webhook_status_conflict"),
         "413": errorResponse("Request body exceeds 8192 bytes.", "body_too_large"),
         "500": errorResponse("Mutation failed, or dev bearer enabled outside development.", "mutation_failed", "dev_bearer_forbidden_in_environment"),
+      },
+    },
+  }],
+    ["/api/admin/webhooks/{id}/test", {
+    post: {
+      tags: ["admin:webhooks"],
+      summary: "Send one signed test event to an active endpoint (admin-only)",
+      description: "The licensing backend, which alone holds the webhook signing secret, re-checks the stored URL is https and POSTs {\"type\":\"test\",\"endpoint_id\",\"sent_at\"} signed exactly like a real delivery, with Licensecc-Event-Source: test and a fresh test- Licensecc-Webhook-Id. It never follows a redirect and waits at most 5 seconds. Only the status class is returned. One test per endpoint per 60 seconds. Not idempotent and not recorded as a delivery. Responses are no-store.",
+      operationId: "sendWebhookTest",
+      security: ADMIN_SECURITY,
+      parameters: [idParam],
+      requestBody: {
+        required: false,
+        description: "Empty JSON object accepted; no body fields are read.",
+        content: { "application/json": { schema: { $ref: "#/components/schemas/EmptyBody" } } },
+      },
+      responses: {
+        "200": successResponse("The test event was sent; data carries only the receiver's status class.", webhookTestResult, ["webhook_test_sent"]),
+        "400": errorResponse("Invalid endpoint id or JSON body, or the stored endpoint URL is not an https URL.", "invalid_request", "invalid_json", "invalid_url"),
+        ...ADMIN_MUTATION_AUTH_ERRORS,
+        "404": errorResponse("No active webhook endpoint with that id (unknown or disabled); nothing was sent.", "not_found"),
+        "413": errorResponse("Request body exceeds 8192 bytes.", "body_too_large"),
+        "429": {
+          ...errorResponse("A test event was sent to this endpoint less than 60 seconds ago; data.retry_after gives the seconds to wait.", "rate_limited"),
+          headers: { "retry-after": { description: "Seconds until this endpoint accepts another test (1-60).", schema: { type: "integer", minimum: 1, maximum: 60 } } },
+        },
+        "500": errorResponse("Dev bearer enabled outside development.", "dev_bearer_forbidden_in_environment"),
+        "503": errorResponse("Nothing was sent: the WEBHOOK_OPERATOR backend capability is not bound, webhook signing is not configured on the backend, or the backend is unavailable.", "webhook_operator_not_configured", "webhook_signing_unconfigured", "temporarily_unavailable"),
       },
     },
   }],

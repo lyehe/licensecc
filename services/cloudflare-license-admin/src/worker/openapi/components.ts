@@ -38,7 +38,7 @@ export interface TransitionDataContract {
   readonly expectedStatus?: string;
 }
 
-function successResponse(
+export function successResponse(
   description: string,
   dataSchema: Record<string, unknown>,
   codes: ReadonlyArray<string>,

@@ -92,7 +92,7 @@ test("editing only the URL of an endpoint with a legacy event type still succeed
   await expect(updatedRow).toContainText("legacy_unknown_type");
 });
 
-// E4b: "Send test event" runs through the backend, which alone holds the signing secret. The
+// "Send test event" runs through the backend, which alone holds the signing secret. The
 // operator sees a sentence naming the receiver's status class; the request id stays under
 // Technical details, and a disabled endpoint cannot be tested.
 test("Send test event shows the receiver's status class, with the request id under Technical details", async ({ page }) => {

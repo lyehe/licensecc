@@ -45,7 +45,7 @@ export const WEBHOOK_REPLAY_WINDOW_SECONDS = 300;
 export const WEBHOOK_MAX_ATTEMPTS = 6;
 export const WEBHOOK_ENQUEUE_BATCH = 500;
 export const WEBHOOK_DELIVER_BATCH = 50;
-const DELIVER_TIMEOUT_MS = 5000;
+export const WEBHOOK_DELIVER_TIMEOUT_MS = 5000;
 // Error diagnostics are deliberately much smaller than the request body limits: a remote endpoint
 // must not be able to make every retry buffer an unbounded response just because it returned non-2xx.
 export const WEBHOOK_ERROR_BODY_MAX_BYTES = 1024;
@@ -482,21 +482,27 @@ export async function enqueueWebhooks(env, now, logEvent) {
   }
 }
 
+/** The one signing selector for real deliveries and operator test sends: the env secret map plus the
+ * active WEBHOOK_SIGNING_KEY_ID, or the fail-closed reason (an event name) when either is unusable. */
+export function webhookSigningConfig(env) {
+  const secretsMap = loadSecretMap(env?.WEBHOOK_SIGNING_SECRETS);
+  if (secretsMap === null) return { error: "webhook.signing_unconfigured" };
+  const keyId = env?.WEBHOOK_SIGNING_KEY_ID;
+  if (typeof keyId !== "string" || keyId.length === 0 || lookupSecret(secretsMap, keyId) === null) return { error: "webhook.signing_key_missing" };
+  return { secretsMap, keyId };
+}
+
 /** DELIVER up to WEBHOOK_DELIVER_BATCH due rows, sign and POST, then persist success or backoff.
  * Missing signing configuration skips fail-closed; fetch failures become retries. */
 export async function deliverWebhooks(env, now, logEvent, clock = () => now) {
   // Fail-closed: with no usable signing secret map, do not deliver (never send unsigned). Log so the
   // skip is observable, then return — pending rows simply wait for a properly-configured tick.
-  const secretsMap = loadSecretMap(env?.WEBHOOK_SIGNING_SECRETS);
-  if (secretsMap === null) {
-    emitWebhookEvent(logEvent, "warn", "webhook.signing_unconfigured", { skipped: true });
+  const signing = webhookSigningConfig(env);
+  if ("error" in signing) {
+    emitWebhookEvent(logEvent, "warn", signing.error, { skipped: true });
     return;
   }
-  const keyId = env?.WEBHOOK_SIGNING_KEY_ID;
-  if (typeof keyId !== "string" || keyId.length === 0 || lookupSecret(secretsMap, keyId) === null) {
-    emitWebhookEvent(logEvent, "warn", "webhook.signing_key_missing", { skipped: true });
-    return;
-  }
+  const { secretsMap, keyId } = signing;
 
   let due;
   try {
@@ -546,7 +552,7 @@ async function deliverOne(env, delivery, secretsMap, keyId, now, claimUntil, log
   let errText = "";
   let ok = false;
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), DELIVER_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), WEBHOOK_DELIVER_TIMEOUT_MS);
   try {
     const resp = await fetch(delivery.url, {
       method: "POST",

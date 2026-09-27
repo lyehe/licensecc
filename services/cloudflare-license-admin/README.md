@@ -160,6 +160,18 @@ exact D1 database name and id. Set these non-secret values:
 - `ADMIN_ACCESS_ADMIN_EMAILS`: the authorized operator email allowlist.
 - `ADMIN_ACCESS_READER_EMAILS`: the optional read-only email allowlist.
 
+The example configuration also binds the optional `WEBHOOK_OPERATOR` service to
+the backend's `WebhookOperator` entrypoint for **Webhooks → Send test event**.
+The backend, which alone holds `WEBHOOK_SIGNING_SECRETS`, signs the test event
+the same way as a real delivery. It sends only to an active endpoint's https
+URL, never follows a redirect, and waits at most 5 seconds. It returns only the
+receiver's status class (`2xx`, `3xx`, `4xx`, `5xx` or `network_error`) and
+accepts one test per endpoint per minute. Receivers see
+`Licensecc-Event-Source: test` and a body of
+`{"type":"test","endpoint_id":...,"sent_at":...}`. Without the binding the route
+answers 503 `webhook_operator_not_configured`. Profile materialization pins the
+binding to the same profile's backend, as it does for `DEVICE_OPERATOR`.
+
 Create a Cloudflare Access application and allow policy for the admin hostname
 before exposing it. Protect every enabled hostname, including `workers.dev`
 if used; disable unused preview URLs. The Worker also validates the Access JWT
@@ -443,6 +455,7 @@ Webhooks:
 - `PATCH /api/admin/webhooks/{id}`
 - `POST /api/admin/webhooks/{id}/disable`
 - `POST /api/admin/webhooks/{id}/reenable`
+- `POST /api/admin/webhooks/{id}/test`
 
 Entitlements:
 

@@ -23,44 +23,19 @@ import type {
   WebhookEndpointPatch,
 } from "../shared/api";
 import { clientIp } from "@licensecc/cloudflare-runtime/http/kit";
+import { safeWebhookUrl } from "@licensecc/cloudflare-runtime/webhooks/webhook_endpoint";
 import { INVALID_EVENT_TYPES, safeWebhookEventTypes, safeWebhookEventTypesShape, webhookEventTypesUnknownTokens, WEBHOOK_EVENT_TYPES } from "./webhook_event_types.js";
-
-// Sentinel distinguishing a present-but-invalid value from an absent one, module-local to the
-// webhook validators (mirrors index.ts's INVALID symbol; compared only within this module).
-const INVALID = Symbol("invalid");
 
 // ── Webhook endpoint validation (migration 0020) ──────────────────────────────
 // An endpoint is a CONFIG row: an https URL + a csv event_types filter ("" = all) +
 // a description. NO signing secret lives here — it is only in the env secret map. URL
 // validation is the security gate: https-only (else 400 invalid_url) so a delivery can
-// never POST to plaintext http. event_types (validated against the closed set WEBHOOK_EVENT_TYPES
-// allows -- see webhook_event_types.ts) is bounded csv (each entry a bare token).
+// never POST to plaintext http. The rule (safeWebhookUrl, null when invalid) is shared with the
+// backend, which re-applies it before an operator test send. event_types (validated against the
+// closed set WEBHOOK_EVENT_TYPES allows -- see webhook_event_types.ts) is bounded csv (each entry
+// a bare token).
 
-const MAX_WEBHOOK_URL_SIZE = 2048;
 const MAX_WEBHOOK_DESCRIPTION_SIZE = 500;
-
-// A valid webhook URL is a parseable absolute https:// URL within the size bound and
-// free of control characters. The INVALID sentinel distinguishes a bad URL (-> 400
-// invalid_url) from a merely-absent one. Returns the normalized href on success.
-function safeWebhookUrl(value: unknown): string | typeof INVALID {
-  if (typeof value !== "string" || value.length === 0 || value.length > MAX_WEBHOOK_URL_SIZE) {
-    return INVALID;
-  }
-  if (value.includes("\n") || value.includes("\r") || value.includes("\0") || /\s/.test(value)) {
-    return INVALID;
-  }
-  let parsed: URL;
-  try {
-    parsed = new URL(value);
-  } catch {
-    return INVALID;
-  }
-  // https-only: never let a delivery POST to plaintext http (or any other scheme).
-  if (parsed.protocol !== "https:") {
-    return INVALID;
-  }
-  return parsed.href;
-}
 
 function safeWebhookDescription(value: unknown): string | null {
   if (value === undefined) {
@@ -112,7 +87,7 @@ export function validateWebhookInput(value: unknown): WebhookEndpointInput | "in
   if (scopeProject !== "" && scopeCustomer !== "") {
     return null;
   }
-  if (url === INVALID) {
+  if (url === null) {
     return "invalid_url";
   }
   return { url, event_types: eventTypes, description, scope_project: scopeProject, scope_customer_id: scopeCustomer };
@@ -138,7 +113,7 @@ export function validateWebhookPatch(value: unknown): WebhookEndpointPatch | "in
   const patch: WebhookEndpointPatch = {};
   if (input.url !== undefined) {
     const url = safeWebhookUrl(input.url);
-    if (url === INVALID) {
+    if (url === null) {
       return "invalid_url";
     }
     patch.url = url;

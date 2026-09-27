@@ -3,6 +3,7 @@
 // share ONE shape. Re-exported here so existing `../shared/api` import sites are
 // unchanged.
 import type { EntitlementStatus, EntitlementInput, EntitlementEventType, EntitlementCreateInput, EntitlementPatch } from "@licensecc/licensing-domain/entitlements/contracts";
+import type { WebhookTestStatusClass } from "@licensecc/cloudflare-runtime/webhooks/webhook_endpoint";
 
 export type {
   EntitlementStatus,
@@ -388,6 +389,12 @@ export interface WebhookDelivery {
   next_attempt_at: number;
   created_at: number;
   delivered_at: number | null;
+}
+
+// POST /api/admin/webhooks/{id}/test data: the backend sends the signed test event and only the
+// receiver's status class ever comes back.
+export interface WebhookTestResult {
+  status_class: WebhookTestStatusClass;
 }
 
 // Optional frozen-trial + provenance columns surfaced on an entitlement record that

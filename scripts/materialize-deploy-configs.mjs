@@ -381,7 +381,8 @@ function validateAccess(vars, target) {
 }
 
 function validateAdmin(config, target, profile, profileName) {
-  validateDeviceService(config,target,profile,"DEVICE_OPERATOR","DeviceOperator");
+  // WEBHOOK_OPERATOR is optional: without it the admin answers "Send test event" with 503.
+  validateDeviceService(config,target,profile,"DEVICE_OPERATOR","DeviceOperator",{WEBHOOK_OPERATOR:"WebhookOperator"});
   const vars = objectValue(config.vars, target, "vars");
   exactString(vars.ENVIRONMENT, profile.environment, target, "vars.ENVIRONMENT");
   exactString(vars.ADMIN_DEV_BEARER_ENABLED, "0", target, "vars.ADMIN_DEV_BEARER_ENABLED");
@@ -394,14 +395,25 @@ function validateAdmin(config, target, profile, profileName) {
   };
 }
 
-function validateDeviceService(config,target,profile,binding,entrypoint) {
+// Every service binding targets this profile's backend under its one reviewed entrypoint. The
+// required binding appears exactly once; each optional one at most once; nothing else is allowed.
+function validateDeviceService(config,target,profile,binding,entrypoint,optional={}) {
   if(config.env!==undefined)fail(target,`must not define environment overrides for ${binding}`);
-  if(!Array.isArray(config.services)||config.services.length!==1)fail(target,`must define exactly one ${binding} service binding`);
-  const service=objectValue(config.services[0],target,"services[0]");
-  if(Object.keys(service).length!==3||["binding","service","entrypoint"].some(key=>!Object.hasOwn(service,key)))fail(target,`${binding} must contain only binding, service and entrypoint`);
-  exactString(service.binding,binding,target,`${binding} binding`);
-  exactString(service.service,profile.serviceNames.backend,target,`${binding} service`);
-  exactString(service.entrypoint,entrypoint,target,`${binding} entrypoint`);
+  const allowed={...optional,[binding]:entrypoint};
+  if(!Array.isArray(config.services)||config.services.length<1)fail(target,`must define exactly one ${binding} service binding`);
+  const seen=new Set();
+  config.services.forEach((entry,index)=>{
+    const service=objectValue(entry,target,`services[${index}]`);
+    // An unknown binding is reported against the required capability it could be mistaken for.
+    const name=typeof service.binding==="string"&&Object.hasOwn(allowed,service.binding)?service.binding:binding;
+    if(seen.has(name))fail(target,`must define exactly one ${name} service binding`);
+    seen.add(name);
+    if(Object.keys(service).length!==3||["binding","service","entrypoint"].some(key=>!Object.hasOwn(service,key)))fail(target,`${name} must contain only binding, service and entrypoint`);
+    exactString(service.binding,name,target,`${name} binding`);
+    exactString(service.service,profile.serviceNames.backend,target,`${name} service`);
+    exactString(service.entrypoint,allowed[name],target,`${name} entrypoint`);
+  });
+  if(!seen.has(binding))fail(target,`must define exactly one ${binding} service binding`);
 }
 
 function validatePortal(config, target, profile, profileName) {

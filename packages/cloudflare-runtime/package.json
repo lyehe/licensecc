@@ -75,6 +75,10 @@
       "types": "./src/webhooks/event_types.d.ts",
       "default": "./src/webhooks/event_types.mjs"
     },
+    "./webhooks/webhook_endpoint": {
+      "types": "./src/webhooks/webhook_endpoint.d.ts",
+      "default": "./src/webhooks/webhook_endpoint.mjs"
+    },
     "./auth/password": {
       "types": "./src/auth/password.d.ts",
       "default": "./src/auth/password.mjs"

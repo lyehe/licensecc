@@ -669,6 +669,18 @@ read/event/retirement HTTP routes and profile-pinned `DEVICE_OPERATOR` binding;
 see its README for the authenticated retry contract and browser operator
 inspection/retirement workflow.
 
+The separate named `WebhookOperator` capability exposes only
+`sendTest(endpointId)` for the admin Worker's **Send test event**. It loads the
+active endpoint, rechecks that its stored URL is https, and signs
+`{"type":"test","endpoint_id":...,"sent_at":...}`. Signing uses the same
+`WEBHOOK_SIGNING_SECRETS` selector and signer as real deliveries, with
+`Licensecc-Event-Source: test`. It POSTs once with a 5-second timeout and no
+redirect following, and returns only the receiver's status class. Each endpoint
+gets one test per 60 seconds, tracked in `rate_limit_counters` under the
+`webhook-test` namespace. It never returns the secret, the signature or any
+part of the receiver's response. Bind only the authenticated admin Worker to
+this capability.
+
 Monitor scheduled protected-device cleanup using structured events:
 
 - `device.cleanup_completed` reports `source`, `target`, `affected_rows` and

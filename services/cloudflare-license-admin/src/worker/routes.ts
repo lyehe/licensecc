@@ -68,6 +68,7 @@ export const API_ROUTES = [
   { method: "PATCH", path: "/api/admin/webhooks/{id}" },
   { method: "POST", path: "/api/admin/webhooks/{id}/disable" },
   { method: "POST", path: "/api/admin/webhooks/{id}/reenable" },
+  { method: "POST", path: "/api/admin/webhooks/{id}/test" },
   { method: "GET", path: "/api/admin/entitlements" },
   { method: "POST", path: "/api/admin/entitlements" },
   { method: "POST", path: "/api/admin/entitlements/batch" },

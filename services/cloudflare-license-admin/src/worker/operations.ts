@@ -50,6 +50,7 @@ import {
   validateWebhookInput,
   validateWebhookPatch,
 } from "./webhooks.js";
+import { sendWebhookTest } from "./groups/webhooks/test-send.js";
 import { validatePolicyInput, validatePolicyPatch } from "./policy_validation.js";
 import { validateEntitlementInput, validateEntitlementPatch } from "./groups/entitlements/validation.js";
 import { validatePlanProjectionInput } from "./groups/catalog/validation.js";
@@ -119,6 +120,7 @@ const HANDLERS: Record<string, BoundRun> = {
   "PATCH /api/admin/webhooks/{id}": (request, env, _g, rid, actor) => handleWebhookMutation(request, env, actor, rid),
   "POST /api/admin/webhooks/{id}/disable": (request, env, _g, rid, actor) => handleWebhookMutation(request, env, actor, rid),
   "POST /api/admin/webhooks/{id}/reenable": (request, env, _g, rid, actor) => handleWebhookMutation(request, env, actor, rid),
+  "POST /api/admin/webhooks/{id}/test": (request, env, g, rid, actor) => sendWebhookTest(request, env, actor, g[0] ?? "", rid),
   "GET /api/admin/entitlements": (request, env, _g, rid) => listEntitlements(request, env, rid),
   "POST /api/admin/entitlements": (request, env, _g, rid, actor) => handleMutation(request, env, actor, rid),
   "POST /api/admin/entitlements/batch": (request, env, _g, rid, actor) => handleBatchTransition(request, env, actor, rid),

@@ -233,6 +233,10 @@
       "path": "/api/admin/webhooks/{id}/reenable"
     },
     {
+      "method": "POST",
+      "path": "/api/admin/webhooks/{id}/test"
+    },
+    {
       "method": "GET",
       "path": "/api/admin/entitlements"
     },
@@ -354,6 +358,7 @@
     "PATCH /api/admin/webhooks/{id}",
     "POST /api/admin/webhooks/{id}/disable",
     "POST /api/admin/webhooks/{id}/reenable",
+    "POST /api/admin/webhooks/{id}/test",
     "GET /api/admin/entitlements",
     "POST /api/admin/entitlements",
     "POST /api/admin/entitlements/batch",
@@ -19314,6 +19319,304 @@
           ]
         }
       },
+      "/api/admin/webhooks/{id}/test": {
+        "post": {
+          "description": "The licensing backend, which alone holds the webhook signing secret, re-checks the stored URL is https and POSTs {\"type\":\"test\",\"endpoint_id\",\"sent_at\"} signed exactly like a real delivery, with Licensecc-Event-Source: test and a fresh test- Licensecc-Webhook-Id. It never follows a redirect and waits at most 5 seconds. Only the status class is returned. One test per endpoint per 60 seconds. Not idempotent and not recorded as a delivery. Responses are no-store.",
+          "operationId": "sendWebhookTest",
+          "parameters": [
+            {
+              "description": "Resource identifier from the URL path. For entitlements this is the encoded entitlement id; for customers it is the URI-decoded customer id.",
+              "in": "path",
+              "name": "id",
+              "required": true,
+              "schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmptyBody"
+                }
+              }
+            },
+            "description": "Empty JSON object accepted; no body fields are read.",
+            "required": false
+          },
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/SuccessEnvelope"
+                      },
+                      {
+                        "properties": {
+                          "code": {
+                            "const": "webhook_test_sent"
+                          },
+                          "data": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "status_class": {
+                                "description": "The class of the receiver's HTTP status (redirects are never followed), or network_error when it could not be reached or did not answer within 5 seconds. Nothing else from the receiver is returned.",
+                                "enum": [
+                                  "2xx",
+                                  "3xx",
+                                  "4xx",
+                                  "5xx",
+                                  "network_error"
+                                ],
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "status_class"
+                            ],
+                            "type": "object"
+                          }
+                        },
+                        "required": [
+                          "data"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  }
+                }
+              },
+              "description": "The test event was sent; data carries only the receiver's status class."
+            },
+            "400": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "invalid_json": {
+                      "value": {
+                        "code": "invalid_json",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    },
+                    "invalid_request": {
+                      "value": {
+                        "code": "invalid_request",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    },
+                    "invalid_url": {
+                      "value": {
+                        "code": "invalid_url",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "Invalid endpoint id or JSON body, or the stored endpoint URL is not an https URL."
+            },
+            "401": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "admin_auth_not_configured": {
+                      "value": {
+                        "code": "admin_auth_not_configured",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    },
+                    "missing_access_jwt": {
+                      "value": {
+                        "code": "missing_access_jwt",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "Authentication failed."
+            },
+            "403": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "admin_role_denied": {
+                      "value": {
+                        "code": "admin_role_denied",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    },
+                    "admin_role_required": {
+                      "value": {
+                        "code": "admin_role_required",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    },
+                    "invalid_access_jwt": {
+                      "value": {
+                        "code": "invalid_access_jwt",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "Authorization failed (RBAC / invalid JWT / admin role required)."
+            },
+            "404": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "not_found": {
+                      "value": {
+                        "code": "not_found",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "No active webhook endpoint with that id (unknown or disabled); nothing was sent."
+            },
+            "413": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "body_too_large": {
+                      "value": {
+                        "code": "body_too_large",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "Request body exceeds 8192 bytes."
+            },
+            "429": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "rate_limited": {
+                      "value": {
+                        "code": "rate_limited",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "A test event was sent to this endpoint less than 60 seconds ago; data.retry_after gives the seconds to wait.",
+              "headers": {
+                "retry-after": {
+                  "description": "Seconds until this endpoint accepts another test (1-60).",
+                  "schema": {
+                    "maximum": 60,
+                    "minimum": 1,
+                    "type": "integer"
+                  }
+                }
+              }
+            },
+            "500": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "dev_bearer_forbidden_in_environment": {
+                      "value": {
+                        "code": "dev_bearer_forbidden_in_environment",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "Dev bearer enabled outside development."
+            },
+            "503": {
+              "content": {
+                "application/json": {
+                  "examples": {
+                    "temporarily_unavailable": {
+                      "value": {
+                        "code": "temporarily_unavailable",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    },
+                    "webhook_operator_not_configured": {
+                      "value": {
+                        "code": "webhook_operator_not_configured",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    },
+                    "webhook_signing_unconfigured": {
+                      "value": {
+                        "code": "webhook_signing_unconfigured",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    }
+                  },
+                  "schema": {
+                    "$ref": "#/components/schemas/ErrorEnvelope"
+                  }
+                }
+              },
+              "description": "Nothing was sent: the WEBHOOK_OPERATOR backend capability is not bound, webhook signing is not configured on the backend, or the backend is unavailable."
+            }
+          },
+          "security": [
+            {
+              "cloudflareAccess": []
+            },
+            {
+              "devBearer": []
+            }
+          ],
+          "summary": "Send one signed test event to an active endpoint (admin-only)",
+          "tags": [
+            "admin:webhooks"
+          ]
+        }
+      },
       "/api/admin/webhooks/deliveries": {
         "get": {
           "operationId": "listWebhookDeliveries",
@@ -20082,8 +20385,8 @@
       }
     ]
   },
-  "openApiOperationCount": 74,
-  "routeCount": 74,
-  "routeKeyCount": 72,
+  "openApiOperationCount": 75,
+  "routeCount": 75,
+  "routeKeyCount": 73,
   "service": "cloudflare-license-admin"
 }

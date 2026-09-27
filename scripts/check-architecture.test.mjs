@@ -27,7 +27,7 @@ function config(overrides = {}) {
 const COMPOSITION_ROOTS = {
   backend: {
     entry: "services/cloudflare-licensing-backend/src/index.ts",
-    entryImports: ["./app.js", "./device/consent_entrypoint.js", "./device/operator_entrypoint.js"],
+    entryImports: ["./app.js", "./device/consent_entrypoint.js", "./device/operator_entrypoint.js", "./webhook_operator_entrypoint.js"],
     app: "services/cloudflare-licensing-backend/src/app.ts",
     appImports: ["./env.js", "./maintenance/**", "./observability/**", "./routes.js", "./routes/**"],
   },
