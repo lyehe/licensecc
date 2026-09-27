@@ -830,7 +830,7 @@ export const openApiComponents: LabeledComponentFragment = {
         description: "Create body. `url` is required and MUST be https. event_types / description / scope_* take the column default ('').",
         properties: {
           url: { type: "string", maxLength: 2048, description: "https URL. A non-https or unparseable URL returns 400 invalid_url." },
-          event_types: { type: "string", maxLength: 1024, default: "", description: "CSV event-type filter; '' = all." },
+          event_types: { type: "string", maxLength: 1024, default: "", description: "CSV event-type filter; '' = all. Each token must be one of the entitlement/customer/order event types the dispatcher actually emits (else 400 invalid_event_types with data.allowed)." },
           description: { type: "string", maxLength: 500, default: "" },
           scope_project: { type: "string", maxLength: 128, default: "", description: "Per-tenant scope (audit R2.2). '' = global. Set one dimension, not both." },
           scope_customer_id: { type: "string", maxLength: 128, default: "", description: "Per-tenant scope (audit R2.2). '' = global. Set one dimension, not both." },
@@ -841,7 +841,7 @@ export const openApiComponents: LabeledComponentFragment = {
         description: "All fields optional; only provided fields are updated. status / id are NOT patchable (status flips only via disable/reenable).",
         properties: {
           url: { type: "string", maxLength: 2048, description: "https URL. A non-https URL returns 400 invalid_url." },
-          event_types: { type: "string", maxLength: 1024 },
+          event_types: { type: "string", maxLength: 1024, description: "CSV event-type filter; '' = all. Each token must be one of the entitlement/customer/order event types the dispatcher actually emits (else 400 invalid_event_types with data.allowed)." },
           description: { type: "string", maxLength: 500 },
           scope_project: { type: "string", maxLength: 128, description: "Per-tenant scope (audit R2.2). '' clears it (global)." },
           scope_customer_id: { type: "string", maxLength: 128, description: "Per-tenant scope (audit R2.2). '' clears it (global)." },

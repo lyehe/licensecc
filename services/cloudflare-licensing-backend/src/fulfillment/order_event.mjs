@@ -11,6 +11,10 @@
 //
 // Design: docs/superpowers/plans/2026-06-24-slice1-order-ingest-blueprint.md
 
+// KNOWN_INTENTS is shared with the admin console's webhook event-types validator (a different
+// deployable), so it lives in the licensing-domain package -- imported here, never duplicated.
+import { KNOWN_INTENTS } from "@licensecc/licensing-domain/orders/intents";
+
 export { clampValidUntil, mapIntentToMutation } from "./order_mutation.mjs";
 
 // --- Self-contained validators ----------------------------------------------
@@ -44,21 +48,6 @@ const GRACE_SECONDS = 86400;
 // Intents that are allowed to carry a backdated current_period_end (a cancellation
 // at/after period end is the WHOLE point of these intents).
 const CANCEL_INTENTS = new Set(["subscription.canceled_at_period_end"]);
-
-// The full closed set of intents the order-ingest contract understands. Anything
-// else is invalid_order (never silently ignored).
-const KNOWN_INTENTS = new Set([
-  "subscription.active",
-  "subscription.renewed",
-  "subscription.past_due",
-  "subscription.paused",
-  "subscription.payment_failed",
-  "subscription.canceled_at_period_end",
-  "subscription.resumed",
-  "quantity.changed",
-  "fraud.confirmed",
-  "chargeback",
-]);
 
 /**
  * A bounded, single-line, separator-free string id (matches src/routes/verify.ts safeString

@@ -48,7 +48,7 @@ export const webhookPaths: LabeledPathFragment = {
       },
       responses: {
         "200": okResponse("Webhook endpoint created.", "#/components/schemas/WebhookEndpoint", "webhook_created"),
-        "400": errorResponse("Invalid request / json / idempotency key, or a non-https URL.", "invalid_idempotency_key", "invalid_json", "invalid_request", "invalid_url"),
+        "400": errorResponse("Invalid request / json / idempotency key, a non-https URL, or an event_types token outside the known entitlement/customer/order set (data.allowed lists the grouped allow-list).", "invalid_idempotency_key", "invalid_json", "invalid_request", "invalid_url", "invalid_event_types"),
         ...ADMIN_MUTATION_AUTH_ERRORS,
         "413": errorResponse("Request body exceeds 8192 bytes.", "body_too_large"),
         "500": errorResponse("Mutation failed, or dev bearer enabled outside development.", "mutation_failed", "dev_bearer_forbidden_in_environment"),
@@ -121,7 +121,7 @@ export const webhookPaths: LabeledPathFragment = {
       },
       responses: {
         "200": okResponse("Webhook endpoint updated.", "#/components/schemas/WebhookEndpoint", "webhook_patched"),
-        "400": errorResponse("Invalid request / json / idempotency key, or a non-https URL (status/id are not patchable).", "invalid_idempotency_key", "invalid_json", "invalid_request", "invalid_url"),
+        "400": errorResponse("Invalid request / json / idempotency key, a non-https URL (status/id are not patchable), or an event_types token outside the known entitlement/customer/order set (data.allowed lists the grouped allow-list).", "invalid_idempotency_key", "invalid_json", "invalid_request", "invalid_url", "invalid_event_types"),
         ...ADMIN_MUTATION_AUTH_ERRORS,
         "404": errorResponse("No webhook endpoint with that id.", "not_found"),
         "413": errorResponse("Request body exceeds 8192 bytes.", "body_too_large"),

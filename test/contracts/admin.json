@@ -3698,7 +3698,7 @@
             },
             "event_types": {
               "default": "",
-              "description": "CSV event-type filter; '' = all.",
+              "description": "CSV event-type filter; '' = all. Each token must be one of the entitlement/customer/order event types the dispatcher actually emits (else 400 invalid_event_types with data.allowed).",
               "maxLength": 1024,
               "type": "string"
             },
@@ -3733,6 +3733,7 @@
               "type": "string"
             },
             "event_types": {
+              "description": "CSV event-type filter; '' = all. Each token must be one of the entitlement/customer/order event types the dispatcher actually emits (else 400 invalid_event_types with data.allowed).",
               "maxLength": 1024,
               "type": "string"
             },
@@ -18229,6 +18230,13 @@
               "content": {
                 "application/json": {
                   "examples": {
+                    "invalid_event_types": {
+                      "value": {
+                        "code": "invalid_event_types",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    },
                     "invalid_idempotency_key": {
                       "value": {
                         "code": "invalid_idempotency_key",
@@ -18263,7 +18271,7 @@
                   }
                 }
               },
-              "description": "Invalid request / json / idempotency key, or a non-https URL."
+              "description": "Invalid request / json / idempotency key, a non-https URL, or an event_types token outside the known entitlement/customer/order set (data.allowed lists the grouped allow-list)."
             },
             "401": {
               "content": {
@@ -18578,6 +18586,13 @@
               "content": {
                 "application/json": {
                   "examples": {
+                    "invalid_event_types": {
+                      "value": {
+                        "code": "invalid_event_types",
+                        "ok": false,
+                        "request_id": "1a2b3c-1"
+                      }
+                    },
                     "invalid_idempotency_key": {
                       "value": {
                         "code": "invalid_idempotency_key",
@@ -18612,7 +18627,7 @@
                   }
                 }
               },
-              "description": "Invalid request / json / idempotency key, or a non-https URL (status/id are not patchable)."
+              "description": "Invalid request / json / idempotency key, a non-https URL (status/id are not patchable), or an event_types token outside the known entitlement/customer/order set (data.allowed lists the grouped allow-list)."
             },
             "401": {
               "content": {

@@ -23,6 +23,7 @@ import type {
   WebhookEndpointPatch,
 } from "../shared/api";
 import { clientIp } from "@licensecc/cloudflare-runtime/http/kit";
+import { INVALID_EVENT_TYPES, safeWebhookEventTypes, WEBHOOK_EVENT_TYPES } from "./webhook_event_types.js";
 
 // Sentinel distinguishing a present-but-invalid value from an absent one, module-local to the
 // webhook validators (mirrors index.ts's INVALID symbol; compared only within this module).
@@ -32,10 +33,10 @@ const INVALID = Symbol("invalid");
 // An endpoint is a CONFIG row: an https URL + a csv event_types filter ("" = all) +
 // a description. NO signing secret lives here — it is only in the env secret map. URL
 // validation is the security gate: https-only (else 400 invalid_url) so a delivery can
-// never POST to plaintext http. event_types is bounded csv (each entry a bare token).
+// never POST to plaintext http. event_types (validated against the closed set WEBHOOK_EVENT_TYPES
+// allows -- see webhook_event_types.ts) is bounded csv (each entry a bare token).
 
 const MAX_WEBHOOK_URL_SIZE = 2048;
-const MAX_WEBHOOK_EVENT_TYPES_SIZE = 1024;
 const MAX_WEBHOOK_DESCRIPTION_SIZE = 500;
 
 // A valid webhook URL is a parseable absolute https:// URL within the size bound and
@@ -59,30 +60,6 @@ function safeWebhookUrl(value: unknown): string | typeof INVALID {
     return INVALID;
   }
   return parsed.href;
-}
-
-// event_types is a csv allow-list filter; "" means "all event types". Each entry must be
-// a bare, non-empty token (no comma/newline/NUL) — the dispatcher splits on comma and
-// trims. We re-serialize the trimmed tokens so storage is canonical. undefined -> "".
-function safeWebhookEventTypes(value: unknown): string | null {
-  if (value === undefined || value === "" || value === null) {
-    return "";
-  }
-  if (typeof value !== "string" || value.length > MAX_WEBHOOK_EVENT_TYPES_SIZE) {
-    return null;
-  }
-  if (value.includes("\n") || value.includes("\r") || value.includes("\0")) {
-    return null;
-  }
-  const tokens = value.split(",").map((token) => token.trim()).filter((token) => token.length > 0);
-  // Reject a token carrying a stray comma-equivalent or whitespace (split already removed
-  // commas; guard internal whitespace so "a b" can never masquerade as one event type).
-  for (const token of tokens) {
-    if (/\s/.test(token)) {
-      return null;
-    }
-  }
-  return tokens.join(",");
 }
 
 function safeWebhookDescription(value: unknown): string | null {
@@ -116,13 +93,16 @@ function safeWebhookScope(value: unknown): string | null {
 // Validate a create body. `url` is required and must be https. Returns null on ANY invalid
 // field (the caller emits 400 invalid_request); a bad URL is reported separately as
 // invalid_url, so the caller distinguishes the two.
-export function validateWebhookInput(value: unknown): WebhookEndpointInput | "invalid_url" | null {
+export function validateWebhookInput(value: unknown): WebhookEndpointInput | "invalid_url" | "invalid_event_types" | null {
   if (typeof value !== "object" || value === null) {
     return null;
   }
   const input = value as Record<string, unknown>;
   const url = safeWebhookUrl(input.url);
   const eventTypes = safeWebhookEventTypes(input.event_types);
+  if (eventTypes === INVALID_EVENT_TYPES) {
+    return "invalid_event_types";
+  }
   const description = safeWebhookDescription(input.description);
   const scopeProject = safeWebhookScope(input.scope_project);
   const scopeCustomer = safeWebhookScope(input.scope_customer_id);
@@ -141,7 +121,7 @@ export function validateWebhookInput(value: unknown): WebhookEndpointInput | "in
 // Validate a patch body. Only url / event_types / description are mutable; status / id /
 // timestamps are NOT patchable (reject if present). All fields optional. A present-but-bad
 // url returns "invalid_url"; any other invalid field returns null.
-export function validateWebhookPatch(value: unknown): WebhookEndpointPatch | "invalid_url" | null {
+export function validateWebhookPatch(value: unknown): WebhookEndpointPatch | "invalid_url" | "invalid_event_types" | null {
   if (typeof value !== "object" || value === null) {
     return null;
   }
@@ -159,6 +139,9 @@ export function validateWebhookPatch(value: unknown): WebhookEndpointPatch | "in
   }
   if (input.event_types !== undefined) {
     const eventTypes = safeWebhookEventTypes(input.event_types);
+    if (eventTypes === INVALID_EVENT_TYPES) {
+      return "invalid_event_types";
+    }
     if (eventTypes === null) {
       return null;
     }
@@ -274,6 +257,9 @@ async function handleWebhookCreate(request: Request, env: Env, actor: Actor, bod
   if (input === "invalid_url") {
     return envelope(requestIdValue, "invalid_url", undefined, 400);
   }
+  if (input === "invalid_event_types") {
+    return envelope(requestIdValue, "invalid_event_types", { allowed: WEBHOOK_EVENT_TYPES }, 400);
+  }
   if (input === null) {
     return envelope(requestIdValue, "invalid_request", undefined, 400);
   }
@@ -317,6 +303,9 @@ async function handleWebhookPatch(request: Request, env: Env, actor: Actor, endp
   const patch = validateWebhookPatch(body);
   if (patch === "invalid_url") {
     return envelope(requestIdValue, "invalid_url", undefined, 400);
+  }
+  if (patch === "invalid_event_types") {
+    return envelope(requestIdValue, "invalid_event_types", { allowed: WEBHOOK_EVENT_TYPES }, 400);
   }
   if (patch === null) {
     return envelope(requestIdValue, "invalid_request", undefined, 400);

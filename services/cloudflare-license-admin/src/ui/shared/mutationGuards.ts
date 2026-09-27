@@ -145,10 +145,10 @@ export const mutationFailurePolicies = {
     ),
   },
   webhookCreate: documentedMutationPolicy(
-    { status: 400, codes: [...invalidRequest, "invalid_url"] },
+    { status: 400, codes: [...invalidRequest, "invalid_url", "invalid_event_types"] },
   ),
   webhookPatch: documentedMutationPolicy(
-    { status: 400, codes: [...invalidRequest, "invalid_url"] },
+    { status: 400, codes: [...invalidRequest, "invalid_url", "invalid_event_types"] },
     { status: 404, codes: ["not_found"] },
   ),
   webhookTransition: {

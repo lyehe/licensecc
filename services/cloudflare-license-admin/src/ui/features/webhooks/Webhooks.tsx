@@ -11,7 +11,7 @@ import { isRetryableAppendFailure, loadMore, pageAppendError, withCursor } from 
 import { hasWebhookData, hasWebhookDeliveryData, hasWebhookDeliveryListData, hasWebhookListData, hasWebhookTransitionData, mutationFailurePolicies, parseMutationResponse } from "../../shared/mutationGuards";
 import { useDebouncedValue } from "../../shared/useDebouncedValue";
 import { useRequestFence } from "../../shared/requestFence";
-import { canRunWebhookAction, disableWebhookConfirm, emptyWebhookForm, normalizeWebhookForm, webhookDeliveriesPath, webhookRedrivePath, webhookTransitionPath, webhooksPath, WebhookAction, WebhookDeliveryFilter, WebhookFilter, WebhookFormState } from "./workflow";
+import { canRunWebhookAction, disableWebhookConfirm, emptyWebhookForm, isWebhookEventTypeChecked, normalizeWebhookForm, toggleWebhookEventType, webhookDeliveriesPath, webhookEventTypesErrorMessage, webhookFormFromEndpoint, webhookPath, webhookRedrivePath, webhookTransitionPath, webhooksPath, WEBHOOK_EVENT_TYPE_GROUPS, WebhookAction, WebhookDeliveryFilter, WebhookFilter, WebhookFormState } from "./workflow";
 
 export function Webhooks({ active }: { active: boolean }): React.ReactElement | null {
   const [deliveriesOpen,setDeliveriesOpen]=useState(false);
@@ -19,15 +19,18 @@ export function Webhooks({ active }: { active: boolean }): React.ReactElement | 
   const [webhookFilter, setWebhookFilter] = useState<WebhookFilter>({ status: "" });
   const [webhooksCursor, setWebhooksCursor] = useState<string | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
+  // The endpoint being edited, or null for a new endpoint. Its id is shown but never sent.
+  const [editing, setEditing] = useState<WebhookEndpoint | null>(null);
   const [readState, setReadState] = useState<{ key: string; loading: boolean; error: string | null }>({ key: "", loading: true, error: null });
   const [deliveryRead, setDeliveryRead] = useState<{ key: string; loading: boolean; error: string | null }>({ key: "", loading: true, error: null });
   const [webhookForm, setWebhookForm] = useState<WebhookFormState>(emptyWebhookForm);
+  const [baseline, setBaseline] = useState(() => JSON.stringify(emptyWebhookForm));
   const [webhookDeliveries, setWebhookDeliveries] = useState<WebhookDelivery[]>([]);
   const [webhookDeliveriesCursor, setWebhookDeliveriesCursor] = useState<string | null>(null);
   const [webhookDeliveryFilter, setWebhookDeliveryFilter] = useState<WebhookDeliveryFilter>({ endpoint_id: "", status: "" });
   const { busy: requestBusy, operationLocked, currentReason, requestConfirm, runConsequenceAction, runKeyedMutation, runMutation, setMessage, setReason } = useOperatorControls();
   const busy = requestBusy || operationLocked;
-  const { requestLeave } = useNavigationGuard({ when: active && editorOpen && JSON.stringify(webhookForm) !== JSON.stringify(emptyWebhookForm), onDiscard: () => { setWebhookForm(emptyWebhookForm); setEditorOpen(false); } });
+  const { requestLeave } = useNavigationGuard({ when: active && editorOpen && JSON.stringify(webhookForm) !== baseline, onDiscard: () => closeEditor() });
   const webhooksUrl = useMemo(() => webhooksPath(webhookFilter), [webhookFilter]);
   // The filter alone reloads the endpoint list; active only gates whether a reload may fire, so
   // leaving and returning to this tab with the filter unchanged costs zero requests. The debounce
@@ -50,6 +53,20 @@ export function Webhooks({ active }: { active: boolean }): React.ReactElement | 
   // reader; the reader itself remains fenced to that current filter snapshot.
   const currentWebhooksRefreshRef = useRef<() => Promise<ExactReadProof | null>>(() => Promise.resolve(null));
   const currentDeliveriesRefreshRef = useRef<() => Promise<ExactReadProof | null>>(() => Promise.resolve(null));
+
+  function openEditor(next: WebhookFormState, target: WebhookEndpoint | null): void {
+    setEditing(target);
+    setWebhookForm(next);
+    setBaseline(JSON.stringify(next));
+    setEditorOpen(true);
+  }
+
+  function closeEditor(): void {
+    setEditorOpen(false);
+    setEditing(null);
+    setWebhookForm(emptyWebhookForm);
+    setBaseline(JSON.stringify(emptyWebhookForm));
+  }
 
   async function refreshWebhooks(strict = false, isCurrent: () => boolean = () => true): Promise<ExactReadProof | null> {
     if (!isCurrent()) return null;
@@ -180,12 +197,47 @@ export function Webhooks({ active }: { active: boolean }): React.ReactElement | 
       onApplied: async (parsed) => {
         if (!isCurrent()) return;
         setMessage(`${parsed.code} (${parsed.requestId})`);
-        if (isWebhookFormGenerationCurrent(formGeneration)) setWebhookForm(emptyWebhookForm);
+        if (isWebhookFormGenerationCurrent(formGeneration)) { setWebhookForm(emptyWebhookForm); setBaseline(JSON.stringify(emptyWebhookForm)); }
       },
       refresh: async () => await currentWebhooksRefreshRef.current(),
       onUnapplied: (parsed) => {
         if (isCurrent()) {
+          setMessage(parsed.code === "invalid_event_types" ? webhookEventTypesErrorMessage(parsed.data, parsed.requestId) : `${parsed.code} (${parsed.requestId})`);
+        }
+      },
+      isCurrent,
+    });
+  }
+
+  async function submitWebhookPatch(event: FormEvent, endpoint: WebhookEndpoint): Promise<void> {
+    event.preventDefault();
+    const contextGeneration = filterGeneration;
+    const formGeneration = webhookFormGeneration;
+    const isCurrent = (): boolean => isFilterGenerationCurrent(contextGeneration) && isWebhookFormGenerationCurrent(formGeneration);
+    let body: ReturnType<typeof normalizeWebhookForm>;
+    try {
+      body = normalizeWebhookForm(webhookForm);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "invalid_form");
+      return;
+    }
+    await runKeyedMutation({
+      request: { method: "PATCH", path: webhookPath(endpoint.id), body: JSON.stringify(body) },
+      send: (attempt) => api<WebhookEndpoint>(attempt.path, { method: attempt.method, headers: { "idempotency-key": attempt.idempotencyKey }, body: attempt.body }),
+      parse: (result, phase) => parseMutationResponse(result, "webhook_patched", (value): value is WebhookEndpoint => {
+        if (!hasWebhookData(value)) return false;
+        const row = value as WebhookEndpoint;
+        return row.id === endpoint.id;
+      }, mutationFailurePolicies.webhookPatch, phase),
+      onApplied: async (parsed) => {
+        if (!isCurrent()) return;
         setMessage(`${parsed.code} (${parsed.requestId})`);
+        closeEditor();
+      },
+      refresh: async () => await currentWebhooksRefreshRef.current(),
+      onUnapplied: (parsed) => {
+        if (isCurrent()) {
+          setMessage(parsed.code === "invalid_event_types" ? webhookEventTypesErrorMessage(parsed.data, parsed.requestId) : `${parsed.code} (${parsed.requestId})`);
         }
       },
       isCurrent,
@@ -299,26 +351,42 @@ export function Webhooks({ active }: { active: boolean }): React.ReactElement | 
   const visibleDeliveriesCursor = deliveriesFence.canLoadMore() ? webhookDeliveriesCursor : null;
 
   if (!active) return null;
+  const editorTitle = editing === null ? "New webhook endpoint" : "Edit webhook endpoint";
   return (
     <section className="listPage">
-      <div className="listHeader"><button className="primary" type="button" disabled={busy} onClick={() => setEditorOpen(true)}>New endpoint</button></div>
+      <div className="listHeader"><button className="primary" type="button" disabled={busy} onClick={() => { if (!editorOpen || editing !== null) requestLeave(() => openEditor(emptyWebhookForm, null)); }}>New endpoint</button></div>
       {editorOpen && <aside className="editorLayout">
-        <h2>Webhook endpoint</h2>
-        <form onSubmit={(event) => void submitWebhookCreate(event)}><fieldset disabled={operationLocked}>
+        <h2>{editorTitle}</h2>
+        <form aria-label={editorTitle} onSubmit={(event) => void (editing === null ? submitWebhookCreate(event) : submitWebhookPatch(event, editing))}><fieldset disabled={operationLocked}>
           <label>URL (required)<input required type="url" placeholder="https://hooks.example.com/lcc" value={webhookForm.url} onChange={(event) => setWebhookForm({ ...webhookForm, url: event.target.value })} /></label>
-          <label>Event types (csv; blank = all)<input placeholder="entitlement.revoked,customer.disabled" value={webhookForm.event_types} onChange={(event) => setWebhookForm({ ...webhookForm, event_types: event.target.value })} /></label>
+          <div className="eventTypesGroup">
+            <p className="muted">Event types (blank = all)</p>
+            {WEBHOOK_EVENT_TYPE_GROUPS.map((group) => <fieldset className="trialPanel" key={group.source}>
+              <legend>{group.label}</legend>
+              {group.tokens.map((token) => <label className="checkboxRow" key={token}>
+                <input
+                  type="checkbox"
+                  aria-label={`${group.label} ${token}`}
+                  checked={isWebhookEventTypeChecked(webhookForm.event_types, token)}
+                  onChange={(event) => setWebhookForm({ ...webhookForm, event_types: toggleWebhookEventType(webhookForm.event_types, token, event.target.checked) })}
+                />
+                {token}
+              </label>)}
+            </fieldset>)}
+            <p className="muted">"disable" and "reenable" match both entitlement and customer events — checking either box selects the same filter for both sources.</p>
+          </div>
           <label>Description<input value={webhookForm.description} onChange={(event) => setWebhookForm({ ...webhookForm, description: event.target.value })} /></label>
           <label>Scope: project (blank = all)<input placeholder="DEFAULT" value={webhookForm.scope_project} onChange={(event) => setWebhookForm({ ...webhookForm, scope_project: event.target.value })} /></label>
           <label>Scope: customer id (blank = all)<input placeholder="cus_..." value={webhookForm.scope_customer_id} onChange={(event) => setWebhookForm({ ...webhookForm, scope_customer_id: event.target.value })} /></label>
           <p className="muted">Set at most one scope dimension. A scoped endpoint receives only matching events; blank = every event.</p>
-          <button disabled={busy || operationLocked} type="submit">Create endpoint</button>
+          <button disabled={busy || operationLocked} type="submit">{editing === null ? "Create endpoint" : "Save changes"}</button>
         </fieldset></form>
-        <button type="button" disabled={busy} onClick={() => requestLeave(() => setEditorOpen(false))}>Close editor</button>
+        <button type="button" disabled={busy} onClick={() => requestLeave(closeEditor)}>Close editor</button>
       </aside>}
       <section className="tablePane">
         <ReadNotice label="webhooks" hasData={webhooksFence.isSettled()} loading={webhooksLoading} error={readState.key === filterContextKey ? readState.error : null} onRetry={() => void refreshWebhooks()} />
         <div className="filters"><label>Status<select aria-label="Filter endpoints by status" value={webhookFilter.status} onChange={(event) => setWebhookFilter({ status: event.target.value })}><option value="">all</option><option value="active">active</option><option value="disabled">disabled</option></select></label></div>
-        <div className="tableScroll" role="region" aria-label="Webhook records" tabIndex={0} aria-busy={webhooksLoading}><table><caption className="srOnly">Webhook endpoints</caption><thead><tr><th scope="col">URL</th><th scope="col">Events</th><th scope="col">Scope</th><th scope="col">Status</th><th scope="col">Created</th><th scope="col">Actions</th></tr></thead><tbody>{visibleWebhooks.map((endpoint) => <tr key={endpoint.id} data-focus-row={`webhook:${endpoint.id}`}><td className="mono">{endpoint.url}</td><td>{endpoint.event_types === "" ? "(all)" : endpoint.event_types}</td><td>{endpoint.scope_project !== null && endpoint.scope_project !== "" ? `project:${endpoint.scope_project}` : endpoint.scope_customer_id !== null && endpoint.scope_customer_id !== "" ? `customer:${endpoint.scope_customer_id}` : "(global)"}</td><td><span className={`status ${endpoint.status}`}>{endpoint.status}</span></td><td>{formatEpoch(endpoint.created_at)}</td><td className="actions"><button type="button" disabled={busy || operationLocked} onClick={() => { setDeliveriesOpen(true); setWebhookDeliveryFilter({ endpoint_id: endpoint.id, status: "" }); }}>Deliveries</button><StatusActions status={endpoint.status}><button className="danger" disabled={busy || operationLocked || !webhooksFence.canLoadMore() || !canRunWebhookAction(endpoint.status, "disable")} onClick={() => requestConfirm({ title: "Disable webhook", body: disableWebhookConfirm(endpoint), requiresReason: true, run: ({ idempotencyKey }: ConfirmActionContext) => webhookTransition(endpoint, "disable", idempotencyKey), successFocusTarget: focusTargetInRow(`webhook:${endpoint.id}`, ['button[data-focus-action="reenable"]', ".status"]), isCurrent: () => isFilterGenerationCurrent(filterGeneration) })}>Disable</button><button data-focus-action="reenable" disabled={busy || operationLocked || !webhooksFence.canLoadMore() || !canRunWebhookAction(endpoint.status, "reenable")} onClick={() => void runConsequenceAction({ run: ({ idempotencyKey }: ConfirmActionContext) => webhookTransition(endpoint, "reenable", idempotencyKey), successFocusTarget: focusTargetInRow(`webhook:${endpoint.id}`, ['button[data-focus-action="reenable"]', ".status"]), isCurrent: () => isFilterGenerationCurrent(filterGeneration) })}>Reenable</button></StatusActions></td></tr>)}</tbody></table></div>
+        <div className="tableScroll" role="region" aria-label="Webhook records" tabIndex={0} aria-busy={webhooksLoading}><table><caption className="srOnly">Webhook endpoints</caption><thead><tr><th scope="col">URL</th><th scope="col">Events</th><th scope="col">Scope</th><th scope="col">Status</th><th scope="col">Created</th><th scope="col">Actions</th></tr></thead><tbody>{visibleWebhooks.map((endpoint) => <tr key={endpoint.id} data-focus-row={`webhook:${endpoint.id}`}><td className="mono">{endpoint.url}</td><td>{endpoint.event_types === "" ? "(all)" : endpoint.event_types}</td><td>{endpoint.scope_project !== null && endpoint.scope_project !== "" ? `project:${endpoint.scope_project}` : endpoint.scope_customer_id !== null && endpoint.scope_customer_id !== "" ? `customer:${endpoint.scope_customer_id}` : "(global)"}</td><td><span className={`status ${endpoint.status}`}>{endpoint.status}</span></td><td>{formatEpoch(endpoint.created_at)}</td><td className="actions"><button type="button" disabled={busy || operationLocked} onClick={() => { setDeliveriesOpen(true); setWebhookDeliveryFilter({ endpoint_id: endpoint.id, status: "" }); }}>Deliveries</button><button type="button" disabled={busy || operationLocked || !webhooksFence.canLoadMore()} onClick={() => requestLeave(() => openEditor(webhookFormFromEndpoint(endpoint), endpoint))}>Edit</button><StatusActions status={endpoint.status}><button className="danger" disabled={busy || operationLocked || !webhooksFence.canLoadMore() || !canRunWebhookAction(endpoint.status, "disable")} onClick={() => requestConfirm({ title: "Disable webhook", body: disableWebhookConfirm(endpoint), requiresReason: true, run: ({ idempotencyKey }: ConfirmActionContext) => webhookTransition(endpoint, "disable", idempotencyKey), successFocusTarget: focusTargetInRow(`webhook:${endpoint.id}`, ['button[data-focus-action="reenable"]', ".status"]), isCurrent: () => isFilterGenerationCurrent(filterGeneration) })}>Disable</button><button data-focus-action="reenable" disabled={busy || operationLocked || !webhooksFence.canLoadMore() || !canRunWebhookAction(endpoint.status, "reenable")} onClick={() => void runConsequenceAction({ run: ({ idempotencyKey }: ConfirmActionContext) => webhookTransition(endpoint, "reenable", idempotencyKey), successFocusTarget: focusTargetInRow(`webhook:${endpoint.id}`, ['button[data-focus-action="reenable"]', ".status"]), isCurrent: () => isFilterGenerationCurrent(filterGeneration) })}>Reenable</button></StatusActions></td></tr>)}</tbody></table></div>
         {webhooksFence.isSettled() && visibleWebhooks.length === 0 && <p className="emptyState">No webhooks match this view.</p>}
         <div className="tableFooter"><span className="muted">{webhooksFence.isSettled() ? `${visibleWebhooks.length} shown` : ""}</span>{visibleWebhooksCursor !== null && <button type="button" disabled={busy || operationLocked} onClick={() => void loadMore(webhooksUrl, visibleWebhooksCursor, visibleWebhooks, setWebhooks, setWebhooksCursor, setMessage, hasWebhookListData, "webhooks_listed", webhooksFence, (webhook) => webhook.id)}>Load more</button>}</div>
         <details role="region" aria-label="Recent webhook deliveries" className="deliveriesPane" open={deliveriesOpen} onToggle={event=>setDeliveriesOpen(event.currentTarget.open)}><summary>Recent deliveries{webhookDeliveryFilter.endpoint_id !== "" ? ` for ${shortHash(webhookDeliveryFilter.endpoint_id)}` : ""}</summary>
