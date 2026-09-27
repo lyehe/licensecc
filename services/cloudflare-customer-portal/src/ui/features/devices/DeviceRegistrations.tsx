@@ -1,10 +1,14 @@
 import React from "react";
 import { DEVICE_RELEASE_ACTION_LABEL, formatTimestamp } from "../../portalWorkflow";
+import { ActionResult } from "../../shared/ActionResult";
 import { matchesDeviceSearch } from "./deviceSearch";
-import type { DeviceRow } from "../../types";
+import type { DeviceRow, StatusMessage } from "../../types";
 
-export function DeviceRegistrations({ devices, busy, releaseDevice, query, project }: {
+export function DeviceRegistrations({ devices, busy, releaseDevice, messages, query, project }: {
   devices: DeviceRow[]; busy: boolean; releaseDevice(item: DeviceRow): Promise<void>;
+  // D2: this row's own result (keyed by device_key_id), rendered next to its Release button instead
+  // of the page-level line.
+  messages: Record<string, StatusMessage | null>;
   // D1: the page-level search box and the route's exact app filter, both owned by DevicesFeature.
   query: string; project: string | null;
 }): React.ReactElement {
@@ -17,7 +21,7 @@ export function DeviceRegistrations({ devices, busy, releaseDevice, query, proje
           <td data-label="Device ID" className="identifier">{item.device_key_id}</td>
           <td data-label="App">{item.project}</td><td data-label="Feature">{item.feature}</td>
           <td data-label="Registered">{formatTimestamp(item.created_at)}</td>
-          <td data-label="Action"><button disabled={busy} onClick={() => void releaseDevice(item)}>{DEVICE_RELEASE_ACTION_LABEL}</button></td>
+          <td data-label="Action"><button disabled={busy} onClick={() => void releaseDevice(item)}>{DEVICE_RELEASE_ACTION_LABEL}</button><ActionResult message={messages[item.device_key_id] ?? null} /></td>
         </tr>)}
       </tbody></table> : <div className="emptyState"><h3>No matching devices</h3><p>Try another device ID or app.</p></div>}
       {devices.length >= 500 && <p className="readNotice">Only the first 500 registrations are shown. More may exist.</p>}

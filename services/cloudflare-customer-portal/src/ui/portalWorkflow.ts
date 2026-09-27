@@ -182,7 +182,10 @@ const RESULT_CODE_COPY: Record<string, string> = {
   device_proof_required: "This device needs to be verified. Use the application to verify it, then try again.",
   device_proof_invalid: "This device couldn't be verified. Use the application to verify it again.",
   borrowing_disabled: "Offline borrowing isn't enabled for this license.",
-  pool_exhausted: "All seats are in use — release one or ask your administrator.",
+  // pool_exhausted is deliberately NOT mapped here (D2): its customer-facing copy links out through
+  // <SupportContact/>, a React node this plain string map cannot hold without pulling React into the
+  // pure workflow module the unit test transpiles without it. It is mapped instead in
+  // ui/shared/ActionResult.tsx, which every local per-row/card result line renders through.
   seat_signing_error: "We couldn't complete that seat action. Try again.",
   verification_error: "We couldn't verify that request. Try again.",
   seat_signing_unavailable: "Seat actions are temporarily unavailable. Try again shortly.",

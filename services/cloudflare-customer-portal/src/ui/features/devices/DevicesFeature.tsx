@@ -2,18 +2,15 @@ import React, { useEffect, useRef, useState } from "react";
 import { DeviceRegistrations } from "./DeviceRegistrations";
 import { ProtectedNodes } from "./ProtectedNodes";
 import { BrowserSeats } from "./BrowserSeats";
+import { randomHex, readStoredSeats, seatPath, writeStoredSeats } from "./seatStorage";
 
 import {
-  checkoutPath,
   DEVICE_RELEASE_CONFIRM_COPY,
   deviceReleasePath,
   FLOATING_SEAT_RELEASE_NETWORK_ERROR_COPY,
   FLOATING_SEAT_RELEASE_REFRESH_FAILED_CODE,
-  heartbeatPath,
   hydrateSeatSessions,
   PORTAL_STATUS_REFRESH_ACTION_LABEL,
-  releasePath,
-  SEATS_KEY,
   serializeSeatSessions,
   type SeatSession,
 } from "../../portalWorkflow";
@@ -53,6 +50,12 @@ export interface DevicesController {
   seatReleaseError: string | null;
   seatReleaseOutcomeUnknown: boolean;
   seatSessions: Record<string, SeatSession>;
+  // D2: "show each result next to the control that produced it" -- each seat card's own
+  // role="status" line (keyed by entitlement id) and each legacy device row's own (keyed by
+  // device_key_id), populated by seatAction()/releaseDevice() below instead of the page-level
+  // setMessage. The page-level line stays reserved for refresh/account-level results.
+  seatMessages: Record<string, StatusMessage | null>;
+  deviceMessages: Record<string, StatusMessage | null>;
   seatReleaseDialogRef: React.RefObject<HTMLDivElement | null>;
   seatStartButtonRefs: React.RefObject<Record<string, HTMLButtonElement | null>>;
   seatReleaseButtonRefs: React.RefObject<Record<string, HTMLButtonElement | null>>;
@@ -65,34 +68,6 @@ export interface DevicesController {
   confirmSeatRelease(): Promise<void>;
   releaseDevice(item: DeviceRow): Promise<void>;
   clear(): void;
-}
-
-function randomHex(byteLength: number): string {
-  const bytes = new Uint8Array(byteLength);
-  crypto.getRandomValues(bytes);
-  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
-}
-
-function seatPath(operation: SeatOperation): string {
-  if (operation === "checkout") return checkoutPath();
-  if (operation === "heartbeat") return heartbeatPath();
-  return releasePath();
-}
-
-function readStoredSeats(): string | null {
-  try {
-    return window.localStorage.getItem(SEATS_KEY);
-  } catch {
-    return null;
-  }
-}
-
-function writeStoredSeats(json: string): void {
-  try {
-    window.localStorage.setItem(SEATS_KEY, json);
-  } catch {
-    // Storage is best-effort. The in-memory map remains authoritative for this page lifetime.
-  }
 }
 
 // Verify-then-fallback focus: try the primary target (skipping a disabled button), then the
@@ -118,6 +93,8 @@ export function useDevicesController(options: DeviceFeatureOptions): DevicesCont
   const [seatReleaseError, setSeatReleaseError] = useState<string | null>(null);
   const [seatReleaseOutcomeUnknown, setSeatReleaseOutcomeUnknown] = useState(false);
   const [pendingSeatFocus, setPendingSeatFocus] = useState<PendingSeatFocus | null>(null);
+  const [seatMessages, setSeatMessages] = useState<Record<string, StatusMessage | null>>({});
+  const [deviceMessages, setDeviceMessages] = useState<Record<string, StatusMessage | null>>({});
   const seatReleaseDialogRef = useRef<HTMLDivElement>(null);
   const seatReleaseReturnFocusRef = useRef<HTMLElement | null>(null);
   const seatReleaseDeferredFocusRef = useRef<HTMLElement | null>(null);
@@ -138,6 +115,12 @@ export function useDevicesController(options: DeviceFeatureOptions): DevicesCont
     });
   }
 
+  // D2: this seat's own role="status" line -- checkout/heartbeat/release results, and the guards
+  // below, all route here instead of the page-level setMessage.
+  function setSeatMessage(entitlementId: string, seatMessage: StatusMessage | null): void {
+    setSeatMessages((current) => ({ ...current, [entitlementId]: seatMessage }));
+  }
+
   async function seatAction(item: EntitlementRow, operation: SeatOperation): Promise<SeatActionResult> {
     let succeeded = false;
     let refreshFailed = false;
@@ -146,7 +129,7 @@ export function useDevicesController(options: DeviceFeatureOptions): DevicesCont
     await runOnce(async () => {
       const existing = seatSessions[item.id];
       if ((operation === "heartbeat" || operation === "release") && existing === undefined) {
-        setMessage(localMessage("seat_not_checked_out", false));
+        setSeatMessage(item.id, localMessage("seat_not_checked_out", false));
         return;
       }
       const clientInstanceId = existing?.client_instance_id ?? crypto.randomUUID();
@@ -160,7 +143,7 @@ export function useDevicesController(options: DeviceFeatureOptions): DevicesCont
         method: "POST",
         body: JSON.stringify(body),
       });
-      setMessage(resultMessage(result));
+      setSeatMessage(item.id, resultMessage(result));
       const resultData = result.data;
       const leaseExpiresAt = typeof resultData?.expires_at === "number" ? resultData.expires_at : 0;
       const seatId = typeof resultData?.seat_id === "string" ? resultData.seat_id : null;
@@ -210,7 +193,7 @@ export function useDevicesController(options: DeviceFeatureOptions): DevicesCont
     if (busyRef.current) return;
     const session = seatSessions[item.id];
     if (session === undefined) {
-      setMessage(localMessage("seat_not_checked_out", false));
+      setSeatMessage(item.id, localMessage("seat_not_checked_out", false));
       return;
     }
     seatReleaseReturnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -329,13 +312,22 @@ export function useDevicesController(options: DeviceFeatureOptions): DevicesCont
       focusFirstAvailable(seatReleaseButtonRefs.current[seatId], seatCardRefs.current[seatId], panelHeadingRef.current);
     } else {
       if (hasSession || pendingSeatRelease !== null) return;
-      // Releasing the last live browser session collapses the panel into a closed <details>, which
-      // makes the seat card/button unfocusable. When neither the start button nor the card took
-      // focus, land it on the panel's own <summary> instead of leaving it on <body>.
+      // Releasing the last live browser session used to always collapse the panel into a closed
+      // <details>; since D2 the panel now also stays open for a seat with a fresh local result to
+      // show (its own release/checkout copy), which is normally the case right after a release, so
+      // the re-enabled Start seat button usually takes focus directly. The <summary> fallback still
+      // covers the case where the panel really has collapsed (e.g. after a later page reload) and
+      // neither the start button nor the card can take focus.
       focusFirstAvailable(seatStartButtonRefs.current[seatId], seatCardRefs.current[seatId], browserSessionsSummaryRef.current);
     }
     setPendingSeatFocus(null);
   }, [entitlements, pendingSeatFocus, pendingSeatRelease, seatSessions]);
+
+  // D2: this device row's own role="status" line, keyed by device_key_id (a device row has no more
+  // stable id than that -- the same key DeviceRegistrations already keys its buttons by).
+  function setDeviceMessage(deviceKeyId: string, deviceMessage: StatusMessage | null): void {
+    setDeviceMessages((current) => ({ ...current, [deviceKeyId]: deviceMessage }));
+  }
 
   async function releaseDevice(item: DeviceRow): Promise<void> {
     if (!window.confirm(DEVICE_RELEASE_CONFIRM_COPY)) return;
@@ -344,7 +336,7 @@ export function useDevicesController(options: DeviceFeatureOptions): DevicesCont
         method: "POST",
         body: JSON.stringify({ device_key_id: item.device_key_id }),
       });
-      setMessage(resultMessage(result));
+      setDeviceMessage(item.device_key_id, resultMessage(result));
       if (result.ok) await refreshData();
     });
   }
@@ -355,6 +347,8 @@ export function useDevicesController(options: DeviceFeatureOptions): DevicesCont
     setSeatReleaseError(null);
     setSeatReleaseOutcomeUnknown(false);
     setPendingSeatFocus(null);
+    setSeatMessages({});
+    setDeviceMessages({});
   }
 
   return {
@@ -365,6 +359,8 @@ export function useDevicesController(options: DeviceFeatureOptions): DevicesCont
     seatReleaseError,
     seatReleaseOutcomeUnknown,
     seatSessions,
+    seatMessages,
+    deviceMessages,
     seatReleaseDialogRef,
     seatStartButtonRefs,
     seatReleaseButtonRefs,
@@ -423,7 +419,7 @@ export function DevicesFeature({
         </section>
       ) : (
         <>
-          {controller.devices.length > 0 && <DeviceRegistrations devices={controller.devices} busy={controller.busy} releaseDevice={controller.releaseDevice} query={query} project={project} />}
+          {controller.devices.length > 0 && <DeviceRegistrations devices={controller.devices} busy={controller.busy} releaseDevice={controller.releaseDevice} messages={controller.deviceMessages} query={query} project={project} />}
           <BrowserSeats controller={controller} query={query} project={project} />
         </>
       )}

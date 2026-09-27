@@ -9,38 +9,46 @@ import {
   canDownloadLicense,
   licenseDisplayStatus,
 } from "../../portalWorkflow";
+import { ActionResult } from "../../shared/ActionResult";
 import { currentSessionEpoch, localMessage, reportUnauthorized, resultMessage } from "../../shared/api";
 import type { EntitlementRow, StatusMessage } from "../../types";
 
 interface DownloadOptions {
   runOnce(work: () => Promise<void>): Promise<void>;
-  setMessage: React.Dispatch<React.SetStateAction<StatusMessage | null>>;
 }
 
 export interface LicenseDownloads {
   deviceKeys: Record<string, string>;
+  // D2: this download's own result (keyed by entitlement id), shown next to its own control instead
+  // of the page-level line.
+  messages: Record<string, StatusMessage | null>;
   setDeviceKey(entitlementId: string, value: string): void;
   download(item: EntitlementRow): Promise<void>;
   clear(): void;
 }
 
-export function useLicenseDownloads({ runOnce, setMessage }: DownloadOptions): LicenseDownloads {
+export function useLicenseDownloads({ runOnce }: DownloadOptions): LicenseDownloads {
   const [deviceKeys, setDeviceKeys] = useState<Record<string, string>>({});
+  const [messages, setMessages] = useState<Record<string, StatusMessage | null>>({});
 
   function setDeviceKey(entitlementId: string, value: string): void {
     setDeviceKeys((current) => ({ ...current, [entitlementId]: value }));
   }
 
+  function setMessage(entitlementId: string, message: StatusMessage | null): void {
+    setMessages((current) => ({ ...current, [entitlementId]: message }));
+  }
+
   async function download(item: EntitlementRow): Promise<void> {
     // Checked again at click time: the license (or its trial) may have ended since the row rendered.
     if (!canDownloadLicense(item) || licenseDisplayStatus(item, Math.floor(Date.now() / 1000)) !== "active") {
-      setMessage(localMessage("license_unavailable", false));
+      setMessage(item.id, localMessage("license_unavailable", false));
       return;
     }
     await runOnce(async () => {
       const deviceKeyId = (deviceKeys[item.id] ?? "").trim();
       if (deviceKeyId === "") {
-        setMessage(localMessage("device_key_required", false));
+        setMessage(item.id, localMessage("device_key_required", false));
         return;
       }
       // Captured before the raw fetch goes out, same as api() does internally, so a straggler response
@@ -59,7 +67,7 @@ export function useLicenseDownloads({ runOnce, setMessage }: DownloadOptions): L
         // This download bypasses api() (it needs the raw Response to read a blob), so a dropped
         // connection needs the same guard here -- same code and copy as api()'s own fetch rejection
         // (task C2), so the customer sees an identical message either way.
-        setMessage(localMessage("network_unavailable", false));
+        setMessage(item.id, localMessage("network_unavailable", false));
         return;
       }
       const contentType = response.headers.get("content-type") ?? "";
@@ -70,9 +78,9 @@ export function useLicenseDownloads({ runOnce, setMessage }: DownloadOptions): L
           // route to the same global onUnauthorized hook every other api() path already gets -- "every
           // api() path" (task C3) has to include the download too.
           reportUnauthorized(response.status, result.code, requestEpoch);
-          setMessage(resultMessage(result));
+          setMessage(item.id, resultMessage(result));
         } catch {
-          setMessage(localMessage(`download_failed_${response.status}`, false));
+          setMessage(item.id, localMessage(`download_failed_${response.status}`, false));
         }
         return;
       }
@@ -85,13 +93,16 @@ export function useLicenseDownloads({ runOnce, setMessage }: DownloadOptions): L
       anchor.click();
       anchor.remove();
       URL.revokeObjectURL(objectUrl);
-      setMessage(localMessage("download_started", true));
+      setMessage(item.id, localMessage("download_started", true));
     });
   }
 
-  const clear = useCallback((): void => setDeviceKeys({}), []);
+  const clear = useCallback((): void => {
+    setDeviceKeys({});
+    setMessages({});
+  }, []);
 
-  return { deviceKeys, setDeviceKey, download, clear };
+  return { deviceKeys, messages, setDeviceKey, download, clear };
 }
 
 // Rendered only for a license that is active now (EntitlementsFeature): an inactive license offers no
@@ -102,5 +113,6 @@ export function LicenseDownloadAction({item,downloads,busy}:{item:EntitlementRow
     <label>Device key<input aria-label={`Device key for ${item.project} ${item.feature}`} placeholder="Device key ID" value={downloads.deviceKeys[item.id]??""} onChange={event=>downloads.setDeviceKey(item.id,event.target.value)} /></label>
     <p>{DEVICE_KEY_HELP_COPY}</p>
     <button disabled={busy || (downloads.deviceKeys[item.id]??"").trim()===""} onClick={()=>void downloads.download(item)}>{ACTIVATION_DOWNLOAD_ACTION_LABEL}</button>
+    <ActionResult message={downloads.messages[item.id] ?? null} />
   </details>;
 }

@@ -45,7 +45,9 @@ function PortalShell(): React.ReactElement {
     active: auth.phase === "authed" && enrollment === null && passwordAction === null,
     setMessage,
   });
-  const downloads = useLicenseDownloads({ runOnce, setMessage });
+  // D2: download results now show next to their own control (LicenseDownloadAction), not the
+  // page-level line, so setMessage is no longer passed through here.
+  const downloads = useLicenseDownloads({ runOnce });
   const deviceController = useDevicesController({
     busy: busy || stale,
     busyRef,
