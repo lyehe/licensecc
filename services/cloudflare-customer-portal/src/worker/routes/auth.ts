@@ -35,6 +35,7 @@ const revokeSession = (sessionModule as { revokeSession: RevokeSession }).revoke
 const cookieFromRequest = (sessionModule as { cookieFromRequest: (r: Request) => string | null }).cookieFromRequest;
 const setSessionCookie = (sessionModule as { setSessionCookie: (raw: string) => string }).setSessionCookie;
 const clearSessionCookie = (sessionModule as { clearSessionCookie: () => string }).clearSessionCookie;
+const loadSessionPeppers = (sessionModule as { loadSessionPeppers: (env: Env) => unknown }).loadSessionPeppers;
 const sendEmail = (emailModule as { sendEmail: SendEmail }).sendEmail;
 
 const MAGIC_REDEEM_MAX_BODY_BYTES = 8192;
@@ -218,6 +219,9 @@ async function redeemOtpSession(
   now: number,
   args: { email?: string; code?: string; secret?: string },
 ): Promise<RedeemOutcome> {
+  // Gate on the session peppers BEFORE the single-use claim: mirrors password/shared.ts's gate, so a
+  // configuration failure never burns the code/link that redeemOtp would otherwise consume atomically.
+  if (loadSessionPeppers(env) === null) return { code: "config_error" };
   const redeemed = await redeemOtp(env, { ...args, clientIp: clientIp(request), now });
   if (redeemed.code === "config_error") return { code: "config_error" };
   if (redeemed.code === "rate_limited") return { code: "rate_limited", retryAfter: redeemed.retryAfter };
