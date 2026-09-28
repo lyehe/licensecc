@@ -12,7 +12,8 @@ interface CatalogWorkspaceOptions {
   active: boolean;
   view: CatalogView;
   busy: boolean;
-  operationLocked: boolean;
+  /** A retained recovery owns the operation gate (a notice that only awaits acknowledgement does not). */
+  operationRetained: boolean;
   snapshots: Record<DraftTask, string>;
   onDiscard: (task: DraftTask) => void;
   invalidate: () => void;
@@ -56,9 +57,9 @@ export function useCatalogWorkspace(options: CatalogWorkspaceOptions): {
   // Evaluated when the operator leaves, against the latest snapshots and baselines, so an apply
   // that reset its baseline a moment ago never prompts from a stale render.
   function dirtyNow(): boolean {
-    const { active, busy, operationLocked, view, snapshots } = latest.current;
+    const { active, busy, operationRetained, view, snapshots } = latest.current;
     const current = draftTask(view, editorRef.current);
-    return active && !busy && !operationLocked && current !== null && snapshots[current] !== baselines.current[current];
+    return active && !busy && !operationRetained && current !== null && snapshots[current] !== baselines.current[current];
   }
   const { requestLeave } = useNavigationGuard({
     when: dirtyNow,
@@ -123,7 +124,7 @@ export function useCatalogWorkspace(options: CatalogWorkspaceOptions): {
     if (setCatalogPlan(id)) setup();
   }
   function close(): void {
-    if (options.busy || options.operationLocked) return;
+    if (options.busy || options.operationRetained) return;
     requestLeave(() => {
       if (draft !== null) options.onDiscard(draft);
       options.invalidate();

@@ -68,7 +68,7 @@ export function Catalog({ active }: { active: boolean }): React.ReactElement | n
   const [catalogPlanFeatureForm, setCatalogPlanFeatureForm] = useState(emptyCatalogPlanFeatureForm);
   const [activePolicies, setActivePolicies] = useState<Policy[]>([]);
   const { catalogView, setCatalogView, routeVersion } = useAdminNavigation();
-  const { busy: requestBusy, operationLocked, modalActive, currentReason, requestConfirm, runKeyedMutation, runMutation, setFeedback, setReason } = useOperatorControls();
+  const { busy: requestBusy, operationLocked, operationRetained, modalActive, currentReason, requestConfirm, runKeyedMutation, runMutation, setFeedback, setReason } = useOperatorControls();
   const featureFeedback = useFormFeedback(CATALOG_FEATURE_FORM, routeVersion);
   const planFeedback = useFormFeedback(CATALOG_PLAN_FORM, routeVersion);
   const rowFeedback = useFormFeedback(CATALOG_PLAN_FEATURE_FORM, routeVersion);
@@ -96,7 +96,7 @@ export function Catalog({ active }: { active: boolean }): React.ReactElement | n
   const updatePlanProjectionForm = planProjection.updateForm;
 
   const workspace = useCatalogWorkspace({
-    active, view: catalogView, busy: requestBusy, operationLocked,
+    active, view: catalogView, busy: requestBusy, operationRetained,
     snapshots: { featureEditor: JSON.stringify(catalogFeatureForm), planEditor: JSON.stringify(catalogPlanForm), planFeatureEditor: JSON.stringify(catalogPlanFeatureForm), projection: JSON.stringify(planProjection.form), import: catalogImport.text },
     invalidate: () => { invalidatePlanProjectionPreview(); invalidateCatalogImportPreview(); },
     onDiscard: (task) => {

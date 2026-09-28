@@ -24,8 +24,13 @@ export interface ActionNoticeControls {
   actionNotice: ActionNotice | null;
   noticePending: boolean;
   setNoticePending: Dispatch<SetStateAction<boolean>>;
-  /** A recovery control, a retained key or a running recovery locks other operations. */
+  /**
+   * Any notice holds the operation slot until it is resolved or acknowledged (a new operation is
+   * refused while one is shown), so every other action is shown as unavailable meanwhile.
+   */
   operationLocked: boolean;
+  /** A recovery control, a retained key or a running recovery keeps the slot after its request settles. */
+  operationRetained: boolean;
   actionNoticeRef: RefObject<ActionNotice | null>;
   noticePendingRef: RefObject<boolean>;
   publishActionNotice: (notice: Omit<ActionNotice, "generation">) => void;
@@ -75,12 +80,14 @@ export function useActionNotice({ operationOwnerRef, setOperationBusy }: Operati
     }
   }, [clearActionNotice, setOperationBusy]);
 
-  const operationLocked = actionNotice?.manualRefresh !== undefined || actionNotice?.unresolvedKey !== undefined || noticePending;
+  const operationRetained = actionNotice?.manualRefresh !== undefined || actionNotice?.unresolvedKey !== undefined || noticePending;
+  const operationLocked = operationRetained || actionNotice !== null;
   return {
     actionNotice,
     noticePending,
     setNoticePending,
     operationLocked,
+    operationRetained,
     actionNoticeRef,
     noticePendingRef,
     publishActionNotice,

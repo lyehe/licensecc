@@ -72,7 +72,7 @@ export function EntitlementEditor({ form, item, extendValidity = false, busy, lo
   const policyLimitLabel = `${grant?.label ?? "Device limit"} (from policy ${chosenPolicy?.name ?? (isCreate ? form.policy_id : "")})`;
   return <section ref={editorRef} className="editorLayout" aria-label={title}>
     <div className="editorHeader"><div><h3 tabIndex={-1}>{title}</h3><p>{isCreate ? "Grant access to a project and feature." : `${item?.project} / ${item?.feature}`}</p></div><button type="button" disabled={busy} onClick={onCancel}>Back to entitlements</button></div>
-    {locked && <p className="readState">{lockMessage ?? "Resolve the pending operation before changing this draft."}</p>}
+    {locked && <p className="readState">{lockMessage ?? "Resolve the notice at the bottom of the page before changing this draft."}</p>}
     <form aria-label={title} noValidate onSubmit={submit}><fieldset disabled={locked}>
       <legend className="srOnly">Entitlement details</legend>
       {isCreate && <>

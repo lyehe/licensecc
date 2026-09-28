@@ -39,8 +39,10 @@ export function useContextGeneration(context: string): ContextGeneration {
 
 interface OperatorControls {
   busy: boolean;
-  /** A retained recovery owns the operation gate after its request settles. */
+  /** Any operator notice is shown: other operations are refused until it is resolved or acknowledged. */
   operationLocked: boolean;
+  /** A retained recovery owns the operation gate after its request settles. */
+  operationRetained: boolean;
   modalActive: boolean;
   currentReason: () => string;
   message: string;
@@ -70,17 +72,18 @@ export function OperatorControlsProvider({ children }: { children: ReactNode }):
   const confirm = useConfirmDialog({ gate, focus, notice });
   const { runMutation, runKeyedMutation, runConsequenceAction, runNoticeRecovery } = useKeyedMutation({ gate, focus, notice, confirmActionRef: confirm.confirmActionRef, setFeedback });
   const { busy } = gate;
-  const { actionNotice, noticePending, operationLocked, acknowledgeNotice } = notice;
+  const { actionNotice, noticePending, operationLocked, operationRetained, acknowledgeNotice } = notice;
   const { modalActive, currentReason, reason, requestConfirm, setReason } = confirm;
 
   return (
-    <OperatorControlsContext.Provider value={{ busy, operationLocked, modalActive, currentReason, message, feedback, reason, requestConfirm, runConsequenceAction, runKeyedMutation, runMutation, setMessage, setFeedback, setReason }}>
+    <OperatorControlsContext.Provider value={{ busy, operationLocked, operationRetained, modalActive, currentReason, message, feedback, reason, requestConfirm, runConsequenceAction, runKeyedMutation, runMutation, setMessage, setFeedback, setReason }}>
       {children}
       {actionNotice !== null && (
         <div className="operatorNotice" role="status" aria-live="polite">
           <div className="noticeMessage"><FeedbackText feedback={actionNotice} /></div>
           {actionNotice.unresolvedKey !== undefined && <span>Other actions are unavailable until reconciliation completes.</span>}
           {actionNotice.manualRefresh !== undefined && <button type="button" disabled={noticePending} onClick={() => void runNoticeRecovery()}>{noticePending ? "Refreshing…" : actionNotice.manualRefresh.label}</button>}
+          {actionNotice.dismissible === true && <span>Other actions are unavailable until you acknowledge this notice.</span>}
           {actionNotice.dismissible === true && <button type="button" disabled={noticePending} onClick={acknowledgeNotice}>Acknowledge</button>}
         </div>
       )}

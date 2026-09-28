@@ -69,7 +69,7 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const previousEditorOpen = useRef(false);
   const { navigate, rememberFilters } = useAdminNavigation();
-  const { busy: requestBusy, operationLocked, currentReason, runKeyedMutation, runMutation, setFeedback, setMessage, setReason } = useOperatorControls();
+  const { busy: requestBusy, operationLocked, operationRetained, currentReason, runKeyedMutation, runMutation, setFeedback, setMessage, setReason } = useOperatorControls();
   const busy = requestBusy || operationLocked;
   const { refreshCore, registerCoreRefresh } = useCoreRefresh();
   const entitlementsUrl = useMemo(() => entitlementsPath(filter), [filter]);
@@ -103,7 +103,7 @@ export function Entitlements({ active, navigationIntent, onNavigationHandled, sc
   // draft stays in this mounted workspace until the operator comes back, with the new policy.
   const [policyDetour, setPolicyDetour] = useState<"leaving" | "away" | null>(null);
   const { requestLeave } = useNavigationGuard({
-    when: active && !operationLocked && policyDetour === null && ((createOpen && formContextKey !== JSON.stringify(emptyEntitlementForm)) || (editingId !== null && JSON.stringify(editForm) !== editBaseline)),
+    when: active && !operationRetained && policyDetour === null && ((createOpen && formContextKey !== JSON.stringify(emptyEntitlementForm)) || (editingId !== null && JSON.stringify(editForm) !== editBaseline)),
     onDiscard: () => { setCreateOpen(false); setForm(emptyEntitlementForm); cancelEdit(); },
   });
   useEffect(() => {
