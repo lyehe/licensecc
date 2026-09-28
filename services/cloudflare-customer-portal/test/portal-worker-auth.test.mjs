@@ -466,7 +466,7 @@ test("auth magic redeem: unset OTP peppers redirect to sign_in_failed", async ()
   db.close();
 });
 
-test("auth magic redeem: a valid secret with unset session peppers redirects to sign_in_failed and mints no cookie", async () => {
+test("auth magic redeem: a valid secret with unset session peppers redirects to sign_in_failed, mints no cookie, and leaves the link unconsumed for a retry", async () => {
   const { db, env } = baseFixture();
   const issued = await requestOtp(env, { email: "a@x.com", clientIp: "seed", returnSecret: true, now: NOW });
   assert.equal(issued.ok, true);
@@ -476,6 +476,13 @@ test("auth magic redeem: a valid secret with unset session peppers redirects to 
   assert.equal(result.status, 303);
   assert.equal(result.res.headers.get("location"), "https://portal.test/?auth_error=sign_in_failed");
   assert.equal(result.res.headers.get("set-cookie"), null);
+  // A configuration failure must never burn the single-use secret: the session-peppers gate runs
+  // BEFORE redeemOtp's atomic claim, so the same link still works once peppers are configured.
+  assert.equal(otpRow(db)?.consumed_at, null);
+  const retried = await magicResponse(env, streamingMagicRequest([`token=${encodeURIComponent(issued.secret)}`]).request);
+  assert.equal(retried.status, 303);
+  assert.equal(retried.res.headers.get("location"), "https://portal.test/#/apps");
+  assert.match(retried.res.headers.get("set-cookie") ?? "", /^lccp_session=/);
   db.close();
 });
 

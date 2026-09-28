@@ -269,6 +269,11 @@ function setPassword(db, customerId) {
 function clearContactEmail(db, customerId) {
   db.prepare("UPDATE customers SET email = '' WHERE id = ?").run(customerId);
 }
+function setMalformedContactEmail(db, customerId) {
+  // Legacy data only: every current writer of customers.email validates the address, so this shape
+  // can only pre-date those writers. requestOtp's own validation would never send a code here.
+  db.prepare("UPDATE customers SET email = 'not-an-email' WHERE id = ?").run(customerId);
+}
 async function sessionFor(env, customerId, authMethod) {
   const minted = await mintSession(env, { customerId, authMethod, now: NOW });
   assert.equal(minted.ok, true);
@@ -336,6 +341,9 @@ test("Unlink is refused as the last sign-in method when no other method is usabl
     ["no other method at all", { ...configuration, ...EMAIL_DELIVERY, PORTAL_PASSWORD_ENABLED: "1" }, (db) => clearContactEmail(db, "A")],
     // Email codes also need the OTP peppers: without them requestOtp answers config_error.
     ["email delivery without OTP peppers", { ...configuration, ...EMAIL_DELIVERY, PORTAL_OTP_PEPPERS: undefined }, () => {}],
+    // A malformed legacy contact address (no "@") can never receive a code; it must not count as a
+    // usable sign-in method even though it is non-empty.
+    ["a malformed contact email even with email delivery configured", { ...configuration, ...EMAIL_DELIVERY }, (db) => setMalformedContactEmail(db, "A")],
   ];
   for (const [name, extraEnv, seed] of cases) {
     const { env, db } = baseFixture(extraEnv);

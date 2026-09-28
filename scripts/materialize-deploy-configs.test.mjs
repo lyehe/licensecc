@@ -466,6 +466,63 @@ test("the optional webhook operator binding is accepted only when pinned to the 
   }
 });
 
+test("an unknown service binding is rejected by name instead of being blamed on the required capability", () => {
+  const root = mkdtempSync(join(tmpdir(), "licensecc-unknown-binding-"));
+  try {
+    const environment = validEnvironment("staging");
+    mutateJson(environment, "LICENSECC_ADMIN_WRANGLER_CONFIG_B64", (config) => {
+      config.services.push({ binding: "OTHER_CAPABILITY", service: "licensecc-online-verifier-staging", entrypoint: "Other" });
+    });
+    assert.throws(
+      () => materializeDeploymentConfigs({ root, environment, profile: "staging" }),
+      /unknown service binding OTHER_CAPABILITY; allowed: DEVICE_OPERATOR, WEBHOOK_OPERATOR/u,
+    );
+    assertNoConfigsWritten(root, "unknown service binding");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("rejects a support contact that is not a credential-free https URL or a single mailto address", () => {
+  const cases = [
+    ["a bare address without mailto:", "support@licensecc-prod.net"],
+    ["an insecure scheme", "http://licensecc-prod.net/support"],
+    ["a credentialed URL", "https://user:pass@licensecc-prod.net/support"],
+    ["a mailto list", "mailto:a@licensecc-prod.net,b@licensecc-prod.net"],
+    ["a non-URL string", "contact support"],
+  ];
+  for (const [name, value] of cases) {
+    const root = mkdtempSync(join(tmpdir(), "licensecc-support-contact-bad-"));
+    try {
+      const environment = validEnvironment();
+      mutateJson(environment, "LICENSECC_PORTAL_WRANGLER_CONFIG_B64", (config) => { config.vars.PORTAL_SUPPORT_CONTACT = value; });
+      assert.throws(() => materializeDeploymentConfigs({ root, environment }), /PORTAL_SUPPORT_CONTACT/u, name);
+      assertNoConfigsWritten(root, name);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+});
+
+test("accepts a support contact left unset or empty, or set to a credential-free https URL or a mailto address", () => {
+  const cases = [
+    ["omitted", (config) => { delete config.vars.PORTAL_SUPPORT_CONTACT; }],
+    ["empty", (config) => { config.vars.PORTAL_SUPPORT_CONTACT = ""; }],
+    ["an https URL with a path", (config) => { config.vars.PORTAL_SUPPORT_CONTACT = "https://licensecc-prod.net/support"; }],
+    ["a mailto address", (config) => { config.vars.PORTAL_SUPPORT_CONTACT = "mailto:support@licensecc-prod.net"; }],
+  ];
+  for (const [name, mutate] of cases) {
+    const root = mkdtempSync(join(tmpdir(), "licensecc-support-contact-ok-"));
+    try {
+      const environment = validEnvironment();
+      mutateJson(environment, "LICENSECC_PORTAL_WRANGLER_CONFIG_B64", mutate);
+      assert.equal(materializeDeploymentConfigs({ root, environment }).length, 4, name);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+});
+
 test("rejects plaintext Worker secrets in every service while ignoring comment-only examples", () => {
   const cases = [
     ["bound approval encryption key", (env) => mutateBackend(env, (source) => source.replace('[vars]', '[vars]\nBOUND_APPROVAL_ENCRYPTION_KEYS = "plaintext"')), /Worker secret/u],
