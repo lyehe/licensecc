@@ -40,6 +40,23 @@ test("safeWebhookUrl refuses credentials, IP literals and internal hostnames", (
   assert.equal(safeWebhookUrl("https://hooks.example.com:8443/lcc"), "https://hooks.example.com:8443/lcc");
 });
 
+test("safeWebhookUrl refuses a trailing-dot host and stays closed against numeric IPv4 spellings", () => {
+  for (const url of [
+    // A trailing dot names the DNS root but must not slip past the internal-suffix or
+    // single-label checks.
+    "https://localhost./", "https://api.localhost./", "https://printer.local./",
+    "https://db.internal./", "https://nas.home.arpa./", "https://intranet./", "https://localhost../",
+    "https://home.arpa/",
+    // Already refused by the IP-literal/IPv6 checks (the URL parser canonicalizes each of these
+    // to a dotted-quad or bracketed IPv6 literal before safeWebhookUrl ever sees the hostname).
+    "https://2130706433/", "https://0x7f.1/", "https://127.1/", "https://127.0.0.1./",
+    "https://[::ffff:127.0.0.1]/",
+  ]) {
+    assert.equal(safeWebhookUrl(url), null, url);
+  }
+  assert.equal(safeWebhookUrl("https://hooks.example.com:8443/lcc"), "https://hooks.example.com:8443/lcc");
+});
+
 test("a test send can only ever report one of five status classes", () => {
   assert.deepEqual([...WEBHOOK_TEST_STATUS_CLASSES], ["2xx", "3xx", "4xx", "5xx", "network_error"]);
   assert.ok(Object.isFrozen(WEBHOOK_TEST_STATUS_CLASSES));

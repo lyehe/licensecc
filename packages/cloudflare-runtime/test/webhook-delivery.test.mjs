@@ -306,18 +306,61 @@ test("fetch errors retain timeout/retry behavior", async () => {
 });
 
 test("a stored endpoint URL that is no longer safe is never fetched and fails terminally", async () => {
+  const { env, state } = makeEnvironment({ delivery: { url: "https://127.0.0.1/hook" } });
+  const events = [];
   let fetched = 0;
-  const state = await deliverWithFetcher(
-    async () => {
-      fetched += 1;
-      return new Response(null, { status: 204 });
-    },
-    { delivery: { url: "https://127.0.0.1/hook" } },
-  );
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => {
+    fetched += 1;
+    return new Response(null, { status: 204 });
+  };
+  try {
+    await deliverWebhooks(env, 200, (severity, event, fields) => {
+      events.push({ severity, event, fields });
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 
   assert.equal(fetched, 0);
   assert.equal(state.status, "failed");
   assert.equal(state.last_error, "invalid_url");
+  assert.equal(state.last_status, 0);
+  assert.equal(state.attempts, 1);
+  assert.deepEqual(events.find((e) => e.event === "webhook.delivery_failed"), {
+    severity: "warn",
+    event: "webhook.delivery_failed",
+    fields: { delivery_id: 17, endpoint_id: "ep1", attempts: 1, last_status: 0, reason: "invalid_url" },
+  });
+});
+
+test("a persistence failure while recording a refusal does not escape deliverWebhooks", async () => {
+  const { env, state } = makeEnvironment({
+    delivery: { url: "https://127.0.0.1/hook" },
+    updateError: new Error("simulated persistence failure"),
+  });
+  const events = [];
+  let fetched = 0;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => {
+    fetched += 1;
+    return new Response(null, { status: 204 });
+  };
+  try {
+    await assert.doesNotReject(deliverWebhooks(env, 200, (severity, event, fields) => {
+      events.push({ severity, event, fields });
+    }));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(fetched, 0, "an unsafe URL is refused before any fetch, persistence failure or not");
+  assert.equal(state.status, "pending");
+  assert.deepEqual(events.find((e) => e.event === "webhook.deliver_error"), {
+    severity: "error",
+    event: "webhook.deliver_error",
+    fields: { source: "persistence", delivery_id: 17, error_type: "Error" },
+  });
 });
 
 test("successful responses cancel an endless body before committing delivery", async () => {
