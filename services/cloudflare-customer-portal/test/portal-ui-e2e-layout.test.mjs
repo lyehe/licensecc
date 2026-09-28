@@ -3,6 +3,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import config from "../playwright.config.mjs";
 
 const directory = dirname(fileURLToPath(import.meta.url));
 const expectedSpecs = [
@@ -12,10 +13,8 @@ const expectedSpecs = [
 ];
 
 test("portal browser specs are discovered by pattern, not by imports", () => {
-  const config = readFileSync(join(directory, "..", "playwright.config.mjs"), "utf8");
-  const match = config.match(/testMatch:\s*(\/.+\/)[,\n]/u);
-  assert.ok(match, "playwright.config.mjs must declare a testMatch pattern");
-  const pattern = new Function(`return ${match[1]}`)();
+  const pattern = config.testMatch;
+  assert.ok(pattern instanceof RegExp, "playwright.config.mjs testMatch must stay a single RegExp");
   const discovered = readdirSync(directory).filter((path) => pattern.test(path)).sort();
   assert.deepEqual(discovered, expectedSpecs);
   const entry = readFileSync(join(directory, "portal-ui.e2e.mjs"), "utf8");
@@ -29,6 +28,8 @@ test("portal browser specs are discovered by pattern, not by imports", () => {
     assert.ok(localTitles.length > 0, `${path} must own browser scenarios`);
     titles.push(...localTitles);
   }
+  // This counts only top-level test( titles; loop-built and describe-nested tests are not
+  // anchored at column 0, so the Playwright run total (156) is higher than this count.
   assert.equal(titles.length, 138);
   assert.equal(new Set(titles).size, titles.length, "browser scenario titles must be unique");
 });
