@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { loadWorkflowModule } from "./helpers.mjs";
 
-// B2: the device limit is visible and settable, policies say what they grant, and a policy's
+// The device limit is visible and settable, policies say what they grant, and a policy's
 // patchable fields are editable.
 const failure = (code, data, requestId = "req-3") => ({ kind: "failure", code, requestId, ...(data === undefined ? {} : { data }) });
 const refusal = (code, requestId, data) => Object.defineProperties(

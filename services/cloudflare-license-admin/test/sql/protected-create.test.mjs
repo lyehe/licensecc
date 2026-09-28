@@ -220,7 +220,7 @@ test("an explicit legacy create cannot overwrite or claim a competing protected 
   }
 });
 
-// B1: every refusal names the first rule the create broke. Each case also proves the rule was the
+// Every refusal names the first rule the create broke. Each case also proves the rule was the
 // whole cause: undoing only that condition lets the same request succeed under a new key.
 const fp = input.license_fingerprint, otherFp = "b".repeat(64);
 const REASON_CASES = [
@@ -305,7 +305,7 @@ const WOULD_BE_ROW_CASES = [
   { name: "a fresh grant stamped from a policy", policy: "type='trial',trial_expiration_basis='from_first_activation',trial_duration_sec=600,max_active_devices=3,max_borrow_sec=60", creates: [{ policy_id: "policy" }] },
   { name: "a grant re-created without a policy over a stamped one", policy: "type='trial',trial_expiration_basis='from_first_activation',trial_duration_sec=600,max_active_devices=3", creates: [{ policy_id: "policy" }, { notes: "again" }] },
   { name: "a grant re-created from a policy over an unstamped one", policy: "max_active_devices=4,meter_quota=9", creates: [{}, { policy_id: "policy" }] },
-  // B2: a create without a policy may set its own device limit in the same batch.
+  // A create without a policy may set its own device limit in the same batch.
   { name: "a fresh grant with its own device limit", creates: [{ max_active_devices: 3 }] },
   { name: "a grant re-created with its own device limit over a stamped one", policy: "max_active_devices=4", creates: [{ policy_id: "policy" }, { max_active_devices: 7 }] },
 ];

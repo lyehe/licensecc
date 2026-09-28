@@ -2,7 +2,7 @@ import { expect } from "@playwright/test";
 
 import { makeAdminApiFixture, makeEnvelope, test } from "./admin-ui.fixture.mjs";
 
-// B1: an operator brings a protected application's customer online without SQL -- Add user,
+// An operator brings a protected application's customer online without SQL -- Add user,
 // create that customer's license for the app's project, then grant protected access. This is the
 // console path the backend's protected-admin-enrollment e2e drives through the same admin routes.
 
@@ -153,7 +153,7 @@ test("the protected license picker offers no creation when its license read fail
   await expect(form.getByRole("button", { name: /^Create license for/ })).toHaveCount(0);
 });
 
-// B2: the device limit is visible and settable, policies say what they grant, and the customer
+// The device limit is visible and settable, policies say what they grant, and the customer
 // field reads one bounded page per pause in typing.
 async function newEntitlement(page) {
   await page.goto("/#/entitlements");

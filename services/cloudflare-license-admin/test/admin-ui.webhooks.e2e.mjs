@@ -2,7 +2,7 @@ import { expect } from "@playwright/test";
 
 import { makeAdminApiFixture, test } from "./admin-ui.fixture.mjs";
 
-// E4: webhook event types are validated (worker + domain/runtime unit tests cover invalid_event_
+// Webhook event types are validated (worker + domain/runtime unit tests cover invalid_event_
 // types), and webhooks can be edited. This e2e proves the operator-facing half: the create form's
 // event_types are grouped checkboxes (not freeform csv text), "disable"/"reenable" are shared
 // between the Entitlement and Customer groups, and the existing PATCH /api/admin/webhooks/{id}
@@ -65,7 +65,7 @@ test("an operator creates a webhook via grouped event-type checkboxes and then e
   await expect(page.getByRole("form", { name: "Edit webhook endpoint", exact: true })).toHaveCount(0);
 });
 
-// Fix round 1 (CRITICAL): webhook_endpoints.event_types has no database CHECK, so an existing row
+// webhook_endpoints.event_types has no database CHECK, so an existing row
 // can already hold a token outside today's closed set. The PATCH form must never re-validate that
 // legacy value just because some OTHER field changed, or such an endpoint could never be edited.
 test("editing only the URL of an endpoint with a legacy event type still succeeds, and the legacy note names it", async ({ page }) => {

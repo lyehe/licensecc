@@ -842,7 +842,7 @@ export function makeAdminApiFixture() {
       }
       // The id/customer_id a real deep link needs come from a seeded entitlement sharing the row's
       // fingerprint when one exists (so a click resolves to exactly that record); otherwise a
-      // synthetic id is used that matches nothing, same as the pre-E2 fixture's unlinked rows.
+      // synthetic id is used that matches nothing, same as this fixture's other unlinked rows.
       const linkToRealEntitlement = (spec) => {
         const real = entitlements.find((item) => item.license_fingerprint === spec.license_fingerprint);
         return { ...spec, id: real ? real.id : spec.id, customer_id: real ? real.customer_id : spec.customer_id };

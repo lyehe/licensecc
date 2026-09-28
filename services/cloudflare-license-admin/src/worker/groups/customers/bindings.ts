@@ -55,7 +55,7 @@ export async function adminBindings(request:Request,env:Env,actor:Actor,customer
       return item;
     });
     const more=page.length>100,items=page.slice(0,100);
-    // B5: per-entitlement device-limit capacity and the customer's most recent refused connections.
+    // Per-entitlement device-limit capacity and the customer's most recent refused connections.
     // A second, bounded read on the same session rather than folding into the page statement above:
     // that statement's cardinality is one row per page item, while capacity/denied are independent,
     // differently-sized rowsets (<=100 entitlements, <=5 denials) that do not share the page's shape.

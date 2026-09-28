@@ -1,4 +1,4 @@
-// B1: POST /api/admin/customers/{id}/licenses creates the `licenses` row a protected entitlement
+// POST /api/admin/customers/{id}/licenses creates the `licenses` row a protected entitlement
 // references, so onboarding needs no hand-written SQL. Real SQLite (the backend schema) end to end
 // through the compiled Worker.
 import assert from "node:assert/strict";

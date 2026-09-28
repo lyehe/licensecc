@@ -63,7 +63,7 @@ test('protected reads paginate without duplicates and use database time rather t
   assert.equal(JSON.stringify(first).includes('spki'),false);
 });
 
-// B5: operators see per-entitlement device-limit capacity and the customer's most recent refused
+// Operators see per-entitlement device-limit capacity and the customer's most recent refused
 // connections, scoped to the customer and honouring the same project filter as the page.
 test('list read reports device-limit capacity and recent refused connections, scoped to the customer and project filter',async t=>{
   const f=fixture(t,1);

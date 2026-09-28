@@ -1,4 +1,4 @@
-// B1: the protected-create rules exist once. The in-batch assertion ANDs the named checks; the
+// The protected-create rules exist once. The in-batch assertion ANDs the named checks; the
 // post-conflict diagnostic walks the SAME list in the same order, so the reason reported for a
 // refusal can never describe a rule the assertion does not enforce (or miss one it does).
 import assert from "node:assert/strict";
@@ -73,7 +73,7 @@ test("the diagnostic's would-be row provides every column a check reads from e",
   }
 });
 
-// B2: a create without a policy may set its own device limit. Its side-write rides the create batch,
+// A create without a policy may set its own device limit. Its side-write rides the create batch,
 // so the would-be row carries that value instead of the kept one, and the batch requires the row to
 // hold exactly what the create wrote.
 test("a create's own device limit is modelled in the would-be row and required of the written row", async () => {

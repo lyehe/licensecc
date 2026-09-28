@@ -7,7 +7,7 @@ import { openApiDocument } from "../../dist-worker/worker/openapi/document.js";
 import { loadWorkflowModule } from "../admin-ui-workflow/helpers.mjs";
 import { worker, baseEnv, authed } from "../worker/fixtures.mjs";
 
-// B2: the device limit is settable. A create without a policy writes it inside its own batch,
+// The device limit is settable. A create without a policy writes it inside its own batch,
 // behind the create's claim; a PATCH writes it alone through the runtime's capacity chokepoint. A
 // protected grant refuses a limit below its connected devices and says how many there are (ADR 0006).
 const path = "/api/admin/entitlements";

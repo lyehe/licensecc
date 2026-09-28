@@ -765,7 +765,7 @@ test("admin UI previews and applies a license plan projection", async ({ page })
   await expect(projectedEntitlement).toContainText("lic_plan");
 });
 
-// B2: a policy's patchable fields are editable in place; its project, name, and type are not.
+// A policy's patchable fields are editable in place; its project, name, and type are not.
 test("an operator edits a policy's device limit without touching its identity", async ({ page }) => {
   const api = makeAdminApiFixture();
   api.seed.policy("pol_edit", "Editable", { project: "APP", type: "node_locked", max_active_devices: 3, notes: "tier" });
@@ -793,7 +793,7 @@ test("an operator edits a policy's device limit without touching its identity", 
   await expect(editor).toHaveCount(0);
 });
 
-// B2: a protected grant's device limit is set on its own; a limit below its connected devices is
+// A protected grant's device limit is set on its own; a limit below its connected devices is
 // refused with their count, in words.
 test("an operator sets a protected grant's device limit and is told how many devices block a lower one", async ({ page }) => {
   const api = makeAdminApiFixture();

@@ -240,7 +240,7 @@ test("console: admin creates an isolated password user atomically with safe same
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM customers").get().n, before, "credential failure rolls back customer creation");
 });
 
-// A5: no plaintext initial password by default. Omitting `password` invites the customer instead of
+// No plaintext initial password by default. Omitting `password` invites the customer instead of
 // setting one: the server hashes a fresh, random, never-disclosed secret so the account has no
 // usable credential until the customer sets their own via the portal's "Forgot your password?".
 test("console: inviting a customer without a password stores a random, unusable credential and never returns or caches it", async () => {
@@ -281,7 +281,7 @@ test("console: a present password must still be valid, and an invalid one is nev
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM portal_passwords").get().n, 0);
 });
 
-// A5 fix round 1, item 3: Invite and Set-password use separate idempotency scopes, so a key reused
+// Invite and Set-password use separate idempotency scopes, so a key reused
 // across modes is a fresh request against the OTHER mode's already-claimed email, not a replay.
 test("console: reusing an idempotency key across Invite and Set-password modes never replays the other mode's cached success", async () => {
   const db = freshDb(); seed(db); db.exec("PRAGMA foreign_keys=ON"); const env = devEnv(db);
