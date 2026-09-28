@@ -538,7 +538,7 @@ export async function deliverWebhooks(env, now, logEvent, clock = () => now) {
 
 /** Deliver one row; failures are recorded as retry/terminal outcomes and never rethrown. */
 async function deliverOne(env, delivery, secretsMap, keyId, now, claimUntil, logEvent, clock) {
-  if (safeWebhookUrl(delivery.url) === null) { await refuseUnsafeWebhookDelivery(env.DB, delivery, now, claimUntil); return; }
+  if (safeWebhookUrl(delivery.url) === null) { await refuseUnsafeWebhookDelivery(env.DB, delivery, now, claimUntil, logEvent); return; }
   const body = delivery.payload_json;
 
   let signatureHeader;

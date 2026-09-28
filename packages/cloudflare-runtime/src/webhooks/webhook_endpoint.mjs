@@ -5,12 +5,14 @@ export const MAX_WEBHOOK_URL_SIZE = 2048;
 
 const INTERNAL_HOST_SUFFIXES = [".localhost", ".local", ".internal", ".home.arpa"];
 
-/** True for a hostname a webhook may be sent to: not an IP literal, not single-label, and not
- * localhost or a suffix reserved for internal networks. */
+/** True for a hostname a webhook may be sent to: no trailing dot, not an IP literal, not
+ * single-label, and not a suffix (or, via the leading "." added before comparing, an exact
+ * match) reserved for internal networks. */
 function publicHostname(host) {
+  if (host.endsWith(".")) return false; // a trailing dot would otherwise slip past every check below
   if (host.startsWith("[") || /^\d{1,3}(\.\d{1,3}){3}$/u.test(host)) return false; // IPv6 / IPv4 literal
-  if (!host.includes(".") || host === "localhost") return false;
-  return !INTERNAL_HOST_SUFFIXES.some((suffix) => host.endsWith(suffix));
+  if (!host.includes(".")) return false; // single-label
+  return !INTERNAL_HOST_SUFFIXES.some((suffix) => ("." + host).endsWith(suffix));
 }
 
 /**

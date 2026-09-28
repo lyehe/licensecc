@@ -2,6 +2,8 @@
 // this module owns only the parameterized compare-and-set statements that establish and finalize
 // one pending delivery's lease.
 
+import { safeErrorType } from "../http/kit.mjs";
+
 export const WEBHOOK_CLAIM_TTL_SECONDS = 60;
 const BACKOFF_SCHEDULE_SECONDS = [30, 120, 600, 3600, 21600];
 
@@ -59,10 +61,33 @@ export async function persistWebhookDeliveryOutcome(db, outcome) {
   return row !== null && row !== undefined;
 }
 
-/** Record a delivery whose stored URL no longer passes safeWebhookUrl as failed, without fetching. */
-export async function refuseUnsafeWebhookDelivery(db, delivery, now, claimUntil) {
-  return persistWebhookDeliveryOutcome(db, {
-    deliveryId: Number(delivery.id), claimUntil, now, ok: false, statusCode: 0,
-    errorText: "invalid_url", attempts: Number(delivery.attempts) + 1, terminal: true, retryAt: null,
-  });
+/** Record a delivery whose stored URL no longer passes safeWebhookUrl as failed, without fetching.
+ * Never throws: a persistence failure here is logged and swallowed (mirroring deliverOne's own
+ * best-effort outcome write) so it can never stop a later row in the same tick from being tried. */
+export async function refuseUnsafeWebhookDelivery(db, delivery, now, claimUntil, logEvent) {
+  const deliveryId = Number(delivery.id);
+  const attempts = Number(delivery.attempts) + 1;
+  let persisted;
+  try {
+    persisted = await persistWebhookDeliveryOutcome(db, {
+      deliveryId, claimUntil, now, ok: false, statusCode: 0,
+      errorText: "invalid_url", attempts, terminal: true, retryAt: null,
+    });
+  } catch (error) {
+    try {
+      logEvent?.("error", "webhook.deliver_error", { source: "persistence", delivery_id: deliveryId, error_type: safeErrorType(error) });
+    } catch {
+      // A throwing logger must never escape this best-effort recording path.
+    }
+    return;
+  }
+  if (persisted) {
+    try {
+      logEvent?.("warn", "webhook.delivery_failed", {
+        delivery_id: deliveryId, endpoint_id: delivery.endpoint_id, attempts, last_status: 0, reason: "invalid_url",
+      });
+    } catch {
+      // Same: a throwing logger must never escape.
+    }
+  }
 }
