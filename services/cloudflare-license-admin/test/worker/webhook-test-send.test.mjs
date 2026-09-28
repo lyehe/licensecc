@@ -192,7 +192,7 @@ test("a failed audit is logged and never changes the relayed result", async (t) 
     assert.deepEqual(body.data, { status_class: "5xx" }, label);
     assert.equal(logged.mock.callCount(), 1, label);
     const [line] = logged.mock.calls[0].arguments;
-    assert.deepEqual(JSON.parse(line), { event: "webhook.test_send_audit_failed", request_id: body.request_id, endpoint_id: "wh/1" }, label);
+    assert.deepEqual(JSON.parse(line), { event: "webhook.test_send_audit_failed", request_id: body.request_id, endpoint_id: "wh/1", error_type: "Error" }, label);
     assert.equal(db.rows?.length ?? 0, 0, label);
   }
 });

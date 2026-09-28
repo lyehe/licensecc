@@ -1,6 +1,7 @@
-// Internal D1 persistence for webhook delivery leases. Network delivery stays in webhook.mjs;
-// this module owns only the parameterized compare-and-set statements that establish and finalize
-// one pending delivery's lease.
+// Internal D1 persistence for webhook delivery leases. Network delivery stays in webhook.mjs; this
+// module owns the parameterized compare-and-set statements that establish and finalize one pending
+// delivery's lease, plus recording and logging a delivery refused before it was ever fetched (its
+// stored URL no longer passes safeWebhookUrl).
 
 import { safeErrorType } from "../http/kit.mjs";
 

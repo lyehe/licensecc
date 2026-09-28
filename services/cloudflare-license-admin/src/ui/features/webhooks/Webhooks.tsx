@@ -9,7 +9,7 @@ import { confirmMutationUnknown, confirmSuccessWithRefreshFailure, ConfirmRefres
 import { FormStatus } from "../../shared/FeedbackText";
 import { FieldDetails, FieldError, fieldErrorId, fieldProps, useFormFeedback } from "../../shared/fieldErrors";
 import { formatEpoch, shortHash } from "../../shared/format";
-import { apiFailureFeedback, codeFeedback, failureFeedback, refusalOutcome, validationCode } from "../../shared/messages";
+import { apiFailureFeedback, codeFeedback, describeCode, failureFeedback, refusalOutcome, validationCode } from "../../shared/messages";
 import type { OperatorFeedback } from "../../shared/operatorFeedback";
 import { isRetryableAppendFailure, loadMore, pageAppendError, withCursor } from "../../shared/pagination";
 import { hasWebhookData, hasWebhookDeliveryData, hasWebhookDeliveryListData, hasWebhookListData, hasWebhookTransitionData, mutationFailurePolicies, parseMutationResponse } from "../../shared/mutationGuards";
@@ -19,6 +19,18 @@ import { webhookTestOutcome, webhookTestPath, type WebhookTestOutcome } from "./
 import { canRunWebhookAction, disableWebhookConfirm, emptyWebhookForm, isWebhookEventTypeChecked, normalizeWebhookForm, normalizeWebhookPatch, toggleWebhookEventType, unknownWebhookEventTypes, webhookDeliveriesPath, webhookEventTypesErrorMessage, webhookFieldForCode, webhookFormFromEndpoint, webhookPath, webhookRedrivePath, webhookTransitionPath, webhooksPath, WEBHOOK_EVENT_TYPE_GROUPS, WebhookAction, WebhookDeliveryFilter, WebhookFilter, WebhookFormState } from "./workflow";
 
 const WEBHOOK_FORM = "webhook-editor";
+
+// A delivery's "Last" cell when its last_status is 0: a known refusal code (currently only
+// invalid_url, from the URL-safety rule re-checked before every send) gets the console's own
+// sentence for that code, with the raw code kept under Technical details; anything else is
+// receiver/network text the backend already bounds to 256 characters, which is shown as-is since
+// it is not a result code.
+function lastErrorCell(lastError: string): React.ReactNode {
+  if (lastError === "") return "-";
+  const known = describeCode(lastError);
+  if (known === null) return lastError;
+  return <>{known.text} <details><summary>Technical details</summary><code>{lastError}</code></details></>;
+}
 
 export function Webhooks({ active }: { active: boolean }): React.ReactElement | null {
   const [deliveriesOpen,setDeliveriesOpen]=useState(false);
@@ -446,7 +458,7 @@ export function Webhooks({ active }: { active: boolean }): React.ReactElement | 
         <details role="region" aria-label="Recent webhook deliveries" className="deliveriesPane" open={deliveriesOpen} onToggle={event=>setDeliveriesOpen(event.currentTarget.open)}><summary>Recent deliveries{webhookDeliveryFilter.endpoint_id !== "" ? ` for ${shortHash(webhookDeliveryFilter.endpoint_id)}` : ""}</summary>
           <ReadNotice label="deliveries" hasData={deliveriesSettled} loading={deliveryRead.key !== deliveryContextKey || deliveryRead.loading} error={deliveryRead.key === deliveryContextKey ? deliveryRead.error : null} onRetry={() => void refreshWebhookDeliveries()} />
           <div className="filters">{webhookDeliveryFilter.endpoint_id !== "" && <button type="button" disabled={busy || operationLocked} onClick={() => setWebhookDeliveryFilter({ endpoint_id: "", status: "" })}>Clear endpoint filter</button>}<label>Delivery status<select aria-label="Filter deliveries by status" value={webhookDeliveryFilter.status} onChange={(event) => setWebhookDeliveryFilter({ ...webhookDeliveryFilter, status: event.target.value })}><option value="">all</option><option value="pending">pending</option><option value="delivered">delivered</option><option value="failed">failed</option></select></label></div>
-          <div className="tableScroll" role="region" aria-label="Webhook records" tabIndex={0}><table><caption className="srOnly">Recent webhook deliveries</caption><thead><tr><th scope="col">Time</th><th scope="col">Endpoint</th><th scope="col">Event</th><th scope="col">Status</th><th scope="col">Attempts</th><th scope="col">Last</th><th scope="col">Actions</th></tr></thead><tbody>{visibleDeliveries.map((delivery) => <tr key={delivery.id}><td>{formatEpoch(delivery.created_at)}</td><td className="mono">{shortHash(delivery.endpoint_id)}</td><td>{delivery.event_source}.{delivery.event_type}</td><td><span className={`status ${delivery.status}`}>{delivery.status}</span></td><td>{delivery.attempts}</td><td>{delivery.last_status !== 0 ? delivery.last_status : delivery.last_error !== "" ? delivery.last_error : "-"}</td><td className="actions"><button type="button" disabled={busy || operationLocked || !deliveriesFence.canLoadMore() || delivery.status !== "failed"} onClick={() => void redriveDelivery(delivery)}>Retry delivery</button></td></tr>)}</tbody></table></div>
+          <div className="tableScroll" role="region" aria-label="Webhook records" tabIndex={0}><table><caption className="srOnly">Recent webhook deliveries</caption><thead><tr><th scope="col">Time</th><th scope="col">Endpoint</th><th scope="col">Event</th><th scope="col">Status</th><th scope="col">Attempts</th><th scope="col">Last</th><th scope="col">Actions</th></tr></thead><tbody>{visibleDeliveries.map((delivery) => <tr key={delivery.id}><td>{formatEpoch(delivery.created_at)}</td><td className="mono">{shortHash(delivery.endpoint_id)}</td><td>{delivery.event_source}.{delivery.event_type}</td><td><span className={`status ${delivery.status}`}>{delivery.status}</span></td><td>{delivery.attempts}</td><td>{delivery.last_status !== 0 ? delivery.last_status : lastErrorCell(delivery.last_error)}</td><td className="actions"><button type="button" disabled={busy || operationLocked || !deliveriesFence.canLoadMore() || delivery.status !== "failed"} onClick={() => void redriveDelivery(delivery)}>Retry delivery</button></td></tr>)}</tbody></table></div>
           <div className="tableFooter"><span className="muted">{deliveriesSettled ? `${visibleDeliveries.length} shown` : ""}</span>{visibleDeliveriesCursor !== null && <button type="button" disabled={busy || operationLocked} onClick={() => void loadMoreWebhookDeliveries()}>Load more</button>}</div>
           {visibleDeliveries.length === 0 && deliveriesSettled && <p className="muted">No deliveries recorded.</p>}
         </details>

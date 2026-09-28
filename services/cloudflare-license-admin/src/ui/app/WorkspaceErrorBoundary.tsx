@@ -30,9 +30,15 @@ export class WorkspaceErrorBoundary extends Component<Props, State> {
   render(): ReactNode {
     if (!this.state.failed) return this.props.children;
     if (!this.props.active) return null;
+    // The console-level boundary (main.tsx, name="console") wraps the whole shell: when it catches,
+    // nothing else is rendered, so "other pages still work" would be false. Every feature-level
+    // boundary wraps one tab, so the rest of the shell (and every other tab) is still up.
+    const message = this.props.name === "console"
+      ? "The console could not be shown. Reload the page to try again."
+      : "This page could not be shown. Reload the page to try again; other pages still work.";
     return (
       <div className="activityMessage" data-tone="error" role="alert">
-        <p>This page could not be shown. Reload the page to try again; other pages still work.</p>
+        <p>{message}</p>
         <button type="button" onClick={() => window.location.reload()}>Reload the page</button>
       </div>
     );

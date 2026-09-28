@@ -139,7 +139,7 @@ test("refusals get human copy; a rate limit says how long to wait", async () => 
     "A test event was sent to this endpoint less than a minute ago. Try again in a minute.");
   const copy = {
     not_found: "This endpoint no longer exists or is disabled, so no test event was sent.",
-    invalid_url: "This endpoint's saved URL is not a valid https address, so no test event was sent. Edit the URL first.",
+    invalid_url: "This endpoint's saved URL is no longer accepted (it must be a public https:// host name, with no IP address, credentials, or internal name like localhost or .internal), so no test event was sent. Edit the URL first.",
     webhook_signing_unconfigured: "Webhook signing is not configured on the licensing backend, so no test event was sent.",
     webhook_operator_not_configured: "Sending test events is not set up for this admin console yet. Connect it to the licensing backend first.",
     admin_role_required: "Only administrators can send test events.",

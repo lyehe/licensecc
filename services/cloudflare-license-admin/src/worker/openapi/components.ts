@@ -814,7 +814,7 @@ export const openApiComponents: LabeledComponentFragment = {
         description: "A webhook endpoint config row (webhook_endpoints). The signing secret is NEVER stored here — it lives only in the Worker-env WEBHOOK_SIGNING_SECRETS map.",
         properties: {
           id: { type: "string" },
-          url: { type: "string", maxLength: 2048, description: "Delivery URL. Always https (a non-https URL is rejected at create/patch with 400 invalid_url)." },
+          url: { type: "string", maxLength: 2048, description: "Delivery URL. Must be https on a public host name; a URL rejected by that rule is refused at create/patch with 400 invalid_url (see WebhookEndpointInput.url)." },
           event_types: { type: "string", maxLength: 1024, description: "CSV event-type filter; empty string means all event types." },
           status: { type: "string", enum: ["active", "disabled"] },
           description: { type: "string", maxLength: 500 },
@@ -829,7 +829,7 @@ export const openApiComponents: LabeledComponentFragment = {
         required: ["url"],
         description: "Create body. `url` is required and MUST be https. event_types / description / scope_* take the column default ('').",
         properties: {
-          url: { type: "string", maxLength: 2048, description: "https URL. A non-https or unparseable URL returns 400 invalid_url." },
+          url: { type: "string", maxLength: 2048, description: "One https:// URL on a public host name: no username or password, no IP-literal host, no single-label or internal host name (localhost, .local, .internal, .home.arpa), and no trailing dot. A URL that fails this rule, or cannot be parsed, returns 400 invalid_url." },
           event_types: { type: "string", maxLength: 1024, default: "", description: "CSV event-type filter; '' = all. Each token must be one of the entitlement/customer/order event types the dispatcher actually emits (else 400 invalid_event_types with data.allowed)." },
           description: { type: "string", maxLength: 500, default: "" },
           scope_project: { type: "string", maxLength: 128, default: "", description: "Per-tenant scope (audit R2.2). '' = global. Set one dimension, not both." },
@@ -840,7 +840,7 @@ export const openApiComponents: LabeledComponentFragment = {
         type: "object",
         description: "All fields optional; only provided fields are updated. status / id are NOT patchable (status flips only via disable/reenable).",
         properties: {
-          url: { type: "string", maxLength: 2048, description: "https URL. A non-https URL returns 400 invalid_url." },
+          url: { type: "string", maxLength: 2048, description: "One https:// URL on a public host name: no username or password, no IP-literal host, no single-label or internal host name (localhost, .local, .internal, .home.arpa), and no trailing dot. A URL that fails this rule, or cannot be parsed, returns 400 invalid_url." },
           event_types: { type: "string", maxLength: 1024, description: "CSV event-type filter; '' = all. Each token must be one of the entitlement/customer/order event types the dispatcher actually emits (else 400 invalid_event_types with data.allowed)." },
           description: { type: "string", maxLength: 500 },
           scope_project: { type: "string", maxLength: 128, description: "Per-tenant scope (audit R2.2). '' clears it (global)." },

@@ -29,11 +29,13 @@ import { INVALID_EVENT_TYPES, safeWebhookEventTypes, safeWebhookEventTypesShape,
 // ── Webhook endpoint validation (migration 0020) ──────────────────────────────
 // An endpoint is a CONFIG row: an https URL + a csv event_types filter ("" = all) +
 // a description. NO signing secret lives here — it is only in the env secret map. URL
-// validation is the security gate: https-only (else 400 invalid_url) so a delivery can
-// never POST to plaintext http. The rule (safeWebhookUrl, null when invalid) is shared with the
-// backend, which re-applies it before an operator test send. event_types (validated against the
-// closed set WEBHOOK_EVENT_TYPES allows -- see webhook_event_types.ts) is bounded csv (each entry
-// a bare token).
+// validation is the security gate (else 400 invalid_url): https on a public host name only —
+// no userinfo, no IP-literal host, no single-label or internal host name (localhost, .local,
+// .internal, .home.arpa), no trailing dot — so a delivery can never reach plaintext http or a
+// non-public destination. The rule (safeWebhookUrl, null when invalid) is shared with the
+// backend, which re-applies it before an operator test send and before every scheduled
+// delivery. event_types (validated against the closed set WEBHOOK_EVENT_TYPES allows -- see
+// webhook_event_types.ts) is bounded csv (each entry a bare token).
 
 const MAX_WEBHOOK_DESCRIPTION_SIZE = 500;
 

@@ -206,3 +206,25 @@ test("a Send test event result that arrives after a filter change is dropped", a
   await expect(send).toBeEnabled();
   await expect(page.getByRole("status").filter({ hasText: "Test event to" })).toHaveCount(0);
 });
+
+// A delivery the backend refused before sending (last_status 0, last_error "invalid_url") must
+// read as a sentence, like every other result code the console shows, not as the bare code; the
+// code itself stays available under Technical details for anyone who wants it.
+test("a delivery refused for its URL shows the human rule, with the raw code under Technical details", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  const endpoint = api.seed.webhook("wh_invalid_url", "https://hooks.example.test/invalid-url");
+  api.behavior.deliveryRows = [
+    { id: 701, endpoint_id: endpoint.id, event_id: 1, event_source: "entitlement", event_type: "disabled", status: "failed", attempts: 1, last_status: 0, last_error: "invalid_url", next_attempt_at: 1_760_000_000, created_at: 1_760_000_000, delivered_at: null },
+  ];
+  await page.route("**/api/admin/**", api.route);
+  await page.goto("/#/webhooks");
+  const row = page.locator("tr").filter({ hasText: "https://hooks.example.test/invalid-url" });
+  await row.getByRole("button", { name: "Deliveries", exact: true }).click();
+  const deliveries = page.getByRole("region", { name: "Recent webhook deliveries" });
+  const deliveryRow = deliveries.locator("tbody tr").first();
+  await expect(deliveryRow).toContainText("public host name");
+  // The raw code is not readable text until Technical details is expanded.
+  await expect(deliveryRow.locator("td").nth(5)).not.toHaveText("invalid_url");
+  await deliveryRow.getByText("Technical details", { exact: true }).click();
+  await expect(deliveryRow.getByText("invalid_url", { exact: true })).toBeVisible();
+});

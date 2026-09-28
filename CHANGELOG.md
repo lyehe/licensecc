@@ -170,13 +170,13 @@ are recorded in [ADR 0005](doc/architecture/decisions/0005-platform-version-and-
   refuses a backend config that omits the flag. Operators must update the
   base64 backend config secret before the next deploy.
 - Webhook endpoint URLs may no longer carry a username or password, an
-  IP-literal host (IPv4 or IPv6), a single-label host, or a host that is or
-  ends in `localhost`, `.local`, `.internal`, or `.home.arpa`; the admin
-  Worker rejects such a URL on create and edit with `400 invalid_url`. The
-  backend also re-applies this check immediately before every scheduled
-  delivery attempt, so a stored endpoint whose URL no longer passes it fails
-  every delivery terminally with `invalid_url` until an operator edits the
-  endpoint to a safe URL.
+  IP-literal host (IPv4 or IPv6), a single-label host, a host ending in a
+  dot, or a host that is or ends in `localhost`, `.local`, `.internal`, or
+  `.home.arpa`; the admin Worker rejects such a URL on create and edit with
+  `400 invalid_url`. The backend also re-applies this check immediately
+  before every scheduled delivery attempt, so a stored endpoint whose URL no
+  longer passes it fails every delivery terminally with `invalid_url` until
+  an operator edits the endpoint to a safe URL.
 
 ### Upgrade notes
 - Existing Linux build trees that cached `LCC_ENABLE_LINUX_DESKTOP=ON` without
@@ -207,6 +207,18 @@ are recorded in [ADR 0005](doc/architecture/decisions/0005-platform-version-and-
   Java's `DeviceBoundClient.Outcome` record gains a sixth component, `detail`; the
   five-argument constructor remains, but Java 21 record patterns that name five
   components must add it.
+- Webhook hardening deploy order:
+  1. Before the next backend deploy, add `compatibility_flags =
+     ["global_fetch_strictly_public"]` to the backend Wrangler config secret.
+     That same secret also feeds the rollback, recovery-drill and capacity
+     workflows, so update it before running any of those too, not just the
+     next deploy.
+  2. Apply migration `0043_allow_webhook_test_send_event.sql` before
+     deploying the admin Worker.
+  3. After deploying, audit stored webhook endpoints. Any whose URL the
+     stricter rule now refuses (credentials, an IP-literal host, a
+     single-label or internal host name, or a trailing dot) will fail every
+     delivery with `invalid_url` until you edit or disable it.
 
 ### Fixed
 - C++ core: unstable disk-derived hardware ids on device-path fstab entries; `confirm_license`

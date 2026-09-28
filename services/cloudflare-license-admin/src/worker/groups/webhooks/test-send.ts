@@ -4,6 +4,7 @@
 // field by field and rebuilt, never passed through: anything unexpected becomes 503. A send the
 // backend attempted also leaves a webhook_events audit row; a refused send leaves none.
 import type { Actor } from "@licensecc/cloudflare-runtime/d1/entitlement_mutation";
+import { safeErrorType } from "@licensecc/cloudflare-runtime/http/kit";
 import { WEBHOOK_TEST_STATUS_CLASSES, type WebhookTestStatusClass } from "@licensecc/cloudflare-runtime/webhooks/webhook_endpoint";
 import { requireAdmin } from "../../auth.js";
 import type { Env } from "../../env.js";
@@ -104,7 +105,7 @@ async function auditTestSend(env: Env, endpointId: string, statusClass: WebhookT
       `INSERT INTO webhook_events (endpoint_id, event_type, prev_status, next_status, actor, actor_type, source, reason, request_id, created_at)
        VALUES (?, ?, ?, ?, ?, ?, 'admin', ?, ?, ?)`,
     ).bind(endpointId, "test_send", endpoint.status, endpoint.status, actor.email || actor.subject, actor.actorType, statusClass, requestId, Math.floor(Date.now() / 1000)).run();
-  } catch {
-    console.error(JSON.stringify({ event: "webhook.test_send_audit_failed", request_id: requestId, endpoint_id: endpointId }));
+  } catch (error) {
+    console.error(JSON.stringify({ event: "webhook.test_send_audit_failed", request_id: requestId, endpoint_id: endpointId, error_type: safeErrorType(error) }));
   }
 }

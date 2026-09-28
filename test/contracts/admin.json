@@ -3686,7 +3686,7 @@
               "type": "integer"
             },
             "url": {
-              "description": "Delivery URL. Always https (a non-https URL is rejected at create/patch with 400 invalid_url).",
+              "description": "Delivery URL. Must be https on a public host name; a URL rejected by that rule is refused at create/patch with 400 invalid_url (see WebhookEndpointInput.url).",
               "maxLength": 2048,
               "type": "string"
             }
@@ -3720,7 +3720,7 @@
               "type": "string"
             },
             "url": {
-              "description": "https URL. A non-https or unparseable URL returns 400 invalid_url.",
+              "description": "One https:// URL on a public host name: no username or password, no IP-literal host, no single-label or internal host name (localhost, .local, .internal, .home.arpa), and no trailing dot. A URL that fails this rule, or cannot be parsed, returns 400 invalid_url.",
               "maxLength": 2048,
               "type": "string"
             }
@@ -3753,7 +3753,7 @@
               "type": "string"
             },
             "url": {
-              "description": "https URL. A non-https URL returns 400 invalid_url.",
+              "description": "One https:// URL on a public host name: no username or password, no IP-literal host, no single-label or internal host name (localhost, .local, .internal, .home.arpa), and no trailing dot. A URL that fails this rule, or cannot be parsed, returns 400 invalid_url.",
               "maxLength": 2048,
               "type": "string"
             }
@@ -18276,7 +18276,7 @@
                   }
                 }
               },
-              "description": "Invalid request / json / idempotency key, a non-https URL, or an event_types token outside the known entitlement/customer/order set (data.allowed lists the grouped allow-list)."
+              "description": "Invalid request / json / idempotency key, a URL that is not an https address on a public host name (no credentials, IP address, single-label or internal name, or trailing dot), or an event_types token outside the known entitlement/customer/order set (data.allowed lists the grouped allow-list)."
             },
             "401": {
               "content": {
@@ -18632,7 +18632,7 @@
                   }
                 }
               },
-              "description": "Invalid request / json / idempotency key, a non-https URL (status/id are not patchable), or an event_types token outside the known entitlement/customer/order set (data.allowed lists the grouped allow-list)."
+              "description": "Invalid request / json / idempotency key, a URL that is not an https address on a public host name (no credentials, IP address, single-label or internal name, or trailing dot; status/id are not patchable), or an event_types token outside the known entitlement/customer/order set (data.allowed lists the grouped allow-list)."
             },
             "401": {
               "content": {
@@ -19422,7 +19422,7 @@
                   }
                 }
               },
-              "description": "Invalid endpoint id or JSON body, or the stored endpoint URL is not an https URL."
+              "description": "Invalid endpoint id or JSON body, or the stored endpoint URL is no longer an https address on a public host name (no credentials, IP address, single-label or internal name, or trailing dot)."
             },
             "401": {
               "content": {

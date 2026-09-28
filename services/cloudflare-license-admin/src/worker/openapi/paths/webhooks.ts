@@ -63,7 +63,7 @@ export const webhookPaths: LabeledPathFragment = {
       },
       responses: {
         "200": okResponse("Webhook endpoint created.", "#/components/schemas/WebhookEndpoint", "webhook_created"),
-        "400": errorResponse("Invalid request / json / idempotency key, a non-https URL, or an event_types token outside the known entitlement/customer/order set (data.allowed lists the grouped allow-list).", "invalid_idempotency_key", "invalid_json", "invalid_request", "invalid_url", "invalid_event_types"),
+        "400": errorResponse("Invalid request / json / idempotency key, a URL that is not an https address on a public host name (no credentials, IP address, single-label or internal name, or trailing dot), or an event_types token outside the known entitlement/customer/order set (data.allowed lists the grouped allow-list).", "invalid_idempotency_key", "invalid_json", "invalid_request", "invalid_url", "invalid_event_types"),
         ...ADMIN_MUTATION_AUTH_ERRORS,
         "413": errorResponse("Request body exceeds 8192 bytes.", "body_too_large"),
         "500": errorResponse("Mutation failed, or dev bearer enabled outside development.", "mutation_failed", "dev_bearer_forbidden_in_environment"),
@@ -136,7 +136,7 @@ export const webhookPaths: LabeledPathFragment = {
       },
       responses: {
         "200": okResponse("Webhook endpoint updated.", "#/components/schemas/WebhookEndpoint", "webhook_patched"),
-        "400": errorResponse("Invalid request / json / idempotency key, a non-https URL (status/id are not patchable), or an event_types token outside the known entitlement/customer/order set (data.allowed lists the grouped allow-list).", "invalid_idempotency_key", "invalid_json", "invalid_request", "invalid_url", "invalid_event_types"),
+        "400": errorResponse("Invalid request / json / idempotency key, a URL that is not an https address on a public host name (no credentials, IP address, single-label or internal name, or trailing dot; status/id are not patchable), or an event_types token outside the known entitlement/customer/order set (data.allowed lists the grouped allow-list).", "invalid_idempotency_key", "invalid_json", "invalid_request", "invalid_url", "invalid_event_types"),
         ...ADMIN_MUTATION_AUTH_ERRORS,
         "404": errorResponse("No webhook endpoint with that id.", "not_found"),
         "413": errorResponse("Request body exceeds 8192 bytes.", "body_too_large"),
@@ -205,7 +205,7 @@ export const webhookPaths: LabeledPathFragment = {
       },
       responses: {
         "200": successResponse("The test event was sent; data carries only the receiver's status class.", webhookTestResult, ["webhook_test_sent"]),
-        "400": errorResponse("Invalid endpoint id or JSON body, or the stored endpoint URL is not an https URL.", "invalid_request", "invalid_json", "invalid_url"),
+        "400": errorResponse("Invalid endpoint id or JSON body, or the stored endpoint URL is no longer an https address on a public host name (no credentials, IP address, single-label or internal name, or trailing dot).", "invalid_request", "invalid_json", "invalid_url"),
         ...ADMIN_MUTATION_AUTH_ERRORS,
         "404": errorResponse("No active webhook endpoint with that id (unknown or disabled); nothing was sent.", "not_found"),
         "413": errorResponse("Request body exceeds 8192 bytes.", "body_too_large"),

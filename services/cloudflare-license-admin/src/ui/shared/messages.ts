@@ -113,7 +113,7 @@ export const RESULT_CODE_COPY: Readonly<Record<string, CodeCopy>> = {
   webhook_test_sent: done("Test event sent."),
   webhook_operator_not_configured: failed("Sending test events is not set up for this admin console yet."),
   webhook_signing_unconfigured: failed("Webhook signing is not configured on the licensing backend."),
-  invalid_url: failed("Enter a single https:// URL."),
+  invalid_url: failed("Enter one https:// address on a public host name (no IP addresses, credentials, or internal names like localhost or .internal)."),
   invalid_event_types: failed("One or more event types aren't recognized. Choose from the listed event types."),
 
   // Plans, features and catalog import.
