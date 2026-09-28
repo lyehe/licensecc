@@ -47,8 +47,8 @@ export type SeatOperation = "checkout" | "heartbeat" | "release";
 export interface SeatActionResult {
   succeeded: boolean;
   refreshFailed: boolean;
-  // True when the seat request itself never reached the server (api()'s own network_unavailable,
-  // task C2) -- distinct from an ordinary failure code, since the server-side outcome is unknown
+  // True when the seat request itself never reached the server (api()'s own network_unavailable)
+  // -- distinct from an ordinary failure code, since the server-side outcome is unknown
   // rather than a definite refusal. Only a floating-seat release currently treats this specially.
   networkFailure: boolean;
 }
@@ -57,10 +57,10 @@ export interface StatusMessage {
   code: string;
   request_id: string;
   ok: boolean;
-  // The `retry-after` header seconds, when the response carried one (task C6); StatusLine uses it to
+  // The `retry-after` header seconds, when the response carried one; StatusLine uses it to
   // build "Too many attempts. Try again in {n} minutes." for a rate_limited code.
   retryAfter?: number;
-  // D3: dynamic values a code's copy needs to interpolate at render time -- e.g. sign-out's released/
+  // Dynamic values a code's copy needs to interpolate at render time -- e.g. sign-out's released/
   // failed browser-seat counts. StatusLine (api.tsx) is the only reader, exactly like retryAfter above;
   // RESULT_CODE_COPY itself stays static strings.
   params?: Record<string, number>;

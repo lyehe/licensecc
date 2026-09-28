@@ -23,9 +23,9 @@ export const DEVICES_REFRESH_ACTION_LABEL = PORTAL_STATUS_REFRESH_ACTION_LABEL;
 interface DeviceFeatureOptions {
   busy: boolean;
   busyRef: React.RefObject<boolean>;
-  // D3: the signed-in customer id. Seats persist keyed by this id, re-hydrated on every change.
+  // The signed-in customer id. Seats persist keyed by this id, re-hydrated on every change.
   customer: string;
-  // D3 fix round 1 (Critical): a reactive session epoch (auth.sessionEpoch), bumped on every confirmed
+  // A reactive session epoch (auth.sessionEpoch), bumped on every confirmed
   // sign-in -- including a re-sign-in as this SAME customer after a session-ending 401, when `customer`
   // itself never changes. Part of the hydrate effect's dependency array below alongside `customer`.
   sessionEpoch: number;
@@ -34,7 +34,7 @@ interface DeviceFeatureOptions {
   refreshData(): Promise<boolean>;
   runOnce(work: () => Promise<void>): Promise<void>;
   setMessage: React.Dispatch<React.SetStateAction<StatusMessage | null>>;
-  // Fix round 2 (Important): bumped by App.tsx whenever the Devices page is entered or left. A ref,
+  // Bumped by App.tsx whenever the Devices page is entered or left. A ref,
   // read (never written) here, so seatAction()/confirmDeviceRelease() can compare "the generation when
   // this action started" against "the generation now" once their response arrives, and drop a result
   // that arrives after the customer has moved on -- see App.tsx's own comment for the full race.
@@ -44,8 +44,8 @@ interface DeviceFeatureOptions {
   showOffPageResult(message: StatusMessage): void;
 }
 
-// Focus to move once a seat "start" action's re-render lands (the seat's session is now present). D4:
-// releasing a seat no longer uses this mechanism -- the native seat-release dialog always returns
+// Focus to move once a seat "start" action's re-render lands (the seat's session is now present).
+// Releasing a seat no longer uses this mechanism -- the native seat-release dialog always returns
 // focus to the "Browser seats" heading on close instead (seatReleaseDialog.ts).
 interface PendingSeatFocus {
   seatId: string;
@@ -58,10 +58,10 @@ export interface DevicesController {
   pendingSeatRelease: PendingSeatRelease | null;
   seatReleaseError: string | null;
   seatReleaseOutcomeUnknown: boolean;
-  // D4: the legacy-device-release confirmation's own pending target (parallels pendingSeatRelease).
+  // The legacy-device-release confirmation's own pending target (parallels pendingSeatRelease).
   pendingDeviceRelease: DeviceRow | null;
   seatSessions: Record<string, SeatSession>;
-  // D2: "show each result next to the control that produced it" -- each seat card's own
+  // "Show each result next to the control that produced it" -- each seat card's own
   // role="status" line (keyed by entitlement id) and each legacy device row's own (keyed by
   // device_key_id), populated by seatAction()/confirmDeviceRelease() below instead of the page-level
   // setMessage. The page-level line stays reserved for refresh/account-level results.
@@ -81,10 +81,10 @@ export interface DevicesController {
   requestDeviceRelease(item: DeviceRow): void;
   dismissDeviceRelease(): void;
   confirmDeviceRelease(): Promise<void>;
-  // D3: sign-out's best-effort seat release (App.tsx's logout(), before the actual sign-out request).
+  // Sign-out's best-effort seat release (App.tsx's logout(), before the actual sign-out request).
   releaseSeatsOnSignOut(): Promise<{ released: number; failed: number }>;
   clear(): void;
-  // Fix round 1 (Important): seatMessages/deviceMessages live here, one level above DevicesFeature,
+  // seatMessages/deviceMessages live here, one level above DevicesFeature,
   // so they otherwise outlive a visit to the Devices page (DevicesFeature only renders while
   // location.page === "nodes") -- a stale "Seat started." would reappear in a freshly mounted
   // role="status" node on a later visit, and keep the seat panel expanded forever (hasBrowserSession
@@ -110,7 +110,7 @@ function focusFirstAvailable(
 
 export function useDevicesController(options: DeviceFeatureOptions): DevicesController {
   const { busy, busyRef, customer, devices, entitlements, refreshData, runOnce, sessionEpoch, setMessage, visitGenerationRef, showOffPageResult } = options;
-  // D3: seeded empty rather than hydrated eagerly -- `customer` is not yet known at PortalShell's very
+  // Seeded empty rather than hydrated eagerly -- `customer` is not yet known at PortalShell's very
   // first render (auth starts as "loading"), so hydration happens in the effect below, keyed to the
   // customer id once a sign-in actually resolves.
   const [seatSessions, setSeatSessionsRaw] = useState<Record<string, SeatSession>>({});
@@ -125,7 +125,7 @@ export function useDevicesController(options: DeviceFeatureOptions): DevicesCont
   const sessionGenerationRef = useRef(0);
   const panelHeadingRef = useRef<HTMLElement | null>(null);
 
-  // D3 (decision 4) / fix round 1 (Critical): re-hydrate on the initial sign-in, a later customer
+  // Re-hydrate on the initial sign-in, a later customer
   // switch, OR a re-sign-in as the SAME customer after a session-ending 401 -- the third case is why
   // sessionEpoch is a dependency too: a session-ending 401 never nulls `customer` (only an explicit
   // sign-out does), so re-signing in as the same customer changes sessionEpoch but not `customer`, and
@@ -146,7 +146,7 @@ export function useDevicesController(options: DeviceFeatureOptions): DevicesCont
     });
   }
 
-  // D2: this seat's own role="status" line -- checkout/heartbeat/release results, and the guards
+  // This seat's own role="status" line -- checkout/heartbeat/release results, and the guards
   // below, all route here instead of the page-level setMessage.
   function setSeatMessage(entitlementId: string, seatMessage: StatusMessage | null): void {
     setSeatMessages((current) => ({ ...current, [entitlementId]: seatMessage }));
@@ -157,7 +157,7 @@ export function useDevicesController(options: DeviceFeatureOptions): DevicesCont
     let refreshFailed = false;
     let checkedOut = false;
     let networkFailure = false;
-    // Fix round 2 (Important): captured before the request goes out (and before runOnce may queue
+    // Captured before the request goes out (and before runOnce may queue
     // it), so a response that arrives after the customer has left (and possibly returned to) Devices
     // can be told apart from one that arrives while they are still on this same visit.
     const startGeneration = visitGenerationRef.current;
@@ -237,10 +237,10 @@ export function useDevicesController(options: DeviceFeatureOptions): DevicesCont
     return { succeeded, refreshFailed, networkFailure };
   }
 
-  // D3 fix round 1 (Important 3, hotspot budget): the release confirm dialog's own state, mutation and
+  // The release confirm dialog's own state, mutation and
   // focus management now live in seatReleaseDialog.ts -- see its own header comment. No behaviour
   // change: this hook still owns seatSessions/seatAction/setMessage, which the dialog flow reaches
-  // through these options. D4: focus-on-close now goes straight to panelHeadingRef (passed in as
+  // through these options. Focus-on-close now goes straight to panelHeadingRef (passed in as
   // headingRef) via the native dialog pattern, so setPendingSeatFocus is no longer threaded into it.
   const seatReleaseDialog = useSeatReleaseDialog({
     busyRef,
@@ -263,13 +263,13 @@ export function useDevicesController(options: DeviceFeatureOptions): DevicesCont
     setPendingSeatFocus(null);
   }, [pendingSeatFocus, seatSessions]);
 
-  // D2: this device row's own role="status" line, keyed by device_key_id (a device row has no more
+  // This device row's own role="status" line, keyed by device_key_id (a device row has no more
   // stable id than that -- the same key DeviceRegistrations already keys its buttons by).
   function setDeviceMessage(deviceKeyId: string, deviceMessage: StatusMessage | null): void {
     setDeviceMessages((current) => ({ ...current, [deviceKeyId]: deviceMessage }));
   }
 
-  // D4: the legacy-release confirmation, replacing window.confirm with the same native <dialog>
+  // The legacy-release confirmation, replacing window.confirm with the same native <dialog>
   // pattern as the seat release above -- see deviceReleaseDialog.ts's own header comment.
   const deviceReleaseDialog = useDeviceReleaseDialog({
     visitGenerationRef,
@@ -280,7 +280,7 @@ export function useDevicesController(options: DeviceFeatureOptions): DevicesCont
     showOffPageResult,
   });
 
-  // D3: sign-out's best-effort seat release, called BEFORE the actual sign-out request. A released
+  // Sign-out's best-effort seat release, called BEFORE the actual sign-out request. A released
   // seat is removed from seatSessions (and storage, via setSeatSessions above) like a manual release;
   // a failed one is left in place so it survives clear() below and is offered again after re-sign-in.
   async function releaseSeatsOnSignOut(): Promise<{ released: number; failed: number }> {
@@ -295,8 +295,8 @@ export function useDevicesController(options: DeviceFeatureOptions): DevicesCont
     return { released: released.length, failed: failed.length };
   }
 
-  // Fix round 1 (CRITICAL) / D3: resets in-memory state only, never storage -- releaseSeatsOnSignOut()
-  // may have just written a failed release there, which must survive this call (decision 2).
+  // Resets in-memory state only, never storage -- releaseSeatsOnSignOut()
+  // may have just written a failed release there, which must survive this call.
   function clear(): void {
     sessionGenerationRef.current += 1;
     setSeatSessionsRaw({});
@@ -307,7 +307,7 @@ export function useDevicesController(options: DeviceFeatureOptions): DevicesCont
     setDeviceMessages({});
   }
 
-  // Fix round 1 (Important): called from App.tsx when the Devices page is left, so a stale local
+  // Called from App.tsx when the Devices page is left, so a stale local
   // result never reappears on a later visit. Deliberately narrower than clear() -- seatSessions and
   // everything else about the live seat state survive navigation, only the shown RESULTS do not.
   function clearMessages(): void {
@@ -346,7 +346,7 @@ export function useDevicesController(options: DeviceFeatureOptions): DevicesCont
   };
 }
 
-// D1: one devices page in customer terms. This is now the single page-level owner for Connected
+// One devices page in customer terms. This is now the single page-level owner for Connected
 // devices, Activated devices (older app versions) and Browser seats: it owns the one search box
 // above all three sections and the route's exact app filter (shown as a removable "App: {project}"
 // chip), and passes both down. Connected devices loads and paginates independently of the

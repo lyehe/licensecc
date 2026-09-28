@@ -4,7 +4,7 @@ import { formatMessageDetail } from "./api";
 import { SupportContact } from "./SupportContact";
 import type { StatusMessage } from "../types";
 
-// D2: "show each result next to the control that produced it". Each seat card and each device row
+// "Show each result next to the control that produced it". Each seat card and each device row
 // that has its own action (start/renew/release a seat, release a legacy device, download a
 // license) gets its OWN role="status" line showing that action's result, instead of every action
 // funnelling through the single page-level StatusLine (api.tsx) -- which stays reserved for page

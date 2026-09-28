@@ -38,7 +38,7 @@ async function legacy(env, email) {
   await env.DB.prepare("INSERT INTO customers (id,name,email,created_at,updated_at) VALUES ('L','Personal account','',?,?)").bind(NOW, NOW).run();
   await env.DB.prepare("INSERT INTO portal_passwords (customer_id,email_lower,password_hash,created_at,updated_at) VALUES ('L',?,?,?,?)").bind(email, await hashPassword(PASSWORD), NOW, NOW).run();
 }
-// The real admin-invite shape (A5): the seeded hash is for a random secret nobody was ever told, not
+// The real admin-invite shape: the seeded hash is for a random secret nobody was ever told, not
 // a chosen/known password like `legacy()` above uses for its other, set-password-style scenarios.
 async function inviteShaped(env, email) {
   const secret = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32)))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
@@ -135,7 +135,7 @@ test("mail cooldown, missing sender, delivery failure, CSRF and disabled flag fa
   assert.equal((await call(f.env,"POST",`${PATH}/reset`,{headers:{origin:"https://evil.test"},body:{email:"a@x.com"}})).status,403);
   assert.equal((await call({...f.env,PORTAL_PASSWORD_ENABLED:"0"},"POST",`${PATH}/complete`,{body:{token:"a".repeat(43),password:PASSWORD}})).status,404);
   await f.request("register");
-  // C6: the shared 1/60s mail-send cooldown's 429 carries the exact seconds left in ITS OWN fixed
+  // The shared 1/60s mail-send cooldown's 429 carries the exact seconds left in ITS OWN fixed
   // window (period 60, not the 900s IP/email throttle), so the UI's "Try again in {n} minutes."
   // reads the real wait, whichever of the two checks tripped.
   const mailWindow = Math.floor(NOW / 60) * 60;
@@ -185,7 +185,7 @@ test("legacy reset stays generic when another customer owns the address", async 
   assert.equal(f.db.prepare("SELECT email FROM customers WHERE id = 'L'").get().email, "");
 });
 
-// A5 fix round 1, item 4: an admin-invite-shaped account (customers.email='', a portal_passwords hash
+// An admin-invite-shaped account (customers.email='', a portal_passwords hash
 // for a random secret nobody was told) cannot sign in with a guessed password before recovering, and
 // can with the password it chooses during reset.
 test("an admin-invite-shaped account cannot sign in with a guessed password before reset, and can with it after", async t => {

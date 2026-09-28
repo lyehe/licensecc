@@ -10,7 +10,7 @@ export interface ApiEnvelope<T> {
   code: string;
   request_id: string;
   data?: T;
-  // Client-only: the `retry-after` response header (seconds), when the server sent one (task C6).
+  // Client-only: the `retry-after` response header (seconds), when the server sent one.
   // Never part of the server's JSON body -- api() (ui/shared/api.tsx) parses the header and attaches
   // it here so every caller reads one shape instead of re-parsing headers itself.
   retryAfter?: number;

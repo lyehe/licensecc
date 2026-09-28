@@ -96,7 +96,7 @@ export const DEVICE_KEY_HELP_COPY =
 
 export const DEVICE_RELEASE_ACTION_LABEL = "Release";
 
-// D4: the native <dialog> confirm's own title, naming the device (Device ID, app and feature appear
+// The native <dialog> confirm's own title, naming the device (Device ID, app and feature appear
 // beside it in the dialog body); the consequence copy below stays a separate sentence underneath.
 export const DEVICE_RELEASE_CONFIRM_TITLE = "Release this device?";
 
@@ -187,7 +187,7 @@ const RESULT_CODE_COPY: Record<string, string> = {
   device_proof_required: "This device needs to be verified. Use the application to verify it, then try again.",
   device_proof_invalid: "This device couldn't be verified. Use the application to verify it again.",
   borrowing_disabled: "Offline borrowing isn't enabled for this license.",
-  // pool_exhausted is deliberately NOT mapped here (D2): its customer-facing copy links out through
+  // pool_exhausted is deliberately NOT mapped here: its customer-facing copy links out through
   // <SupportContact/>, a React node this plain string map cannot hold without pulling React into the
   // pure workflow module the unit test transpiles without it. It is mapped instead in
   // ui/shared/ActionResult.tsx, which every local per-row/card result line renders through.
@@ -208,7 +208,7 @@ const RESULT_CODE_COPY: Record<string, string> = {
   invalid_response: "The service returned an unexpected response. Try again.",
   // A fetch that never reached the network at all (offline, DNS failure, an aborted request) --
   // produced by api()'s own fetch rejection and by the download's raw fetch, both of which bypass the
-  // server entirely, so no server-authored code is available (task C2).
+  // server entirely, so no server-authored code is available.
   network_unavailable: "Couldn't reach the portal. Check your connection and try again.",
   account_refresh_failed: "Account refresh failed. Displayed data may be out of date; retry to refresh it.",
   seat_not_checked_out: "Start a seat before doing that.",
@@ -216,17 +216,16 @@ const RESULT_CODE_COPY: Record<string, string> = {
   download_started: "Download started.",
   // Shown whenever the logout request itself failed (a server-returned failure code, or the network
   // rejection above) -- always specific about staying signed in rather than forwarding whatever code
-  // came back, since a code like "unauthorized" would misleadingly suggest the session already ended
-  // (task C2).
+  // came back, since a code like "unauthorized" would misleadingly suggest the session already ended.
   logout_failed: "Sign-out didn't complete. You're still signed in — try again.",
   // Shown by App's global onUnauthorized hook (api.tsx) once retrySession() confirms a mid-session
   // 401 is real. The server's own `unauthorized` code already maps to this identical sentence above,
   // but this local code is what fires the return-to-sign-in transition itself, and it can be raised
   // by ANY api() caller -- a background data read, a seat action, or the download's raw fetch -- not
-  // just the one request whose response happened to carry the code (task C3).
+  // just the one request whose response happened to carry the code.
   session_ended: "Your session ended. Sign in again.",
   [FLOATING_SEAT_RELEASE_REFRESH_FAILED_CODE]: FLOATING_SEAT_RELEASE_REFRESH_ERROR_COPY,
-  // D3: sign-out's best-effort seat release. The real customer-facing sentence needs the released/
+  // Sign-out's best-effort seat release. The real customer-facing sentence needs the released/
   // failed COUNTS interpolated (singular "seat" vs plural, and whether a second sentence about
   // failures applies at all), which a static string here cannot express -- StatusLine (api.tsx)
   // special-cases this code via its own seatsReleasedMessage(), exactly like rate_limited's retryAfter

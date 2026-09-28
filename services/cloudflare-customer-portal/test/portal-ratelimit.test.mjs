@@ -60,7 +60,7 @@ test("first call in a window returns count 1 (under cap)", async () => {
   assert.equal(r.limited, false);
 });
 
-// C6: the UI's rate-limit sentence needs the exact seconds left in the CURRENT fixed window
+// The UI's rate-limit sentence needs the exact seconds left in the CURRENT fixed window
 // (windowStart + period - now), not just a limited/not-limited flag. Pin both ends of a window: the
 // very first instant has the full period left, and the very last instant has exactly one second.
 test("retryAfter is the exact seconds left in the fixed window, at both boundaries", async () => {

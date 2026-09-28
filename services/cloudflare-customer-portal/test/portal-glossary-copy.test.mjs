@@ -1,4 +1,4 @@
-// Task F1 (doc/architecture/glossary.md): the customer portal and the admin console share one
+// See doc/architecture/glossary.md: the customer portal and the admin console share one
 // vocabulary for the same underlying records. A term the glossary retired must never resurface
 // in UI source in either app. This guard scans the portal's src/ui tree; the admin console has
 // an equivalent test at admin-ui-workflow/glossary-copy.test.mjs.
@@ -35,7 +35,7 @@ function collectSourceFiles(dir) {
   return files;
 }
 
-test("portal UI source never reintroduces a term the F1 glossary retired", () => {
+test("portal UI source never reintroduces a term the glossary retired", () => {
   const offenses = [];
   for (const file of collectSourceFiles(UI_SOURCE_ROOT)) {
     const text = readFileSync(file, "utf8");

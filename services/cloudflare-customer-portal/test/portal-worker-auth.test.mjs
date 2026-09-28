@@ -215,7 +215,7 @@ test("auth/request returns the SAME ok for a known and unknown email (no enumera
   db.close();
 });
 
-// C6: the UI shows "Try again in {n} minutes." from this header alone, so every JSON-answering auth
+// The UI shows "Try again in {n} minutes." from this header alone, so every JSON-answering auth
 // 429 must carry the exact seconds left in portalRateLimit's own fixed window.
 test("auth/request over the per-email cap answers 429 with the exact retry-after for the fixed window", async (t) => {
   t.mock.method(Date, "now", () => NOW * 1000);
@@ -452,7 +452,7 @@ test("auth magic redeem: exceeding the per-IP verify rate limit redirects to rat
   const result = await magicResponse(env, streamingMagicRequest(["token=bad"]).request);
   assert.equal(result.status, 303);
   assert.equal(result.res.headers.get("location"), "https://portal.test/?auth_error=rate_limited");
-  // C6: a top-level redirect has no script running to read a header, so this path never gets one
+  // A top-level redirect has no script running to read a header, so this path never gets one
   // (the UI instead falls back to the "later" wording for auth_error=rate_limited).
   assert.equal(result.res.headers.get("retry-after"), null);
   db.close();

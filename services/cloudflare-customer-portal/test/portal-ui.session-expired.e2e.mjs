@@ -1,9 +1,9 @@
 import { expect, test } from "@playwright/test";
 
-// C3: a mid-session 401 (the server's `unauthorized` code, never a credential failure like
+// A mid-session 401 (the server's `unauthorized` code, never a credential failure like
 // `invalid_otp`) must return the customer to sign-in on every api() path -- a background data read,
 // a seat action, or the download's raw fetch -- via one global onUnauthorized hook (api.tsx) that
-// App wires to auth.retrySession(). These tests pin the five scenarios from the dispatch: mid-download,
+// App wires to auth.retrySession(). These tests pin five scenarios: mid-download,
 // mid-seat-action, a consent mutation surviving the same kind of 401, a wrong OTP code NOT tripping the
 // hook, and exactly one /me retry for a single expired-session event.
 const VALID_CODE = "80315426";
@@ -199,7 +199,7 @@ test("an expired session produces exactly one /me retry request", async ({ page 
   expect(pageErrors).toEqual([]);
 });
 
-// ---- Consent: the existing raw-fetch 401 handling (consentApi.ts, unchanged by C3) must keep working
+// ---- Consent: the existing raw-fetch 401 handling (consentApi.ts) must keep working
 // side by side with the new global hook, which never touches it. ------------------------------------
 
 const consentHandle = "F".repeat(42) + "A";
@@ -251,7 +251,7 @@ test("consent: a page with a saved mutation survives a 401, then resumes after s
   await page.getByRole("button", { name: "Approve", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Sign in", exact: true })).toBeVisible();
   await expect(page.getByText("Sign in to approve this device connection.", { exact: true })).toBeVisible();
-  // consentApi.ts's own 401 handling (unchanged by C3) drives this screen directly -- the new global
+  // consentApi.ts's own 401 handling drives this screen directly -- the new global
   // hook is never in this call path, so it never shows its own session-ended sentence here.
   await expect(page.getByText(SESSION_ENDED_COPY, { exact: false })).toHaveCount(0);
   await page.getByLabel("Email", { exact: true }).fill("customer@example.com");
@@ -262,7 +262,7 @@ test("consent: a page with a saved mutation survives a 401, then resumes after s
   expect(pageErrors).toEqual([]);
 });
 
-// ---- Fix round 1 (CRITICAL): the hook's confirmed-session-gone branch must clear all portal-local
+// ---- The hook's confirmed-session-gone branch must clear all portal-local
 // customer data, the same way logout() already does, or a DIFFERENT customer signing in next in the
 // same tab can see the previous customer's licenses, devices and usage -- usePortalData skips its own
 // loading state when readState is already "ready", so stale data stays visible until (or unless) the
@@ -364,7 +364,7 @@ test("a customer switch after a session-ending 401 never shows the previous cust
   await expect(page.getByText("device-beta-002", { exact: true })).toBeVisible();
   await expect(page.getByText("device-alpha-001", { exact: false })).toHaveCount(0);
 
-  // D3 (carried from C3, decision 7): B's own floating entitlement renders the Browser seats section,
+  // B's own floating entitlement renders the Browser seats section,
   // but it must start COLLAPSED -- never pre-expanded as though it already held A's live seat. A
   // pre-expanded panel uses an <h3 role="heading">; the collapsed <details> uses a plain <summary>.
   await expect(page.getByRole("heading", { name: "Browser seats" })).toHaveCount(0);
@@ -376,7 +376,7 @@ test("a customer switch after a session-ending 401 never shows the previous cust
   expect(pageErrors).toEqual([]);
 });
 
-// D3 fix round 1 (Critical): a session-ending 401 never nulls customerId (only an explicit sign-out
+// A session-ending 401 never nulls customerId (only an explicit sign-out
 // does), so when the SAME customer signs back in with no page reload, the customer id passed to
 // useDevicesController never changes -- only App.tsx's reactive session epoch does. Without threading
 // that epoch into the hydrate effect's dependency array, a seat this browser genuinely still holds

@@ -24,7 +24,7 @@ export const ERR_CROSS_SITE = errorResponse("Cross-site request rejected (Sec-Fe
 export const ERR_BODY_TOO_LARGE = errorResponse("Request body exceeded 8192 bytes.", "body_too_large");
 export const ERR_INVALID_JSON = errorResponse("Body was not a JSON object.", "invalid_json");
 
-// task C6: the response headers object for the seven auth 429s that carry the exact wait
+// The response headers object for the seven auth 429s that carry the exact wait
 // (portalRateLimit's own fixed-window retryAfter, in seconds) instead of leaving the customer to
 // guess. Spread this into an errorResponse()'s result for exactly those routes -- every other 429
 // (the signed-in password-change action, device consent/bindings' own fixed 60s header, and the

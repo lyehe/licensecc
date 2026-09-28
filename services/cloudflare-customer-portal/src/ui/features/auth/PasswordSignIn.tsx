@@ -22,8 +22,8 @@ export function PasswordSignIn({ onSignedIn, mode, onModeChange, emailLinks }: {
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<React.ReactNode>("");
-  // D5: an actual failure (invalid credentials, a network error, a rate limit…) is told apart from
-  // the "Check your email" confirmation below so only the former gets the error colour (decision 1) --
+  // An actual failure (invalid credentials, a network error, a rate limit…) is told apart from
+  // the "Check your email" confirmation below so only the former gets the error colour --
   // both currently share this one message slot and role="alert".
   const [messageIsError, setMessageIsError] = useState(false);
   async function submit(event: React.FormEvent): Promise<void> {

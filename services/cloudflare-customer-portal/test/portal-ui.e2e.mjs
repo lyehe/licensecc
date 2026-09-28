@@ -42,7 +42,7 @@ test("registration verifies email before choosing a password and opens an empty 
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.getByRole("button", { name: "Send verification link", exact: true }).click();
   await expect(page.getByRole("alert")).toContainText("Check your email");
-  // D5 (decision 1): this is a confirmation, not an error -- it must NOT use the error colour, unlike
+  // This is a confirmation, not an error -- it must NOT use the error colour, unlike
   // the two failures below.
   await expect(page.getByRole("alert")).toHaveCSS("color", "rgb(155, 196, 155)");
   expect(submissions).toEqual([{ email: "new@example.com" }]);
@@ -55,7 +55,7 @@ test("registration verifies email before choosing a password and opens an empty 
   await page.getByLabel("Confirm password", { exact: true }).fill("A different testing passphrase");
   await page.getByRole("button", { name: "Save password and sign in" }).click();
   await expect(page.getByRole("alert")).toHaveText("Passwords do not match.");
-  // D5 (decision 1): an actual auth error uses the same error colour `.statusline.error` uses.
+  // An actual auth error uses the same error colour `.statusline.error` uses.
   await expect(page.getByRole("alert")).toHaveCSS("color", "rgb(219, 146, 146)");
   expect(submissions).toHaveLength(1);
   await page.getByLabel("Confirm password", { exact: true }).fill("A long testing passphrase 1!");
@@ -77,11 +77,11 @@ test("password login errors clear the secret and explain recovery", async ({ pag
   await page.getByLabel("Password", { exact: true }).fill("A wrong testing passphrase");
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await expect(page.getByRole("alert")).toHaveText("Email or password is incorrect.");
-  // D5 (decision 1): reuses the existing error colour token rather than a new literal.
+  // Reuses the existing error colour token rather than a new literal.
   await expect(page.getByRole("alert")).toHaveCSS("color", "rgb(219, 146, 146)");
   await expect(page.getByLabel("Password", { exact: true })).toHaveValue("");
   await page.getByText("Forgot your password?", { exact: true }).click();
-  // Carried from A5: reworded to drop "verified" -- an admin-invited account with an
+  // Reworded to drop "verified" -- an admin-invited account with an
   // unverified login email also recovers, and verifies, through this same reset.
   await expect(page.getByText(/We'll email a reset link to your login address/)).toBeVisible();
   await page.route("**/portal/v1/auth/password/reset", route => {
@@ -90,7 +90,7 @@ test("password login errors clear the secret and explain recovery", async ({ pag
   });
   await page.getByRole("button", { name: "Send reset link" }).click();
   await expect(page.getByRole("alert")).toContainText("Check your email");
-  // D5 (decision 1): a confirmation, not an error -- unaffected by the error-colour fix above.
+  // A confirmation, not an error -- unaffected by the error-colour fix above.
   await expect(page.getByRole("alert")).toHaveCSS("color", "rgb(155, 196, 155)");
 });
 
@@ -125,7 +125,7 @@ test("expired password link shows recovery guidance and reloading cannot retain 
   await page.getByLabel("Confirm password", { exact: true }).fill("A replacement passphrase 2!");
   await page.getByRole("button", { name: "Save password and sign in" }).click();
   await expect(page.getByRole("alert")).toContainText("expired or was already used");
-  // D5 (decision 1): a server-reported failure (not the local validation error above) also gets the
+  // A server-reported failure (not the local validation error above) also gets the
   // error colour.
   await expect(page.getByRole("alert")).toHaveCSS("color", "rgb(219, 146, 146)");
   await expect(page.getByRole("alert").getByRole("link", { name: "Request a new link" })).toBeVisible();
@@ -138,7 +138,7 @@ test("expired password link shows recovery guidance and reloading cannot retain 
   expect(attempts).toBe(1);
 });
 
-// C6: "Request a new link" (invalid_link) is an actual affordance, not inert text -- it returns to
+// "Request a new link" (invalid_link) is an actual affordance, not inert text -- it returns to
 // sign-in with the reset form already open, reusing PasswordSignIn's own `mode`.
 test("Request a new link returns to sign-in with the reset form already open", async ({ page }) => {
   await page.route("**/api/portal/me", route => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" } }));
@@ -170,7 +170,7 @@ test("password sign-in hides email-only actions when email delivery is off", asy
   await expect(page.getByText("Contact your administrator to reset your password.", { exact: true })).toBeVisible();
 });
 
-// C6: the same password-only mode, but with a configured support contact -- the sentence must link
+// The same password-only mode, but with a configured support contact -- the sentence must link
 // it exactly as <SupportContact/> does everywhere else, never a bare mailto/URL string.
 test("password-only mode with a configured support contact links it in the reset-password hint", async ({ page }) => {
   await page.route("**/api/portal/me", route => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" } }));
@@ -210,14 +210,14 @@ test("Account password change requires the current password and confirms session
   await page.getByRole("button", { name: "Change password", exact: true }).click();
   const savedMessage = page.getByText("Password saved. Other browser sessions have been signed out.");
   await expect(savedMessage).toBeVisible();
-  // Fix round 1: this result shares one role="status" slot with a failed change below -- a
+  // This result shares one role="status" slot with a failed change below -- a
   // confirmation must not use the error colour.
   await expect(savedMessage).toHaveCSS("color", "rgb(155, 196, 155)");
   expect(submitted).toEqual({ current_password: "A long testing passphrase 1!", password: "A replacement passphrase 2!" });
   await expect(page.getByLabel("New password", { exact: true })).toHaveValue("");
 });
 
-// Fix round 1: the same result slot must use the error colour for an actual failure.
+// The same result slot must use the error colour for an actual failure.
 test("Account password change failure uses the error colour, not the confirmation's", async ({ page }) => {
   await page.route("**/api/portal/**", (route) => route.fulfill({ json: makeEnvelope("ok", route.request().url().endsWith("/me") ? { customer_id: "cus_self" } : { items: [] }) }));
   await page.route("**/portal/v1/auth/providers", (route) => route.fulfill({ json: makeEnvelope("auth_providers", { google: false, github: false, email: false, password: true }) }));
@@ -236,7 +236,7 @@ test("Account password change failure uses the error colour, not the confirmatio
   await expect(failureMessage).toHaveCSS("color", "rgb(219, 146, 146)");
 });
 
-// A5: `recovery_available` (routes/password.ts) shares the reset query's own eligibility predicate,
+// `recovery_available` (routes/password.ts) shares the reset query's own eligibility predicate,
 // so this copy must never promise a recovery the server would refuse.
 test("password settings point an eligible unverified email at Forgot your password", async ({ page }) => {
   await page.route("**/api/portal/**", (route) => route.fulfill({ json: makeEnvelope("ok", route.request().url().endsWith("/me") ? { customer_id: "cus_self" } : { items: [] }) }));
@@ -268,11 +268,11 @@ test("password settings hide the recovery promise when the portal has no email d
   await expect(page.getByText("Use 'Forgot your password?' once to verify this email.", { exact: true })).toHaveCount(0);
 });
 
-// C6 fix round 1 (Important): no existing PasswordSettings fixture ever set has_password:false, so
+// No existing PasswordSettings fixture ever set has_password:false, so
 // RecoveryHint's actual list-only-configured-methods rendering (as opposed to the pure
 // configuredRecoveryMethods/joinWithOr helpers it calls) was never exercised end to end. These five
-// cover every case the controller named, each with a distinct providers response so the exact
-// sentence pins to that exact configuration.
+// cover every configuration RecoveryHint can render, each with a distinct providers response so the
+// exact sentence pins to that exact configuration.
 async function goToPasswordSettingsNeedingSetup(page, providers) {
   await page.route("**/api/portal/**", (route) => route.fulfill({ json: makeEnvelope("ok", route.request().url().endsWith("/me") ? { customer_id: "cus_self" } : { items: [] }) }));
   await page.route("**/portal/v1/auth/providers", (route) => route.fulfill({ json: makeEnvelope("auth_providers", { password: true, ...providers }) }));
@@ -337,7 +337,7 @@ test("link_expired shows the exact expired-link sentence, never the raw code", a
   expect(page.url()).not.toContain("auth_error");
 });
 
-// Carried from A3 (Minor 1): ProviderResult's ERRORS lookup already guards with Object.hasOwn, but no
+// ProviderResult's ERRORS lookup already guards with Object.hasOwn, but no
 // test ever exercised a prototype-polluting `auth_error` value. `__proto__`/`constructor` name
 // Object.prototype members, so an unsafe `ERRORS[error]` lookup would resolve to that inherited
 // function/value instead of falling back -- React would then throw or silently render a function.
@@ -362,7 +362,7 @@ test("OAuth sign-in to a suspended account explains it and names the administrat
   await page.goto("/?auth_error=account_suspended");
   const suspendedMessage = page.getByText("This account is suspended. Contact your administrator.", { exact: true });
   await expect(suspendedMessage).toBeVisible();
-  // Fix round 1: ProviderResult shares one role="status" slot with the "Sign-in provider connected."
+  // ProviderResult shares one role="status" slot with the "Sign-in provider connected."
   // confirmation below -- an actual auth failure must get the error colour.
   await expect(suspendedMessage).toHaveCSS("color", "rgb(219, 146, 146)");
   await expect(page.getByRole("link", { name: "Contact support" })).toHaveCount(0);
@@ -370,7 +370,7 @@ test("OAuth sign-in to a suspended account explains it and names the administrat
   expect(page.url()).not.toContain("auth_error");
 });
 
-// Fix round 1: the SAME ProviderResult component (ProviderSignIn.tsx) renders the "Sign-in provider
+// The SAME ProviderResult component (ProviderSignIn.tsx) renders the "Sign-in provider
 // connected." confirmation after linking a provider under Account -- it must NOT get the error colour
 // the failure above does.
 test("a linked-provider confirmation under Account is not coloured like an error", async ({ page }) => {
@@ -422,9 +422,9 @@ test("unconfigured providers show a clear unavailable state", async ({ page }) =
   await expect(page.getByRole("button", { name: /Continue with|Send code/ })).toHaveCount(0);
 });
 
-// Carried from A3 (Minor 2): providers failing once must recover through Retry sign-in
+// Providers failing once must recover through Retry sign-in
 // options, landing back on a usable sign-in form -- not a stuck "Unable to load" state.
-test("providers failing once then succeeding recovers through Retry sign-in options (carried from A3)", async ({ page }) => {
+test("providers failing once then succeeding recovers through Retry sign-in options", async ({ page }) => {
   await page.route("**/api/portal/me", (route) => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" } }));
   let attempt = 0;
   await page.route("**/portal/v1/auth/providers", (route) => {
@@ -441,7 +441,7 @@ test("providers failing once then succeeding recovers through Retry sign-in opti
   expect(attempt).toBeGreaterThanOrEqual(2);
 });
 
-// C6: focus moves to the new h1 on every auth step and password-mode switch, using tabIndex={-1}.
+// Focus moves to the new h1 on every auth step and password-mode switch, using tabIndex={-1}.
 test("focus moves to the new heading on every sign-in step and mode switch", async ({ page }) => {
   await page.route("**/api/portal/me", (route) => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" } }));
   await page.route("**/portal/v1/auth/providers", (route) => route.fulfill({ json: makeEnvelope("auth_providers", { google: false, github: false, email: true, password: true }) }));
@@ -467,7 +467,7 @@ test("focus moves to the new heading on every sign-in step and mode switch", asy
   await expect(heading).toBeFocused();
 });
 
-// C6: one sentence, driven by the server's real retry-after header, for the OTP request path.
+// One sentence, driven by the server's real retry-after header, for the OTP request path.
 test("a mocked 429 with retry-after shows the shared rate-limit sentence with minutes (OTP request)", async ({ page }) => {
   await page.route("**/api/portal/me", (route) => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" } }));
   await page.route("**/portal/v1/auth/providers", (route) => route.fulfill({ json: makeEnvelope("auth_providers", { google: false, github: false, email: true, password: false }) }));
@@ -476,7 +476,7 @@ test("a mocked 429 with retry-after shows the shared rate-limit sentence with mi
   await page.getByLabel("Email", { exact: true }).fill("user@example.com");
   await page.getByRole("button", { name: "Send code" }).click();
   await expect(page.getByText("Too many attempts. Try again in 2 minutes.", { exact: true })).toBeVisible();
-  // StatusLine still tucks the raw code under a collapsed "Technical details" disclosure (C1) -- it
+  // StatusLine still tucks the raw code under a collapsed "Technical details" disclosure -- it
   // is present in the DOM but not visible, so this checks visibility, not (non-)existence.
   await expect(page.getByText("rate_limited", { exact: false })).not.toBeVisible();
 });
@@ -505,7 +505,7 @@ test("auth_error=rate_limited (redirect path, no header) shows the later-form se
   expect(page.url()).not.toContain("auth_error");
 });
 
-// C6: the resend button's client-side-only 60s cooldown counts down and re-enables at zero.
+// The resend button's client-side-only 60s cooldown counts down and re-enables at zero.
 test("the resend cooldown counts down and re-enables at zero", async ({ page }) => {
   await page.clock.install();
   await page.route("**/api/portal/me", (route) => route.fulfill({ status: 401, json: { ok: false, code: "unauthorized" } }));
@@ -801,7 +801,7 @@ test("customer portal signs in with an 8-digit code and walks every screen witho
   const api = makePortalApiFixture();
   await page.route("**/portal/v1/auth/**", api.route);
   await page.route("**/api/portal/**", api.route);
-  // The resend button's 60s client-side cooldown (C6) would otherwise make the click below wait a
+  // The resend button's 60s client-side cooldown would otherwise make the click below wait a
   // real minute; fast-forward past it, then resume so the rest of this long walkthrough runs on real
   // time exactly as before.
   await page.clock.install();
@@ -814,7 +814,7 @@ test("customer portal signs in with an 8-digit code and walks every screen witho
   await page.getByLabel("Email").fill("user@example.com");
   await page.getByRole("button", { name: "Send code" }).click();
   // The verify screen's own heading, not a loose text match: otp_requested's StatusLine copy ("Check
-  // your email for a sign-in code.", C1) now also legitimately contains "Check your email", so a bare
+  // your email for a sign-in code.") now also legitimately contains "Check your email", so a bare
   // /Check your email/ regex matches both and is a strict-mode violation.
   const checkYourEmailHeading = page.getByRole("heading", { name: "Check your email" });
   await expect(checkYourEmailHeading).toBeVisible();
@@ -823,7 +823,7 @@ test("customer portal signs in with an 8-digit code and walks every screen witho
   await expect.poll(() => api.requests.authRequests).toBe(1);
 
   // Resending shares the request path but must retain the verification form and input. It is
-  // disabled with a countdown for 60s after a code is sent (client-side only, C6).
+  // disabled with a countdown for 60s after a code is sent (client-side only).
   await page.getByLabel("8-digit code").fill("1234");
   await expect(page.getByRole("button", { name: "Resend code (0:59)", exact: true })).toBeDisabled();
   await page.clock.fastForward("01:00");
@@ -875,12 +875,12 @@ test("customer portal signs in with an 8-digit code and walks every screen witho
   const heartbeat = api.requests.seatActions.at(-1);
   expect(heartbeat).toMatchObject({ op: "heartbeat", body: { entitlement_id: "ent_floating", seat_id: "seat-e2e" } });
   expect(heartbeat.body.client_instance_id).toBe(checkout.body.client_instance_id);
-  // D3: seats persist per customer id ("cus_self" throughout this fixture), not under one shared key.
+  // Seats persist per customer id ("cus_self" throughout this fixture), not under one shared key.
   const storedSeatSessionBeforeReleaseConfirm = await page.evaluate(() => window.localStorage.getItem("licensecc.portal.seats.v1:cus_self"));
 
   // Release is destructive: opening the confirmation must not send a request or change the live
   // session. The dialog names the exact app, feature and this browser, plus the availability impact
-  // (D4: no longer the seat id or license fingerprint -- decision 2 pins the dialog to app/feature/
+  // (no longer the seat id or license fingerprint -- the dialog is pinned to app/feature/
   // "This browser" only).
   await page.setViewportSize({ width: 320, height: 240 });
   await seatCard.getByRole("button", { name: "Release seat" }).click();
@@ -892,7 +892,7 @@ test("customer portal signs in with an 8-digit code and walks every screen witho
   await expect(releaseDialog).toContainText(checkout.body.client_instance_id);
   await expect(releaseDialog).toContainText("cannot be undone");
   await expect(releaseDialog).toContainText("available to another user");
-  // D4: a native <dialog> (no separate overlay/backdrop div to inspect) -- still scrollable and
+  // A native <dialog> (no separate overlay/backdrop div to inspect) -- still scrollable and
   // clipped at a small viewport, and the page itself never gains horizontal scroll.
   const compactModalLayout = await page.evaluate(() => {
     const modal = document.querySelector("dialog[open]");
@@ -923,7 +923,7 @@ test("customer portal signs in with an 8-digit code and walks every screen witho
   // A native dialog's own default: showModal() focuses the first focusable descendant (Cancel), no
   // explicit autofocus code needed.
   await expect(cancelRelease).toBeFocused();
-  // D4 (decision 4): a modal <dialog> alone does not reliably keep the rest of the page out of the
+  // A modal <dialog> alone does not reliably keep the rest of the page out of the
   // accessibility tree in every engine, so App.tsx still makes `main` inert by hand while either new
   // confirm dialog is pending -- verified directly against this Chromium build, not assumed.
   await expect(page.locator("main")).toHaveAttribute("aria-hidden", "true");
@@ -954,8 +954,8 @@ test("customer portal signs in with an 8-digit code and walks every screen witho
   await expect.poll(() => page.evaluate(() => window.localStorage.getItem("licensecc.portal.seats.v1:cus_self"))).toBe(storedSeatSessionBeforeReleaseConfirm);
   await expect(seatCard.getByRole("button", { name: "Renew seat" })).toBeEnabled();
   await expect(seatCard.getByRole("button", { name: "Release seat" })).toBeEnabled();
-  // D4: every close -- Cancel here -- returns focus to the "Browser seats" section heading, matching
-  // ProtectedNodes' own heading-focus pattern (decision 3).
+  // Every close -- Cancel here -- returns focus to the "Browser seats" section heading, matching
+  // ProtectedNodes' own heading-focus pattern.
   await expect(page.getByRole("heading", { name: "Browser seats" })).toBeFocused();
   await page.setViewportSize({ width: 1280, height: 720 });
 
@@ -970,7 +970,7 @@ test("customer portal signs in with an 8-digit code and walks every screen witho
   await expect(page.getByRole("heading", { name: "Browser seats" })).toBeFocused();
 
   // A deferred failed confirmation keeps focus inside the busy dialog, blocks Escape/Cancel, and
-  // then preserves the active seat, leaves the error visible, and returns focus to the heading (D4).
+  // then preserves the active seat, leaves the error visible, and returns focus to the heading.
   api.controls.failNextRelease = true;
   api.controls.deferNextRelease = true;
   await seatCard.getByRole("button", { name: "Release seat" }).click();
@@ -989,7 +989,7 @@ test("customer portal signs in with an 8-digit code and walks every screen witho
   await expect.poll(() => typeof api.controls.resolveRelease).toBe("function");
   api.controls.resolveRelease();
   await expect(failedReleaseDialog).toHaveCount(0);
-  // Human text, not the raw code (C1): the code stays available, but only inside the collapsed
+  // Human text, not the raw code: the code stays available, but only inside the collapsed
   // "Technical details" disclosure.
   await expect(page.getByText("We couldn't verify that request. Try again.", { exact: true })).toBeVisible();
   await expect(page.getByText("verification_error", { exact: false })).not.toBeVisible();
@@ -998,7 +998,7 @@ test("customer portal signs in with an 8-digit code and walks every screen witho
   await expect.poll(() => page.evaluate(() => window.localStorage.getItem("licensecc.portal.seats.v1:cus_self"))).toBe(storedSeatSessionBeforeReleaseConfirm);
 
   // A rejected fetch keeps the context/modal present with an explicit failure, then Escape closes
-  // it through the normal policy path and returns focus to the heading (D4).
+  // it through the normal policy path and returns focus to the heading.
   api.controls.rejectNextRelease = true;
   await seatCard.getByRole("button", { name: "Release seat" }).click();
   const networkErrorDialog = page.getByRole("dialog");
@@ -1018,9 +1018,9 @@ test("customer portal signs in with an 8-digit code and walks every screen witho
 
   // Only the explicit confirmation sends the original request, and a double click remains one
   // release while the existing busy guard is active. Releasing the last live seat used to always
-  // collapse the panel into a plain <details>; since D2 it instead shows this seat's own result
+  // collapse the panel into a plain <details>; now it instead shows this seat's own result
   // (its role="status" line) and stays expanded so that result is visible without reopening
-  // anything. D4: focus after this close goes to the "Browser seats" heading, not the re-enabled
+  // anything. Focus after this close goes to the "Browser seats" heading, not the re-enabled
   // Start seat button.
   await seatCard.getByRole("button", { name: "Release seat" }).click();
   const confirmReleaseDialog = page.getByRole("dialog");
@@ -1036,7 +1036,7 @@ test("customer portal signs in with an 8-digit code and walks every screen witho
     seat_id: "seat-e2e",
   });
   expect(release.body.client_instance_id).toBe(checkout.body.client_instance_id);
-  // Human text, not the raw code (C1): Technical details stay collapsed. D2: this is the SEAT's own
+  // Human text, not the raw code: Technical details stay collapsed. This is the SEAT's own
   // local result line now, not the page-level one.
   await expect(seatCard.getByRole("status")).toContainText("Seat released.");
   await expect(page.getByText("release_ok", { exact: false })).not.toBeVisible();
@@ -1063,13 +1063,13 @@ test("customer portal signs in with an 8-digit code and walks every screen witho
   await expect.poll(() => api.requests.releases).toBe(refreshFailureReleaseCount + 1);
   await expect(refreshFailedDialog).toHaveCount(0);
   await expect.poll(() => api.requests.refreshRejects).toBe(3);
-  // Not tag-qualified (C1 changed StatusLine's non-empty root from <p> to <div> so it can validly
+  // Not tag-qualified (StatusLine's non-empty root changed from <p> to <div> so it can validly
   // contain the collapsed Technical-details <details>); role + class alone identify it either way.
   await expect(page.locator('.feedback [role="status"]')).toContainText(/released; status refresh failed/i);
   await expect(page.getByRole("button", { name: "Refresh status" })).toBeVisible();
   await expect.poll(() => page.evaluate(() => window.localStorage.getItem("licensecc.portal.seats.v1:cus_self"))).toBe("{}");
   // This release also leaves no browser session, but the panel stays expanded (this seat's own
-  // "Seat released." result is showing). D4: focus still lands on the "Browser seats" heading -- it
+  // "Seat released." result is showing). Focus still lands on the "Browser seats" heading -- it
   // is never busy-disabled the way the Start seat button is, so the failed refresh does not change
   // where focus goes.
   await expect(page.getByRole("heading", { name: "Browser seats" })).toBeFocused();
@@ -1149,7 +1149,7 @@ test("a null account email never renders a dangling \"Signed in as\" or the lite
   expect(bodyText).not.toContain("null");
 });
 
-// D5: `button.primary`'s hover state must keep the text/background pair readable, not just visually
+// `button.primary`'s hover state must keep the text/background pair readable, not just visually
 // distinct -- WCAG's contrast ratio, computed here from the pair's actual computed styles rather than
 // trusted by inspection. Exercises the shared `button.primary:hover:not(:disabled)` rule across three
 // independent components (AuthFeature's own two primary buttons, and PasswordAction's) so a fix to the
@@ -1181,7 +1181,7 @@ test("hovering a primary button keeps at least a 4.5:1 contrast between its text
   expect(await hoverContrast(page.getByRole("button", { name: "Save password and sign in", exact: true }))).toBeGreaterThanOrEqual(4.5);
 });
 
-// D5 / decision 2: Sign out right-aligns inside `.headerInner`, and `.signedInAs` (A4) must stay
+// Sign out right-aligns inside `.headerInner`, and `.signedInAs` must stay
 // visible without overlapping it, at desktop width and at 390px alike.
 test("Sign out's right edge aligns with the header's content box at desktop and phone width", async ({ page }) => {
   const api = makePortalApiFixture();
@@ -1295,11 +1295,11 @@ test("usage failure stays local and removing a searched registration keeps the f
   await page.getByText("Activity",{exact:true}).click();
   await expect(page.getByText("87", { exact: true })).toBeVisible();
   await page.getByRole("link", { name: "Devices", exact: true }).click();
-  // D1: one page-level search box (matching name, ID or app) replaces the registrations-only App
+  // One page-level search box (matching name, ID or app) replaces the registrations-only App
   // select; typing the app name filters the same way the old dropdown did.
   await page.getByRole("searchbox", { name: "Find a device" }).fill("DEFAULT");
-  // D4: the native <dialog> confirm replaces window.confirm() -- no page.on("dialog") handler needed
-  // any more (decision 5) -- and names the exact device, app and feature before anything is sent.
+  // The native <dialog> confirm replaces window.confirm() -- no page.on("dialog") handler needed
+  // any more -- and names the exact device, app and feature before anything is sent.
   await page.locator(".registrations").getByRole("button", { name: "Release", exact: true }).click();
   const deviceReleaseDialog = page.getByRole("dialog");
   await expect(deviceReleaseDialog).toBeVisible();
@@ -1308,7 +1308,7 @@ test("usage failure stays local and removing a searched registration keeps the f
   await expect(deviceReleaseDialog).toContainText("pro");
   await deviceReleaseDialog.getByRole("button", { name: "Confirm release" }).click();
   await expect(deviceReleaseDialog).toHaveCount(0);
-  // D4 review (carried, Minor 2): a SUCCESSFUL Confirm returns focus to the section heading too, not
+  // A SUCCESSFUL Confirm returns focus to the section heading too, not
   // only Cancel/Escape (already covered by the legacy-release test below).
   await expect(page.getByRole("heading", { name: "Activated devices (older app versions)" })).toBeFocused();
   await expect(page.getByRole("heading", { name: "No matching devices" })).toBeVisible();
@@ -1319,7 +1319,7 @@ test("usage failure stays local and removing a searched registration keeps the f
   await expect(page.getByText("second-node", { exact: true })).toBeVisible();
 });
 
-// D4: the legacy-release confirm follows the exact same native <dialog> pattern as the floating-seat
+// The legacy-release confirm follows the exact same native <dialog> pattern as the floating-seat
 // release above -- Escape cancels with no request sent, and focus returns to this section's own
 // heading ("Activated devices (older app versions)"), not window.confirm's old accept/dismiss.
 test("the legacy device release confirm names the device, app and feature; Escape cancels without a request and returns focus to the section heading", async ({ page }) => {
@@ -1462,7 +1462,7 @@ test("protected access uses app enrollment while legacy downloads respect date b
   await expect(page.getByRole("cell", { name: "Protected device", exact: true })).toBeVisible();
   await expect(page.getByLabel("Device key for DEFAULT protected")).toHaveCount(0);
   await expect(page.locator(".status.expired")).toHaveCount(1);
-  // C5: an expired license offers no download at all; its status says what to do instead.
+  // An expired license offers no download at all; its status says what to do instead.
   const expiredRow = page.locator("tr").filter({ hasText: "solo" });
   await expect(expiredRow.locator('td[data-label="Status"]')).toHaveText(/^Expired on \d{4}-\d{2}-\d{2}\. Contact your administrator to renew\.$/);
   await expect(expiredRow.getByText("Activate and download")).toHaveCount(0);

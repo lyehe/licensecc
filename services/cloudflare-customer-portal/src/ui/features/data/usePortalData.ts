@@ -55,7 +55,7 @@ export function usePortalData({ active, setMessage }: PortalDataOptions): Portal
       setReadState("ready");
       return true;
     } catch {
-      // Defensive: api() no longer throws (task C2), but we keep this catch in case something unexpected does.
+      // Defensive: api() no longer throws, but we keep this catch in case something unexpected does.
       if (requestGeneration !== generation.current) return false;
       setStale(true);
       setReadState((current) => current === "ready" ? current : "error");

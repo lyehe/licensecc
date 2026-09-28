@@ -39,7 +39,7 @@ function PortalShell(): React.ReactElement {
   const [message, setMessage] = useState<StatusMessage | null>(null);
   const { busy, busyRef, runOnce } = useSingleFlight();
   const auth = usePortalAuth({ setMessage, runOnce });
-  // D3 fix round 1 (Important 2): real render state (not just signingOutRef's synchronous re-entrancy
+  // Real render state (not just signingOutRef's synchronous re-entrancy
   // guard below) so the Sign out button and every other busy-gated control visibly disable for the
   // whole ~5s seat-release window -- BEFORE auth.logout's own runOnce (the shared busy flag) even
   // starts. Kept separate from `busy` rather than nested inside runOnce, because auth.logout() calls
@@ -56,18 +56,18 @@ function PortalShell(): React.ReactElement {
     setMessage,
   });
 
-  // D3 fix round (carried, Minor): derived once instead of OR-ing `signingOut` into `busy` by hand at
+  // Derived once instead of OR-ing `signingOut` into `busy` by hand at
   // each JSX site below -- a new busy-gated control just uses one of these two and cannot forget
   // signingOut. controlsBusyStale additionally folds in `stale` for the few controls (the device
   // controller, and AppsFeature) that also disable while portal data is known out of date.
   const controlsBusy = busy || signingOut;
   const controlsBusyStale = controlsBusy || stale;
 
-  // Fix round 2 (Important): a visit generation per owning page ("nodes" for seats/legacy devices,
+  // A visit generation per owning page ("nodes" for seats/legacy devices,
   // "apps" for downloads), bumped whenever that page is entered OR left. Refs, not state -- bumping
   // one must never itself cause a render, and the controllers below need to read the CURRENT value
   // both when an action starts and again whenever its response arrives, arbitrarily later. This closes
-  // a race fix round 1's clearMessages() alone could not: Start seat, then navigate to Apps before the
+  // a race that clearing a page's messages on leaving it alone could not: Start seat, then navigate to Apps before the
   // ~1.5s response arrives -- clearMessages() already wiped what was showing, but the LATE response
   // would otherwise still write "Seat started." back into the map, and it would reappear on a later
   // visit. Real state (seat sessions, storage, the account refresh, the actual downloaded file) still
@@ -99,7 +99,7 @@ function PortalShell(): React.ReactElement {
     setMessage((current) => (current === shown ? null : current));
   }, [location.page]);
 
-  // D2: download results now show next to their own control (LicenseDownloadAction), not the
+  // Download results now show next to their own control (LicenseDownloadAction), not the
   // page-level line, so setMessage is no longer passed through here.
   const downloads = useLicenseDownloads({ runOnce, visitGenerationRef: appsVisitGenerationRef });
   const deviceController = useDevicesController({
@@ -116,7 +116,7 @@ function PortalShell(): React.ReactElement {
     showOffPageResult,
   });
 
-  // Fix round 1 (CRITICAL): PortalShell stays mounted across a session-ended transition, so a
+  // PortalShell stays mounted across a session-ended transition, so a
   // DIFFERENT customer signing in next in the same tab must never see the previous customer's
   // entitlements, devices, usage, seat state (including its localStorage-backed cache) or a typed
   // device key -- the same reset logout() already performs below. Read through a ref (updated on
@@ -129,14 +129,14 @@ function PortalShell(): React.ReactElement {
     clearPortalData();
     deviceController.clear();
     downloads.clear();
-    // D3 (carried from D2, fix round 2 observation 2): a session-ended clear is exactly the kind of
+    // A session-ended clear is exactly the kind of
     // "customer has moved on" event the visit generation guards against -- bump both so a response
     // still in flight under the ending session can never write a local result after the next sign-in.
     devicesVisitGenerationRef.current += 1;
     appsVisitGenerationRef.current += 1;
   };
 
-  // Task C3: a mid-session 401 (the server's `unauthorized` code, never a credential failure) must
+  // A mid-session 401 (the server's `unauthorized` code, never a credential failure) must
   // return the customer to sign-in no matter which api() call -- or the download's raw fetch, via
   // reportUnauthorized() -- surfaced it. Registered exactly once here; `retrying` is a re-entrancy
   // guard so several api() calls failing at once (e.g. usePortalData's concurrent reads) collapse into
@@ -173,7 +173,7 @@ function PortalShell(): React.ReactElement {
     document.getElementById("content")?.focus();
   }, [shellVisible, location.page, location.project]);
 
-  // Fix round 1 (Important): DevicesFeature/LicenseDownloadAction only render while location.page is
+  // DevicesFeature/LicenseDownloadAction only render while location.page is
   // "nodes"/"apps", but seatMessages/deviceMessages/downloads.messages live one level up, in the
   // controllers below, so they otherwise outlive a single visit -- a stale "Seat started." or
   // "Download started." would reappear in a freshly mounted role="status" node on a later visit, and
@@ -202,7 +202,7 @@ function PortalShell(): React.ReactElement {
     return () => clearDownloadMessagesRef.current();
   }, [location.page]);
 
-  // Each view sets document.title (task C6): the SAME branches PortalShell's own return below uses
+  // Each view sets document.title: the SAME branches PortalShell's own return below uses
   // to pick which screen renders, read here instead of duplicated per screen component, so this one
   // effect can never drift from what is actually on screen. Apps/Devices/Account, Sign in/Check your
   // email (AuthFeature's own two step headings), Set a password (PasswordAction) and Connect a
@@ -256,7 +256,7 @@ function PortalShell(): React.ReactElement {
     if (document.contains(target) && !target.hasAttribute("disabled")) target.focus();
   }, [busy, message]);
 
-  // D3: signingOutRef is the SYNCHRONOUS re-entrancy guard (a ref updates immediately, unlike state,
+  // signingOutRef is the SYNCHRONOUS re-entrancy guard (a ref updates immediately, unlike state,
   // so a double-click before the first render commits still sees it set); `signingOut` state (above)
   // drives the visible disabled/label change.
   const signingOutRef = useRef(false);
@@ -275,7 +275,7 @@ function PortalShell(): React.ReactElement {
         deviceController.clear();
         downloads.clear();
         clearEnrollment();setEnrollment(null);
-        // D3 (carried from D2, fix round 2 observation 2): see clearAllPortalStateRef's identical bump.
+        // See clearAllPortalStateRef's identical bump.
         devicesVisitGenerationRef.current += 1;
         appsVisitGenerationRef.current += 1;
         window.history.replaceState(null,"","/#/apps");
@@ -285,7 +285,7 @@ function PortalShell(): React.ReactElement {
         // Sign-out actually completed: show the release summary on the now-visible sign-in screen.
         if (seatsTouched) setMessage(localMessage("seats_released_on_signout", true, { released: seatOutcome.released, failed: seatOutcome.failed }));
       } else if (seatsTouched) {
-        // D3 fix round 1 (Minor 5): the release POSTs are independent of the sign-out POST -- they
+        // The release POSTs are independent of the sign-out POST -- they
         // already happened for real even though sign-out itself failed -- so replace auth.logout's own
         // plain "logout_failed" message (no params) with one carrying the same params, which StatusLine
         // appends after the logout_failed sentence (see api.tsx).

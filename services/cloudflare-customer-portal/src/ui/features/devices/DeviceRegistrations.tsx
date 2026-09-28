@@ -9,7 +9,7 @@ import type { StatusMessage } from "../../types";
 // App.tsx renders (ReleaseDialogs.tsx), so that it outlives this page.
 export function DeviceRegistrations({ controller, query, project }: {
   controller: DevicesController;
-  // D1: the page-level search box and the route's exact app filter, both owned by DevicesFeature.
+  // The page-level search box and the route's exact app filter, both owned by DevicesFeature.
   query: string; project: string | null;
 }): React.ReactElement {
   const { devices, busy, deviceMessages: messages } = controller;

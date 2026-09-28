@@ -13,7 +13,7 @@ export function PasswordSettings(): React.ReactElement {
   const [current, setCurrent] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<React.ReactNode>("");
-  // Fix round 1: told apart from the "Password saved" confirmation below, matching PasswordSignIn/
+  // Told apart from the "Password saved" confirmation below, matching PasswordSignIn/
   // PasswordAction -- both currently share this one message slot and role="status".
   const [messageIsError, setMessageIsError] = useState(false);
   useEffect(() => {

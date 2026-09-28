@@ -29,7 +29,7 @@ const proxyBackend = (tokenModule as { proxyBackend: ProxyBackend }).proxyBacken
 const portalRateLimit = (ratelimitModule as { portalRateLimit: PortalRateLimit }).portalRateLimit;
 
 // Resolve the signed-in customer's display email in ONE read, so the header/consent/empty-state UI
-// can show "Signed in as {email}" / "Connecting to {email}". Precedence (task A4): customers.email if
+// can show "Signed in as {email}" / "Connecting to {email}". Precedence: customers.email if
 // non-empty, else the customer's portal_passwords.email_lower (an admin-created password account has
 // no customers.email), else the EARLIEST portal_identities.email (deterministic via
 // ORDER BY created_at, provider), else null. Additive: customer_id is unchanged; email is a new sibling
@@ -44,7 +44,7 @@ async function apiMe(env: Env, session: { customer_id: string }, reqId: string):
   return envelope(reqId, "me", { customer_id: session.customer_id, email: row === null ? null : row.email });
 }
 
-// When each row's trial ends (task C5), by the rule that enforces that row: the protected-device
+// When each row's trial ends, by the rule that enforces that row: the protected-device
 // trial rule for a protected row, the legacy lease trial rule otherwise. Neither takes a prospective
 // start, so a trial clock the first activation has not started yet has no end (NULL). The end is
 // clamped to valid_until as the consent page does, since a trial never outlives its license;

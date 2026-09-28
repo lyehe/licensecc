@@ -10,11 +10,11 @@ import type { DevicesController } from "./DevicesFeature";
 // App.tsx (ReleaseDialogs.tsx), so that it outlives this page.
 export function BrowserSeats({ controller, query, project }: {
   controller: DevicesController;
-  // D1: the page-level search box and the route's exact app filter, both owned by DevicesFeature.
+  // The page-level search box and the route's exact app filter, both owned by DevicesFeature.
   query: string; project: string | null;
 }): React.ReactElement | null {
   const now = useLicenseClock();
-  // D2: once a seat has shown its own result, keep the panel expanded so that result stays visible
+  // Once a seat has shown its own result, keep the panel expanded so that result stays visible
   // (and in the mobile viewport) rather than collapsing into a closed <details> the customer would
   // have to reopen to see it -- e.g. releasing the only live session used to always collapse this.
   const hasBrowserSession = Object.keys(controller.seatSessions).length > 0

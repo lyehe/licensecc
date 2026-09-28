@@ -70,7 +70,7 @@ test("CSRF, body limits, disabled configuration and throttling gate credential w
   db.prepare("INSERT INTO rate_limit_counters (namespace, rate_key, window_start, request_count, expires_at, updated_at) VALUES ('portal', 'password:register:ip:', ?, 5, ?, ?)").run(window, NOW + 1800, NOW);
   const limited = await call({ ...env, PORTAL_EMAIL_API_KEY: "test", PORTAL_EMAIL_FROM: "sender@example.com" }, "POST", `${PATH}/register`, { body: { email: "new@example.com" } });
   assert.equal(limited.status, 429);
-  // C6: the auth 429s carry the exact seconds left in the fixed window, so the UI can say "Try again
+  // The auth 429s carry the exact seconds left in the fixed window, so the UI can say "Try again
   // in {n} minutes." instead of a vague "later".
   assert.equal(limited.res.headers.get("retry-after"), String(window + 900 - NOW));
   assert.equal(db.prepare("SELECT count(*) AS n FROM portal_passwords").get().n, 0);
@@ -157,7 +157,7 @@ test("first password and recovery require recent verified sign-in", async () => 
   assert.equal((await login(env, "a@x.com", NEXT)).status, 200);
 });
 
-// A5: `recovery_available` must use the EXACT predicate the emailed reset endpoint uses
+// `recovery_available` must use the EXACT predicate the emailed reset endpoint uses
 // (password-email.ts), so the settings UI never promises a recovery the server would refuse.
 test("password settings report no recovery path before any credential exists", async () => {
   const { env } = fixture();

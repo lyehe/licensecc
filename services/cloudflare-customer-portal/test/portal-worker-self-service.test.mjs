@@ -26,7 +26,7 @@ test("/api/portal/me reports the SESSION customer, never a client value", async 
 });
 
 // =================================================================================================
-// /api/portal/me EMAIL RESOLUTION (task A4) — one read, precedence: customers.email, then
+// /api/portal/me EMAIL RESOLUTION — one read, precedence: customers.email, then
 // portal_passwords.email_lower, then the EARLIEST portal_identities.email, else null. Additive: the
 // route still reports customer_id exactly as before; email is a new sibling field.
 // =================================================================================================
@@ -584,7 +584,7 @@ test("portal entitlement projection distinguishes protected enrollment without e
 });
 
 // =================================================================================================
-// TRIAL END (task C5) — each row says when its trial ends by the rule that enforces that row: the
+// TRIAL END — each row says when its trial ends by the rule that enforces that row: the
 // protected-device rule for a protected row, the legacy lease rule otherwise (a legacy trial has a
 // clock only for an activation basis with a positive duration). A trial never outlives its license
 // (valid_until wins), a clock not yet started has no end (null), and trial_starts_on_activation says
@@ -613,7 +613,7 @@ function seedProtectedTrial(db, feature, fingerprint, { basis, duration, started
   ).run(feature, fingerprint, validUntil, basis, duration, started, started === null ? null : TRIAL_KEY, NOW, NOW);
 }
 
-test("each row's trial end follows the rule that enforces it and never outlives the license (C5)", async () => {
+test("each row's trial end follows the rule that enforces it and never outlives the license", async () => {
   const { db, env } = baseFixture();
   try {
     seedTrial(db, "RUNNING", "1".repeat(64), { basis: "from_first_activation", duration: 14 * DAY, started: NOW - DAY });

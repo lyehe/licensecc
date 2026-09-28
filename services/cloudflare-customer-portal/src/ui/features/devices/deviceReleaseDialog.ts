@@ -11,7 +11,7 @@ import type { DeviceRow, StatusMessage } from "../../types";
 // device's row when the release fails, under the list when it succeeds and the row goes away. When
 // that section is not on screen, a failure shows in the page-level line instead (see below).
 interface DeviceReleaseDialogOptions {
-  // Fix round 2 (Important), carried here from releaseDevice()'s own prior guard: the generation when
+  // Carried here from releaseDevice()'s own prior guard: the generation when
   // this action started, compared against the generation when its response arrives, so a response
   // that lands after the customer has left (and possibly returned to) Devices is dropped.
   visitGenerationRef: React.RefObject<number>;

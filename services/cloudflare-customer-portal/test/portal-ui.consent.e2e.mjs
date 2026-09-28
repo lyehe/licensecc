@@ -21,7 +21,7 @@ async function approve(page){
   await page.getByRole("button",{name:"Approve",exact:true}).click();
 }
 
-// D5 carried (B3, decision 7): both consent capacity messages must meet the same contrast rule the
+// Both consent capacity messages must meet the same contrast rule the
 // primary-button hover check does, computed the same way -- from the element's own computed color
 // against its card's actual background, not by inspection.
 async function colorAndContrast(locator) {
@@ -99,7 +99,7 @@ test("consent: password login retains the attempt without leaking it into naviga
   await page.getByLabel("Password", { exact: true }).fill("A test password for browser 1!");
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await expect(page.getByRole("combobox", { name: "License", exact: true })).toBeVisible();
-  // C6: the Connect flow's document.title, once past sign-in and onto the consent screen itself.
+  // The Connect flow's document.title, once past sign-in and onto the consent screen itself.
   await expect(page).toHaveTitle("Connect a device · Licensecc");
   expect(state.logins).toEqual([{ email: "customer@example.com", password: "A test password for browser 1!" }]);
   expect(JSON.stringify(state.requests)).not.toContain(handle);
@@ -649,7 +649,7 @@ test("consent: cursor cycles and account changes cannot append a new page",async
   await expect(page.getByRole("navigation",{name:"License pages"})).toHaveCount(0);
 });
 
-// B3 (RF2): a full license blocks Approve until Check again finds a free slot. The selection
+// A full license blocks Approve until Check again finds a free slot. The selection
 // survives the re-inspect, focus lands on Approve once it re-enables, and the approve body never
 // carries a capacity claim.
 test("consent: a full license disables Approve; Check again labels itself, keeps the selection, finds a free slot, moves focus to Approve, and approves with an unchanged body",async({page})=>{
@@ -706,7 +706,7 @@ test("consent: a device already connected to a full license leaves Approve enabl
   await expect(page.getByRole("button",{name:"Check again",exact:true})).toHaveCount(0);
   await expect(page.getByRole("button",{name:"Approve",exact:true})).toBeEnabled();
   await expect(page.getByText("Uses one device slot when your app finishes connecting.",{exact:true})).toHaveCount(0);
-  // D5 carried (B3, decision 7): not left at the default muted paragraph colour, and meets the
+  // Not left at the default muted paragraph colour, and meets the
   // contrast rule against its card's actual background.
   const connected=await colorAndContrast(connectedMessage);
   expect(connected.color).toBe("rgb(232, 232, 232)");
@@ -723,7 +723,7 @@ test("consent: a device limit of 1 uses singular copy when full",async({page})=>
   const capacityMessage=page.getByText("This license's only device slot is in use. Disconnect a device under Devices, then check again.",{exact:true});
   await expect(capacityMessage).toBeVisible();
   await expect(page.getByRole("button",{name:"Approve",exact:true})).toBeDisabled();
-  // D5 carried (B3, decision 7): the full-license message gets clear (error/attention) emphasis,
+  // The full-license message gets clear (error/attention) emphasis,
   // reusing the same error colour `.statusline.error` uses, and meets the contrast rule.
   const capacity=await colorAndContrast(capacityMessage);
   expect(capacity.color).toBe("rgb(219, 146, 146)");

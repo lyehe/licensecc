@@ -143,7 +143,7 @@ test("A password-login account (empty customers.email, portal_passwords.email_lo
   assert.equal(db.prepare("SELECT count(*) AS n FROM customers").get().n, before);
   assert.equal(db.prepare("SELECT count(*) AS n FROM portal_identities").get().n, 0);
 });
-test("RF1: a brand-new email still self-registers when an unrelated password login already exists", async (t) => {
+test("a brand-new email still self-registers when an unrelated password login already exists", async (t) => {
   const { env, db } = baseFixture(configuration);
   // An unrelated password-login account must not make portal_passwords non-empty enough to trip
   // a guard that forgets to compare the actual email (e.g. one keyed only on "some row exists").

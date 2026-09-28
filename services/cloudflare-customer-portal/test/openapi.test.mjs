@@ -183,7 +183,7 @@ test("provider unlink requires a session and documents every status its handler 
   assert.deepEqual(documentedErrorCodes(path, 503), ["config_error"]);
 });
 
-// C6: the seven auth entry points that now send a real `retry-after` header must document it; the
+// The seven auth entry points that now send a real `retry-after` header must document it; the
 // password-change 429 (not one of the auth entry points the UI drives its countdown from) and the
 // operator break-glass bootstrap route were both deliberately left out of the rollout.
 test("the auth 429s that now carry retry-after document it; the untouched 429s do not", () => {

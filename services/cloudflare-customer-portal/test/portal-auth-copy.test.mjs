@@ -27,7 +27,7 @@ async function loadAuthCopyModule() {
   }
 }
 
-// C6: the resend button's client-side-only cooldown label -- "Resend code" once free, else "Resend
+// The resend button's client-side-only cooldown label -- "Resend code" once free, else "Resend
 // code (0:59)" counting down. The cooldown never reaches a full minute, so the minutes digit is
 // always "0".
 test("authCopy formats the resend cooldown label and never reaches a full minute", async () => {
@@ -40,7 +40,7 @@ test("authCopy formats the resend cooldown label and never reaches a full minute
   assert.equal(authCopy.resendCodeLabel(1), "Resend code (0:01)");
 });
 
-// C6: recovery hints (passwordMessages' verified_sign_in_required, PasswordSettings' own hard-coded
+// Recovery hints (passwordMessages' verified_sign_in_required, PasswordSettings' own hard-coded
 // sentence) list only the methods GET /portal/v1/auth/providers actually reports as configured, and
 // never name an unconfigured one.
 test("authCopy lists only configured recovery methods, joined in prose", async () => {

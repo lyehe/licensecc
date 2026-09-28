@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-// C5: every license lifecycle state tells the customer what happens next, dates render as UTC
+// Every license lifecycle state tells the customer what happens next, dates render as UTC
 // calendar days, a trial shows when it ends, an inactive license offers no download, and the Apps
 // list flags an app whose licenses need attention -- in words, never colour alone.
 function makeEnvelope(code, data) {

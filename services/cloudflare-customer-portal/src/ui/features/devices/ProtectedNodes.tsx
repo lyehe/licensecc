@@ -5,7 +5,7 @@ import { clearRetirement,restoreRetirement,saveRetirement,type PendingRetirement
 import { formatTimestamp } from "../../portalWorkflow";
 import { matchesDeviceSearch } from "./deviceSearch";
 
-// D1: query/project are owned by the page-level DevicesFeature and shared with the other two
+// query/project are owned by the page-level DevicesFeature and shared with the other two
 // sections; this component still loads and paginates its own rows.
 type Props={customer:string;busy:boolean;runOnce(work:()=>Promise<void>):Promise<void>;onSessionExpired():Promise<boolean>;query:string;project:string|null};
 export function ProtectedNodes({customer,busy,runOnce,onSessionExpired,query,project}:Props):React.ReactElement {

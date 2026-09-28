@@ -1,4 +1,4 @@
-// Shared WCAG relative-luminance / contrast-ratio math for e2e visual-contrast assertions (D5): the
+// Shared WCAG relative-luminance / contrast-ratio math for e2e visual-contrast assertions: the
 // e2e tests parse a getComputedStyle() rgb()/rgba() string and compute the contrast ratio themselves,
 // per https://www.w3.org/TR/WCAG21/#dfn-relative-luminance -- no third-party contrast library.
 

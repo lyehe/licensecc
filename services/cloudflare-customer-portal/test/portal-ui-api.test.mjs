@@ -49,7 +49,7 @@ function jsonResponse(status, body, headers = {}) {
   };
 }
 
-// Fix round 1 (Minor): a session epoch stops a straggler -- a request sent under an OLD, already-
+// A session epoch stops a straggler -- a request sent under an OLD, already-
 // superseded session that only answers 401 long after the customer signed in again -- from bouncing
 // that new sign-in back a step.
 
@@ -120,7 +120,7 @@ test("beginNewSession/currentSessionEpoch track one counter, and credential 401s
   assert.equal(fired.length, 0);
 });
 
-// C6: the auth 429s now carry a real retry-after header; api() surfaces it on the envelope so the
+// The auth 429s now carry a real retry-after header; api() surfaces it on the envelope so the
 // UI can build "Try again in {n} minutes." without re-parsing headers at every call site.
 test("api() surfaces the retry-after response header as retryAfter on the envelope", async () => {
   const api = await loadApiModule();
@@ -145,7 +145,7 @@ test("api() ignores a non-numeric retry-after header rather than surfacing NaN",
   assert.equal(result.retryAfter, undefined);
 });
 
-// D3: localMessage's third argument threads dynamic interpolation values onto StatusMessage.params --
+// localMessage's third argument threads dynamic interpolation values onto StatusMessage.params --
 // omitted entirely (not just undefined) when no params are given, so an ordinary local message stays
 // exactly the same shape it always has.
 test("localMessage omits params when none are given, and carries them through when given", async () => {
@@ -157,7 +157,7 @@ test("localMessage omits params when none are given, and carries them through wh
   assert.deepEqual(withParams, { code: "seats_released_on_signout", request_id: "", ok: true, params: { released: 2, failed: 1 } });
 });
 
-// D3 (decision 3): sign-out's best-effort seat release. "Released {n} browser seat(s)" is shown only
+// Sign-out's best-effort seat release. "Released {n} browser seat(s)" is shown only
 // when at least one seat actually released; the failure sentence is additive and appears even when
 // nothing released (every attempt failed). Nothing is shown when both counts are zero.
 test("seatsReleasedMessage composes the sign-in screen's release summary", async () => {

@@ -1,7 +1,7 @@
 import type { LabeledPathFragment } from "../assemble.js";
 import { ERR_BODY_TOO_LARGE, ERR_CROSS_SITE, ERR_INVALID_JSON, errorResponse, LEASE_ACTION_REQUEST, RETRY_AFTER_HEADER } from "../components.js";
 
-// task C6: OTP request/verify and magic-redeem's JSON branch now answer their 429 with a real
+// OTP request/verify and magic-redeem's JSON branch now answer their 429 with a real
 // retry-after header (the form-encoded/redirect branch of magic-redeem never gets one -- a top-level
 // navigation has no script to read a header with -- so its own 429... there is none: see the 303
 // response below, which covers every outcome of that branch instead).

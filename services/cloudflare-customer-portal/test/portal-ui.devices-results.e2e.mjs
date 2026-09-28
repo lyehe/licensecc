@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { contrastRatio, parseRgb } from "./e2e-contrast.mjs";
 
-// D2: "show each result next to the control that produced it, and make seat state visible." Each
+// "Show each result next to the control that produced it, and make seat state visible." Each
 // seat card and device row that has its own action now gets its own role="status" line, populated
 // instead of the single page-level StatusLine, and that line must stay reachable at phone width
 // without scrolling -- the whole point of moving it next to the control that produced it.
@@ -30,7 +30,7 @@ function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// D3: `customers` maps an OTP code to its own { customerId, entitlements } account, so a test can sign
+// `customers` maps an OTP code to its own { customerId, entitlements } account, so a test can sign
 // in as more than one customer on the SAME browser (e.g. an explicit sign-out, then a different
 // customer's sign-in). The single-account tests below never pass it -- they keep signing in as
 // VALID_CODE / "cus_results" exactly as before.
@@ -54,7 +54,7 @@ function setup(page, { entitlements, support, checkoutResponse, checkoutDelayMs,
       authedCode = body.code;
       return fulfill(200, envelope("signed_in", { customer_id: account.customerId }));
     }
-    // D3: sign-out itself. Every fixture here now accepts it so decision 5's sign-out tests can share
+    // Sign-out itself. Every fixture here now accepts it so the sign-out tests below can share
     // this same setup() as the checkout/release tests above.
     if (method === "POST" && path === "/portal/v1/auth/logout") {
       if (authedCode === null) return fulfill(401, { ok: false, code: "unauthorized", request_id: "devices-results-401" });
@@ -138,7 +138,7 @@ test("seat start, seat release and a license download each show their own result
   // Before checkout: the pool sentence, not a bare "pool 2".
   const seatStateBefore = alphaCard.getByText("Uses 1 of 2 shared seats until released or it expires.", { exact: true });
   await expect(seatStateBefore).toBeVisible();
-  // D5 carried (D2, decision 8): live seat state has its own class, not `.muted` -- it must not be
+  // Live seat state has its own class, not `.muted` -- it must not be
   // dimmed like secondary copy, and must meet the same contrast rule the hover check does.
   await expect(seatStateBefore).toHaveClass("seatState");
   await expect(seatStateBefore).not.toHaveClass("muted");
@@ -161,11 +161,11 @@ test("seat start, seat release and a license download each show their own result
 
   // Start a second seat so releasing the first below does not leave zero live sessions -- unrelated
   // to what this test is checking; the sign-out tests further down cover what happens once seats are
-  // released at sign-out (D3).
+  // released at sign-out.
   await betaCard.getByRole("button", { name: "Start seat" }).click();
   await expect(betaCard.getByRole("status")).toContainText("Seat started.");
 
-  // The release dialog's own-browser row now reads "This browser", not "Device" (D2).
+  // The release dialog's own-browser row now reads "This browser", not "Device".
   await alphaCard.getByRole("button", { name: "Release seat" }).click();
   const dialog = page.getByRole("dialog");
   await expect(dialog).toBeVisible();
@@ -199,7 +199,7 @@ test("a seat action's own result never reaches the page-level status line", asyn
   const alphaCard = page.locator(".seatCard").filter({ hasText: "alpha" });
   await alphaCard.getByRole("button", { name: "Start seat" }).click();
   await expect(alphaCard.getByRole("status")).toContainText("Seat started.");
-  // The page-level line (App.tsx's .feedback) is reserved for refresh/account-level results (D2).
+  // The page-level line (App.tsx's .feedback) is reserved for refresh/account-level results.
   await expect(page.locator('.feedback [role="status"]')).toHaveText("");
 });
 
@@ -369,7 +369,7 @@ test("a seat release confirmed on another page after Back and refused by the ser
   await expect(page.getByText("We couldn't verify that request. Try again.")).toHaveCount(0);
 });
 
-// Fix round 1 (Important): seatMessages/deviceMessages/downloads.messages live one level ABOVE the
+// seatMessages/deviceMessages/downloads.messages live one level ABOVE the
 // components that only render while their own page is showing, so nothing used to reset them when
 // that page was left and revisited -- a stale "Seat started." would reappear in a freshly mounted
 // role="status" node, and (because BrowserSeats' hasBrowserSession also reads seatMessages) the panel
@@ -431,7 +431,7 @@ test("leaving and returning to Apps clears a stale license-download result", asy
   await expect(page.locator(".licenseDownload").getByRole("status")).toHaveCount(0);
 });
 
-// Fix round 2 (Important): clearMessages() (fix round 1) only wipes what is ALREADY showing at the
+// clearMessages() only wipes what is ALREADY showing at the
 // moment a page is left. It does nothing about a response that is still in flight at that moment and
 // arrives later -- possibly after the customer has come back. This is a real race, not a theoretical
 // one: the SPA never aborts an in-flight fetch on a hash-route change, so the delayed response's
@@ -520,7 +520,7 @@ test("a delayed download response that arrives after leaving Apps does not show 
   await expect(page.locator(".licenseDownload").getByRole("status")).toHaveCount(0);
 });
 
-// D3: "Signing out doesn't orphan browser seats." Sign-out releases every seat this browser holds,
+// "Signing out doesn't orphan browser seats." Sign-out releases every seat this browser holds,
 // best-effort, before the actual sign-out request, and the sign-in screen says how many.
 test("signing out with a live seat releases it and the sign-in screen shows the release count", async ({ page }) => {
   const requests = setup(page, { entitlements: [ENT_ALPHA] });
@@ -539,7 +539,7 @@ test("signing out with a live seat releases it and the sign-in screen shows the 
   await expect.poll(() => page.evaluate(() => window.localStorage.getItem("licensecc.portal.seats.v1:cus_results"))).toBe("{}");
 });
 
-// D3 (decision 5): a seat whose release fails at sign-out stays stored under the customer id, is
+// A seat whose release fails at sign-out stays stored under the customer id, is
 // listed again after the next sign-in, and can still be released once the server accepts it.
 test("a seat whose release fails at sign-out is listed again after signing in and can be released", async ({ page }) => {
   let releaseAttempts = 0;
@@ -584,7 +584,7 @@ test("a seat whose release fails at sign-out is listed again after signing in an
   await expect.poll(() => requests.releases).toBe(2);
 });
 
-// D3 (decision 5): a different customer signing in on the same browser, after an explicit sign-out,
+// A different customer signing in on the same browser, after an explicit sign-out,
 // never sees the first customer's (even failed/unreleased) browser seats.
 test("a different customer signing in after an explicit sign-out never sees the first customer's browser seats", async ({ page }) => {
   const CODE_B = "19283746";
@@ -631,7 +631,7 @@ test("a different customer signing in after an explicit sign-out never sees the 
   expect(storedForA).toContain("ent_switch_a");
 });
 
-// D3 fix round 1 (Important 2): while sign-out's seat releases are still in flight, the UI must not
+// While sign-out's seat releases are still in flight, the UI must not
 // look idle -- Sign out itself reads "Signing out…" and is disabled, and every other busy-gated
 // control (another seat's Start seat button here) is disabled too, so a seat cannot be started mid-
 // release and left out of the batch that was already sent.

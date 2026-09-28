@@ -11,7 +11,7 @@ function decodeProject(raw: string | undefined): string | null {
 function readLocation(): PortalLocation {
   const [page, project] = window.location.hash.replace(/^#\/?/, "").split("/");
   if (page === "account") return { page, project: null };
-  // D1: nodes carries the same `/{project}` segment apps does, so "View devices" can open the
+  // nodes carries the same `/{project}` segment apps does, so "View devices" can open the
   // devices page pre-filtered to one app's exact name.
   if (page === "nodes") return { page, project: decodeProject(project) };
   return { page: "apps", project: decodeProject(project) };

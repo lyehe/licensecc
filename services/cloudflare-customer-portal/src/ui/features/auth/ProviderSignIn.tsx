@@ -58,7 +58,7 @@ const ERRORS: Record<string, React.ReactNode> = {
   sign_in_failed: "Unable to complete sign-in. Please try again.",
 };
 export function ProviderResult(): React.ReactElement | null {
-  // Fix round 1: this one status slot renders real auth failures (account_suspended, link_expired,
+  // This one status slot renders real auth failures (account_suspended, link_expired,
   // sign_in_cancelled, link_failed, sign_in_failed, provider_unavailable, rate_limited) on the same
   // screen as the "Sign-in provider connected." confirmation -- track isError alongside the text so
   // only a genuine failure gets the error colour.

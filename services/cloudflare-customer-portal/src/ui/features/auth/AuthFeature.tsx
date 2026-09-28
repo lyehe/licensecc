@@ -34,13 +34,13 @@ interface AuthOptions {
 
 export interface PortalAuth {
   customerId: string | null;
-  // The signed-in account's resolved display email (task A4): customers.email, else the password
+  // The signed-in account's resolved display email: customers.email, else the password
   // account's email, else the earliest linked identity's email, else null. Read-only from the
   // consumer's side -- it is derived from /me, never typed by the user. Distinct from `loginEmail`
   // below, the sign-in form's OWN draft value.
   email: string | null;
   retrySession(): Promise<boolean>;
-  // D3 fix round 1 (Critical): a REACTIVE mirror of api.tsx's module-level session epoch, bumped on
+  // A REACTIVE mirror of api.tsx's module-level session epoch, bumped on
   // every confirmed loadMe success -- including a re-sign-in as the SAME customer after a session-
   // ending 401, when customerId itself does not change. useDevicesController depends on this (alongside
   // customer) to re-hydrate stored seats even when the customer id alone gives no signal that a new
@@ -55,7 +55,7 @@ export interface PortalAuth {
   submitVerify(event: React.FormEvent): Promise<void>;
   resendCode(): Promise<void>;
   useDifferentEmail(): void;
-  // D3: returns whether sign-out actually completed, so a caller (App.tsx's logout()) can tell a real
+  // Returns whether sign-out actually completed, so a caller (App.tsx's logout()) can tell a real
   // sign-out apart from a failed attempt that leaves the customer signed in -- e.g. to decide whether
   // overriding the "You're signed out." message with a seat-release summary is even appropriate.
   logout(afterLogout: () => void): Promise<boolean>;
@@ -74,13 +74,13 @@ export function usePortalAuth({ setMessage, runOnce }: AuthOptions): PortalAuth 
     try {
       // This IS the session check the global onUnauthorized hook (api.tsx, wired in App.tsx) calls to
       // find out whether a session is really gone. Its own 401 must never re-trigger that hook -- that
-      // would be circular -- so it is the one api() call in this file that opts out (task C3).
+      // would be circular -- so it is the one api() call in this file that opts out.
       const result = await api<PortalMe>(mePath(), undefined, { skipUnauthorizedHook: true });
       if (result.ok && result.data) {
         // A confirmed session, new or reconfirmed. Bumps the epoch so a straggler response from a
-        // request sent under an OLDER session can never bounce this one back to sign-in (fix round 1).
+        // request sent under an OLDER session can never bounce this one back to sign-in.
         beginNewSession();
-        // D3 fix round 1 (Critical): mirror the epoch into state too -- customerId alone does not
+        // Mirror the epoch into state too -- customerId alone does not
         // change when the SAME customer signs back in after a session-ending 401, but this always does.
         setSessionEpoch(currentSessionEpoch());
         setCustomerId(result.data.customer_id);
@@ -163,7 +163,7 @@ export function usePortalAuth({ setMessage, runOnce }: AuthOptions): PortalAuth 
       if (!result.ok) {
         // Whatever the server said -- or api()'s own network_unavailable when it couldn't even ask --
         // the customer is still signed in. Say so specifically rather than forwarding a code like
-        // "unauthorized" that would misleadingly suggest the session is already gone (task C2).
+        // "unauthorized" that would misleadingly suggest the session is already gone.
         setMessage(localMessage("logout_failed", false));
         return;
       }
@@ -199,7 +199,7 @@ export function usePortalAuth({ setMessage, runOnce }: AuthOptions): PortalAuth 
 
 // AuthFeature-owned marker: PasswordAction.tsx's "Request a new link" (invalid_link) navigates here
 // with it so the reset form opens immediately, reusing PasswordSignIn's own `mode` rather than
-// inventing a second, parallel way to say "open the reset form" (task C6, decision 5). Read once on
+// inventing a second, parallel way to say "open the reset form". Read once on
 // mount and stripped immediately, exactly like ProviderResult already does for auth_error/auth_result.
 function initialPasswordMode(): PasswordMode {
   if (typeof window === "undefined") return "login";
@@ -231,13 +231,13 @@ export function AuthFeature({ auth, busy, message, connecting = false }: {
     : auth.phase === "error" ? "Unable to check your session"
     : auth.phase === "verify" ? "Check your email"
     : passwordHeading;
-  // Focus moves to the new h1 on every step/mode change (task C6, decision 6): a fresh render whose
+  // Focus moves to the new h1 on every step/mode change: a fresh render whose
   // heading text actually changed is exactly a "new step" from the customer's perspective, whether
   // that is a phase transition or a login/register/reset mode switch within "request".
   useLayoutEffect(() => {
     heading.current?.focus();
   }, [stepHeading]);
-  // The resend cooldown (task C6, decision 4) restarts every time a fresh otp_requested message
+  // The resend cooldown restarts every time a fresh otp_requested message
   // arrives -- the initial send AND every resend alike -- and is purely a client-side display timer;
   // the server enforces its own, separate rate limit regardless of what this countdown shows.
   // `resendDeadline` is the moment the button reads "Resend code" again; it is set (RESEND_COOLDOWN_

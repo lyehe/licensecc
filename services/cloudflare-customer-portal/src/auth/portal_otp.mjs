@@ -159,7 +159,7 @@ function activePepperId(peppers) {
  *   { ok:false, code:"config_error" }   peppers unset (the worker maps this to 503).
  *   { ok:false, code:"rate_limited", retryAfter }   always-on RL tripped (per email + per IP, BEFORE
  *                                       any write). retryAfter is the seconds left in the fixed
- *                                       window that tripped (task C6's retry-after header).
+ *                                       window that tripped, sent back to the caller as the retry-after header.
  *   { ok:true,  code:"ok" }             ALWAYS on the success path AND for an unknown email
  *                                       (no enumeration). The secret is NEVER returned.
  *
@@ -258,7 +258,7 @@ export async function requestOtp(env, { email, clientIp = "", sendEmailFn, email
  *
  *   { ok:false, code:"config_error" }   peppers unset (worker -> 503).
  *   { ok:false, code:"rate_limited", retryAfter }   always-on verify RL tripped; retryAfter is the
- *                                       seconds left in the fixed window that tripped (task C6).
+ *                                       seconds left in the fixed window that tripped.
  *   { ok:false, code:"invalid_otp" }    wrong code / unknown secret / consumed / expired / capped
  *                                       — all BYTE-IDENTICAL (no oracle on WHY).
  *   { ok:true,  customerId, code:"ok" } the atomic single-use claim matched a live row.

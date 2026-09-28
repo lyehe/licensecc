@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-// C2: network failures are visible. Each test below aborts exactly ONE request the same way the main
+// Network failures are visible. Each test below aborts exactly ONE request the same way the main
 // fixture already does for a seat release / status refresh (route.abort("failed"), simulating offline
 // or a DNS failure) and checks that the customer sees a plain-language message -- never a stuck
 // screen, a raw code, or a silent failure -- with zero pageerror escaping to the page (a rejected
@@ -124,7 +124,7 @@ test("an aborted verify call shows the network message and stays on the verify s
   expect(pageErrors).toEqual([]);
 });
 
-// Carried from C2: api()'s own network_unavailable now reaches passwordMessage() too (PasswordSignIn,
+// api()'s own network_unavailable now reaches passwordMessage() too (PasswordSignIn,
 // PasswordAction, PasswordSettings), which previously had no copy for it and fell through to the
 // generic "Unable to complete the request" fallback.
 test("an aborted password login shows the network message and leaves the form usable", async ({ page }) => {
@@ -162,7 +162,7 @@ test("an aborted logout call keeps the customer signed in and explains the failu
   expect(pageErrors).toEqual([]);
 });
 
-// D3 fix round 1 (Minor 5): the seat-release POSTs sign-out sends are independent of the sign-out POST
+// The seat-release POSTs sign-out sends are independent of the sign-out POST
 // itself -- a seat can genuinely be released even though the final sign-out request then fails. The
 // customer must be told BOTH facts, not just "logout_failed" (which would wrongly imply nothing at all
 // happened).

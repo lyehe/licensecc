@@ -1,4 +1,4 @@
-// Task A3: every customer-facing instruction to contact someone renders <SupportContact/>. It links
+// Every customer-facing instruction to contact someone renders <SupportContact/>. It links
 // to the operator's configured support contact (PORTAL_SUPPORT_CONTACT, published by the providers
 // envelope) and otherwise falls back to "Contact your administrator".
 import assert from "node:assert/strict";

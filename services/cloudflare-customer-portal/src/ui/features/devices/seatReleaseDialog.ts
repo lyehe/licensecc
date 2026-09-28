@@ -4,14 +4,14 @@ import { localMessage } from "../../shared/api";
 import { useNativeDialogFocus } from "./nativeDialog";
 import type { EntitlementRow, SeatActionResult, SeatOperation, StatusMessage } from "../../types";
 
-// D3 fix round 1 (Important 3, hotspot budget): the floating-seat release confirm dialog's state,
+// The floating-seat release confirm dialog's state,
 // mutation and focus management, split out of DevicesFeature.tsx's useDevicesController. This is a
 // cohesive, self-contained flow that only reaches into the parent hook via the options below -- never
-// any other DevicesFeature.tsx state. No behaviour change beyond D4 (below): useDevicesController calls
-// this hook and spreads its return value into the exact same DevicesController shape it always
-// returned.
+// any other DevicesFeature.tsx state. No behaviour change beyond what is described below:
+// useDevicesController calls this hook and spreads its return value into the exact same
+// DevicesController shape it always returned.
 //
-// D4: replaced the manual overlay/div modal (its own focus trap and a return-to-trigger-button focus
+// Replaced the manual overlay/div modal (its own focus trap and a return-to-trigger-button focus
 // restoration) with the native <dialog> pattern from nativeDialog.ts/ProtectedNodes.tsx. Verified
 // directly against this Chromium build: a modally-invoked <dialog> keeps real Tab/keyboard focus from
 // reaching background content on its own, so the manual keydown Tab-trap is gone -- but it does NOT by
@@ -44,8 +44,8 @@ export interface SeatReleaseDialogState {
   requestSeatRelease(item: EntitlementRow): void;
   dismissSeatRelease(): void;
   confirmSeatRelease(): Promise<void>;
-  // D3 fix round 1: lets useDevicesController's own clear() reset this flow's state too, without this
-  // hook needing its own storage-aware clear() -- clear() must never touch storage (decision 2), and
+  // Lets useDevicesController's own clear() reset this flow's state too, without this
+  // hook needing its own storage-aware clear() -- clear() must never touch storage, and
   // none of this flow's state is storage-backed anyway.
   resetForClear(): void;
 }
@@ -95,7 +95,7 @@ export function useSeatReleaseDialog(options: SeatReleaseDialogOptions): SeatRel
         if (outcome.refreshFailed) setMessage(localMessage(FLOATING_SEAT_RELEASE_REFRESH_FAILED_CODE, false));
         setPendingSeatRelease(null);
       } else if (outcome.networkFailure) {
-        // api() no longer throws for a dropped connection (task C2) -- it reports network_unavailable
+        // api() no longer throws for a dropped connection -- it reports network_unavailable
         // like any other failure code. A release specifically cannot treat that as an ordinary
         // failure: whether the server released the seat before the connection dropped is unknown, so
         // this stays open with the same "outcome is unknown" guidance a thrown exception used to

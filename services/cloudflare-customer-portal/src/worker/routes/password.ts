@@ -53,7 +53,7 @@ async function settings(request: Request, env: Env, reqId: string, now: number):
   if (!validPassword(body.password)) return envelope(reqId, "invalid_registration", undefined, 400, HEADERS);
   const email = credential?.email_lower ?? loginEmail(row.email);
   if (!email) return envelope(reqId, "verified_sign_in_required", undefined, 403, HEADERS);
-  // The password-change action was deliberately left out of the retry-after rollout (task C6): it is
+  // The password-change action was deliberately left out of the retry-after rollout: it is
   // a signed-in settings action, not one of the auth entry points the UI drives a countdown from, so
   // its 429 keeps answering with no header, exactly as before.
   if ((await throttle(request, env, email, "change", now)).limited) return envelope(reqId, "rate_limited", undefined, 429, HEADERS);

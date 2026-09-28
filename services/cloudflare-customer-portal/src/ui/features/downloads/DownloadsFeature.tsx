@@ -15,7 +15,7 @@ import type { EntitlementRow, StatusMessage } from "../../types";
 
 interface DownloadOptions {
   runOnce(work: () => Promise<void>): Promise<void>;
-  // Fix round 2 (Important): bumped by App.tsx whenever the Apps page is entered or left. A ref, read
+  // Bumped by App.tsx whenever the Apps page is entered or left. A ref, read
   // (never written) here, so download() can compare "the generation when this download started"
   // against "the generation now" once its response arrives, and drop a result that arrives after the
   // customer has moved on -- see App.tsx's own comment for the full race.
@@ -24,13 +24,13 @@ interface DownloadOptions {
 
 export interface LicenseDownloads {
   deviceKeys: Record<string, string>;
-  // D2: this download's own result (keyed by entitlement id), shown next to its own control instead
+  // This download's own result (keyed by entitlement id), shown next to its own control instead
   // of the page-level line.
   messages: Record<string, StatusMessage | null>;
   setDeviceKey(entitlementId: string, value: string): void;
   download(item: EntitlementRow): Promise<void>;
   clear(): void;
-  // Fix round 1 (Important): messages lives here, one level above the Apps page's own components, so
+  // messages lives here, one level above the Apps page's own components, so
   // it otherwise outlives a visit to Apps -- a stale "Download started." would reappear on a later
   // visit. App.tsx calls this when the Apps page is left. Deliberately narrower than clear(): typed
   // device keys are untouched.
@@ -55,7 +55,7 @@ export function useLicenseDownloads({ runOnce, visitGenerationRef }: DownloadOpt
       setMessage(item.id, localMessage("license_unavailable", false));
       return;
     }
-    // Fix round 2 (Important): captured before runOnce may queue this download, so a response that
+    // Captured before runOnce may queue this download, so a response that
     // arrives after the customer has left (and possibly returned to) Apps can be told apart from one
     // that arrives while they are still on this same visit. The download itself (the actual file save
     // below) is real state, not a shown result, so it always proceeds regardless of this guard --
@@ -68,8 +68,7 @@ export function useLicenseDownloads({ runOnce, visitGenerationRef }: DownloadOpt
         return;
       }
       // Captured before the raw fetch goes out, same as api() does internally, so a straggler response
-      // from a request sent under an OLDER session can't bounce a customer who already signed in again
-      // (fix round 1).
+      // from a request sent under an OLDER session can't bounce a customer who already signed in again.
       const requestEpoch = currentSessionEpoch();
       let response: Response;
       try {
@@ -82,7 +81,7 @@ export function useLicenseDownloads({ runOnce, visitGenerationRef }: DownloadOpt
       } catch {
         // This download bypasses api() (it needs the raw Response to read a blob), so a dropped
         // connection needs the same guard here -- same code and copy as api()'s own fetch rejection
-        // (task C2), so the customer sees an identical message either way.
+        // so the customer sees an identical message either way.
         if (visitGenerationRef.current === startGeneration) setMessage(item.id, localMessage("network_unavailable", false));
         return;
       }
@@ -92,7 +91,7 @@ export function useLicenseDownloads({ runOnce, visitGenerationRef }: DownloadOpt
           const result = (await response.json()) as ApiEnvelope<unknown>;
           // This download bypasses api() (see the fetch above), so a mid-session 401 needs its own
           // route to the same global onUnauthorized hook every other api() path already gets -- "every
-          // api() path" (task C3) has to include the download too.
+          // api() path" has to include the download too.
           reportUnauthorized(response.status, result.code, requestEpoch);
           if (visitGenerationRef.current === startGeneration) setMessage(item.id, resultMessage(result));
         } catch {
@@ -118,7 +117,7 @@ export function useLicenseDownloads({ runOnce, visitGenerationRef }: DownloadOpt
     setMessages({});
   }, []);
 
-  // Fix round 1 (Important): called from App.tsx when the Apps page is left, so a stale local result
+  // Called from App.tsx when the Apps page is left, so a stale local result
   // never reappears on a later visit. Typed device keys survive navigation; only shown results do not.
   const clearMessages = useCallback((): void => setMessages({}), []);
 

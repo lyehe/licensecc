@@ -57,10 +57,10 @@ async function loadPasswordMessages() {
   }
 }
 
-// Carried from C2: api()'s own network_unavailable (a dropped connection) now reaches
+// api()'s own network_unavailable (a dropped connection) now reaches
 // passwordMessage() from PasswordSettings, PasswordAction and PasswordSignIn alike, and must give
 // the same customer-facing sentence StatusLine already shows everywhere else.
-test("passwordMessage gives the network-unavailable copy verbatim (C2 carried)", async () => {
+test("passwordMessage gives the network-unavailable copy verbatim", async () => {
   const { passwordMessage } = await loadPasswordMessages();
   assert.equal(
     passwordMessage("network_unavailable"),

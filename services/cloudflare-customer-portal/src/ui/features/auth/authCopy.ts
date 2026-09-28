@@ -1,4 +1,4 @@
-// Pure, dependency-free copy/formatting helpers scoped to the auth flow (task C6). Split out of
+// Pure, dependency-free copy/formatting helpers scoped to the auth flow. Split out of
 // ../../portalWorkflow.ts (the portal-wide pure module) so that shared module can stay under the
 // repository's hotspot review threshold: these three concerns -- the resend cooldown label, and the
 // configured-only recovery-method list -- are used exclusively by files under features/auth, never

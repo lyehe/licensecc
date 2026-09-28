@@ -16,8 +16,8 @@ export function PasswordAction({ token, onDone }: { token: string; onDone(): Pro
   const [confirmation, setConfirmation] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<React.ReactNode>(token ? "" : "Open the link from your email again, or request a new link.");
-  // D5: told apart from the "Password saved" confirmation below so only an actual failure gets the
-  // error colour (decision 1) -- both currently share this one message slot and role="alert". A
+  // Told apart from the "Password saved" confirmation below so only an actual failure gets the
+  // error colour -- both currently share this one message slot and role="alert". A
   // missing/malformed token is itself a failure.
   const [messageIsError, setMessageIsError] = useState(!token);
   const [finished, setFinished] = useState(false);

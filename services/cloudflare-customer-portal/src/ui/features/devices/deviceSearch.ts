@@ -1,4 +1,4 @@
-// D1: one search box, above the devices page's three sections (connected devices, activated
+// One search box, above the devices page's three sections (connected devices, activated
 // devices, browser seats), filters rows by a case-insensitive substring match against a per-row
 // set of searchable fields -- always including the row's app -- combined with an optional EXACT
 // app filter carried by the route's project segment (`#/nodes/{project}`).

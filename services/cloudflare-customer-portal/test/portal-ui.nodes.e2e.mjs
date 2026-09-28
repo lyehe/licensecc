@@ -37,7 +37,7 @@ test('nodes: retirement confirmation preserves hold, refreshes status and explai
   await expect(dialog).not.toBeVisible();await expect(page.getByText(/Renewal stopped for Work laptop/)).toBeVisible();
   await expect(page.getByRole('heading',{name:'Connected devices'})).toBeFocused();
   await expect(page.getByRole('cell',{name:/Disconnecting/})).toBeVisible();
-  // D5 (decision 3): "Disconnecting · slot available" is wrapped in its own <span> so it styles and
+  // "Disconnecting · slot available" is wrapped in its own <span> so it styles and
   // wraps as one unit, separate from the <time> that follows it in the same cell.
   const statusCell=page.locator('.protectedNodes td[data-label="Status"]');
   await expect(statusCell.locator('span')).toHaveText('Disconnecting · slot available');

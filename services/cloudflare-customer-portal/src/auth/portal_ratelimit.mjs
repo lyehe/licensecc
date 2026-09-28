@@ -23,7 +23,7 @@ function fixedWindowStart(nowSeconds, periodSeconds) {
  * (blueprint (a)): a request that is rate-limited never reaches the OTP/session mutation.
  *
  * `retryAfter` is the seconds left in the CURRENT fixed window (windowStart + period - now), so a
- * caller can answer a 429 with a real `retry-after` header (task C6) instead of a vague "later". It
+ * caller can answer a 429 with a real `retry-after` header instead of a vague "later". It
  * is a pure function of (now, period) -- computed up front, so it is correct even on the fail-closed
  * branch below, where the counter write itself never happened.
  *

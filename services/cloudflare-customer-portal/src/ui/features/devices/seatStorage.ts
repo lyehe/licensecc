@@ -2,9 +2,9 @@ import { checkoutPath, heartbeatPath, releasePath, SEATS_KEY, type SeatSession }
 import { api } from "../../shared/api";
 import type { SeatOperation } from "../../types";
 
-// D2 (hotspot budget): DevicesFeature.tsx's seat-storage/networking plumbing, split out into its own
+// DevicesFeature.tsx's seat-storage/networking plumbing, split out into its own
 // file so the local per-row/card result-line work added alongside it does not push that file over
-// the 500-line limit (task-D-common.md).
+// the 500-line hotspot limit.
 
 export function randomHex(byteLength: number): string {
   const bytes = new Uint8Array(byteLength);
@@ -18,7 +18,7 @@ export function seatPath(operation: SeatOperation): string {
   return releasePath();
 }
 
-// D3 (decision 1): seats now persist per CUSTOMER, not in one shared key -- a browser signed into
+// Seats now persist per CUSTOMER, not in one shared key -- a browser signed into
 // several accounts in turn must never mix one customer's seats into another's storage.
 function seatStorageKey(customerId: string): string {
   return `${SEATS_KEY}:${encodeURIComponent(customerId)}`;
@@ -40,7 +40,7 @@ export function writeStoredSeats(customerId: string, json: string): void {
   }
 }
 
-// D3 (decision 1): before this task, every customer on a shared browser read and wrote the SAME
+// Before this, every customer on a shared browser read and wrote the SAME
 // unkeyed SEATS_KEY entry. That legacy entry has no reliable owner -- it could belong to whoever last
 // signed in, not necessarily the customer signing in now -- so it is read once (nothing here adopts
 // its value into anyone's live seat state) and discarded outright rather than migrated to the first
@@ -54,7 +54,7 @@ export function discardLegacyStoredSeats(): void {
   }
 }
 
-// D3: sign-out best-effort releases every seat this browser holds, so the portal never keeps a
+// Sign-out best-effort releases every seat this browser holds, so the portal never keeps a
 // floating seat checked out against a device the customer believes has signed out. Every stored seat
 // is released in PARALLEL (one POST per entitlement) so N seats cost about the same wall-clock time
 // as one, and every attempt races the SAME shared deadline so the whole batch is bounded to

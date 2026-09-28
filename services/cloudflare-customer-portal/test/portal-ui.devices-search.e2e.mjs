@@ -1,6 +1,6 @@
 import {expect,test} from '@playwright/test';
 
-// D1: one devices page in customer terms -- a single search box above Connected devices,
+// One devices page in customer terms -- a single search box above Connected devices,
 // Activated devices (older app versions) and Browser seats, plus an exact app filter carried by
 // the route (`#/nodes/{project}`) and shown as a removable "App: {project}" chip.
 const now=1800000000;
@@ -49,7 +49,7 @@ test('devices: searching a Device ID filters the activated devices',async({page}
   await expect(page.locator('.registrations tr').filter({hasText:'legacy-beta-002'})).toHaveCount(0);
 });
 
-// D1 carryover (review, Minor 1): a search/app filter that empties the LOADED page must still say
+// A search/app filter that empties the LOADED page must still say
 // more devices may be waiting on later pages, rather than implying "No matching devices" is final.
 test('devices: a search that empties the loaded page still hints that more devices may exist',async({page})=>{
   const ids=Array.from({length:100},(_,i)=>{

@@ -77,7 +77,7 @@ test("portal UI workflow exposes the OTP 10-minute expiry copy", async () => {
   assert.match(workflow.OTP_EXPIRY_COPY, /10 minutes/);
 });
 
-// C6: one sentence for every auth 429 that now carries the server's retry-after header, and the
+// One sentence for every auth 429 that now carries the server's retry-after header, and the
 // same "later" fallback wherever that header is absent (a redirect-driven rate_limited, or a
 // password screen's own 429 that was left out of the header rollout).
 test("portal UI workflow builds the single rate-limit sentence from retryAfter, with a later fallback", async () => {
@@ -103,7 +103,7 @@ test("portal UI workflow exposes empty-state copy for every tab", async () => {
 
 test("portal UI workflow maps raw result codes to human-readable copy", async () => {
   const workflow = await loadWorkflowModule();
-  // pool_exhausted is deliberately absent from this pure string map (D2): its copy links out via
+  // pool_exhausted is deliberately absent from this pure string map: its copy links out via
   // <SupportContact/>, a React node, so it is mapped instead in ui/shared/ActionResult.tsx -- see the
   // dedicated coverage test below, which checks that file directly.
   assert.equal(workflow.describeResultCode("pool_exhausted"), null);
@@ -131,10 +131,10 @@ test("portal UI workflow maps raw result codes to human-readable copy", async ()
   // message instead of the raw code.
   assert.equal(workflow.describeResultCode("some_unknown_code"), null);
   assert.equal(workflow.describeResultCode(""), null);
-  // Prototype-safe lookup (C1 / RF3): a code equal to an Object.prototype member name must resolve to
+  // Prototype-safe lookup: a code equal to an Object.prototype member name must resolve to
   // null too, via Object.hasOwn -- NOT `RESULT_CODE_COPY[code] ?? null`, which would instead return
   // that inherited function/value and crash React ("Objects are not valid as a React child") or
-  // silently render a function. Carried forward from A3, which fixed the identical bug in
+  // silently render a function. The same fix was applied to the identical bug in
   // ProviderSignIn's ERRORS and passwordMessage()'s MESSAGES with the same Object.hasOwn guard.
   assert.equal(workflow.describeResultCode("constructor"), null);
   assert.equal(workflow.describeResultCode("__proto__"), null);
@@ -158,10 +158,10 @@ test("portal UI workflow maps the download_failed_<status> family by prefix, sta
   assert.doesNotMatch(workflow.DOWNLOAD_FAILED_COPY, /[0-9]/);
 });
 
-test("portal UI workflow gives every StatusLine-reachable result code human copy (C1 coverage)", async () => {
+test("portal UI workflow gives every StatusLine-reachable result code human copy", async () => {
   const workflow = await loadWorkflowModule();
 
-  // ---- 1) envelope(reqId, "...") literals from the four route files C1 scans --------------------
+  // ---- 1) envelope(reqId, "...") literals from the four route files this test scans --------------
   const routeFiles = [
     "../src/worker/routes/auth.ts",
     "../src/worker/routes/self-service.ts",
@@ -192,8 +192,8 @@ test("portal UI workflow gives every StatusLine-reachable result code human copy
 
   // ---- 3) local UI-only codes: string literals + identifier constants passed to localMessage() ----
   // Walk EVERY .ts/.tsx file under src/ui recursively rather than scanning a fixed file list -- a
-  // fixed list silently misses a later task's new file that calls localMessage(...) (carried into
-  // C2's dispatch: C1's original list of 5 files would not have noticed a 6th).
+  // fixed list silently misses a later new file that calls localMessage(...) (an earlier version of
+  // this scan used a fixed list of 5 files, which would not have noticed a 6th).
   const uiRoot = new URL("../src/ui/", import.meta.url);
   function listUiSourceFiles(dirUrl) {
     const files = [];
@@ -265,7 +265,7 @@ test("portal UI workflow gives every StatusLine-reachable result code human copy
   ]);
 
   // ---- 6) codes covered by a React node (ui/shared/ActionResult.tsx) instead of RESULT_CODE_COPY --
-  // pool_exhausted's copy links out through <SupportContact/> (D2), which cannot live in this pure
+  // pool_exhausted's copy links out through <SupportContact/>, which cannot live in this pure
   // string map, so it is excluded here the same way DATA_ONLY_CODES is -- but verified against the
   // node file's actual source, not just blindly excluded, so a future removal there would still fail.
   const NODE_ONLY_CODES = new Set(["pool_exhausted"]);
@@ -311,9 +311,9 @@ test("portal UI workflow gives every StatusLine-reachable result code human copy
   }
 });
 
-// C2: a dropped connection (api()'s own fetch rejection, or the download's raw fetch) and a failed
-// sign-out both need copy the customer actually sees, verbatim per the dispatch.
-test("portal UI workflow maps network-failure and failed-logout copy verbatim (C2)", async () => {
+// A dropped connection (api()'s own fetch rejection, or the download's raw fetch) and a failed
+// sign-out both need copy the customer actually sees, verbatim.
+test("portal UI workflow maps network-failure and failed-logout copy verbatim", async () => {
   const workflow = await loadWorkflowModule();
   assert.equal(
     workflow.describeResultCode("network_unavailable"),
@@ -325,10 +325,10 @@ test("portal UI workflow maps network-failure and failed-logout copy verbatim (C
   );
 });
 
-// C3: api()'s global onUnauthorized hook (App.tsx) shows this local code once a mid-session 401 is
+// api()'s global onUnauthorized hook (App.tsx) shows this local code once a mid-session 401 is
 // confirmed (retrySession() finds the session really is gone), regardless of which api() caller's
 // response actually carried the server's own `unauthorized` code.
-test("portal UI workflow maps the session-ended copy verbatim (C3)", async () => {
+test("portal UI workflow maps the session-ended copy verbatim", async () => {
   const workflow = await loadWorkflowModule();
   assert.equal(
     workflow.describeResultCode("session_ended"),
@@ -336,11 +336,11 @@ test("portal UI workflow maps the session-ended copy verbatim (C3)", async () =>
   );
 });
 
-// D3: sign-out's best-effort seat release. StatusLine (api.tsx) special-cases this code to interpolate
+// Sign-out's best-effort seat release. StatusLine (api.tsx) special-cases this code to interpolate
 // the released/failed counts via seatsReleasedMessage() instead of this static string -- this is only
 // the fallback for the (never expected in practice) case where the message carries no params, and it
-// must still be non-null coverage per C1, and never leak the raw code itself.
-test("portal UI workflow maps the seats-released-on-signout fallback copy, never the raw code (D3)", async () => {
+// must still be non-null and never leak the raw code itself.
+test("portal UI workflow maps the seats-released-on-signout fallback copy, never the raw code", async () => {
   const workflow = await loadWorkflowModule();
   const copy = workflow.describeResultCode("seats_released_on_signout");
   assert.equal(typeof copy, "string");
@@ -381,7 +381,7 @@ test("portal UI workflow copy discloses account-safe auth and activation downloa
 test("portal UI workflow formats epoch windows and timestamps", async () => {
   const workflow = await loadWorkflowModule();
   assert.equal(workflow.formatEpoch(1_710_000_000), "2024-03-09");
-  // C5: a missing start or end says so in words, through its own helper, never a bare "any".
+  // A missing start or end says so in words, through its own helper, never a bare "any".
   assert.equal(workflow.formatStartDate(null), "No start date");
   assert.equal(workflow.formatStartDate(undefined), "No start date");
   assert.equal(workflow.formatStartDate(1_710_000_000), "2024-03-09");
@@ -483,9 +483,9 @@ test("license display preserves explicit status and handles exact date boundarie
   assert.equal(downloadable({ license_mode: "floating" }), false);
 });
 
-// C5: a trial the rule that enforces it has ended is expired like any other ended license, and a
+// A trial the rule that enforces it has ended is expired like any other ended license, and a
 // status code the portal does not know is never passed through to the page.
-test("license display treats an ended trial as expired and never passes an unknown status through (C5)", async () => {
+test("license display treats an ended trial as expired and never passes an unknown status through", async () => {
   const { licenseDisplayStatus: status } = await loadWorkflowModule();
   const trial = { status: "active", valid_from: null, valid_until: null, trial_ends_at: 150 };
   assert.equal(status(trial, 149), "active");
@@ -500,9 +500,9 @@ test("license display treats an ended trial as expired and never passes an unkno
   assert.equal(status({ ...trial, status: "constructor" }, 100), "unknown");
 });
 
-// C5: every lifecycle state reads as words with its date; the next step (contact support) is
+// Every lifecycle state reads as words with its date; the next step (contact support) is
 // rendered by <SupportContact/> after this lead, by the entitlements feature.
-test("license status copy names each lifecycle state with its UTC date (C5)", async () => {
+test("license status copy names each lifecycle state with its UTC date", async () => {
   const { licenseStatusLead: lead } = await loadWorkflowModule();
   const row = { status: "active", valid_from: 1_700_000_000, valid_until: 1_750_000_000 };
   assert.equal(lead(row, 1_710_000_000), "Active");
@@ -522,7 +522,7 @@ test("license status copy names each lifecycle state with its UTC date (C5)", as
   }
 });
 
-test("license mode names a trial's end, says the first activation starts it, or just says Trial (C5)", async () => {
+test("license mode names a trial's end, says the first activation starts it, or just says Trial", async () => {
   const { licenseModeLabel: mode } = await loadWorkflowModule();
   const now = 1_700_000_000;
   const usable = { status: "active", valid_from: null, valid_until: null };
@@ -548,9 +548,9 @@ test("license mode names a trial's end, says the first activation starts it, or 
   assert.equal(mode({ ...usable, license_mode: "floating", trial_ends_at: null }, now), "Floating");
 });
 
-// C5: "starts when you activate" is a promise about a license the customer can still activate. Next
+// "starts when you activate" is a promise about a license the customer can still activate. Next
 // to "Revoked.", "Suspended." or "Expired on ..." it would contradict the status, so it reads "Trial".
-test("license mode says the first activation starts a trial only while the license is usable (C5)", async () => {
+test("license mode says the first activation starts a trial only while the license is usable", async () => {
   const { licenseModeLabel: mode } = await loadWorkflowModule();
   const now = 1_700_000_000;
   const pending = { enforcement_mode: "device_bound_v1", license_mode: "trial", status: "active", valid_from: null, valid_until: null,
@@ -565,7 +565,7 @@ test("license mode says the first activation starts a trial only while the licen
   assert.equal(mode({ ...pending, status: "paused" }, now), "Protected device · Trial", "a status the portal does not know is not usable");
 });
 
-test("a license needs attention when it is expired, suspended or revoked, not when it is yet to start (C5)", async () => {
+test("a license needs attention when it is expired, suspended or revoked, not when it is yet to start", async () => {
   const { licenseNeedsAttention: attention, LICENSE_ATTENTION_COPY } = await loadWorkflowModule();
   assert.equal(LICENSE_ATTENTION_COPY, "Needs attention");
   const row = { status: "active", valid_from: null, valid_until: null };

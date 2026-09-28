@@ -10,7 +10,7 @@ const body = (register: boolean) => ({ required: true, content: { "application/j
 // check/the batch write. Each verb gets its own map below so neither can claim a code its own
 // handler path cannot emit.
 const signedInResponse = { description: "Signed in with a rotated opaque HttpOnly session cookie. No password/hash is returned." };
-// task C6: login, register, reset and complete all answer their 429 with a real retry-after header
+// login, register, reset and complete all answer their 429 with a real retry-after header
 // (portalRateLimit's own fixed-window seconds left). The signed-in password-change action (the POST
 // verb of settings, below) was deliberately left out of that rollout -- it is not one of the auth
 // entry points the UI drives a countdown from -- so it keeps the plain, headerless 429.

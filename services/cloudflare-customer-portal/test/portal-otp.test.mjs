@@ -287,7 +287,7 @@ test("the attempt cap is enforced (5 live attempts max)", async () => {
   assert.equal(r.ok, false, "a row at the attempt cap is denied even with the right secret");
 });
 
-// C6: the UI's rate-limit sentence needs the exact seconds left in the window, so requestOtp/
+// The UI's rate-limit sentence needs the exact seconds left in the window, so requestOtp/
 // redeemOtp must forward portalRateLimit's retryAfter on their rate_limited outcome.
 test("requestOtp reports retryAfter when the per-email cap trips", async () => {
   const db = freshDb();
