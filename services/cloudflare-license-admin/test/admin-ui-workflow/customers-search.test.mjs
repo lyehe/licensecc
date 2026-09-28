@@ -124,8 +124,13 @@ test("admin UI workflow maps each search-result type to its deep-link navigation
 test("the UI's per-type search limit agrees with the Worker's", () => {
   const uiSource = readFileSync(new URL("../../src/ui/features/search/workflow.ts", import.meta.url), "utf8");
   const workerSource = readFileSync(new URL("../../src/worker/query.ts", import.meta.url), "utf8");
-  const uiMatch = uiSource.match(/SEARCH_RESULTS_PER_TYPE_LIMIT\s*=\s*(\d+)/);
-  const workerMatch = workerSource.match(/SEARCH_PER_TYPE_LIMIT\s*=\s*(\d+)/);
+  // Either declaration may carry a `: number` annotation without falling out of this comparison.
+  const uiPattern = /SEARCH_RESULTS_PER_TYPE_LIMIT(?:\s*:\s*number)?\s*=\s*(\d+)/;
+  const workerPattern = /SEARCH_PER_TYPE_LIMIT(?:\s*:\s*number)?\s*=\s*(\d+)/;
+  assert.equal("export const SEARCH_RESULTS_PER_TYPE_LIMIT: number = 10;".match(uiPattern)?.[1], "10");
+  assert.equal("const SEARCH_PER_TYPE_LIMIT : number = 10;".match(workerPattern)?.[1], "10");
+  const uiMatch = uiSource.match(uiPattern);
+  const workerMatch = workerSource.match(workerPattern);
   assert.ok(uiMatch, "features/search/workflow.ts must declare a parseable SEARCH_RESULTS_PER_TYPE_LIMIT");
   assert.ok(workerMatch, "worker/query.ts must declare a parseable SEARCH_PER_TYPE_LIMIT");
   assert.equal(uiMatch[1], workerMatch[1], "the UI's search limit note fires at a different count than the Worker actually caps at");
