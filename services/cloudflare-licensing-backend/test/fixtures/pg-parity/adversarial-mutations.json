@@ -138,5 +138,12 @@
     "old": "IF NEW.requested_feature IS DISTINCT FROM OLD.requested_feature THEN",
     "new": "IF FALSE THEN",
     "expected": "tr_bound_requested_feature_immutable: protected trigger/function contract mismatch"
+  },
+  {
+    "name": "postgres-drop-index-removes-the-index",
+    "source": "postgres",
+    "old": "CREATE INDEX IF NOT EXISTS idx_license_plan_projection_previews_expiry_id\n  ON license_plan_projection_previews(expires_at, id);\n",
+    "new": "CREATE INDEX IF NOT EXISTS idx_license_plan_projection_previews_expiry_id\n  ON license_plan_projection_previews(expires_at, id);\nDROP INDEX IF EXISTS idx_license_plan_projection_previews_expiry_id;\n",
+    "expected": "idx_license_plan_projection_previews_expiry_id: index missing from schema.pg.sql"
   }
 ]
