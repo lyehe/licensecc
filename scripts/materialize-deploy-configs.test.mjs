@@ -64,6 +64,7 @@ function backendConfig(values) {
 name = "licensecc-online-verifier${values.suffix}"
 main = "src/index.ts"
 compatibility_date = "2026-08-30"
+compatibility_flags = ["global_fetch_strictly_public"]
 workers_dev = false
 preview_urls = false
 routes = [{ pattern = "${values.backendHost}", custom_domain = true }]
@@ -390,6 +391,26 @@ test("rejects D1 split-brain and unsafe backend or backup operations", () => {
       const environment = validEnvironment();
       mutate(environment);
       assert.throws(() => materializeDeploymentConfigs({ root, environment }), pattern, name);
+      assertNoConfigsWritten(root, name);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+});
+
+test("rejects a backend config that does not route webhook fetches strictly through the public internet", () => {
+  const cases = [
+    ["missing compatibility_flags", (env) => mutateBackend(env, (source) => source.replace('compatibility_flags = ["global_fetch_strictly_public"]\n', ""))],
+    ["empty compatibility_flags", (env) => mutateBackend(env, (source) => source.replace('compatibility_flags = ["global_fetch_strictly_public"]', "compatibility_flags = []"))],
+    ["unrelated compatibility_flags", (env) => mutateBackend(env, (source) => source.replace('compatibility_flags = ["global_fetch_strictly_public"]', 'compatibility_flags = ["nodejs_compat"]'))],
+    ["global_fetch_private_origin also enabled", (env) => mutateBackend(env, (source) => source.replace('compatibility_flags = ["global_fetch_strictly_public"]', 'compatibility_flags = ["global_fetch_strictly_public", "global_fetch_private_origin"]'))],
+  ];
+  for (const [name, mutate] of cases) {
+    const root = mkdtempSync(join(tmpdir(), "licensecc-deploy-configs-fetch-public-"));
+    try {
+      const environment = validEnvironment();
+      mutate(environment);
+      assert.throws(() => materializeDeploymentConfigs({ root, environment }), /global_fetch_strictly_public/u, name);
       assertNoConfigsWritten(root, name);
     } finally {
       rmSync(root, { recursive: true, force: true });
