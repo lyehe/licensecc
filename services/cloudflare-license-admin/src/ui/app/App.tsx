@@ -5,6 +5,7 @@ import type { DraftPolicy, PolicyDraftRequest } from "./types";
 import { EnvironmentBadge } from "./EnvironmentBadge";
 import { Sidebar } from "./Sidebar";
 import { descriptions, tabs } from "./shellContent";
+import { WorkspaceErrorBoundary } from "./WorkspaceErrorBoundary";
 import { Catalog } from "../features/catalog/Catalog";
 import { Customers } from "../features/customers/Customers";
 import { Entitlements } from "../features/entitlements/Entitlements";
@@ -84,16 +85,16 @@ function ConsoleShell(): React.ReactElement {
           {navigationNotice !== null && <p className="activityMessage" data-tone="info" role="status">{navigationNotice}</p>}
           {feedback.message && <div className="activityMessage" data-tone={feedback.tone} role={feedback.tone === "error" ? "alert" : "status"}><FeedbackText feedback={feedback} /></div>}
           {activeTab === "overview" && <div className="quickActions"><button className="primary" onClick={() => navigateTab("entitlements")}>Manage access <span aria-hidden="true">→</span></button><button onClick={() => navigateTab("reports")}>View usage</button></div>}
-          <Overview active={activeTab === "overview"} />
-          <Entitlements active={activeTab === "entitlements"} navigationIntent={navigationIntent} onNavigationHandled={onNavigationHandled} onCreatePolicy={requestPolicy} draftPolicy={draftPolicy} onDraftPolicyUsed={clearDraftPolicy} />
-          <Policies active={activeTab === "policies"} draftRequest={policyRequest} onReturnToDraft={returnToDraft} />
-          <Catalog active={activeTab === "plans"} />
-          <Webhooks active={activeTab === "webhooks"} />
-          <Events active={activeTab === "events"} navigationIntent={navigationIntent} onNavigationHandled={onNavigationHandled} />
-          <Customers active={activeTab === "customers"} navigationIntent={navigationIntent} onNavigationHandled={onNavigationHandled} />
-          <Licenses active={activeTab === "licenses"} navigationIntent={navigationIntent} onNavigationHandled={onNavigationHandled} />
-          <Fulfillment active={activeTab === "fulfillment"} navigationIntent={navigationIntent} onNavigationHandled={onNavigationHandled} />
-          <Reports active={activeTab === "reports"} onNavigate={navigate} />
+          <WorkspaceErrorBoundary name="overview" active={activeTab === "overview"}><Overview active={activeTab === "overview"} /></WorkspaceErrorBoundary>
+          <WorkspaceErrorBoundary name="entitlements" active={activeTab === "entitlements"}><Entitlements active={activeTab === "entitlements"} navigationIntent={navigationIntent} onNavigationHandled={onNavigationHandled} onCreatePolicy={requestPolicy} draftPolicy={draftPolicy} onDraftPolicyUsed={clearDraftPolicy} /></WorkspaceErrorBoundary>
+          <WorkspaceErrorBoundary name="policies" active={activeTab === "policies"}><Policies active={activeTab === "policies"} draftRequest={policyRequest} onReturnToDraft={returnToDraft} /></WorkspaceErrorBoundary>
+          <WorkspaceErrorBoundary name="plans" active={activeTab === "plans"}><Catalog active={activeTab === "plans"} /></WorkspaceErrorBoundary>
+          <WorkspaceErrorBoundary name="webhooks" active={activeTab === "webhooks"}><Webhooks active={activeTab === "webhooks"} /></WorkspaceErrorBoundary>
+          <WorkspaceErrorBoundary name="events" active={activeTab === "events"}><Events active={activeTab === "events"} navigationIntent={navigationIntent} onNavigationHandled={onNavigationHandled} /></WorkspaceErrorBoundary>
+          <WorkspaceErrorBoundary name="customers" active={activeTab === "customers"}><Customers active={activeTab === "customers"} navigationIntent={navigationIntent} onNavigationHandled={onNavigationHandled} /></WorkspaceErrorBoundary>
+          <WorkspaceErrorBoundary name="licenses" active={activeTab === "licenses"}><Licenses active={activeTab === "licenses"} navigationIntent={navigationIntent} onNavigationHandled={onNavigationHandled} /></WorkspaceErrorBoundary>
+          <WorkspaceErrorBoundary name="fulfillment" active={activeTab === "fulfillment"}><Fulfillment active={activeTab === "fulfillment"} navigationIntent={navigationIntent} onNavigationHandled={onNavigationHandled} /></WorkspaceErrorBoundary>
+          <WorkspaceErrorBoundary name="reports" active={activeTab === "reports"}><Reports active={activeTab === "reports"} onNavigate={navigate} /></WorkspaceErrorBoundary>
         </div>
       </div>
     </main>
