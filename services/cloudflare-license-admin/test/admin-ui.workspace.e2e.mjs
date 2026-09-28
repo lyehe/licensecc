@@ -371,3 +371,79 @@ test("customer assignment replaces an untouched editor with customer and app con
   await expect(page.getByLabel("License ID", { exact: true })).toHaveValue("");
   await expect(page.getByLabel("Customer ID", { exact: true })).toHaveValue(enterpriseCustomerId);
 });
+
+// The workspace's own page title is the document's one h1; the sidebar brand and every in-page
+// section title (a customer's name, a plan's name, "Technical details", …) stay at h2 or lower.
+async function boundingBoxesAtLeast(locator, minSize) {
+  const count = await locator.count();
+  for (let index = 0; index < count; index += 1) {
+    const box = await locator.nth(index).boundingBox();
+    expect(box, `visible element ${index} must report a bounding box`).not.toBeNull();
+    expect(box.width).toBeGreaterThanOrEqual(minSize);
+    expect(box.height).toBeGreaterThanOrEqual(minSize);
+  }
+}
+
+test("the workspace heading is the only h1 on mobile Overview with the menu closed", async ({ page }) => {
+  await installRealisticFixture(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/#/overview");
+  await expect(page.locator(".sidebar")).not.toHaveClass(/isOpen/);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveCount(1);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Overview");
+});
+
+test("the sidebar brand stays plain text, not a second heading, whether the mobile menu is open or closed", async ({ page }) => {
+  await installRealisticFixture(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/#/overview");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveCount(1);
+
+  await page.getByRole("button", { name: /menu/i }).click();
+  await expect(page.locator(".sidebar")).toHaveClass(/isOpen/);
+  await expect(page.getByText("Licensecc admin", { exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Licensecc admin" })).toHaveCount(0);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveCount(1);
+});
+
+test("the workspace heading stays the only h1 across desktop drill-downs", async ({ page }) => {
+  const api = await installRealisticFixture(page);
+  const plan = api.seed.catalogPlan();
+  await page.setViewportSize({ width: 1280, height: 900 });
+
+  await page.goto("/#/entitlements");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveCount(1);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("License access");
+
+  await page.goto(`/#/customers/${enterpriseCustomerId}`);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveCount(1);
+  await expect(page.getByRole("heading", { name: enterpriseCustomerName, exact: true })).toBeVisible();
+
+  await page.goto(`/#/plans?plan=${plan.id}`);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveCount(1);
+  await expect(page.getByRole("heading", { name: "Plan confirm", exact: true })).toBeVisible();
+});
+
+test("checkboxes and disclosure summaries meet the minimum touch target on Overview and Entitlements", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  api.seed.entitlements(3);
+  await page.route("**/api/admin/**", api.route);
+  await page.setViewportSize({ width: 1280, height: 900 });
+
+  await page.goto("/#/overview");
+  await boundingBoxesAtLeast(page.locator('input[type="checkbox"]:visible'), 24);
+  await boundingBoxesAtLeast(page.locator("summary:visible"), 24);
+
+  await page.goto("/#/entitlements");
+  const checkboxes = page.locator('input[type="checkbox"]:visible');
+  expect(await checkboxes.count()).toBeGreaterThan(0);
+  await boundingBoxesAtLeast(checkboxes, 24);
+  const summaries = page.locator("summary:visible");
+  expect(await summaries.count()).toBeGreaterThan(0);
+  await boundingBoxesAtLeast(summaries, 24);
+  const summaryCount = await summaries.count();
+  for (let index = 0; index < summaryCount; index += 1) {
+    const box = await summaries.nth(index).boundingBox();
+    expect(box.height, `summary ${index} must be at least 44px tall`).toBeGreaterThanOrEqual(44);
+  }
+});

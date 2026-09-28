@@ -94,7 +94,9 @@ test("admin UI completes entitlement lifecycle and blocks duplicate create submi
   await page.route("**/api/admin/**", api.route);
 
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "licensecc admin" })).toBeVisible();
+  // The sidebar brand is plain text, not a heading; the workspace's own page title is the one h1.
+  await expect(page.getByText("Licensecc admin", { exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "licensecc admin" })).toHaveCount(0);
   await page.getByRole("link", { name: "License access" }).click();
 
   if (!await page.locator("section.editorLayout form").isVisible()) await page.getByRole("button", { name: "New entitlement", exact: true }).click();
