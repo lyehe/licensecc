@@ -38,6 +38,27 @@ test("an operator-typed validity date shows the same UTC day in the list and the
   await expect(eventTime).not.toHaveText(/ UTC$/);
 });
 
+test("the events date filters say they are UTC days and send UTC day bounds from a non-UTC browser", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  await page.route("**/api/admin/**", api.route);
+  const eventQueries = [];
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (request.method() === "GET" && url.pathname === "/api/admin/events") eventQueries.push(url.search);
+  });
+  await page.goto("/#/events");
+  await page.getByText("More filters", { exact: true }).click();
+  const since = page.getByLabel("Filter events since (UTC)", { exact: true });
+  const until = page.getByLabel("Filter events until (UTC)", { exact: true });
+  // The Time column beside these filters is local, so the filters must name their own zone.
+  await expect(page.locator("label").filter({ has: since })).toContainText("Since (UTC)");
+  await expect(page.locator("label").filter({ has: until })).toContainText("Until (UTC)");
+  await since.fill("2026-09-27");
+  await until.fill("2026-09-27");
+  // 2026-09-27 as a UTC day: its first and last second, not New York's.
+  await expect.poll(() => eventQueries.some((search) => search.includes("since=1790467200") && search.includes("until=1790553599"))).toBe(true);
+});
+
 test("the reports expiring-soon deadline renders in UTC in a non-UTC browser time zone", async ({ page }) => {
   const api = makeAdminApiFixture();
   await page.route("**/api/admin/**", api.route);

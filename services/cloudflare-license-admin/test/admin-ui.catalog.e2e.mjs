@@ -337,7 +337,7 @@ test("admin UI surfaces catalog-import capability failures exactly and recovers 
   api.behavior.catalogImportReadFailures.push("response-error");
   dialog = await attempt();
   await expect(dialog).toHaveCount(0);
-  await expect(page.locator(".operatorNotice")).toContainText("The change was saved, but its status could not be refreshed.");
+  await expect(page.locator(".operatorNotice")).toContainText("The change was applied, but its status could not be refreshed.");
   await expect(form.getByRole("button", { name: "Apply import" })).toBeDisabled();
   await page.getByRole("button", { name: "Refresh status" }).click();
   await expect(page.locator(".operatorNotice")).toHaveCount(0);

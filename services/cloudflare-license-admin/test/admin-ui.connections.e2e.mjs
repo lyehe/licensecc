@@ -3,6 +3,24 @@ import { makeProtectedConnectionsFixture as fixture, test } from './admin-ui.fix
 
 async function open(page,f){await page.route('**/api/admin/**',f.route);await page.goto('/');await expect(page.getByRole('button',{name:'Search',exact:true})).toBeVisible();if(await page.getByRole('button',{name:'Menu',exact:true}).isVisible())await page.getByRole('button',{name:'Menu',exact:true}).click();await page.getByRole('navigation',{name:'Main navigation'}).getByRole('link',{name:'Customers',exact:true}).click();await expect(page.getByRole('region',{name:'Customers',exact:true})).toContainText('Acme Corp');if(await page.locator('#customer-open-cus_acme').isVisible())await page.locator('#customer-open-cus_acme').click();else await page.getByRole('article').filter({has:page.getByRole('heading',{name:'Acme Corp',exact:true})}).getByRole('button',{name:'Open details'}).click();await expect(page.getByRole('heading',{name:'Protected connections',exact:true})).toBeVisible();}
 const region=page=>page.getByRole('region',{name:'Protected connections'});
+// Records the typed field's value and the commit button's state at the moment the dialog's `open`
+// attribute appears, before any later render or effect could correct a stale value. Call it while
+// the dialog is closed; the returned function waits for that sample.
+async function sampleWhenDialogOpens(page){
+  await page.evaluate(()=>{
+    const dialog=document.querySelector('dialog.connectionDialog');
+    window.__dialogOpenSample=null;
+    const observer=new MutationObserver(()=>{
+      if(!dialog.open)return;
+      observer.disconnect();
+      const input=dialog.querySelector('.typedConfirmation input');
+      const commit=dialog.querySelector('.actions button.danger');
+      window.__dialogOpenSample={value:input?input.value:null,disabled:commit?commit.disabled:null};
+    });
+    observer.observe(dialog,{attributes:true,attributeFilter:['open']});
+  });
+  return async()=>{await expect.poll(()=>page.evaluate(()=>window.__dialogOpenSample)).not.toBeNull();return page.evaluate(()=>window.__dialogOpenSample);};
+}
 
 test("admin connections retire with explicit hold, exact request and audit history",async({page},testInfo)=>{
   const f=fixture();await open(page,f);
@@ -57,15 +75,12 @@ test("admin connections clear the typed Disconnect field synchronously on open, 
   await expect(dialog).not.toBeVisible();
 
   // Reopening the same pending request must never show the previous "DISCONNECT" value or an
-  // enabled commit button, not even for one render. Read the field back with plain one-shot
-  // locator reads (never a retrying `expect(locator)`, which could let a later correction settle
-  // in before this looks) as soon as the dialog reports itself visible.
+  // enabled commit button, not even for one render: the sample is taken in the browser at the very
+  // moment the dialog opens, so a reset that landed a render later would be caught here.
+  const reopened=await sampleWhenDialogOpens(page);
   await region(page).getByRole('button',{name:'Disconnect',exact:true}).click();
   dialog=page.getByRole('dialog');await expect(dialog).toBeVisible();
-  const reopenedInput=dialog.getByLabel('Type DISCONNECT to confirm');
-  const reopenedCommit=dialog.getByRole('button',{name:'Disconnect',exact:true});
-  const [reopenedValue,reopenedDisabled]=await Promise.all([reopenedInput.inputValue(),reopenedCommit.isDisabled()]);
-  expect({value:reopenedValue,disabled:reopenedDisabled}).toEqual({value:'',disabled:true});
+  expect(await reopened()).toEqual({value:'',disabled:true});
 
   // Cover resume(): send (the fixture drops the response), close, then resume the saved request.
   await dialog.getByLabel('Type DISCONNECT to confirm').fill('DISCONNECT');
@@ -73,12 +88,30 @@ test("admin connections clear the typed Disconnect field synchronously on open, 
   await expect(dialog).toContainText('result is not confirmed');
   await dialog.getByRole('button',{name:'Close',exact:true}).click();
   await expect(dialog).not.toBeVisible();
+  const resumed=await sampleWhenDialogOpens(page);
   await region(page).getByRole('button',{name:'Review saved request'}).click();
   dialog=page.getByRole('dialog');await expect(dialog).toBeVisible();
-  const resumedInput=dialog.getByLabel('Type DISCONNECT to confirm');
-  const resumedCommit=dialog.getByRole('button',{name:'Retry same request',exact:true});
-  const [resumedValue,resumedDisabled]=await Promise.all([resumedInput.inputValue(),resumedCommit.isDisabled()]);
-  expect({value:resumedValue,disabled:resumedDisabled}).toEqual({value:'',disabled:true});
+  await expect(dialog.getByRole('button',{name:'Retry same request',exact:true})).toBeVisible();
+  expect(await resumed()).toEqual({value:'',disabled:true});
+});
+
+test("admin connections offer a changed reader no typed field and start on Close when a saved request is resumed",async({page})=>{
+  const f=fixture();f.behavior.drop=true;await open(page,f);
+  await region(page).getByRole('button',{name:'Disconnect',exact:true}).click();
+  await page.getByRole('dialog').getByLabel('Type DISCONNECT to confirm').fill('DISCONNECT');
+  await page.getByRole('dialog').getByRole('button',{name:'Disconnect',exact:true}).click();
+  await expect(page.getByRole('dialog')).toContainText('result is not confirmed');await page.getByRole('dialog').getByRole('button',{name:'Close',exact:true}).click();
+  f.behavior.role='reader';f.behavior.subject='reader-two';
+  const refreshed=page.waitForResponse(response=>response.url().includes('/customers/cus_acme/bindings') && response.request().method()==='GET');
+  await region(page).getByRole('button',{name:'Refresh connections'}).click();await refreshed;
+  await region(page).getByRole('button',{name:'Review saved request'}).click();
+  const dialog=page.getByRole('dialog');await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText('Your operator or customer access has changed.');
+  // Retry can never be enabled for this operator, so there is nothing to type and focus starts on Close.
+  await expect(dialog.getByLabel('Type DISCONNECT to confirm')).toHaveCount(0);
+  await expect(dialog.getByRole('button',{name:'Close',exact:true})).toBeFocused();
+  await expect(dialog.getByRole('button',{name:'Retry same request'})).toBeDisabled();
+  expect(f.posts).toHaveLength(1);
 });
 
 test("admin connections recover a lost response after reload using the original operator and key",async({page})=>{

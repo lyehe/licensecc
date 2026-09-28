@@ -221,7 +221,7 @@ test("known codes keep their tone, refusals are always errors, and the code trav
   assert.deepEqual(messages.codeFeedback("policy_created", "req-1"), { tone: "success", message: "Policy created.", detail: { code: "policy_created", requestId: "req-1" } });
   assert.deepEqual(messages.codeFeedback("stale_transition", "req-2"), {
     tone: "error",
-    message: "This record changed after you loaded it. Reload it and try again.",
+    message: "This record changed after you loaded it. Refresh and try again.",
     detail: { code: "stale_transition", requestId: "req-2" },
   });
   // Emitted for a plan feature whose project differs from its plan's, and for a policy of another project.
@@ -269,7 +269,7 @@ test("a failed response becomes feedback from its envelope, and a malformed one 
 test("the retained-notice sentences are full sentences from the catalog", async () => {
   const [actions, messages] = await loadWorkflowModules(["shared/operatorActions.ts", "shared/messages.ts"]);
   assert.equal(actions.CONFIRM_MUTATION_UNKNOWN_MESSAGE, "The outcome of this change is unknown. Don't repeat it; reconcile its status first.");
-  assert.equal(actions.CONFIRM_REFRESH_FAILURE_MESSAGE, "The change was saved, but its status could not be refreshed.");
+  assert.equal(actions.CONFIRM_REFRESH_FAILURE_MESSAGE, "The change was applied, but its status could not be refreshed.");
   assert.equal(actions.CONFIRM_MUTATION_UNKNOWN_MESSAGE, messages.OUTCOME_UNKNOWN_TEXT);
   assert.equal(actions.CONFIRM_REFRESH_FAILURE_MESSAGE, messages.STATUS_NOT_REFRESHED_TEXT);
   // A strict read's failure carries its code for handling, but its message never reads as one.

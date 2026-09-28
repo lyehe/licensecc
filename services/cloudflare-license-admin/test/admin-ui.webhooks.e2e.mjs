@@ -92,6 +92,25 @@ test("editing only the URL of an endpoint with a legacy event type still succeed
   await expect(updatedRow).toContainText("legacy_unknown_type");
 });
 
+// A save with nothing changed writes nothing: an empty PATCH would still bump updated_at and
+// reorder the endpoint list for no change at all.
+test("saving an unchanged webhook endpoint sends no request and says there was nothing to save", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  api.seed.webhook("wh_unchanged", "https://hooks.example.test/unchanged", { event_types: "create,disable" });
+  await page.route("**/api/admin/**", api.route);
+
+  await page.goto("/#/webhooks");
+  const row = page.locator("tr").filter({ hasText: "https://hooks.example.test/unchanged" });
+  await row.getByRole("button", { name: "Edit", exact: true }).click();
+  const editForm = page.getByRole("form", { name: "Edit webhook endpoint", exact: true });
+  await expect(editForm.getByLabel("URL", { exact: false })).toHaveValue("https://hooks.example.test/unchanged");
+  await editForm.getByRole("button", { name: "Save changes", exact: true }).click();
+
+  await expect(page.getByText("No changes to save.", { exact: true })).toBeVisible();
+  await expect(page.getByRole("form", { name: "Edit webhook endpoint", exact: true })).toHaveCount(0);
+  expect(api.requests.webhookPatches).toHaveLength(0);
+});
+
 // "Send test event" runs through the backend, which alone holds the signing secret. The
 // operator sees a sentence naming the receiver's status class; the request id stays under
 // Technical details, and a disabled endpoint cannot be tested.

@@ -140,6 +140,35 @@ test("customer app pages recover failed refreshes and manage only the selected o
   await expect(page.getByLabel("Plan project", { exact: true })).toHaveValue("CAD");
 });
 
+test("Manage access offers no Show all and never lists another customer's grant", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  const customer = api.seed.customer();
+  api.seed.entitlements([
+    { customer_id: customer.id, project: "CAD", feature: "render" },
+    { customer_id: "another-customer", project: "CAD", feature: "render" },
+  ]);
+  await page.route("**/api/admin/**", api.route);
+  // Every list read made inside Manage access, by the customer it names.
+  const listReadCustomers = [];
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (request.method() === "GET" && url.pathname === "/api/admin/entitlements") listReadCustomers.push(url.searchParams.get("customer_id"));
+  });
+  await page.goto(`/#/customers/${customer.id}?section=access`);
+  await page.getByRole("button", { name: "View app", exact: true }).click();
+  await page.getByRole("button", { name: "Manage access", exact: true }).click();
+  await expect(page.getByText(/License access for customer/)).toContainText(customer.id);
+  const rows = page.locator(".desktopRecords tbody tr");
+  await expect(rows).toHaveCount(1);
+  await expect(rows).toContainText(customer.id);
+  // The scoped view's only exit is "Back to app": nothing in it may widen the list to all customers.
+  await expect(page.getByRole("button", { name: "Show all", exact: true })).toHaveCount(0);
+  await expect(page.getByText("Showing 1 entitlement")).toHaveCount(0);
+  await expect(page.locator(".desktopRecords")).not.toContainText("another-customer");
+  expect(listReadCustomers.length).toBeGreaterThan(0);
+  expect(listReadCustomers.every((id) => id === customer.id)).toBe(true);
+});
+
 test("workspace shell has no document overflow at supported viewports", async ({ page }, testInfo) => {
   test.setTimeout(120_000);
   const api = await installRealisticFixture(page);

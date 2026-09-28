@@ -836,7 +836,8 @@ test("admin UI rejects reordered batch proof rows as an unknown outcome", async 
 
 /**
  * Records every batch POST (its key and body) before it is answered: by `respond(attempt, api)` when that
- * returns `{ status, body }`, otherwise by the fixture.
+ * returns (or resolves to) `{ status, body }`, otherwise by the fixture. A responder that awaits holds
+ * its chunk unanswered until it resolves.
  */
 async function routeBatchPosts(page, api, respond) {
   const attempts = [];
@@ -844,7 +845,7 @@ async function routeBatchPosts(page, api, respond) {
   await page.route("**/api/admin/entitlements/batch", async (route) => {
     const request = route.request();
     attempts.push({ key: request.headers()["idempotency-key"], body: request.postDataJSON() });
-    const scripted = respond(attempts.length, api);
+    const scripted = await respond(attempts.length, api);
     if (scripted === undefined) return route.fallback();
     return route.fulfill({ status: scripted.status, contentType: "application/json", body: JSON.stringify(scripted.body) });
   });
@@ -868,6 +869,26 @@ async function openTwentyRowBatch(page, respond) {
 }
 
 const chunkIds = (chunk) => Array.from({ length: 4 }, (_unused, row) => `ent-${(chunk - 1) * 4 + row + 1}`);
+
+test("admin UI keeps a running batch's dialog out of aria-busy so its chunk progress is still announced", async ({ page }) => {
+  let releaseChunkTwo;
+  const chunkTwoHeld = new Promise((resolve) => { releaseChunkTwo = resolve; });
+  const { attempts, dialog } = await openTwentyRowBatch(page, async (attempt) => {
+    if (attempt === 2) await chunkTwoHeld;
+    return undefined;
+  });
+
+  await expect.poll(() => attempts.length).toBe(2);
+  // Chunk 2 is still unanswered: the run is in flight, yet no ancestor of its live region is busy.
+  await expect(dialog).toHaveAttribute("aria-busy", "false");
+  await expect(dialog.locator(".batchRun [role=status]")).toContainText("Chunk 2 of 5");
+  expect(await dialog.locator(".batchRun").evaluate((element) => element.closest('[aria-busy="true"]') === null)).toBe(true);
+
+  releaseChunkTwo();
+  await expect.poll(() => attempts.length).toBe(5);
+  await expect(dialog).toHaveCount(0);
+  await expect(page.locator(".tablePane .batchRun").getByRole("listitem")).toHaveText(["20 done"]);
+});
 
 test("admin UI stops a twenty-row batch at a 500 on chunk 3 and reconciles that chunk with its own key", async ({ page }) => {
   const { attempts, dialog } = await openTwentyRowBatch(page, (attempt) => attempt === 3
@@ -1015,6 +1036,32 @@ test("admin UI reconciles an unknown second reenable chunk by replaying its froz
   await expect(panel.getByRole("listitem")).toHaveText(["5 done"]);
   await expect(panel).toContainText("Reenable finished; chunk 2 is now reconciled.");
   await expect(page.locator(".desktopRecords .status.active")).toHaveCount(5);
+});
+
+test("admin UI visibly locks other actions while a refused action's notice waits to be acknowledged", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  api.seed.entitlement({ feature: "refused-reenable", status: "disabled" });
+  await page.route("**/api/admin/**", api.route);
+  await page.goto("/#/entitlements");
+  const row = page.locator(".desktopRecords tbody tr").filter({ hasText: "refused-reenable" });
+  await expect(row).toHaveCount(1);
+  api.behavior.transitionStatus = 404;
+  api.behavior.transitionResponseOnce = true;
+  api.behavior.transitionResponse = { ok: false, code: "not_found", request_id: "ui-e2e-reenable-refused" };
+  await clickAction(row.getByRole("button", { name: "Reenable", exact: true, includeHidden: true }).first());
+
+  const notice = page.locator(".operatorNotice");
+  await expect(notice).toContainText("That record was not found");
+  // Every other action is refused until the notice is acknowledged, so none may look available.
+  await expect(page.getByRole("button", { name: "New entitlement", exact: true })).toBeDisabled();
+  await expect(row.getByRole("button", { name: "Edit", exact: true })).toBeDisabled();
+  await expect(notice).toContainText("Other actions are unavailable until you acknowledge this notice.");
+
+  await notice.getByRole("button", { name: "Acknowledge", exact: true }).click();
+  await expect(notice).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "New entitlement", exact: true })).toBeEnabled();
+  await expect(row.getByRole("button", { name: "Edit", exact: true })).toBeEnabled();
+  expect(api.requests.transitions).toHaveLength(1);
 });
 
 test("admin UI rejects duplicate release-seat identities as unknown", async ({ page }) => {
@@ -1201,10 +1248,10 @@ test("admin UI direct re-enable keeps parsed refresh recovery visible", async ({
   api.behavior.refreshFailures = ["response-error", "response-error"];
   await clickAction(row.getByRole("button", { name: "Reenable", exact: true, includeHidden: true }).first());
   await expect.poll(() => api.requests.transitions.filter((item) => item.action === "reenable").length).toBe(1);
-  await expect(page.locator(".operatorNotice")).toContainText("The change was saved, but its status could not be refreshed.");
+  await expect(page.locator(".operatorNotice")).toContainText("The change was applied, but its status could not be refreshed.");
   const refreshButton = page.getByRole("button", { name: "Refresh status" });
   await refreshButton.click();
-  await expect(page.locator(".operatorNotice")).toContainText("The change was saved, but its status could not be refreshed.");
+  await expect(page.locator(".operatorNotice")).toContainText("The change was applied, but its status could not be refreshed.");
   await refreshButton.click();
   await expect(page.locator(".operatorNotice")).toHaveCount(0);
   await expect(row.getByRole("button", { name: "Reenable", exact: true, includeHidden: true })).toHaveCount(0);
@@ -1303,7 +1350,7 @@ test("admin UI settles an ABA filter switch after an exact same-key replay", asy
   await expect(filter).toBeFocused();
   // The replay's original strict GET started before the A → B → A switch, so
   // it cannot prove the final A view. A current-context GET-only recovery can.
-  await expect(page.locator(".operatorNotice")).toContainText("The change was saved, but its status could not be refreshed.");
+  await expect(page.locator(".operatorNotice")).toContainText("The change was applied, but its status could not be refreshed.");
   await page.getByRole("button", { name: "Refresh status" }).click();
   await expect(page.locator(".operatorNotice")).toHaveCount(0);
   const replay = api.requests.transitions.at(-1);
@@ -1334,11 +1381,11 @@ test("admin UI keeps unresolved recovery exclusive without stealing focus after 
 
   api.behavior.refreshFailures = ["response-error"];
   await clickAction(row.getByRole("button", { name: "Reenable", exact: true, includeHidden: true }).first());
-  await expect(page.locator(".operatorNotice")).toContainText("The change was saved, but its status could not be refreshed.");
+  await expect(page.locator(".operatorNotice")).toContainText("The change was applied, but its status could not be refreshed.");
   const transitionCount = api.requests.transitions.filter((item) => item.action === "reenable").length;
   await expect(row.getByRole("button", { name: "Reenable", exact: true, includeHidden: true }).first()).toBeDisabled();
   await expect(page.getByRole("dialog")).toHaveCount(0);
-  await expect(page.locator(".operatorNotice")).toContainText("The change was saved, but its status could not be refreshed.");
+  await expect(page.locator(".operatorNotice")).toContainText("The change was applied, but its status could not be refreshed.");
   expect(api.requests.transitions.filter((item) => item.action === "reenable").length).toBe(transitionCount);
 
   api.behavior.deferRefresh = true;
@@ -1350,7 +1397,7 @@ test("admin UI keeps unresolved recovery exclusive without stealing focus after 
   await filter.fill("no-such-project");
   api.behavior.releaseRefresh();
   await expect(filter).toBeFocused();
-  await expect(page.locator(".operatorNotice")).toContainText("The change was saved, but its status could not be refreshed.");
+  await expect(page.locator(".operatorNotice")).toContainText("The change was applied, but its status could not be refreshed.");
   expect(api.requests.transitions.filter((item) => item.action === "reenable").length).toBe(transitionCount);
   await filter.fill("");
   await refreshButton.click();
@@ -1386,7 +1433,7 @@ test("admin UI discards stale device recovery after filter supersession while ac
   await disableDialog.getByLabel("Reason (required)").fill("operator review");
   await disableDialog.getByRole("button", { name: "Confirm" }).click();
   await expect.poll(() => api.requests.deviceTransitions.length).toBe(1);
-  await expect(page.locator(".operatorNotice")).toContainText("The change was saved, but its status could not be refreshed.");
+  await expect(page.locator(".operatorNotice")).toContainText("The change was applied, but its status could not be refreshed.");
 
   // The retained recovery owns the operation gate, so switching device rows
   // is visibly unavailable. A still-editable filter can supersede the source
@@ -1404,7 +1451,7 @@ test("admin UI discards stale device recovery after filter supersession while ac
   releaseOriginalDeviceRefresh();
   if (api.behavior.releaseDeviceRefresh !== releaseOriginalDeviceRefresh) api.behavior.releaseDeviceRefresh();
   await expect(filter).toBeFocused();
-  await expect(page.locator(".operatorNotice")).toContainText("The change was saved, but its status could not be refreshed.");
+  await expect(page.locator(".operatorNotice")).toContainText("The change was applied, but its status could not be refreshed.");
   await filter.fill("");
   await expect.poll(() => api.requests.entitlementReads.at(-1)).toBe("");
   await refreshButton.click();

@@ -292,7 +292,7 @@ test("admin UI clears known webhook recovery only after an additional current-co
   await form.getByLabel("URL").fill("https://hooks.example.test/stale-refresh");
   api.behavior.webhookRefreshFailures.push("response-error");
   await form.getByRole("button", { name: "Create endpoint" }).click();
-  await expect(page.locator(".operatorNotice")).toContainText("The change was saved, but its status could not be refreshed.");
+  await expect(page.locator(".operatorNotice")).toContainText("The change was applied, but its status could not be refreshed.");
 
   // This changes the list's read context after the known-success POST. The
   // saved recovery callback may not clear solely because its old closure is a
@@ -307,7 +307,7 @@ test("admin UI clears known webhook recovery only after an additional current-co
   await expect.poll(() => api.requests.webhookReads.length).toBe(readsBeforeRecovery + 1);
   expect(new URLSearchParams(api.requests.webhookReads.at(-1)).get("status")).toBe("disabled");
   await expect.poll(() => api.behavior.releaseReads.has("webhooks:disabled")).toBe(true);
-  await expect(page.locator(".operatorNotice")).toContainText("The change was saved, but its status could not be refreshed.");
+  await expect(page.locator(".operatorNotice")).toContainText("The change was applied, but its status could not be refreshed.");
   api.behavior.releaseReads.get("webhooks:disabled")();
   await expect(page.locator(".operatorNotice")).toHaveCount(0);
   expect(api.requests.webhookCreateAttempts).toHaveLength(1);
@@ -330,7 +330,7 @@ test("admin UI retains known webhook recovery after its current read becomes sta
   await form.getByLabel("URL").fill("https://hooks.example.test/noop-refresh");
   api.behavior.webhookRefreshFailures.push("response-error");
   await form.getByRole("button", { name: "Create endpoint" }).click();
-  await expect(page.locator(".operatorNotice")).toContainText("The change was saved, but its status could not be refreshed.");
+  await expect(page.locator(".operatorNotice")).toContainText("The change was applied, but its status could not be refreshed.");
 
   const filter = page.getByLabel("Filter endpoints by status");
   await filter.selectOption("disabled");
@@ -350,7 +350,7 @@ test("admin UI retains known webhook recovery after its current read becomes sta
   // recovery notice; otherwise this assertion can pass before its no-op
   // callback has actually run.
   await expect(page.getByRole("button", { name: "Refresh status", exact: true })).toBeEnabled();
-  await expect(page.locator(".operatorNotice")).toContainText("The change was saved, but its status could not be refreshed.");
+  await expect(page.locator(".operatorNotice")).toContainText("The change was applied, but its status could not be refreshed.");
   expect(api.requests.webhookCreateAttempts).toHaveLength(1);
 });
 

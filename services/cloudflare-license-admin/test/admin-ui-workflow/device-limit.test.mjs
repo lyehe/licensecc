@@ -63,7 +63,7 @@ test("a refused device limit names the connected devices in words, never its cod
     assert.doesNotMatch(message, /capacity_in_use|undefined|NaN|null/);
   }
   assert.equal(limits.deviceLimitFailureMessage(failure("stale_transition"), 2),
-    "This license (entitlement) changed after you opened it; its current values were reloaded. Check the device limit and save again.");
+    "This license (entitlement) changed after you opened it; its current values were refreshed. Check the device limit and save again.");
   assert.equal(limits.deviceLimitFailureMessage(failure("revoked_entitlement_is_terminal"), 2),
     "Revocation is permanent; this license (entitlement) can no longer change.");
   assert.equal(limits.deviceLimitFailureMessage(failure("invalid_request"), 2), null);

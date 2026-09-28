@@ -1,4 +1,4 @@
-// Task F1 (doc/architecture/glossary.md): the admin console and the customer portal share one
+// doc/architecture/glossary.md: the admin console and the customer portal share one
 // vocabulary for the same underlying records. A term the glossary retired must never resurface
 // in UI source in either app. This guard scans the admin console's src/ui tree; the portal has
 // an equivalent test at test/portal-glossary-copy.test.mjs.
@@ -22,6 +22,9 @@ const RETIRED_TERMS = [
   // Quoted (not bare) so this never matches the lowercase `row.state==='retiring'` comparison
   // value — only a capitalized, quoted display string such as `?'Retiring':...`.
   { name: "'Retiring' connection-state label (protected binding)", pattern: /(['"])Retiring\1/, useInstead: '"Disconnecting"' },
+  // The wire code stays `disabled`; a count of such entitlements or customers reads "suspended".
+  { name: "'Disabled' entitlement count label (status)", pattern: /<span>Disabled<\/span>/, useInstead: '"Suspended"' },
+  { name: "'Customers disabled' count label (customer status)", pattern: /Customers disabled/, useInstead: '"Customers suspended"' },
 ];
 
 function collectSourceFiles(dir) {
@@ -37,7 +40,7 @@ function collectSourceFiles(dir) {
   return files;
 }
 
-test("admin UI source never reintroduces a term the F1 glossary retired", () => {
+test("admin UI source never reintroduces a term the glossary retired", () => {
   const offenses = [];
   for (const file of collectSourceFiles(UI_SOURCE_ROOT)) {
     const text = readFileSync(file, "utf8");

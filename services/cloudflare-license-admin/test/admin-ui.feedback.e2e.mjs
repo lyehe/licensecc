@@ -281,7 +281,7 @@ test("a stale save of the entitlement editor explains itself and reloads the ent
   await editor.getByRole("button", { name: "Save changes", exact: true }).click();
 
   const banner = page.locator(".activityMessage");
-  await expect(banner).toContainText("This license (entitlement) changed after you opened it; its current values were reloaded. Check your changes and save again.");
+  await expect(banner).toContainText("This license (entitlement) changed after you opened it; its current values were refreshed. Check your changes and save again.");
   await banner.getByText("Technical details", { exact: true }).click();
   await expect(banner.getByText("stale_transition · ui-e2e-stale-edit", { exact: true })).toBeVisible();
   await expect.poll(() => api.requests.entitlementReads.length).toBeGreaterThan(readsBefore);
@@ -386,6 +386,40 @@ test("a created entitlement outside the current filter opens alone, and its id s
   }
 });
 
+test("a created entitlement opens in the list read after its save, even when an older read lands in between", async ({ page }) => {
+  const api = makeAdminApiFixture();
+  await page.route("**/api/admin/**", api.route);
+  let releaseCreate;
+  const createHeld = new Promise((resolve) => { releaseCreate = resolve; });
+  await page.route("**/api/admin/entitlements", async (route) => {
+    if (route.request().method() === "POST") await createHeld;
+    await route.fallback();
+  });
+  await page.goto("/#/entitlements");
+  await expect(page.getByText("No entitlements yet. Create an entitlement to grant access.", { exact: true })).toBeVisible();
+  // The read for the new filter is held, so it is still in flight when the save is sent.
+  api.behavior.deferRefresh = true;
+  await page.getByLabel("Filter by status").selectOption("active");
+  await expect.poll(() => typeof api.behavior.releaseRefresh).toBe("function");
+  await page.getByRole("button", { name: "New entitlement", exact: true }).click();
+  const form = page.getByRole("form", { name: "New entitlement", exact: true });
+  await form.getByLabel("Feature").fill("revealed");
+  await form.getByLabel("License fingerprint").fill("e".repeat(64));
+  await form.getByRole("button", { name: "Create entitlement", exact: true }).click();
+  // That older read, sent before the save, lands while the save is still unanswered; then the save lands.
+  const olderRead = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/admin/entitlements" && response.request().method() === "GET");
+  api.behavior.releaseRefresh();
+  await olderRead;
+  releaseCreate();
+  await expect(page.locator(".activityMessage")).toContainText("License (entitlement) created.");
+  // The new row is active, so the save's own read shows it in this active list: it opens there, not alone.
+  const created = page.locator("[data-focus-row]").filter({ hasText: "revealed" });
+  await expect(created).toHaveCount(1);
+  await expect.poll(() => page.evaluate(() => document.activeElement?.closest("[data-focus-row]")?.textContent ?? "")).toContain("revealed");
+  await expect(page.getByText("Showing 1 entitlement")).toHaveCount(0);
+  await expect(page.getByLabel("Filter by status")).toHaveValue("active");
+});
+
 test("a create that settles after the operator changes the filter leaves that filter alone", async ({ page }) => {
   const api = makeAdminApiFixture();
   await page.route("**/api/admin/**", api.route);
@@ -398,7 +432,7 @@ test("a create that settles after the operator changes the filter leaves that fi
   api.behavior.refreshFailure = "response-error";
   await form.getByRole("button", { name: "Create entitlement", exact: true }).click();
   const notice = page.locator(".operatorNotice");
-  await expect(notice).toContainText("The change was saved, but its status could not be refreshed.");
+  await expect(notice).toContainText("The change was applied, but its status could not be refreshed.");
   // The operator moves to another view of the list before the new record could be shown.
   const status = page.getByLabel("Filter by status");
   await status.selectOption("disabled");
@@ -410,7 +444,7 @@ test("a create that settles after the operator changes the filter leaves that fi
   await expect(page.getByText("Showing 1 entitlement")).toHaveCount(0);
 });
 
-test("a stale save whose reload fails says the values were not reloaded", async ({ page }) => {
+test("a stale save whose refresh fails says the values were not refreshed", async ({ page }) => {
   const api = makeAdminApiFixture();
   api.seed.entitlement();
   await page.route("**/api/admin/**", api.route);
@@ -429,7 +463,7 @@ test("a stale save whose reload fails says the values were not reloaded", async 
   api.behavior.refreshFailure = "response-error";
   await editor.getByRole("button", { name: "Save changes", exact: true }).click();
   const banner = page.locator(".activityMessage");
-  await expect(banner).toContainText("This license (entitlement) changed after you opened it, and its current values could not be reloaded. Reload the list before you save again.");
-  await expect(banner).not.toContainText("were reloaded");
+  await expect(banner).toContainText("This license (entitlement) changed after you opened it, and its current values could not be refreshed. Use Retry to refresh the list before you save again.");
+  await expect(banner).not.toContainText("were refreshed");
   await expect(editor.getByLabel("Notes")).toHaveValue("changed meanwhile");
 });

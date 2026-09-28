@@ -434,6 +434,41 @@ test("expiring: an activated activation-basis trial is included via its trial de
   assert.equal(activated.valid_until, now + 5 * DAY);
 });
 
+// A policy may stamp an explicit valid_until on an activation-basis trial before its clock has
+// started. The grant still stops at valid_until whatever the trial clock later does, so the report
+// must list it by that date; an unknown trial deadline must never hide the known one.
+test("expiring: an unstarted activation-basis trial is listed by its stamped valid_until", async () => {
+  const db = freshDb();
+  const env = devEnv(db);
+  const now = Math.floor(Date.now() / 1000);
+  const DAY = 86400;
+  // Legacy grant: no first activation yet, but the license itself ends in 2 days.
+  insertEntitlement(db, FP_A, {
+    validUntil: now + 2 * DAY, now,
+    isTrial: 1, trialBasis: "from_first_activation", trialDurationSec: 20 * DAY, trialStartedAt: null,
+  });
+  // The same shape for a protected (device_bound_v1) grant, whose clock rule has its own SQL twin.
+  insertEntitlement(db, FP_B, {
+    validUntil: now + 3 * DAY, now,
+    isTrial: 1, trialBasis: "from_first_use", trialDurationSec: 20 * DAY, trialStartedAt: null,
+    enforcementMode: "device_bound_v1",
+  });
+  // Unstarted and without any valid_until: still no known deadline, so still not expiring soon.
+  insertEntitlement(db, FP_C, {
+    validUntil: null, now,
+    isTrial: 1, trialBasis: "from_first_activation", trialDurationSec: 2 * DAY, trialStartedAt: null,
+  });
+
+  const data = (await body(await worker.fetch(devReq("/api/admin/report/expiring"), env))).data;
+  assert.deepEqual(data.items.map((item) => item.license_fingerprint), [FP_A, FP_B]);
+  const legacy = data.items.find((item) => item.license_fingerprint === FP_A);
+  assert.equal(legacy.valid_until, now + 2 * DAY);
+  assert.equal(legacy.days_left, 2);
+  const bound = data.items.find((item) => item.license_fingerprint === FP_B);
+  assert.equal(bound.valid_until, now + 3 * DAY);
+  assert.equal(bound.days_left, 3);
+});
+
 // An operator can set valid_until on a trial grant; every enforcing path (the lease issuer, the
 // protected-device store, the portal's self-service list) then clamps the trial clock to it, since a
 // trial never outlives its license. The report must use the same min(valid_until, trial deadline)
