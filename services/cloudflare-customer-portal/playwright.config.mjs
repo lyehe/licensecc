@@ -5,7 +5,7 @@ const baseURL = externalBaseUrl ?? "http://127.0.0.1:4174";
 
 export default defineConfig({
   testDir: "./test",
-  testMatch: /portal-ui\.e2e\.mjs$/,
+  testMatch: /portal-ui(\.[^.]+)?\.e2e\.mjs$/,
   timeout: 30_000,
   workers: 1,
   reporter: [["list"]],

@@ -1,12 +1,5 @@
 import { expect, test } from "@playwright/test";
 import { contrastRatio, parseRgb } from "./e2e-contrast.mjs";
-import "./portal-ui.consent.e2e.mjs";
-import "./portal-ui.nodes.e2e.mjs";
-import "./portal-ui.network-failures.e2e.mjs";
-import "./portal-ui.session-expired.e2e.mjs";
-import "./portal-ui.license-lifecycle.e2e.mjs";
-import "./portal-ui.devices-search.e2e.mjs";
-import "./portal-ui.devices-results.e2e.mjs";
 
 function makeEnvelope(code, data) {
   makeEnvelope.nextRequestId += 1;
