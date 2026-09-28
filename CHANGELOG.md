@@ -143,10 +143,11 @@ are recorded in [ADR 0005](doc/architecture/decisions/0005-platform-version-and-
   `email` (remediation).
 - Customer portal: `GET /api/portal/entitlements` rows now include
   `trial_ends_at` and `trial_starts_on_activation` (remediation).
-- Customer portal: seven auth `429` responses (OTP request/verify, magic
-  redeem, and the password request/reset/settings routes) now carry a
-  `retry-after` header with the exact remaining wait, instead of leaving the
-  client to guess (remediation).
+- Customer portal: seven auth `429` responses (OTP request and verify, the
+  JSON magic-link redeem, and password login/register/reset/complete) now
+  carry a `retry-after` header with the exact remaining wait, instead of
+  leaving the client to guess; the signed-in password-change action is
+  unchanged (remediation).
 - Customer portal: the device-authorizations inspect envelope's entitlement
   rows also report `devices_in_use`, `slot_free_at` and `device_connected`, so
   the consent screen can show remaining capacity before an approval is
@@ -218,12 +219,11 @@ are recorded in [ADR 0005](doc/architecture/decisions/0005-platform-version-and-
   lock; keyboard focus lands on the seat after Start seat (follow-up).
 - Admin: a suspended customer is labelled "Suspended" (Overview) and counted
   as "Customers suspended" (Reports), matching the customer-facing status
-  instead of "Disabled"; the Events date filters are labelled and interpreted
-  in UTC ("Since (UTC)"/"Until (UTC)") instead of the browser's local zone;
-  while a dismissible failure notice awaits acknowledgement, other console
-  actions are now visibly disabled instead of silently blocked; saving a
-  webhook edit that changes nothing shows "No changes to save." and sends no
-  request (remediation).
+  instead of "Disabled"; the Events Since/Until filters, which are UTC days,
+  now say so ("Since (UTC)"/"Until (UTC)"); while a dismissible failure
+  notice awaits acknowledgement, other console actions are now visibly
+  disabled instead of silently blocked; saving a webhook edit that changes
+  nothing shows "No changes to save." and sends no request (remediation).
 - Customer portal: a seat or device release result is now always reported
   somewhere on screen, including on the page left showing after a browser
   Back/Forward navigation moves its own seat or device row off screen,
