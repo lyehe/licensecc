@@ -252,7 +252,7 @@ test("useKeyedMutation retains an unknown outcome under its key and reconciles b
   });
 });
 
-test("useConfirmDialog renders an accessible modal, keeps the non-native fallback and retains a key only for an unknown outcome", async () => {
+test("useConfirmDialog renders an accessible native dialog and retains a key only for an unknown outcome", async () => {
   const hooks = await loadHooks();
   const runs = [];
   const action = {
@@ -282,13 +282,13 @@ test("useConfirmDialog renders an accessible modal, keeps the non-native fallbac
   };
 
   await withBrowserGlobals(async () => {
-    // Without a native <dialog> the equivalent overlay modal renders.
+    // The confirmation renders as a native <dialog> element; no fallback markup exists.
     const blank = renderDialog();
     assert.equal(blank.confirm.modalActive, true);
     assert.equal(blank.confirm.confirmActionRef.current, action);
     assert.equal(blank.gate.operationOwnerRef.current, "consequence", "an open confirmation owns the operation gate");
-    assert.doesNotMatch(blank.markup, /<dialog/u);
-    assert.match(blank.markup, /<div class="modalOverlay" role="presentation"><div class="modal danger" role="dialog" aria-modal="true"/u);
+    assert.match(blank.markup, /^<dialog class="modal danger" role="dialog" aria-modal="true"/u);
+    assert.doesNotMatch(blank.markup, /modalOverlay/u);
     const labelledBy = blank.markup.match(/aria-labelledby="([^"]+)"/u)[1];
     assert.ok(blank.markup.includes(`<h2 id="${labelledBy}">Revoke license</h2>`));
     assert.match(blank.markup, /<section class="modalDetails" aria-label="Action consequences"><p>2 activated devices lose access\.<\/p><\/section>/u);
@@ -334,15 +334,6 @@ test("useConfirmDialog renders an accessible modal, keeps the non-native fallbac
     assert.equal(typed.gate.operationOwnerRef.current, "consequence");
     assert.deepEqual(typed.focus.pendingRestoreFocusRef.current, noFocus);
   });
-
-  class StubDialog {
-    showModal() {}
-  }
-  await withBrowserGlobals(async () => {
-    const native = renderDialog();
-    assert.match(native.markup, /^<dialog class="modal danger" role="dialog" aria-modal="true"/u);
-    assert.doesNotMatch(native.markup, /modalOverlay/u);
-  }, { HTMLDialogElement: StubDialog });
 });
 
 test("useConfirmDialog gates a renamed Confirm behind an exact typed phrase and offers reason presets", async () => {
