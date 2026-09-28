@@ -1,19 +1,12 @@
 import React from "react";
-import { createPortal } from "react-dom";
-import {
-  FLOATING_SEAT_RELEASE_CONFIRM_COPY,
-  FLOATING_SEAT_RELEASE_CONFIRM_TITLE,
-  formatTimestamp,
-  licenseDisplayStatus,
-} from "../../portalWorkflow";
+import { formatTimestamp, licenseDisplayStatus } from "../../portalWorkflow";
 import { ActionResult } from "../../shared/ActionResult";
 import { useLicenseClock } from "../../shared/useLicenseClock";
 import { matchesDeviceSearch } from "./deviceSearch";
 import type { DevicesController } from "./DevicesFeature";
 
-// The "Browser seats" section of the devices page (D1 hotspot budget: split out of
-// DevicesFeature.tsx alongside the release dialog, which shares this file since both operate on
-// the same controller.pendingSeatRelease state).
+// The "Browser seats" section of the devices page. Its Release seat confirmation is rendered by
+// App.tsx (ReleaseDialogs.tsx), so that it outlives this page.
 export function BrowserSeats({ controller, query, project }: {
   controller: DevicesController;
   // D1: the page-level search box and the route's exact app filter, both owned by DevicesFeature.
@@ -27,11 +20,7 @@ export function BrowserSeats({ controller, query, project }: {
     || controller.pendingSeatRelease !== null
     || Object.values(controller.seatMessages).some((message) => message !== null);
   const floatingEntitlements = controller.entitlements.filter((item) => item.license_mode === "floating");
-  // D4 review (carried, Minor 1): keep the release dialog mounted while a release is pending even if
-  // floatingEntitlements ever shrinks to zero in the meantime -- App.tsx keeps `main` inert for as
-  // long as controller.pendingSeatRelease is set, and an inert main with no dialog left to close it
-  // would strand the customer.
-  if (floatingEntitlements.length === 0 && controller.pendingSeatRelease === null) return null;
+  if (floatingEntitlements.length === 0) return null;
   const visibleEntitlements = floatingEntitlements.filter((item) => matchesDeviceSearch(
     [item.feature, controller.seatSessions[item.id]?.seat_id],
     item.project,
@@ -97,41 +86,10 @@ export function BrowserSeats({ controller, query, project }: {
             tabIndex={-1}
           >Browser seats</h3>
           {seatGridContent}
-          <SeatReleaseDialog controller={controller} />
         </section>
       ) : (
         <details className="browserSessions"><summary>Browser seats</summary>{seatGridContent}</details>
       )}
     </div>
   );
-}
-
-// D4: the native <dialog> pattern from nativeDialog.ts/ProtectedNodes.tsx (showModal()/close(), Escape
-// via onCancel, focus returned to the "Browser seats" heading on close). Still portaled to
-// document.body, same as the manual overlay it replaces -- App.tsx keeps `main` inert by hand while
-// this dialog (or the device-release one) is pending (decision 4: a modal <dialog> alone does not
-// reliably remove sibling content from the accessibility tree), and this dialog must therefore render
-// OUTSIDE `main`'s subtree, or `main`'s own inert would swallow the dialog along with everything else.
-function SeatReleaseDialog({ controller }: { controller: DevicesController }): React.ReactElement {
-  const pending = controller.pendingSeatRelease;
-  return createPortal((
-    <dialog
-      ref={controller.seatReleaseDialogRef}
-      className="confirmDialog"
-      aria-labelledby="floatingSeatReleaseTitle"
-      aria-busy={controller.busy}
-      tabIndex={-1}
-      onCancel={(event) => { event.preventDefault(); controller.dismissSeatRelease(); }}
-    >
-      <h2 id="floatingSeatReleaseTitle">{FLOATING_SEAT_RELEASE_CONFIRM_TITLE}</h2>
-      <p>{pending?.item.project} · {pending?.item.feature}<span className="retirementIdentity"><span>This browser</span>: <code>{pending?.session.client_instance_id}</code></span></p>
-      <p>{FLOATING_SEAT_RELEASE_CONFIRM_COPY}</p>
-      {controller.busy && <p role="status" aria-live="polite">Releasing…</p>}
-      {controller.seatReleaseError !== null && <p role="alert">{controller.seatReleaseError}</p>}
-      <div className="dialogActions">
-        <button type="button" disabled={controller.busy} onClick={controller.dismissSeatRelease}>Cancel</button>
-        <button type="button" className="danger" disabled={controller.busy || controller.seatReleaseOutcomeUnknown} onClick={() => void controller.confirmSeatRelease()}>Confirm release</button>
-      </div>
-    </dialog>
-  ), document.body);
 }

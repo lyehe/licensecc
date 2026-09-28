@@ -6,6 +6,7 @@ import { PasswordAction, capturePasswordAction } from "../features/auth/Password
 import { ProvidersScope } from "../features/auth/ProviderSignIn";
 import { usePortalData } from "../features/data/usePortalData";
 import { DEVICES_REFRESH_ACTION_LABEL, DEVICES_REFRESH_FAILURE_CODE, DevicesFeature, useDevicesController } from "../features/devices/DevicesFeature";
+import { ReleaseDialogs } from "../features/devices/ReleaseDialogs";
 import { useLicenseDownloads } from "../features/downloads/DownloadsFeature";
 import { AppsFeature } from "../features/apps/AppsFeature";
 import { AccountFeature } from "../features/account/AccountFeature";
@@ -158,10 +159,15 @@ function PortalShell(): React.ReactElement {
   // like clearAllPortalStateRef above) so these effects depend on nothing but location.page itself --
   // deviceController/downloads are plain objects recreated every render, and depending on them
   // directly would fire the cleanup (clearing a result that was just set) on every unrelated render.
+  //
+  // Devices' results are cleared on entering the page too: a release confirmation can outlive the page
+  // (browser Back leaves it open, see ReleaseDialogs.tsx), so a result can land while another page is
+  // showing, and it belongs to that visit, not the next one. A layout effect, so it never paints.
   const clearDeviceMessagesRef = useRef<() => void>(() => {});
   clearDeviceMessagesRef.current = () => deviceController.clearMessages();
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (location.page !== "nodes") return undefined;
+    clearDeviceMessagesRef.current();
     return () => clearDeviceMessagesRef.current();
   }, [location.page]);
 
@@ -279,15 +285,15 @@ function PortalShell(): React.ReactElement {
   if (typeof enrollment === "string" || (enrollment && auth.phase === "authed")) return <ConsentFeature key={typeof enrollment==="string"?enrollment:`${enrollment.handle}:${enrollment.createdAt}`} entry={enrollment} customerId={auth.customerId??""} email={auth.email} onDone={finishEnrollment} onSignOut={logout} onSessionExpired={auth.retrySession} feedback={<StatusLine message={message} fallback="" />} />;
   if (auth.phase !== "authed") return <AuthFeature auth={auth} busy={busy} message={message} connecting={enrollment!==null} />;
 
-  // D4: a modally-invoked native <dialog> does not reliably remove the rest of the page from the
+  // A modally-invoked native <dialog> does not reliably remove the rest of the page from the
   // accessibility tree or from focus/click reach in every engine -- verified directly: a plain
   // <dialog showModal()> next to a sibling button left that button still findable by role and still
-  // clickable via a dispatched click, even though real Tab/keyboard focus could not reach it. `main`
-  // keeps being made inert by hand, exactly as it already was for the seat-release dialog before D4,
-  // now covering the device-release dialog too -- both are the confirmations this still applies to.
+  // clickable via a dispatched click, even though real Tab/keyboard focus could not reach it. So `main`
+  // is made inert by hand while a seat or device release confirmation is pending. Both dialogs render
+  // beside `main`, never inside it, and whatever page is showing (see ReleaseDialogs.tsx).
   const mainInert = deviceController.pendingSeatRelease !== null || deviceController.pendingDeviceRelease !== null;
 
-  return (
+  return (<>
     <main aria-hidden={mainInert ? "true" : undefined} inert={mainInert ? true : undefined}>
       <a className="skipLink" href="#content" onClick={(event) => { event.preventDefault(); document.getElementById("content")?.focus(); }}>Skip to content</a>
       <header className="topbar">
@@ -313,5 +319,6 @@ function PortalShell(): React.ReactElement {
         {location.page === "apps" && (readState !== "ready" ? <section className="emptyState"><h2>{readState === "loading" ? "Loading your account…" : "Account data unavailable"}</h2><p>{readState === "loading" ? "Fetching your licenses and devices." : "We could not refresh your account. Retry to see current access."}</p>{readState === "error" && <button disabled={controlsBusy} onClick={() => void refreshPortalData()}>Retry</button>}</section> : <AppsFeature entitlements={entitlements} usage={usage} usageAvailable={usageAvailable} retry={refreshPortalData} downloads={downloads} busy={controlsBusyStale} project={location.project} email={auth.email} />)}
       </div>
     </main>
-  );
+    <ReleaseDialogs controller={deviceController} />
+  </>);
 }

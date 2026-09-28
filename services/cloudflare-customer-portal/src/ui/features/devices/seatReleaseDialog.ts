@@ -16,9 +16,10 @@ import type { EntitlementRow, SeatActionResult, SeatOperation, StatusMessage } f
 // directly against this Chromium build: a modally-invoked <dialog> keeps real Tab/keyboard focus from
 // reaching background content on its own, so the manual keydown Tab-trap is gone -- but it does NOT by
 // itself remove that background from the accessibility tree or from a scripted click, which is why
-// App.tsx still makes `main` inert by hand (see confirmSeatRelease's own comment below). Every close --
-// Cancel, Escape, a successful release, or an ordinary (non-network) failure -- now returns focus to
-// the "Browser seats" heading instead of the seat's own buttons, per decision.
+// App.tsx still makes `main` inert by hand, and renders the dialog itself next to `main`
+// (ReleaseDialogs.tsx). Every close -- Cancel, Escape, a successful release, or an ordinary
+// (non-network) failure -- returns focus to the "Browser seats" heading, or to the page content when
+// history navigation has left the Devices page.
 export interface PendingSeatRelease {
   item: EntitlementRow;
   session: SeatSession;
@@ -86,12 +87,10 @@ export function useSeatReleaseDialog(options: SeatReleaseDialogOptions): SeatRel
     seatReleaseDialogRef.current?.focus();
     try {
       const outcome = await seatAction(pending.item, "release");
-      // Carried from D2 (fix-round-2 re-review, observation 1): these two setters run after an await,
-      // with no visitGenerationRef guard. That is safe because App.tsx keeps `main` inert (aria-hidden
-      // + inert) for as long as pendingSeatRelease is set -- the same mechanism this guarded before D4,
-      // now shared with the device-release dialog -- so the customer cannot navigate away from Devices
-      // while a release is pending, the same guarantee the other visit-generation guards exist to
-      // substitute for.
+      // These setters run after an await with no visit-generation guard, and need none: they only
+      // change the dialog's own state, and App.tsx renders the dialog whatever page is showing (browser
+      // Back and Forward still work while `main` is inert). The seat's own result line is guarded
+      // inside seatAction(), and the page-level refresh-failed message belongs on every page.
       if (outcome.succeeded) {
         if (outcome.refreshFailed) setMessage(localMessage(FLOATING_SEAT_RELEASE_REFRESH_FAILED_CODE, false));
         setPendingSeatRelease(null);
