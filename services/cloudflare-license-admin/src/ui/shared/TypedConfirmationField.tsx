@@ -20,14 +20,16 @@ export interface TypedConfirmationFieldProps {
   inputRef?: React.Ref<HTMLInputElement>;
 }
 
-/** The labelled "Type X to confirm" field, so a screen reader announces exactly what to type. */
+/**
+ * The labelled "Type X to confirm" field, so a screen reader announces exactly what to type. Its host
+ * dialog decides initial focus when it opens, so the field never takes focus on its own.
+ */
 export function TypedConfirmationField({ phrase, value, onChange, disabled, inputRef }: TypedConfirmationFieldProps): React.ReactElement {
   return (
     <label className="typedConfirmation">
       {`Type ${phrase} to confirm`}
       <input
         ref={inputRef}
-        autoFocus
         autoComplete="off"
         spellCheck={false}
         disabled={disabled}

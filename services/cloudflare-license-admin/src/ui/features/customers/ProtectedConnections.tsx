@@ -54,10 +54,22 @@ export function ProtectedConnections({customer,active=true}:{customer:string;act
   const pendingRef=useRef(pending);pendingRef.current=pending;
   const reviewGeneration=useRef(0);
   const locked=controls.busy || controls.operationLocked || controls.modalActive || sending;
+  const mayRetire=page?.operator.role==='admin' && page.customer.status==='active';
+  const sameOperator=!!pending && !!page && operatorKey(page.operator)===operatorKey(pending.operator);
+  // The typed field shows only when typing it could enable the commit: a reader, a suspended
+  // customer or a changed operator can never retry, so they get no field to type into.
+  const typedShown=!!pending && !reviewReady && mayRetire && sameOperator;
   useEffect(()=>{live.current=true;void load();return()=>{live.current=false;};},[]);
   useEffect(()=>{if(!active && !saved){reviewGeneration.current++;setOpen(false);setDraft(null);}},[active,saved]);
   // Initial focus goes to the typed field whenever this open shows it, matching the shared dialog.
-  useEffect(()=>{if(open && !dialog.current?.open){dialog.current?.showModal();(pending && !reviewReady?typedConfirmInput.current:cancel.current)?.focus();}else if(!open && dialog.current?.open){dialog.current.close();heading.current?.focus();}},[open,active,saved]);
+  useEffect(()=>{if(open && !dialog.current?.open){dialog.current?.showModal();(typedShown?typedConfirmInput.current:cancel.current)?.focus();}else if(!open && dialog.current?.open){dialog.current.close();heading.current?.focus();}},[open,active,saved]);
+  // Access is known only once the connections page loads, so the field can appear or go while the
+  // dialog is open: focus follows it from Cancel, and never falls back to the page when it goes.
+  useEffect(()=>{
+    if(!open)return;const current=document.activeElement;
+    if(typedShown && current===cancel.current)typedConfirmInput.current?.focus();
+    else if(!typedShown && (current===null || current===document.body || current===dialog.current))cancel.current?.focus();
+  },[open,typedShown]);
   async function load(cursor=''):Promise<boolean>{
     if(reading.current)return false;reading.current=true;setLoading(true);setError('');
     try{const result=await readConnections(customer,cursor);if(!live.current)return false;
@@ -109,8 +121,6 @@ export function ProtectedConnections({customer,active=true}:{customer:string;act
     if(!clearPending(customer)){setDialogError('The saved request could not be cleared. Check browser storage and try again.');return;}
     setSaved(null);setDraft(null);setStopped(false);setOpen(false);setReviewReady(false);setStale(true);void load();
   }
-  const mayRetire=page?.operator.role==='admin' && page.customer.status==='active';
-  const sameOperator=!!pending && !!page && operatorKey(page.operator)===operatorKey(pending.operator);
   const allowReview=!!saved && (saved==='invalid' || stopped || confirmed || (!!page && !stale && (!sameOperator || !mayRetire)));
   if(!active && !saved)return null;
   return <section className="protectedConnections" aria-label="Protected connections" aria-busy={loading}>
@@ -147,7 +157,7 @@ export function ProtectedConnections({customer,active=true}:{customer:string;act
       {pending && page && (!sameOperator || !mayRetire) && <p role="alert">Your operator or customer access has changed. Review the connection before clearing this saved request.</p>}
       {dialogError && <p role="alert">{dialogError}</p>}
       {reviewReady && <p role="status">{pending ? reviewed ? `Current connection: ${reviewed.state==='active'?'Connected':reviewed.state==='retiring'?'Disconnecting':'Disconnected'}. Reserved until ${formatUtcDate(reviewed.hold_until)}.`:'This binding is unavailable in the current customer context.':'Current customer connections have been refreshed.'} Clearing the saved request does not cancel or undo a disconnection.</p>}
-      {pending && !reviewReady && <TypedConfirmationField phrase={DISCONNECT_PHRASE} value={typedConfirm} onChange={setTypedConfirm} disabled={sending} inputRef={typedConfirmInput} />}
+      {typedShown && <TypedConfirmationField phrase={DISCONNECT_PHRASE} value={typedConfirm} onChange={setTypedConfirm} disabled={sending} inputRef={typedConfirmInput} />}
       <div className="actions">
         {pending && !reviewReady && <button className="danger" disabled={locked || loading || stale || stopped || !mayRetire || !sameOperator || !typedConfirmationMatches(typedConfirm,DISCONNECT_PHRASE)} onClick={()=>void send()}>{sending?'Checking…':saved?'Retry same request':'Disconnect'}</button>}
         {allowReview && <button disabled={sending || loading} onClick={()=>void review()}>Review current connection</button>}

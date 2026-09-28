@@ -306,8 +306,10 @@ test("admin UI gates a batch revoke behind an exact typed REVOKE phrase", async 
   await clickAction(page.locator(".bulkBar").getByRole("button", { name: "Revoke selected", includeHidden: true }));
   const dialog = page.getByRole("dialog");
   const confirm = dialog.getByRole("button", { name: "Revoke", exact: true });
-  await dialog.getByLabel(/Reason/).fill("mass revoke test");
   const typed = dialog.getByLabel("Type REVOKE 4 to confirm");
+  // The dialog itself moves focus to the typed field when it opens (the field has no autofocus of its own).
+  await expect(typed).toBeFocused();
+  await dialog.getByLabel(/Reason/).fill("mass revoke test");
   await expect(confirm).toBeDisabled();
   await typed.fill("revoke 4");
   await expect(confirm).toBeDisabled(); // the match is case-sensitive
