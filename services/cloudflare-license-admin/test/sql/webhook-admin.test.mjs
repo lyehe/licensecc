@@ -9,6 +9,7 @@
 // Covers: create + the https-only URL gate (a non-https URL is 400 invalid_url, persists nothing);
 // event_types csv normalization; list + status filter + cursor; detail (endpoint + recent deliveries)
 // + 404; patch (and the not-patchable status rejection); disable/reenable guard + 409 on a stale status;
+// the test_send audit row an operator test send leaves (and none for a refused send);
 // the deliveries status view filtered by status/endpoint; redrive resets a 'failed' delivery to pending
 // (and is 409 on a non-failed one). RBAC: a reader can read webhooks but cannot run any webhook write.
 // Plus a sign/verify roundtrip against the backend's exported verifyWebhookSignature (the SAME verifier
@@ -386,6 +387,50 @@ test("webhook: disable requires a reason and records it in an audit event", asyn
   const reEvent = db.prepare("SELECT * FROM webhook_events WHERE endpoint_id = ? ORDER BY id DESC LIMIT 1").get(ep.id);
   assert.equal(reEvent.event_type, "reenable");
   assert.equal(reEvent.reason, "");
+});
+
+test("webhook_events: after all migrations a test_send row is accepted and an unknown event_type still fails the CHECK", async () => {
+  const db = freshDb();
+  const env = devEnv(db);
+  const ep = await createWebhook(env, { url: "https://check.example.com/h" });
+  const insert = db.prepare(
+    "INSERT INTO webhook_events (endpoint_id, event_type, prev_status, next_status, actor, actor_type, source, reason, request_id, created_at) " +
+      "VALUES (?, ?, 'active', 'active', 'ops@example.com', 'access', 'admin', '2xx', 'rid-check', 1000)",
+  );
+  insert.run(ep.id, "test_send");
+  assert.equal(db.prepare("SELECT COUNT(*) AS c FROM webhook_events WHERE endpoint_id = ? AND event_type = 'test_send'").get(ep.id).c, 1);
+  assert.throws(() => insert.run(ep.id, "unknown"), /CHECK constraint failed/);
+  assert.equal(db.prepare("SELECT COUNT(*) AS c FROM webhook_events WHERE endpoint_id = ?").get(ep.id).c, 1);
+});
+
+test("webhook test send: a send that reached the receiver leaves one test_send audit row; a refusal leaves none", async () => {
+  const db = freshDb();
+  let result = { ok: true, status: 200, code: "webhook_test_sent", data: { status_class: "2xx" } };
+  const env = devEnv(db, { WEBHOOK_OPERATOR: { async sendTest() { return result; } } });
+  const ep = await createWebhook(env, { url: "https://tested.example.com/h" });
+
+  const response = await worker.fetch(devReq(`/api/admin/webhooks/${ep.id}/test`, { method: "POST", body: "{}" }), env);
+  assert.equal(response.status, 200);
+  const sent = await body(response);
+  assert.deepEqual(sent.data, { status_class: "2xx" });
+  const rows = db.prepare("SELECT * FROM webhook_events WHERE endpoint_id = ?").all(ep.id);
+  assert.equal(rows.length, 1);
+  const [event] = rows;
+  assert.equal(event.event_type, "test_send");
+  assert.equal(event.prev_status, "active");
+  assert.equal(event.next_status, "active");
+  assert.equal(event.actor, "dev.local");
+  assert.equal(event.actor_type, "dev");
+  assert.equal(event.source, "admin");
+  assert.equal(event.reason, "2xx");
+  assert.equal(event.request_id, sent.request_id);
+  assert.ok(Number.isInteger(event.created_at) && event.created_at > 0);
+  assert.equal(db.prepare("SELECT status FROM webhook_endpoints WHERE id = ?").get(ep.id).status, "active", "a test send never changes the endpoint");
+
+  result = { ok: false, status: 429, code: "rate_limited", data: { retry_after: 30 } };
+  const limited = await worker.fetch(devReq(`/api/admin/webhooks/${ep.id}/test`, { method: "POST", body: "{}" }), env);
+  assert.equal(limited.status, 429);
+  assert.equal(db.prepare("SELECT COUNT(*) AS c FROM webhook_events WHERE endpoint_id = ?").get(ep.id).c, 1, "a refused send writes nothing");
 });
 
 test("webhook deliveries: status view filters by status + endpoint", async () => {

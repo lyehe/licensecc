@@ -328,9 +328,9 @@ test("migration lineage fails closed when history is absent, divergent, or incom
 
 test("checked-out backend migrations are a contiguous canonical inventory", () => {
   const names = canonicalMigrationNames();
-  assert.equal(names.length, 42);
+  assert.equal(names.length, 43);
   assert.equal(names[0], "0001_create_entitlements.sql");
-  assert.equal(names.at(-1), "0042_portal_password_actions.sql");
+  assert.equal(names.at(-1), "0043_allow_webhook_test_send_event.sql");
   assert.equal(migrationHistorySql(), "SELECT id, name FROM d1_migrations ORDER BY id");
   assert.match(snapshotSchemaObjectSql(), /name NOT IN \('_cf_KV', 'd1_migrations'\)/);
   assert.deepEqual([...SNAPSHOT_COUNTED_TABLES], REQUIRED_TABLES);
@@ -836,7 +836,7 @@ test("wrangler json parser tolerates advisory text before json", () => {
   assert.equal(parsed[0].results[0].x, 1);
 });
 
-test("restore inventory pins all migrated tables through migration 0042", () => {
+test("restore inventory pins all migrated tables through migration 0043", () => {
   const migratedTables = [
     "account_token_events", "account_token_revocations", "account_tokens", "audit_digests",
     "catalog_events", "catalog_features", "catalog_import_previews", "catalog_plan_features", "catalog_plans",
